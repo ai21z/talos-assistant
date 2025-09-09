@@ -1,0 +1,60 @@
+ollama:
+  host: "http://127.0.0.1:11434"
+  models:
+    coder: "qwen3:8b"   # installed model
+  embed: "bge-m3"
+
+policy:
+  sandbox_root: "C:/dev"
+  dry_run: true
+  max_files_per_write: 20
+  allowlist: ["git","rg","node","npm","yarn","pnpm","mvn","gradle","cargo","go","javac","jar","python","ruff","black","eslint","prettier","powershell","cmd","bash"]
+  blocklist: ["diskpart","format","bcdedit","shutdown","sc delete","del /s /q *","rm -rf /"]
+
+rag:
+  include: [
+    "**/*.java",
+    "**/*.md",
+    "**/*.yml",
+    "**/*.yaml",
+    "**/*.txt"
+  ]
+  exclude: [
+    "**/.git/**",
+    "**/node_modules/**",
+    "**/target/**",
+    "**/build/**",
+    ".idea/**",
+    ".vscode/**",
+    "**/out/**",
+    "**/bin/**",
+    "**/dist/**",
+    "**/generated/**",
+    "*/resources/**/prompts/**",
+    "src/test/**"
+  ]
+  chunk_chars: 1200
+  chunk_overlap: 150
+  top_k: 6
+  fuse:
+    rrf_k: 60
+    mmr_lambda: 0.7
+    final_k: 10
+  vectors:
+    enabled: true
+
+net:
+  enabled: true
+  read_only: true
+  allow_domains: []   # allow web, list hosts here, e.g. ["docs.oracle.com"]
+  max_bytes: 5000000
+  content_types: ["text/html","text/plain","application/pdf","application/json"]
+  user_agent: "LOQ-J/0.1 (local)"
+  redaction:
+    strip_paths: true
+    strip_emails: true
+    confirm_query: true
+
+cache:
+  http_ttl_minutes: 1440
+  result_ttl_minutes: 1440
