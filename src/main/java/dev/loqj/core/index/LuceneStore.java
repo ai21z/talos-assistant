@@ -3,25 +3,10 @@ package dev.loqj.core.index;
 import dev.loqj.core.spi.CorpusStore;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
-import org.apache.lucene.document.Document;
-import org.apache.lucene.document.Field;
-import org.apache.lucene.document.KnnFloatVectorField;
-import org.apache.lucene.document.StoredField;
-import org.apache.lucene.document.StringField;
-import org.apache.lucene.document.TextField;
-import org.apache.lucene.index.IndexWriter;
-import org.apache.lucene.index.IndexWriterConfig;
-import org.apache.lucene.index.StoredFields;
-import org.apache.lucene.index.Term;
-import org.apache.lucene.queryparser.classic.MultiFieldQueryParser;
-import org.apache.lucene.queryparser.classic.QueryParser;
-import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.document.*;
+import org.apache.lucene.index.*;
+import org.apache.lucene.search.*;
 import org.apache.lucene.search.KnnFloatVectorQuery;
-import org.apache.lucene.search.Query;
-import org.apache.lucene.search.ScoreDoc;
-import org.apache.lucene.search.SearcherManager;
-import org.apache.lucene.search.TermQuery;
-import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.store.FSDirectory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -90,7 +75,7 @@ public class LuceneStore implements AutoCloseable, CorpusStore {
             int hash = rel.indexOf('#');
             if (hash >= 0) rel = rel.substring(0, hash);
 
-// Basename and path tokens from normalized rel
+            // Basename and path tokens from normalized rel
             String base = rel;
             int slash = Math.max(base.lastIndexOf('/'), base.lastIndexOf('\\'));
             if (slash >= 0) base = base.substring(slash + 1);
@@ -106,7 +91,6 @@ public class LuceneStore implements AutoCloseable, CorpusStore {
                 if (vectorDim > 0 && vec.length == vectorDim) {
                     doc.add(new KnnFloatVectorField(F_VEC, vec));
                 } else {
-                    // Soft-fail: keep BM25-only if vectors are unavailable/mismatched
                     LOG.debug("Skip vector for {} (have={}, expected={})", path,
                             (vec == null ? -1 : vec.length), vectorDim);
                 }
@@ -126,32 +110,6 @@ public class LuceneStore implements AutoCloseable, CorpusStore {
             throw new RuntimeException(e);
         }
     }
-
-//    @Override
-//    public List<CorpusStore.Hit> bm25(String queryText, int k) {
-//        IndexSearcher s = null;
-//        try {
-//            s = sm.acquire();
-//            // NEW: search across text + basename + path tokens
-//            Query q = new MultiFieldQueryParser(
-//                    new String[]{F_TEXT, F_NAME, F_PATHTOK},
-//                    analyzer
-//            ).parse(QueryParser.escape(queryText));
-//
-//            TopDocs td = s.search(q, k);
-//            StoredFields stored = s.storedFields();
-//            var hits = new ArrayList<CorpusStore.Hit>(td.scoreDocs.length);
-//            for (ScoreDoc sd : td.scoreDocs) {
-//                var d = stored.document(sd.doc);
-//                hits.add(new CorpusStore.Hit(d.get(F_PATH), sd.score));
-//            }
-//            return hits;
-//        } catch (Exception e) {
-//            throw new RuntimeException(e);
-//        } finally {
-//            if (s != null) try { sm.release(s); } catch (IOException ignore) {}
-//        }
-//    }
 
     @Override
     public List<CorpusStore.Hit> bm25(String queryText, int k) {
@@ -200,7 +158,6 @@ public class LuceneStore implements AutoCloseable, CorpusStore {
                 }
             }
 
-            // Combine base MFQP with nudges
             Query finalQ = new org.apache.lucene.search.BooleanQuery.Builder()
                     .add(base,  org.apache.lucene.search.BooleanClause.Occur.SHOULD)
                     .add(nudges.build(), org.apache.lucene.search.BooleanClause.Occur.SHOULD)
@@ -210,7 +167,7 @@ public class LuceneStore implements AutoCloseable, CorpusStore {
 
             StoredFields stored = s.storedFields();
             var hits = new ArrayList<CorpusStore.Hit>(td.scoreDocs.length);
-            for (org.apache.lucene.search.ScoreDoc sd : td.scoreDocs) {
+            for (ScoreDoc sd : td.scoreDocs) {
                 var d = stored.document(sd.doc);
                 hits.add(new CorpusStore.Hit(d.get(F_PATH), sd.score));
             }
