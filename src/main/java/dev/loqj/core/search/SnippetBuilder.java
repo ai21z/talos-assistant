@@ -1,45 +1,64 @@
 package dev.loqj.core.search;
 
-import dev.loqj.core.spi.CorpusStore;
-
 import java.util.*;
 
-/** Packs text snippets for prompts with a simple budget; dedupes by path. */
+/** Packs snippets with a simple pinned-first policy and a total character budget. */
 public final class SnippetBuilder {
-    private SnippetBuilder() {}
 
     public record Snippet(String path, String text) {}
 
-    /** Pack hits from the store up to ~budget characters. Deduplicates by path. */
-    public static List<Snippet> pack(CorpusStore store, List<CorpusStore.Hit> hits, int budgetChars) {
-        LinkedHashMap<String, Snippet> ordered = new LinkedHashMap<>();
-        for (CorpusStore.Hit h : hits) {
-            if (ordered.containsKey(h.path())) continue;
-            String text = store.getTextByPath(h.path());
-            if (text == null || text.isBlank()) continue;
-            ordered.put(h.path(), new Snippet(h.path(), text));
-        }
-        return trimToBudget(new ArrayList<>(ordered.values()), budgetChars);
-    }
+    private SnippetBuilder() {}
 
-    /** Merge pinned-first, then regular snippets, and trim to budget. */
-    public static List<Snippet> packWithPinned(List<Snippet> pinned, List<Snippet> regular, int budgetChars) {
+    /**
+     * Pinned snippets are kept in order, then regular snippets are appended until the budget is exhausted.
+     * Deduplicates by exact path and lightly diversifies across files (avoid too many chunks from the same file).
+     */
+    public static List<Snippet> packWithPinned(List<Snippet> pinned, List<Snippet> regular, int maxChars) {
         LinkedHashMap<String, Snippet> ordered = new LinkedHashMap<>();
-        for (Snippet s : pinned) ordered.putIfAbsent(s.path(), s);
-        for (Snippet s : regular) ordered.putIfAbsent(s.path(), s);
-        return trimToBudget(new ArrayList<>(ordered.values()), budgetChars);
-    }
 
-    private static List<Snippet> trimToBudget(List<Snippet> in, int budgetChars) {
-        List<Snippet> out = new ArrayList<>();
-        int used = 0;
-        for (Snippet s : in) {
-            String t = s.text();
-            if (t.length() > 1400) t = t.substring(0, 1400);
-            if (used + t.length() > budgetChars && !out.isEmpty()) break;
-            out.add(new Snippet(s.path(), t));
-            used += t.length();
+        // Use a mutable holder so lambdas can update the remaining budget
+        final int[] budget = new int[] { maxChars };
+
+        // Helper: attempt to add snippet if budget allows
+        java.util.function.Consumer<Snippet> tryAdd = s -> {
+            if (s == null) return;
+            String text = s.text();
+            if (text == null || text.isEmpty()) return;
+            if (ordered.containsKey(s.path())) return;
+
+            int need = text.length(); // conservative: count full text length
+            if (budget[0] - need < -200) return; // allow tiny overflow but not too much
+
+            ordered.put(s.path(), s);
+            budget[0] -= need;
+        };
+
+        // 1) pinned
+        if (pinned != null) {
+            for (Snippet s : pinned) tryAdd.accept(s);
         }
-        return out;
+
+        // 2) regular with light file diversification
+        if (regular != null) {
+            Map<String, Integer> perFile = new HashMap<>();
+            for (Snippet s : regular) {
+                String base = s.path();
+                int idx = base.indexOf('#');
+                if (idx >= 0) base = base.substring(0, idx);
+
+                int count = perFile.getOrDefault(base, 0);
+                if (count >= 3) continue; // avoid too many from same file
+
+                tryAdd.accept(s);
+
+                if (ordered.containsKey(s.path())) {
+                    perFile.put(base, count + 1);
+                }
+
+                if (budget[0] <= 0) break;
+            }
+        }
+
+        return new ArrayList<>(ordered.values());
     }
 }

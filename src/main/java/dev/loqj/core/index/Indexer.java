@@ -51,7 +51,7 @@ public class Indexer {
         var includeGlobs = CfgUtil.strList(rag.get("include"));
         var excludeGlobs = CfgUtil.strList(rag.get("exclude"));
 
-        // Prebuild matchers to keep lambda captures minimal & effectively-final
+        // Prebuild matchers
         final FileSystem fs = rootPath.getFileSystem();
         final List<PathMatcher> includeMatchers = new ArrayList<>();
         for (String g : includeGlobs) includeMatchers.add(fs.getPathMatcher("glob:" + g));
@@ -100,7 +100,7 @@ public class Indexer {
             }
         }
 
-        final boolean useVectors = vecEnabled;     // <— snapshot for lambdas
+        final boolean useVectors = vecEnabled;
         final int vectorDim = useVectors ? dim : 0;
 
         try (var store = new LuceneStore(indexDirFor(rootPath), vectorDim)) {
@@ -116,7 +116,7 @@ public class Indexer {
                         List<ParsedChunk> chunks = Chunker.chunk(rel, text, chunkChars, overlap);
                         for (ParsedChunk c : chunks) {
                             float[] vec = null;
-                            if (useVectors) {                     // <— use the final snapshot here
+                            if (useVectors) {
                                 try {
                                     vec = emb.embed(c.text());
                                     if (vec == null || vec.length == 0) {
