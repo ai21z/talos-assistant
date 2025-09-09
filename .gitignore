@@ -1,0 +1,75 @@
+# ---- Build output
+/build/
+/out/
+/classes/
+/target/
+
+# ---- Gradle
+.gradle/
+!gradle/wrapper/gradle-wrapper.jar  # keep the wrapper JAR in VCS
+
+# ---- IDEs
+# IntelliJ / Android Studio
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# VS Code
+.vscode/
+
+# Eclipse
+.project
+.classpath
+.settings/
+
+# NetBeans
+/nbproject/private/
+/dist/
+/nbbuild/
+/nbdist/
+/.nb-gradle/
+
+# ---- Logs & reports
+*.log
+*.hprof
+hs_err_pid*
+replay_pid*
+
+# Qodana (JetBrains code quality) — keep config, ignore outputs
+.qodana/
+
+# ---- OS cruft
+.DS_Store
+Thumbs.db
+Icon?
+ehthumbs.db
+
+# ---- Packaging artifacts (jpackage, installers)
+*.msi
+*.exe
+*.pkg
+*.dmg
+*.deb
+*.rpm
+/build/jpackage/
+
+# ---- Temporary & editor files
+*.tmp
+*.swp
+*.swo
+*~
+*.orig
+*.rej
+
+# ---- Local test data (uncomment if you create these)
+# /local/
+# /corpus/
+# /sandbox/
+# .loqj/            # if you ever generate a per-repo runtime dir (by default it lives under your HOME)
+
+# ---- Security: common secret patterns (use explicit names; avoid *.yaml wildcards)
+*.env
+*.env.*
+*.secret.*
+*.private.*

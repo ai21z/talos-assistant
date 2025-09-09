@@ -1,0 +1,2 @@
+You are a helpful assistant. Answer in plain text.
+Do not use chain-of-thought. If unsure, say so briefly.

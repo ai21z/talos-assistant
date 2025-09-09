@@ -1,0 +1,24 @@
+* text=auto
+
+# Scripts should be LF on all OSes
+*.sh      text eol=lf
+gradlew   text eol=lf
+
+# Windows launchers keep CRLF
+*.bat     text eol=crlf
+*.cmd     text eol=crlf
+
+# Configs: prefer LF for consistency
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.properties text eol=lf
+*.md      text eol=lf
+
+# Treat common binaries as binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.mp4 binary
+*.jar binary
+*.zip binary

@@ -1,0 +1,17 @@
+models:
+  - id: "qwen3:8b"
+    role: "coder-default"
+    ram_hint_gb: 8
+    note: "Balanced speed/quality (current)"
+  - id: "qwen2.5:3b"
+    role: "lite"
+    ram_hint_gb: 4
+    note: "Fast, lightweight"
+  - id: "qwen2.5:7b-instruct"
+    role: "coder"
+    ram_hint_gb: 8
+    note: "Older 7B instruct"
+  - id: "llama3.1:8b-instruct"
+    role: "general"
+    ram_hint_gb: 8
+    note: "General chat"
