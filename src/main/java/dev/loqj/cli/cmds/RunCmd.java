@@ -28,7 +28,6 @@ public class RunCmd implements Runnable {
 
     private static final Pattern SET_MODEL = Pattern.compile("^:set\\s+model\\s+(.+)$", Pattern.CASE_INSENSITIVE);
     private static final Pattern FILE_TOKEN = Pattern.compile("([A-Za-z0-9_./\\\\-]+\\.(?:java|md|txt|yaml|yml|xml|gradle|kts|json|properties))");
-    private static final Pattern CAMEL = Pattern.compile("\\b([A-Z][A-Za-z0-9_]{3,})\\b");
 
     enum Mode { ASK, RAG, RAG_MEMORY, DEV, WEB, AUTO }
 
@@ -40,10 +39,14 @@ public class RunCmd implements Runnable {
         }
 
         Config cfg = new Config();
+
+        // --bm25-only: write into MUTABLE copies, then put back into cfg.data
         if (bm25Only) {
-            Map<String,Object> rag = CfgUtil.map(cfg.data.get("rag"));
-            Map<String,Object> vectors = CfgUtil.map(rag.get("vectors"));
+            Map<String,Object> rag = new LinkedHashMap<>(CfgUtil.map(cfg.data.get("rag")));
+            Map<String,Object> vectors = new LinkedHashMap<>(CfgUtil.map(rag.get("vectors")));
             vectors.put("enabled", Boolean.FALSE);
+            rag.put("vectors", vectors);
+            cfg.data.put("rag", rag);
         }
 
         var svc = new RagService(cfg);
@@ -53,16 +56,16 @@ public class RunCmd implements Runnable {
         Mode mode = Mode.RAG;
         boolean memoryOn = false;
         boolean citationsOn = true;
-        boolean webOn = false; // explicit
+        boolean webOn = false; // explicit gate for later web work
         boolean debug = false;
         Integer topK = kOverride;
         String activeModel = llm.getModel();
 
-        // Installed models (for banner panel only; we won't print a separate list below)
+        // Installed models for banner panel
         var models = OllamaModels.list(cfg);
 
-        banner(ws, cfg, models); // <-- banner now shows commands, modes, and installed models inside the frame
-        printStatus("Current configuration:", mode, activeModel, ws, vectorsEnabled(cfg), memoryOn, netEnabled(cfg), topK, citationsOn);
+        banner(ws, cfg, models);
+        printStatus("Current configuration:", mode, activeModel, ws, vectorsEnabled(cfg), memoryOn, webOn, topK, citationsOn);
 
         System.out.println("Type your question. Commands: :help  :models  :set model <name>  :mode <m>  :k <int>  :debug on|off  :q");
         System.out.println();
@@ -72,69 +75,122 @@ public class RunCmd implements Runnable {
             LineReader reader = LineReaderBuilder.builder().terminal(term).build();
             String prompt = color("loqj", 36) + "@" + ws.getFileName() + color(" > ", 90);
 
-            while (true) {
+            boolean quit = false;
+            while (!quit) {
                 String line;
                 try { line = reader.readLine(prompt); }
                 catch (EndOfFileException eof) { break; }
                 if (line == null) break;
-                line = line.trim();
+                line = line.strip();
                 if (line.isBlank()) continue;
 
-                // Commands
-                if (line.equals(":q")) break;
-                if (line.equals(":help")) { printHelp(); continue; }
-                if (line.equals(":models")) {
-                    var m2 = OllamaModels.list(cfg);
-                    System.out.println("Installed models: " + (m2.isEmpty() ? "(none found)" : String.join(", ", m2)) + "\n");
-                    continue;
-                }
-                if (line.startsWith(":k ")) {
-                    String s = line.substring(3).trim();
-                    try { topK = Integer.parseInt(s); System.out.println("top_k = " + topK + "\n"); }
-                    catch (Exception e) { System.out.println("Usage: :k <int>\n"); }
-                    continue;
-                }
-                if (line.equalsIgnoreCase(":debug on")) { debug = true; System.out.println("debug = ON\n"); continue; }
-                if (line.equalsIgnoreCase(":debug off")) { debug = false; System.out.println("debug = OFF\n"); continue; }
+                // ---------- All commands must begin with ":" at column 0 ----------
+                if (line.startsWith(":")) {
+                    // ":" alone -> full command list
+                    String after = line.substring(1).trim();
+                    if (after.isEmpty()) { printMan(mode, debug, topK, activeModel); continue; }
 
-                if (line.startsWith(":mode ")) {
-                    String m = line.substring(6).trim().toLowerCase(Locale.ROOT)
-                            .replaceAll("\\bon\\b|\\boff\\b", "").trim();;
-                    Mode prev = mode;
-                    mode = switch (m) {
-                        case "ask" -> Mode.ASK;
-                        case "rag" -> Mode.RAG;
-                        case "rag+memory", "rag-memory", "cag" -> Mode.RAG_MEMORY;
-                        case "dev" -> Mode.DEV;
-                        case "web" -> Mode.WEB;
-                        case "auto" -> Mode.AUTO;
-                        default -> { System.out.println("Unknown mode. Use: ask | rag | rag+memory | dev | web | auto\n"); yield mode; }
-                    };
-                    if (mode != prev) {
-                        citationsOn = (mode == Mode.RAG || mode == Mode.RAG_MEMORY || mode == Mode.WEB);
-                        memoryOn = (mode == Mode.RAG_MEMORY);
-                        printStatus("Current configuration:", mode, activeModel, ws, vectorsEnabled(cfg), memoryOn, netEnabled(cfg), topK, citationsOn);
+                    // Parse primary command and the rest (case-insensitive)
+                    String[] parts = after.split("\\s+", 2);
+                    String cmd = parts[0].toLowerCase(Locale.ROOT);
+                    String args = parts.length > 1 ? parts[1].trim() : "";
+
+                    switch (cmd) {
+                        case "q":
+                        case "quit": {
+                            quit = true;
+                            break;
+                        }
+
+                        case "help": {
+                            printMan(mode, debug, topK, activeModel);
+                            break;
+                        }
+
+                        case "models": {
+                            var m2 = OllamaModels.list(cfg);
+                            System.out.println("Installed models: " + (m2.isEmpty() ? "(none found)" : String.join(", ", m2)) + "\n");
+                            break;
+                        }
+
+                        case "k": {
+                            if (args.isEmpty()) { printUsageK(); break; }
+                            try {
+                                topK = Integer.parseInt(args);
+                                System.out.println("top_k = " + topK + "\n");
+                            } catch (NumberFormatException nfe) {
+                                printUsageK();
+                            }
+                            break;
+                        }
+
+                        case "debug": {
+                            if (args.isEmpty()) { printUsageDebug(debug); break; }
+                            if (args.equalsIgnoreCase("on")) { debug = true; System.out.println("debug = ON\n"); }
+                            else if (args.equalsIgnoreCase("off")) { debug = false; System.out.println("debug = OFF\n"); }
+                            else printUsageDebug(debug);
+                            break;
+                        }
+
+                        case "set": {
+                            // Only subcommand we support is "model"
+                            if (args.isEmpty() || !args.toLowerCase(Locale.ROOT).startsWith("model")) {
+                                printUsageSetModel();
+                                break;
+                            }
+                            String rest = args.substring("model".length()).trim();
+                            if (rest.isEmpty()) { printUsageSetModel(); break; }
+                            String name = sanitizeModelName(rest);
+                            if (name.isBlank()) { printUsageSetModel(); break; }
+
+                            var known = OllamaModels.list(cfg);
+                            if (!known.isEmpty() && !known.contains(name)) {
+                                System.out.println("Model not found: " + name + "\n");
+                                System.out.println("Tip: run :models, or `ollama list`, or `ollama pull " + name + "`.\n");
+                                break;
+                            }
+                            activeModel = name;
+                            llm.setModel(name);
+                            // Reprint status after explicit model change
+                            printStatus("Current configuration:", mode, activeModel, ws, vectorsEnabled(cfg), (mode==Mode.RAG_MEMORY), webOn, topK, (mode==Mode.RAG || mode==Mode.RAG_MEMORY || mode==Mode.WEB));
+                            break;
+                        }
+
+                        case "mode": {
+                            if (args.isEmpty()) { printUsageMode(mode); break; }
+                            String m = args.toLowerCase(Locale.ROOT).replaceAll("\\bon\\b|\\boff\\b", "").trim();
+                            Mode newMode = switch (m) {
+                                case "ask" -> Mode.ASK;
+                                case "rag" -> Mode.RAG;
+                                case "rag+memory", "rag-memory", "cag" -> Mode.RAG_MEMORY;
+                                case "dev" -> Mode.DEV;
+                                case "web" -> Mode.WEB;
+                                case "auto" -> Mode.AUTO;
+                                default -> null;
+                            };
+                            if (newMode == null) { printUsageMode(mode); break; }
+
+                            mode = newMode;
+                            // Mode-driven toggles
+                            citationsOn = (mode == Mode.RAG || mode == Mode.RAG_MEMORY || mode == Mode.WEB);
+                            memoryOn = (mode == Mode.RAG_MEMORY);
+
+                            // ALWAYS print status on :mode, even if unchanged
+                            printStatus("Current configuration:", mode, activeModel, ws, vectorsEnabled(cfg), memoryOn, webOn, topK, citationsOn);
+                            break;
+                        }
+
+                        default: {
+                            System.out.println("Unknown command: :" + cmd + "\n");
+                            printMan(mode, debug, topK, activeModel);
+                            break;
+                        }
                     }
+                    // We handled a command; go to next prompt
                     continue;
                 }
 
-                Matcher sm = SET_MODEL.matcher(line);
-                if (sm.matches()) {
-                    String name = sanitizeModelName(sm.group(1));
-                    if (name.isBlank()) { System.out.println("Usage: :set model <name>\n"); continue; }
-                    // If we have a list, validate against it, otherwise accept and let Ollama decide
-                    var known = OllamaModels.list(cfg);
-                    if (!known.isEmpty() && !known.contains(name)) {
-                        System.out.println("Model not found: " + name + "\n");
-                        System.out.println("Tip: run :models, or `ollama list`, or `ollama pull " + name + "`.\n");
-                        continue;
-                    }
-                    activeModel = name;
-                    llm.setModel(name);
-                    printStatus("Current configuration:", mode, activeModel, ws, vectorsEnabled(cfg), memoryOn, netEnabled(cfg), topK, citationsOn);
-                    continue;
-                }
-
+                // ---------- Not a command: route to REPL logic ----------
                 // Router (Auto) → pick a mode for this turn, but do not change global mode
                 Mode route = mode;
                 if (mode == Mode.AUTO) {
@@ -177,14 +233,13 @@ public class RunCmd implements Runnable {
                     Map<String,Object> net = CfgUtil.map(cfg.data.get("net"));
                     boolean enabled = Boolean.TRUE.equals(net.getOrDefault("enabled", false));
                     if (!enabled) {
-                        System.out.println("Network is DISABLED in config (net.enabled=false).");
+                        System.out.println("Web access is disabled by config (net.enabled=false).");
                         System.out.println("Enable it in src/main/resources/config/default-config.yaml and restart,");
                         System.out.println("or use :mode rag for local-only answers.\n");
                         continue;
                     }
-                    // TODO: implement web search here
+                    // TODO: implement web lookup once net is enabled
                 }
-
 
                 // Build snippets (pinned first)
                 List<Map<String,String>> pinned = pinFiles(ws, line, 3, 1600);
@@ -208,8 +263,8 @@ public class RunCmd implements Runnable {
                 // Choose system prompt
                 String system = switch (route) {
                     case ASK -> readOrFallback("prompts/ask-system.txt", svc);
-                    case RAG, RAG_MEMORY, WEB, AUTO -> readOrFallback("prompts/rag-system.txt", svc);
-                    case DEV -> readOrFallback("prompts/cli-system.txt", svc);
+                    case RAG, RAG_MEMORY, DEV, AUTO -> readOrFallback("prompts/cli-system.txt", svc);
+                    case WEB -> readOrFallback("prompts/rag-system.txt", svc);
                 };
 
                 // Ask (stream first, fallback to non-stream)
@@ -250,11 +305,6 @@ public class RunCmd implements Runnable {
     private static boolean vectorsEnabled(Config cfg) {
         Map<String,Object> rag = CfgUtil.map(cfg.data.get("rag"));
         return Boolean.TRUE.equals(CfgUtil.map(rag.get("vectors")).getOrDefault("enabled", true));
-    }
-
-    private static boolean netEnabled(Config cfg) {
-        Map<String,Object> net = CfgUtil.map(cfg.data.get("net"));
-        return Boolean.TRUE.equals(net.getOrDefault("enabled", false));
     }
 
     private static Mode routeFor(String line) {
@@ -311,16 +361,6 @@ public class RunCmd implements Runnable {
         return null;
     }
 
-    private static Path findFirst(Path ws, String basename) {
-        try (var walk = Files.walk(ws)) {
-            return walk.filter(Files::isRegularFile)
-                    .filter(p -> p.getFileName().toString().equalsIgnoreCase(basename))
-                    .findFirst().orElse(null);
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
     private static void showFile(Path path, int maxChars, int maxLines) {
         try {
             String text = ParserUtil.smartParse(path);
@@ -359,30 +399,28 @@ public class RunCmd implements Runnable {
 
     private static List<Map<String,String>> pinFiles(Path ws, String question, int maxPins, int maxChars) {
         List<Map<String,String>> out = new ArrayList<>();
-        Set<String> seen = new LinkedHashSet<>();
-
-        // 1) explicit file-like tokens
         Matcher m = FILE_TOKEN.matcher(question);
+        Set<String> seen = new LinkedHashSet<>();
         while (m.find() && out.size() < maxPins) {
             String token = m.group(1);
             if (!seen.add(token)) continue;
+
             Path p = ws.resolve(token).normalize();
-            if (Files.isRegularFile(p)) { addSnippet(ws, out, p, maxChars); continue; }
-
+            if (Files.isRegularFile(p)) {
+                addSnippet(ws, out, p, maxChars);
+                continue;
+            }
             String base = Path.of(token).getFileName().toString();
-            Path hit = findFirst(ws, base);
-            if (hit != null) addSnippet(ws, out, hit, maxChars);
+            try {
+                try (var walk = Files.walk(ws)) {
+                    Optional<Path> hit = walk
+                            .filter(Files::isRegularFile)
+                            .filter(fp -> fp.getFileName().toString().equalsIgnoreCase(base))
+                            .findFirst();
+                    if (hit.isPresent()) addSnippet(ws, out, hit.get(), maxChars);
+                }
+            } catch (Exception ignore) {}
         }
-
-        // 2) CamelCase → <Name>.java
-        Matcher cm = CAMEL.matcher(question);
-        while (cm.find() && out.size() < maxPins) {
-            String name = cm.group(1);
-            if (!seen.add(name)) continue;
-            Path hit = findFirst(ws, name + ".java");
-            if (hit != null) addSnippet(ws, out, hit, maxChars);
-        }
-
         return out;
     }
 
@@ -401,7 +439,6 @@ public class RunCmd implements Runnable {
         final String BORDER = "█████████████████████████████████████████████████████████████████████████";
         final int inner = BORDER.length() - 4; // account for "█▌" + "▐█"
 
-        // Logo (interior lines only; we frame them ourselves)
         String[] logo = new String[] {
                 "                                                                     ",
                 " ██╗      ██████╗  ██████╗      ██╗               ██████╗██╗     ██╗ ",
@@ -413,7 +450,6 @@ public class RunCmd implements Runnable {
                 "                                                                     "
         };
 
-        // Panel content (commands, modes, models)
         List<String> panel = new ArrayList<>();
         panel.add("Commands");
         panel.add(":help                 - show this help");
@@ -424,7 +460,6 @@ public class RunCmd implements Runnable {
         panel.add(":debug on|off         - toggle debug snippet view");
         panel.add(":q                    - quit");
         panel.add("");
-
         panel.add("Modes");
         panel.add("ASK           - General Q&A. No project context. (Good for brainstorming or generic questions.)");
         panel.add("RAG           - Answers grounded in your current folder and its subfolders.");
@@ -436,13 +471,11 @@ public class RunCmd implements Runnable {
         panel.add("WEB           - Reserved for safe web lookups (off by default in config).");
         panel.add("AUTO          - Lets me decide: I route to DEV/RAG/ASK based on your prompt.");
         panel.add("");
-
         panel.add("Installed models");
         panel.add(models == null || models.isEmpty()
                 ? "(none found)  — install via `ollama pull <model>`"
                 : String.join(", ", models));
 
-        // Render
         System.out.println(BORDER);
         for (String ln : logo) printBoxLine(ln, inner);
         printBoxLine("", inner);
@@ -458,16 +491,14 @@ public class RunCmd implements Runnable {
         System.out.println();
     }
 
-    private static void printStatus(String title, Mode mode, String model, Path ws,
-                                    boolean vectors, boolean memory, boolean netEnabled,
-                                    Integer k, boolean cites) {
+    private static void printStatus(String title, Mode mode, String model, Path ws, boolean vectors, boolean memory, boolean web, Integer k, boolean cites) {
         System.out.println(title);
         System.out.println("  Mode:        " + mode);
         System.out.println("  Model:       " + model);
         System.out.println("  Scope:       " + ws);
         System.out.println("  Vectors:     " + (vectors ? "ON" : "OFF"));
         System.out.println("  Memory:      " + (memory ? "ON" : "OFF"));
-        System.out.println("  Network:     " + (netEnabled ? "ON" : "DISABLED (config)"));
+        System.out.println("  Web:         " + (web ? "ON" : "OFF"));
         System.out.println("  TopK:        " + (k == null ? "(cfg)" : k));
         System.out.println("  Citations:   " + (cites ? "ON" : "OFF"));
         System.out.println();
@@ -475,15 +506,51 @@ public class RunCmd implements Runnable {
 
     private static void printHelp() {
         System.out.println("""
-            Commands:
-              :help                 show this help
-              :models               list installed models
-              :set model <name>     switch active model
-              :mode ask|rag|rag+memory|dev|web|auto
-              :k <int>              set retrieval top-K
-              :debug on|off         toggle debug snippet view
-              :q                    quit
-        """);
+Commands:
+  :help                 show this help
+  :models               list installed models
+  :set model <name>     switch active model
+  :mode ask|rag|rag+memory|dev|web|auto
+  :k <int>              set retrieval top-K
+  :debug on|off         toggle debug snippet view
+  :q                    quit
+""");
+    }
+
+    private static void printMan(Mode mode, boolean debug, Integer topK, String model) {
+        // “man page” style list + quick reference
+        printHelp();
+        System.out.println("Current quick refs:");
+        System.out.println("  mode   : " + mode);
+        System.out.println("  model  : " + model);
+        System.out.println("  debug  : " + (debug ? "ON" : "OFF"));
+        System.out.println("  top_k  : " + (topK == null ? "(cfg)" : topK));
+        System.out.println();
+        System.out.println("Examples:");
+        System.out.println("  :mode rag");
+        System.out.println("  :set model qwen3:8b");
+        System.out.println("  :k 6");
+        System.out.println("  :debug on");
+        System.out.println();
+    }
+
+    private static void printUsageMode(Mode current) {
+        System.out.println("Usage: :mode ask|rag|rag+memory|dev|web|auto");
+        System.out.println("Current: " + current + "\n");
+    }
+
+    private static void printUsageDebug(boolean debug) {
+        System.out.println("Usage: :debug on|off");
+        System.out.println("Current: " + (debug ? "ON" : "OFF") + "\n");
+    }
+
+    private static void printUsageK() {
+        System.out.println("Usage: :k <int>\n");
+    }
+
+    private static void printUsageSetModel() {
+        System.out.println("Usage: :set model <name>");
+        System.out.println("Example: :set model qwen3:8b\n");
     }
 
     private static String color(String s, int code) { return "\u001B[" + code + "m" + s + "\u001B[0m"; }
@@ -502,9 +569,7 @@ public class RunCmd implements Runnable {
         StringBuilder line = new StringBuilder();
         for (String w : words) {
             if (w.length() > width) {
-                // flush current
                 if (line.length() > 0) { out.add(line.toString()); line.setLength(0); }
-                // hard-break long token
                 int i = 0;
                 while (i < w.length()) {
                     out.add(w.substring(i, Math.min(i + width, w.length())));

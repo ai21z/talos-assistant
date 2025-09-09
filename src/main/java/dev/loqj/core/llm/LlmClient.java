@@ -85,19 +85,20 @@ public class LlmClient implements LanguageModel {
     }
 
     /** Streaming: request plain text (no JSON) so we can print tokens directly. */
-    public String chatStream(String system, String question, List<Map<String,String>> snippets, java.util.function.Consumer<String> onChunk) {
+    public String chatStream(String system, String question, List<Map<String,String>> snippets, Consumer<String> onChunk) {
         StringBuilder out = new StringBuilder();
         boolean[] inThink = { false }; // state across streamed chunks
 
         try {
             String user = buildUserPromptStreaming(question, snippets);
+
             Map<String,Object> payload = new LinkedHashMap<>();
             payload.put("model", model);
             payload.put("messages", List.of(
                     Map.of("role","system", "content", system),
                     Map.of("role","user",   "content", user)
             ));
-            payload.put("stream", true); // no format=json for streaming
+            payload.put("stream", true); // NOTE: no "format":"json"
             payload.put("options", Map.of("temperature", 0.1));
 
             String body = mapper.writeValueAsString(payload);
@@ -118,7 +119,7 @@ public class LlmClient implements LanguageModel {
                 while ((line = br.readLine()) != null) {
                     line = line.trim();
                     if (line.isEmpty()) continue;
-
+                    // Ollama streams newline-delimited JSON
                     try {
                         Map<String,Object> evt = mapper.readValue(line, new TypeReference<>() {});
                         if (Boolean.TRUE.equals(evt.get("done"))) break;
@@ -180,7 +181,7 @@ public class LlmClient implements LanguageModel {
         return -1;
     }
 
-    /** Plain, non-JSON request (non-stream). Used by memory prompts to avoid JSON schema conflicts. */
+    /** Plain, non-JSON request (non-stream). Useful for memory prompts. */
     public String chatPlain(String system, String userContent) {
         try {
             Map<String,Object> payload = new LinkedHashMap<>();

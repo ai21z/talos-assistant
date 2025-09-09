@@ -9,30 +9,41 @@ policy:
   dry_run: true
   max_files_per_write: 20
   allowlist: ["git","rg","node","npm","yarn","pnpm","mvn","gradle","cargo","go","javac","jar","python","ruff","black","eslint","prettier","powershell","cmd","bash"]
-  blocklist: ["diskpart","format","bcdedit","shutdown","sc delete","del /s /q *","rm -rf /"]
+  blocklist: ["diskpart","format","bcdedit","shutdown","sc delete","del /s / q *","rm -rf /"]
 
 rag:
-  include: [
-    "**/*.java",
-    "**/*.md",
-    "**/*.yml",
-    "**/*.yaml",
-    "**/*.txt"
-  ]
-  exclude: [
-    "**/.git/**",
-    "**/node_modules/**",
-    "**/target/**",
-    "**/build/**",
-    ".idea/**",
-    ".vscode/**",
-    "**/out/**",
-    "**/bin/**",
-    "**/dist/**",
-    "**/generated/**",
-    "*/resources/**/prompts/**",
-    "src/test/**"
-  ]
+  include:
+    - "**/*.java"
+    - "**/*.kt"
+    - "**/*.scala"
+    - "**/*.md"
+    - "**/*.txt"
+    - "**/*.yml"
+    - "**/*.yaml"
+    - "**/*.json"
+    - "**/*.xml"
+    - "**/*.html"
+    - "**/*.htm"
+    - "**/*.properties"
+    - "**/*.conf"
+    - "**/*.cfg"
+    - "**/*.ini"
+    - "**/*.gradle"
+    - "**/*.kts"
+    - "**/*.log"
+  exclude:
+    - "**/.git/**"
+    - "**/node_modules/**"
+    - "**/target/**"
+    - "**/build/**"
+    - "**/out/**"
+    - "**/bin/**"
+    - "**/dist/**"
+    - "**/generated/**"
+    - ".idea/**"
+    - ".vscode/**"
+    - "*/resources/**/prompts/**"
+    - "src/test/**"
   chunk_chars: 1200
   chunk_overlap: 150
   top_k: 6
@@ -44,7 +55,7 @@ rag:
     enabled: true
 
 net:
-  enabled: true
+  enabled: false
   read_only: true
   allow_domains: []   # allow web, list hosts here, e.g. ["docs.oracle.com"]
   max_bytes: 5000000
