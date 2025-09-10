@@ -1,7 +1,5 @@
 package dev.loqj.core.rag;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.loqj.core.CfgUtil;
 import dev.loqj.core.Config;
 import dev.loqj.core.embed.EmbeddingsClient;
@@ -14,14 +12,12 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
 import java.util.*;
-import java.util.stream.Collectors;
 
-/** Prepares retrieval (BM25 + optional KNN), performs light fusion, and returns snippet maps + citations. */
+/** Prepares retrieval (BM25 + optional KNN), performs RRF→MMR fusion, and returns snippet maps + citations. */
 public class RagService {
     private static final Logger LOG = LoggerFactory.getLogger(RagService.class);
 
     private final Config cfg;
-    private final ObjectMapper mapper = new ObjectMapper();
 
     public RagService(Config cfg) { this.cfg = cfg; }
 
@@ -37,50 +33,70 @@ public class RagService {
         int cfgTopK = CfgUtil.intAt(rag, "top_k", 6);
         int reqTopK = (kOverride == null || kOverride <= 0) ? cfgTopK : kOverride;
 
-        int rrfK = CfgUtil.intAt(CfgUtil.map(rag.get("fuse")), "rrf_k", 60);
-        double mmrLambda = CfgUtil.doubleAt(CfgUtil.map(rag.get("fuse")), "mmr_lambda", 0.7);
-        int finalK = CfgUtil.intAt(CfgUtil.map(rag.get("fuse")), "final_k", Math.max(10, reqTopK));
+        Map<String,Object> fuse = CfgUtil.map(rag.get("fuse"));
+        int rrfK         = CfgUtil.intAt(fuse, "rrf_k", 60);
+        double mmrLambda = clamp01(CfgUtil.doubleAt(fuse, "mmr_lambda", 0.70));
+        int finalK       = CfgUtil.intAt(fuse, "final_k", Math.max(10, reqTopK));
+
+        int snippetMax   = CfgUtil.intAt(rag, "snippet_max_chars", 2000);
+        Map<String,Object> vec = CfgUtil.map(rag.get("vectors"));
+        boolean vectorsEnabled = Boolean.TRUE.equals(vec.getOrDefault("enabled", Boolean.TRUE));
 
         // Index location
         var indexDir = new Indexer(cfg).indexDirFor(workspace);
 
-        // Retrieve candidates
         List<CorpusStore.Hit> bm25Hits;
-        List<CorpusStore.Hit> knnHits = List.of();
-        boolean vectorsEnabled = Boolean.TRUE.equals(CfgUtil.map(rag.get("vectors")).getOrDefault("enabled", true));
+        List<CorpusStore.Hit> knnHits = Collections.emptyList();
 
         try (var store = new LuceneStore(indexDir, 0)) { // vectorDim not required for reading/searching
-            bm25Hits = store.bm25(question, Math.max(2 * reqTopK, 20));
+            int pool = Math.max(2 * reqTopK, 40);
 
+            // BM25 candidates
+            bm25Hits = store.bm25(question, pool);
+            LOG.debug("RAG/BM25: {} hits (pool={})", bm25Hits.size(), pool);
+
+            // Optional KNN candidates
             if (vectorsEnabled) {
                 try {
                     var emb = new EmbeddingsClient(cfg);
                     float[] qvec = emb.embed(question);
                     if (qvec != null && qvec.length > 0) {
-                        knnHits = store.knn(qvec, Math.max(2 * reqTopK, 20));
+                        knnHits = store.knn(qvec, pool);
+                        LOG.debug("RAG/KNN: {} hits (vectors enabled)", knnHits.size());
+                    } else {
+                        LOG.debug("RAG/KNN: embedding vector empty; skipping KNN.");
                     }
                 } catch (Exception e) {
-                    LOG.debug("Embedding failed; continuing with BM25 only: {}", e.toString());
+                    LOG.debug("RAG/KNN: embedding failed; proceeding BM25-only: {}", e.toString());
                 }
+            } else {
+                LOG.debug("RAG/KNN: vectors disabled via config; proceeding BM25-only.");
             }
 
-            // Fuse
-            var fused = rrfFuse(bm25Hits, knnHits, rrfK, finalK, mmrLambda);
+            // RRF → MMR fusion
+            var fused = fuseRrfThenMmr(bm25Hits, knnHits, rrfK, finalK, mmrLambda);
 
-            // Materialize snippets
+            // Materialize snippets (defensive trim; SnippetBuilder will pack later)
             List<Map<String,String>> snippets = new ArrayList<>(fused.size());
             List<String> citations = new ArrayList<>(fused.size());
+
             for (var h : fused) {
-                String text = store.getTextByPath(h.path());
-                if (text == null) continue;
-                // Trim very long chunks defensively; SnippetBuilder will pack further.
-                if (text.length() > 2000) text = text.substring(0, 2000);
-                snippets.add(Map.of("path", h.path(), "text", text));
-                citations.add(h.path());
+                String path = h.path();
+                String text = store.getTextByPath(path);
+                if (text == null || text.isBlank()) {
+                    LOG.debug("RAG: no text for path {}", path);
+                    continue;
+                }
+                if (text.length() > snippetMax) text = text.substring(0, Math.max(0, snippetMax));
+                snippets.add(Map.of("path", path, "text", text));
+                citations.add(path);
             }
+
+            LOG.debug("RAG: prepared {} snippets (finalK={}, snippetMax={})", snippets.size(), finalK, snippetMax);
             return new Prepared(snippets, citations);
+
         } catch (Exception e) {
-            LOG.warn("prepare failed", e);
+            LOG.warn("RAG prepare failed: {}: {}", e.getClass().getSimpleName(), e.getMessage(), e);
             return new Prepared(List.of(), List.of());
         }
     }
@@ -96,60 +112,91 @@ public class RagService {
                 text = "I'm not sure based on the provided context.";
             }
         } catch (Exception e) {
-            LOG.warn("ask failed", e);
+            LOG.warn("RAG ask failed: {}: {}", e.getClass().getSimpleName(), e.getMessage(), e);
             text = "Ask failed: " + e.getMessage();
         }
         return new Answer(text, p.citations());
     }
 
-    /** Reciprocal Rank Fusion + simple path-based diversification. */
-    private static List<CorpusStore.Hit> rrfFuse(List<CorpusStore.Hit> bm25,
-                                                 List<CorpusStore.Hit> knn,
-                                                 int rrfK,
-                                                 int finalK,
-                                                 double mmrLambda) {
-        Map<String, Double> score = new HashMap<>();
+    /** RRF scoring followed by simple MMR selection (diversity by base-file). */
+    private static List<CorpusStore.Hit> fuseRrfThenMmr(List<CorpusStore.Hit> bm25,
+                                                        List<CorpusStore.Hit> knn,
+                                                        int rrfK,
+                                                        int finalK,
+                                                        double mmrLambda) {
+        // 1) RRF scores (equal weight for now; extendable later)
+        Map<String, Double> rrfScore = new LinkedHashMap<>();
         Map<String, Integer> firstRank = new HashMap<>();
 
-        // Helper to update scores
-        java.util.function.BiConsumer<List<CorpusStore.Hit>, Double> addList = (hits, weight) -> {
-            for (int i = 0; i < hits.size(); i++) {
-                var h = hits.get(i);
-                double s = 1.0 / (rrfK + i + 1.0);
-                score.merge(h.path(), weight * s, Double::sum);
-                firstRank.putIfAbsent(h.path(), i);
-            }
-        };
+        addRrf(rrfScore, firstRank, bm25, rrfK, 1.0);
+        addRrf(rrfScore, firstRank, knn,  rrfK, 1.0);
 
-        addList.accept(bm25, 1.0);
-        addList.accept(knn, 1.0);
+        if (rrfScore.isEmpty()) return List.of();
 
-        // Diversity: if multiple chunks from the same file appear, penalize later ones a bit
-        Map<String, Integer> seenPerFile = new HashMap<>();
-        List<String> keys = new ArrayList<>(score.keySet());
-        keys.sort((a, b) -> Double.compare(score.getOrDefault(b, 0.0), score.getOrDefault(a, 0.0)));
+        // Sort by RRF (desc), deterministic by path if tie
+        List<Map.Entry<String, Double>> cands = new ArrayList<>(rrfScore.entrySet());
+        cands.sort((a, b) -> {
+            int cmp = Double.compare(b.getValue(), a.getValue());
+            return (cmp != 0) ? cmp : a.getKey().compareTo(b.getKey());
+        });
 
+        // 2) MMR selection
+        double maxRrf = cands.get(0).getValue();
         List<CorpusStore.Hit> out = new ArrayList<>();
-        Set<String> seen = new HashSet<>();
+        Set<String> seenBases = new HashSet<>();
 
-        for (String path : keys) {
-            if (out.size() >= finalK) break;
-            // base file key (strip #chunkId)
-            String base = path;
-            int hash = base.indexOf('#');
-            if (hash >= 0) base = base.substring(0, hash);
+        while (out.size() < finalK && !cands.isEmpty()) {
+            String bestKey = null;
+            double bestVal = Double.NEGATIVE_INFINITY;
 
-            int nSeen = seenPerFile.getOrDefault(base, 0);
-            double penalty = (nSeen == 0) ? 1.0 : Math.max(0.5, 1.0 - 0.15 * nSeen);
+            for (var e : cands) {
+                String path = e.getKey();
+                double rel = (maxRrf > 0) ? (e.getValue() / maxRrf) : e.getValue(); // ~[0,1]
+                String base = basePath(path);
+                double diversityPenalty = seenBases.contains(base) ? 1.0 : 0.0; // 1 if same file already selected
 
-            double s = score.get(path) * penalty;
-
-            if (seen.add(path)) {
-                out.add(new CorpusStore.Hit(path, (float) s));
-                seenPerFile.put(base, nSeen + 1);
+                double val = mmrLambda * rel - (1.0 - mmrLambda) * diversityPenalty;
+                if (val > bestVal) {
+                    bestVal = val;
+                    bestKey = path;
+                }
             }
+
+            if (bestKey == null) break;
+
+            out.add(new CorpusStore.Hit(bestKey, rrfScore.get(bestKey).floatValue()));
+            seenBases.add(basePath(bestKey));
+
+            // remove chosen key from candidates
+            final String chosen = bestKey;
+            cands.removeIf(en -> en.getKey().equals(chosen));
         }
+
         return out;
+    }
+
+    private static void addRrf(Map<String, Double> score,
+                               Map<String, Integer> firstRank,
+                               List<CorpusStore.Hit> hits,
+                               int rrfK,
+                               double weight) {
+        if (hits == null || hits.isEmpty()) return;
+        for (int i = 0; i < hits.size(); i++) {
+            var h = hits.get(i);
+            double s = weight * (1.0 / (rrfK + i + 1.0));
+            score.merge(h.path(), s, Double::sum);
+            firstRank.putIfAbsent(h.path(), i);
+        }
+    }
+
+    private static String basePath(String path) {
+        int hash = (path == null) ? -1 : path.indexOf('#');
+        return (hash >= 0) ? path.substring(0, hash) : path;
+    }
+
+    private static double clamp01(double x) {
+        if (Double.isNaN(x)) return 0.0;
+        return (x < 0.0) ? 0.0 : (x > 1.0 ? 1.0 : x);
     }
 
     /** Fallback system prompt if classpath resource is missing (CLI-style). */

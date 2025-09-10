@@ -1,7 +1,7 @@
 package dev.loqj.core.ingest;
 
 import java.io.IOException;
-import java.nio.charset.Charset;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -51,12 +51,17 @@ public final class ParserUtil {
     }
 
     private static boolean likelyText(Path file) throws IOException {
-        byte[] buf = Files.readAllBytes(file);
-        int n = Math.min(buf.length, 4096);
-        for (int i = 0; i < n; i++) {
-            int b = buf[i] & 0xFF;
-            if (b == 0) return false; // NUL often indicates binary
+        try (var channel = Files.newByteChannel(file)) {
+            ByteBuffer buffer = ByteBuffer.allocate(4096);
+            channel.read(buffer);
+            buffer.flip();
+
+            while (buffer.hasRemaining()) {
+                int b = buffer.get() & 0xFF;
+                if (b == 0) return false;
+            }
+            return true;
         }
-        return true;
     }
+
 }
