@@ -308,6 +308,17 @@ public class RunCmd implements Runnable {
                 // ---------- Not a command: route to REPL logic ----------
                 Mode route = (mode == Mode.AUTO ? routeFor(line) : mode);
 
+                // NEW — PR-4 mode pipeline (DevMode first):
+                // Only let the pipeline handle prompts that look like DEV actions,
+                // and only when you're in DEV mode (or AUTO, and it probes as DEV).
+                Mode probe = routeFor(line);
+                if (mode == Mode.DEV || (mode == Mode.AUTO && probe == Mode.DEV)) {
+                    if (glue.tryHandlePrompt(line, ws)) {
+                        if (glue.shouldQuit()) { quit = true; }
+                        continue; // handled via ModeController + RenderEngine
+                    }
+                }
+
                 // DEV mode handlers
                 String lower = line.toLowerCase(Locale.ROOT);
                 if (route == Mode.DEV && isOpenIntent(lower)) {

@@ -1,6 +1,7 @@
 package dev.loqj.cli.cmds;
 
 import dev.loqj.cli.commands.*;
+import dev.loqj.cli.modes.ModeController;
 import dev.loqj.cli.repl.*;
 import dev.loqj.core.Audit;
 import dev.loqj.core.Config;
@@ -18,8 +19,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * - Intercepts a small set of colon commands via the new framework
  * - Executes via ExecutionPipeline
  * - Prints via RenderEngine
- * <p>
- * Extendable: we now include :secret set|get|del
+ * - (NEW) Optional prompt handler for modes (DevMode first)
  */
 public final class RunCmdGlue {
 
@@ -31,6 +31,9 @@ public final class RunCmdGlue {
     private final CommandRegistry registry = new CommandRegistry();
     private final LineClassifier classifier = new LineClassifier();
     private final Context ctx;
+
+    // NEW: modes
+    private final ModeController modes = ModeController.defaultController();
 
     public RunCmdGlue(Object runCmdHost, Config cfg, PrintStream out) {
         this.host = runCmdHost;
@@ -45,14 +48,14 @@ public final class RunCmdGlue {
                 new Audit(),
                 redactor,
                 sandbox,
-                null,                 // RagService: not needed for these commands
-                null,                 // LlmClient: not needed for these commands
+                null,                 // RagService: not needed for these commands yet
+                null,                 // LlmClient: not needed for these commands yet
                 new NetPolicy(this.cfg)
         );
         registerCommands();
     }
 
-    /** Returns true if the line was handled here; caller should 'continue' the REPL loop. */
+    /** Returns true if the colon command line was handled here; caller should 'continue' the REPL loop. */
     public boolean tryHandle(String line) {
         LineClassifier.Classified c = classifier.classify(line);
         if (c.type() != LineClassifier.LineType.COMMAND) return false;
@@ -61,6 +64,23 @@ public final class RunCmdGlue {
         if (!registry.has(name)) return false;
 
         Result r = pipe.run(() -> registry.execute(name, c.argsText(), ctx), ctx, ":" + name);
+        render.render(r);
+        return true;
+    }
+
+    /**
+     * NEW: Try to handle a PROMPT (non-colon line) via ModeController. Returns true if handled & rendered.
+     * Safe to call early in the RunCmd loop, e.g. before native dev logic, to start draining behavior gradually.
+     */
+    public boolean tryHandlePrompt(String rawLine, Path workspace) {
+        LineClassifier.Classified c = classifier.classify(rawLine);
+        if (c.type() != LineClassifier.LineType.PROMPT) return false;
+
+        Result r = pipe.run(() ->
+                        modes.route(rawLine, workspace, ctx).orElse(null),
+                ctx, "(prompt)"
+        );
+        if (r == null) return false;
         render.render(r);
         return true;
     }
@@ -78,52 +98,57 @@ public final class RunCmdGlue {
             @Override public void setDebug(boolean on) { reflectSetBool(host, new String[]{"debug","verbose"}, on); }
         };
 
-        registry.register(new HelpCommand(registry));
         registry.register(new KCommand(rt));
         registry.register(new DebugCommand(rt));
         registry.register(new QuitCommand(quit));
         registry.register(new PolicyCommand());
         registry.register(new AuditToggleCommand());
-        registry.register(new SecretCommand(cfg, ctx.audit())); // NEW
+        // extend as needed (e.g., :secret set|get|del)
     }
 
-    /* Reflection helpers so we don't depend on RunCmd's private field names. */
-    private static int reflectGetInt(Object host, String[] candidates, int def) {
-        if (host == null) return def;
-        for (String f : candidates) try {
-            var fld = host.getClass().getDeclaredField(f);
-            fld.setAccessible(true);
-            Object v = fld.get(host);
-            if (v instanceof Integer i) return i;
-        } catch (Exception ignored) {}
+    private static int reflectGetInt(Object o, String[] fields, int def) {
+        for (String f : fields) {
+            try {
+                var fld = o.getClass().getDeclaredField(f);
+                fld.setAccessible(true);
+                Object v = fld.get(o);
+                if (v instanceof Integer iv) return iv;
+            } catch (Exception ignore) {}
+        }
         return def;
     }
-    private static void reflectSetInt(Object host, String[] candidates, int value) {
-        if (host == null) return;
-        for (String f : candidates) try {
-            var fld = host.getClass().getDeclaredField(f);
-            fld.setAccessible(true);
-            fld.set(host, value);
-            return;
-        } catch (Exception ignored) {}
+
+    private static void reflectSetInt(Object o, String[] fields, int val) {
+        for (String f : fields) {
+            try {
+                var fld = o.getClass().getDeclaredField(f);
+                fld.setAccessible(true);
+                fld.set(o, val);
+                return;
+            } catch (Exception ignore) {}
+        }
     }
-    private static boolean reflectGetBool(Object host, String[] candidates, boolean def) {
-        if (host == null) return def;
-        for (String f : candidates) try {
-            var fld = host.getClass().getDeclaredField(f);
-            fld.setAccessible(true);
-            Object v = fld.get(host);
-            if (v instanceof Boolean b) return b;
-        } catch (Exception ignored) {}
+
+    private static boolean reflectGetBool(Object o, String[] fields, boolean def) {
+        for (String f : fields) {
+            try {
+                var fld = o.getClass().getDeclaredField(f);
+                fld.setAccessible(true);
+                Object v = fld.get(o);
+                if (v instanceof Boolean bv) return bv;
+            } catch (Exception ignore) {}
+        }
         return def;
     }
-    private static void reflectSetBool(Object host, String[] candidates, boolean value) {
-        if (host == null) return;
-        for (String f : candidates) try {
-            var fld = host.getClass().getDeclaredField(f);
-            fld.setAccessible(true);
-            fld.set(host, value);
-            return;
-        } catch (Exception ignored) {}
+
+    private static void reflectSetBool(Object o, String[] fields, boolean val) {
+        for (String f : fields) {
+            try {
+                var fld = o.getClass().getDeclaredField(f);
+                fld.setAccessible(true);
+                fld.set(o, val);
+                return;
+            } catch (Exception ignore) {}
+        }
     }
 }
