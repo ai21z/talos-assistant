@@ -22,6 +22,9 @@ import java.util.concurrent.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+// PR-2 glue (non-invasive)
+import dev.loqj.cli.cmds.RunCmdGlue;
+
 @CommandLine.Command(name="run", description="Interactive LOQ-J REPL")
 public class RunCmd implements Runnable {
     @CommandLine.Option(names="--root", description="Workspace root (default: .)") Path root;
@@ -127,6 +130,9 @@ public class RunCmd implements Runnable {
         System.out.println("Type your question. Commands: :help  :models  :set model <name>  :mode <m>  :k <int>  :debug on|off  :status [--verbose]  :reindex  :memory clear  :q");
         System.out.println();
 
+        // PR-2/PR-3A glue: handle :k, :debug, :q, :policy, :audit via pipeline/renderer
+        final RunCmdGlue glue = new RunCmdGlue(this, cfg, System.out);
+
         try {
             Terminal term = TerminalBuilder.builder().system(true).jna(true).build();
             LineReader reader = LineReaderBuilder.builder().terminal(term).build();
@@ -148,7 +154,21 @@ public class RunCmd implements Runnable {
                     continue;
                 }
 
-                // ---------- Strict colon-command gating ----------
+                // ---------- PR-2 glue interception (only for a safe subset) ----------
+                if (line.startsWith(":")) {
+                    String afterTmp = line.substring(1).trim();
+                    String cmdToken = afterTmp.isEmpty() ? "" : afterTmp.split("\\s+", 2)[0].toLowerCase(Locale.ROOT);
+                    // Only delegate these to glue; keep native :help and others
+                    if (cmdToken.equals("k") || cmdToken.equals("debug") || cmdToken.equals("q")
+                            || cmdToken.equals("quit") || cmdToken.equals("policy") || cmdToken.equals("audit")) {
+                        if (glue.tryHandle(line)) {
+                            if (glue.shouldQuit()) { quit = true; }
+                            continue; // handled by pipeline/renderer
+                        }
+                    }
+                }
+
+                // ---------- Strict colon-command gating (native handlers) ----------
                 if (line.startsWith(":")) {
                     String after = line.substring(1).trim();
                     if (after.isEmpty()) { printMan(mode, debug, topK, activeModel, lim); continue; }
@@ -195,7 +215,7 @@ public class RunCmd implements Runnable {
                             }
                             break;
                         }
-                        case "k": {
+                        case "k": { // still here for quick-help; actual set handled by glue
                             if (args.isEmpty()) { printUsageK(lim); break; }
                             try {
                                 int v = Integer.parseInt(args);
@@ -207,7 +227,7 @@ public class RunCmd implements Runnable {
                             }
                             break;
                         }
-                        case "debug": {
+                        case "debug": { // still here for quick-help; actual toggle handled by glue
                             if (args.isEmpty()) { printUsageDebug(debug); break; }
                             if (args.equalsIgnoreCase("on")) { debug = true; System.out.println("debug = ON\n"); }
                             else if (args.equalsIgnoreCase("off")) { debug = false; System.out.println("debug = OFF\n"); }
@@ -311,9 +331,8 @@ public class RunCmd implements Runnable {
                     Map<String,Object> net = CfgUtil.map(cfg.data.get("net"));
                     boolean enabled = Boolean.TRUE.equals(net.getOrDefault("enabled", false));
                     if (!enabled) {
-                        System.out.println("Web access is disabled by config (net.enabled=false).");
-                        System.out.println("Enable it in src/main/resources/config/default-config.yaml and restart,");
-                        System.out.println("or use :mode rag for local-only answers.\n");
+                        System.out.println("Web mode denied: net.enabled=false (enable in config and restart).");
+                        System.out.println();
                         continue;
                     }
                     System.out.println("Web mode is reserved. No external network calls are performed in this build.\n");
