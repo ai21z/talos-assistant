@@ -18,6 +18,7 @@ public class NetCmd implements Runnable {
         System.out.println("  enabled     : " + np.enabled);
         System.out.println("  read_only   : " + np.readOnly);
         System.out.println("  max_bytes   : " + np.maxBytes);
+
         System.out.println("  allowDomains: " + allow);
     }
 }
