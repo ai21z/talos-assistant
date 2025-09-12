@@ -19,6 +19,13 @@ public final class CfgUtil {
         return def;
     }
 
+    public static long longAt(Map<String,Object> m, String key, long def) {
+        Object o = m.get(key);
+        if (o instanceof Number n) return n.longValue();
+        if (o instanceof String s) { try { return Long.parseLong(s.trim()); } catch (Exception ignore) {} }
+        return def;
+    }
+
     public static double doubleAt(Map<String,Object> m, String key, double def) {
         Object o = m.get(key);
         if (o instanceof Number n) return n.doubleValue();
