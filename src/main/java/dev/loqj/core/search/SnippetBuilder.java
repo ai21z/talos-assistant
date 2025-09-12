@@ -1,33 +1,50 @@
 package dev.loqj.core.search;
 
-import java.util.*;
+import dev.loqj.core.util.Sanitize;
 
-/** Packs snippets with a simple pinned-first policy and a total character budget. */
+import java.util.*;
+import java.util.function.Consumer;
+
+/**
+ * Builds the final ordered snippet list with "pinned-first packing".
+ * API is stable; tests rely on it. Also sanitizes snippet text and
+ * applies a light per-snippet clip to avoid pathological huge chunks.
+ */
 public final class SnippetBuilder {
 
     public record Snippet(String path, String text) {}
 
-    private SnippetBuilder() {}
-
     /**
-     * Pinned snippets are kept in order, then regular snippets are appended until the budget is exhausted.
-     * Deduplicates by exact path and lightly diversifies across files (avoid too many chunks from the same file).
+     * Combine pinned + regular snippets into an ordered list within a char budget.
+     * - Keeps first occurrence of each path (dedupe)
+     * - File diversification for regulars (max 3 per file)
+     * - Small negative overflow allowed (<= 200 chars) to not drop last useful chunk
+     * - NEW: sanitize text and lightly clip each snippet before budgeting
      */
-    public static List<Snippet> packWithPinned(List<Snippet> pinned, List<Snippet> regular, int maxChars) {
-        LinkedHashMap<String, Snippet> ordered = new LinkedHashMap<>();
+    public static List<Snippet> packWithPinned(List<Snippet> pinned,
+                                               List<Snippet> regular,
+                                               int maxChars) {
+        if (maxChars <= 0) return List.of();
 
-        // Use a mutable holder so lambdas can update the remaining budget
-        final int[] budget = new int[] { maxChars };
+        // Share budget across items; also per-snippet soft cap (min(2000, budget/2) but >= 256)
+        final int perCap = Math.max(256, Math.min(2000, maxChars / 2));
 
-        // Helper: attempt to add snippet if budget allows
-        java.util.function.Consumer<Snippet> tryAdd = s -> {
-            if (s == null) return;
-            String text = s.text();
-            if (text == null || text.isEmpty()) return;
+        final LinkedHashMap<String, Snippet> ordered = new LinkedHashMap<>();
+        final int[] budget = { maxChars };
+
+        Consumer<Snippet> tryAdd = (Snippet sRaw) -> {
+            if (sRaw == null) return;
+
+            // sanitize + clip before any length accounting
+            String clean = Sanitize.sanitizeForPrompt(sRaw.text() == null ? "" : sRaw.text());
+            if (clean.length() > perCap) clean = Sanitize.clip(clean, perCap);
+
+            Snippet s = new Snippet(sRaw.path(), clean);
+
             if (ordered.containsKey(s.path())) return;
 
-            int need = text.length(); // conservative: count full text length
-            if (budget[0] - need < -200) return; // allow tiny overflow but not too much
+            int need = s.text().length(); // conservative budget by characters
+            if (budget[0] - need < -200) return; // allow tiny overflow, but not too much
 
             ordered.put(s.path(), s);
             budget[0] -= need;

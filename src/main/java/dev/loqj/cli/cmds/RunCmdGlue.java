@@ -15,15 +15,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Minimal, non-invasive bridge for RunCmd:
- * - Intercepts a small set of colon commands first (PR-2/PR-3A)
+ * - Intercepts a small set of colon commands via the new framework
  * - Executes via ExecutionPipeline
- * - Prints via RenderEngine (sanitization + safe clipping)
- * - Leaves all other RunCmd behavior untouched
- *
- * Usage in RunCmd:
- *   private final RunCmdGlue __glue = new RunCmdGlue(this, cfg, System.out);
- *   ...
- *   if (__glue.tryHandle(line)) { if (__glue.shouldQuit()) break; continue; }
+ * - Prints via RenderEngine
+ * <p>
+ * Extendable: we now include :secret set|get|del
  */
 public final class RunCmdGlue {
 
@@ -40,8 +36,7 @@ public final class RunCmdGlue {
         this.host = runCmdHost;
         this.cfg = (cfg == null ? new Config() : cfg);
 
-        // No-op redactor/sandbox for PR-1 (safe defaults)
-        Redactor redactor = new Redactor();
+        Redactor redactor = new Redactor(); // config-aware redactor
         Sandbox sandbox = new Sandbox(Path.of("."), Map.of());
 
         this.render = new RenderEngine(this.cfg, redactor, out == null ? System.out : out);
@@ -89,7 +84,7 @@ public final class RunCmdGlue {
         registry.register(new QuitCommand(quit));
         registry.register(new PolicyCommand());
         registry.register(new AuditToggleCommand());
-        // NOTE: :secret comes later in PR-3B; modes in PR-4.
+        registry.register(new SecretCommand(cfg, ctx.audit())); // NEW
     }
 
     /* Reflection helpers so we don't depend on RunCmd's private field names. */
