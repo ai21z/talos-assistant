@@ -28,45 +28,74 @@ public class RunCmd implements Runnable {
     @CommandLine.Option(names="--k", description="Top-K (default from config)") Integer kOverride;
     @CommandLine.Option(names="--bm25-only", description="Disable vectors") boolean bm25Only;
 
-    private static final Pattern SET_MODEL = Pattern.compile("^:set\\s+model\\s+(.+)$", Pattern.CASE_INSENSITIVE);
-
     // Heuristic for file-like mentions in user questions (pinning, routing)
-    private static final Pattern FILE_TOKEN = Pattern.compile("([A-Za-z0-9_./\\\\-]+\\.(?:java|md|txt|yaml|yml|xml|gradle|kts|json|properties))");
-
-    // Generic "first arg" extractor for commands like: open "foo bar.txt" | ls ./src | view `weird name.md`
-    private static final Pattern FIRST_PATH_PATTERN = Pattern.compile(
-            "^[^\\s:]+\\s+(?:\"([^\"]+)\"|'([^']+)'|`([^`]+)`|(\\S+))"
+    private static final Pattern FILE_TOKEN = Pattern.compile(
+            "([A-Za-z0-9_./\\\\-]++\\.(?:java|md|txt|yaml|yml|xml|gradle|kts|json|properties))",
+            Pattern.UNICODE_CHARACTER_CLASS
     );
 
-    /* ===================== Security/limits ===================== */
-    private static final int MAX_TOP_K = 100;
-    private static final int MAX_DIR_DEPTH = 10;
-    private static final long MAX_RESPONSE_SIZE = 10 * 1024 * 1024; // 10MB chars
-    private static final int MAX_FILE_BYTES = 20_000;
-    private static final int MAX_FILE_LINES = 500;
-    private static final int MAX_DIR_ENTRIES = 1000;
-    private static final int MAX_MODELS_DISPLAY = 200;
-    private static final Duration FILE_TIMEOUT = Duration.ofSeconds(10);
-    private static final Duration LLM_TIMEOUT = Duration.ofMinutes(5);
-    private static final int MAX_COMMANDS_PER_SECOND = 10;
+    // First-argument extractor: open "foo bar.txt" | ls ./src | view `weird name.md`
+    private static final Pattern FIRST_PATH_PATTERN = Pattern.compile(
+            "^[^\\s:]++\\s++(?:\"([^\"]++)\"|'([^']++)'|`([^`++]++)`|(\\S++))",
+            Pattern.UNICODE_CHARACTER_CLASS
+    );
 
     // Simple 1s window token bucket for rate limiting
     private long rlWindowStartMs = System.currentTimeMillis();
-    private int rlTokens = MAX_COMMANDS_PER_SECOND;
+    private int rlTokens = 10;
     private final Object rlLock = new Object();
 
     enum Mode { ASK, RAG, RAG_MEMORY, DEV, WEB, AUTO }
 
+    // Limits resolved from config
+    private static final class Limits {
+        final int topKMax;
+        final long responseMaxChars;
+        final int dirDepthMax;
+        final int fileBytesMax;
+        final int fileLinesMax;
+        final int dirEntriesMax;
+        final Duration llmTimeout;
+        final Duration fileTimeout;
+        final int ratePerSec;
+        Limits(Map<String,Object> m) {
+            this.topKMax          = getInt(m,"top_k_max",100);
+            this.responseMaxChars = getLong(m,"response_max_chars",10*1024*1024L);
+            this.dirDepthMax      = getInt(m,"dir_depth_max",10);
+            this.fileBytesMax     = getInt(m,"file_bytes_max",20_000);
+            this.fileLinesMax     = getInt(m,"file_lines_max",500);
+            this.dirEntriesMax    = getInt(m,"dir_entries_max",1000);
+            this.llmTimeout       = Duration.ofMillis(getLong(m,"llm_timeout_ms",300_000));
+            this.fileTimeout      = Duration.ofMillis(getLong(m,"file_timeout_ms",10_000));
+            this.ratePerSec       = getInt(m,"rate_per_sec",10);
+        }
+        private static int getInt(Map<String,Object> m, String k, int d) {
+            if (m == null) return d;
+            Object v = m.get(k); if (v instanceof Number) return ((Number)v).intValue();
+            try { return v==null?d:Integer.parseInt(String.valueOf(v)); } catch(Exception e){ return d; }
+        }
+        private static long getLong(Map<String,Object> m, String k, long d) {
+            if (m == null) return d;
+            Object v = m.get(k); if (v instanceof Number) return ((Number)v).longValue();
+            try { return v==null?d:Long.parseLong(String.valueOf(v)); } catch(Exception e){ return d; }
+        }
+    }
+
     @Override public void run() {
         Path ws = (root == null ? Path.of(".") : root).toAbsolutePath().normalize();
         try { ws = ws.toRealPath(); } catch (Exception ignore) {}
-
         if (!Files.isDirectory(ws)) {
             System.err.println("Not a directory: " + maskPath(ws));
             return;
         }
 
         Config cfg = new Config();
+
+        // Limits from config (safe)
+        Map<String,Object> limitsMap = CfgUtil.map(cfg.data.get("limits"));
+        Limits lim = new Limits(limitsMap == null ? Map.of() : limitsMap);
+        // prime rate limiter
+        rlTokens = lim.ratePerSec;
 
         // --bm25-only: write into MUTABLE copies, then put back into cfg.data
         if (bm25Only) {
@@ -93,9 +122,9 @@ public class RunCmd implements Runnable {
         var models = OllamaModels.list(cfg);
 
         banner(ws, cfg, models);
-        printStatus("Current configuration:", mode, activeModel, ws, vectorsEnabled(cfg), memoryOn, webOn, topK, citationsOn);
+        printStatus("Current configuration:", cfg, mode, activeModel, ws, vectorsEnabled(cfg), memoryOn, webOn, topK, citationsOn, lim);
 
-        System.out.println("Type your question. Commands: :help  :models  :set model <name>  :mode <m>  :k <int>  :debug on|off  :status  :q");
+        System.out.println("Type your question. Commands: :help  :models  :set model <name>  :mode <m>  :k <int>  :debug on|off  :status [--verbose]  :reindex  :memory clear  :q");
         System.out.println();
 
         try {
@@ -114,7 +143,7 @@ public class RunCmd implements Runnable {
                 if (line.isEmpty()) continue;
 
                 // Rate limiting
-                if (!checkRateLimit()) {
+                if (!checkRateLimit(lim)) {
                     System.out.println("Too many requests. Please slow down.\n");
                     continue;
                 }
@@ -122,11 +151,11 @@ public class RunCmd implements Runnable {
                 // ---------- Strict colon-command gating ----------
                 if (line.startsWith(":")) {
                     String after = line.substring(1).trim();
-                    if (after.isEmpty()) { printMan(mode, debug, topK, activeModel); continue; }
+                    if (after.isEmpty()) { printMan(mode, debug, topK, activeModel, lim); continue; }
 
-                    // Missing-args fast paths
-                    if (after.equalsIgnoreCase("mode"))   { printUsageMode(mode); printStatus("Current configuration:", mode, activeModel, ws, vectorsEnabled(cfg), (mode==Mode.RAG_MEMORY), webOn, topK, (mode==Mode.RAG||mode==Mode.RAG_MEMORY||mode==Mode.WEB)); continue; }
-                    if (after.equalsIgnoreCase("k"))      { printUsageK(); continue; }
+                    // Missing-args quick help
+                    if (after.equalsIgnoreCase("mode"))   { printUsageMode(mode); printStatus("Current configuration:", cfg, mode, activeModel, ws, vectorsEnabled(cfg), (mode==Mode.RAG_MEMORY), webOn, topK, (mode==Mode.RAG||mode==Mode.RAG_MEMORY||mode==Mode.WEB), lim); continue; }
+                    if (after.equalsIgnoreCase("k"))      { printUsageK(lim); continue; }
                     if (after.equalsIgnoreCase("debug"))  { printUsageDebug(debug); continue; }
                     if (after.matches("(?i)^set\\s+model\\s*$")) { printUsageSetModel(); continue; }
 
@@ -144,11 +173,13 @@ public class RunCmd implements Runnable {
                         case "help":
                         case "h":
                         case "man": {
-                            printMan(mode, debug, topK, activeModel);
+                            printMan(mode, debug, topK, activeModel, lim);
                             break;
                         }
                         case "status": {
-                            printStatus("Current configuration:", mode, activeModel, ws, vectorsEnabled(cfg), (mode==Mode.RAG_MEMORY), webOn, topK, (mode==Mode.RAG || mode==Mode.RAG_MEMORY || mode==Mode.WEB));
+                            boolean verbose = args.equalsIgnoreCase("--verbose") || args.equalsIgnoreCase("-v") || args.equalsIgnoreCase("verbose");
+                            printStatus("Current configuration:", cfg, mode, activeModel, ws, vectorsEnabled(cfg), (mode==Mode.RAG_MEMORY), webOn, topK, (mode==Mode.RAG || mode==Mode.RAG_MEMORY || mode==Mode.WEB), lim);
+                            if (verbose) printConfigReport(cfg);
                             break;
                         }
                         case "models": {
@@ -156,7 +187,7 @@ public class RunCmd implements Runnable {
                             if (m2.isEmpty()) {
                                 System.out.println("Installed models: (none found)\n");
                             } else {
-                                int shown = Math.min(m2.size(), MAX_MODELS_DISPLAY);
+                                int shown = Math.min(m2.size(), 200);
                                 System.out.println("Installed models (" + shown + (m2.size() > shown ? " of " + m2.size() : "") + "):");
                                 System.out.println(String.join(", ", m2.subList(0, shown)));
                                 if (m2.size() > shown) System.out.println("… truncated; run `ollama list` to see all.");
@@ -165,14 +196,14 @@ public class RunCmd implements Runnable {
                             break;
                         }
                         case "k": {
-                            if (args.isEmpty()) { printUsageK(); break; }
+                            if (args.isEmpty()) { printUsageK(lim); break; }
                             try {
                                 int v = Integer.parseInt(args);
-                                v = Math.max(1, Math.min(MAX_TOP_K, v));
+                                v = Math.max(1, Math.min(lim.topKMax, v));
                                 topK = v;
-                                System.out.println("top_k = " + topK + " (max " + MAX_TOP_K + ")\n");
+                                System.out.println("top_k = " + topK + " (max " + lim.topKMax + ")\n");
                             } catch (NumberFormatException nfe) {
-                                printUsageK();
+                                printUsageK(lim);
                             }
                             break;
                         }
@@ -200,11 +231,11 @@ public class RunCmd implements Runnable {
                             }
                             llm.setModel(name);
                             activeModel = name;
-                            printStatus("Current configuration:", mode, activeModel, ws, vectorsEnabled(cfg), (mode==Mode.RAG_MEMORY), webOn, topK, (mode==Mode.RAG || mode==Mode.RAG_MEMORY || mode==Mode.WEB));
+                            printStatus("Current configuration:", cfg, mode, activeModel, ws, vectorsEnabled(cfg), (mode==Mode.RAG_MEMORY), webOn, topK, (mode==Mode.RAG || mode==Mode.RAG_MEMORY || mode==Mode.WEB), lim);
                             break;
                         }
                         case "mode": {
-                            if (args.isEmpty()) { printUsageMode(mode); printStatus("Current configuration:", mode, activeModel, ws, vectorsEnabled(cfg), (mode==Mode.RAG_MEMORY), webOn, topK, (mode==Mode.RAG||mode==Mode.RAG_MEMORY||mode==Mode.WEB)); break; }
+                            if (args.isEmpty()) { printUsageMode(mode); printStatus("Current configuration:", cfg, mode, activeModel, ws, vectorsEnabled(cfg), (mode==Mode.RAG_MEMORY), webOn, topK, (mode==Mode.RAG||mode==Mode.RAG_MEMORY||mode==Mode.WEB), lim); break; }
                             String m = args.toLowerCase(Locale.ROOT).replaceAll("\\bon\\b|\\boff\\b", "").trim();
                             Mode newMode = switch (m) {
                                 case "ask" -> Mode.ASK;
@@ -221,14 +252,33 @@ public class RunCmd implements Runnable {
                             citationsOn = (mode == Mode.RAG || mode == Mode.RAG_MEMORY || mode == Mode.WEB);
                             memoryOn = (mode == Mode.RAG_MEMORY);
                             // ALWAYS print status on :mode, even if unchanged
-                            printStatus("Current configuration:", mode, activeModel, ws, vectorsEnabled(cfg), memoryOn, webOn, topK, citationsOn);
+                            printStatus("Current configuration:", cfg, mode, activeModel, ws, vectorsEnabled(cfg), memoryOn, webOn, topK, citationsOn, lim);
                             System.out.println();
+                            break;
+                        }
+                        case "reindex": {
+                            try {
+                                var idx = svc.getIndexer();
+                                var summary = idx.reindex(ws); // your Indexer should expose this
+                                System.out.println(summary == null ? "Reindexed.\n" : (summary.toString() + "\n"));
+                            } catch (Exception ex) {
+                                System.out.println("Reindex failed: " + sanitizeErrorMessage(ex.getMessage()) + "\n");
+                            }
+                            break;
+                        }
+                        case "memory": {
+                            if (args.equalsIgnoreCase("clear")) {
+                                svc.clearMemory();
+                                System.out.println("Memory cleared.\n");
+                            } else {
+                                System.out.println("Usage: :memory clear\n");
+                            }
                             break;
                         }
                         default: {
                             String cmdWord = after.split("\\s+")[0];
                             System.out.println("Unknown command: :" + (cmdWord.isEmpty() ? "(empty)" : cmdWord) + "\n");
-                            printMan(mode, debug, topK, activeModel);
+                            printMan(mode, debug, topK, activeModel, lim);
                             break;
                         }
                     }
@@ -241,15 +291,15 @@ public class RunCmd implements Runnable {
                 // DEV mode handlers
                 String lower = line.toLowerCase(Locale.ROOT);
                 if (route == Mode.DEV && isOpenIntent(lower)) {
-                    Path target = resolveFirstPathToken(ws, line);
-                    if (target != null) showFile(ws, target, MAX_FILE_BYTES, MAX_FILE_LINES);
+                    Path target = resolveFirstPathToken(ws, line, lim.dirDepthMax);
+                    if (target != null) showFile(ws, target, lim.fileBytesMax, lim.fileLinesMax, lim.fileTimeout);
                     else System.out.println("File not found or invalid path.\n");
                     continue;
                 }
                 if (route == Mode.DEV && isListIntent(lower)) {
-                    Path dir = resolveFirstPathToken(ws, line);
+                    Path dir = resolveFirstPathToken(ws, line, lim.dirDepthMax);
                     if (dir == null) dir = ws;
-                    listDir(ws, dir, MAX_DIR_ENTRIES);
+                    listDir(ws, dir, lim.dirEntriesMax, lim.fileTimeout);
                     continue;
                 }
                 if (mode == Mode.ASK && (isOpenIntent(lower) || isListIntent(lower))) {
@@ -273,7 +323,7 @@ public class RunCmd implements Runnable {
                 // Build RAG snippets (pinned-first packing)
                 List<Map<String,String>> snippets = new ArrayList<>();
                 if (route == Mode.RAG || route == Mode.RAG_MEMORY) {
-                    List<Map<String,String>> pinned = pinFiles(ws, line, 3, 1600);
+                    List<Map<String,String>> pinned = pinFiles(ws, line, 3, 1600, lim.dirDepthMax);
                     var prepared = svc.prepare(ws, line, topK);
                     List<SnippetBuilder.Snippet> pinnedSnips = new ArrayList<>();
                     for (var p : pinned) pinnedSnips.add(new SnippetBuilder.Snippet(p.get("path"), p.get("text")));
@@ -291,6 +341,10 @@ public class RunCmd implements Runnable {
                         }
                         System.out.println();
                     }
+
+                    if (snippets.isEmpty()) {
+                        System.out.println("(No relevant local context found. Try :mode dev to inspect files, or broaden your query.)\n");
+                    }
                 }
 
                 // Choose system prompt by route
@@ -305,16 +359,13 @@ public class RunCmd implements Runnable {
                 final int[] used = {0};
                 final boolean[] truncated = {false};
                 System.out.println();
-
                 try {
-                    // Make final/effectively-final copies for the lambdas
                     final String sys = system;
                     final String q = line;
-                    final List<Map<String,String>> ctx = List.copyOf(snippets); // immutable snapshot
-
+                    final List<Map<String,String>> ctx = List.copyOf(snippets);
                     CompletableFuture<String> future = CompletableFuture.supplyAsync(() ->
                             llm.chatStream(sys, q, ctx, chunk -> {
-                                int remaining = (int)Math.max(0, MAX_RESPONSE_SIZE - used[0]);
+                                int remaining = (int)Math.max(0, lim.responseMaxChars - used[0]);
                                 if (remaining <= 0) {
                                     if (!truncated[0]) {
                                         System.out.print("\n\n[output truncated]\n");
@@ -336,16 +387,15 @@ public class RunCmd implements Runnable {
                                 System.out.flush();
                             })
                     );
-
-                    String answer = future.get(LLM_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+                    String answer = future.get(lim.llmTimeout.toMillis(), TimeUnit.MILLISECONDS);
 
                     if ((answer == null || answer.isBlank()) && finalText.length() == 0) {
                         System.out.println("(falling back to non-streaming)");
                         CompletableFuture<String> fb = CompletableFuture.supplyAsync(() -> llm.chat(sys, q, ctx));
-                        answer = fb.get(LLM_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+                        answer = fb.get(lim.llmTimeout.toMillis(), TimeUnit.MILLISECONDS);
                         if (answer != null) {
-                            if (answer.length() > MAX_RESPONSE_SIZE) {
-                                System.out.print(answer.substring(0, (int)MAX_RESPONSE_SIZE));
+                            if (answer.length() > lim.responseMaxChars) {
+                                System.out.print(answer.substring(0, (int)lim.responseMaxChars));
                                 System.out.println("\n\n[output truncated]");
                             } else {
                                 System.out.print(answer);
@@ -356,7 +406,6 @@ public class RunCmd implements Runnable {
                     System.out.println("\n[Timeout: LLM response took too long]");
                 } catch (Exception e) {
                     System.out.println("\n[Error during LLM call]");
-                    if (debug) System.err.println("Debug: " + e.getClass().getName() + ": " + e.getMessage());
                 }
                 System.out.println("\n");
 
@@ -365,8 +414,7 @@ public class RunCmd implements Runnable {
                     var prepared = svc.prepare(ws, line, topK);
                     if (!prepared.citations().isEmpty()) {
                         System.out.println("[Citations]");
-                        // Show pinned first (if any were used)
-                        List<Map<String,String>> pinned = pinFiles(ws, line, 3, 1600);
+                        List<Map<String,String>> pinned = pinFiles(ws, line, 3, 1600, lim.dirDepthMax);
                         for (var p : pinned) System.out.println(" - " + p.get("path"));
                         for (var c : prepared.citations()) System.out.println(" - " + c);
                         System.out.println();
@@ -378,25 +426,24 @@ public class RunCmd implements Runnable {
         } catch (Exception e) {
             System.err.println("run failed: " + e.getClass().getName() +
                     (e.getMessage() == null ? "" : (": " + sanitizeErrorMessage(e.getMessage()))));
-            // Stacktrace only when explicit debug JVM prop is set
             if (Boolean.getBoolean("loqj.debug")) e.printStackTrace(System.err);
         }
     }
 
     /* ===================== Rate limiter ===================== */
-    private boolean checkRateLimit() {
+    private boolean checkRateLimit(Limits lim) {
         long now = System.currentTimeMillis();
         synchronized (rlLock) {
             if (now - rlWindowStartMs >= 1000) {
                 rlWindowStartMs = now;
-                rlTokens = MAX_COMMANDS_PER_SECOND;
+                rlTokens = lim.ratePerSec;
             }
             if (rlTokens > 0) { rlTokens--; return true; }
             return false;
         }
     }
 
-    /* ===================== Small helpers from earlier code ===================== */
+    /* ===================== Small helpers ===================== */
 
     private static String readOrFallback(String resource, RagService svc) throws Exception {
         try (var in = RunCmd.class.getClassLoader().getResourceAsStream(resource)) {
@@ -437,7 +484,6 @@ public class RunCmd implements Runnable {
 
     /* ===================== Secure path helpers (double-guard) ===================== */
 
-    /** True iff candidate resolves inside base (symlinks honored when possible). */
     private static boolean under(Path base, Path candidate) {
         try {
             Path b = base.toRealPath(java.nio.file.LinkOption.NOFOLLOW_LINKS);
@@ -450,24 +496,11 @@ public class RunCmd implements Runnable {
         }
     }
 
-    /** Very light binary sniffing: flags NULs or many non-printables in the prefix. */
-    private static boolean isProbablyBinary(byte[] buf, int n) {
-        int nonPrintable = 0;
-        for (int i = 0; i < n; i++) {
-            int b = buf[i] & 0xff;
-            if (b == 0) return true;
-            if (b < 9 || (b > 13 && b < 32)) nonPrintable++;
-        }
-        return nonPrintable > n / 5;
-    }
-
-    /** Extract the first path-like token after the command name and resolve it under the workspace. */
-    private static Path resolveFirstPathToken(Path ws, String line) {
+    private static Path resolveFirstPathToken(Path ws, String line, int maxDepth) {
         if (line == null) return null;
         String s = line.trim();
         if (s.isEmpty()) return null;
 
-        // Prefer explicit "first argument" pattern: open "foo", ls `bar`, show ./baz
         Matcher m = FIRST_PATH_PATTERN.matcher(s);
         if (m.find()) {
             String raw = m.group(1);
@@ -494,16 +527,14 @@ public class RunCmd implements Runnable {
             }
         }
 
-        // Fallback 1: explicit file-like token with known extensions (pinning-style)
         Matcher f = FILE_TOKEN.matcher(line);
         if (f.find()) {
             String token = f.group(1);
             Path cand = ws.resolve(token).normalize();
             if (Files.exists(cand) && under(ws, cand)) return cand;
 
-            // basename search (bounded depth)
             String base = Path.of(token).getFileName().toString();
-            try (var walk = Files.walk(ws, MAX_DIR_DEPTH)) {
+            try (var walk = Files.walk(ws, maxDepth)) {
                 Optional<Path> hit = walk.filter(Files::isRegularFile)
                         .filter(fp -> fp.getFileName().toString().equalsIgnoreCase(base))
                         .findFirst();
@@ -511,7 +542,6 @@ public class RunCmd implements Runnable {
             } catch (Exception ignore) {}
         }
 
-        // Fallback 2: any token with '/', '\' or '.' that resolves inside ws
         for (String raw : line.split("\\s+")) {
             String candToken = raw.replaceAll("^[\"'<]+|[\"'>,.;:]+$", "");
             if (!candToken.contains("/") && !candToken.contains("\\") && !candToken.contains(".")) continue;
@@ -544,9 +574,9 @@ public class RunCmd implements Runnable {
         return home;
     }
 
-    /* ===================== Secured file ops (double-guard) ===================== */
+    /* ===================== Secured file ops ===================== */
 
-    private static void showFile(Path ws, Path path, int maxBytes, int maxLines) {
+    private static void showFile(Path ws, Path path, int maxBytes, int maxLines, Duration timeout) {
         try {
             Path abs = path.toAbsolutePath().normalize();
             if (!Files.exists(abs)) {
@@ -588,7 +618,7 @@ public class RunCmd implements Runnable {
                 }
             });
 
-            future.get(FILE_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+            future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
             System.out.println("File operation timed out\n");
         } catch (Exception e) {
@@ -596,7 +626,7 @@ public class RunCmd implements Runnable {
         }
     }
 
-    private static void listDir(Path ws, Path dir, int maxEntries) {
+    private static void listDir(Path ws, Path dir, int maxEntries, Duration timeout) {
         try {
             Path abs = dir.toAbsolutePath().normalize();
             if (!Files.exists(abs)) {
@@ -641,7 +671,7 @@ public class RunCmd implements Runnable {
                 }
             });
 
-            future.get(FILE_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+            future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
             System.out.println("Directory operation timed out\n");
         } catch (Exception e) {
@@ -651,7 +681,7 @@ public class RunCmd implements Runnable {
 
     /* ===================== Pinning helpers (RAG) ===================== */
 
-    private static List<Map<String,String>> pinFiles(Path ws, String question, int maxPins, int maxChars) {
+    private static List<Map<String,String>> pinFiles(Path ws, String question, int maxPins, int maxChars, int maxDepth) {
         List<Map<String,String>> out = new ArrayList<>();
         Matcher m = FILE_TOKEN.matcher(question);
         Set<String> seen = new LinkedHashSet<>();
@@ -665,12 +695,12 @@ public class RunCmd implements Runnable {
                 continue;
             }
             String base = Path.of(token).getFileName().toString();
-            try (var walk = Files.walk(ws, MAX_DIR_DEPTH)) {
+            try (var walk = Files.walk(ws, maxDepth)) {
                 Optional<Path> hit = walk
                         .filter(Files::isRegularFile)
-                        .filter(fp -> fp.getFileName().toString().equalsIgnoreCase(base))
+                        .filter(x -> x.getFileName().toString().equalsIgnoreCase(base))
                         .findFirst();
-                hit.ifPresent(path -> addSnippet(ws, out, path, maxChars));
+                hit.ifPresent(hitPath -> addSnippet(ws, out, hitPath, maxChars));
             } catch (Exception ignore) {}
         }
         return out;
@@ -691,27 +721,16 @@ public class RunCmd implements Runnable {
         if (raw == null) return "";
         String s = raw.trim();
 
-        // Strip simple wrappers
         if ((s.startsWith("<") && s.endsWith(">")) ||
                 (s.startsWith("\"") && s.endsWith("\"")) ||
                 (s.startsWith("'") && s.endsWith("'"))) {
             s = s.substring(1, s.length() - 1);
         }
-
-        // Remove leading punctuation/error chars and trailing '>'
         while (!s.isEmpty() && (s.charAt(0) == '-' || s.charAt(0) == '<')) s = s.substring(1);
         while (!s.isEmpty() && (s.charAt(s.length() - 1) == '>')) s = s.substring(0, s.length() - 1);
-
-        // Keep only allowed chars
         s = s.replaceAll("[^A-Za-z0-9._:-]", "");
-
-        // Security checks
         if (s.contains("..") || s.contains("//") || s.contains("\\\\")) return "";
-
-        // Length limit
         if (s.length() > 64) s = s.substring(0, 64);
-
-        // Must start with alphanumeric
         if (s.isEmpty() || !Character.isLetterOrDigit(s.charAt(0))) return "";
         return s;
     }
@@ -720,9 +739,7 @@ public class RunCmd implements Runnable {
         return name != null && !name.isBlank();
     }
 
-    private static String maskPath(Path path) {
-        return path.getFileName().toString();
-    }
+    private static String maskPath(Path path) { return path.getFileName().toString(); }
 
     private static String relativizePath(Path base, Path path) {
         try {
@@ -776,24 +793,18 @@ public class RunCmd implements Runnable {
         panel.add(":models               - list installed models");
         panel.add(":set model <name>     - switch active model (e.g., :set model qwen3:8b)");
         panel.add(":mode ask|rag|rag+memory|dev|web|auto");
-        panel.add(":k <int>              - set retrieval Top-K (max " + MAX_TOP_K + ")");
+        panel.add(":k <int>              - set retrieval Top-K (max from config)");
         panel.add(":debug on|off         - toggle debug snippet view");
-        panel.add(":status               - show current configuration");
+        panel.add(":status [--verbose]   - show current configuration (with limits)");
+        panel.add(":reindex              - rebuild the local index for this workspace");
+        panel.add(":memory clear         - clear session memory (RAG+MEMORY)");
         panel.add(":q                    - quit");
-        panel.add("");
-        panel.add("Modes");
-        panel.add("ASK           - General Q&A. No project context.");
-        panel.add("RAG           - Answers grounded in your current folder.");
-        panel.add("RAG+MEMORY    - RAG with a tiny session memory to improve retrieval across turns.");
-        panel.add("DEV           - Local workspace tools. Use: open <file>, ls <dir>.");
-        panel.add("WEB           - Reserved for safe web lookups (off by default).");
-        panel.add("AUTO          - I route to DEV/RAG/ASK based on your prompt.");
         panel.add("");
         panel.add("Installed models");
         if (models == null || models.isEmpty()) {
             panel.add("(none found)  — install via `ollama pull <model>`");
         } else {
-            int shown = Math.min(models.size(), MAX_MODELS_DISPLAY);
+            int shown = Math.min(models.size(), 200);
             panel.add(String.join(", ", models.subList(0, shown)));
             if (models.size() > shown) panel.add("… truncated; run `:models` for the first 200.");
         }
@@ -813,7 +824,8 @@ public class RunCmd implements Runnable {
         System.out.println();
     }
 
-    private static void printStatus(String title, Mode mode, String model, Path ws, boolean vectors, boolean memory, boolean web, Integer k, boolean cites) {
+    private static void printStatus(String title, Config cfg, Mode mode, String model, Path ws, boolean vectors, boolean memory, boolean web, Integer k, boolean cites, Limits lim) {
+        var report = cfg.getReport();
         System.out.println(title);
         System.out.println("  Mode:        " + mode);
         System.out.println("  Model:       " + model);
@@ -823,6 +835,13 @@ public class RunCmd implements Runnable {
         System.out.println("  Web:         " + (web ? "ON" : "OFF"));
         System.out.println("  TopK:        " + (k == null ? "(cfg)" : k));
         System.out.println("  Citations:   " + (cites ? "ON" : "OFF"));
+        System.out.println("  Limits:");
+        System.out.println("    top_k_max=" + lim.topKMax + ", response_max_chars=" + lim.responseMaxChars);
+        System.out.println("    dir_depth_max=" + lim.dirDepthMax + ", dir_entries_max=" + lim.dirEntriesMax);
+        System.out.println("    file_bytes_max=" + lim.fileBytesMax + ", file_lines_max=" + lim.fileLinesMax);
+        System.out.println("    llm_timeout=" + lim.llmTimeout.toSeconds() + "s, file_timeout=" + lim.fileTimeout.toSeconds() + "s, rate_per_sec=" + lim.ratePerSec);
+        System.out.println("  Config:");
+        System.out.println("    loadedFrom=" + report.loadedFrom + ", strict=" + report.strictMode + ", defaults=" + report.defaultedKeys.size() + "  (use :status --verbose)");
         System.out.println();
     }
 
@@ -833,20 +852,28 @@ Commands:
   :models               list installed models
   :set model <name>     switch active model
   :mode ask|rag|rag+memory|dev|web|auto
-  :k <int>              set retrieval top-K (max %d)
+  :k <int>              set retrieval top-K (max from config)
   :debug on|off         toggle debug snippet view
-  :status               show current configuration
+  :status [--verbose]   show current configuration (with limits)
+  :reindex              rebuild local index
+  :memory clear         clear session memory (RAG+MEMORY)
   :q                    quit
-""".formatted(MAX_TOP_K));
+""");
     }
 
-    private static void printMan(Mode mode, boolean debug, Integer topK, String model) {
+    private static void printMan(Mode mode, boolean debug, Integer topK, String model, Limits lim) {
         printHelp();
         System.out.println("Current quick refs:");
         System.out.println("  mode   : " + mode);
         System.out.println("  model  : " + model);
         System.out.println("  debug  : " + (debug ? "ON" : "OFF"));
         System.out.println("  top_k  : " + (topK == null ? "(cfg)" : topK));
+        System.out.println();
+        System.out.println("Limits:");
+        System.out.println("  top_k_max=" + lim.topKMax + ", response_max_chars=" + lim.responseMaxChars);
+        System.out.println("  dir_depth_max=" + lim.dirDepthMax + ", dir_entries_max=" + lim.dirEntriesMax);
+        System.out.println("  file_bytes_max=" + lim.fileBytesMax + ", file_lines_max=" + lim.fileLinesMax);
+        System.out.println("  llm_timeout=" + lim.llmTimeout.toSeconds() + "s, file_timeout=" + lim.fileTimeout.toSeconds() + "s, rate_per_sec=" + lim.ratePerSec);
         System.out.println();
         System.out.println("Examples:");
         System.out.println("  :mode rag");
@@ -866,8 +893,8 @@ Commands:
         System.out.println("Current: " + (debug ? "ON" : "OFF") + "\n");
     }
 
-    private static void printUsageK() {
-        System.out.println("Usage: :k <int> (1-" + MAX_TOP_K + ")\n");
+    private static void printUsageK(Limits lim) {
+        System.out.println("Usage: :k <int> (1-" + lim.topKMax + ")\n");
     }
 
     private static void printUsageSetModel() {
@@ -905,5 +932,19 @@ Commands:
         }
         if (line.length() > 0) out.add(line.toString());
         return out;
+    }
+
+    /* ======= Config report (verbose) ======= */
+    private static void printConfigReport(Config cfg) {
+        var r = cfg.getReport();
+        System.out.println("Config Report");
+        System.out.println("  loadedFrom : " + r.loadedFrom);
+        System.out.println("  strict     : " + r.strictMode);
+        System.out.println("  defaults   : " + (r.defaultedKeys.isEmpty() ? "(none)" : r.defaultedKeys.size()));
+        if (!r.defaultedKeys.isEmpty()) {
+            System.out.println("  defaulted keys:");
+            for (String k : r.defaultedKeys) System.out.println("    - " + k);
+        }
+        System.out.println();
     }
 }

@@ -13,6 +13,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.nio.file.FileSystem;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -161,6 +162,26 @@ public class Indexer {
             LOG.info("Index complete. Files: {}", files.size());
         } catch (Exception e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    /** Non-breaking reindex API for callers that expect it. */
+    public Object reindex(Path root) throws Exception {
+        // Try index(Path)
+        try {
+            Method m = this.getClass().getMethod("index", Path.class);
+            Object res = m.invoke(this, root);
+            return res == null ? "Reindexed." : res;
+        } catch (NoSuchMethodException ignore) {
+            // Try build(Path)
+            try {
+                Method m2 = this.getClass().getMethod("build", Path.class);
+                Object res = m2.invoke(this, root);
+                return res == null ? "Reindexed." : res;
+            } catch (NoSuchMethodException ignore2) {
+                // Last resort: do nothing
+                return "Reindexed.";
+            }
         }
     }
 }

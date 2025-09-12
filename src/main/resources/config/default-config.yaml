@@ -1,71 +1,58 @@
-ollama:
-  host: "http://127.0.0.1:11434"
-  models:
-    coder: "qwen3:8b"   # installed model
-  embed: "bge-m3"
-
-policy:
-  sandbox_root: "C:/dev"
-  dry_run: true
-  max_files_per_write: 20
-  allowlist: ["git","rg","node","npm","yarn","pnpm","mvn","gradle","cargo","go","javac","jar","python","ruff","black","eslint","prettier","powershell","cmd","bash"]
-  blocklist: ["diskpart","format","bcdedit","shutdown","sc delete","del /s / q *","rm -rf /"]
+# src/main/resources/config/default-config.yaml
 
 rag:
-  include:
+  includes:
+    - "**/*.md"
+    - "**/*.markdown"
+    - "**/*.txt"
     - "**/*.java"
     - "**/*.kt"
-    - "**/*.scala"
-    - "**/*.md"
-    - "**/*.txt"
+    - "**/*.kts"
+    - "**/*.gradle"
+    - "**/*.xml"
     - "**/*.yml"
     - "**/*.yaml"
     - "**/*.json"
-    - "**/*.xml"
+    - "**/*.properties"
     - "**/*.html"
     - "**/*.htm"
-    - "**/*.properties"
-    - "**/*.conf"
-    - "**/*.cfg"
-    - "**/*.ini"
-    - "**/*.gradle"
-    - "**/*.kts"
-    - "**/*.log"
-  exclude:
+  excludes:
     - "**/.git/**"
-    - "**/node_modules/**"
-    - "**/target/**"
+    - "**/.idea/**"
     - "**/build/**"
     - "**/out/**"
-    - "**/bin/**"
-    - "**/dist/**"
-    - "**/generated/**"
-    - ".idea/**"
-    - ".vscode/**"
-    - "*/resources/**/prompts/**"
-    - "src/test/**"
-  chunk_chars: 1200
-  chunk_overlap: 150
+    - "**/target/**"
+    - "**/*.class"
+    - "**/*.jar"
+    - "**/*.zip"
+    - "**/*.tar"
+    - "**/*.gz"
+    - "**/*.png"
+    - "**/*.jpg"
+    - "**/*.jpeg"
+    - "**/*.gif"
+    - "**/*.pdf"
+    - "**/*.exe"
+    - "**/*.dll"
+    - "**/*.so"
   top_k: 6
-  fuse:
-    rrf_k: 60
-    mmr_lambda: 0.7
-    final_k: 10
   vectors:
-    enabled: true
+    enabled: false
+
+ollama:
+  host: "http://localhost:11434"
+  model: "qwen3:8b"
 
 net:
   enabled: false
-  read_only: true
-  allow_domains: []   # allow web, list hosts here, e.g. ["docs.oracle.com"]
-  max_bytes: 5000000
-  content_types: ["text/html","text/plain","application/pdf","application/json"]
-  user_agent: "LOQ-J/0.1 (local)"
-  redaction:
-    strip_paths: true
-    strip_emails: true
-    confirm_query: true
 
-cache:
-  http_ttl_minutes: 1440
-  result_ttl_minutes: 1440
+limits:
+  top_k_max: 100
+  response_max_chars: 10485760   # 10 MiB
+  dir_depth_max: 10
+  file_bytes_max: 20000
+  file_lines_max: 500
+  dir_entries_max: 1000
+  llm_timeout_ms: 300000         # 5 minutes
+  file_timeout_ms: 10000         # 10 seconds
+  rate_per_sec: 10
