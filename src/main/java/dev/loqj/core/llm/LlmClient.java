@@ -16,7 +16,7 @@ import java.util.function.Supplier;
  * A minimal, local-first LLM client.
  * The transport to actual model backends is intentionally absent here.
  * A deterministic placeholder is produced so higher layers can be exercised safely.
- *
+ * <p>
  * Stream and non-stream outputs are sanitized consistently and capped by limits.
  */
 public final class LlmClient {
