@@ -1,7 +1,9 @@
 package dev.loqj.cli.cmds;
 
-import dev.loqj.core.Config;
+import dev.loqj.cli.repl.ReplRouter;
+import dev.loqj.cli.repl.SessionState;
 import dev.loqj.core.CfgUtil;
+import dev.loqj.core.Config;
 import org.jline.reader.EndOfFileException;
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
@@ -16,23 +18,34 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @CommandLine.Command(name="run", description="Interactive LOQ-J REPL")
-public class RunCmd implements Runnable {
-    @CommandLine.Option(names="--root", description="Workspace root (default: .)") Path root;
-    @CommandLine.Option(names="--k", description="Top-K (default from config)") Integer kOverride;
-    @CommandLine.Option(names="--bm25-only", description="Disable vectors") boolean bm25Only;
+public class RunCmd implements Runnable, SessionState {
 
-    // Session state (read/written by commands via reflection in RunCmdGlue)
-    enum Mode { ASK, RAG, RAG_MEMORY, DEV, WEB, AUTO }
-    private Mode mode = Mode.RAG;
+    @CommandLine.Option(names="--root", description="Workspace root (default: .)")
+    Path root;
+
+    @CommandLine.Option(names="--k", description="Top-K (default from config)")
+    Integer kOverride;
+
+    @CommandLine.Option(names="--bm25-only", description="Disable vectors")
+    boolean bm25Only;
+
+    // Minimal session state for commands
     private int k = 8;
     private boolean debug = false;
 
-    // Rate limiter (simple 1s bucket)
+    // Simple 1s token bucket
     private long rlWindowStartMs = System.currentTimeMillis();
     private final AtomicInteger rlTokens = new AtomicInteger(10);
     private final Object rlLock = new Object();
 
-    @Override public void run() {
+    // ---- SessionState impl ----
+    @Override public int getK() { return k; }
+    @Override public void setK(int k) { this.k = Math.max(1, k); }
+    @Override public boolean isDebug() { return debug; }
+    @Override public void setDebug(boolean on) { this.debug = on; }
+
+    @Override
+    public void run() {
         Path ws = (root == null ? Path.of(".") : root).toAbsolutePath().normalize();
         try { ws = ws.toRealPath(); } catch (Exception ignore) {}
         if (!Files.isDirectory(ws)) {
@@ -56,8 +69,8 @@ public class RunCmd implements Runnable {
             cfg.data.put("rag", rag);
         }
 
-        // Glue: commands + modes
-        RunCmdGlue glue = new RunCmdGlue(this, cfg, System.out);
+        // Router: commands + modes (workspace-aware), with *this* as SessionState
+        ReplRouter router = new ReplRouter(this, cfg, System.out, ws);
 
         banner(ws, cfg);
         System.out.println("Type your question. Commands: :help  :models  :set model <name>  :mode <m>  :k <int>  :debug on|off  :status [--verbose]  :reindex  :memory clear  :q");
@@ -74,6 +87,7 @@ public class RunCmd implements Runnable {
                 try { line = reader.readLine(prompt); }
                 catch (EndOfFileException eof) { break; }
                 if (line == null) break;
+
                 line = sanitizeOutput(line).trim();
                 if (line.isEmpty()) continue;
 
@@ -83,62 +97,21 @@ public class RunCmd implements Runnable {
                     continue;
                 }
 
-                // Handle colon commands via glue registry first
+                // Colon-commands: router handles *all* registered commands
                 if (line.startsWith(":")) {
-                    if (glue.tryHandle(line)) {
-                        if (glue.shouldQuit()) { quit = true; }
+                    if (router.tryHandle(line)) {
+                        if (router.shouldQuit()) { quit = true; }
                         continue;
                     }
-                    // Native minimal handlers that still live here (status/mode/reindex/memory/help)
-                    String after = line.substring(1).trim();
-                    String[] parts = after.split("\\s+", 2);
-                    String cmd = parts[0].toLowerCase(Locale.ROOT);
-                    String args = parts.length > 1 ? parts[1].trim() : "";
-
-                    switch (cmd) {
-                        case "status" -> {
-                            boolean verbose = args.equalsIgnoreCase("--verbose") || args.equalsIgnoreCase("-v") || args.equalsIgnoreCase("verbose");
-                            printStatus("Current configuration:", cfg, mode, ws, lim);
-                            if (verbose) printConfigReport(cfg);
-                        }
-                        case "help", "h", "man" -> printMan();
-                        case "mode" -> {
-                            if (args.isEmpty()) { printUsageMode(mode); printStatus("Current configuration:", cfg, mode, ws, lim); break; }
-                            Mode newMode = parseMode(args);
-                            if (newMode == null) { printUsageMode(mode); break; }
-                            mode = newMode;
-                            printStatus("Current configuration:", cfg, mode, ws, lim);
-                            System.out.println();
-                        }
-                        case "reindex" -> {
-                            try {
-                                var idx = new dev.loqj.core.rag.RagService(cfg).getIndexer();
-                                var summary = idx.reindex(ws);
-                                System.out.println(summary == null ? "Reindexed.\n" : (summary.toString() + "\n"));
-                            } catch (Exception ex) {
-                                System.out.println("Reindex failed: " + sanitizeErrorMessage(ex.getMessage()) + "\n");
-                            }
-                        }
-                        case "memory" -> {
-                            if (args.equalsIgnoreCase("clear")) {
-                                new dev.loqj.core.rag.RagService(cfg).clearMemory();
-                                System.out.println("Memory cleared.\n");
-                            } else {
-                                System.out.println("Usage: :memory clear\n");
-                            }
-                        }
-                        case "q", "quit" -> quit = true; // <-- unified arrow-style case labels
-                        default -> {
-                            System.out.println("Unknown command: :" + cmd + "\n");
-                            printMan();
-                        }
-                    }
+                    // Unknown -> show minimal help
+                    System.out.println("Unknown command: " + line + "\n");
+                    printMan();
                     continue;
                 }
 
-                // Non-command prompt: route via modes with the active mode name
-                if (glue.tryHandlePrompt(line, ws, mode.name().toLowerCase(Locale.ROOT))) {
-                    if (glue.shouldQuit()) { quit = true; }
+                // Non-command prompt: route via modes (controller uses its own active mode)
+                if (router.tryHandlePrompt(line, ws, null)) {
+                    if (router.shouldQuit()) { quit = true; }
                     continue;
                 }
 
@@ -166,19 +139,6 @@ public class RunCmd implements Runnable {
             if (rlTokens.get() > 0) { rlTokens.decrementAndGet(); return true; }
             return false;
         }
-    }
-
-    private static Mode parseMode(String arg) {
-        String m = arg.toLowerCase(Locale.ROOT).replaceAll("\\bon\\b|\\boff\\b", "").trim();
-        return switch (m) {
-            case "ask" -> Mode.ASK;
-            case "rag" -> Mode.RAG;
-            case "rag+memory", "ragmemory", "rag_memory", "cag" -> Mode.RAG_MEMORY;
-            case "dev" -> Mode.DEV;
-            case "web" -> Mode.WEB;
-            case "auto" -> Mode.AUTO;
-            default -> null;
-        };
     }
 
     /* ===== Limits struct ===== */
@@ -242,21 +202,6 @@ public class RunCmd implements Runnable {
         System.out.println();
     }
 
-    private static void printStatus(String title, Config cfg, Mode mode, Path ws, Limits lim) {
-        var report = cfg.getReport();
-        System.out.println(title);
-        System.out.println("  Mode:        " + mode);
-        System.out.println("  Scope:       " + shortenPath(ws));
-        System.out.println("  Limits:");
-        System.out.println("    top_k_max=" + lim.topKMax + ", response_max_chars=" + lim.responseMaxChars);
-        System.out.println("    dir_depth_max=" + lim.dirDepthMax + ", dir_entries_max=" + lim.dirEntriesMax);
-        System.out.println("    file_bytes_max=" + lim.fileBytesMax + ", file_lines_max=" + lim.fileLinesMax);
-        System.out.println("    llm_timeout=" + lim.llmTimeout.toSeconds() + "s, file_timeout=" + lim.fileTimeout.toSeconds() + "s, rate_per_sec=" + lim.ratePerSec);
-        System.out.println("  Config:");
-        System.out.println("    loadedFrom=" + report.loadedFrom + ", strict=" + report.strictMode + ", defaults=" + report.defaultedKeys.size() + "  (use :status --verbose)");
-        System.out.println();
-    }
-
     private static void printMan() {
         System.out.println("""
 Commands:
@@ -273,11 +218,6 @@ Commands:
 """);
     }
 
-    private static void printUsageMode(Mode current) {
-        System.out.println("Usage: :mode ask|rag|rag+memory|dev|web|auto");
-        System.out.println("Current: " + current + "\n");
-    }
-
     private static String color(String s, int code) { return "\u001B[" + code + "m" + s + "\u001B[0m"; }
 
     private static void printBoxLine(String content, int inner) {
@@ -288,6 +228,7 @@ Commands:
     }
 
     private static String maskPath(Path path) { return path.getFileName().toString(); }
+
     private static String shortenPath(Path path) {
         String home = System.getProperty("user.home");
         String pathStr = path.toString();
@@ -296,28 +237,16 @@ Commands:
         }
         return path.getFileName().toString();
     }
+
     private static String sanitizeOutput(String text) {
         if (text == null) return "";
         return text.replaceAll("\u001B\\[[;\\d]*m", "")
                 .replaceAll("[\u0000-\u0008\u000E-\u001F\u007F]", "");
     }
+
     private static String sanitizeErrorMessage(String message) {
         if (message == null) return "(no details)";
         return message.replaceAll("([A-Za-z]:)?[\\\\/][^\\\\/]+(?:[\\\\/][^\\\\/]+)*", "[path]")
                 .replaceAll("\\b\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\b", "[ip]");
-    }
-
-    /* ===== Config report (verbose) ===== */
-    private static void printConfigReport(Config cfg) {
-        var r = cfg.getReport();
-        System.out.println("Config Report");
-        System.out.println("  loadedFrom : " + r.loadedFrom);
-        System.out.println("  strict     : " + r.strictMode);
-        System.out.println("  defaults   : " + (r.defaultedKeys.isEmpty() ? "(none)" : r.defaultedKeys.size()));
-        if (!r.defaultedKeys.isEmpty()) {
-            System.out.println("  defaulted keys:");
-            for (String k : r.defaultedKeys) System.out.println("    - " + k);
-        }
-        System.out.println();
     }
 }
