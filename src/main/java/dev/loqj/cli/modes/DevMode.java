@@ -1,134 +1,144 @@
 package dev.loqj.cli.modes;
 
 import dev.loqj.cli.repl.Context;
+import dev.loqj.cli.repl.Limits;
 import dev.loqj.cli.repl.Result;
-import dev.loqj.core.CfgUtil;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
-/** Functional extraction for "dev" behaviors: list directory / open file. */
-public final class DevMode extends BaseMode implements Mode {
-
+/** Local file ops: open/show/view + ls/list/dir, bounded by Limits and Sandbox. */
+public final class DevMode implements Mode {
     @Override public String name() { return "dev"; }
 
-    @Override public boolean canHandle(String rawLine) {
-        if (rawLine == null) return false;
-        String lower = rawLine.toLowerCase(Locale.ROOT);
-        return isOpenIntent(lower) || isListIntent(lower);
+    @Override public boolean canHandle(String raw) {
+        if (raw == null) return false;
+        String s = raw.trim().toLowerCase(Locale.ROOT);
+        return s.startsWith("open ") || s.startsWith("show ") || s.startsWith("view ")
+                || s.startsWith("ls ") || s.startsWith("list ") || s.startsWith("dir ")
+                || s.equals("ls") || s.equals("list") || s.equals("dir");
     }
 
     @Override
-    public Optional<Result> handle(String rawLine, Path workspace, Context ctx) throws Exception {
-        if (rawLine == null || rawLine.isBlank()) return Optional.empty();
-        String lower = rawLine.toLowerCase(Locale.ROOT);
+    public Optional<Result> handle(String raw, Path ws, Context ctx) {
+        String s = raw.trim();
+        Limits lim = ctx.limits();
 
-        var lim = CfgUtil.map(ctx.cfg().data.get("limits"));
-        int dirDepthMax   = CfgUtil.intAt(lim, "dir_depth_max", 10);
-        int dirEntriesMax = CfgUtil.intAt(lim, "dir_entries_max", 1000);
-        int fileBytesMax  = CfgUtil.intAt(lim, "file_bytes_max", 20_000);
-        int fileLinesMax  = CfgUtil.intAt(lim, "file_lines_max", 500);
-        long fileTimeoutMs= CfgUtil.longAt(lim, "file_timeout_ms", 10_000L);
-
-        Path ws = (workspace == null ? Path.of(".") : workspace);
-        Path target = resolveFirstPathToken(ws, rawLine, dirDepthMax);
-
-        if (isOpenIntent(lower)) {
-            if (target == null) return Optional.of(new Result.Error("File not found or invalid path.", 201));
-            if (!allowed(ctx, target) || !under(ws, target)) return Optional.of(new Result.Error("Refusing path outside workspace.", 203));
-            if (Files.isDirectory(target)) return Optional.of(new Result.Info("Path is a directory. Use a list command on: " + relativize(ws, target)));
-
-            Duration timeout = Duration.ofMillis(fileTimeoutMs);
-            String text = readFileWithCaps(ws, target, fileBytesMax, fileLinesMax, timeout);
-            return Optional.of(new Result.Ok(text));
-        }
-
-        if (isListIntent(lower)) {
+        boolean isList = isListIntent(s);
+        Path target = extractPathArg(ws, s);
+        if (isList) {
             Path dir = (target == null ? ws : target);
-            if (!allowed(ctx, dir) || !under(ws, dir)) return Optional.of(new Result.Error("Refusing path outside workspace.", 203));
-            if (!Files.isDirectory(dir)) return Optional.of(new Result.Error("Not a directory: " + relativize(ws, dir), 201));
+            if (!ctx.sandbox().allowedPath(dir)) {
+                return Optional.of(new Result.Info("Refusing to list outside workspace.\n"));
+            }
+            if (!Files.exists(dir)) return Optional.of(new Result.Info("Not found: " + rel(ws, dir) + "\n"));
+            if (!Files.isDirectory(dir)) return Optional.of(new Result.Info("Not a directory: " + rel(ws, dir) + "\n"));
 
-            Duration timeout = Duration.ofMillis(fileTimeoutMs);
-            String text = listDirWithCaps(ws, dir, dirEntriesMax, timeout);
-            return Optional.of(new Result.Ok(text));
+            List<Path> entries = new ArrayList<>();
+            try (var stream = Files.list(dir)) {
+                stream.limit(lim.dirEntriesMax() + 1L).forEach(entries::add);
+            } catch (Exception e) {
+                return Optional.of(new Result.Error("List error: " + safe(e.getMessage()), 500));
+            }
+            boolean clipped = entries.size() > lim.dirEntriesMax();
+            if (clipped) entries = entries.subList(0, lim.dirEntriesMax());
+
+            List<Path> dirs = new ArrayList<>(), files = new ArrayList<>();
+            for (Path p : entries) {
+                if (Files.isDirectory(p)) dirs.add(p); else files.add(p);
+            }
+            dirs.sort(Comparator.comparing(x -> x.getFileName().toString().toLowerCase(Locale.ROOT)));
+            files.sort(Comparator.comparing(x -> x.getFileName().toString().toLowerCase(Locale.ROOT)));
+
+            StringBuilder out = new StringBuilder();
+            out.append("\n── dir: ").append(rel(ws, dir)).append("\n\n");
+            for (Path d : dirs)  out.append("  [DIR]  ").append(d.getFileName()).append("\n");
+            for (Path f : files) out.append("  [FILE] ").append(f.getFileName()).append("\n");
+            if (clipped) out.append("\n(showing first ").append(lim.dirEntriesMax()).append(" entries)\n\n");
+            else out.append("\n");
+            return Optional.of(new Result.Ok(out.toString()));
         }
 
-        return Optional.empty();
+        // open/show/view -> file read
+        if (target == null) return Optional.of(new Result.Info("File not found or invalid path.\n"));
+        if (!ctx.sandbox().allowedPath(target)) {
+            return Optional.of(new Result.Info("Refusing to read outside workspace.\n"));
+        }
+        if (!Files.exists(target)) return Optional.of(new Result.Info("Not found: " + rel(ws, target) + "\n"));
+        if (Files.isDirectory(target)) {
+            return Optional.of(new Result.Info("Path is a directory. Try 'ls " + rel(ws, target) + "'.\n"));
+        }
+
+        StringBuilder out = new StringBuilder();
+        try {
+            long size = Files.size(target);
+            out.append("\n── file: ").append(rel(ws, target)).append(" (").append(String.format("%,d", size)).append(" bytes)\n\n");
+
+            int bytes = 0, lines = 0;
+            try (var reader = Files.newBufferedReader(target)) {
+                String ln;
+                while ((ln = reader.readLine()) != null && lines < lim.fileLinesMax() && bytes < lim.fileBytesMax()) {
+                    out.append(ln).append("\n");
+                    lines++;
+                    bytes += ln.length() + 1;
+                }
+            }
+            if (lines >= lim.fileLinesMax() || size > lim.fileBytesMax()) {
+                out.append("\n… (truncated)\n\n");
+            } else {
+                out.append("\n");
+            }
+        } catch (Exception e) {
+            return Optional.of(new Result.Error("Read error: " + safe(e.getMessage()), 500));
+        }
+        return Optional.of(new Result.Ok(out.toString()));
     }
 
-    /* ================= helpers ================= */
-
-    private static String readFileWithCaps(Path ws, Path path, int maxBytes, int maxLines, Duration timeout) throws Exception {
-        CompletableFuture<String> fut = CompletableFuture.supplyAsync(() -> {
-            try {
-                Path abs = toRealOrNorm(path);
-                if (!Files.exists(abs)) return "Not found: " + relativize(ws, path) + System.lineSeparator();
-                long size = Files.size(abs);
-
-                StringBuilder sb = new StringBuilder();
-                sb.append("\n── file: ").append(relativize(ws, abs)).append(" (").append(String.format("%,d", size)).append(" bytes)").append("\n\n");
-
-                List<String> lines = new ArrayList<>();
-                try (var reader = Files.newBufferedReader(abs)) {
-                    String ln;
-                    int totalBytes = 0;
-                    while ((ln = reader.readLine()) != null && lines.size() < maxLines && totalBytes < maxBytes) {
-                        lines.add(ln);
-                        totalBytes += ln.length() + 1;
-                    }
-                }
-                for (String ln : lines) sb.append(ln).append("\n");
-
-                if (lines.size() >= maxLines || size > maxBytes) sb.append("\n… (truncated)\n\n");
-                else sb.append("\n");
-                return sb.toString();
-            } catch (Exception e) {
-                return "Read error: " + (e.getMessage() == null ? "(no details)" : e.getMessage()) + "\n";
-            }
-        });
-        try { return fut.get(timeout.toMillis(), TimeUnit.MILLISECONDS); }
-        catch (java.util.concurrent.TimeoutException te) { return "File operation timed out\n"; }
+    private static String rel(Path base, Path p) {
+        try { return base.relativize(p).toString().replace('\\','/'); }
+        catch(Exception e){ return p.getFileName().toString(); }
     }
 
-    private static String listDirWithCaps(Path ws, Path dir, int maxEntries, Duration timeout) throws Exception {
-        CompletableFuture<String> fut = CompletableFuture.supplyAsync(() -> {
-            try {
-                Path abs = toRealOrNorm(dir);
-                if (!Files.exists(abs)) return "Not found: " + relativize(ws, dir) + "\n";
+    private static boolean isListIntent(String s) {
+        String lower = s.toLowerCase(Locale.ROOT);
+        return lower.startsWith("ls") || lower.startsWith("list") || lower.startsWith("dir");
+    }
 
-                StringBuilder sb = new StringBuilder();
-                sb.append("\n── dir: ").append(relativize(ws, abs)).append("\n\n");
+    private static final Pattern ARG = Pattern.compile("^[^\\s:]++\\s++(?:\"([^\"]++)\"|'([^']++)'|`([^`++]++)`|(\\S++))");
 
-                List<Path> entries = new ArrayList<>();
-                try (var stream = Files.list(abs)) {
-                    stream.limit(maxEntries + 1).forEach(entries::add);
-                }
-                boolean clipped = entries.size() > maxEntries;
-                if (clipped) entries = entries.subList(0, maxEntries);
-
-                List<Path> dirs = new ArrayList<>();
-                List<Path> files = new ArrayList<>();
-                for (Path e : entries) {
-                    if (Files.isDirectory(e)) dirs.add(e); else files.add(e);
-                }
-                dirs.sort(Comparator.comparing(p -> p.getFileName().toString().toLowerCase(Locale.ROOT)));
-                files.sort(Comparator.comparing(p -> p.getFileName().toString().toLowerCase(Locale.ROOT)));
-
-                for (Path d : dirs)  sb.append("  [DIR]  ").append(d.getFileName()).append("\n");
-                for (Path f : files) sb.append("  [FILE] ").append(f.getFileName()).append("\n");
-
-                if (clipped) sb.append("\n(showing first ").append(maxEntries).append(" entries)\n\n");
-                else sb.append("\n");
-                return sb.toString();
-            } catch (Exception e) {
-                return "List error: " + (e.getMessage() == null ? "(no details)" : e.getMessage()) + "\n";
+    private static Path extractPathArg(Path ws, String s) {
+        Matcher m = ARG.matcher(s);
+        if (m.find()) {
+            String raw = m.group(1); if (raw == null) raw = m.group(2);
+            if (raw == null) raw = m.group(3);
+            if (raw == null) raw = m.group(4);
+            if (raw != null && !raw.isBlank()) {
+                Path cand = Path.of(expandTilde(raw));
+                if (!cand.isAbsolute()) cand = ws.resolve(cand);
+                return cand.normalize();
             }
-        });
-        try { return fut.get(timeout.toMillis(), TimeUnit.MILLISECONDS); }
-        catch (java.util.concurrent.TimeoutException te) { return "Directory operation timed out\n"; }
+        }
+        return null;
+    }
+
+    private static String expandTilde(String raw) {
+        if (raw == null) return null;
+        if (raw.equals("~")) return home();
+        if (raw.startsWith("~" + java.io.File.separator) || raw.startsWith("~/")) {
+            return home() + raw.substring(1);
+        }
+        return raw;
+    }
+    private static String home() {
+        String h = System.getProperty("user.home");
+        return (h == null || h.isBlank()) ? System.getProperty("user.dir", ".") : h;
+    }
+
+    private static String safe(String msg) {
+        if (msg == null) return "(no details)";
+        return msg.replaceAll("([A-Za-z]:)?[\\\\/][^\\\\/]+(?:[\\\\/][^\\\\/]+)*", "[path]");
     }
 }
