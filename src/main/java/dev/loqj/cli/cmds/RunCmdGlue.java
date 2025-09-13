@@ -5,7 +5,9 @@ import dev.loqj.cli.modes.ModeController;
 import dev.loqj.cli.repl.*;
 import dev.loqj.core.Audit;
 import dev.loqj.core.Config;
+import dev.loqj.core.llm.LlmClient;
 import dev.loqj.core.net.NetPolicy;
+import dev.loqj.core.rag.RagService;
 import dev.loqj.core.security.Redactor;
 import dev.loqj.core.security.Sandbox;
 
@@ -15,15 +17,14 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Minimal, non-invasive bridge for RunCmd:
- * - Intercepts a small set of colon commands via the new framework
- * - Executes via ExecutionPipeline
- * - Prints via RenderEngine
- * - (NEW) Optional prompt handler for modes (DevMode first)
+ * Non-invasive bridge:
+ * - Colonel commands: via CommandRegistry
+ * - Prompts: via ModeController (active mode aware)
+ * - Rendering: RenderEngine
  */
 public final class RunCmdGlue {
 
-    private final Object host;                 // the RunCmd instance (for reflection on k/debug)
+    private final Object host;                 // RunCmd instance (for reflection on mode/k/debug)
     private final Config cfg;
     private final RenderEngine render;
     private final ExecutionPipeline pipe = new ExecutionPipeline();
@@ -32,30 +33,29 @@ public final class RunCmdGlue {
     private final LineClassifier classifier = new LineClassifier();
     private final Context ctx;
 
-    // NEW: modes
     private final ModeController modes = ModeController.defaultController();
 
     public RunCmdGlue(Object runCmdHost, Config cfg, PrintStream out) {
         this.host = runCmdHost;
         this.cfg = (cfg == null ? new Config() : cfg);
 
-        Redactor redactor = new Redactor(); // config-aware redactor
+        Redactor redactor = new Redactor();
         Sandbox sandbox = new Sandbox(Path.of("."), Map.of());
 
-        this.render = new RenderEngine(this.cfg, redactor, out == null ? System.out : out);
         this.ctx = new Context(
                 this.cfg,
                 new Audit(),
                 redactor,
                 sandbox,
-                null,                 // RagService: not needed for these commands yet
-                null,                 // LlmClient: not needed for these commands yet
+                new RagService(this.cfg),
+                new LlmClient(this.cfg),
                 new NetPolicy(this.cfg)
         );
+        this.render = new RenderEngine(this.cfg, redactor, out == null ? System.out : out);
+
         registerCommands();
     }
 
-    /** Returns true if the colon command line was handled here; caller should 'continue' the REPL loop. */
     public boolean tryHandle(String line) {
         LineClassifier.Classified c = classifier.classify(line);
         if (c.type() != LineClassifier.LineType.COMMAND) return false;
@@ -68,16 +68,12 @@ public final class RunCmdGlue {
         return true;
     }
 
-    /**
-     * NEW: Try to handle a PROMPT (non-colon line) via ModeController. Returns true if handled & rendered.
-     * Safe to call early in the RunCmd loop, e.g. before native dev logic, to start draining behavior gradually.
-     */
-    public boolean tryHandlePrompt(String rawLine, Path workspace) {
+    public boolean tryHandlePrompt(String rawLine, Path workspace, String activeModeName) {
         LineClassifier.Classified c = classifier.classify(rawLine);
         if (c.type() != LineClassifier.LineType.PROMPT) return false;
 
         Result r = pipe.run(() ->
-                        modes.route(rawLine, workspace, ctx).orElse(null),
+                        modes.route(rawLine, workspace, ctx, activeModeName).orElse(null),
                 ctx, "(prompt)"
         );
         if (r == null) return false;
@@ -90,7 +86,7 @@ public final class RunCmdGlue {
     /* -------------------- internals -------------------- */
 
     private void registerCommands() {
-        // lightweight adapter over RunCmd's fields
+        // adapter over RunCmd's fields
         CliRuntime rt = new CliRuntime() {
             @Override public int getK() { return reflectGetInt(host, new String[]{"k","topK"}, 8); }
             @Override public void setK(int k) { reflectSetInt(host, new String[]{"k","topK"}, k); }
@@ -98,12 +94,15 @@ public final class RunCmdGlue {
             @Override public void setDebug(boolean on) { reflectSetBool(host, new String[]{"debug","verbose"}, on); }
         };
 
+        registry.register(new HelpCommand(registry));
         registry.register(new KCommand(rt));
         registry.register(new DebugCommand(rt));
         registry.register(new QuitCommand(quit));
         registry.register(new PolicyCommand());
         registry.register(new AuditToggleCommand());
-        // extend as needed (e.g., :secret set|get|del)
+        registry.register(new SecretCommand(cfg, ctx.audit()));
+        registry.register(new ModelsCommand());
+        registry.register(new SetCommand());
     }
 
     private static int reflectGetInt(Object o, String[] fields, int def) {

@@ -8,7 +8,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 abstract class BaseMode {
-    // Keep heuristics aligned with RunCmd for parity.
     protected static final Pattern FILE_TOKEN = Pattern.compile(
             "([A-Za-z0-9_./\\\\-]++\\.(?:java|md|txt|yaml|yml|xml|gradle|kts|json|properties))",
             Pattern.UNICODE_CHARACTER_CLASS
