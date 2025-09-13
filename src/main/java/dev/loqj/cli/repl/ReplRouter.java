@@ -40,15 +40,18 @@ public final class ReplRouter {
         this.cfg       = (cfg == null ? new Config() : cfg);
         this.workspace = (workspace == null ? Path.of(".") : workspace);
 
-        // Explicit DI: construct all components and feed them to Context.Builder
+        // compose all pieces explicitly
         Audit    audit    = new Audit();
         Redactor redactor = new Redactor();
         Sandbox  sandbox  = new Sandbox(this.workspace, Map.of());
         RagService rag    = new RagService(this.cfg);
         LlmClient llm     = new LlmClient(this.cfg);
         NetPolicy net     = new NetPolicy(this.cfg);
+        Limits    limits  = Limits.fromConfig(this.cfg);
 
         this.ctx = Context.builder(this.cfg)
+                .limits(limits)
+                .session(this.session)
                 .audit(audit)
                 .redactor(redactor)
                 .sandbox(sandbox)
@@ -62,20 +65,20 @@ public final class ReplRouter {
         registerCommands();
     }
 
-    /** Return true if a colon command was handled and rendered. */
     public boolean tryHandle(String line) {
         LineClassifier.Classified c = classifier.classify(line);
         if (c.type() != LineClassifier.LineType.COMMAND) return false;
-
         String name = c.commandName();
         if (!registry.has(name)) return false;
 
-        Result r = pipe.run(() -> registry.execute(name, c.argsText(), ctx), ctx, ":" + name);
+        Result r = pipe.run(() ->
+                        registry.execute(name, c.argsText(), ctx),
+                ctx, ":" + name
+        );
         render.render(r);
         return true;
     }
 
-    /** Route a non-colon prompt through modes, honoring controller’s active mode unless overridden. */
     public boolean tryHandlePrompt(String rawLine, Path workspaceOverride, String activeModeName) {
         LineClassifier.Classified c = classifier.classify(rawLine);
         if (c.type() != LineClassifier.LineType.PROMPT) return false;
@@ -93,8 +96,6 @@ public final class ReplRouter {
 
     public boolean shouldQuit() { return quit.get(); }
 
-    /* -------------------- internals -------------------- */
-
     private void registerCommands() {
         // :k and :debug operate on SessionState
         CliRuntime rt = new CliRuntime() {
@@ -104,7 +105,6 @@ public final class ReplRouter {
             @Override public void setDebug(boolean on) { session.setDebug(on); }
         };
 
-        // Core utility commands
         registry.register(new HelpCommand(registry));
         registry.register(new KCommand(rt));
         registry.register(new DebugCommand(rt));
@@ -112,19 +112,11 @@ public final class ReplRouter {
         registry.register(new PolicyCommand());
         registry.register(new AuditToggleCommand());
         registry.register(new SecretCommand(cfg, ctx.audit()));
-
-        // Model/Mode commands
         registry.register(new ModelsCommand());
-        // Prefer explicit ':set model' command; avoid legacy ':set' collision
-        // registry.register(new SetCommand());
         registry.register(new SetModelCommand());
         registry.register(new ModeCommand(modes));
-
-        // Workspace-aware commands
         registry.register(new StatusCommand(modes, this.workspace));
         registry.register(new ReindexCommand(this.workspace));
-
-        // Memory management
         registry.register(new MemoryCommand());
     }
 }

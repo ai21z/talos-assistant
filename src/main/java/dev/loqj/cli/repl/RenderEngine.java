@@ -1,184 +1,108 @@
 package dev.loqj.cli.repl;
 
-import dev.loqj.core.CfgUtil;
 import dev.loqj.core.Config;
 import dev.loqj.core.security.Redactor;
 import dev.loqj.core.util.Sanitize;
 
 import java.io.PrintStream;
-import java.nio.charset.StandardCharsets;
+import java.util.List;
 
-/**
- * The only place that prints to the console.
- * - Applies redaction
- * - Removes <think>…</think> (stateful across chunks)
- * - Clips safely by Unicode code points
- * PR-1: Not wired into RunCmd yet (no behavior change).
- */
+/** Renders Results to the terminal with consistent sanitize → redact → print. */
 public final class RenderEngine {
+    private final Config cfg;
     private final Redactor redactor;
     private final PrintStream out;
-    private final int responseMaxCodePoints;
-    private final int streamMaxCodePoints;
-    private final ThinkFilter thinkFilter = new ThinkFilter();
 
-    public RenderEngine(dev.loqj.core.Config cfg,
-                        dev.loqj.core.security.Redactor redactor,
-                        java.io.PrintStream out) {
-        this.redactor = (redactor == null ? new dev.loqj.core.security.Redactor() : redactor);
+    public RenderEngine(Config cfg, Redactor redactor, PrintStream out) {
+        this.cfg = (cfg == null ? new Config() : cfg);
+        this.redactor = (redactor == null ? new Redactor() : redactor);
         this.out = (out == null ? System.out : out);
-
-        var lim = dev.loqj.core.CfgUtil.map(cfg.data.get("limits"));
-        int resp = dev.loqj.core.CfgUtil.intAt(lim, "response_max_chars", 12_000);
-        int strm = dev.loqj.core.CfgUtil.intAt(lim, "stream_max_chars", 8_000);
-
-        this.responseMaxCodePoints = Math.max(0, resp);
-        this.streamMaxCodePoints = Math.max(0, strm);
     }
-
-    /* ===================== Public API for future wiring ===================== */
 
     public void render(Result r) {
-        if (r == null) return;
-        switch (r) {
-            case Result.Ok ok -> println(sanitizeAndClip(ok.text, responseMaxCodePoints));
-            case Result.Info info -> println(sanitizeAndClip(info.text, responseMaxCodePoints));
-            case Result.Error err -> println(sanitizeAndClip(err.toString(), responseMaxCodePoints));
-            case Result.Table table -> printTable(table);
-            case Result.StreamStart start -> println(sanitizeAndClip(start.preface, responseMaxCodePoints));
-            case Result.StreamChunk chunk -> printStreamChunk(chunk.text);
-            case Result.StreamEnd ignored -> { flushPending(); println(""); }
+        if (r == null) {
+            println(sro("(null result)"));
+            return;
+        }
+
+        if (r instanceof Result.Ok ok) {
+            println(sro(ok.text));
+            return;
+        }
+        if (r instanceof Result.Info info) {
+            println(sro(info.text));
+            return;
+        }
+        if (r instanceof Result.Error err) {
+            String msg = sro(err.message);
+            if (err.code > 0) println("[error " + err.code + "] " + msg);
+            else println("[error] " + msg);
+            return;
+        }
+        if (r instanceof Result.Table tbl) {
+            renderTable(tbl);
+            return;
+        }
+        if (r instanceof Result.StreamStart ss) {
+            // optional preface then no trailing newline required, but printing one is fine
+            String pf = ss.preface == null ? "" : ss.preface;
+            if (!pf.isEmpty()) println(sro(pf));
+            return;
+        }
+        if (r instanceof Result.StreamChunk chunk) {
+            print(sroInline(chunk.text)); // do not force newline between chunks
+            return;
+        }
+        if (r instanceof Result.StreamEnd) {
+            println(""); // ensure we end on a new line after streaming
+            return;
+        }
+
+        // Fallback for any future Result variants
+        println(sro(r.toString()));
+    }
+
+    /* ---------------- helpers ---------------- */
+
+    private void renderTable(Result.Table tbl) {
+        String title = sro(tbl.title);
+        if (!title.isEmpty()) println(title);
+
+        List<String> cols = (tbl.columns == null ? List.of() : tbl.columns);
+        List<List<String>> rows = (tbl.rows == null ? List.of() : tbl.rows);
+
+        if (!cols.isEmpty()) {
+            StringBuilder header = new StringBuilder();
+            for (int i = 0; i < cols.size(); i++) {
+                if (i > 0) header.append(" | ");
+                header.append(sroInline(cols.get(i)));
+            }
+            println(header.toString());
+            println("-".repeat(Math.max(3, header.length())));
+        }
+
+        for (List<String> row : rows) {
+            StringBuilder line = new StringBuilder();
+            for (int i = 0; i < row.size(); i++) {
+                if (i > 0) line.append(" | ");
+                line.append(sroInline(row.get(i)));
+            }
+            println(line.toString());
         }
     }
 
-    /** For streaming: feed a chunk and print the safe, filtered portion. */
-    private void printStreamChunk(String rawChunk) {
-        if (rawChunk == null || rawChunk.isEmpty()) return;
-        String sanitized = Sanitize.stripAnsi(Sanitize.stripControls(rawChunk));
-        String filtered = thinkFilter.accept(sanitized);
-        if (filtered.isEmpty()) return;
-        String clipped = clipCodePoints(filtered, streamMaxCodePoints - thinkFilter.totalOut());
-        if (!clipped.isEmpty()) {
-            out.print(redactor.redactBlock(clipped));
-        }
+    /** sanitize → redact for multi-line blocks. */
+    private String sro(String s) {
+        String cleaned = Sanitize.sanitizeForOutput(s == null ? "" : s);
+        return redactor.redactBlock(cleaned);
     }
 
-    /** For StreamEnd: flush any pending tail from the think-filter (non-injected). */
-    private void flushPending() {
-        String tail = thinkFilter.flushTail();
-        if (!tail.isEmpty()) {
-            String clipped = clipCodePoints(tail, streamMaxCodePoints - thinkFilter.totalOut());
-            if (!clipped.isEmpty()) out.print(redactor.redactBlock(clipped));
-        }
-        thinkFilter.reset();
-    }
-
-    /* ===================== Helpers ===================== */
-
-    private String sanitizeAndClip(String s, int max) {
-        if (s == null) return "";
-        String cleaned = Sanitize.sanitizeForPrompt(s);
-        // Final hardening: strip any overlooked think tags
-        cleaned = Sanitize.stripThinkTags(cleaned);
-        String clipped = clipCodePoints(cleaned, max);
-        return redactor.redactBlock(clipped);
+    /** sanitize → redact for single-line/inline chunks. */
+    private String sroInline(String s) {
+        String cleaned = Sanitize.sanitizeForOutput(s == null ? "" : s);
+        return redactor.redactLine(cleaned);
     }
 
     private void println(String s) { out.println(s == null ? "" : s); }
-
-    private void printTable(Result.Table t) {
-        // Minimal monospace table; paging comes later.
-        if (!t.title.isBlank()) println(t.title);
-        if (!t.columns.isEmpty()) {
-            println(String.join(" | ", t.columns));
-            println("-".repeat(Math.max(3, t.columns.stream().mapToInt(String::length).sum()
-                    + Math.max(0, (t.columns.size() - 1) * 3))));
-        }
-        for (var row : t.rows) {
-            println(String.join(" | ", row));
-        }
-    }
-
-    /** Unicode-safe clipping by code points (avoids breaking surrogate pairs/combining chars). */
-    public static String clipCodePoints(String s, int maxCodePoints) {
-        if (s == null || maxCodePoints <= 0) return "";
-        int len = s.length();
-        int cpCount = s.codePointCount(0, len);
-        if (cpCount <= maxCodePoints) return s;
-        int endIdx = s.offsetByCodePoints(0, maxCodePoints);
-        return s.substring(0, endIdx);
-    }
-
-    /* ===================== Stateful <think> filter ===================== */
-
-    /**
-     * Removes <think>…</think> across chunk boundaries, case-insensitive, minimal buffering.
-     * Keeps at most K trailing chars as lookbehind to detect boundary-spanning tags.
-     */
-    static final class ThinkFilter {
-        private static final String OPEN = "<think>";
-        private static final String CLOSE = "</think>";
-        private static final int K = Math.max(OPEN.length(), CLOSE.length()); // lookbehind window
-
-        private final StringBuilder tail = new StringBuilder(K * 2);
-        private boolean inThink = false;
-        private int outSoFar = 0;
-
-        /** Accept a new chunk; return safe text to print immediately. */
-        String accept(String chunk) {
-            if (chunk == null || chunk.isEmpty()) return "";
-            String data = tail + chunk; // prepend tail from previous call
-            tail.setLength(0);
-
-            StringBuilder out = new StringBuilder(data.length());
-            int i = 0, n = data.length();
-            while (i < n) {
-                // Lowercase compare without allocating substring by peeking chars
-                if (!inThink && regionMatchesCI(data, i, OPEN)) {
-                    i += OPEN.length();
-                    inThink = true;
-                    continue;
-                }
-                if (inThink && regionMatchesCI(data, i, CLOSE)) {
-                    i += CLOSE.length();
-                    inThink = false;
-                    continue;
-                }
-                if (!inThink) out.append(data.charAt(i));
-                i++;
-            }
-
-            // Keep trailing K chars in tail to catch split tags on next chunk
-            String outStr = out.toString();
-            int safeLen = Math.max(0, outStr.length() - K);
-            String emit = outStr.substring(0, safeLen);
-            String remain = outStr.substring(safeLen);
-            tail.append(remain);
-            outSoFar += emit.codePointCount(0, emit.length());
-            return emit;
-        }
-
-        /** Flush any remaining non-think tail at stream end. */
-        String flushTail() {
-            String s = tail.toString();
-            tail.setLength(0);
-            outSoFar += s.codePointCount(0, s.length());
-            return s;
-        }
-
-        void reset() { tail.setLength(0); inThink = false; outSoFar = 0; }
-
-        int totalOut() { return outSoFar; }
-
-        private static boolean regionMatchesCI(String s, int offset, String token) {
-            int n = token.length();
-            if (offset + n > s.length()) return false;
-            for (int j = 0; j < n; j++) {
-                char a = s.charAt(offset + j);
-                char b = token.charAt(j);
-                if (Character.toLowerCase(a) != Character.toLowerCase(b)) return false;
-            }
-            return true;
-        }
-    }
+    private void print(String s)   { out.print(s == null ? "" : s); }
 }

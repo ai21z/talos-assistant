@@ -1,38 +1,87 @@
 package dev.loqj.cli.repl;
 
-import dev.loqj.core.Audit;
+import java.util.Map;
 
 /**
- * Central place to wrap execution with cross-cutting concerns.
- * PR-1 keeps it minimal (no behavior change); later PRs can add:
- *  - audit start/end
- *  - rate limiting
- *  - timeouts
- *  - sandbox checks (when applicable)
+ * ExecutionPipeline
+ * - Central place for cross-cutting concerns (rate limiting, audit, error envelopes)
+ * - Always returns a Result for rendering; never throws into the REPL loop
  */
 public final class ExecutionPipeline {
 
-    public Result run(CommandInvoker invoker, Context ctx, String eventName) {
-        // Future: ctx.audit().log("start", ...);
+    @FunctionalInterface
+    public interface Op<T> {
+        T get() throws Exception; // allow checked exceptions
+    }
+
+    private final TokenBucket bucket = new TokenBucket();
+
+    /**
+     * Run a unit of work under the pipeline.
+     *
+     * @param op     Work that returns a Result (may return null) and can throw
+     * @param ctx    Runtime context (limits, audit, redactor, etc.)
+     * @param label  Short label for audit/diagnostics (e.g., ":help", "(prompt)")
+     */
+    public Result run(Op<Result> op, Context ctx, String label) {
+        // 1) Rate limit (global per ReplRouter instance)
+        int rate = ctx.limits().ratePerSec();
+        if (!bucket.tryConsume(rate)) {
+            try {
+                ctx.audit().log("rate_limited", Map.of("op", label, "rate_per_sec", rate));
+            } catch (Throwable ignore) {}
+            return new Result.Info("Too many requests. Please slow down.");
+        }
+
+        // 2) Execute with envelope
         try {
-            Result r = invoker.invoke();
-            // Future: redact here only for audit payloads; user-output redaction is in RenderEngine.
-            // Future: ctx.audit().log("end", ...);
+            Result r = op.get();
+            if (r == null) return new Result.Info("(no result)");
             return r;
-        } catch (InterruptedException ie) {
-            Thread.currentThread().interrupt();
-            return new Result.Error("Interrupted.", 399);
-        } catch (Exception e) {
-            // Do NOT expose stack traces to user here; RenderEngine will present a clean message.
-            Audit audit = ctx.audit();
-            if (audit != null) {
-                audit.log("error", java.util.Map.of(
-                        "event", eventName == null ? "" : eventName,
-                        "type", e.getClass().getSimpleName(),
-                        "msg", e.getMessage() == null ? "" : e.getMessage()
+        } catch (Throwable t) {
+            Throwable ex = unwrap(t);
+            String msg = ex.getMessage();
+            if (msg == null || msg.isBlank()) msg = ex.getClass().getSimpleName();
+            msg = ctx.redactor().redactLine(msg);
+
+            // minimal redacted audit
+            try {
+                ctx.audit().log("error", Map.of(
+                        "op", label,
+                        "ex", ex.getClass().getName()
                 ));
+            } catch (Throwable ignore) {}
+
+            return new Result.Error(msg, 500);
+        }
+    }
+
+    private static Throwable unwrap(Throwable t) {
+        // Preserve Errors; unwrap typical wrapper exceptions
+        if (t instanceof Error) return t;
+        Throwable cur = t;
+        while (cur.getCause() != null
+                && (cur instanceof RuntimeException
+                || cur.getClass().getName().endsWith("InvocationTargetException"))) {
+            cur = cur.getCause();
+        }
+        return cur;
+    }
+
+    /** Simple 1-second token bucket; rate<=0 disables limiting. */
+    private static final class TokenBucket {
+        private long windowStartMs = System.currentTimeMillis();
+        private int tokens = Integer.MAX_VALUE;
+
+        synchronized boolean tryConsume(int ratePerSec) {
+            if (ratePerSec <= 0) return true; // disabled
+            long now = System.currentTimeMillis();
+            if (now - windowStartMs >= 1000L) {
+                windowStartMs = now;
+                tokens = ratePerSec;
             }
-            return new Result.Error("Unexpected error; try again with :debug if needed.", 599);
+            if (tokens > 0) { tokens--; return true; }
+            return false;
         }
     }
 }

@@ -8,18 +8,19 @@ import java.util.*;
 
 /**
  * Router over registered Mode strategies with an active-mode concept.
- * - activeName defaults to "rag" and can be changed via :mode (ModeCommand).
- * - route(..., activeModeHint) uses the hint if provided; otherwise it uses activeName.
- * - "auto" applies the dev -> rag -> ask heuristic.
+ * Single-pass logic:
+ *   - If hint == "auto": try dev -> rag -> ask, then sweep all
+ *   - Else if hint matches a mode: try hinted first, then sweep all
+ *   - Sweep is in registration order and only runs once
  */
 public final class ModeController {
-    private final List<Mode> modes = new ArrayList<>();
+    private final List<Mode> order = new ArrayList<>();
     private final Map<String, Mode> byName = new HashMap<>();
     private String activeName = "rag"; // default
 
     public ModeController add(Mode m) {
         if (m != null) {
-            modes.add(m);
+            order.add(m);
             byName.put(m.name().toLowerCase(Locale.ROOT), m);
         }
         return this;
@@ -27,6 +28,9 @@ public final class ModeController {
 
     /** Return the current active mode name (e.g., "rag", "dev", "auto"). */
     public String getActiveName() { return activeName; }
+
+    /** Optional: get the active Mode if it's not "auto". */
+    public Optional<Mode> getActive() { return Optional.ofNullable(byName.get(activeName)); }
 
     /**
      * Set the active mode. Returns true if accepted.
@@ -42,54 +46,45 @@ public final class ModeController {
         return false;
     }
 
-    /** Back-compat API: no active mode hint; uses this.activeName. */
+    /** Back-compat API: no hint provided; controller uses its activeName. */
     public Optional<Result> route(String rawLine, Path workspace, Context ctx) throws Exception {
         return route(rawLine, workspace, ctx, null);
     }
 
     /**
-     * Preferred: route with an active mode hint. If the hint is null/blank, we use the controller's activeName.
-     * For "auto", we try dev -> rag -> ask.
+     * Preferred: route with a hint. If null/blank, uses activeName.
+     * Executes in a single pass over a de-duplicated ordered set of candidates.
      */
-    public Optional<Result> route(String rawLine, Path workspace, Context ctx, String activeModeHint) throws Exception {
+    public Optional<Result> route(String rawLine, Path workspace, Context ctx, String hint) throws Exception {
         if (rawLine == null || rawLine.isBlank()) return Optional.empty();
 
-        String hint = (activeModeHint == null || activeModeHint.isBlank())
-                ? this.activeName
-                : activeModeHint.toLowerCase(Locale.ROOT);
+        String h = (hint == null || hint.isBlank()) ? activeName : hint.toLowerCase(Locale.ROOT).trim();
 
-        if ("auto".equals(hint)) {
-            Mode dev = byName.get("dev");
-            if (dev != null && dev.canHandle(rawLine)) {
-                Optional<Result> r = dev.handle(rawLine, workspace, ctx);
-                if (r.isPresent()) return r;
-            }
-            Mode rag = byName.get("rag");
-            if (rag != null) {
-                Optional<Result> r = rag.handle(rawLine, workspace, ctx);
-                if (r.isPresent()) return r;
-            }
-            Mode ask = byName.get("ask");
-            if (ask != null) {
-                Optional<Result> r = ask.handle(rawLine, workspace, ctx);
-                if (r.isPresent()) return r;
-            }
-            return Optional.empty();
+        // Build candidate sequence once
+        LinkedHashSet<Mode> seq = new LinkedHashSet<>();
+
+        if ("auto".equals(h)) {
+            addIfPresent(seq, byName.get("dev"));
+            addIfPresent(seq, byName.get("rag"));
+            addIfPresent(seq, byName.get("ask"));
+        } else {
+            addIfPresent(seq, byName.get(h));
         }
+        // Fallback sweep in declared order
+        for (Mode m : order) addIfPresent(seq, m);
 
-        Mode chosen = byName.get(hint);
-        if (chosen != null) {
-            Optional<Result> r = chosen.handle(rawLine, workspace, ctx);
+        // Single pass: first mode that both "canHandle" and returns a non-empty result wins
+        for (Mode m : seq) {
+            if (m == null) continue;
+            if (!m.canHandle(rawLine)) continue;
+            Optional<Result> r = m.handle(rawLine, workspace, ctx);
             if (r != null && r.isPresent()) return r;
         }
-
-        for (Mode m : modes) {
-            if (m.canHandle(rawLine)) {
-                Optional<Result> r = m.handle(rawLine, workspace, ctx);
-                if (r != null && r.isPresent()) return r;
-            }
-        }
         return Optional.empty();
+    }
+
+    private static void addIfPresent(LinkedHashSet<Mode> seq, Mode m) {
+        if (m != null) seq.add(m);
     }
 
     public static ModeController defaultController() {
