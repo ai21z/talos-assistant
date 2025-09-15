@@ -49,47 +49,78 @@ public final class StatusCommand implements Command {
         int ratePerSec       = CfgUtil.intAt(lim, "rate_per_sec", 10);
 
         boolean vectors = true;
-        Map<String,Object> rag = CfgUtil.map(cfg.data.get("rag"));
-        if (rag != null) {
-            Map<String,Object> vec = CfgUtil.map(rag.get("vectors"));
-            vectors = vec == null || Boolean.TRUE.equals(vec.getOrDefault("enabled", true));
+        var rag = CfgUtil.map(cfg.data.get("rag"));
+        var vectorsObj = rag.get("vectors");
+        if (vectorsObj instanceof Map<?,?> vm) {
+            Object en = vm.get("enabled");
+            if (en instanceof Boolean b) vectors = b;
         }
+
+        var oll = CfgUtil.map(cfg.data.get("ollama"));
+        String host = (String) oll.getOrDefault("host", "http://127.0.0.1:11434");
+        // Get active model from LlmClient instead of config default
+        String activeModel = ctx.llm().getModel();
+        String embedModel = (String) oll.getOrDefault("embed", "bge-m3");
 
         sb.append("Current configuration:\n");
         sb.append("  Mode:        ").append(modes.getActiveName()).append("\n");
-        sb.append("  Model:       ").append(ctx.llm().getModel()).append("\n");
-        sb.append("  Scope:       ").append(shortenPath(workspace)).append("\n");
+        sb.append("  Model:       ").append(activeModel).append("\n");
+        sb.append("  Scope:       ").append(workspace.getFileName()).append("\n");
         sb.append("  Vectors:     ").append(vectors ? "ON" : "OFF").append("\n");
-        sb.append("  Limits:\n");
-        sb.append("    top_k_max=").append(topKMax)
-                .append(", response_max_chars=").append(responseMax).append("\n");
-        sb.append("    dir_depth_max=").append(dirDepthMax)
-                .append(", dir_entries_max=").append(dirEntriesMax).append("\n");
-        sb.append("    file_bytes_max=").append(fileBytesMax)
-                .append(", file_lines_max=").append(fileLinesMax).append("\n");
-        sb.append("    llm_timeout=").append(Duration.ofMillis(llmTimeoutMs).toSeconds()).append("s")
-                .append(", file_timeout=").append(Duration.ofMillis(fileTimeoutMs).toSeconds()).append("s")
-                .append(", rate_per_sec=").append(ratePerSec).append("\n");
-
-        var report = cfg.getReport();
-        sb.append("  Config:\n");
-        sb.append("    loadedFrom=").append(report.loadedFrom)
-                .append(", strict=").append(report.strictMode)
-                .append(", defaults=").append(report.defaultedKeys.size())
-                .append("  (use :status --verbose)\n\n");
 
         if (verbose) {
-            sb.append("Config Report\n");
-            sb.append("  loadedFrom : ").append(report.loadedFrom).append("\n");
-            sb.append("  strict     : ").append(report.strictMode).append("\n");
-            sb.append("  defaults   : ").append(report.defaultedKeys.isEmpty() ? "(none)" : report.defaultedKeys.size()).append("\n");
-            if (!report.defaultedKeys.isEmpty()) {
-                sb.append("  defaulted keys:\n");
-                for (String k : report.defaultedKeys) sb.append("    - ").append(k).append("\n");
-            }
-            sb.append("\n");
+            sb.append("  Host:        ").append(host).append("\n");
+            sb.append("  Embed Model: ").append(embedModel).append("\n");
+            sb.append("  Embed Conc:  ").append(CfgUtil.intAt(rag, "embed_concurrency", 4)).append("\n");
+            sb.append("  Force Full:  ").append(CfgUtil.intAt(rag, "force_full_reindex", 0) == 1 ? "ON" : "OFF").append("\n");
         }
 
+        sb.append("  Limits:\n");
+        sb.append(String.format("    top_k_max=%d, response_max_chars=%d\n", topKMax, responseMax));
+        sb.append(String.format("    dir_depth_max=%d, dir_entries_max=%d\n", dirDepthMax, dirEntriesMax));
+        sb.append(String.format("    file_bytes_max=%d, file_lines_max=%d\n", fileBytesMax, fileLinesMax));
+        sb.append(String.format("    llm_timeout=%ds, file_timeout=%ds, rate_per_sec=%d\n",
+                Duration.ofMillis(llmTimeoutMs).toSeconds(),
+                Duration.ofMillis(fileTimeoutMs).toSeconds(),
+                ratePerSec));
+
+        sb.append("  Config:\n");
+        sb.append("    loadedFrom=").append(cfg.getReport().loadedFrom).append(", ");
+        sb.append("strict=").append(cfg.getReport().strictMode).append(", ");
+        sb.append("defaults=").append(cfg.getReport().defaultedKeys.size());
+        if (!verbose) sb.append("  (use :status --verbose)");
+        sb.append("\n");
+
+        if (verbose) {
+            // Add detailed indexing stats if available
+            try {
+                var indexer = ctx.rag().getIndexer();
+                var stats = indexer.getLastRunStats();
+                if (stats != null) {
+                    sb.append("  Last Index Run:\n");
+                    sb.append("    ").append(stats.getSummary()).append("\n");
+                    sb.append("    ").append(stats.getDetailedTimings()).append("\n");
+                }
+            } catch (Exception ignore) {
+                // Indexer might not be available in all contexts
+            }
+
+            // Add cache statistics
+            try (var cache = new dev.loqj.core.cache.CacheDb()) {
+                var cacheStats = cache.getStats();
+                sb.append("  Cache:\n");
+                sb.append("    ").append(cacheStats.summary()).append("\n");
+            } catch (Exception ignore) {
+                sb.append("  Cache: unavailable\n");
+            }
+
+            // Show defaulted config keys if any
+            if (!cfg.getReport().defaultedKeys.isEmpty()) {
+                sb.append("  Defaulted keys: ").append(String.join(", ", cfg.getReport().defaultedKeys)).append("\n");
+            }
+        }
+
+        sb.append("\n");
         return new Result.Ok(sb.toString());
     }
 

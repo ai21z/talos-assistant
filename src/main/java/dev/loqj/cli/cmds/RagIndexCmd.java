@@ -12,6 +12,15 @@ public class RagIndexCmd implements Runnable {
     @CommandLine.Option(names="--root", description="Path to project root (default: current dir)")
     String root;
 
+    @CommandLine.Option(names="--full", description="Force full reindex (ignore file hashes)")
+    boolean forceFull;
+
+    @CommandLine.Option(names="--json", description="Output statistics in JSON format")
+    boolean asJson;
+
+    @CommandLine.Option(names="--stats", description="Show last indexing statistics without running")
+    boolean statsOnly;
+
     @Override public void run() {
         Path r = Path.of(root == null || root.isBlank() ? "." : root).toAbsolutePath().normalize();
         try {
@@ -19,12 +28,33 @@ public class RagIndexCmd implements Runnable {
                 System.err.println("Index failed: not a directory: " + r);
                 return;
             }
-            System.out.println("Indexing root: " + r);
+
             var cfg = new Config();
-            new Indexer(cfg).index(r);
-            System.out.println("Index complete.");
+            var indexer = new Indexer(cfg);
+
+            if (statsOnly) {
+                renderStats(indexer.getLastRunStats(), asJson);
+                return;
+            }
+
+            System.out.println("Indexing root: " + r);
+            indexer.index(r, forceFull);
+            renderStats(indexer.getLastRunStats(), asJson);
         } catch (Exception e) {
             System.err.println("Index failed: " + e.getMessage());
+        }
+    }
+
+    private void renderStats(Object stats, boolean asJson) {
+        if (stats == null) {
+            System.out.println(asJson ? "{\"error\":\"No statistics available\"}" : "No statistics available.");
+            return;
+        }
+
+        if (asJson && stats instanceof dev.loqj.core.index.IndexingStats indexStats) {
+            System.out.println(indexStats.toJson());
+        } else {
+            System.out.println("Index complete.");
         }
     }
 }

@@ -22,6 +22,11 @@ final class LlmClientStreamParityTest {
         @SuppressWarnings("unchecked")
         var ollama = (java.util.Map<String,Object>) cfg.data.computeIfAbsent("ollama", k -> new java.util.LinkedHashMap<>());
         ollama.put("model", "qwen3:8b");
+        // *** Force placeholder transport for unit tests ***
+        @SuppressWarnings("unchecked")
+        var llm = (java.util.Map<String,Object>) cfg.data.computeIfAbsent("llm", k -> new java.util.LinkedHashMap<>());
+        llm.put("transport", "placeholder");       // <— add this
+        llm.put("default_backend", "ollama");      // optional, keeps getModel() stable
         return cfg;
     }
 

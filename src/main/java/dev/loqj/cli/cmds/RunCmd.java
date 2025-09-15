@@ -33,9 +33,9 @@ public class RunCmd implements Runnable, SessionState {
     private int k = 8;
     private boolean debug = false;
 
-    // Simple 1s token bucket
+    // Simple 1s token bucket - FIXED VERSION
     private long rlWindowStartMs = System.currentTimeMillis();
-    private final AtomicInteger rlTokens = new AtomicInteger(10);
+    private int rlTokens = 10; // will be set from config
     private final Object rlLock = new Object();
 
     // ---- SessionState impl ----
@@ -58,7 +58,7 @@ public class RunCmd implements Runnable, SessionState {
         // Limits from config
         Map<String,Object> limitsMap = CfgUtil.map(cfg.data.get("limits"));
         Limits lim = new Limits(limitsMap == null ? Map.of() : limitsMap);
-        rlTokens.set(lim.ratePerSec);
+        rlTokens = lim.ratePerSec;
 
         // --bm25-only flag: mutate cfg copy
         if (bm25Only) {
@@ -134,9 +134,9 @@ public class RunCmd implements Runnable, SessionState {
         synchronized (rlLock) {
             if (now - rlWindowStartMs >= 1000) {
                 rlWindowStartMs = now;
-                rlTokens.set(lim.ratePerSec);
+                rlTokens = lim.ratePerSec;
             }
-            if (rlTokens.get() > 0) { rlTokens.decrementAndGet(); return true; }
+            if (rlTokens > 0) { rlTokens--; return true; }
             return false;
         }
     }

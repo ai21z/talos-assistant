@@ -235,6 +235,49 @@ public class LuceneStore implements AutoCloseable, CorpusStore {
         return out;
     }
 
+    /**
+     * Check if a file with given path and hash is already up-to-date in the index.
+     * Used to skip re-embedding unchanged chunks during incremental indexing.
+     */
+    public boolean isUpToDate(String filePath, String fileHash) {
+        if (fileHash == null) return false;
+
+        IndexSearcher s = null;
+        try {
+            s = sm.acquire();
+
+            // Query for any chunk from this file with matching hash
+            Query pathPrefix = new PrefixQuery(new Term(F_PATH, filePath + "#"));
+            Query hashMatch = new TermQuery(new Term(F_FILEHASH, fileHash));
+            Query combined = new BooleanQuery.Builder()
+                .add(pathPrefix, BooleanClause.Occur.MUST)
+                .add(hashMatch, BooleanClause.Occur.MUST)
+                .build();
+
+            TopDocs hits = s.search(combined, 1);
+            return hits.scoreDocs.length > 0;
+        } catch (Exception e) {
+            LOG.debug("Error checking file freshness for {}: {}", filePath, e.getMessage());
+            return false;
+        } finally {
+            if (s != null) {
+                try { sm.release(s); } catch (IOException ignore) {}
+            }
+        }
+    }
+
+    /**
+     * Remove all chunks for a given file path (used when file content changes).
+     */
+    public void removeFileChunks(String filePath) {
+        try {
+            Query pathPrefix = new PrefixQuery(new Term(F_PATH, filePath + "#"));
+            writer.deleteDocuments(pathPrefix);
+        } catch (IOException e) {
+            LOG.warn("Failed to remove chunks for {}: {}", filePath, e.getMessage());
+        }
+    }
+
     @Override public void close() {
         try {
             sm.close();

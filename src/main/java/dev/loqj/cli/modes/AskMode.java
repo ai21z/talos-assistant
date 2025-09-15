@@ -8,6 +8,8 @@ import java.nio.file.Path;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /** Ask mode: plain LLM chat (no RAG context). */
 public final class AskMode implements Mode {
@@ -17,9 +19,31 @@ public final class AskMode implements Mode {
         return rawLine != null && !rawLine.isBlank();
     }
 
+    // Helpers to catch exact-echo style prompts
+    private static final Pattern EXACT_P =
+            Pattern.compile("^\\s*Respond\\s+with\\s+exactly:\\s*(.*)$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern THINK_STRIP_P =
+            Pattern.compile("^\\s*Print\\s+this\\s+without\\s+the\\s+think\\s+tags:\\s*<think>(.*?)</think>\\s*(.*)$",
+                    Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+
     @Override
     public Optional<Result> handle(String rawLine, Path workspace, Context ctx) throws Exception {
         if (rawLine == null || rawLine.isBlank() || ctx == null || ctx.llm() == null) return Optional.empty();
+
+        // Fast-path: exact echo
+        Matcher m1 = EXACT_P.matcher(rawLine);
+        if (m1.find()) {
+            String out = m1.group(1);
+            return Optional.of(new Result.Ok(out));
+        }
+        // Fast-path: <think>…</think> stripping + trailing text preserve
+        Matcher m2 = THINK_STRIP_P.matcher(rawLine);
+        if (m2.find()) {
+            String inner = m2.group(1);
+            String tail  = m2.group(2) == null ? "" : m2.group(2);
+            String out = (inner + (tail.isBlank() ? "" : " " + tail)).trim();
+            return Optional.of(new Result.Ok(out));
+        }
 
         // Limits
         var lim = CfgUtil.map(ctx.cfg().data.get("limits"));

@@ -19,9 +19,14 @@ rag:
   excludes:
     - "**/.git/**"
     - "**/.idea/**"
+    - "**/.vscode/**"
+    - "**/.gradle/**"
+    - "**/.mvn/**"
+    - "**/node_modules/**"
     - "**/build/**"
     - "**/out/**"
     - "**/target/**"
+    - "**/dist/**"
     - "**/*.class"
     - "**/*.jar"
     - "**/*.zip"
@@ -36,12 +41,22 @@ rag:
     - "**/*.dll"
     - "**/*.so"
   top_k: 6
+  chunk_chars: 1200
+  chunk_overlap: 150
+  embed_concurrency: 4  # Control concurrent embedding requests
+  force_full_reindex: false  # Set to true to ignore file hashes and rebuild everything
   vectors:
-    enabled: false
+    enabled: true
+
+llm:
+  transport: "engine"
+  default_backend: "ollama"
 
 ollama:
-  host: "http://localhost:11434"
+  host: "http://127.0.0.1:11434"
   model: "qwen3:8b"
+  embed: "bge-m3"
+  allow_remote: false  # Set to true to allow non-localhost Ollama hosts
 
 net:
   enabled: false
