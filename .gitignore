@@ -39,6 +39,12 @@ replay_pid*
 # Qodana (JetBrains code quality) — keep config, ignore outputs
 .qodana/
 
+# ---- Temporary and scratch files
+*.tmp
+*.temp
+/tools/scratch/
+/Exports/
+
 # ---- OS cruft
 .DS_Store
 Thumbs.db
