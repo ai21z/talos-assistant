@@ -6,7 +6,11 @@ import dev.loqj.cli.repl.Result;
 import java.nio.file.Path;
 import java.util.Optional;
 
-/** Thin wrapper for now — delegates to RagMode. */
+/**
+ * @deprecated This mode is a thin wrapper that only delegates to RagMode without adding functionality.
+ * Use RagMode directly instead. Will be removed in a future version.
+ */
+@Deprecated(since = "0.1.0", forRemoval = true)
 public final class RagMemoryMode implements Mode {
     private final RagMode delegate = new RagMode();
 
