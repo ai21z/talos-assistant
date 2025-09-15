@@ -1,10 +1,14 @@
-package dev.loqj.engine.gpt4all;
+package dev.loqj.engine.stubs.gpt4all;
 
 import dev.loqj.spi.ModelCatalog;
 import dev.loqj.spi.types.ModelRef;
 import java.util.*;
 import java.util.stream.Collectors;
 
+/**
+ * @deprecated Stub implementation moved to engine.stubs. Not functional.
+ */
+@Deprecated(since = "0.1.0", forRemoval = true)
 final class Gpt4AllCatalog implements ModelCatalog {
     @Override public List<ModelRef> installed() {
         String env = System.getenv("LOQJ_GPT4ALL_MODELS");
