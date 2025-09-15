@@ -1,4 +1,4 @@
-package dev.loqj.engine.llamacpp;
+package dev.loqj.engine.stubs.llamacpp;
 
 import dev.loqj.spi.ModelEngine;
 import dev.loqj.spi.types.*;
@@ -6,6 +6,10 @@ import java.util.Collections;
 import java.util.List;
 import java.util.stream.Stream;
 
+/**
+ * @deprecated Stub implementation moved to engine.stubs. Not functional.
+ */
+@Deprecated(since = "0.1.0", forRemoval = true)
 final class LlamaCppEngine implements ModelEngine {
     @Override public String id() { return "llamacpp"; }
     @Override public Capabilities caps() { return Capabilities.of(true, true, false, 8192); }

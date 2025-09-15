@@ -1,10 +1,14 @@
-package dev.loqj.engine.llamacpp;
+package dev.loqj.engine.stubs.llamacpp;
 
 import dev.loqj.spi.ModelCatalog;
 import dev.loqj.spi.types.ModelRef;
 import java.util.*;
 import java.util.stream.Collectors;
 
+/**
+ * @deprecated Stub implementation moved to engine.stubs. Not functional.
+ */
+@Deprecated(since = "0.1.0", forRemoval = true)
 final class LlamaCppCatalog implements ModelCatalog {
     @Override public List<ModelRef> installed() {
         // optional: models from env (space/comma-separated)

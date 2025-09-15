@@ -1,4 +1,4 @@
-package dev.loqj.engine.gpt4all;
+package dev.loqj.engine.stubs.gpt4all;
 
 import dev.loqj.spi.ModelEngine;
 import dev.loqj.spi.types.*;
@@ -6,6 +6,10 @@ import java.util.Collections;
 import java.util.List;
 import java.util.stream.Stream;
 
+/**
+ * @deprecated Stub implementation moved to engine.stubs. Not functional.
+ */
+@Deprecated(since = "0.1.0", forRemoval = true)
 final class Gpt4AllEngine implements ModelEngine {
     @Override public String id() { return "gpt4all"; }
     @Override public Capabilities caps() { return Capabilities.of(true, true, false, 8192); }
