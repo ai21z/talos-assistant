@@ -1,19 +1,23 @@
 package dev.loqj.core.rag;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.loqj.core.CfgUtil;
 import dev.loqj.core.Config;
+import dev.loqj.core.embed.CachingEmbeddings;
+import dev.loqj.core.embed.EmbeddingsClient;
 import dev.loqj.core.index.Indexer;
+import dev.loqj.core.index.LuceneStore;
 import dev.loqj.core.llm.LlmClient;
+import dev.loqj.core.cache.CacheDb;
+import dev.loqj.core.spi.CorpusStore;
+import dev.loqj.core.util.Hash;
+import dev.loqj.core.search.Retriever;
 
 import java.io.InputStream;
 import java.nio.file.Path;
 import java.util.*;
 
-/**
- * RAG service facade used by CLI.
- * This version provides the methods your CLI references and avoids
- * depending on SnippetBuilder constructors that aren't present in your codebase.
- */
 public class RagService {
 
     private final Config cfg;
@@ -43,23 +47,11 @@ public class RagService {
         this.indexer = new Indexer(cfg);
     }
 
-    /** Expose indexer to callers that need it. */
-    public Indexer getIndexer() {
-        return indexer;
-    }
+    public Indexer getIndexer() { return indexer; }
 
-    /** Rebuild the index; the actual Indexer implementation handles details. */
-    public Object reindex(Path root) throws Exception {
-        return indexer.reindex(root);
-    }
+    public Object reindex(Path root) throws Exception { return indexer.reindex(root); }
 
-    /**
-     * Prepare snippets/citations for a query.
-     * NOTE: This implementation returns empty lists to avoid coupling to a specific SnippetBuilder API.
-     * Wire your actual retriever here later (e.g., Bm25KnnRetriever) and fill snippet maps + citations.
-     */
     public Prepared prepare(Path ws, String query, Integer topKOverride) {
-        // Try to read top_k from config; default to 6
         int defaultTopK = 6;
         try {
             Map<String, Object> rag = CfgUtil.map(cfg.data.get("rag"));
@@ -68,32 +60,89 @@ public class RagService {
             else if (v != null) defaultTopK = Integer.parseInt(String.valueOf(v));
         } catch (Exception ignore) {}
 
-        int k = (topKOverride == null ? defaultTopK : Math.max(1, topKOverride));
+        final int k = (topKOverride == null ? defaultTopK : Math.max(1, topKOverride));
 
-        // TODO (Phase 1/2): fetch top-K snippet maps + citations via your retriever.
-        // For now, return empty collections to keep CLI stable.
-        List<Map<String,String>> snippets = List.of();
-        List<String> citations = List.of();
+        // Read vector toggle; if off, we’ll skip KNN
+        Map<String,Object> rag = CfgUtil.map(cfg.data.get("rag"));
+        boolean vecEnabled = true;
+        Object vectorsObj = rag.get("vectors");
+        if (vectorsObj instanceof Map<?,?> vm) {
+            Object en = ((Map<?,?>) vm).get("enabled");
+            if (en instanceof Boolean b) vecEnabled = b;
+        }
+
+        Path indexDir = indexer.indexDirFor(ws);
+        List<Map<String,String>> snippets = new ArrayList<>();
+        List<String> citations = new ArrayList<>();
+
+        // Open store for read (vectorDim==0 is fine for reading BM25; writer creation is the only user of vectorDim)
+        try (LuceneStore store = new LuceneStore(indexDir, 0)) {
+            // BM25 first
+            List<CorpusStore.Hit> bm25 = store.bm25(query, Math.max(k * 3, k));
+            List<CorpusStore.Hit> knn = List.of();
+
+            // Add KNN when available
+            if (vecEnabled) {
+                try (CacheDb cache = new CacheDb();
+                     CachingEmbeddings emb = new CachingEmbeddings(new EmbeddingsClient(cfg), cache, "query/ollama")) {
+                    float[] qvec = emb.embed(query);
+                    if (qvec != null && qvec.length > 0) {
+                        knn = store.knn(qvec, Math.max(k * 3, k));
+                    }
+                } catch (Exception ignore) {
+                    // If embeddings fail, just proceed with BM25
+                }
+            }
+
+            // Fuse + dedupe by path
+            var fused = Retriever.fuseRrf(asLuceneHits(bm25), asLuceneHits(knn), 60, Math.max(k * 2, k));
+            var finalCands = Retriever.mmr(fused, 0.7, k);
+
+            // Build snippet maps + citations
+            for (var c : finalCands) {
+                String text = store.getTextByPath(c.path);
+                if (text == null || text.isBlank()) continue;
+                snippets.add(Map.of("path", c.path, "text", text));
+                citations.add(stripChunkId(c.path));
+            }
+        } catch (Exception e) {
+            // On any failure, return empty (don’t explode CLI)
+        }
 
         return new Prepared(snippets, citations);
     }
 
-    /** Load the CLI system prompt or a safe default. */
+    private static List<LuceneStore.Hit> asLuceneHits(List<CorpusStore.Hit> xs) {
+        var out = new ArrayList<LuceneStore.Hit>(xs.size());
+        for (var h : xs) out.add(new LuceneStore.Hit(h.path(), h.score()));
+        return out;
+    }
+
+    private static String stripChunkId(String path) {
+        int i = path.indexOf('#');
+        return (i < 0) ? path : path.substring(0, i);
+    }
+
     public String readCliSystemPromptOrDefault() throws Exception {
         try (InputStream in = RagService.class.getClassLoader().getResourceAsStream("prompts/cli-system.txt")) {
             if (in != null) return new String(in.readAllBytes());
         }
-        // Fallback text to keep functionality even if the resource is missing
         return "You are LOQ-J (CLI). Answer briefly, cite local files when available. If context is insufficient, say so.";
     }
 
-    /**
-     * Convenience call used by RagAskCmd: builds context and asks the LLM.
-     * Returns an Answer with text and citations.
-     */
     public Answer ask(Path ws, String question, Integer kOverride) {
         try {
             Prepared prepared = prepare(ws, question, kOverride);
+
+            // If network is disabled we can short-circuit to keep tests fast
+            Map<String,Object> net = CfgUtil.map(cfg.data.get("net"));
+            boolean netEnabled = !(net.get("enabled") instanceof Boolean b) || b;
+
+            if (!netEnabled) {
+                String stub = "(net disabled) " + question;
+                return new Answer(stub, prepared.citations());
+            }
+
             LlmClient llm = new LlmClient(cfg);
             String sys = readCliSystemPromptOrDefault();
             String text = llm.chat(sys, question, prepared.snippetMaps());

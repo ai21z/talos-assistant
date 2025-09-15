@@ -30,6 +30,26 @@ public class EmbeddingsClient implements Embeddings {
         Map<String,Object> oll = CfgUtil.map(cfg.data.get("ollama"));
         this.host  = Objects.toString(oll.getOrDefault("host", "http://127.0.0.1:11434"));
         this.model = Objects.toString(oll.getOrDefault("embed", "bge-m3"));
+
+        // Security: enforce localhost-only policy unless explicitly allowed
+        boolean allowRemote = false;
+        Object allowRemoteObj = oll.get("allow_remote");
+        if (allowRemoteObj instanceof Boolean) {
+            allowRemote = (Boolean) allowRemoteObj;
+        } else if (allowRemoteObj != null) {
+            String str = String.valueOf(allowRemoteObj).trim().toLowerCase();
+            allowRemote = "true".equals(str) || "1".equals(str) || "yes".equals(str);
+        }
+
+        if (!isLocalhost(this.host)) {
+            if (!allowRemote) {
+                throw new SecurityException(String.format(
+                    "Remote Ollama host '%s' is not allowed. Set ollama.allow_remote=true to enable remote hosts, " +
+                    "or use localhost (127.0.0.1 or localhost).", this.host));
+            } else {
+                LOG.warn("SECURITY: Using remote Ollama host: {}. This may expose your data to external services.", this.host);
+            }
+        }
     }
 
     @Override
@@ -134,5 +154,15 @@ public class EmbeddingsClient implements Embeddings {
     private static String truncate(String s, int max) {
         if (s == null) return "";
         return s.length() <= max ? s : s.substring(0, max) + "…";
+    }
+
+    private static boolean isLocalhost(String host) {
+        if (host == null) return true;
+        String lower = host.toLowerCase();
+        return lower.contains("127.0.0.1") ||
+               lower.contains("localhost") ||
+               lower.contains("[::1]") ||
+               lower.startsWith("http://127.0.0.1") ||
+               lower.startsWith("http://localhost");
     }
 }

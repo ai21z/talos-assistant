@@ -49,10 +49,13 @@ ehthumbs.db
 *.msi
 *.exe
 *.pkg
-*.dmg
-*.deb
-*.rpm
-/build/jpackage/
+
+# ---- Test files (temporary/local testing)
+smoke_test_commands.txt
+test_commands.txt
+test_performance.java
+validation_commands.txt
+test-remote-config.yaml
 
 # ---- Temporary & editor files
 *.tmp

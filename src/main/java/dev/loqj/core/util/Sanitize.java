@@ -74,6 +74,14 @@ public final class Sanitize {
 
     /** Alias for legacy code: drop <think> tags. */
     public static String stripThinkTags(String s) {
-        return dropThinkBlocks(s);
+        if (s == null || s.isEmpty()) return s;
+        // Literal <think>...</think>
+        s = s.replaceAll("(?is)<\\s*think\\s*>.*?<\\s*/\\s*think\\s*>", "");
+        // Escaped \u003cthink\u003e...\u003c/think\u003e
+        s = s.replaceAll("(?is)\\u003c\\s*think\\s*\\u003e.*?\\u003c\\s*/\\s*think\\s*\\u003e", "");
+        // Stray open/close, literal and escaped
+        s = s.replaceAll("(?is)<\\s*/?\\s*think\\s*>", "");
+        s = s.replaceAll("(?is)\\u003c\\s*/?\\s*think\\s*\\u003e", "");
+        return s;
     }
 }
