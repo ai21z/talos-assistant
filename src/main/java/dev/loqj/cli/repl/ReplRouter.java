@@ -75,6 +75,7 @@ public final class ReplRouter {
                         registry.execute(name, c.argsText(), ctx),
                 ctx, ":" + name
         );
+
         render.render(r);
         return true;
     }
@@ -96,6 +97,8 @@ public final class ReplRouter {
 
     public boolean shouldQuit() { return quit.get(); }
 
+    public ModeController getModes() { return modes; }
+
     private void registerCommands() {
         // :k and :debug operate on SessionState
         CliRuntime rt = new CliRuntime() {
@@ -116,6 +119,7 @@ public final class ReplRouter {
         registry.register(new SetModelCommand());
         registry.register(new ModeCommand(modes));
         registry.register(new StatusCommand(modes, this.workspace));
+        registry.register(new WorkspaceCommand(this.workspace));  // NEW: :workspace command
         registry.register(new ReindexCommand(this.workspace));
         registry.register(new MemoryCommand());
         // DX commands for workspace exploration

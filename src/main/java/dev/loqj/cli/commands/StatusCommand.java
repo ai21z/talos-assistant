@@ -4,6 +4,7 @@ import dev.loqj.cli.modes.ModeController;
 import dev.loqj.cli.repl.Context;
 import dev.loqj.cli.repl.Result;
 import dev.loqj.core.CfgUtil;
+import dev.loqj.core.IndexPathResolver;
 
 import java.nio.file.Path;
 import java.time.Duration;
@@ -36,6 +37,14 @@ public final class StatusCommand implements Command {
 
         var sb = new StringBuilder();
         var cfg = ctx.cfg();
+
+        // Always show workspace and index directory at the top
+        Path absWorkspace = workspace.toAbsolutePath().normalize();
+        Path indexDir = IndexPathResolver.getIndexDirectory(absWorkspace);
+        boolean indexExists = java.nio.file.Files.exists(indexDir);
+
+        sb.append("Workspace : ").append(absWorkspace).append("\n");
+        sb.append("Index dir : ").append(indexDir).append("\n\n");
 
         var lim = CfgUtil.map(cfg.data.get("limits"));
         int topKMax          = CfgUtil.intAt(lim, "top_k_max", 100);

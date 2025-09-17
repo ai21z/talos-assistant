@@ -16,6 +16,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 @CommandLine.Command(name="run", description="Interactive LOQ-J REPL")
 public class RunCmd implements Runnable, SessionState {
@@ -28,6 +29,9 @@ public class RunCmd implements Runnable, SessionState {
 
     @CommandLine.Option(names="--bm25-only", description="Disable vectors")
     boolean bm25Only;
+
+    @CommandLine.Option(names="--no-logo", description="Skip banner/logo display")
+    boolean noLogo;
 
     // Minimal session state for commands
     private int k = 8;
@@ -72,17 +76,44 @@ public class RunCmd implements Runnable, SessionState {
         // Router: commands + modes (workspace-aware), with *this* as SessionState
         ReplRouter router = new ReplRouter(this, cfg, System.out, ws);
 
-        banner(ws, cfg);
-        System.out.println("Type your question. Commands: :help  :models  :set model <name>  :mode <m>  :k <int>  :debug on|off  :status [--verbose]  :reindex  :memory clear  :q");
-        System.out.println();
+        // Show banner unless --no-logo
+        if (!noLogo) {
+            banner(ws, cfg);
+            System.out.println("Type your question. Commands: :help  :models  :set model <name>  :mode <m>  :k <int>  :debug on|off  :status [--verbose]  :reindex  :memory clear  :q");
+            System.out.println();
+        } else {
+            // Still show active mode and workspace in compact form
+            String currentMode = router.getModes().getActiveName();
+            System.out.println("Active mode: " + currentMode + " • Workspace: " + shortenPath(ws));
+        }
 
         try {
             Terminal term = TerminalBuilder.builder().system(true).jna(true).build();
             LineReader reader = LineReaderBuilder.builder().terminal(term).build();
-            String prompt = color("loqj", 36) + "@" + shortenPath(ws) + color(" > ", 90);
+
+            // Set up prompt refresh callback for mode changes
+            final AtomicReference<String> currentPrompt = new AtomicReference<>();
+            router.getModes().setPromptRefreshCallback(() -> {
+                // This will be called when mode changes
+                String newMode = router.getModes().getActiveName();
+                String newPrompt = "loqj@" + newMode + "_ > ";
+                currentPrompt.set(newPrompt);
+            });
+
+            // Initialize the prompt
+            String initialMode = router.getModes().getActiveName();
+            String initialPrompt = "loqj@" + initialMode + "_ > ";
+            currentPrompt.set(initialPrompt);
 
             boolean quit = false;
             while (!quit) {
+                // Get the current prompt (updated by mode changes)
+                String prompt = currentPrompt.get();
+                if (prompt == null) {
+                    String currentMode = router.getModes().getActiveName();
+                    prompt = "loqj@" + currentMode + "_ > ";
+                }
+
                 String line;
                 try { line = reader.readLine(prompt); }
                 catch (EndOfFileException eof) { break; }

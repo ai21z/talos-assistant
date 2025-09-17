@@ -3,6 +3,7 @@ package dev.loqj.core.index;
 import dev.loqj.core.CfgUtil;
 import dev.loqj.core.Config;
 import dev.loqj.core.cache.CacheDb;
+import dev.loqj.core.embed.BatchEmbeddings;
 import dev.loqj.core.embed.CachingEmbeddings;
 import dev.loqj.core.embed.EmbeddingsClient;
 import dev.loqj.core.ingest.Chunker;
@@ -178,28 +179,72 @@ public class Indexer {
 
                             List<ParsedChunk> chunks = Chunker.chunk(rel, text, chunkChars, overlap);
 
-                            for (ParsedChunk c : chunks) {
-                                float[] vec = null;
-                                if (embForTasks != null) {
-                                    long embedStart = System.currentTimeMillis();
-                                    try {
-                                        vec = embForTasks.embed(c.text());
-                                        if (vec == null || vec.length == 0) {
-                                            LOG.debug("Empty embedding for {}, BM25-only for this chunk", c.id());
-                                            vec = null;
+                            // Batch process embeddings for better performance
+                            if (embForTasks != null && embForTasks instanceof BatchEmbeddings batchEmb) {
+                                // Extract texts for batch processing
+                                List<String> chunkTexts = chunks.stream()
+                                    .map(ParsedChunk::text)
+                                    .toList();
+
+                                long embedStart = System.currentTimeMillis();
+                                List<float[]> vectors;
+                                try {
+                                    vectors = batchEmb.embedBatch(chunkTexts);
+                                } catch (Exception ex) {
+                                    LOG.debug("Batch embedding failed for {}: {} (falling back to individual)", rel, ex.toString());
+                                    // Fallback to individual processing
+                                    vectors = new ArrayList<>();
+                                    for (String chunkText : chunkTexts) {
+                                        try {
+                                            float[] vec = embForTasks.embed(chunkText);
+                                            vectors.add(vec);
+                                        } catch (Exception e) {
+                                            LOG.debug("Individual embedding failed: {}", e.toString());
+                                            vectors.add(null);
                                         }
-                                    } catch (Exception ex) {
-                                        LOG.debug("Embedding failed for {}: {} (BM25-only this chunk)", c.id(), ex.toString());
+                                    }
+                                }
+                                stats.addEmbedTime(System.currentTimeMillis() - embedStart);
+
+                                // Store chunks with their corresponding embeddings
+                                for (int i = 0; i < chunks.size(); i++) {
+                                    ParsedChunk c = chunks.get(i);
+                                    float[] vec = i < vectors.size() ? vectors.get(i) : null;
+
+                                    if (vec == null || vec.length == 0) {
+                                        LOG.debug("Empty/null embedding for {}, BM25-only for this chunk", c.id());
                                         vec = null;
                                     }
-                                    stats.addEmbedTime(System.currentTimeMillis() - embedStart);
-                                }
 
-                                long luceneStart = System.currentTimeMillis();
-                                String currentHash = skipHashing ? null : Hash.sha256Hex(Files.readAllBytes(p));
-                                store.add(c.id(), c.text(), vec, currentHash, c.chunkId());
-                                stats.addLuceneTime(System.currentTimeMillis() - luceneStart);
-                                stats.incrementChunksWritten();
+                                    long luceneStart = System.currentTimeMillis();
+                                    String currentHash = skipHashing ? null : Hash.sha256Hex(Files.readAllBytes(p));
+                                    store.add(c.id(), c.text(), vec, currentHash, c.chunkId());
+                                    stats.addLuceneTime(System.currentTimeMillis() - luceneStart);
+                                }
+                            } else {
+                                // Fallback to individual processing for non-batch embeddings
+                                for (ParsedChunk c : chunks) {
+                                    float[] vec = null;
+                                    if (embForTasks != null) {
+                                        long embedStart = System.currentTimeMillis();
+                                        try {
+                                            vec = embForTasks.embed(c.text());
+                                            if (vec == null || vec.length == 0) {
+                                                LOG.debug("Empty embedding for {}, BM25-only for this chunk", c.id());
+                                                vec = null;
+                                            }
+                                        } catch (Exception ex) {
+                                            LOG.debug("Embedding failed for {}: {} (BM25-only this chunk)", c.id(), ex.toString());
+                                            vec = null;
+                                        }
+                                        stats.addEmbedTime(System.currentTimeMillis() - embedStart);
+                                    }
+
+                                    long luceneStart = System.currentTimeMillis();
+                                    String currentHash = skipHashing ? null : Hash.sha256Hex(Files.readAllBytes(p));
+                                    store.add(c.id(), c.text(), vec, currentHash, c.chunkId());
+                                    stats.addLuceneTime(System.currentTimeMillis() - luceneStart);
+                                }
                             }
                         } catch (Exception ex) {
                             LOG.warn("Skip {} : {}", p, ex.toString());

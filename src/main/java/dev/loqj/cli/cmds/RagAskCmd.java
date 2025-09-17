@@ -15,8 +15,11 @@ public class RagAskCmd implements Runnable {
 
     @Override public void run() {
         try {
-            Path r = Path.of(root == null || root.isBlank() ? "." : root).toAbsolutePath().normalize();
-            if (!Files.isDirectory(r)) { System.err.println("rag-ask failed: not a directory: " + r); return; }
+            Path r = resolveWorkspaceRoot();
+            if (!Files.isDirectory(r)) {
+                System.err.println("rag-ask failed: not a directory: " + r);
+                return;
+            }
             var ans = new RagService(new Config()).ask(r, question, k);
             System.out.println(ans.text());
             if (!ans.citations().isEmpty()) {
@@ -26,5 +29,18 @@ public class RagAskCmd implements Runnable {
         } catch (Exception e) {
             System.err.println("rag-ask failed: " + e.getMessage());
         }
+    }
+
+    private Path resolveWorkspaceRoot() {
+        if (root != null && !root.isBlank()) {
+            return Path.of(root).toAbsolutePath().normalize();
+        }
+
+        String envRoot = System.getenv("LOQJ_WORKSPACE");
+        if (envRoot != null && !envRoot.isBlank()) {
+            return Path.of(envRoot).toAbsolutePath().normalize();
+        }
+
+        return Path.of(".").toAbsolutePath().normalize();
     }
 }
