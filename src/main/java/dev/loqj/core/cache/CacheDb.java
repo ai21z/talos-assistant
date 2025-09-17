@@ -62,6 +62,14 @@ public class CacheDb implements AutoCloseable {
                 entities TEXT NOT NULL
               );
             """);
+            // New table for caching model dimensions
+            st.execute("""
+              CREATE TABLE IF NOT EXISTS model_dimensions(
+                model_key TEXT PRIMARY KEY,
+                dimension INTEGER NOT NULL,
+                ts INTEGER NOT NULL
+              );
+            """);
         }
     }
 
@@ -221,6 +229,29 @@ public class CacheDb implements AutoCloseable {
         } catch (SQLException e) {
             throw new RuntimeException("Failed to get cache stats", e);
         }
+    }
+
+    public void putModelDimension(String modelKey, int dimension) {
+        try (PreparedStatement ps = cx.prepareStatement(
+                "INSERT OR REPLACE INTO model_dimensions(model_key,dimension,ts) VALUES(?,?,?)")) {
+            ps.setString(1, modelKey);
+            ps.setInt(2, dimension);
+            ps.setLong(3, Instant.now().toEpochMilli());
+            ps.executeUpdate();
+        } catch (SQLException e) { throw new RuntimeException(e); }
+    }
+
+    /**
+     * Get cached dimension for a model, or null if not cached.
+     */
+    public Integer getModelDimension(String modelKey) {
+        try (PreparedStatement ps = cx.prepareStatement(
+                "SELECT dimension FROM model_dimensions WHERE model_key=?")) {
+            ps.setString(1, modelKey);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getInt(1) : null;
+            }
+        } catch (SQLException e) { throw new RuntimeException(e); }
     }
 
     public static record CacheStats(int embeddingCount, long embeddingSize, int answerCount, long answerSize) {

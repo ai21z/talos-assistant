@@ -45,6 +45,10 @@ replay_pid*
 /tools/scratch/
 /Exports/
 
+# ---- Export tools and generated files
+Export-tree-with-contents.ps1
+/tools/Exports/
+
 # ---- OS cruft
 .DS_Store
 Thumbs.db

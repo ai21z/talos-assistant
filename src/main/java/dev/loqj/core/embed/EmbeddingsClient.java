@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.loqj.core.CfgUtil;
 import dev.loqj.core.Config;
+import dev.loqj.core.cache.CacheDb;
 import dev.loqj.core.spi.Embeddings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,7 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.*;
 
-public class EmbeddingsClient implements Embeddings {
+public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
     private static final Logger LOG = LoggerFactory.getLogger(EmbeddingsClient.class);
 
     private final ObjectMapper mapper = new ObjectMapper();
@@ -25,8 +26,14 @@ public class EmbeddingsClient implements Embeddings {
     private final String host;      // e.g. http://127.0.0.1:11434
     private final String model;     // e.g. bge-m3
     private volatile Integer dim;   // lazy
+    private final CacheDb cache;    // for dimension caching
 
     public EmbeddingsClient(Config cfg) {
+        this(cfg, new CacheDb());
+    }
+
+    public EmbeddingsClient(Config cfg, CacheDb cache) {
+        this.cache = cache;
         Map<String,Object> oll = CfgUtil.map(cfg.data.get("ollama"));
         this.host  = Objects.toString(oll.getOrDefault("host", "http://127.0.0.1:11434"));
         this.model = Objects.toString(oll.getOrDefault("embed", "bge-m3"));
@@ -57,11 +64,33 @@ public class EmbeddingsClient implements Embeddings {
         if (dim != null) return dim;
         synchronized (this) {
             if (dim != null) return dim;
+
+            // Try cache first to avoid redundant probes
+            String modelKey = host + "/" + model;
+            Integer cachedDim = cache.getModelDimension(modelKey);
+            if (cachedDim != null) {
+                LOG.debug("Using cached dimension {} for model {}", cachedDim, modelKey);
+                dim = cachedDim;
+                return dim;
+            }
+
+            // Cache miss, probe the model
             float[] p = embed("probe");
             if (p == null || p.length == 0) {
                 throw new IllegalStateException("Embedding model returned zero-length vector");
             }
+
             dim = p.length;
+
+            // Cache the dimension for future runs
+            try {
+                cache.putModelDimension(modelKey, dim);
+                LOG.debug("Cached dimension {} for model {}", dim, modelKey);
+            } catch (Exception e) {
+                LOG.debug("Failed to cache dimension: {}", e.getMessage());
+                // Non-fatal, continue without caching
+            }
+
             return dim;
         }
     }
@@ -164,5 +193,131 @@ public class EmbeddingsClient implements Embeddings {
                lower.contains("[::1]") ||
                lower.startsWith("http://127.0.0.1") ||
                lower.startsWith("http://localhost");
+    }
+
+    @Override
+    public List<float[]> embedBatch(List<String> texts) throws Exception {
+        if (texts.isEmpty()) return List.of();
+
+        // For single text, use existing single embed method
+        if (texts.size() == 1) {
+            return List.of(embed(texts.get(0)));
+        }
+
+        // Try batch embedding first, fall back to individual on failure
+        try {
+            return embedBatchInternal(texts);
+        } catch (Exception e) {
+            LOG.debug("Batch embedding failed ({}), falling back to individual requests", e.getMessage());
+
+            // Fallback: process each text individually
+            List<float[]> results = new ArrayList<>();
+            for (String text : texts) {
+                results.add(embed(text));
+            }
+            return results;
+        }
+    }
+
+    private List<float[]> embedBatchInternal(List<String> texts) throws Exception {
+        // Try modern + legacy batch permutations
+        var attempts = List.of(
+                new Ep("/api/embeddings", "input"),
+                new Ep("/api/embed", "input"),
+                new Ep("/api/embeddings", "prompt"),
+                new Ep("/api/embed", "prompt")
+        );
+
+        Exception lastErr = null;
+        for (Ep ep : attempts) {
+            try {
+                Map<String, Object> body = new LinkedHashMap<>();
+                body.put("model", model);
+
+                // Send array of texts for batch processing
+                if ("input".equals(ep.param)) {
+                    body.put("input", texts);
+                } else {
+                    body.put("prompt", texts);
+                }
+
+                String json = mapper.writeValueAsString(body);
+
+                HttpRequest req = HttpRequest.newBuilder()
+                        .uri(URI.create(host + ep.path))
+                        .timeout(Duration.ofSeconds(120)) // Longer timeout for batch
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
+                        .build();
+
+                HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+
+                // Handle HTTP 413 (Payload Too Large) by falling back to singles
+                if (resp.statusCode() == 413) {
+                    LOG.debug("Batch too large (HTTP 413), will retry individual requests");
+                    throw new BatchTooLargeException("Batch size too large for server");
+                }
+
+                if (resp.statusCode() / 100 != 2) {
+                    LOG.debug("batch embed non-2xx at {} {} -> {} {}", ep.path, ep.param, resp.statusCode(),
+                            truncate(resp.body(), 120));
+                    continue;
+                }
+
+                Map<String, Object> root = mapper.readValue(resp.body(), new TypeReference<>() {});
+                List<float[]> vectors = parseBatchEmbeddingFlexible(root, texts.size());
+
+                if (vectors != null && vectors.size() == texts.size()) {
+                    return vectors;
+                } else {
+                    LOG.debug("Batch embedding size mismatch from {} {} (expected {}, got {})",
+                            ep.path, ep.param, texts.size(), vectors != null ? vectors.size() : 0);
+                }
+            } catch (BatchTooLargeException e) {
+                throw e; // Re-throw to trigger individual fallback
+            } catch (Exception e) {
+                lastErr = e;
+                LOG.debug("batch embed attempt failed at {} {} : {}", ep.path, ep.param, e.toString());
+            }
+        }
+
+        if (lastErr != null) throw lastErr;
+        throw new IllegalStateException("No batch embedding returned from Ollama");
+    }
+
+    private List<float[]> parseBatchEmbeddingFlexible(Map<String, Object> root, int expectedSize) {
+        // Case A: {"embeddings": [[vec1], [vec2], ...]}
+        Object multi = root.get("embeddings");
+        if (multi instanceof List<?> listB && !listB.isEmpty()) {
+            List<float[]> results = new ArrayList<>();
+            for (Object item : listB) {
+                if (item instanceof List<?> vec) {
+                    results.add(toFloatArray(vec));
+                }
+            }
+            if (results.size() == expectedSize) {
+                return results;
+            }
+        }
+
+        // Case B: {"embedding": [vec]} - single vector (fallback for batch of 1)
+        Object single = root.get("embedding");
+        if (single instanceof List<?> listA && expectedSize == 1) {
+            return List.of(toFloatArray(listA));
+        }
+
+        return null;
+    }
+
+    @Override
+    public int preferredBatchSize() {
+        return 16; // Tunable default from acceptance criteria
+    }
+
+    // Custom exception for batch size limits
+    private static class BatchTooLargeException extends Exception {
+        BatchTooLargeException(String message) {
+            super(message);
+        }
     }
 }

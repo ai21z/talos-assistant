@@ -11,7 +11,7 @@ public final class ModeCommand implements Command {
     public ModeCommand(ModeController modes) { this.modes = modes; }
 
     @Override public CommandSpec spec() {
-        return new CommandSpec("mode", List.of(), ":mode ask|rag|rag+memory|dev|web|auto", "Switch active mode.");
+        return new CommandSpec("mode", List.of(), ":mode ask|rag|rag+memory|dev|web|auto", "Switch active mode.", CommandGroup.RAG);
     }
 
     @Override public Result execute(String args, Context ctx) {

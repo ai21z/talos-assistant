@@ -22,7 +22,7 @@ public class RagIndexCmd implements Runnable {
     boolean statsOnly;
 
     @Override public void run() {
-        Path r = Path.of(root == null || root.isBlank() ? "." : root).toAbsolutePath().normalize();
+        Path r = resolveWorkspaceRoot();
         try {
             if (!Files.isDirectory(r)) {
                 System.err.println("Index failed: not a directory: " + r);
@@ -43,6 +43,19 @@ public class RagIndexCmd implements Runnable {
         } catch (Exception e) {
             System.err.println("Index failed: " + e.getMessage());
         }
+    }
+
+    private Path resolveWorkspaceRoot() {
+        if (root != null && !root.isBlank()) {
+            return Path.of(root).toAbsolutePath().normalize();
+        }
+
+        String envRoot = System.getenv("LOQJ_WORKSPACE");
+        if (envRoot != null && !envRoot.isBlank()) {
+            return Path.of(envRoot).toAbsolutePath().normalize();
+        }
+
+        return Path.of(".").toAbsolutePath().normalize();
     }
 
     private void renderStats(Object stats, boolean asJson) {

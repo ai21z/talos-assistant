@@ -25,7 +25,7 @@ java {
     }
 }
 
-version = (project.findProperty("appVersion") as String?) ?: "0.1.0"
+version = "0.9.0-beta"
 
 /* ---------- Repositories ---------- */
 
@@ -102,8 +102,24 @@ dependencies {
 
 application {
     mainClass.set("dev.loqj.app.Main")
-    // Enable Vector API for local runs
-    applicationDefaultJvmArgs = listOf("--add-modules=jdk.incubator.vector")
+    applicationDefaultJvmArgs = listOf(
+        "--add-modules", "jdk.incubator.vector",
+        "-Dfile.encoding=UTF-8",
+        "-XX:+UseZGC"
+    )
+}
+
+/* ---------- Jar manifest attributes ---------- */
+
+tasks.withType<Jar>().configureEach {
+    manifest {
+        attributes(
+            "Implementation-Title" to "LOQ-J",
+            "Implementation-Version" to project.version,
+            "Implementation-Vendor" to System.currentTimeMillis().toString(), // Build timestamp
+            "Main-Class" to "dev.loqj.app.Main"
+        )
+    }
 }
 
 /* ---------- Jar naming ---------- */

@@ -16,7 +16,8 @@ import java.util.*;
 public final class ModeController {
     private final List<Mode> order = new ArrayList<>();
     private final Map<String, Mode> byName = new HashMap<>();
-    private String activeName = "rag"; // default
+    private String activeName = "ask"; // default to ask mode
+    private Runnable promptRefreshCallback;
 
     public ModeController add(Mode m) {
         if (m != null) {
@@ -24,6 +25,11 @@ public final class ModeController {
             byName.put(m.name().toLowerCase(Locale.ROOT), m);
         }
         return this;
+    }
+
+    /** Set a callback to refresh the REPL prompt when mode changes. */
+    public void setPromptRefreshCallback(Runnable callback) {
+        this.promptRefreshCallback = callback;
     }
 
     /** Return the current active mode name (e.g., "rag", "dev", "auto"). */
@@ -41,6 +47,10 @@ public final class ModeController {
         String n = name.toLowerCase(Locale.ROOT).trim();
         if ("auto".equals(n) || byName.containsKey(n)) {
             this.activeName = n;
+            // Trigger prompt refresh if callback is set
+            if (promptRefreshCallback != null) {
+                promptRefreshCallback.run();
+            }
             return true;
         }
         return false;
