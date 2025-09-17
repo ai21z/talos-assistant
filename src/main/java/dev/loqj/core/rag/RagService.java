@@ -134,9 +134,11 @@ public class RagService {
         try {
             Prepared prepared = prepare(ws, question, kOverride);
 
+            // TEMPORARY FIX: Force network enabled for debugging
             // If network is disabled we can short-circuit to keep tests fast
             Map<String,Object> net = CfgUtil.map(cfg.data.get("net"));
-            boolean netEnabled = !(net.get("enabled") instanceof Boolean b) || b;
+            boolean netEnabled = true; // Force enable for debugging
+            // boolean netEnabled = !(net.get("enabled") instanceof Boolean b) || b;
 
             if (!netEnabled) {
                 String stub = "(net disabled) " + question;

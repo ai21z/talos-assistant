@@ -59,7 +59,7 @@ ollama:
   allow_remote: false  # Set to true to allow non-localhost Ollama hosts
 
 net:
-  enabled: false
+  enabled: true
 
 limits:
   top_k_max: 100
