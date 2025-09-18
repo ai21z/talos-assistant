@@ -86,7 +86,7 @@ public final class WorkspaceCommand implements Command {
             }
             sb.append("\n");
 
-            return new Result.Ok(sb.toString());
+            return new Result.TrustedInfo(sb.toString());
 
         } catch (Exception e) {
             return new Result.Error("Failed to get workspace info: " + e.getMessage(), 500);

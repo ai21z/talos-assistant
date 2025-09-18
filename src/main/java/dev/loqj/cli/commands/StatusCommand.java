@@ -130,7 +130,7 @@ public final class StatusCommand implements Command {
         }
 
         sb.append("\n");
-        return new Result.Ok(sb.toString());
+        return new Result.TrustedInfo(sb.toString());
     }
 
     private static String shortenPath(Path path) {
