@@ -23,14 +23,17 @@ import java.nio.file.Path;
 import java.nio.file.PathMatcher;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
+import java.util.regex.Pattern;
 
 public class Indexer {
     private static final Logger LOG = LoggerFactory.getLogger(Indexer.class);
+    private static final boolean IS_WINDOWS = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("windows");
 
     private final Config cfg;
     private volatile IndexingStats lastRunStats;
@@ -75,19 +78,8 @@ public class Indexer {
                 CfgUtil.strList(rag.get("exclude"))
         );
 
-        // Prebuild matchers
-        final FileSystem fs = rootPath.getFileSystem();
-        final List<PathMatcher> includeMatchers = new ArrayList<>();
-        for (String g : includeGlobs) includeMatchers.add(fs.getPathMatcher("glob:" + g));
-        final List<PathMatcher> excludeMatchers = new ArrayList<>();
-        for (String g : excludeGlobs) excludeMatchers.add(fs.getPathMatcher("glob:" + g));
-
-        final Predicate<Path> pred = p -> {
-            Path rel = rootPath.relativize(p);
-            boolean inc = includeMatchers.isEmpty() || includeMatchers.stream().anyMatch(m -> m.matches(rel));
-            boolean exc = excludeMatchers.stream().anyMatch(m -> m.matches(rel));
-            return inc && !exc;
-        };
+        // Create the file filter predicate (Windows case-insensitive, others case-sensitive)
+        final Predicate<Path> pred = createFileFilter(rootPath, includeGlobs, excludeGlobs);
 
         // Walk files with timing
         final List<Path> files;
@@ -331,5 +323,73 @@ public class Indexer {
 
     public IndexingStats getLastRunStats() {
         return lastRunStats;
+    }
+
+    /**
+     * Creates a file filter predicate that is case-insensitive on Windows, case-sensitive elsewhere.
+     */
+    private Predicate<Path> createFileFilter(Path rootPath, List<String> includeGlobs, List<String> excludeGlobs) {
+        if (IS_WINDOWS) {
+            return createWindowsCaseInsensitiveFilter(rootPath, includeGlobs, excludeGlobs);
+        } else {
+            return createCaseSensitiveFilter(rootPath, includeGlobs, excludeGlobs);
+        }
+    }
+
+    /**
+     * Case-sensitive filter for non-Windows systems (original behavior).
+     */
+    private Predicate<Path> createCaseSensitiveFilter(Path rootPath, List<String> includeGlobs, List<String> excludeGlobs) {
+        final FileSystem fs = rootPath.getFileSystem();
+        final List<PathMatcher> includeMatchers = new ArrayList<>();
+        for (String g : includeGlobs) includeMatchers.add(fs.getPathMatcher("glob:" + g));
+        final List<PathMatcher> excludeMatchers = new ArrayList<>();
+        for (String g : excludeGlobs) excludeMatchers.add(fs.getPathMatcher("glob:" + g));
+
+        return p -> {
+            Path rel = rootPath.relativize(p);
+            boolean inc = includeMatchers.isEmpty() || includeMatchers.stream().anyMatch(m -> m.matches(rel));
+            boolean exc = excludeMatchers.stream().anyMatch(m -> m.matches(rel));
+            return inc && !exc;
+        };
+    }
+
+    /**
+     * Case-insensitive filter for Windows systems.
+     */
+    private Predicate<Path> createWindowsCaseInsensitiveFilter(Path rootPath, List<String> includeGlobs, List<String> excludeGlobs) {
+        // Convert globs to regex patterns (case-insensitive)
+        final List<Pattern> includePatterns = new ArrayList<>();
+        for (String glob : includeGlobs) {
+            includePatterns.add(globToRegexPattern(glob));
+        }
+        final List<Pattern> excludePatterns = new ArrayList<>();
+        for (String glob : excludeGlobs) {
+            excludePatterns.add(globToRegexPattern(glob));
+        }
+
+        return p -> {
+            Path rel = rootPath.relativize(p);
+            String relStr = rel.toString().replace('\\', '/').toLowerCase(Locale.ROOT);
+
+            boolean inc = includePatterns.isEmpty() || includePatterns.stream().anyMatch(pattern -> pattern.matcher(relStr).matches());
+            boolean exc = excludePatterns.stream().anyMatch(pattern -> pattern.matcher(relStr).matches());
+            return inc && !exc;
+        };
+    }
+
+    /**
+     * Converts a glob pattern to a case-insensitive regex pattern.
+     */
+    private Pattern globToRegexPattern(String glob) {
+        String regex = glob.toLowerCase(Locale.ROOT)
+            .replace(".", "\\.")
+            .replace("**/", "DOUBLE_STAR_PLACEHOLDER")
+            .replace("**", ".*")
+            .replace("DOUBLE_STAR_PLACEHOLDER", ".*")
+            .replace("*", "[^/]*")
+            .replace("?", ".");
+
+        return Pattern.compile("^" + regex + "$", Pattern.CASE_INSENSITIVE);
     }
 }

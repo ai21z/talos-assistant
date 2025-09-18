@@ -6,7 +6,7 @@ package dev.loqj.cli.repl;
  */
 public sealed interface Result
         permits Result.Ok, Result.Info, Result.Error, Result.Table,
-        Result.StreamStart, Result.StreamChunk, Result.StreamEnd {
+        Result.StreamStart, Result.StreamChunk, Result.StreamEnd, Result.TrustedInfo {
 
     /* -------- Simple text results -------- */
 
@@ -19,6 +19,15 @@ public sealed interface Result
     public static final class Info implements Result {
         public final String text;
         public Info(String text) { this.text = text == null ? "" : text; }
+        @Override public String toString() { return text; }
+    }
+
+    /**
+     * Trusted information that bypasses path redaction (for workspace commands).
+     */
+    public static final class TrustedInfo implements Result {
+        public final String text;
+        public TrustedInfo(String text) { this.text = text == null ? "" : text; }
         @Override public String toString() { return text; }
     }
 
@@ -68,4 +77,5 @@ public sealed interface Result
     static Info info(String s) { return new Info(s); }
     static Ok ok(String s) { return new Ok(s); }
     static Error error(String s, int code) { return new Error(s, code); }
+    static TrustedInfo trustedInfo(String s) { return new TrustedInfo(s); }
 }

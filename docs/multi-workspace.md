@@ -39,17 +39,14 @@ After installation, `loqj` works from any directory!
 
 **Windows PowerShell:**
 ```powershell
-# Basic uninstall (keeps your workspace data)
-pwsh tools/uninstall-windows.ps1
+# dry run
+pwsh -NoProfile -File .\uninstall-windows.ps1 -WhatIf
 
-# Complete removal including all workspace data
-pwsh tools/uninstall-windows.ps1 -Purge
+# real uninstall (keep ~/.loqj)
+pwsh -NoProfile -File .\uninstall-windows.ps1 -Quiet
 
-# Silent uninstall for automation
-pwsh tools/uninstall-windows.ps1 -Purge -Quiet
-
-# Preview what would be removed without actually doing it
-pwsh tools/uninstall-windows.ps1 -WhatIf
+# full purge (also removes ~/.loqj)
+pwsh -NoProfile -File .\uninstall-windows.ps1 -Quiet -Purge
 ```
 
 The uninstaller will:
@@ -211,6 +208,12 @@ loqj version
 ```
 
 ## Troubleshooting
+
+### File Matching Behavior
+
+**Windows:** Include/exclude pattern matching is case-insensitive. For example, `**/*.html` will match both `index.html` and `INDEX.HTML`.
+
+**Linux/macOS:** Include/exclude pattern matching is case-sensitive. For example, `**/*.html` will match `index.html` but NOT `INDEX.HTML`. If you need to match uppercase extensions, add explicit patterns like `**/*.HTML` to your configuration.
 
 ### Windows PowerShell Common Issues
 

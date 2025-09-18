@@ -33,6 +33,12 @@ public final class RenderEngine {
             println(sro(info.text));
             return;
         }
+        if (r instanceof Result.TrustedInfo trustedInfo) {
+            // Bypass path redaction for trusted workspace information
+            String cleaned = Sanitize.sanitizeForOutput(trustedInfo.text == null ? "" : trustedInfo.text);
+            println(cleaned); // Skip redactor.redactBlock() for trusted content
+            return;
+        }
         if (r instanceof Result.Error err) {
             String msg = sro(err.message);
             if (err.code > 0) println("[error " + err.code + "] " + msg);
