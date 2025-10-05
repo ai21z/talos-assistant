@@ -50,11 +50,23 @@ public final class Sanitize {
         return stripSuspiciousHtml(stripControl(dropThinkBlocks(s)));
     }
 
-    /** Hard truncate to max characters (safe for terminal; doesn’t split surrogate pairs). */
+    /** Hard truncate to max characters (safe for terminal; doesn't split surrogate pairs). */
     public static String hardTruncate(String s, int maxChars) {
         if (s == null) return "";
         if (maxChars <= 0) return "";
         if (s.length() <= maxChars) return s;
+        // Log truncation event (debug only, not in user output)
+        System.err.println("[DEBUG] hardTruncate: truncated from " + s.length() + " to " + maxChars + " chars");
+        return s.substring(0, maxChars);
+    }
+
+    /** Hard truncate with callback for telemetry tracking. */
+    public static String hardTruncate(String s, int maxChars, Runnable onTruncate) {
+        if (s == null) return "";
+        if (maxChars <= 0) return "";
+        if (s.length() <= maxChars) return s;
+        if (onTruncate != null) onTruncate.run();
+        System.err.println("[DEBUG] hardTruncate: truncated from " + s.length() + " to " + maxChars + " chars [truncated]");
         return s.substring(0, maxChars);
     }
 

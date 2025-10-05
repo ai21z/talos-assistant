@@ -24,13 +24,72 @@ final class OllamaEngine implements ModelEngine {
     private final String defaultModel;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
 
+    // Cache for model context length (avoid repeated API calls)
+    private volatile Integer cachedContextLength = null;
+    private volatile String cachedModelName = null;
+
     OllamaEngine(String host, String defaultModel) {
         this.host = (host == null || host.isBlank()) ? "http://127.0.0.1:11434" : host.trim();
         this.defaultModel = defaultModel;
     }
 
     @Override public String id() { return OllamaCatalog.BACKEND; }
-    @Override public Capabilities caps() { return Capabilities.of(true, true, false, 8192); }
+
+    @Override
+    public Capabilities caps() {
+        // Try to fetch actual model context length
+        int contextLength = getModelContextLength();
+        return Capabilities.of(true, true, false, contextLength);
+    }
+
+    /**
+     * Fetch model context window size from Ollama /api/show endpoint.
+     * Returns cached value if already fetched, otherwise queries Ollama.
+     * Falls back to 8192 if unavailable.
+     */
+    public int getModelContextLength() {
+        return getModelContextLength(defaultModel);
+    }
+
+    public int getModelContextLength(String modelName) {
+        if (modelName == null) modelName = defaultModel;
+
+        // Return cached value if same model
+        if (Objects.equals(modelName, cachedModelName) && cachedContextLength != null) {
+            return cachedContextLength;
+        }
+
+        try {
+            String json = "{\"name\":\"" + esc(modelName) + "\"}";
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(host + "/api/show"))
+                    .timeout(Duration.ofSeconds(5))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
+                    .build();
+
+            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (resp.statusCode() / 100 == 2) {
+                // Parse num_ctx from model info or modelfile parameters
+                // Pattern: "num_ctx":<number> or in modelfile section
+                Matcher m = Pattern.compile("\"num_ctx\"\\s*:\\s*(\\d+)").matcher(resp.body());
+                if (m.find()) {
+                    int ctx = Integer.parseInt(m.group(1));
+                    cachedModelName = modelName;
+                    cachedContextLength = ctx;
+                    return ctx;
+                }
+            }
+        } catch (Exception ignored) {
+            // Fall through to default
+        }
+
+        // Fallback to safe default
+        int fallback = 8192;
+        cachedModelName = modelName;
+        cachedContextLength = fallback;
+        return fallback;
+    }
 
     @Override public Health health() {
         try {
@@ -90,7 +149,7 @@ final class OllamaEngine implements ModelEngine {
 
     @Override
     public EmbeddingResult embed(java.util.List<String> texts) throws Exception {
-        // Minimal implementation: return empty to satisfy SPI (we’re not using embeddings yet)
+        // Minimal implementation: return empty to satisfy SPI (we're not using embeddings yet)
         return new EmbeddingResult(java.util.Collections.emptyList(), 0);
     }
 
