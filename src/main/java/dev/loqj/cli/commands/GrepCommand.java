@@ -32,16 +32,31 @@ public final class GrepCommand implements Command {
         }
 
         String regex = args.trim();
+
+        // Strip surrounding quotes if present (handles both single and double quotes)
+        if ((regex.startsWith("\"") && regex.endsWith("\"") && regex.length() > 1) ||
+            (regex.startsWith("'") && regex.endsWith("'") && regex.length() > 1)) {
+            regex = regex.substring(1, regex.length() - 1);
+        }
+
         try {
             Pattern pattern = Pattern.compile(regex, Pattern.CASE_INSENSITIVE);
             var sb = new StringBuilder();
             int totalMatches = 0;
             int fileCount = 0;
 
-            // Get files using similar filtering as the indexer
+            // Get files using filtering that matches the indexer's include patterns
             var fs = workspace.getFileSystem();
-            PathMatcher javaMatcher = fs.getPathMatcher("glob:**/*.java");
-            PathMatcher txtMatcher = fs.getPathMatcher("glob:**/*.{md,txt,yaml,yml,json,properties}");
+
+            // Create matchers for both nested files (**/*.ext) and root-level files (*.ext)
+            PathMatcher codeMatcher = fs.getPathMatcher("glob:**/*.{java,kt,kts,py,rb,go,rs,cpp,c,h,hpp,js,ts,jsx,tsx,php,cs,sh,bat,ps1}");
+            PathMatcher codeRootMatcher = fs.getPathMatcher("glob:*.{java,kt,kts,py,rb,go,rs,cpp,c,h,hpp,js,ts,jsx,tsx,php,cs,sh,bat,ps1}");
+
+            PathMatcher docMatcher = fs.getPathMatcher("glob:**/*.{md,markdown,txt,html,htm,xml}");
+            PathMatcher docRootMatcher = fs.getPathMatcher("glob:*.{md,markdown,txt,html,htm,xml}");
+
+            PathMatcher configMatcher = fs.getPathMatcher("glob:**/*.{yaml,yml,json,properties,ini,conf,config,toml,env,gradle}");
+            PathMatcher configRootMatcher = fs.getPathMatcher("glob:*.{yaml,yml,json,properties,ini,conf,config,toml,env,gradle}");
 
             var files = FileWalker.listFiles(workspace, p -> {
                 Path rel = workspace.relativize(p);
@@ -51,7 +66,11 @@ public final class GrepCommand implements Command {
                     pathStr.startsWith(".git/") || pathStr.startsWith(".idea/")) {
                     return false;
                 }
-                return javaMatcher.matches(rel) || txtMatcher.matches(rel);
+
+                // Match both nested files and root-level files
+                return codeMatcher.matches(rel) || codeRootMatcher.matches(rel) ||
+                       docMatcher.matches(rel) || docRootMatcher.matches(rel) ||
+                       configMatcher.matches(rel) || configRootMatcher.matches(rel);
             });
 
             for (Path file : files) {
