@@ -101,3 +101,4 @@ limits:
   llm_timeout_ms: 300000         # 5 minutes
   file_timeout_ms: 10000         # 10 seconds
   rate_per_sec: 10
+  llm_context_max_tokens: 8192   # Default token budget for prompt validation (fallback if model info unavailable)

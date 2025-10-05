@@ -4,17 +4,25 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
 
 /**
- * Loads config from classpath resource "config/default-config.yaml" (if present)
- * and then ensures core defaults exist so downstream code/tests never see nulls.
+ * Loads config with precedence: CLI flags > ENV > user-config > classpath defaults.
+ *
+ * Config sources (in order):
+ *  1. Classpath resource "config/default-config.yaml"
+ *  2. User config file: ~/.loqj/config.yaml (or %USERPROFILE%\.loqj\config.yaml on Windows)
+ *  3. Environment variables: LOQJ__rag__top_k=8 maps to rag.top_k=8
+ *  4. CLI flags (applied by command classes)
  *
  * Improvements:
  *  - Tracks which keys were defaulted (report).
  *  - Warns once if defaults were applied (can be silenced).
  *  - Strict mode via env LOQJ_STRICT_CONFIG=true -> fail fast if any default is applied.
- *  - Ships "limits" block with sane defaults.
+ *  - Ships "limits" block with sane defaults including llm_context_max_tokens.
  */
 public class Config {
 
@@ -29,24 +37,30 @@ public class Config {
     /** Immutable view of load/report info. */
     public static final class Report {
         public final String loadedFrom;            // e.g., "classpath:config/default-config.yaml" or "(none)"
+        public final String userConfigPath;        // e.g., "~/.loqj/config.yaml" or "(none)"
         public final boolean strictMode;           // env LOQJ_STRICT_CONFIG
         public final List<String> defaultedKeys;   // dotted keys that were filled with defaults
+        public final int envOverridesApplied;      // count of ENV overrides
 
-        Report(String loadedFrom, boolean strictMode, List<String> defaultedKeys) {
+        Report(String loadedFrom, String userConfigPath, boolean strictMode, List<String> defaultedKeys, int envOverrides) {
             this.loadedFrom = loadedFrom;
+            this.userConfigPath = userConfigPath;
             this.strictMode = strictMode;
             this.defaultedKeys = Collections.unmodifiableList(defaultedKeys);
+            this.envOverridesApplied = envOverrides;
         }
     }
 
     private String loadedFrom = "(none)";
+    private String userConfigPath = "(none)";
     private final List<String> defaulted = new ArrayList<>();
+    private int envOverridesCount = 0;
     private Report snapshot;
 
     public Config() {
         boolean strict = envTrue(STRICT_ENV);
 
-        // 1) Load YAML (if present)
+        // 1) Load classpath default config
         Map<String, Object> loaded = new LinkedHashMap<>();
         try (InputStream in = Config.class.getClassLoader().getResourceAsStream("config/default-config.yaml")) {
             if (in != null) {
@@ -60,11 +74,33 @@ public class Config {
             // Keep going with empty map — we'll backfill defaults next
         }
 
-        // 2) Copy and normalize defaults
         data.putAll(loaded);
         ensureDefaults();
 
-        // 3) Strict mode or warn once
+        // 2) Load user config overlay from ~/.loqj/config.yaml
+        Path userConfig = getUserConfigPath();
+        if (userConfig != null && Files.exists(userConfig) && Files.isRegularFile(userConfig)) {
+            try {
+                ObjectMapper om = new ObjectMapper(new YAMLFactory());
+                @SuppressWarnings("unchecked")
+                Map<String, Object> userMap = om.readValue(userConfig.toFile(), Map.class);
+                if (userMap != null && !userMap.isEmpty()) {
+                    CfgUtil.deepMerge(data, userMap);
+                    userConfigPath = userConfig.toString();
+                }
+            } catch (Exception ignored) {
+                // Silently skip if user config is malformed
+            }
+        }
+
+        // 3) Apply ENV overrides (LOQJ__rag__top_k=8 -> rag.top_k=8)
+        Map<String, Object> envOverrides = CfgUtil.parseEnvOverrides();
+        if (!envOverrides.isEmpty()) {
+            CfgUtil.deepMerge(data, envOverrides);
+            envOverridesCount = countLeafKeys(envOverrides);
+        }
+
+        // 4) Strict mode or warn once
         if (!defaulted.isEmpty()) {
             if (strict) {
                 throw new IllegalStateException("Strict config mode: required keys missing -> " + String.join(", ", defaulted));
@@ -75,12 +111,38 @@ public class Config {
             }
         }
 
-        // 4) Freeze report
-        snapshot = new Report(loadedFrom, strict, new ArrayList<>(defaulted));
+        // 5) Freeze report
+        snapshot = new Report(loadedFrom, userConfigPath, strict, new ArrayList<>(defaulted), envOverridesCount);
     }
 
     public Report getReport() {
         return snapshot;
+    }
+
+    /**
+     * Resolve user config path: ~/.loqj/config.yaml (Unix) or %USERPROFILE%\.loqj\config.yaml (Windows)
+     */
+    private static Path getUserConfigPath() {
+        String home = System.getProperty("user.home");
+        if (home == null || home.isBlank()) {
+            home = System.getenv("USERPROFILE"); // Windows fallback
+        }
+        if (home == null || home.isBlank()) return null;
+        return Paths.get(home, ".loqj", "config.yaml");
+    }
+
+    private static int countLeafKeys(Map<String, Object> map) {
+        int count = 0;
+        for (Object v : map.values()) {
+            if (v instanceof Map) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> nested = (Map<String, Object>) v;
+                count += countLeafKeys(nested);
+            } else {
+                count++;
+            }
+        }
+        return count;
     }
 
     @SuppressWarnings("unchecked")
@@ -155,6 +217,7 @@ public class Config {
         putIfAbsent(limits, "llm_timeout_ms",     300_000L, "limits.llm_timeout_ms");
         putIfAbsent(limits, "file_timeout_ms",    10_000L, "limits.file_timeout_ms");
         putIfAbsent(limits, "rate_per_sec",       10, "limits.rate_per_sec");
+        putIfAbsent(limits, "llm_context_max_tokens", 8192, "limits.llm_context_max_tokens"); // Safe default for token budget
     }
 
     @SuppressWarnings("unchecked")

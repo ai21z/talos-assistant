@@ -145,10 +145,33 @@ public class RagService {
                 return new Answer(stub, prepared.citations());
             }
 
-            LlmClient llm = new LlmClient(cfg);
             String sys = readCliSystemPromptOrDefault();
-            String text = llm.chat(sys, question, prepared.snippetMaps());
+
+            // Validate and trim snippets to fit token budget
+            PromptValidator validator = new PromptValidator(cfg);
+            PromptValidator.ValidationResult validation = validator.validateAndTrim(
+                sys, question, prepared.snippetMaps()
+            );
+
+            // Warn if trimming occurred
+            if (validation.wasTrimmed) {
+                System.err.println("WARN RAG_CONTEXT_TRIMMED: Reduced snippets from " +
+                    validation.originalCount + " to " + validation.finalCount +
+                    " to fit " + validation.budgetTokens + " token budget (estimated " +
+                    validation.estimatedTokens + " tokens). Consider reducing :k or enabling vectors.");
+            }
+
+            LlmClient llm = new LlmClient(cfg);
+            String text = llm.chat(sys, question, validation.snippets);
             if (text == null) text = "";
+
+            // Warn if we have retrieval but answer is empty
+            if (!validation.snippets.isEmpty() && text.trim().isEmpty()) {
+                System.err.println("WARN RAG_GEN_EMPTY: Retrieved " + validation.snippets.size() +
+                    " snippets but answer body is empty (promptTokens≈" + validation.estimatedTokens +
+                    ", budget=" + validation.budgetTokens + "). Check model capacity or reduce :k.");
+            }
+
             return new Answer(text, prepared.citations());
         } catch (Exception e) {
             String msg = "Error: " + e.getClass().getSimpleName() + (e.getMessage() == null ? "" : (": " + e.getMessage()));

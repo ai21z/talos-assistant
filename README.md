@@ -556,13 +556,175 @@ loqj status --verbose
 
 ---
 
-## Links
+## Citations-Only or Empty Answers
 
-- **[Technical Analysis](docs/TECHNICAL_ANALYSIS_v0.9.0-beta.md)** - Architecture and implementation details
-- **[Contributing Guide](CONTRIBUTING.md)** - Development workflow and branch policy
-- **[Multi-Workspace Guide](docs/multi-workspace.md)** - Advanced workspace management
+If you see citations but no answer text (or "citations-only" output), this usually means the context exceeded the model's token budget or the model failed to generate a response.
+
+**Symptoms:**
+- Citations appear at the bottom
+- Answer body is missing or empty
+- WARN messages like `RAG_CONTEXT_TRIMMED` or `RAG_GEN_EMPTY`
+
+**Quick Diagnosis:**
+```powershell
+# Run diagnostics to check prompt size and model capacity
+loqj diagnose --mode rag --q "Summarize this project" --k 12 --print-stats
+```
+
+The diagnose command shows:
+- Configuration sources (default, user, ENV)
+- Ollama connection status
+- Token budget and utilization
+- Whether context was trimmed
+- Whether the answer body is empty
+
+**Common Causes & Fixes:**
+
+1. **Context window exceeded (K too high)**
+   ```powershell
+   # Reduce top-K retrieval count
+   loqj rag-ask --k 5 "Your question"
+   # Or in REPL:
+   :k 5
+   ```
+
+2. **Model not running**
+   ```powershell
+   # Check Ollama service
+   ollama list
+   ollama ps
+   ```
+
+3. **Model context limit reached**
+   - Default fallback: 8192 tokens
+   - Configure in `%USERPROFILE%\.loqj\config.yaml`:
+   ```yaml
+   limits:
+     llm_context_max_tokens: 16384  # If your model supports more
+   ```
+
+4. **Large files in snippets**
+   - Enable vectors for better relevance ranking:
+   ```yaml
+   rag:
+     vectors:
+       enabled: true
+   ```
+   ```powershell
+   loqj rag-index --full  # Reindex with embeddings
+   ```
+
+5. **Network/transport disabled**
+   - Check config:
+   ```yaml
+   net:
+     enabled: true
+   llm:
+     transport: "engine"  # Not "placeholder"
+   ```
+
+**Expected Behavior:**
+- Answer text appears **first**
+- Citations appear **second** (at the bottom)
+- If context is trimmed, you'll see a WARN message but still get an answer
 
 ---
 
-**LOQ-J** - Local-Only Java CLI for RAG  
-Version `v0.9.0-beta` • Commit `ec2f6e9`
+## Configuration
+
+LOQ-J uses a layered configuration system with clear precedence:
+
+**Precedence (highest to lowest):**
+1. **CLI flags** (e.g., `--k 10`)
+2. **Environment variables** (e.g., `LOQJ__rag__top_k=10`)
+3. **User config file** (`%USERPROFILE%\.loqj\config.yaml`)
+4. **Default config** (classpath: `src/main/resources/config/default-config.yaml`)
+
+### User Configuration File
+
+Create or edit `%USERPROFILE%\.loqj\config.yaml` to override defaults:
+
+```yaml
+# Example user config.yaml
+rag:
+  top_k: 8                    # Override default retrieval count
+  vectors:
+    enabled: true             # Enable vector search
+
+ollama:
+  host: "http://127.0.0.1:11434"
+  model: "qwen2.5:7b"         # Use different model
+  embed: "bge-m3"
+
+limits:
+  llm_context_max_tokens: 16384   # Override token budget
+  response_max_chars: 20000000    # 20MB response limit
+  llm_timeout_ms: 600000          # 10 minute timeout
+```
+
+**Note:** User config uses `.yaml` extension (not `.yml`).
+
+### Environment Variable Overrides
+
+Set environment variables to override config without editing files:
+
+**Convention:** `LOQJ__section__key=value` maps to `section.key: value`
+
+**Examples:**
+```powershell
+# Windows PowerShell
+$env:LOQJ__rag__top_k = "10"
+$env:LOQJ__limits__llm_context_max_tokens = "16384"
+$env:LOQJ__ollama__model = "llama3.2:3b"
+
+loqj rag-ask "Your question"
+```
+
+```cmd
+REM Windows Command Prompt
+set LOQJ__rag__top_k=10
+set LOQJ__limits__response_max_chars=20000000
+
+loqj rag-ask "Your question"
+```
+
+**Supported types:**
+- Numbers: `LOQJ__rag__top_k=10` → `10` (integer)
+- Booleans: `LOQJ__rag__vectors__enabled=true` → `true`
+- Strings: `LOQJ__ollama__model=qwen3:8b` → `"qwen3:8b"`
+
+### Configuration Reference
+
+**Key settings in `limits` block:**
+```yaml
+limits:
+  top_k_max: 100                      # Maximum allowed K value
+  response_max_chars: 10485760        # 10MB response cap
+  llm_context_max_tokens: 8192        # Token budget for prompt validation
+  llm_timeout_ms: 300000              # 5 minutes
+  file_bytes_max: 20000               # Skip files larger than this
+  file_lines_max: 500                 # Skip files with more lines
+  dir_entries_max: 1000               # Max files per directory
+  dir_depth_max: 10                   # Max directory nesting
+```
+
+**Check active configuration:**
+```powershell
+loqj diagnose --mode rag --q "test" --print-stats
+```
+
+This shows:
+- Default config source
+- User config path (if exists)
+- Number of ENV overrides applied
+
+---
+
+## Multi-Workspace Support
+
+LOQ-J maintains separate indices for each workspace directory:
+
+```powershell
+# Work with web project
+loqj rag-index --root C:\projects\webapp
+```

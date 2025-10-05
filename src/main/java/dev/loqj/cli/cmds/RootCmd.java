@@ -10,7 +10,7 @@ import picocli.CommandLine;
         description = "LOQ-J local RAG agent",
         subcommands = {
                 SetupCmd.class, RagIndexCmd.class, RagAskCmd.class, RunCmd.class,
-                NetCmd.class, TopLevelStatusCmd.class, VersionCmd.class  // Fixed class name
+                NetCmd.class, TopLevelStatusCmd.class, VersionCmd.class, DiagnoseCmd.class
         }
 )
 public class RootCmd implements Runnable {

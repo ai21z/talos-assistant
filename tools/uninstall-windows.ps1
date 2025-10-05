@@ -24,6 +24,15 @@
 
 .EXAMPLE
   pwsh tools/uninstall-windows.ps1
+
+.EXAMPLE
+  pwsh tools/uninstall-windows.ps1 -WhatIf
+
+.EXAMPLE
+  pwsh tools/uninstall-windows.ps1 -Quiet
+
+.EXAMPLE
+  pwsh tools/uninstall-windows.ps1 -Quiet -Purge
 #>
 
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
@@ -47,8 +56,8 @@ if ($resolved) { $InstallDir = $resolved.Path }
 $BinDir   = Join-Path $InstallDir 'bin'
 $UserData = Join-Path $HOME '.loqj'
 
-# 0) Confirm
-if (-not $Quiet) {
+# 0) Confirm (unless -Quiet or -WhatIf or -Confirm:$false)
+if (-not $Quiet -and -not $WhatIfPreference) {
     $dataRemovalText = if ($RemoveUserData) { "YES" } else { "NO" }
     $msg = "Uninstall LOQ-J from:`n  Install: $InstallDir`n  Remove PATH entry: $BinDir`n  Remove user data (~\.loqj): $dataRemovalText"
     $title = "Confirm LOQ-J uninstall"
@@ -57,6 +66,11 @@ if (-not $Quiet) {
     $choices.Add((New-Object Management.Automation.Host.ChoiceDescription "&No", "Cancel"))
     $sel = $Host.UI.PromptForChoice($title, $msg, $choices, 1)
     if ($sel -ne 0) { Write-Host "Cancelled."; return }
+}
+
+# Set ConfirmPreference if -Quiet is specified (suppresses all confirmation prompts)
+if ($Quiet) {
+    $ConfirmPreference = 'None'
 }
 
 # 1) Stop any LOQ-J Java processes (best-effort)
@@ -73,8 +87,10 @@ try {
     if ($procs) {
         foreach ($p in $procs) {
             try {
-                Write-Info ("Stopping PID {0}: {1}" -f $p.ProcessId, $p.Name)
-                Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+                if ($PSCmdlet.ShouldProcess("Process $($p.ProcessId) ($($p.Name))", "Stop-Process")) {
+                    Write-Info ("Stopping PID {0}: {1}" -f $p.ProcessId, $p.Name)
+                    Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+                }
             } catch {}
         }
     } else {
@@ -85,32 +101,35 @@ try {
 }
 
 # 2) Remove LOQ-J bin from User PATH
-function Remove-FromUserPath([string]$target) {
-    if (-not $target) { return $false }
-    $current = [Environment]::GetEnvironmentVariable('Path', 'User')
-    if (-not $current) { return $false }
-    $parts = $current -split ';' | Where-Object { $_ -and $_.Trim() -ne '' }
-    $before = $parts.Count
-    $filtered = foreach ($entry in $parts) {
-        $p = $entry.Trim()
-        if ($p.TrimEnd('\') -ieq $target.TrimEnd('\')) { continue }
-        $p
-    }
-    if ($filtered.Count -ne $before) {
-        $newPath = ($filtered -join ';')
-        [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
-        return $true
-    }
-    return $false
-}
-
 Write-Step "Removing LOQ-J bin from User PATH"
-$removed = Remove-FromUserPath $BinDir
-if ($removed) {
-    Write-Info ("Removed PATH entry: {0}" -f $BinDir)
-    Write-Info "PATH updated in the User profile. Open a NEW terminal to pick up changes."
-} else {
-    Write-Info "No PATH entry found (already removed or never installed)."
+
+if ($PSCmdlet.ShouldProcess($BinDir, "Remove from User PATH")) {
+    $current = [Environment]::GetEnvironmentVariable('Path', 'User')
+
+    if (-not $current) {
+        Write-Info "User PATH is empty (nothing to remove)."
+    } else {
+        $parts = $current -split ';' | Where-Object { $_ -and $_.Trim() -ne '' }
+        $before = $parts.Count
+
+        # Normalize target path for comparison
+        $targetNormalized = $BinDir.TrimEnd('\').ToLower()
+
+        # Filter out entries that match the target path
+        $filtered = $parts | Where-Object {
+            $entryNormalized = $_.Trim().TrimEnd('\').ToLower()
+            $entryNormalized -ne $targetNormalized
+        }
+
+        if ($filtered.Count -ne $before) {
+            $newPath = ($filtered -join ';')
+            [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
+            Write-Info ("Removed PATH entry: {0}" -f $BinDir)
+            Write-Info "PATH updated in the User profile. Open a NEW terminal to pick up changes."
+        } else {
+            Write-Info "No PATH entry found (already removed or never installed)."
+        }
+    }
 }
 
 # 3) Remove install directory

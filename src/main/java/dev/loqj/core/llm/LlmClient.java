@@ -35,6 +35,9 @@ public final class LlmClient implements AutoCloseable {
     private volatile String model;            // model name (or backend-qualified accepted via setModel)
     private final long responseMaxChars;
 
+    // Telemetry: track truncation events
+    private volatile int truncationCount = 0;
+
     public LlmClient(Config cfg) {
         this.cfg = (cfg == null ? new Config() : cfg);
 
@@ -72,6 +75,16 @@ public final class LlmClient implements AutoCloseable {
             }
             try { this.registry.select(this.backend, this.model); } catch (Exception ignore) {}
         }
+    }
+
+    /** Get number of truncation events that occurred (for telemetry/status reporting). */
+    public int getTruncationCount() {
+        return truncationCount;
+    }
+
+    /** Reset telemetry counters. */
+    public void resetTelemetry() {
+        truncationCount = 0;
     }
 
     public String getModel() {
@@ -176,7 +189,7 @@ public final class LlmClient implements AutoCloseable {
         // output sanitation mirrors RenderEngine (strip ANSI/control + think tags) + hard cap
         String cleaned = Sanitize.stripThinkTags(raw);
         cleaned = Sanitize.sanitizeForOutput(cleaned);
-        cleaned = Sanitize.hardTruncate(cleaned, safeCap());
+        cleaned = Sanitize.hardTruncate(cleaned, safeCap(), () -> truncationCount++);
         return cleaned;
     }
 
