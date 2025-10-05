@@ -211,6 +211,7 @@ public class Indexer {
                                     long luceneStart = System.currentTimeMillis();
                                     String currentHash = skipHashing ? null : Hash.sha256Hex(Files.readAllBytes(p));
                                     store.add(c.id(), c.text(), vec, currentHash, c.chunkId());
+                                    stats.incrementChunksWritten();
                                     stats.addLuceneTime(System.currentTimeMillis() - luceneStart);
                                 }
                             } else {
@@ -235,6 +236,7 @@ public class Indexer {
                                     long luceneStart = System.currentTimeMillis();
                                     String currentHash = skipHashing ? null : Hash.sha256Hex(Files.readAllBytes(p));
                                     store.add(c.id(), c.text(), vec, currentHash, c.chunkId());
+                                    stats.incrementChunksWritten();
                                     stats.addLuceneTime(System.currentTimeMillis() - luceneStart);
                                 }
                             }
