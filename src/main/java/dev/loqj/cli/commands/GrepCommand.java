@@ -10,7 +10,6 @@ import java.nio.file.PathMatcher;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.IntStream;
 
 public final class GrepCommand implements Command {
     private final Path workspace;
@@ -23,7 +22,7 @@ public final class GrepCommand implements Command {
         return new CommandSpec("grep",
                 List.of(),
                 ":grep <regex>",
-                "Search for regex patterns in workspace files with line numbers.");
+                "Search for regex patterns in workspace files with line numbers. Patterns are regex; quotes are optional for literals with spaces or punctuation. Example: :grep \"SMOKEPROBE-\"");
     }
 
     @Override public Result execute(String args, Context ctx) {
@@ -33,10 +32,12 @@ public final class GrepCommand implements Command {
 
         String regex = args.trim();
 
-        // Strip surrounding quotes if present (handles both single and double quotes)
-        if ((regex.startsWith("\"") && regex.endsWith("\"") && regex.length() > 1) ||
-            (regex.startsWith("'") && regex.endsWith("'") && regex.length() > 1)) {
-            regex = regex.substring(1, regex.length() - 1);
+        // Strip one layer of surrounding quotes if present (handles both single and double quotes)
+        if (regex.length() > 1) {
+            if ((regex.startsWith("\"") && regex.endsWith("\"")) ||
+                (regex.startsWith("'") && regex.endsWith("'"))) {
+                regex = regex.substring(1, regex.length() - 1);
+            }
         }
 
         try {
@@ -45,18 +46,21 @@ public final class GrepCommand implements Command {
             int totalMatches = 0;
             int fileCount = 0;
 
-            // Get files using filtering that matches the indexer's include patterns
+            // Get files using broader filtering that includes scripts, configs, and markup
             var fs = workspace.getFileSystem();
 
-            // Create matchers for both nested files (**/*.ext) and root-level files (*.ext)
-            PathMatcher codeMatcher = fs.getPathMatcher("glob:**/*.{java,kt,kts,py,rb,go,rs,cpp,c,h,hpp,js,ts,jsx,tsx,php,cs,sh,bat,ps1}");
-            PathMatcher codeRootMatcher = fs.getPathMatcher("glob:*.{java,kt,kts,py,rb,go,rs,cpp,c,h,hpp,js,ts,jsx,tsx,php,cs,sh,bat,ps1}");
+            // Broader file patterns matching user's local validated behavior
+            // Code files (source, scripts, shell)
+            PathMatcher codeMatcher = fs.getPathMatcher("glob:**/*.{java,kt,kts,py,rb,go,rs,cpp,c,h,hpp,js,ts,jsx,tsx,php,cs,sh,bat,cmd,ps1,psm1,gradle}");
+            PathMatcher codeRootMatcher = fs.getPathMatcher("glob:*.{java,kt,kts,py,rb,go,rs,cpp,c,h,hpp,js,ts,jsx,tsx,php,cs,sh,bat,cmd,ps1,psm1,gradle}");
 
+            // Documentation and markup files
             PathMatcher docMatcher = fs.getPathMatcher("glob:**/*.{md,markdown,txt,html,htm,xml}");
             PathMatcher docRootMatcher = fs.getPathMatcher("glob:*.{md,markdown,txt,html,htm,xml}");
 
-            PathMatcher configMatcher = fs.getPathMatcher("glob:**/*.{yaml,yml,json,properties,ini,conf,config,toml,env,gradle}");
-            PathMatcher configRootMatcher = fs.getPathMatcher("glob:*.{yaml,yml,json,properties,ini,conf,config,toml,env,gradle}");
+            // Configuration files
+            PathMatcher configMatcher = fs.getPathMatcher("glob:**/*.{yaml,yml,json,properties,ini,conf,config,toml,env}");
+            PathMatcher configRootMatcher = fs.getPathMatcher("glob:*.{yaml,yml,json,properties,ini,conf,config,toml,env}");
 
             var files = FileWalker.listFiles(workspace, p -> {
                 Path rel = workspace.relativize(p);

@@ -55,8 +55,6 @@ public final class Sanitize {
         if (s == null) return "";
         if (maxChars <= 0) return "";
         if (s.length() <= maxChars) return s;
-        // Log truncation event (debug only, not in user output)
-        System.err.println("[DEBUG] hardTruncate: truncated from " + s.length() + " to " + maxChars + " chars");
         return s.substring(0, maxChars);
     }
 
@@ -66,7 +64,6 @@ public final class Sanitize {
         if (maxChars <= 0) return "";
         if (s.length() <= maxChars) return s;
         if (onTruncate != null) onTruncate.run();
-        System.err.println("[DEBUG] hardTruncate: truncated from " + s.length() + " to " + maxChars + " chars [truncated]");
         return s.substring(0, maxChars);
     }
 

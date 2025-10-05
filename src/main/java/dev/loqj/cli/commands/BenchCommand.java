@@ -2,13 +2,10 @@ package dev.loqj.cli.commands;
 
 import dev.loqj.cli.repl.Context;
 import dev.loqj.cli.repl.Result;
-import dev.loqj.core.CfgUtil;
 import dev.loqj.core.Config;
 import dev.loqj.core.cache.CacheDb;
 import dev.loqj.core.embed.CachingEmbeddings;
 import dev.loqj.core.embed.EmbeddingsClient;
-import dev.loqj.core.index.Indexer;
-import dev.loqj.core.index.IndexingStats;
 import dev.loqj.core.index.LuceneStore;
 import dev.loqj.core.ingest.FileWalker;
 import dev.loqj.core.spi.Embeddings;

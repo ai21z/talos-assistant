@@ -10,6 +10,7 @@ import picocli.CommandLine;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.Objects;
 
 @CommandLine.Command(name = "status", description = "Show current configuration and workspace status")
 public class TopLevelStatusCmd implements Runnable {
@@ -58,7 +59,7 @@ public class TopLevelStatusCmd implements Runnable {
         System.out.println("LOQ-J Status:");
 
         // Workspace and index directory
-        Path indexDir = getIndexDirectory(workspace);
+        Path indexDir = dev.loqj.core.IndexPathResolver.getIndexDirectory(workspace);
         boolean indexExists = Files.exists(indexDir);
         int docCount = indexExists ? getDocCount(indexDir) : 0;
 
@@ -67,7 +68,7 @@ public class TopLevelStatusCmd implements Runnable {
         System.out.println("  Index exists: " + (indexExists ? ("YES (docs=" + docCount + ")") : "NO"));
 
         // Check if we're in the installer directory and show hint
-        if (isInstallerDirectory(workspace)) {
+        if (dev.loqj.cli.CliUtil.isInstallerDirectory(workspace)) {
             System.out.println("  Hint: You are in LOQ-J's install directory. Use --root <project> or set LOQJ_WORKSPACE.");
         }
 
@@ -88,17 +89,20 @@ public class TopLevelStatusCmd implements Runnable {
         // Ollama configuration
         var ollama = CfgUtil.map(cfg.data.get("ollama"));
         if (ollama != null) {
-            String host = (String) ollama.getOrDefault("host", System.getenv("LOQJ_OLLAMA_HOST"));
-            if (host == null) host = "http://127.0.0.1:11434";
+            String host = Objects.toString(ollama.getOrDefault("host", System.getenv("LOQJ_OLLAMA_HOST")));
+            if (host == null || host.isBlank()) {
+                host = "http://127.0.0.1:11434";
+            }
 
             String model = System.getenv("LOQJ_OLLAMA_MODEL");
-            if (model == null) model = (String) ollama.getOrDefault("chat", "qwen2.5:7b");
+            if (model == null) model = Objects.toString(ollama.getOrDefault("chat", "qwen2.5:7b"));
 
             System.out.println("  Ollama host : " + host);
             System.out.println("  Chat model  : " + model);
 
             if (verbose) {
-                String embedModel = (String) ollama.getOrDefault("embed", "bge-m3");
+                // Embeddings: check availability
+                String embedModel = Objects.toString(ollama.getOrDefault("embed", "bge-m3"));
                 System.out.println("  Embed model : " + embedModel);
             }
         }
@@ -111,12 +115,6 @@ public class TopLevelStatusCmd implements Runnable {
         }
     }
 
-    private Path getIndexDirectory(Path workspace) {
-        // Use the same logic as Indexer to compute index path
-        String workspaceHash = Integer.toHexString(workspace.toString().hashCode());
-        return Path.of(System.getProperty("user.home"), ".loqj", "indices", workspaceHash);
-    }
-
     private int getDocCount(Path indexDir) {
         try (Directory dir = FSDirectory.open(indexDir);
              DirectoryReader reader = DirectoryReader.open(dir)) {
@@ -124,17 +122,5 @@ public class TopLevelStatusCmd implements Runnable {
         } catch (Exception e) {
             return 0; // If we can't read the index, assume 0 docs
         }
-    }
-
-    /**
-     * Check if the workspace path indicates we're in the LOQ-J installer directory.
-     */
-    private boolean isInstallerDirectory(Path workspace) {
-        String pathStr = workspace.toString();
-        // Check for common installer directory patterns (platform-independent)
-        return pathStr.contains("build/install/loqj/bin") ||
-               pathStr.contains("build\\install\\loqj\\bin") ||
-               pathStr.endsWith("loqj/bin") ||
-               pathStr.endsWith("loqj\\bin");
     }
 }

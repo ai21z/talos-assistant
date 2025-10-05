@@ -15,7 +15,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 @CommandLine.Command(name="run", description="Interactive LOQ-J REPL")
@@ -84,7 +83,7 @@ public class RunCmd implements Runnable, SessionState {
         } else {
             // Still show active mode and workspace in compact form
             String currentMode = router.getModes().getActiveName();
-            System.out.println("Active mode: " + currentMode + " • Workspace: " + shortenPath(ws));
+            System.out.println("Active mode: " + currentMode + " • Workspace: " + dev.loqj.cli.CliUtil.shortenPath(ws));
         }
 
         try {
@@ -196,12 +195,14 @@ public class RunCmd implements Runnable, SessionState {
         }
         private static int getInt(Map<String,Object> m, String k, int d) {
             if (m == null) return d;
-            Object v = m.get(k); if (v instanceof Number) return ((Number)v).intValue();
+            Object v = m.get(k);
+            if (v instanceof Number n) return n.intValue();
             try { return v==null?d:Integer.parseInt(String.valueOf(v)); } catch(Exception e){ return d; }
         }
         private static long getLong(Map<String,Object> m, String k, long d) {
             if (m == null) return d;
-            Object v = m.get(k); if (v instanceof Number) return ((Number)v).longValue();
+            Object v = m.get(k);
+            if (v instanceof Number n) return n.longValue();
             try { return v==null?d:Long.parseLong(String.valueOf(v)); } catch(Exception e){ return d; }
         }
     }
@@ -259,15 +260,6 @@ Commands:
     }
 
     private static String maskPath(Path path) { return path.getFileName().toString(); }
-
-    private static String shortenPath(Path path) {
-        String home = System.getProperty("user.home");
-        String pathStr = path.toString();
-        if (home != null && !home.isBlank() && pathStr.startsWith(home)) {
-            return "~" + pathStr.substring(home.length()).replace('\\', '/');
-        }
-        return path.getFileName().toString();
-    }
 
     private static String sanitizeOutput(String text) {
         if (text == null) return "";

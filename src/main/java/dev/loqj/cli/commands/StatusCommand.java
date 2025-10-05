@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 
 public final class StatusCommand implements Command {
     private final ModeController modes;
@@ -66,10 +67,10 @@ public final class StatusCommand implements Command {
         }
 
         var oll = CfgUtil.map(cfg.data.get("ollama"));
-        String host = (String) oll.getOrDefault("host", "http://127.0.0.1:11434");
+        String host = Objects.toString(oll.getOrDefault("host", "http://127.0.0.1:11434"));
         // Get active model from LlmClient instead of config default
         String activeModel = ctx.llm().getModel();
-        String embedModel = (String) oll.getOrDefault("embed", "bge-m3");
+        String embedModel = Objects.toString(oll.getOrDefault("embed", "bge-m3"));
 
         sb.append("Current configuration:\n");
         sb.append("  Mode:        ").append(modes.getActiveName()).append("\n");
@@ -131,14 +132,5 @@ public final class StatusCommand implements Command {
 
         sb.append("\n");
         return new Result.TrustedInfo(sb.toString());
-    }
-
-    private static String shortenPath(Path path) {
-        String home = System.getProperty("user.home");
-        String pathStr = path.toString();
-        if (home != null && !home.isBlank() && pathStr.startsWith(home)) {
-            return "~" + pathStr.substring(home.length()).replace('\\', '/');
-        }
-        return path.getFileName().toString();
     }
 }
