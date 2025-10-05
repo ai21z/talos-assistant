@@ -11,6 +11,7 @@ import org.apache.lucene.store.FSDirectory;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Objects;
 
 public final class WorkspaceCommand implements Command {
     private final Path workspace;
@@ -75,8 +76,8 @@ public final class WorkspaceCommand implements Command {
 
             var ollama = CfgUtil.map(cfg.data.get("ollama"));
             if (ollama != null) {
-                String model = (String) ollama.get("embed");
-                if (model != null) embedModel = model;
+                Object modelObj = ollama.get("embed");
+                if (modelObj != null) embedModel = Objects.toString(modelObj);
             }
 
             sb.append("Vectors   : ").append(vectors ? "ON" : "OFF");

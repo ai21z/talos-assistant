@@ -1,7 +1,5 @@
 package dev.loqj.core.rag;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.loqj.core.CfgUtil;
 import dev.loqj.core.Config;
 import dev.loqj.core.embed.CachingEmbeddings;
@@ -11,14 +9,16 @@ import dev.loqj.core.index.LuceneStore;
 import dev.loqj.core.llm.LlmClient;
 import dev.loqj.core.cache.CacheDb;
 import dev.loqj.core.spi.CorpusStore;
-import dev.loqj.core.util.Hash;
 import dev.loqj.core.search.Retriever;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.InputStream;
 import java.nio.file.Path;
 import java.util.*;
 
 public class RagService {
+    private static final Logger LOG = LoggerFactory.getLogger(RagService.class);
 
     private final Config cfg;
     private final Indexer indexer;
@@ -56,7 +56,7 @@ public class RagService {
         try {
             Map<String, Object> rag = CfgUtil.map(cfg.data.get("rag"));
             Object v = (rag == null ? null : rag.get("top_k"));
-            if (v instanceof Number) defaultTopK = ((Number) v).intValue();
+            if (v instanceof Number n) defaultTopK = n.intValue();
             else if (v != null) defaultTopK = Integer.parseInt(String.valueOf(v));
         } catch (Exception ignore) {}
 
@@ -134,11 +134,9 @@ public class RagService {
         try {
             Prepared prepared = prepare(ws, question, kOverride);
 
-            // TEMPORARY FIX: Force network enabled for debugging
-            // If network is disabled we can short-circuit to keep tests fast
+            // Check if network is disabled to short-circuit for fast tests
             Map<String,Object> net = CfgUtil.map(cfg.data.get("net"));
-            boolean netEnabled = true; // Force enable for debugging
-            // boolean netEnabled = !(net.get("enabled") instanceof Boolean b) || b;
+            boolean netEnabled = !(net.get("enabled") instanceof Boolean b) || b;
 
             if (!netEnabled) {
                 String stub = "(net disabled) " + question;
@@ -155,10 +153,8 @@ public class RagService {
 
             // Warn if trimming occurred
             if (validation.wasTrimmed) {
-                System.err.println("WARN RAG_CONTEXT_TRIMMED: Reduced snippets from " +
-                    validation.originalCount + " to " + validation.finalCount +
-                    " to fit " + validation.budgetTokens + " token budget (estimated " +
-                    validation.estimatedTokens + " tokens). Consider reducing :k or enabling vectors.");
+                LOG.warn("RAG_CONTEXT_TRIMMED: Reduced snippets from {} to {} to fit {} token budget (estimated {} tokens). Consider reducing :k or enabling vectors.",
+                    validation.originalCount, validation.finalCount, validation.budgetTokens, validation.estimatedTokens);
             }
 
             LlmClient llm = new LlmClient(cfg);
@@ -167,9 +163,8 @@ public class RagService {
 
             // Warn if we have retrieval but answer is empty
             if (!validation.snippets.isEmpty() && text.trim().isEmpty()) {
-                System.err.println("WARN RAG_GEN_EMPTY: Retrieved " + validation.snippets.size() +
-                    " snippets but answer body is empty (promptTokens≈" + validation.estimatedTokens +
-                    ", budget=" + validation.budgetTokens + "). Check model capacity or reduce :k.");
+                LOG.warn("RAG_GEN_EMPTY: Retrieved {} snippets but answer body is empty (promptTokens≈{}, budget={}). Check model capacity or reduce :k.",
+                    validation.snippets.size(), validation.estimatedTokens, validation.budgetTokens);
             }
 
             return new Answer(text, prepared.citations());
