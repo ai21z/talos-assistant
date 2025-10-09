@@ -34,7 +34,7 @@ public final class HelpCommand implements Command {
         var sb = new StringBuilder();
         sb.append("Available Commands:\n\n");
 
-        // Process each group in order with proper table format
+        // Process each group in order
         var groups = Arrays.asList(
             CommandGroup.BASICS,
             CommandGroup.MODELS,
@@ -53,32 +53,41 @@ public final class HelpCommand implements Command {
             // Sort commands within each group alphabetically
             groupSpecs.sort(Comparator.comparing(CommandSpec::name));
 
-            for (CommandSpec spec : groupSpecs) {
-                // Command column
-                sb.append("  :").append(spec.name());
+            // Calculate max widths for proper alignment
+            int maxCmdLen = groupSpecs.stream().mapToInt(s -> s.name().length()).max().orElse(8);
+            int maxAliasLen = groupSpecs.stream()
+                .mapToInt(s -> {
+                    if (s.aliases().isEmpty()) return 1;
+                    return s.aliases().stream().mapToInt(a -> a.length() + 1).sum() + (s.aliases().size() - 1) * 2;
+                })
+                .max().orElse(5);
+            int maxUsageLen = groupSpecs.stream().mapToInt(s -> s.usage().length()).max().orElse(20);
 
-                // Aliases column
-                String aliasesStr = "";
-                if (!spec.aliases().isEmpty()) {
+            for (CommandSpec spec : groupSpecs) {
+                // Command name (left-aligned, padded)
+                sb.append(String.format("  :%-" + maxCmdLen + "s", spec.name()));
+
+                // Aliases (left-aligned, padded)
+                String aliasesStr;
+                if (spec.aliases().isEmpty()) {
+                    aliasesStr = "-";
+                } else {
                     aliasesStr = spec.aliases().stream()
-                        .map(alias -> ":" + alias)
+                        .map(a -> ":" + a)
                         .collect(Collectors.joining(", "));
                 }
+                sb.append(String.format("  │  %-" + maxAliasLen + "s", aliasesStr));
 
-                // Usage column
-                String usageStr = spec.usage();
+                // Usage (left-aligned, padded)
+                sb.append(String.format("  │  %-" + maxUsageLen + "s", spec.usage()));
 
-                // Format as table: Command | Aliases | Usage | Summary
-                sb.append(String.format(" | %s | %s | %s%n",
-                    aliasesStr.isEmpty() ? "-" : aliasesStr,
-                    usageStr,
-                    spec.summary()));
+                // Summary (no padding needed, end of line)
+                sb.append("  │  ").append(spec.summary()).append("\n");
             }
             sb.append("\n");
         }
 
         sb.append("Use :help <command> for details about a specific command.\n");
-
         return new Result.Ok(sb.toString());
     }
 

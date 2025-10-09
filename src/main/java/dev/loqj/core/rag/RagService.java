@@ -14,14 +14,19 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.InputStream;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class RagService {
     private static final Logger LOG = LoggerFactory.getLogger(RagService.class);
 
     private final Config cfg;
     private final Indexer indexer;
+
+    // Guard against re-entrant lazy indexing
+    private final AtomicBoolean indexingNow = new AtomicBoolean(false);
 
     // very small session-memory field used by RAG+MEMORY mode (optional)
     private String sessionMemory;
@@ -52,6 +57,9 @@ public class RagService {
     public Object reindex(Path root) throws Exception { return indexer.reindex(root); }
 
     public Prepared prepare(Path ws, String query, Integer topKOverride) {
+        // Ensure index exists before retrieval (lazy indexing on first query)
+        ensureIndexExists(ws);
+
         int defaultTopK = 6;
         try {
             Map<String, Object> rag = CfgUtil.map(cfg.data.get("rag"));
@@ -98,15 +106,17 @@ public class RagService {
             var fused = Retriever.fuseRrf(asLuceneHits(bm25), asLuceneHits(knn), 60, Math.max(k * 2, k));
             var finalCands = Retriever.mmr(fused, 0.7, k);
 
-            // Build snippet maps + citations
+            // Build snippet maps + citations (deduplicate citations by file path)
+            var citationSet = new LinkedHashSet<String>(finalCands.size());
             for (var c : finalCands) {
                 String text = store.getTextByPath(c.path);
                 if (text == null || text.isBlank()) continue;
                 snippets.add(Map.of("path", c.path, "text", text));
-                citations.add(stripChunkId(c.path));
+                citationSet.add(stripChunkId(c.path)); // Dedupe: same file won't appear multiple times
             }
+            citations.addAll(citationSet);
         } catch (Exception e) {
-            // On any failure, return empty (don’t explode CLI)
+            // On any failure, return empty (don't explode CLI)
         }
 
         return new Prepared(snippets, citations);
@@ -180,5 +190,48 @@ public class RagService {
     public void updateMemory(String userInput, String answer, int maxItems, int maxNames) {
         String s = (sessionMemory == null ? "" : sessionMemory + "\n") + userInput + "\n" + answer;
         sessionMemory = (s.length() > 4000 ? s.substring(s.length() - 4000) : s);
+    }
+
+    /**
+     * Ensures index exists for the given workspace. If missing or unreadable, performs lazy indexing.
+     * Guard with AtomicBoolean to prevent re-entrancy. Falls back to full rebuild on corruption.
+     */
+    private void ensureIndexExists(Path workspace) {
+        Path indexDir = indexer.indexDirFor(workspace);
+
+        // Check if index exists and is readable
+        if (Files.exists(indexDir) && Files.isDirectory(indexDir)) {
+            // Try to verify it's a valid Lucene index by attempting to open it
+            try (LuceneStore store = new LuceneStore(indexDir, 0)) {
+                // If we can open it, assume it's valid
+                return;
+            } catch (Exception e) {
+                // Index exists but is corrupted - log and proceed to rebuild
+                LOG.warn("Index directory exists but appears corrupted, will rebuild: {}", e.getMessage());
+            }
+        }
+
+        // Index missing or corrupted - attempt lazy indexing
+        if (!indexingNow.compareAndSet(false, true)) {
+            // Already indexing in another thread/call, skip
+            return;
+        }
+
+        try {
+            System.out.print("\rIndexing workspace (first RAG query)... ");
+            System.out.flush();
+
+            // Perform indexing with current config (respects vectors setting)
+            indexer.index(workspace, false);
+
+            // Print final summary (Indexer already prints this, but ensure newline)
+            System.out.println();
+
+        } catch (Exception e) {
+            LOG.error("Lazy indexing failed: {}", e.getMessage(), e);
+            System.err.println("\rIndexing failed: " + e.getMessage());
+        } finally {
+            indexingNow.set(false);
+        }
     }
 }

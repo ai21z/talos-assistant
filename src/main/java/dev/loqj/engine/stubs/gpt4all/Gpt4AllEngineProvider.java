@@ -11,9 +11,13 @@ import dev.loqj.spi.*;
 public final class Gpt4AllEngineProvider implements ModelEngineProvider {
     @Override public String id() { return "gpt4all"; }
 
-    @SuppressWarnings("removal")
-    @Override public ModelEngine create(Config cfg) { return new Gpt4AllEngine(); }
+    @Override
+    public ModelEngine create(Config cfg) {
+        throw new UnsupportedOperationException("Gpt4All stub - not implemented. Use Ollama.");
+    }
 
-    @SuppressWarnings("removal")
-    @Override public ModelCatalog catalog(Config cfg) { return new Gpt4AllCatalog(); }
+    @Override
+    public ModelCatalog catalog(Config cfg) {
+        throw new UnsupportedOperationException("Gpt4All stub - not implemented. Use Ollama.");
+    }
 }
