@@ -5,13 +5,39 @@
 
 Fast, private, citation-backed answers grounded in your current directory. LOQ-J is a local-first RAG (Retrieval-Augmented Generation) CLI that indexes your project files and enables intelligent questioning without sending data to external services.
 
-## Why Local-First?
+---
+
+## Table of Contents
+
+- [Why LOQ-J?](#why-loq-j)
+- [Prerequisites (Windows)](#prerequisites-windows)
+- [Installation (Windows)](#installation-windows)
+- [Quick Start](#quick-start)
+- [Commands & Modes](#commands--modes)
+  - [CLI Commands](#cli-commands)
+  - [Interactive REPL Commands](#interactive-repl-commands)
+  - [Available Modes](#available-modes)
+- [Embeddings: bge-m3](#embeddings-bge-m3)
+- [Understanding K (Top-K)](#understanding-k-top-k)
+- [Best Practices](#best-practices)
+- [Per-Workspace Indexing](#per-workspace-indexing)
+- [Configuration](#configuration)
+- [Troubleshooting](#troubleshooting)
+- [Citations-Only or Empty Answers](#citations-only-or-empty-answers)
+
+---
+
+## Why LOQ-J?
 
 - **Privacy**: Your code never leaves your machine
 - **Speed**: No network latency for indexing or retrieval
-- **Security**: No telemetry, no external API calls, full air-gap capability
+- **Security**: No telemetry, no external API calls, localhost-only operation
+- **Per-Workspace Indexing**: Each project gets its own isolated search index
 - **Control**: Customize indexing rules, embedding models, and retrieval parameters
 - **Offline**: Works completely disconnected from the internet
+
+**Note on "Air-Gap" Operation:**
+LOQ-J requires no external internet connectivity once models are downloaded. All processing happens locally via Ollama (which uses localhost HTTP communication). This is "air-gapped" in the sense that no data leaves your machine, though the localhost network stack is used for inter-process communication.
 
 ---
 
@@ -140,6 +166,7 @@ loqj rag-ask --root C:\other\project "What are the main components?"
 | `loqj rag-index` | Index repository files | `--root`, `--full`, `--json`, `--stats` | `loqj rag-index --full` |
 | `loqj rag-ask` | Ask with RAG retrieval | `--root`, `--k` + `<question>` | `loqj rag-ask --k 5 "How does login work?"` |
 | `loqj status` | Show workspace status | `--root`, `--verbose` | `loqj status --verbose` |
+| `loqj diagnose` | Diagnose RAG configuration | `--mode`, `--k`, `-q/--question`, `--print-stats` | `loqj diagnose --mode rag --q "test" --print-stats` |
 | `loqj version` | Version information | None | `loqj version` |
 | `loqj setup` | First-run configuration | Various setup options | `loqj setup` |
 | `loqj net` | Network configuration | Network-related options | `loqj net` |
@@ -149,11 +176,16 @@ loqj rag-ask --root C:\other\project "What are the main components?"
 | Command | Purpose | Example | Notes |
 |---------|---------|---------|-------|
 | `:help` | Show available commands | `:help` | Lists all REPL commands |
+| `:files` | List directories and files | `:files` | Shows workspace directory structure and indexed files |
+| `:grep <regex>` | Search for patterns in files | `:grep "TODO"` | Searches workspace files with line numbers |
+| `:workspace` | Show current workspace info | `:workspace` | Displays workspace path, index location, and doc count |
 | `:mode <mode>` | Switch active mode | `:mode rag` | Modes: ask, rag, rag+memory, dev, web, auto |
 | `:k <number>` | Set retrieval top-K | `:k 10` | Range: 1-100, affects context size |
 | `:debug on\|off` | Toggle debug output | `:debug on` | Shows retrieved chunks and scores |
 | `:models` | List available models | `:models` | Shows Ollama models |
 | `:set model <name>` | Switch LLM model | `:set model qwen2.5:7b` | Must be pulled in Ollama first |
+| `:set <key> <value>` | Set configuration value | `:set top_k 10` | Runtime configuration changes |
+| `:show <key>` | Show configuration value | `:show top_k` | Display current setting |
 | `:reindex` | Rebuild current index | `:reindex` | Forces full reindex of workspace |
 | `:status` | Show workspace info | `:status --verbose` | Configuration and index stats |
 | `:memory clear` | Clear conversation | `:memory clear` | Resets context in memory modes |
@@ -294,10 +326,24 @@ How does the authentication system work in this codebase?
 What are the main REST endpoints defined here?
 Show me how error handling is implemented.
 
+# Comparing files (both separators work)
+Summarize the differences between README.md and docs\landing.md
+Compare docs/landing.md with README.md
+
+# Referencing nested files
+What does src\main\java\App.java do?
+Explain the config/app.yml settings
+
 # Less effective - too generic
 What is this project about?
 Help me code.
 ```
+
+**Path Separator Equivalence:**
+- You can reference files with either `\` (Windows) or `/` (POSIX) separators
+- LOQ-J treats them identically and normalizes paths in `[Sources]` output
+- Example: `docs\landing.md` and `docs/landing.md` refer to the same file
+- Sources are always displayed with forward slashes for cross-platform consistency
 
 **Ask mode (`:mode ask`):**
 ```
@@ -341,29 +387,70 @@ loqj rag-index
 
 ---
 
-## Multi-Workspace Support
+## Per-Workspace Indexing
 
-LOQ-J maintains separate indices for each workspace directory:
+LOQ-J creates a separate search index for each workspace directory you work with.
+
+### How It Works
+
+**One workspace per terminal session:**
+- Each `loqj` process works with **one workspace at a time**
+- The workspace is determined by: `--root` flag, `LOQJ_WORKSPACE` environment variable, or current directory
+- Different terminal windows can work with different workspaces independently
+
+**Isolated indices:**
+- Each workspace gets its own Lucene index stored at `%USERPROFILE%\.loqj\indices\<workspace-hash>\`
+- The hash is computed from the absolute workspace path
+- Switching workspaces means switching to a completely different index
+- No mixing of results across workspaces
+
+### Usage Examples
+
+**Working with different projects:**
 
 ```powershell
-# Work with web project
-loqj rag-index --root C:\projects\webapp
+# Terminal 1: Working with web app
+cd C:\projects\webapp
+loqj rag-index
+loqj rag-ask "What APIs are exposed?"
 ```
 
 ```powershell
+# Terminal 2: Working with mobile app (completely separate)
+cd C:\projects\mobile-app
+loqj rag-index
+loqj rag-ask "How is data stored locally?"
+```
+
+```powershell
+# Terminal 3: Working with desktop app (another separate workspace)
+cd C:\projects\desktop-app
+loqj rag-index
+loqj rag-ask "What frameworks are used?"
+```
+
+**Switching workspaces in the same terminal:**
+
+```powershell
+# Index first project
+loqj rag-index --root C:\projects\webapp
 loqj rag-ask --root C:\projects\webapp "What APIs are exposed?"
 ```
 
 ```powershell
-# Switch to mobile project (completely separate context)
+# Switch to second project
 loqj rag-index --root C:\projects\mobile-app
-```
-
-```powershell
 loqj rag-ask --root C:\projects\mobile-app "How is data stored locally?"
 ```
 
-**Environment variable shortcut:**
+```powershell
+# Switch to third project
+loqj rag-index --root C:\projects\desktop-app
+loqj rag-ask --root C:\projects\desktop-app "What frameworks are used?"
+```
+
+**Using environment variable for default workspace:**
+
 ```powershell
 # Set default workspace (avoids typing --root every time)
 $env:LOQJ_WORKSPACE = "C:\projects\webapp"
@@ -371,16 +458,25 @@ $env:LOQJ_WORKSPACE = "C:\projects\webapp"
 
 ```powershell
 loqj status          # Now uses webapp by default
-```
-
-```powershell
 loqj rag-ask "question"
 ```
 
-**Index storage locations:**
-- `%USERPROFILE%\.loqj\indices\<workspace-hash>\`
-- Each workspace gets isolated Lucene index
+### Index Management
+
+**Index storage:**
+- Location: `%USERPROFILE%\.loqj\indices\<workspace-hash>\`
+- Each workspace gets its own subdirectory based on a hash of its path
+- Indices persist across loqj sessions
+
+**Cleaning indices:**
+- **No built-in index cleanup command** - indices are kept indefinitely
+- Manual cleanup: Delete `%USERPROFILE%\.loqj\indices\` directory or specific workspace subdirectories
+- Uninstall with cleanup: `pwsh tools\uninstall-windows.ps1 -Purge` removes all indices
+
+**Index isolation guarantees:**
 - No cross-contamination between projects
+- Each workspace can have different include/exclude patterns
+- Switching workspaces is instant (just changes which index to query)
 
 ---
 
@@ -418,14 +514,14 @@ net:
 
 # Performance limits
 limits:
-  top_k_max: 100              # Maximum K value
-  response_max_chars: 10485760  # 10MB response limit
-  file_bytes_max: 20000       # Max file size to index
-  file_lines_max: 500         # Max lines per file
-  dir_entries_max: 1000       # Max files per directory
-  llm_timeout_ms: 300000      # 5 minute LLM timeout
-  file_timeout_ms: 10000      # 10 second file I/O timeout
-  rate_per_sec: 10            # Request rate limiting
+  top_k_max: 100                      # Maximum allowed K value
+  response_max_chars: 10485760        # 10MB response cap
+  llm_context_max_tokens: 8192        # Token budget for prompt validation
+  llm_timeout_ms: 300000              # 5 minutes
+  file_bytes_max: 20000               # Skip files larger than this
+  file_lines_max: 500                 # Skip files with more lines
+  dir_entries_max: 1000               # Max files per directory
+  dir_depth_max: 10                   # Max directory nesting
 ```
 
 ### Environment Variables
@@ -627,104 +723,3 @@ The diagnose command shows:
 - Answer text appears **first**
 - Citations appear **second** (at the bottom)
 - If context is trimmed, you'll see a WARN message but still get an answer
-
----
-
-## Configuration
-
-LOQ-J uses a layered configuration system with clear precedence:
-
-**Precedence (highest to lowest):**
-1. **CLI flags** (e.g., `--k 10`)
-2. **Environment variables** (e.g., `LOQJ__rag__top_k=10`)
-3. **User config file** (`%USERPROFILE%\.loqj\config.yaml`)
-4. **Default config** (classpath: `src/main/resources/config/default-config.yaml`)
-
-### User Configuration File
-
-Create or edit `%USERPROFILE%\.loqj\config.yaml` to override defaults:
-
-```yaml
-# Example user config.yaml
-rag:
-  top_k: 8                    # Override default retrieval count
-  vectors:
-    enabled: true             # Enable vector search
-
-ollama:
-  host: "http://127.0.0.1:11434"
-  model: "qwen2.5:7b"         # Use different model
-  embed: "bge-m3"
-
-limits:
-  llm_context_max_tokens: 16384   # Override token budget
-  response_max_chars: 20000000    # 20MB response limit
-  llm_timeout_ms: 600000          # 10 minute timeout
-```
-
-**Note:** User config uses `.yaml` extension (not `.yml`).
-
-### Environment Variable Overrides
-
-Set environment variables to override config without editing files:
-
-**Convention:** `LOQJ__section__key=value` maps to `section.key: value`
-
-**Examples:**
-```powershell
-# Windows PowerShell
-$env:LOQJ__rag__top_k = "10"
-$env:LOQJ__limits__llm_context_max_tokens = "16384"
-$env:LOQJ__ollama__model = "llama3.2:3b"
-
-loqj rag-ask "Your question"
-```
-
-```cmd
-REM Windows Command Prompt
-set LOQJ__rag__top_k=10
-set LOQJ__limits__response_max_chars=20000000
-
-loqj rag-ask "Your question"
-```
-
-**Supported types:**
-- Numbers: `LOQJ__rag__top_k=10` → `10` (integer)
-- Booleans: `LOQJ__rag__vectors__enabled=true` → `true`
-- Strings: `LOQJ__ollama__model=qwen3:8b` → `"qwen3:8b"`
-
-### Configuration Reference
-
-**Key settings in `limits` block:**
-```yaml
-limits:
-  top_k_max: 100                      # Maximum allowed K value
-  response_max_chars: 10485760        # 10MB response cap
-  llm_context_max_tokens: 8192        # Token budget for prompt validation
-  llm_timeout_ms: 300000              # 5 minutes
-  file_bytes_max: 20000               # Skip files larger than this
-  file_lines_max: 500                 # Skip files with more lines
-  dir_entries_max: 1000               # Max files per directory
-  dir_depth_max: 10                   # Max directory nesting
-```
-
-**Check active configuration:**
-```powershell
-loqj diagnose --mode rag --q "test" --print-stats
-```
-
-This shows:
-- Default config source
-- User config path (if exists)
-- Number of ENV overrides applied
-
----
-
-## Multi-Workspace Support
-
-LOQ-J maintains separate indices for each workspace directory:
-
-```powershell
-# Work with web project
-loqj rag-index --root C:\projects\webapp
-```
