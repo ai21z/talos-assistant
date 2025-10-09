@@ -67,6 +67,11 @@ test_performance.java
 validation_commands.txt
 test-remote-config.yaml
 
+# ---- Scratch/throwaway test files in root
+/test_*.java
+/test_*.class
+*.class
+
 # ---- Temporary & editor files
 *.tmp
 *.swp
