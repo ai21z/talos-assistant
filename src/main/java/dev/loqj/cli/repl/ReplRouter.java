@@ -16,10 +16,10 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * ReplRouter:
- *  - Dispatches colon-commands via CommandRegistry + ExecutionPipeline
- *  - Routes non-colon prompts through ModeController
- *  - Renders Results via RenderEngine
+ * REPL router that dispatches commands and prompts:
+ *  - Colon-commands are dispatched via CommandRegistry and ExecutionPipeline
+ *  - Non-colon prompts are routed through ModeController
+ *  - Results are rendered via RenderEngine
  */
 public final class ReplRouter {
 
@@ -40,7 +40,7 @@ public final class ReplRouter {
         this.cfg       = (cfg == null ? new Config() : cfg);
         this.workspace = (workspace == null ? Path.of(".") : workspace);
 
-        // compose all pieces explicitly
+        // All components are composed explicitly
         Audit    audit    = new Audit();
         Redactor redactor = new Redactor();
         Sandbox  sandbox  = new Sandbox(this.workspace, Map.of());
@@ -86,10 +86,15 @@ public final class ReplRouter {
 
         Path ws = (workspaceOverride == null ? this.workspace : workspaceOverride);
 
+        // Spinner is started before execution
+        render.startSpinner();
+
         Result r = pipe.run(() ->
                         modes.route(rawLine, ws, ctx, activeModeName).orElse(null),
                 ctx, "(prompt)"
         );
+
+        // Spinner is stopped automatically by render
         if (r == null) return false;
         render.render(r);
         return true;
@@ -119,10 +124,11 @@ public final class ReplRouter {
         registry.register(new SetModelCommand());
         registry.register(new ModeCommand(modes));
         registry.register(new StatusCommand(modes, this.workspace));
-        registry.register(new WorkspaceCommand(this.workspace));  // NEW: :workspace command
+        registry.register(new WorkspaceCommand(this.workspace));
         registry.register(new ReindexCommand(this.workspace));
         registry.register(new MemoryCommand());
         // DX commands for workspace exploration
+        registry.register(new FilesCommand(this.workspace));
         registry.register(new GrepCommand(this.workspace));
         registry.register(new ShowCommand(this.workspace));
         // Performance benchmarking
