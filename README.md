@@ -179,7 +179,7 @@ loqj rag-ask --root C:\other\project "What are the main components?"
 | `:files` | List directories and files | `:files` | Shows workspace directory structure and indexed files |
 | `:grep <regex>` | Search for patterns in files | `:grep "TODO"` | Searches workspace files with line numbers |
 | `:workspace` | Show current workspace info | `:workspace` | Displays workspace path, index location, and doc count |
-| `:mode <mode>` | Switch active mode | `:mode rag` | Modes: ask, rag, rag+memory, dev, web, auto |
+| `:mode <mode>` | Switch active mode | `:mode rag` | Modes: ask, rag, dev, auto |
 | `:k <number>` | Set retrieval top-K | `:k 10` | Range: 1-100, affects context size |
 | `:debug on\|off` | Toggle debug output | `:debug on` | Shows retrieved chunks and scores |
 | `:models` | List available models | `:models` | Shows Ollama models |
@@ -188,7 +188,6 @@ loqj rag-ask --root C:\other\project "What are the main components?"
 | `:show <key>` | Show configuration value | `:show top_k` | Display current setting |
 | `:reindex` | Rebuild current index | `:reindex` | Forces full reindex of workspace |
 | `:status` | Show workspace info | `:status --verbose` | Configuration and index stats |
-| `:memory clear` | Clear conversation | `:memory clear` | Resets context in memory modes |
 | `:q` | Quit | `:q` | Exit REPL |
 
 ### Available Modes
@@ -197,10 +196,13 @@ loqj rag-ask --root C:\other\project "What are the main components?"
 |------|---------|-------------|
 | `ask` | General Q&A (no indexing) | General questions, no project context needed |
 | `rag` | Project-aware retrieval | Questions about your indexed codebase |
-| `rag+memory` | RAG with conversation history | Multi-turn conversations about code |
-| `dev` | Development-focused prompts | Code review, debugging, architecture questions |
-| `web` | Web-search augmented | External information lookup (requires net.enabled) |
+| `dev` | Local file operations | View files and list directories (`ls`, `open`, `show`) |
 | `auto` | Smart mode selection | Let LOQ-J choose the best mode for your question |
+
+**Notes on modes:**
+- `rag+memory` mode exists in code but is **deprecated and non-functional** (just redirects to `rag`)
+- `web` mode is **not implemented** (placeholder only, returns "reserved" message)
+- For actual functionality, use `ask`, `rag`, `dev`, or `auto`
 
 ---
 
@@ -355,10 +357,11 @@ Explain microservices architecture.
 
 **Dev mode (`:mode dev`):**
 ```
-# Good prompts - development-focused
-Review this authentication flow for security issues.
-What architectural improvements would you suggest?
-How can I optimize this database query?
+# File operations
+ls                    # List current directory
+ls src/main          # List specific directory
+open README.md       # View file contents
+show config/app.yml  # View configuration file
 ```
 
 ### Performance Tips
