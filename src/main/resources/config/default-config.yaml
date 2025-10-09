@@ -95,10 +95,16 @@ limits:
   top_k_max: 100
   response_max_chars: 10485760   # 10 MiB
   dir_depth_max: 10
-  file_bytes_max: 20000
-  file_lines_max: 500
+  file_bytes_max: 200000         # 200 KB for realistic docs
+  file_lines_max: 8000           # 8000 lines
   dir_entries_max: 1000
   llm_timeout_ms: 300000         # 5 minutes
   file_timeout_ms: 10000         # 10 seconds
   rate_per_sec: 10
   llm_context_max_tokens: 8192   # Default token budget for prompt validation (fallback if model info unavailable)
+
+ui:
+  show_status_during_answer: true
+  show_timing_after_answer: true
+  show_breakdown: false
+  status_label: "Answering…"

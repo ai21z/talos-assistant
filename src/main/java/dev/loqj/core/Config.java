@@ -211,13 +211,22 @@ public class Config {
         putIfAbsent(limits, "top_k_max",          100, "limits.top_k_max");
         putIfAbsent(limits, "response_max_chars", 10 * 1024 * 1024L, "limits.response_max_chars");
         putIfAbsent(limits, "dir_depth_max",      10, "limits.dir_depth_max");
-        putIfAbsent(limits, "file_bytes_max",     20_000, "limits.file_bytes_max");
-        putIfAbsent(limits, "file_lines_max",     500, "limits.file_lines_max");
+        putIfAbsent(limits, "file_bytes_max",     200_000, "limits.file_bytes_max");  // Raised to 200 KB for realistic docs
+        putIfAbsent(limits, "file_lines_max",     8_000, "limits.file_lines_max");    // Raised to 8000 lines
         putIfAbsent(limits, "dir_entries_max",    1000, "limits.dir_entries_max");
         putIfAbsent(limits, "llm_timeout_ms",     300_000L, "limits.llm_timeout_ms");
         putIfAbsent(limits, "file_timeout_ms",    10_000L, "limits.file_timeout_ms");
         putIfAbsent(limits, "rate_per_sec",       10, "limits.rate_per_sec");
-        putIfAbsent(limits, "llm_context_max_tokens", 8192, "limits.llm_context_max_tokens"); // Safe default for token budget
+        putIfAbsent(limits, "llm_context_max_tokens", 8192, "limits.llm_context_max_tokens");
+
+        // ----- ui -----
+        Map<String,Object> ui = map(data.get("ui"));
+        if (ui == null) { ui = new LinkedHashMap<>(); data.put("ui", ui); defaulted("ui"); }
+
+        putIfAbsent(ui, "show_status_during_answer", true, "ui.show_status_during_answer");
+        putIfAbsent(ui, "show_timing_after_answer", true, "ui.show_timing_after_answer");
+        putIfAbsent(ui, "show_breakdown", false, "ui.show_breakdown");
+        putIfAbsent(ui, "status_label", "Answering…", "ui.status_label");
     }
 
     @SuppressWarnings("unchecked")

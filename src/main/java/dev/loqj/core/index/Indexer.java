@@ -381,15 +381,21 @@ public class Indexer {
 
     /**
      * Converts a glob pattern to a case-insensitive regex pattern.
+     * Properly handles ** for recursive directory matching.
      */
     private Pattern globToRegexPattern(String glob) {
         String regex = glob.toLowerCase(Locale.ROOT)
             .replace(".", "\\.")
-            .replace("**/", "DOUBLE_STAR_PLACEHOLDER")
-            .replace("**", ".*")
-            .replace("DOUBLE_STAR_PLACEHOLDER", ".*")
+            // Use placeholders to prevent interference from subsequent replacements
+            .replace("**/", "__DOUBLESTAR_SLASH__")
+            .replace("**", "__DOUBLESTAR__")
+            // Now replace single * (won't affect placeholders)
             .replace("*", "[^/]*")
-            .replace("?", ".");
+            // Replace ? (single character, not separator)
+            .replace("?", "[^/]")
+            // Finally replace placeholders with actual regex patterns
+            .replace("__DOUBLESTAR_SLASH__", "(?:.*/)?")  // Matches zero or more directory levels
+            .replace("__DOUBLESTAR__", ".*");              // Matches anything
 
         return Pattern.compile("^" + regex + "$", Pattern.CASE_INSENSITIVE);
     }

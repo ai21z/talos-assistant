@@ -1,11 +1,13 @@
 package dev.loqj.cli.cmds;
 
+import dev.loqj.core.CfgUtil;
 import dev.loqj.core.Config;
 import dev.loqj.core.rag.RagService;
 import picocli.CommandLine;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 
 @CommandLine.Command(name="rag-ask", description="Ask with RAG")
 public class RagAskCmd implements Runnable {
@@ -20,12 +22,49 @@ public class RagAskCmd implements Runnable {
                 System.err.println("rag-ask failed: not a directory: " + r);
                 return;
             }
-            var ans = new RagService(new Config()).ask(r, question, k);
+
+            Config cfg = new Config();
+
+            // UI config is read
+            Map<String, Object> ui = CfgUtil.map(cfg.data.get("ui"));
+            boolean showStatus = ui == null || !(ui.get("show_status_during_answer") instanceof Boolean b) || b;
+            boolean showTiming = ui == null || !(ui.get("show_timing_after_answer") instanceof Boolean b2) || b2;
+            String statusLabel = ui == null ? "Answering…" : String.valueOf(ui.getOrDefault("status_label", "Answering…"));
+
+            long t0 = System.nanoTime();
+
+            // Pre-answer status is shown
+            if (showStatus) {
+                System.out.print("\r" + statusLabel + " ");
+                System.out.flush();
+            }
+
+            var ans = new RagService(cfg).ask(r, question, k);
+
+            long elapsed = System.nanoTime() - t0;
+
+            // Status line is cleared before printing answer
+            if (showStatus) {
+                System.out.print("\r" + " ".repeat(statusLabel.length() + 1) + "\r");
+                System.out.flush();
+            }
+
             System.out.println(ans.text());
             if (!ans.citations().isEmpty()) {
-                System.out.println("\n[Citations]");
-                for (var c : ans.citations()) System.out.println(" - " + c);
+                System.out.println("\n[Sources]");
+                for (var c : ans.citations()) {
+                    // Paths are normalized to forward slashes
+                    String normalized = c.replace('\\', '/');
+                    System.out.println(" - " + normalized);
+                }
             }
+
+            // Post-answer timing is shown
+            if (showTiming) {
+                String timeStr = formatElapsedTime(elapsed);
+                System.out.println("\nCompleted in " + timeStr + ".");
+            }
+
         } catch (Exception e) {
             System.err.println("rag-ask failed: " + e.getMessage());
         }
@@ -42,5 +81,26 @@ public class RagAskCmd implements Runnable {
         }
 
         return Path.of(".").toAbsolutePath().normalize();
+    }
+
+    /**
+     * Formats elapsed time according to spec:
+     * <1s → XYZms
+     * 1-59s → X.Ys
+     * >=60s → M:SS
+     */
+    private static String formatElapsedTime(long nanos) {
+        long millis = nanos / 1_000_000;
+        if (millis < 1000) {
+            return millis + "ms";
+        }
+        double seconds = millis / 1000.0;
+        if (seconds < 60) {
+            return String.format("%.1fs", seconds);
+        }
+        long totalSeconds = (long) seconds;
+        long minutes = totalSeconds / 60;
+        long secs = totalSeconds % 60;
+        return String.format("%d:%02d", minutes, secs);
     }
 }

@@ -236,6 +236,52 @@ public class LuceneStore implements AutoCloseable, CorpusStore {
     }
 
     /**
+     * Match-all listing, ordered by path for stable grouping.
+     * Use this instead of bm25("*") which doesn't work as expected.
+     */
+    public List<CorpusStore.Hit> matchAll(int k) {
+        IndexSearcher s = null;
+        try {
+            s = sm.acquire();
+            var query = new MatchAllDocsQuery();
+            TopDocs td = s.search(query, k);
+
+            StoredFields stored = s.storedFields();
+            var hits = new ArrayList<CorpusStore.Hit>(td.scoreDocs.length);
+            for (ScoreDoc sd : td.scoreDocs) {
+                var d = stored.document(sd.doc);
+                String path = d.get(F_PATH);
+                if (path != null) {
+                    hits.add(new CorpusStore.Hit(path, sd.score));
+                }
+            }
+
+            // Sort by path for deterministic output
+            hits.sort(java.util.Comparator.comparing(CorpusStore.Hit::path, String.CASE_INSENSITIVE_ORDER));
+            return hits;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        } finally {
+            if (s != null) try { sm.release(s); } catch (IOException ignore) {}
+        }
+    }
+
+    /**
+     * Number of live docs in the index for diagnostics.
+     */
+    public int numDocs() {
+        IndexSearcher s = null;
+        try {
+            s = sm.acquire();
+            return s.getIndexReader().numDocs();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        } finally {
+            if (s != null) try { sm.release(s); } catch (IOException ignore) {}
+        }
+    }
+
+    /**
      * Check if a file with given path and hash is already up-to-date in the index.
      * Used to skip re-embedding unchanged chunks during incremental indexing.
      */
