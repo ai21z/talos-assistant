@@ -15,7 +15,7 @@ This document provides a technical deep-dive into LOQ-J's architecture, implemen
 - [Configuration Model](#configuration-model)
 - [LLM Client Architecture](#llm-client-architecture)
 - [First-Run & Context Directory](#first-run--context-directory)
-- [Multi-Workspace Support](#multi-workspace-support)
+- [Per-Workspace Indexing](#per-workspace-indexing)
 - [Test Coverage & Limits](#test-coverage--limits)
 - [Operational Notes](#operational-notes)
 
@@ -27,6 +27,10 @@ LOQ-J follows a layered architecture with clear separation of concerns:
 
 ```
 ┌─────────────────────────────────────────┐
+│ App Layer (dev.loqj.app)                │
+│ ├── Main.java (Entry point)             │
+│ └── ui/ (First-run wizard)              │
+├─────────────────────────────────────────┤
 │ CLI Layer (dev.loqj.cli)                │
 │ ├── cmds/ (Picocli commands)            │
 │ ├── modes/ (REPL interaction modes)     │
@@ -53,13 +57,113 @@ LOQ-J follows a layered architecture with clear separation of concerns:
 └─────────────────────────────────────────┘
 ```
 
+### Layer Descriptions
+
+#### App Layer (`dev.loqj.app`)
+Application entry point and first-run setup.
+
+- **`Main.java`** - Entry point; checks if first-run wizard is needed, otherwise launches Picocli command parsing
+- **`ui/FirstRunWizard`** - Interactive setup wizard that creates `~/.loqj/` directory structure and validates Ollama models on first launch
+
+#### CLI Layer (`dev.loqj.cli`)
+Command-line interface and interactive REPL.
+
+- **`cmds/`** - Picocli command implementations for batch operations
+  - `RootCmd` - Main command that delegates to subcommands
+  - `RunCmd` - Launches interactive REPL with JLine terminal
+  - `RagIndexCmd` - Batch indexing command
+  - `RagAskCmd` - One-shot RAG query command
+  - `StatusCmd` - Shows workspace and configuration status
+  - `SetupCmd`, `NetCmd`, `VersionCmd`, `DiagnoseCmd` - Utility commands
+
+- **`modes/`** - REPL interaction strategies for different query types
+  - `Mode` - Interface defining `canHandle()` and `handle()` methods
+  - `AskMode` - Direct LLM queries without indexing
+  - `RagMode` - Retrieval-augmented generation using workspace index
+  - `AutoMode` - Automatic mode selection based on query heuristics
+  - `DevMode`, `WebMode` - Specialized prompting strategies
+  - `ModeController` - Routes user prompts to appropriate mode
+
+- **`repl/`** - Interactive shell infrastructure
+  - `ReplRouter` - Dispatches colon-commands and routes natural language prompts through modes
+  - `RenderEngine` - Formats and displays results in terminal (spinner, boxes, sanitization)
+  - `ExecutionPipeline` - Rate-limiting and validation for command execution
+  - `SessionState` - Tracks per-session settings (k, debug mode)
+  - `Context` - Provides access to RAG service, config, and workspace for commands
+
+- **`commands/`** - REPL colon-commands (`:help`, `:files`, `:reindex`, etc.)
+  - `Command` - Interface for REPL commands
+  - `CommandRegistry` - Registers and dispatches commands by name
+  - `FilesCommand` - Lists workspace directories and indexed files
+  - `HelpCommand`, `ModelsCommand`, `StatusCommand`, `DebugCommand`, etc.
+
+#### Core Layer (`dev.loqj.core`)
+Business logic for RAG, indexing, and LLM interaction.
+
+- **`rag/`** - RAG pipeline orchestration
+  - `RagService` - Main service that coordinates retrieval and generation
+  - `PromptValidator` - Validates prompts fit within token budgets
+  - `MemoryManager` - Manages conversation history for RAG+memory mode
+
+- **`index/`** - Lucene index management
+  - `Indexer` - Walks workspace, parses files, generates embeddings, writes to Lucene
+  - `LuceneStore` - Low-level Lucene operations (BM25 search, vector search, document storage)
+  - `IndexingStats` - Tracks indexing performance metrics
+
+- **`search/`** - Query processing and result ranking
+  - `Retriever` - Implements Reciprocal Rank Fusion (RRF) to combine BM25 and vector search results
+    - **RRF Formula**: `score = 1 / (k + rank)` where k=60 (hardcoded constant)
+    - **Implementation**: `Retriever.fuseRrf()` called from `RagService` with fixed k=60
+    - **Not configurable**: RRF constant is hardcoded, no YAML configuration option
+  - `SnippetBuilder` - Assembles retrieved chunks into context snippets with deduplication
+    - **Path normalization**: Converts Windows backslashes to forward slashes via `RagMode.normalizePathSeparators()`
+    - **Location**: Private method in `dev.loqj.cli.modes.RagMode` (no centralized PathUtil class)
+
+- **`embed/`** - Embeddings generation
+  - `EmbeddingsClient` - HTTP client for Ollama embeddings API
+  - `CachingEmbeddings` - SQLite-backed cache to avoid re-embedding identical text
+  - `BatchEmbeddings` - Batches embedding requests for performance
+
+- **`llm/`** - Chat model interaction
+  - `LlmClient` - HTTP client for Ollama chat API (streaming and non-streaming)
+  - `CachingLanguageModel` - Optional response cache
+  - `OllamaModels` - Model catalog utilities
+
+- **`ingest/`** - File parsing and text extraction
+  - `FileWalker` - Walks workspace directory applying glob include/exclude patterns
+  - `ParserUtil` - Extracts text from various file formats (plain text, HTML, PDF, Office docs)
+  - `Chunker` - Splits text into overlapping chunks with sentence-boundary awareness
+  - `ParsedChunk` - Data structure holding chunk text and metadata
+
+- **`Config`** - YAML configuration loader with layered precedence (CLI flags > ENV > user config > defaults)
+- **`IndexPathResolver`** - Computes workspace hash and resolves index directory path
+
+#### Engine Layer (`dev.loqj.engine`)
+Backend implementations for LLM and embeddings.
+
+- **`ollama/`** - Ollama backend implementation
+  - `OllamaEngine` - Implements `ModelEngine` SPI for Ollama HTTP API
+  - `OllamaEngineProvider` - Factory for creating Ollama engine instances
+  - `OllamaCatalog` - Lists available Ollama models
+
+- **`stubs/`** - Test doubles for offline development and testing (gpt4all, llamacpp stubs)
+
+#### SPI Layer (`dev.loqj.spi`)
+Service Provider Interface for pluggable backends.
+
+- **`ModelEngine`** - Interface for LLM backends (chat, chatStream, embed methods)
+- **`ModelEngineProvider`** - Factory interface for creating engine instances
+- **`ModelCatalog`** - Interface for listing available models
+- **`BackendProcessManager`** - Interface for managing backend lifecycle (start/stop/health)
+
 ### Data Flow
 
-1. **CLI Entry** → `dev.loqj.app.Main` → Picocli command parsing
-2. **Interactive Mode** → `dev.loqj.cli.cmds.RunCmd` → JLine REPL
-3. **Mode Routing** → `dev.loqj.cli.modes.ModeController` → Strategy pattern
-4. **RAG Query** → `dev.loqj.core.rag.RagService` → Index search + LLM generation
-5. **Result Rendering** → `dev.loqj.cli.repl.RenderEngine` → Terminal output
+1. **CLI Entry** → `Main.java` checks for first run → Picocli parses command → `RootCmd` routes to subcommand
+2. **Interactive Mode** → `RunCmd` starts JLine REPL → `ReplRouter` processes each input line
+3. **Mode Routing** → `ReplRouter` sends natural language prompts to `ModeController` → Mode's `handle()` method executes
+4. **RAG Query** → `RagService.ask()` → `Retriever` searches index → `SnippetBuilder` assembles context → `LlmClient` generates answer
+5. **Indexing** → `Indexer.index()` → `FileWalker` finds files → `ParserUtil` extracts text → `Chunker` splits → `EmbeddingsClient` embeds → `LuceneStore` writes
+6. **Result Rendering** → Mode returns `Result` → `RenderEngine` formats (sanitize, box, spinner) → Terminal output
 
 ---
 
@@ -77,6 +181,20 @@ LOQ-J follows a layered architecture with clear separation of concerns:
 | `SetupCmd` | First-run configuration | `@Command(name="setup")` | `run()` - wizard setup |
 | `NetCmd` | Network configuration | `@Command(name="net")` | `run()` - network settings |
 | `VersionCmd` | Version information | `@Command(name="version")` | `run()` - shows version info |
+
+**REPL Commands** (`dev.loqj.cli.commands`):
+- `FilesCommand` - Lists workspace directories and indexed files (`:files`)
+- `HelpCommand` - Shows available REPL commands (`:help`)
+- `ModelsCommand` - Lists available Ollama models (`:models`)
+- `StatusCommand` - Shows configuration and index stats (`:status`)
+- Command registration via `ReplRouter`
+
+**FilesCommand Enhancement:**
+- Extracts parent directories from indexed file paths
+- Shows directories first, then files
+- Handles nested directory structures (e.g., `a/b/c/file.txt` → shows `a/`, `a/b/`, `a/b/c/`)
+- Normalizes path separators (Windows `\` → POSIX `/`)
+- Provides deterministic workspace structure without LLM hallucination
 
 **Command registration** in `RootCmd.subcommands`:
 ```java
@@ -370,10 +488,24 @@ if (!hasArgs && FirstRunWizard.shouldRunWizard()) {
 }
 ```
 
+**shouldRunWizard() implementation**:
+```java
+// Checks for sentinel file existence
+public static boolean shouldRunWizard() {
+    return !Files.exists(SENTINEL);
+}
+
+private static final Path SENTINEL =
+    Paths.get(System.getProperty("user.home"), ".loqj", "first_run_done");
+```
+
+**Wizard trigger**: Simply checks if `~/.loqj/first_run_done` sentinel file exists. Once created, wizard never runs again.
+
 **Wizard creates**:
 - `%USERPROFILE%\.loqj\` directory structure
 - Initial `config.yaml` with user preferences
-- Model validation (checks if BGE-M3 and chat model are available)
+- Sentinel file to prevent re-running
+- Model validation guidance (doesn't enforce model availability)
 
 ### Context Directory Structure
 
@@ -395,25 +527,9 @@ if (!hasArgs && FirstRunWizard.shouldRunWizard()) {
     └── .gitignore        # Never commit secrets
 ```
 
-### Multi-Workspace Index Management
-
-**Workspace identification**: `dev.loqj.core.IndexPathResolver`
-
-```java
-// Hash-based workspace identification
-String workspaceHash = DigestUtils.sha256Hex(workspacePath.toString());
-Path indexPath = userDataDir.resolve("indices").resolve(workspaceHash);
-```
-
-**Benefits**:
-- **Isolation**: Each workspace has separate Lucene index
-- **Performance**: No cross-contamination between projects  
-- **Storage**: Deduplication via content hashing
-- **Cleanup**: Easy to identify and remove unused indices
-
 ---
 
-## Multi-Workspace Support
+## Per-Workspace Indexing
 
 ### Current Implementation
 
@@ -448,155 +564,7 @@ loqj rag-ask "How does auth work?"
 
 **In REPL** (via `dev.loqj.cli.commands.WorkspaceCommand`):
 ```
-:workspace                    # Show current workspace
-:workspace list               # List known workspaces  
-:workspace switch <path>      # Change active workspace
-:workspace clean <path>       # Remove workspace index
+:workspace                    # Show current workspace info (path, index location, doc count)
 ```
 
----
-
-## Test Coverage & Limits
-
-### Test Structure
-
-**Test packages** mirror main packages:
-```
-src/test/java/dev/loqj/
-├── cli/repl/                 # REPL command testing
-├── core/                     # Core logic unit tests
-│   ├── CfgUtilTest.java      # Configuration parsing
-│   ├── CfgGlobsTest.java     # File pattern matching  
-│   ├── index/                # Indexing tests
-│   ├── embed/                # Embeddings client tests
-│   ├── rag/                  # RAG pipeline tests
-│   └── search/               # Search & retrieval tests
-├── engine/ollama/            # Ollama client tests
-└── bench/                    # Performance benchmarks
-```
-
-### Security & Injection Tests
-
-**SQL injection protection** (`dev.loqj.core.cache.CacheDbSqlInjectionTest`):
-- Tests SQLite cache against malicious inputs
-- Validates parameterized queries
-
-**Content sanitization** (`dev.loqj.cli.repl.RenderEngineSanitizeTest`):
-- ANSI escape sequence filtering  
-- Output sanitization for terminal safety
-
-**Network security** (`dev.loqj.core.embed.EmbeddingsClientSecurityTest`):
-- Localhost-only validation for Ollama
-- Remote host blocking tests
-
-### Performance Tests
-
-**Batch embeddings** (`dev.loqj.core.embed.BatchEmbeddingsPerformanceTest`):
-- Concurrency scaling tests
-- Memory usage validation
-
-**Lucene BM25** (`dev.loqj.core.index.LuceneStoreBm25Test`):
-- Search performance benchmarks
-- Index size vs. query speed trade-offs
-
-### Known Limits & Constraints
-
-**From configuration** (`src/main/resources/config/default-config.yaml`):
-```yaml
-limits:
-  top_k_max: 100                   # Maximum retrieval count
-  response_max_chars: 10485760     # 10MB response size limit
-  dir_depth_max: 10                # Directory traversal depth
-  file_bytes_max: 20000            # 20KB max file size
-  file_lines_max: 500              # 500 line limit per file
-  dir_entries_max: 1000            # Max files per directory
-  llm_timeout_ms: 300000           # 5 minute LLM timeout
-  file_timeout_ms: 10000           # 10 second file I/O timeout  
-  rate_per_sec: 10                 # 10 requests per second limit
-```
-
-**Platform-specific behavior**:
-- **Windows**: Case-insensitive file glob matching (`dev.loqj.core.index.IndexerCaseTest`)
-- **Linux/macOS**: Case-sensitive file matching
-- **Vector API**: Requires Java 21+ (`--add-modules jdk.incubator.vector`)
-
----
-
-## Operational Notes
-
-### Index Storage & Performance
-
-**Index file structure**:
-```
-%USERPROFILE%\.loqj\indices\<workspace-hash>\
-├── _0.cfe, _0.cfs         # Lucene segment files
-├── _0_Lucene90_0.dvd      # DocValues (metadata)
-├── _0_Lucene90_0.vec      # Vector index (HNSW)
-├── segments_1             # Segment metadata
-└── write.lock             # Write synchronization
-```
-
-**Typical index sizes**:
-- **Small project** (< 100 files): 1-10 MB
-- **Medium project** (100-1000 files): 10-100 MB  
-- **Large project** (1000+ files): 100MB-1GB
-- **Enterprise** (10k+ files): 1GB+ (consider workspace splitting)
-
-### Memory Usage Patterns
-
-**Indexing phase**:
-- **File parsing**: 50-200 MB working set
-- **Embeddings generation**: 100-500 MB (depends on batch size)
-- **Lucene writing**: 100-300 MB buffer space
-
-**Query phase**:
-- **Base memory**: 50-100 MB
-- **Per-query overhead**: 10-50 MB (depends on top-K)
-- **High K values** (K > 20): Can use 200+ MB for context assembly
-
-### Cache Behavior
-
-**Embeddings cache** (`dev.loqj.core.cache.EmbeddingsCache`):
-- **Storage**: SQLite database (`%USERPROFILE%\.loqj\cache\embeddings.db`)
-- **Key**: SHA-256 hash of text content
-- **Persistence**: Survives restarts, shared across workspaces
-- **Size management**: No automatic cleanup (manual `rm` if needed)
-
-**Response cache** (if enabled):
-- **Storage**: SQLite database (`%USERPROFILE%\.loqj\cache\responses.db`)
-- **Key**: Hash of (model + prompt + parameters)
-- **TTL**: Configurable expiration (default: none)
-
-### Logging & Debugging
-
-**Log configuration**: `src/main/resources/config/logback.xml`
-
-**Log levels**:
-- **INFO**: Normal operation messages
-- **DEBUG**: Enable via `:debug on` in REPL or `-Dloqj.debug=true`
-- **TRACE**: Detailed Lucene and HTTP client logs
-
-**Log file location**: `%USERPROFILE%\.loqj\logs\loqj.log`
-
-**Debug output includes**:
-- Retrieved snippet content and scores
-- Embeddings generation timing
-- HTTP request/response details (Ollama)
-- Index statistics and query performance
-
-### Production Deployment Considerations
-
-**Resource requirements**:
-- **CPU**: 4+ cores recommended for concurrent embeddings
-- **RAM**: 8GB minimum, 16GB+ for large workspaces
-- **Storage**: SSD strongly recommended for index performance
-- **Network**: Local Ollama only (security best practice)
-
-**Scaling recommendations**:
-- **Large teams**: Consider dedicated Ollama instance per developer
-- **Large codebases**: Split into focused workspaces by component/service
-- **CI/CD integration**: Use `--bm25-only` for faster indexing in automation
-
----
-
-**LOQ-J Technical Analysis** - Version `v0.9.0-beta` • Commit `ec2f6e9`
+**Note:** The `:workspace` command is information-only. It displays the current workspace path, index directory location, document count, and vector configuration status. There are no subcommands for listing, switching, or cleaning workspaces.
