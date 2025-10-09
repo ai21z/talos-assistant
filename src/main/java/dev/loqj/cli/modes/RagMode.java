@@ -7,6 +7,9 @@ import dev.loqj.core.ingest.ParserUtil;
 import dev.loqj.core.rag.RagService;
 import dev.loqj.core.search.SnippetBuilder;
 import dev.loqj.core.util.Sanitize;
+import dev.loqj.core.security.Sandbox;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -14,8 +17,13 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** RAG mode: builds snippets (pinned-first), calls LLM once, reuses same prepare-result for citations. */
+/**
+ * RAG mode implementation that builds snippets with pinned files prioritized first,
+ * calls the LLM once, and reuses the same prepared result for citations.
+ */
 public final class RagMode implements Mode {
+
+    private static final Logger LOG = LoggerFactory.getLogger(RagMode.class);
 
     @Override public String name() { return "rag"; }
 
@@ -31,89 +39,259 @@ public final class RagMode implements Mode {
         final Limits lim = ctx.limits();
         final int topK = Math.max(1, Math.min(lim.topKMax(), ctx.session().getK()));
 
-        // 1) pin by file-like mentions
+        // Pin files mentioned in the question
         var pinnedSnips = pinFiles(workspace, q, 3, 1600, lim.dirDepthMax());
 
-        // 2) prepare once (BM25F + vectors if enabled)
+        // Extract unique base file paths (without #chunk suffix) from pinned snippets
+        Set<String> pinnedBaseFiles = new LinkedHashSet<>();
+        for (var snip : pinnedSnips) {
+            String base = stripChunkId(snip.path());
+            pinnedBaseFiles.add(base);
+        }
+
+        boolean isTwoFileComparison = pinnedBaseFiles.size() == 2;
+
+        // Prepare RAG context once (BM25F + vectors if enabled)
         RagService.Prepared prepared = ctx.rag().prepare(workspace, q, topK);
 
-        // 3) pack pinned-first
+        // Pack snippets with pinned files first, optional reservation for two-file comparisons
         List<SnippetBuilder.Snippet> reg = new ArrayList<>();
         for (var m : prepared.snippetMaps()) {
             reg.add(new SnippetBuilder.Snippet(m.get("path"), m.get("text")));
         }
-        var packed = SnippetBuilder.packWithPinned(pinnedSnips, reg, 3000);
+        var packed = SnippetBuilder.packWithPinned(pinnedSnips, reg, 3000, isTwoFileComparison);
 
-        // LLM context payload (path/text pairs)
+        // Anchor snippet paths with backticks for model clarity
         List<Map<String,String>> ctxMaps = new ArrayList<>(packed.size());
-        for (var s : packed) ctxMaps.add(Map.of("path", s.path(), "text", s.text()));
+        for (var s : packed) {
+            String anchoredPath = "`" + s.path() + "`";
+            ctxMaps.add(Map.of("path", anchoredPath, "text", s.text()));
+        }
 
-        // 4) system prompt
+        // Load system prompt
         String system = readOrFallback("prompts/rag-system.txt", ctx);
 
-        // 5) call LLM (non-stream), sanitize, then cap
-        String answer = ctx.llm().chat(system, q, ctxMaps);
+        // Prepend comparison intent if exactly two files are pinned
+        String userMessage = q;
+        if (isTwoFileComparison) {
+            List<String> fileList = new ArrayList<>(pinnedBaseFiles);
+            String file1 = fileList.get(0);
+            String file2 = fileList.get(1);
+            userMessage = "Compare these two files exactly: " + file1 + " vs " + file2 + ". Use only the provided snippets.\n"
+                        + "Files in play: " + file1 + " | " + file2 + "\n\n"
+                        + q;
+        }
+
+        // Call LLM (non-stream), sanitize output (strip preambles & model-added sources), then cap
+        String answer = ctx.llm().chat(system, userMessage, ctxMaps);
+        answer = sanitizeAnswer(answer);
         answer = Sanitize.sanitizeForOutput(answer);
         if (answer.length() > lim.responseMaxChars()) {
             answer = answer.substring(0, (int) lim.responseMaxChars()) + "\n\n[output truncated]";
         }
 
-        // 6) citations (same prepared result)
+        // Build citations section (same prepared result) - paths normalized to forward slashes
         StringBuilder out = new StringBuilder();
         out.append(answer);
         if (!prepared.citations().isEmpty() || !pinnedSnips.isEmpty()) {
-            out.append("\n\n[Citations]\n");
-            for (var p : pinnedSnips) out.append(" - ").append(p.path()).append("\n");
-            for (String c : prepared.citations()) out.append(" - ").append(c).append("\n");
+            out.append("\n\n[Sources]\n");
+            for (var p : pinnedSnips) {
+                String cleanPath = normalizePathSeparators(stripChunkId(p.path()));
+                out.append(" - ").append(cleanPath).append("\n");
+            }
+            // Deduplicate citations with pinned files
+            Set<String> alreadyShown = new LinkedHashSet<>();
+            for (var p : pinnedSnips) alreadyShown.add(normalizePathSeparators(stripChunkId(p.path())));
+            for (String c : prepared.citations()) {
+                String normalized = normalizePathSeparators(c);
+                if (!alreadyShown.contains(normalized)) {
+                    out.append(" - ").append(normalized).append("\n");
+                }
+            }
         }
         return Optional.of(new Result.Ok(out.toString()));
     }
 
-    /* ---------------- helpers ---------------- */
-
+    /**
+     * FILE_TOKEN pattern for matching file references in user queries.
+     * Supports:
+     * - Case-insensitive extensions
+     * - Both path separators (backslash and forward slash)
+     * - Quoted paths with spaces
+     * - Common script/config/web/build extensions
+     * - Dotfiles with no extension (e.g., .editorconfig, .env)
+     * - Captures the entire token for secure resolution
+     */
     private static final Pattern FILE_TOKEN = Pattern.compile(
-            "([A-Za-z0-9_./\\\\-]++\\.(?:java|md|txt|yaml|yml|xml|gradle|kts|json|properties))",
-            Pattern.UNICODE_CHARACTER_CLASS
+        "(?:" +
+            // Branch 1: Quoted path (with spaces allowed)
+            "\"((?:[A-Za-z]:)?[/\\\\]?[^\"]+)\"" +
+            "|" +
+            // Branch 2: Unquoted path with extension (case-insensitive)
+            "((?:[A-Za-z]:)?[/\\\\]?[A-Za-z0-9_./\\\\-]+\\." +
+                "(?i:ps1|psm1|psd1|cmd|bat|sh|bash|zsh|fish|" +
+                "ts|tsx|js|jsx|mjs|cjs|css|scss|sass|less|" +
+                "csv|tsv|toml|ini|cfg|conf|config|lock|" +
+                "gradle|kts|pom|" +
+                "md|markdown|mdx|txt|rst|adoc|" +
+                "json|json5|yaml|yml|xml|html|htm|" +
+                "java|kt|groovy|scala|" +
+                "py|rb|go|rs|cpp|c|h|hpp|cs|php|" +
+                "properties|env|gitignore|gitattributes|" +
+                "sql|dockerfile))" +
+            "|" +
+            // Branch 3: Common extensionless files (LICENSE, README, etc.)
+            "\\b(LICENSE|README|NOTICE|COPYRIGHT|AUTHORS|CHANGELOG|CONTRIBUTING|MAKEFILE|Dockerfile)\\b" +
+            "|" +
+            // Branch 4: Dotfiles (e.g., .editorconfig, .env, .npmrc)
+            "(\\.[A-Za-z0-9_][A-Za-z0-9_.\\-]{1,})" +
+        ")",
+        Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CHARACTER_CLASS
     );
 
+    /**
+     * Pins files mentioned in the question by extracting file-like tokens and resolving them
+     * against the workspace. Files are validated against workspace boundaries for security.
+     *
+     * @param ws workspace root path
+     * @param question user's question text
+     * @param maxPins maximum number of files to pin
+     * @param maxChars maximum characters per file snippet
+     * @param maxDepth maximum directory depth for file search
+     * @return list of pinned file snippets
+     */
     private static List<SnippetBuilder.Snippet> pinFiles(Path ws, String question, int maxPins, int maxChars, int maxDepth) {
         List<SnippetBuilder.Snippet> out = new ArrayList<>();
-        Matcher m = FILE_TOKEN.matcher(question);
         Set<String> seen = new LinkedHashSet<>();
+        Sandbox sandbox = new Sandbox(ws, Map.of());
+
+        Matcher m = FILE_TOKEN.matcher(question);
         while (m.find() && out.size() < maxPins) {
-            String token = m.group(1);
+            // Extract token from whichever group matched
+            String token = null;
+            for (int i = 1; i <= m.groupCount(); i++) {
+                if (m.group(i) != null) {
+                    token = m.group(i);
+                    break;
+                }
+            }
+
+            if (token == null || token.isEmpty()) continue;
+
+            String originalToken = token;
+
             if (!seen.add(token)) continue;
 
-            Path p = ws.resolve(token).normalize();
-            if (Files.isRegularFile(p)) {
-                addSnippet(ws, out, p, maxChars);
+            // Strip surrounding quotes if present
+            if ((token.startsWith("\"") && token.endsWith("\"")) ||
+                (token.startsWith("'") && token.endsWith("'"))) {
+                token = token.substring(1, token.length() - 1);
+            }
+
+            // Normalize: replace backslashes with forward slashes before resolution
+            String tokenNormalized = token.replace('\\', '/');
+
+            // Secure resolve: check against workspace boundary
+            Path candidate = ws.resolve(tokenNormalized).normalize();
+
+            // Reject anything outside workspace
+            if (!sandbox.allowedPath(candidate)) {
+                LOG.debug("pinned-miss:{} (outside workspace, normalized:{})", originalToken, tokenNormalized);
                 continue;
             }
-            String base = Path.of(token).getFileName().toString();
-            try (var walk = Files.walk(ws, maxDepth)) {
-                Optional<Path> hit = walk
-                        .filter(Files::isRegularFile)
-                        .filter(x -> x.getFileName().toString().equalsIgnoreCase(base))
-                        .findFirst();
-                hit.ifPresent(hitPath -> addSnippet(ws, out, hitPath, maxChars));
-            } catch (Exception ignore) {}
+
+            // Check if it's a regular file
+            if (Files.isRegularFile(candidate)) {
+                // Compute relative path and normalize to forward slashes
+                String rel = ws.relativize(candidate).toString().replace('\\', '/');
+                addSnippet(ws, out, candidate, maxChars, rel);
+                LOG.debug("pin-found:{} (from token:{})", rel, originalToken);
+            } else {
+                // If not found directly, search by filename
+                String base = Path.of(tokenNormalized).getFileName().toString();
+                try (var walk = Files.walk(ws, maxDepth)) {
+                    Optional<Path> hit = walk
+                            .filter(Files::isRegularFile)
+                            .filter(x -> x.getFileName().toString().equalsIgnoreCase(base))
+                            .filter(sandbox::allowedPath)
+                            .findFirst();
+                    if (hit.isPresent()) {
+                        Path hitPath = hit.get();
+                        String rel = ws.relativize(hitPath).toString().replace('\\', '/');
+                        addSnippet(ws, out, hitPath, maxChars, rel);
+                        LOG.debug("pin-found:{} (basename match from:{})", rel, originalToken);
+                    } else {
+                        LOG.debug("pinned-miss:{} (normalized:{}, not found)", originalToken, tokenNormalized);
+                    }
+                } catch (Exception e) {
+                    LOG.debug("pinned-miss:{} (normalized:{}, walk failed: {})", originalToken, tokenNormalized, e.getMessage());
+                }
+            }
         }
+
         return out;
     }
 
-    private static void addSnippet(Path ws, List<SnippetBuilder.Snippet> out, Path p, int maxChars) {
+    /**
+     * Adds a file snippet to the output list after parsing and truncating if necessary.
+     */
+    private static void addSnippet(Path ws, List<SnippetBuilder.Snippet> out, Path p, int maxChars, String relPath) {
         try {
-            String rel = ws.relativize(p).toString().replace('\\','/');
             String text = ParserUtil.smartParse(p);
             if (text.length() > maxChars) text = text.substring(0, maxChars);
-            out.add(new SnippetBuilder.Snippet(rel + "#0", text));
-        } catch (Exception ignore) {}
+            out.add(new SnippetBuilder.Snippet(relPath + "#0", text));
+        } catch (Exception e) {
+            LOG.debug("Failed to read pinned file {}: {}", relPath, e.getMessage());
+        }
     }
 
+    /**
+     * Sanitizes LLM answer by stripping chatty preambles and model-added Sources/Citations blocks.
+     * Expanded patterns are used to catch common model chattiness.
+     */
+    private static String sanitizeAnswer(String answer) {
+        if (answer == null || answer.isBlank()) return "";
+
+        // Strip preambles at the start
+        answer = answer.replaceFirst(
+            "(?is)^\\s*(" +
+            "okay|sure|let me|i (?:will|can)|here['']?s|" +
+            "looking at the|now,|starting with|comparing the two|" +
+            "the user is asking|first, i need to|" +
+            "i couldn't find that here\\. the context|wait," +
+            ")\\b[^\\n]*(?:\\n\\n|\\n|$)",
+            ""
+        );
+
+        // Remove model-added Sources/Citations blocks
+        answer = answer.replaceAll("(?is)\\n\\s*\\[?\\s*(?:citations?|sources?)\\s*\\]?\\s*:?\\s*\\n(?:\\s*[-*]\\s+[^\\n]+\\n)*", "");
+
+        return answer.trim();
+    }
+
+    /**
+     * Normalizes path separators to forward slashes for consistent cross-platform output.
+     */
+    private static String normalizePathSeparators(String path) {
+        if (path == null) return "";
+        return path.replace('\\', '/');
+    }
+
+    /**
+     * Reads a resource from the classpath or falls back to context default.
+     */
     private static String readOrFallback(String resource, Context ctx) throws Exception {
         try (var in = RagMode.class.getClassLoader().getResourceAsStream(resource)) {
             if (in != null) return new String(in.readAllBytes());
         }
         return ctx.rag().readCliSystemPromptOrDefault();
+    }
+
+    /**
+     * Strips chunk ID suffix from a path (everything after #).
+     */
+    private static String stripChunkId(String path) {
+        int i = path.indexOf('#');
+        return (i < 0) ? path : path.substring(0, i);
     }
 }
