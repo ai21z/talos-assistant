@@ -7,7 +7,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 /**
  * Reciprocal Rank Fusion stage. Merges candidates from multiple sources (e.g., BM25 + KNN)
- * into a single fused and ranked list. Mirrors the logic from the existing Retriever.fuseRrf().
+ * into a single fused and ranked list using the formula: score(d) = Σ 1/(k + rank_i + 1).
  */
 public final class RrfFusionStage implements RetrievalStage {
     private final int rrfK;

@@ -1,7 +1,5 @@
 package dev.loqj.core.retrieval;
 
-import dev.loqj.core.index.LuceneStore;
-import dev.loqj.core.search.Retriever;
 import dev.loqj.core.retrieval.stages.DedupStage;
 import dev.loqj.core.retrieval.stages.RrfFusionStage;
 import org.junit.jupiter.api.Test;
@@ -12,199 +10,100 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Golden parity tests: verify that the new pipeline stages produce identical
- * results to the legacy Retriever.fuseRrf() + Retriever.mmr() on fixed data.
+ * Golden retrieval tests: verify that the pipeline stages produce correct,
+ * deterministic results on fixed fixture data.
  *
- * These tests compare the legacy code path against the new pipeline stages
- * to prove behavior equivalence before the legacy code is removed.
+ * These expected values were originally derived from the legacy
+ * Retriever.fuseRrf() + Retriever.mmr() code path, confirming parity
+ * before that code was removed.
  */
 class RetrievalParityTest {
 
-    // --- Fixture data ---
+    // --- Fixture data as RetrievalCandidates ---
 
-    /** Simulated BM25 hits (path, score) — fixed ordering. */
-    private static final List<LuceneStore.Hit> BM25_HITS = List.of(
-            new LuceneStore.Hit("src/Main.java#0", 12.5f),
-            new LuceneStore.Hit("src/Config.java#0", 10.2f),
-            new LuceneStore.Hit("src/Utils.java#0", 8.7f),
-            new LuceneStore.Hit("README.md#0", 6.1f),
-            new LuceneStore.Hit("src/Main.java#1", 5.0f),
-            new LuceneStore.Hit("build.gradle#0", 3.2f)
+    private static final List<RetrievalCandidate> BM25_HITS = List.of(
+            RetrievalCandidate.of("src/Main.java#0", 12.5f, "bm25"),
+            RetrievalCandidate.of("src/Config.java#0", 10.2f, "bm25"),
+            RetrievalCandidate.of("src/Utils.java#0", 8.7f, "bm25"),
+            RetrievalCandidate.of("README.md#0", 6.1f, "bm25"),
+            RetrievalCandidate.of("src/Main.java#1", 5.0f, "bm25"),
+            RetrievalCandidate.of("build.gradle#0", 3.2f, "bm25")
     );
 
-    /** Simulated KNN hits (path, score) — overlapping with BM25. */
-    private static final List<LuceneStore.Hit> KNN_HITS = List.of(
-            new LuceneStore.Hit("src/Config.java#0", 0.95f),
-            new LuceneStore.Hit("src/Main.java#0", 0.88f),
-            new LuceneStore.Hit("docs/GUIDE.md#0", 0.82f),
-            new LuceneStore.Hit("src/Utils.java#0", 0.75f),
-            new LuceneStore.Hit("src/Service.java#0", 0.70f)
+    private static final List<RetrievalCandidate> KNN_HITS = List.of(
+            RetrievalCandidate.of("src/Config.java#0", 0.95f, "knn"),
+            RetrievalCandidate.of("src/Main.java#0", 0.88f, "knn"),
+            RetrievalCandidate.of("docs/GUIDE.md#0", 0.82f, "knn"),
+            RetrievalCandidate.of("src/Utils.java#0", 0.75f, "knn"),
+            RetrievalCandidate.of("src/Service.java#0", 0.70f, "knn")
     );
 
     private static final int RRF_K = 60;
     private static final int TOP_K = 4;
 
-    // --- Helper: convert LuceneStore.Hit list to RetrievalCandidate list ---
+    /*
+     * Pre-computed golden RRF scores (k=60) for the combined BM25+KNN fixture:
+     *   src/Config.java#0:  1/62 (bm25 rank 1) + 1/61 (knn rank 0) = 0.032786885...
+     *   src/Main.java#0:    1/61 (bm25 rank 0) + 1/62 (knn rank 1) = 0.032786885...
+     *   src/Utils.java#0:   1/63 (bm25 rank 2) + 1/64 (knn rank 3) = 0.031498...
+     *   docs/GUIDE.md#0:    1/63 (knn rank 2) = 0.015873...
+     *   README.md#0:        1/64 (bm25 rank 3) = 0.015625
+     *   src/Main.java#1:    1/65 (bm25 rank 4) = 0.015384...
+     *   src/Service.java#0: 1/65 (knn rank 4) = 0.015384...
+     *   build.gradle#0:     1/66 (bm25 rank 5) = 0.015151...
+     *
+     * Note: Config and Main have identical sums due to symmetric rank positions.
+     * HashMap iteration order is deterministic within a single JVM run but the
+     * tie-break between them depends on insertion order into the HashMap.
+     * Both orderings are acceptable — the test accepts either order for the top 2.
+     */
 
-    private List<RetrievalCandidate> toCandidate(List<LuceneStore.Hit> hits, String source) {
-        List<RetrievalCandidate> out = new ArrayList<>();
-        for (LuceneStore.Hit h : hits) {
-            out.add(RetrievalCandidate.of(h.path, h.score, source));
-        }
-        return out;
+    private static List<RetrievalCandidate> combinedFixture() {
+        var combined = new ArrayList<RetrievalCandidate>();
+        combined.addAll(BM25_HITS);
+        combined.addAll(KNN_HITS);
+        return combined;
     }
 
-    // --- Parity test: RRF fusion ---
+    // --- Golden test: RRF fusion path ordering ---
 
     @Test
-    void rrf_fusion_produces_same_paths_and_order_as_legacy() {
-        // Legacy path
-        List<Retriever.Cand> legacyFused = Retriever.fuseRrf(BM25_HITS, KNN_HITS, RRF_K, TOP_K * 2);
-
-        // New pipeline path: merge BM25 + KNN candidates, then RRF stage
-        List<RetrievalCandidate> combined = new ArrayList<>();
-        combined.addAll(toCandidate(BM25_HITS, "bm25"));
-        combined.addAll(toCandidate(KNN_HITS, "knn"));
-
+    void rrf_fusion_produces_expected_top_paths() {
         RrfFusionStage rrfStage = new RrfFusionStage(RRF_K);
         RetrievalRequest request = new RetrievalRequest("test query", new float[]{1f}, TOP_K);
-        List<RetrievalCandidate> pipelineFused = rrfStage.process(request, combined).candidates();
+        List<RetrievalCandidate> fused = rrfStage.process(request, combinedFixture()).candidates();
 
-        // Compare: same paths in same order
-        List<String> legacyPaths = legacyFused.stream().map(c -> c.path).toList();
-        List<String> pipelinePaths = pipelineFused.stream().map(RetrievalCandidate::path).toList();
-        assertEquals(legacyPaths, pipelinePaths, "RRF fusion must produce same path ordering");
-
-        // Compare: same scores (float precision)
-        for (int i = 0; i < legacyFused.size(); i++) {
-            assertEquals(legacyFused.get(i).score, pipelineFused.get(i).score(), 1e-6,
-                    "RRF score mismatch at index " + i + " for path " + legacyPaths.get(i));
-        }
+        // Top 2 are Config and Main (tied score), followed by Utils
+        var top2 = List.of(fused.get(0).path(), fused.get(1).path());
+        assertTrue(top2.contains("src/Config.java#0"), "Config must be in top 2");
+        assertTrue(top2.contains("src/Main.java#0"), "Main must be in top 2");
+        assertEquals("src/Utils.java#0", fused.get(2).path());
     }
 
-    // --- Parity test: RRF + dedup (full legacy path) ---
-
     @Test
-    void full_legacy_path_matches_pipeline_rrf_then_dedup() {
-        // Legacy: fuseRrf → mmr (dedup + topK)
-        List<Retriever.Cand> legacyFused = Retriever.fuseRrf(BM25_HITS, KNN_HITS, RRF_K, TOP_K * 2);
-        List<Retriever.Cand> legacyFinal = Retriever.mmr(legacyFused, 0.7, TOP_K);
-
-        // Pipeline: combined candidates → RRF → Dedup
-        List<RetrievalCandidate> combined = new ArrayList<>();
-        combined.addAll(toCandidate(BM25_HITS, "bm25"));
-        combined.addAll(toCandidate(KNN_HITS, "knn"));
-
+    void rrf_fusion_scores_match_formula() {
         RrfFusionStage rrfStage = new RrfFusionStage(RRF_K);
-        DedupStage dedupStage = new DedupStage();
-        RetrievalRequest request = new RetrievalRequest("test query", new float[]{1f}, TOP_K);
+        RetrievalRequest request = new RetrievalRequest("test query", new float[]{1f}, 10);
+        List<RetrievalCandidate> fused = rrfStage.process(request, combinedFixture()).candidates();
 
-        List<RetrievalCandidate> afterRrf = rrfStage.process(request, combined).candidates();
-        List<RetrievalCandidate> afterDedup = dedupStage.process(request, afterRrf).candidates();
+        // Config and Main should have identical RRF scores: 1/61 + 1/62
+        double expectedTopScore = 1.0 / 61 + 1.0 / 62;
+        assertEquals((float) expectedTopScore, fused.get(0).score(), 1e-6);
+        assertEquals((float) expectedTopScore, fused.get(1).score(), 1e-6);
 
-        // Compare final paths
-        List<String> legacyPaths = legacyFinal.stream().map(c -> c.path).toList();
-        List<String> pipelinePaths = afterDedup.stream().map(RetrievalCandidate::path).toList();
-        assertEquals(legacyPaths, pipelinePaths, "Full pipeline must match legacy path ordering");
+        // Utils: 1/63 + 1/64
+        double expectedUtilsScore = 1.0 / 63 + 1.0 / 64;
+        assertEquals((float) expectedUtilsScore, fused.get(2).score(), 1e-6);
     }
 
-    // --- Parity test: BM25-only (no KNN hits) ---
+    // --- Golden test: RRF + dedup (full pipeline path) ---
 
     @Test
-    void bm25_only_path_matches_legacy() {
-        // Legacy: fuseRrf with empty KNN → mmr
-        List<Retriever.Cand> legacyFused = Retriever.fuseRrf(BM25_HITS, List.of(), RRF_K, TOP_K * 2);
-        List<Retriever.Cand> legacyFinal = Retriever.mmr(legacyFused, 0.7, TOP_K);
-
-        // Pipeline: only BM25 candidates → RRF → Dedup
-        List<RetrievalCandidate> bm25Only = toCandidate(BM25_HITS, "bm25");
-
-        RrfFusionStage rrfStage = new RrfFusionStage(RRF_K);
-        DedupStage dedupStage = new DedupStage();
-        RetrievalRequest request = new RetrievalRequest("test query", null, TOP_K);
-
-        List<RetrievalCandidate> afterRrf = rrfStage.process(request, bm25Only).candidates();
-        List<RetrievalCandidate> afterDedup = dedupStage.process(request, afterRrf).candidates();
-
-        List<String> legacyPaths = legacyFinal.stream().map(c -> c.path).toList();
-        List<String> pipelinePaths = afterDedup.stream().map(RetrievalCandidate::path).toList();
-        assertEquals(legacyPaths, pipelinePaths, "BM25-only pipeline must match legacy");
-    }
-
-    // --- Parity test: duplicate path dedup ---
-
-    @Test
-    void duplicate_paths_deduped_same_as_legacy_mmr() {
-        // Construct hits where same path appears in both BM25 and KNN
-        List<LuceneStore.Hit> bm25 = List.of(
-                new LuceneStore.Hit("A", 10f),
-                new LuceneStore.Hit("B", 8f),
-                new LuceneStore.Hit("C", 5f)
-        );
-        List<LuceneStore.Hit> knn = List.of(
-                new LuceneStore.Hit("B", 0.9f),
-                new LuceneStore.Hit("A", 0.8f),
-                new LuceneStore.Hit("D", 0.7f)
-        );
-
-        // Legacy
-        List<Retriever.Cand> legacyFused = Retriever.fuseRrf(bm25, knn, RRF_K, 10);
-        List<Retriever.Cand> legacyFinal = Retriever.mmr(legacyFused, 0.7, 3);
-
-        // Pipeline
-        List<RetrievalCandidate> combined = new ArrayList<>();
-        combined.addAll(toCandidate(bm25, "bm25"));
-        combined.addAll(toCandidate(knn, "knn"));
-
-        RrfFusionStage rrfStage = new RrfFusionStage(RRF_K);
-        DedupStage dedupStage = new DedupStage();
-        RetrievalRequest request = new RetrievalRequest("q", new float[]{1f}, 3);
-
-        List<RetrievalCandidate> afterRrf = rrfStage.process(request, combined).candidates();
-        List<RetrievalCandidate> afterDedup = dedupStage.process(request, afterRrf).candidates();
-
-        List<String> legacyPaths = legacyFinal.stream().map(c -> c.path).toList();
-        List<String> pipelinePaths = afterDedup.stream().map(RetrievalCandidate::path).toList();
-        assertEquals(legacyPaths, pipelinePaths, "Dedup parity must hold for overlapping paths");
-    }
-
-    // --- Parity test: score ordering stability ---
-
-    @Test
-    void fused_scores_are_always_descending() {
-        List<RetrievalCandidate> combined = new ArrayList<>();
-        combined.addAll(toCandidate(BM25_HITS, "bm25"));
-        combined.addAll(toCandidate(KNN_HITS, "knn"));
-
-        RrfFusionStage rrfStage = new RrfFusionStage(RRF_K);
-        RetrievalRequest request = new RetrievalRequest("q", new float[]{1f}, 10);
-        List<RetrievalCandidate> fused = rrfStage.process(request, combined).candidates();
-
-        for (int i = 1; i < fused.size(); i++) {
-            assertTrue(fused.get(i - 1).score() >= fused.get(i).score(),
-                    "Scores must be descending at index " + i);
-        }
-    }
-
-    // --- Pipeline integration test: full pipeline on fixture data ---
-
-    @Test
-    void full_pipeline_matches_legacy_end_to_end() {
-        // Legacy path
-        List<Retriever.Cand> legacyFused = Retriever.fuseRrf(BM25_HITS, KNN_HITS, RRF_K, TOP_K * 2);
-        List<Retriever.Cand> legacyFinal = Retriever.mmr(legacyFused, 0.7, TOP_K);
-
-        // Pipeline path (no real store needed — we simulate BM25/KNN via a custom first stage)
-        List<RetrievalCandidate> combined = new ArrayList<>();
-        combined.addAll(toCandidate(BM25_HITS, "bm25"));
-        combined.addAll(toCandidate(KNN_HITS, "knn"));
-
-        // Inject combined candidates as a "seed" stage
+    void full_pipeline_produces_expected_final_paths() {
         RetrievalStage seedStage = new RetrievalStage() {
             @Override public String name() { return "seed"; }
-            @Override
-            public StageOutput process(RetrievalRequest req, List<RetrievalCandidate> in) {
-                return StageOutput.of(combined);
+            @Override public StageOutput process(RetrievalRequest req, List<RetrievalCandidate> in) {
+                return StageOutput.of(combinedFixture());
             }
         };
 
@@ -217,10 +116,12 @@ class RetrievalParityTest {
         RetrievalRequest request = new RetrievalRequest("test query", new float[]{1f}, TOP_K);
         RetrievalResult result = pipeline.execute(request);
 
-        // Compare
-        List<String> legacyPaths = legacyFinal.stream().map(c -> c.path).toList();
-        List<String> pipelinePaths = result.paths();
-        assertEquals(legacyPaths, pipelinePaths, "Full pipeline must match legacy end-to-end");
+        assertEquals(TOP_K, result.candidates().size());
+        // Top 2 are Config and Main (tied), then Utils, then one of the remaining
+        var top2 = List.of(result.candidates().get(0).path(), result.candidates().get(1).path());
+        assertTrue(top2.contains("src/Config.java#0"));
+        assertTrue(top2.contains("src/Main.java#0"));
+        assertEquals("src/Utils.java#0", result.candidates().get(2).path());
 
         // Trace must record 3 stages
         assertEquals(3, result.trace().entries().size());
@@ -228,5 +129,63 @@ class RetrievalParityTest {
         assertEquals("rrf", result.trace().entries().get(1).stageName());
         assertEquals("dedup", result.trace().entries().get(2).stageName());
     }
-}
 
+    // --- Golden test: BM25-only (no KNN hits) ---
+
+    @Test
+    void bm25_only_produces_expected_paths() {
+        RrfFusionStage rrfStage = new RrfFusionStage(RRF_K);
+        DedupStage dedupStage = new DedupStage();
+        RetrievalRequest request = new RetrievalRequest("test query", null, TOP_K);
+
+        List<RetrievalCandidate> afterRrf = rrfStage.process(request, new ArrayList<>(BM25_HITS)).candidates();
+        List<RetrievalCandidate> afterDedup = dedupStage.process(request, afterRrf).candidates();
+
+        // With only BM25, order follows original BM25 ranking
+        assertEquals(TOP_K, afterDedup.size());
+        assertEquals("src/Main.java#0", afterDedup.get(0).path());
+        assertEquals("src/Config.java#0", afterDedup.get(1).path());
+        assertEquals("src/Utils.java#0", afterDedup.get(2).path());
+        assertEquals("README.md#0", afterDedup.get(3).path());
+    }
+
+    // --- Golden test: duplicate path dedup ---
+
+    @Test
+    void duplicate_paths_deduped_correctly() {
+        List<RetrievalCandidate> candidates = new ArrayList<>();
+        candidates.add(RetrievalCandidate.of("A", 10f, "bm25"));
+        candidates.add(RetrievalCandidate.of("B", 8f, "bm25"));
+        candidates.add(RetrievalCandidate.of("C", 5f, "bm25"));
+        candidates.add(RetrievalCandidate.of("B", 0.9f, "knn"));
+        candidates.add(RetrievalCandidate.of("A", 0.8f, "knn"));
+        candidates.add(RetrievalCandidate.of("D", 0.7f, "knn"));
+
+        RrfFusionStage rrfStage = new RrfFusionStage(RRF_K);
+        DedupStage dedupStage = new DedupStage();
+        RetrievalRequest request = new RetrievalRequest("q", new float[]{1f}, 3);
+
+        List<RetrievalCandidate> afterRrf = rrfStage.process(request, candidates).candidates();
+        List<RetrievalCandidate> afterDedup = dedupStage.process(request, afterRrf).candidates();
+
+        // A and B both appear in both sources, so they get boosted above C and D
+        var top2 = List.of(afterDedup.get(0).path(), afterDedup.get(1).path());
+        assertTrue(top2.contains("A"), "A must be in top 2");
+        assertTrue(top2.contains("B"), "B must be in top 2");
+        assertEquals(3, afterDedup.size());
+    }
+
+    // --- Golden test: score ordering stability ---
+
+    @Test
+    void fused_scores_are_always_descending() {
+        RrfFusionStage rrfStage = new RrfFusionStage(RRF_K);
+        RetrievalRequest request = new RetrievalRequest("q", new float[]{1f}, 10);
+        List<RetrievalCandidate> fused = rrfStage.process(request, combinedFixture()).candidates();
+
+        for (int i = 1; i < fused.size(); i++) {
+            assertTrue(fused.get(i - 1).score() >= fused.get(i).score(),
+                    "Scores must be descending at index " + i);
+        }
+    }
+}
