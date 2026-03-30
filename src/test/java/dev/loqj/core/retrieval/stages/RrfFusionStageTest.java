@@ -10,8 +10,8 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Tests for RrfFusionStage. Verifies scoring behavior matches the original
- * Retriever.fuseRrf() logic and handles edge cases.
+ * Tests for RrfFusionStage. Verifies RRF scoring formula correctness
+ * and edge case handling.
  */
 class RrfFusionStageTest {
 
@@ -112,7 +112,7 @@ class RrfFusionStageTest {
 
     @Test
     void parity_with_original_retriever_fuseRrf() {
-        // Simulates what the original Retriever.fuseRrf() would compute:
+        // Golden RRF values for this fixture (k=60):
         // bm25 = [A(rank 0), B(rank 1), C(rank 2)]
         // knn  = [B(rank 0), D(rank 1)]
         // Expected RRF (k=60):
