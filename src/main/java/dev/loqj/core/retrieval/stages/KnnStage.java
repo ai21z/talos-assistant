@@ -9,8 +9,19 @@ import java.util.List;
 /**
  * Retrieval stage that performs KNN (vector) search via a CorpusStore.
  * Skipped gracefully if the request has no query vector.
+ *
+ * <p>Over-fetches by {@link #FETCH_MULTIPLIER}× the requested topK so that
+ * downstream RRF fusion and dedup have a larger candidate pool to work with.
+ * Uses the same multiplier as {@link Bm25Stage} for symmetry.
  */
 public final class KnnStage implements RetrievalStage {
+
+    /**
+     * Multiplier applied to {@code topK} to determine how many candidates
+     * to fetch from the KNN index. Symmetric with {@link Bm25Stage#FETCH_MULTIPLIER}.
+     */
+    static final int FETCH_MULTIPLIER = 3;
+
     private final CorpusStore store;
     public KnnStage(CorpusStore store) {
         this.store = store;
@@ -22,7 +33,7 @@ public final class KnnStage implements RetrievalStage {
         if (!request.hasVector()) {
             return StageOutput.of(candidates, "skipped: no query vector");
         }
-        int fetchK = Math.max(request.topK() * 3, request.topK());
+        int fetchK = request.topK() * FETCH_MULTIPLIER;
         List<CorpusStore.Hit> hits = store.knn(request.queryVector(), fetchK);
         List<RetrievalCandidate> out = new ArrayList<>(candidates);
         for (CorpusStore.Hit h : hits) {
