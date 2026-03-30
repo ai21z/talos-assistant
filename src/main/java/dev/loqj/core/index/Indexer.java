@@ -16,7 +16,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.lang.reflect.Method;
 import java.nio.file.FileSystem;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -305,21 +304,13 @@ public class Indexer {
         return (b == null) ? List.of() : b;
     }
 
-    /** Non-breaking reindex API for callers that expect it. */
-    public Object reindex(Path root) throws Exception {
-        try {
-            Method m = this.getClass().getMethod("index", Path.class);
-            Object res = m.invoke(this, root);
-            return res == null ? "Reindexed." : res;
-        } catch (NoSuchMethodException ignore) {
-            try {
-                Method m2 = this.getClass().getMethod("build", Path.class);
-                Object res = m2.invoke(this, root);
-                return res == null ? "Reindexed." : res;
-            } catch (NoSuchMethodException ignore2) {
-                return "Reindexed.";
-            }
-        }
+    /**
+     * Reindex the given workspace root. Delegates directly to {@link #index(Path)}.
+     * Returns a status string for callers that display a summary.
+     */
+    public Object reindex(Path root) {
+        index(root);
+        return "Reindexed.";
     }
 
     public IndexingStats getLastRunStats() {
