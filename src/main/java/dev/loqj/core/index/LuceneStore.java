@@ -28,10 +28,20 @@ public class LuceneStore implements AutoCloseable, CorpusStore {
     public static final String F_CHUNKID  = "chunkId";    // metadata
     public static final String F_NAME     = "name";       // basename (analyzed)
     public static final String F_PATHTOK  = "pathtok";    // path tokens (analyzed)
-    public static final String F_LANG     = "lang";       // programming/markup language
-    public static final String F_LINE_START = "lineStart"; // 1-based start line
-    public static final String F_LINE_END   = "lineEnd";   // 1-based end line (inclusive)
-    public static final String F_HEADING    = "heading";   // last Markdown heading context
+    public static final String F_LANG     = "lang";       // programming/markup language (StringField, filterable)
+    public static final String F_LINE_START = "lineStart"; // 1-based start line (StoredField + IntPoint)
+    public static final String F_LINE_END   = "lineEnd";   // 1-based end line, inclusive (StoredField + IntPoint)
+    /**
+     * Last Markdown heading in effect for this chunk (StoredField only).
+     * <p>
+     * Current purpose: provenance — lets consumers display section context alongside
+     * a retrieved snippet (e.g. "src/Foo.java § Architecture, lines 10–25").
+     * <p>
+     * Future purpose: if heading-filtered retrieval is needed, add a parallel
+     * {@code StringField} or {@code TextField} to make this field searchable.
+     * Kept as StoredField-only for now to avoid index bloat until a consumer exists.
+     */
+    public static final String F_HEADING    = "heading";
 
     /** Legacy hit type kept for test compatibility. */
     public static class Hit {

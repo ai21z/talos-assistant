@@ -158,5 +158,75 @@ class ChunkerMetadataTest {
         assertTrue(c.metadata().lineEnd() >= 3,
                 "lineEnd should cover the last line, got " + c.metadata().lineEnd());
     }
+
+    // ───── heading-context boundary correctness ─────
+
+    /**
+     * Proves the heading-assignment bug is fixed: when a new heading block causes
+     * the previous buffer to overflow, the emitted chunk must carry the OLD heading
+     * (the one in effect while that content was accumulated), not the new heading.
+     *
+     * Layout (chunkChars=40, overlap=0):
+     *   Block 0: "# Intro"           (heading, short)
+     *   Block 1: "\nIntro body text." (prose under # Intro, short)
+     *   Block 2: "## Details"         (heading, triggers overflow of buffer = block0+block1)
+     *   Block 3: "\nDetail body."     (prose under ## Details)
+     *
+     * Before fix: chunk 0 got heading "## Details" because heading was updated
+     *             before the overflow emit.
+     * After fix:  chunk 0 gets heading "# Intro".
+     */
+    @Test
+    void headingBoundary_overflowEmitGetsOldHeading() {
+        // Craft content so that block "## Details" causes the buffer (containing
+        // "# Intro" + prose) to overflow at chunkChars=40.
+        String text = "# Intro\nIntro body text is here now.\n## Details\nDetail body text here.\n";
+        List<ParsedChunk> chunks = Chunker.chunk("doc.md", text, 40, 0);
+
+        assertTrue(chunks.size() >= 2,
+                "Expected at least 2 chunks, got " + chunks.size() + ": " + chunks);
+
+        // First chunk contains intro content — must have heading "# Intro", NOT "## Details"
+        ParsedChunk first = chunks.get(0);
+        assertEquals("# Intro", first.metadata().headingContext(),
+                "First chunk should carry the heading under which its content was accumulated");
+
+        // A later chunk containing "Details" content should have heading "## Details"
+        ParsedChunk last = chunks.get(chunks.size() - 1);
+        assertEquals("## Details", last.metadata().headingContext(),
+                "Last chunk should carry the '## Details' heading");
+    }
+
+    /**
+     * When content has no headings at all, all chunks should have null heading context.
+     */
+    @Test
+    void headingBoundary_noHeadings_allNull() {
+        String text = "aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk lll mmm\n";
+        List<ParsedChunk> chunks = Chunker.chunk("plain.txt", text, 15, 0);
+        assertTrue(chunks.size() >= 2);
+        for (ParsedChunk c : chunks) {
+            assertNull(c.metadata().headingContext(),
+                    "Chunks in a headingless file should have null heading, chunk " + c.chunkId());
+        }
+    }
+
+    /**
+     * Heading context should persist across multiple chunks under the same section
+     * until a new heading is encountered.
+     */
+    @Test
+    void headingBoundary_persistsAcrossChunksInSameSection() {
+        // One heading followed by enough text to produce multiple chunks
+        String text = "# Only Section\n"
+                + "word ".repeat(50) + "\n";  // ~250 chars of prose under one heading
+        List<ParsedChunk> chunks = Chunker.chunk("doc.md", text, 60, 0);
+        assertTrue(chunks.size() >= 2,
+                "Expected multiple chunks under one heading, got " + chunks.size());
+        for (ParsedChunk c : chunks) {
+            assertEquals("# Only Section", c.metadata().headingContext(),
+                    "All chunks under a single heading should carry that heading, chunk " + c.chunkId());
+        }
+    }
 }
 
