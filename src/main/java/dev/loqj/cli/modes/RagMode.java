@@ -5,6 +5,9 @@ import dev.loqj.cli.repl.Limits;
 import dev.loqj.cli.repl.Result;
 import dev.loqj.core.ingest.ParserUtil;
 import dev.loqj.core.rag.RagService;
+import dev.loqj.core.context.ContextPacker;
+import dev.loqj.core.context.ContextResult;
+import dev.loqj.core.context.TokenBudget;
 import dev.loqj.core.search.SnippetBuilder;
 import dev.loqj.core.util.Sanitize;
 import dev.loqj.core.security.Sandbox;
@@ -54,22 +57,29 @@ public final class RagMode implements Mode {
         // Prepare RAG context once (BM25F + vectors if enabled)
         RagService.Prepared prepared = ctx.rag().prepare(workspace, q, topK);
 
-        // Pack snippets with pinned files first, optional reservation for two-file comparisons
-        List<SnippetBuilder.Snippet> reg = new ArrayList<>();
-        for (var m : prepared.snippetMaps()) {
-            reg.add(new SnippetBuilder.Snippet(m.get("path"), m.get("text")));
+        // Pack snippets using unified ContextPacker (pinned-first, budget-aware, deduplicated)
+        List<ContextResult.Snippet> pinnedCtx = new ArrayList<>();
+        for (var snip : pinnedSnips) {
+            pinnedCtx.add(new ContextResult.Snippet(snip.path(), snip.text()));
         }
-        var packed = SnippetBuilder.packWithPinned(pinnedSnips, reg, 3000, isTwoFileComparison);
+        List<ContextResult.Snippet> regularCtx = new ArrayList<>();
+        for (var m : prepared.snippetMaps()) {
+            regularCtx.add(new ContextResult.Snippet(m.get("path"), m.get("text")));
+        }
+
+        // Load system prompt (needed for token budget calculation)
+        String system = readOrFallback("prompts/rag-system.txt", ctx);
+
+        ContextPacker packer = new ContextPacker(TokenBudget.fromConfig(ctx.cfg()));
+        ContextResult packed = packer.pack(system, q, pinnedCtx, regularCtx, isTwoFileComparison);
 
         // Anchor snippet paths with backticks for model clarity
-        List<Map<String,String>> ctxMaps = new ArrayList<>(packed.size());
-        for (var s : packed) {
+        List<Map<String,String>> ctxMaps = new ArrayList<>(packed.finalCount());
+        for (var s : packed.snippets()) {
             String anchoredPath = "`" + s.path() + "`";
             ctxMaps.add(Map.of("path", anchoredPath, "text", s.text()));
         }
 
-        // Load system prompt
-        String system = readOrFallback("prompts/rag-system.txt", ctx);
 
         // Prepend comparison intent if exactly two files are pinned
         String userMessage = q;
@@ -90,21 +100,15 @@ public final class RagMode implements Mode {
             answer = answer.substring(0, (int) lim.responseMaxChars()) + "\n\n[output truncated]";
         }
 
-        // Build citations section (same prepared result) - paths normalized to forward slashes
+        // Build citations section from ContextResult - paths normalized to forward slashes
         StringBuilder out = new StringBuilder();
         out.append(answer);
-        if (!prepared.citations().isEmpty() || !pinnedSnips.isEmpty()) {
+        if (!packed.citations().isEmpty()) {
             out.append("\n\n[Sources]\n");
-            for (var p : pinnedSnips) {
-                String cleanPath = normalizePathSeparators(stripChunkId(p.path()));
-                out.append(" - ").append(cleanPath).append("\n");
-            }
-            // Deduplicate citations with pinned files
-            Set<String> alreadyShown = new LinkedHashSet<>();
-            for (var p : pinnedSnips) alreadyShown.add(normalizePathSeparators(stripChunkId(p.path())));
-            for (String c : prepared.citations()) {
+            Set<String> shown = new LinkedHashSet<>();
+            for (String c : packed.citations()) {
                 String normalized = normalizePathSeparators(c);
-                if (!alreadyShown.contains(normalized)) {
+                if (shown.add(normalized)) {
                     out.append(" - ").append(normalized).append("\n");
                 }
             }

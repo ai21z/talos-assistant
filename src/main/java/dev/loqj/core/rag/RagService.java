@@ -8,8 +8,13 @@ import dev.loqj.core.index.Indexer;
 import dev.loqj.core.index.LuceneStore;
 import dev.loqj.core.llm.LlmClient;
 import dev.loqj.core.cache.CacheDb;
+import dev.loqj.core.context.ContextPacker;
+import dev.loqj.core.context.ContextResult;
+import dev.loqj.core.context.TokenBudget;
+import dev.loqj.core.rerank.NoOpReranker;
+import dev.loqj.core.retrieval.*;
+import dev.loqj.core.retrieval.stages.*;
 import dev.loqj.core.spi.CorpusStore;
-import dev.loqj.core.search.Retriever;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,8 +49,25 @@ public class RagService {
         public List<String> citations()                 { return citations;  }
     }
 
-    /** Answer type expected by RagAskCmd (has text() and citations()). */
-    public record Answer(String text, List<String> citations) {}
+    /**
+     * Answer returned by {@link #ask(Path, String, Integer)}.
+     * <p>
+     * {@code packedContext} is the context actually sent to the LLM after packing
+     * and possible truncation. It is {@code null} on the net-disabled stub path
+     * (no model call occurs, so no packing is performed). Callers that inspect
+     * packed context must null-check first.
+     *
+     * @param text           generated answer text (or stub / error message)
+     * @param citations      deduplicated source-file citations
+     * @param prepared       full pre-packed retrieval result (nullable on error path)
+     * @param packedContext   packed context sent to model (null when net is disabled or on error)
+     */
+    public record Answer(String text, List<String> citations, Prepared prepared, ContextResult packedContext) {
+        /** Backwards-compatible constructor for callers that do not supply Prepared or packed context. */
+        public Answer(String text, List<String> citations) {
+            this(text, citations, null, null);
+        }
+    }
 
     public RagService(Config cfg) {
         this.cfg = Objects.requireNonNull(cfg);
@@ -62,15 +84,15 @@ public class RagService {
 
         int defaultTopK = 6;
         try {
-            Map<String, Object> rag = CfgUtil.map(cfg.data.get("rag"));
-            Object v = (rag == null ? null : rag.get("top_k"));
+            Map<String, Object> ragCfg = CfgUtil.map(cfg.data.get("rag"));
+            Object v = (ragCfg == null ? null : ragCfg.get("top_k"));
             if (v instanceof Number n) defaultTopK = n.intValue();
             else if (v != null) defaultTopK = Integer.parseInt(String.valueOf(v));
         } catch (Exception ignore) {}
 
         final int k = (topKOverride == null ? defaultTopK : Math.max(1, topKOverride));
 
-        // Read vector toggle; if off, we’ll skip KNN
+        // Read vector toggle; if off, KnnStage will gracefully skip (no query vector)
         Map<String,Object> rag = CfgUtil.map(cfg.data.get("rag"));
         boolean vecEnabled = true;
         Object vectorsObj = rag.get("vectors");
@@ -83,36 +105,32 @@ public class RagService {
         List<Map<String,String>> snippets = new ArrayList<>();
         List<String> citations = new ArrayList<>();
 
-        // Open store for read (vectorDim==0 is fine for reading BM25; writer creation is the only user of vectorDim)
         try (LuceneStore store = new LuceneStore(indexDir, 0)) {
-            // BM25 first
-            List<CorpusStore.Hit> bm25 = store.bm25(query, Math.max(k * 3, k));
-            List<CorpusStore.Hit> knn = List.of();
-
-            // Add KNN when available
+            // Compute query vector when vectors are enabled
+            float[] qvec = null;
             if (vecEnabled) {
                 try (CacheDb cache = new CacheDb();
                      CachingEmbeddings emb = new CachingEmbeddings(new EmbeddingsClient(cfg), cache, "query/ollama")) {
-                    float[] qvec = emb.embed(query);
-                    if (qvec != null && qvec.length > 0) {
-                        knn = store.knn(qvec, Math.max(k * 3, k));
-                    }
+                    qvec = emb.embed(query);
                 } catch (Exception ignore) {
-                    // If embeddings fail, just proceed with BM25
+                    // If embeddings fail, proceed BM25-only
                 }
             }
 
-            // Fuse + dedupe by path
-            var fused = Retriever.fuseRrf(asLuceneHits(bm25), asLuceneHits(knn), 60, Math.max(k * 2, k));
-            var finalCands = Retriever.mmr(fused, 0.7, k);
+            // Build and execute the retrieval pipeline
+            RetrievalPipeline pipeline = buildDefaultPipeline(store);
+            RetrievalRequest request = new RetrievalRequest(query, qvec, k);
+            RetrievalResult result = pipeline.execute(request);
 
-            // Build snippet maps + citations (deduplicate citations by file path)
-            var citationSet = new LinkedHashSet<String>(finalCands.size());
-            for (var c : finalCands) {
-                String text = store.getTextByPath(c.path);
+            LOG.debug("Retrieval pipeline trace:\n{}", result.trace().summary());
+
+            // Build snippet maps + citations from pipeline results
+            var citationSet = new LinkedHashSet<String>(result.candidates().size());
+            for (RetrievalCandidate c : result.candidates()) {
+                String text = store.getTextByPath(c.path());
                 if (text == null || text.isBlank()) continue;
-                snippets.add(Map.of("path", c.path, "text", text));
-                citationSet.add(stripChunkId(c.path)); // Dedupe: same file won't appear multiple times
+                snippets.add(Map.of("path", c.path(), "text", text));
+                citationSet.add(stripChunkId(c.path()));
             }
             citations.addAll(citationSet);
         } catch (Exception e) {
@@ -122,10 +140,19 @@ public class RagService {
         return new Prepared(snippets, citations);
     }
 
-    private static List<LuceneStore.Hit> asLuceneHits(List<CorpusStore.Hit> xs) {
-        var out = new ArrayList<LuceneStore.Hit>(xs.size());
-        for (var h : xs) out.add(new LuceneStore.Hit(h.path(), h.score()));
-        return out;
+    /**
+     * Builds the default retrieval pipeline: BM25 → KNN → RRF Fusion → Rerank → Dedup.
+     * The reranker stage uses NoOpReranker by default; swap in a real reranker later.
+     * Package-private for testability.
+     */
+    RetrievalPipeline buildDefaultPipeline(CorpusStore store) {
+        return RetrievalPipeline.builder()
+                .addStage(new Bm25Stage(store))
+                .addStage(new KnnStage(store))
+                .addStage(new RrfFusionStage(60))
+                .addStage(new RerankerStage(new NoOpReranker()))
+                .addStage(new DedupStage())
+                .build();
     }
 
     private static String stripChunkId(String path) {
@@ -140,44 +167,73 @@ public class RagService {
         return "You are LOQ-J (CLI). Answer briefly, cite local files when available. If context is insufficient, say so.";
     }
 
+    /**
+     * Retrieves context for the given question and generates an LLM answer.
+     * <p>
+     * <strong>Net-disabled stub path:</strong> When {@code net.enabled} is {@code false}
+     * in configuration, the LLM call is skipped entirely. The method returns an
+     * {@link Answer} whose text is a synthetic stub ({@code "(net disabled) <question>"}),
+     * whose citations come from the pre-packed retrieval set (i.e. {@link Prepared#citations()}),
+     * and whose {@link Answer#packedContext()} is {@code null} because context packing
+     * never runs (no model will consume it). Callers must therefore treat a null
+     * {@code packedContext} as "no packing was performed" — not as "packing produced
+     * nothing." The {@link Answer#prepared()} field is still populated, so the full
+     * retrieved snippet set is available for inspection.
+     * <p>
+     * This path exists to allow fast integration tests and air-gapped environments
+     * to exercise the retrieval pipeline without requiring a reachable LLM endpoint.
+     *
+     * @param ws          workspace root directory
+     * @param question    user query
+     * @param kOverride   optional override for top-K retrieval (null → config default)
+     * @return a non-null {@link Answer}; on unrecoverable error the answer text
+     *         contains the error message and citations are empty
+     */
     public Answer ask(Path ws, String question, Integer kOverride) {
         try {
             Prepared prepared = prepare(ws, question, kOverride);
 
-            // Check if network is disabled to short-circuit for fast tests
+            // Net-disabled stub path: skip LLM + context packing for fast tests / air-gap.
+            // packedContext is null because no packing is performed — no model will consume it.
+            // Citations come from the pre-packed retrieval set (Prepared).
+            // See Javadoc above for full semantics.
             Map<String,Object> net = CfgUtil.map(cfg.data.get("net"));
             boolean netEnabled = !(net.get("enabled") instanceof Boolean b) || b;
 
             if (!netEnabled) {
                 String stub = "(net disabled) " + question;
-                return new Answer(stub, prepared.citations());
+                return new Answer(stub, prepared.citations(), prepared, null);
             }
 
             String sys = readCliSystemPromptOrDefault();
 
-            // Validate and trim snippets to fit token budget
-            PromptValidator validator = new PromptValidator(cfg);
-            PromptValidator.ValidationResult validation = validator.validateAndTrim(
-                sys, question, prepared.snippetMaps()
-            );
+            // Pack retrieved snippets into context using unified ContextPacker
+            ContextPacker packer = new ContextPacker(TokenBudget.fromConfig(cfg));
+
+            List<ContextResult.Snippet> regular = new java.util.ArrayList<>();
+            for (var m : prepared.snippetMaps()) {
+                regular.add(new ContextResult.Snippet(m.get("path"), m.get("text")));
+            }
+            ContextResult packed = packer.pack(sys, question, List.of(), regular);
 
             // Warn if trimming occurred
-            if (validation.wasTrimmed) {
+            if (packed.wasTrimmed()) {
                 LOG.warn("RAG_CONTEXT_TRIMMED: Reduced snippets from {} to {} to fit {} token budget (estimated {} tokens). Consider reducing :k or enabling vectors.",
-                    validation.originalCount, validation.finalCount, validation.budgetTokens, validation.estimatedTokens);
+                    packed.originalCount(), packed.finalCount(), packed.budgetTokens(), packed.estimatedTokens());
             }
 
             LlmClient llm = new LlmClient(cfg);
-            String text = llm.chat(sys, question, validation.snippets);
+            String text = llm.chat(sys, question, packed.toSnippetMaps());
             if (text == null) text = "";
 
             // Warn if we have retrieval but answer is empty
-            if (!validation.snippets.isEmpty() && text.trim().isEmpty()) {
-                LOG.warn("RAG_GEN_EMPTY: Retrieved {} snippets but answer body is empty (promptTokens≈{}, budget={}). Check model capacity or reduce :k.",
-                    validation.snippets.size(), validation.estimatedTokens, validation.budgetTokens);
+            if (!packed.isEmpty() && text.trim().isEmpty()) {
+                LOG.warn("RAG_GEN_EMPTY: Retrieved {} snippets but answer body is empty (promptTokens={}, budget={}). Check model capacity or reduce :k.",
+                    packed.finalCount(), packed.estimatedTokens(), packed.budgetTokens());
             }
 
-            return new Answer(text, prepared.citations());
+            // Return packed citations (what the model actually saw), not pre-packed
+            return new Answer(text, packed.citations(), prepared, packed);
         } catch (Exception e) {
             String msg = "Error: " + e.getClass().getSimpleName() + (e.getMessage() == null ? "" : (": " + e.getMessage()));
             return new Answer(msg, List.of());

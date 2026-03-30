@@ -1,5 +1,6 @@
 package dev.loqj.core.index;
 
+import dev.loqj.core.ingest.ChunkMetadata;
 import dev.loqj.core.spi.CorpusStore;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
@@ -27,6 +28,20 @@ public class LuceneStore implements AutoCloseable, CorpusStore {
     public static final String F_CHUNKID  = "chunkId";    // metadata
     public static final String F_NAME     = "name";       // basename (analyzed)
     public static final String F_PATHTOK  = "pathtok";    // path tokens (analyzed)
+    public static final String F_LANG     = "lang";       // programming/markup language (StringField, filterable)
+    public static final String F_LINE_START = "lineStart"; // 1-based start line (StoredField + IntPoint)
+    public static final String F_LINE_END   = "lineEnd";   // 1-based end line, inclusive (StoredField + IntPoint)
+    /**
+     * Last Markdown heading in effect for this chunk (StoredField only).
+     * <p>
+     * Current purpose: provenance — lets consumers display section context alongside
+     * a retrieved snippet (e.g. "src/Foo.java § Architecture, lines 10–25").
+     * <p>
+     * Future purpose: if heading-filtered retrieval is needed, add a parallel
+     * {@code StringField} or {@code TextField} to make this field searchable.
+     * Kept as StoredField-only for now to avoid index bloat until a consumer exists.
+     */
+    public static final String F_HEADING    = "heading";
 
     /** Legacy hit type kept for test compatibility. */
     public static class Hit {
@@ -56,6 +71,9 @@ public class LuceneStore implements AutoCloseable, CorpusStore {
 
     /* ------------------- CorpusStore (SPI) ------------------- */
 
+    /** Package-private accessor for test use. */
+    SearcherManager getSearcherManager() { return sm; }
+
     @Override
     public void add(String path, String text, float[] vec) {
         add(path, text, vec, null, null);
@@ -63,6 +81,11 @@ public class LuceneStore implements AutoCloseable, CorpusStore {
 
     @Override
     public void add(String path, String text, float[] vec, String fileHash, Integer chunkId) {
+        add(path, text, vec, fileHash, chunkId, null);
+    }
+
+    @Override
+    public void add(String path, String text, float[] vec, String fileHash, Integer chunkId, ChunkMetadata metadata) {
         try {
             var doc = new Document();
             doc.add(new StringField(F_PATH, path, Field.Store.YES));
@@ -95,6 +118,25 @@ public class LuceneStore implements AutoCloseable, CorpusStore {
                             (vec == null ? -1 : vec.length), vectorDim);
                 }
             }
+
+            // Structured chunk metadata
+            if (metadata != null) {
+                if (metadata.language() != null) {
+                    doc.add(new StringField(F_LANG, metadata.language(), Field.Store.YES));
+                }
+                if (metadata.lineStart() > 0) {
+                    doc.add(new StoredField(F_LINE_START, metadata.lineStart()));
+                    doc.add(new IntPoint("lineStartPt", metadata.lineStart()));
+                }
+                if (metadata.lineEnd() > 0) {
+                    doc.add(new StoredField(F_LINE_END, metadata.lineEnd()));
+                    doc.add(new IntPoint("lineEndPt", metadata.lineEnd()));
+                }
+                if (metadata.headingContext() != null) {
+                    doc.add(new StoredField(F_HEADING, metadata.headingContext()));
+                }
+            }
+
             writer.updateDocument(new Term(F_PATH, path), doc);
         } catch (IOException e) {
             throw new RuntimeException(e);

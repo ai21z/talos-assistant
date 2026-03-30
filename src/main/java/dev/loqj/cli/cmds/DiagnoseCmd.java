@@ -3,7 +3,9 @@ package dev.loqj.cli.cmds;
 import dev.loqj.cli.ManifestVersionProvider;
 import dev.loqj.core.CfgUtil;
 import dev.loqj.core.Config;
-import dev.loqj.core.rag.PromptValidator;
+import dev.loqj.core.context.ContextPacker;
+import dev.loqj.core.context.ContextResult;
+import dev.loqj.core.context.TokenBudget;
 import dev.loqj.core.rag.RagService;
 import picocli.CommandLine;
 
@@ -102,20 +104,22 @@ public class DiagnoseCmd implements Runnable {
                 System.out.println("  Retrieved: " + retrievedCount + " snippets");
                 System.out.println();
 
-                // 6. Validate token budget
-                PromptValidator validator = new PromptValidator(cfg);
-                PromptValidator.ValidationResult validation = validator.validateAndTrim(
-                    systemPrompt, question, prepared.snippetMaps()
-                );
+                // 6. Pack context and validate token budget
+                ContextPacker packer = new ContextPacker(TokenBudget.fromConfig(cfg));
+                java.util.List<ContextResult.Snippet> regular = new java.util.ArrayList<>();
+                for (var m : prepared.snippetMaps()) {
+                    regular.add(new ContextResult.Snippet(m.get("path"), m.get("text")));
+                }
+                ContextResult packed = packer.pack(systemPrompt, question, java.util.List.of(), regular);
 
                 System.out.println("Prompt Validation:");
-                System.out.println("  Original snippets:   " + validation.originalCount);
-                System.out.println("  Final snippets:      " + validation.finalCount);
-                System.out.println("  Was trimmed:         " + (validation.wasTrimmed ? "YES" : "no"));
-                System.out.println("  Estimated tokens:    " + validation.estimatedTokens);
-                System.out.println("  Budget tokens:       " + validation.budgetTokens);
+                System.out.println("  Original snippets:   " + packed.originalCount());
+                System.out.println("  Final snippets:      " + packed.finalCount());
+                System.out.println("  Was trimmed:         " + (packed.wasTrimmed() ? "YES" : "no"));
+                System.out.println("  Estimated tokens:    " + packed.estimatedTokens());
+                System.out.println("  Budget tokens:       " + packed.budgetTokens());
                 System.out.println("  Budget utilization:  " +
-                    String.format("%.1f%%", (100.0 * validation.estimatedTokens / validation.budgetTokens)));
+                    String.format("%.1f%%", packed.utilization() * 100.0));
                 System.out.println();
 
                 // 7. Print prompt head if requested
@@ -123,7 +127,7 @@ public class DiagnoseCmd implements Runnable {
                     StringBuilder promptSample = new StringBuilder();
                     promptSample.append("System: ").append(systemPrompt.substring(0, Math.min(200, systemPrompt.length())));
                     promptSample.append("\n...\nUser: ").append(question);
-                    promptSample.append("\nContext snippets: ").append(validation.finalCount);
+                    promptSample.append("\nContext snippets: ").append(packed.finalCount());
 
                     System.out.println("Prompt Head (first 400 chars):");
                     System.out.println(promptSample.toString().substring(0, Math.min(400, promptSample.length())));
@@ -134,12 +138,12 @@ public class DiagnoseCmd implements Runnable {
                 // 8. Detailed stats if requested
                 if (printStats) {
                     System.out.println("Detailed Statistics:");
-                    int totalSnippetChars = validation.snippets.stream()
-                        .mapToInt(s -> s.getOrDefault("text", "").length())
+                    int totalSnippetChars = packed.snippets().stream()
+                        .mapToInt(s -> s.text().length())
                         .sum();
                     System.out.println("  Total snippet chars: " + totalSnippetChars);
                     System.out.println("  Avg chars per snippet: " +
-                        (validation.finalCount > 0 ? totalSnippetChars / validation.finalCount : 0));
+                        (packed.finalCount() > 0 ? totalSnippetChars / packed.finalCount() : 0));
                     System.out.println();
                 }
 
