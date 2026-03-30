@@ -8,8 +8,21 @@ import java.util.stream.Collectors;
 /**
  * Reciprocal Rank Fusion stage. Merges candidates from multiple sources (e.g., BM25 + KNN)
  * into a single fused and ranked list using the formula: score(d) = Σ 1/(k + rank_i + 1).
+ *
+ * <p>The fused list is limited to {@code topK × }{@link #FUSED_LIMIT_MULTIPLIER} so that
+ * downstream stages (reranker, dedup) still have room to drop or reorder candidates
+ * before the final topK cut. The multiplier is intentionally lower than the per-source
+ * {@link Bm25Stage#FETCH_MULTIPLIER}/{@link KnnStage#FETCH_MULTIPLIER} — RRF has
+ * already merged and ranked; keeping 2× is enough headroom.
  */
 public final class RrfFusionStage implements RetrievalStage {
+
+    /**
+     * After fusion, keep at most {@code topK × FUSED_LIMIT_MULTIPLIER} candidates.
+     * This leaves headroom for downstream rerank and dedup before the final topK cut.
+     */
+    static final int FUSED_LIMIT_MULTIPLIER = 2;
+
     private final int rrfK;
     /** @param rrfK the RRF smoothing constant (typically 60). */
     public RrfFusionStage(int rrfK) {
@@ -37,8 +50,8 @@ public final class RrfFusionStage implements RetrievalStage {
                 fusedScores.merge(path, rrfScore, Double::sum);
             }
         }
-        // Sort by fused score descending, limit to topK * 2
-        int limit = Math.max(request.topK() * 2, request.topK());
+        // Sort by fused score descending, limit to topK × FUSED_LIMIT_MULTIPLIER
+        int limit = request.topK() * FUSED_LIMIT_MULTIPLIER;
         return StageOutput.of(fusedScores.entrySet().stream()
                 .sorted((a, b) -> Double.compare(b.getValue(), a.getValue()))
                 .limit(limit)
