@@ -4,6 +4,7 @@ import dev.loqj.core.rerank.Reranker;
 import dev.loqj.core.retrieval.RetrievalCandidate;
 import dev.loqj.core.retrieval.RetrievalRequest;
 import dev.loqj.core.retrieval.RetrievalStage;
+import dev.loqj.core.retrieval.StageOutput;
 import java.util.List;
 /**
  * Pipeline stage that delegates to a Reranker implementation.
@@ -20,7 +21,7 @@ public final class RerankerStage implements RetrievalStage {
     @Override
     public String name() { return "rerank"; }
     @Override
-    public List<RetrievalCandidate> process(RetrievalRequest request, List<RetrievalCandidate> candidates) {
-        return reranker.rerank(request.query(), candidates);
+    public StageOutput process(RetrievalRequest request, List<RetrievalCandidate> candidates) {
+        return StageOutput.of(reranker.rerank(request.query(), candidates));
     }
 }

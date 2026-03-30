@@ -19,10 +19,10 @@ class RetrievalPipelineTest {
         FixedStage(String tag) { this.tag = tag; }
         @Override public String name() { return tag; }
         @Override
-        public List<RetrievalCandidate> process(RetrievalRequest req, List<RetrievalCandidate> in) {
+        public StageOutput process(RetrievalRequest req, List<RetrievalCandidate> in) {
             var out = new ArrayList<>(in);
             out.add(RetrievalCandidate.of("path/" + tag, 1.0f, tag));
-            return out;
+            return StageOutput.of(out);
         }
     }
 
@@ -30,8 +30,8 @@ class RetrievalPipelineTest {
     static class ClearStage implements RetrievalStage {
         @Override public String name() { return "clear"; }
         @Override
-        public List<RetrievalCandidate> process(RetrievalRequest req, List<RetrievalCandidate> in) {
-            return new ArrayList<>();
+        public StageOutput process(RetrievalRequest req, List<RetrievalCandidate> in) {
+            return StageOutput.of(new ArrayList<>());
         }
     }
 
@@ -117,7 +117,7 @@ class RetrievalPipelineTest {
     void pipeline_handles_stage_returning_null() {
         RetrievalStage nullStage = new RetrievalStage() {
             @Override public String name() { return "null-returner"; }
-            @Override public List<RetrievalCandidate> process(RetrievalRequest r, List<RetrievalCandidate> c) {
+            @Override public StageOutput process(RetrievalRequest r, List<RetrievalCandidate> c) {
                 return null;
             }
         };

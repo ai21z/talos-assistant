@@ -26,7 +26,7 @@ class RrfFusionStageTest {
         );
 
         RetrievalRequest req = new RetrievalRequest("q", null, 10);
-        List<RetrievalCandidate> fused = stage.process(req, candidates);
+        List<RetrievalCandidate> fused = stage.process(req, candidates).candidates();
 
         // file-a should have highest RRF score: 1/(60+0+1) = 1/61
         assertEquals("file-a", fused.get(0).path());
@@ -48,7 +48,7 @@ class RrfFusionStageTest {
         candidates.add(RetrievalCandidate.of("C", 0.7f, "knn"));
 
         RetrievalRequest req = new RetrievalRequest("q", new float[]{1f}, 10);
-        List<RetrievalCandidate> fused = stage.process(req, candidates);
+        List<RetrievalCandidate> fused = stage.process(req, candidates).candidates();
 
         // B appears in both sources: 1/(60+1+1) + 1/(60+0+1) = 1/62 + 1/61
         // A appears only in bm25: 1/(60+0+1) = 1/61
@@ -67,7 +67,7 @@ class RrfFusionStageTest {
         );
 
         RetrievalRequest req = new RetrievalRequest("q", null, 10);
-        List<RetrievalCandidate> fused = stage.process(req, candidates);
+        List<RetrievalCandidate> fused = stage.process(req, candidates).candidates();
 
         float expected = (float) (1.0 / (60 + 0 + 1));
         assertEquals(expected, fused.get(0).score(), 1e-6);
@@ -76,7 +76,7 @@ class RrfFusionStageTest {
     @Test
     void empty_candidates_returns_empty() {
         RetrievalRequest req = new RetrievalRequest("q", null, 5);
-        List<RetrievalCandidate> fused = stage.process(req, new ArrayList<>());
+        List<RetrievalCandidate> fused = stage.process(req, new ArrayList<>()).candidates();
         assertTrue(fused.isEmpty());
     }
 
@@ -89,7 +89,7 @@ class RrfFusionStageTest {
 
         // topK=3, limit should be topK*2 = 6
         RetrievalRequest req = new RetrievalRequest("q", null, 3);
-        List<RetrievalCandidate> fused = stage.process(req, candidates);
+        List<RetrievalCandidate> fused = stage.process(req, candidates).candidates();
 
         assertTrue(fused.size() <= 6, "Should limit to topK*2");
     }
@@ -103,7 +103,7 @@ class RrfFusionStageTest {
         );
 
         RetrievalRequest req = new RetrievalRequest("q", null, 10);
-        List<RetrievalCandidate> fused = stageK1.process(req, candidates);
+        List<RetrievalCandidate> fused = stageK1.process(req, candidates).candidates();
 
         // With k=1: score = 1/(1+0+1) = 0.5
         float expected = (float) (1.0 / (1 + 0 + 1));
@@ -131,7 +131,7 @@ class RrfFusionStageTest {
         candidates.add(RetrievalCandidate.of("D", 0.7f, "knn"));
 
         RetrievalRequest req = new RetrievalRequest("q", new float[]{1f}, 10);
-        List<RetrievalCandidate> fused = stage.process(req, candidates);
+        List<RetrievalCandidate> fused = stage.process(req, candidates).candidates();
 
         double scoreA = 1.0 / 61;
         double scoreB = 1.0 / 62 + 1.0 / 61;
@@ -151,4 +151,3 @@ class RrfFusionStageTest {
         assertEquals((float) scoreC, fused.get(3).score(), 1e-6);
     }
 }
-

@@ -25,10 +25,12 @@ public final class RetrievalPipeline {
         for (RetrievalStage stage : stages) {
             int before = candidates.size();
             long t0 = System.nanoTime();
-            candidates = stage.process(request, candidates);
-            if (candidates == null) candidates = new ArrayList<>();
+            StageOutput output = stage.process(request, candidates);
+            candidates = output != null && output.candidates() != null
+                    ? output.candidates() : new ArrayList<>();
             long elapsed = System.nanoTime() - t0;
-            trace.record(stage.name(), elapsed, before, candidates.size(), stage.lastNote());
+            String note = output != null ? output.note() : null;
+            trace.record(stage.name(), elapsed, before, candidates.size(), note);
         }
         return new RetrievalResult(request, candidates, trace);
     }

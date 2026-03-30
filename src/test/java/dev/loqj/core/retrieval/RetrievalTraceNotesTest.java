@@ -84,23 +84,22 @@ class RetrievalTraceNotesTest {
 
     @Test
     void pipeline_captures_knn_skip_note_when_no_vector() {
-        // Use a stage that reports a skip note via lastNote()
+        // Stage that reports a skip note via StageOutput
         RetrievalStage skipStage = new RetrievalStage() {
             @Override public String name() { return "knn"; }
             @Override
-            public List<RetrievalCandidate> process(RetrievalRequest r, List<RetrievalCandidate> c) {
-                return c; // passthrough
+            public StageOutput process(RetrievalRequest r, List<RetrievalCandidate> c) {
+                return StageOutput.of(c, "skipped: no query vector");
             }
-            @Override public String lastNote() { return "skipped: no query vector"; }
         };
 
         RetrievalStage addStage = new RetrievalStage() {
             @Override public String name() { return "bm25"; }
             @Override
-            public List<RetrievalCandidate> process(RetrievalRequest r, List<RetrievalCandidate> c) {
+            public StageOutput process(RetrievalRequest r, List<RetrievalCandidate> c) {
                 var out = new ArrayList<>(c);
                 out.add(RetrievalCandidate.of("test", 1f, "bm25"));
-                return out;
+                return StageOutput.of(out);
             }
         };
 

@@ -2,6 +2,7 @@ package dev.loqj.core.retrieval.stages;
 import dev.loqj.core.retrieval.RetrievalCandidate;
 import dev.loqj.core.retrieval.RetrievalRequest;
 import dev.loqj.core.retrieval.RetrievalStage;
+import dev.loqj.core.retrieval.StageOutput;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -13,7 +14,7 @@ public final class DedupStage implements RetrievalStage {
     @Override
     public String name() { return "dedup"; }
     @Override
-    public List<RetrievalCandidate> process(RetrievalRequest request, List<RetrievalCandidate> candidates) {
+    public StageOutput process(RetrievalRequest request, List<RetrievalCandidate> candidates) {
         LinkedHashSet<String> seen = new LinkedHashSet<>();
         List<RetrievalCandidate> deduped = new ArrayList<>();
         for (RetrievalCandidate c : candidates) {
@@ -22,6 +23,6 @@ public final class DedupStage implements RetrievalStage {
             }
         }
         int limit = Math.min(request.topK(), deduped.size());
-        return deduped.subList(0, limit);
+        return StageOutput.of(deduped.subList(0, limit));
     }
 }
