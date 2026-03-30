@@ -50,10 +50,10 @@ public class RagService {
     }
 
     /** Answer type expected by RagAskCmd (has text() and citations()). */
-    public record Answer(String text, List<String> citations, Prepared prepared) {
-        /** Backwards-compatible constructor for callers that do not supply Prepared. */
+    public record Answer(String text, List<String> citations, Prepared prepared, ContextResult packedContext) {
+        /** Backwards-compatible constructor for callers that do not supply Prepared or packed context. */
         public Answer(String text, List<String> citations) {
-            this(text, citations, null);
+            this(text, citations, null, null);
         }
     }
 
@@ -165,15 +165,13 @@ public class RagService {
 
             if (!netEnabled) {
                 String stub = "(net disabled) " + question;
-                return new Answer(stub, prepared.citations(), prepared);
+                return new Answer(stub, prepared.citations(), prepared, null);
             }
 
             String sys = readCliSystemPromptOrDefault();
 
             // Pack retrieved snippets into context using unified ContextPacker
-            Map<String, Object> limits = CfgUtil.map(cfg.data.get("limits"));
-            int contextMax = CfgUtil.intAt(limits, "llm_context_max_tokens", TokenBudget.DEFAULT_CONTEXT_MAX_TOKENS);
-            ContextPacker packer = new ContextPacker(new TokenBudget(contextMax));
+            ContextPacker packer = new ContextPacker(TokenBudget.fromConfig(cfg));
 
             List<ContextResult.Snippet> regular = new java.util.ArrayList<>();
             for (var m : prepared.snippetMaps()) {
@@ -193,11 +191,12 @@ public class RagService {
 
             // Warn if we have retrieval but answer is empty
             if (!packed.isEmpty() && text.trim().isEmpty()) {
-                LOG.warn("RAG_GEN_EMPTY: Retrieved {} snippets but answer body is empty (promptTokens≈{}, budget={}). Check model capacity or reduce :k.",
+                LOG.warn("RAG_GEN_EMPTY: Retrieved {} snippets but answer body is empty (promptTokens={}, budget={}). Check model capacity or reduce :k.",
                     packed.finalCount(), packed.estimatedTokens(), packed.budgetTokens());
             }
 
-            return new Answer(text, prepared.citations(), prepared);
+            // Return packed citations (what the model actually saw), not pre-packed
+            return new Answer(text, packed.citations(), prepared, packed);
         } catch (Exception e) {
             String msg = "Error: " + e.getClass().getSimpleName() + (e.getMessage() == null ? "" : (": " + e.getMessage()));
             return new Answer(msg, List.of());
