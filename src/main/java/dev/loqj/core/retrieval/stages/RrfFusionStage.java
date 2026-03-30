@@ -2,6 +2,7 @@ package dev.loqj.core.retrieval.stages;
 import dev.loqj.core.retrieval.RetrievalCandidate;
 import dev.loqj.core.retrieval.RetrievalRequest;
 import dev.loqj.core.retrieval.RetrievalStage;
+import dev.loqj.core.retrieval.StageOutput;
 import java.util.*;
 import java.util.stream.Collectors;
 /**
@@ -20,8 +21,8 @@ public final class RrfFusionStage implements RetrievalStage {
     @Override
     public String name() { return "rrf"; }
     @Override
-    public List<RetrievalCandidate> process(RetrievalRequest request, List<RetrievalCandidate> candidates) {
-        if (candidates.isEmpty()) return candidates;
+    public StageOutput process(RetrievalRequest request, List<RetrievalCandidate> candidates) {
+        if (candidates.isEmpty()) return StageOutput.of(candidates);
         // Group candidates by source, preserving order within each source
         Map<String, List<RetrievalCandidate>> bySource = new LinkedHashMap<>();
         for (RetrievalCandidate c : candidates) {
@@ -38,10 +39,10 @@ public final class RrfFusionStage implements RetrievalStage {
         }
         // Sort by fused score descending, limit to topK * 2
         int limit = Math.max(request.topK() * 2, request.topK());
-        return fusedScores.entrySet().stream()
+        return StageOutput.of(fusedScores.entrySet().stream()
                 .sorted((a, b) -> Double.compare(b.getValue(), a.getValue()))
                 .limit(limit)
                 .map(e -> RetrievalCandidate.of(e.getKey(), e.getValue().floatValue(), "rrf"))
-                .collect(Collectors.toList());
+                .collect(Collectors.toList()));
     }
 }

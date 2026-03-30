@@ -68,7 +68,7 @@ class RetrievalParityTest {
 
         RrfFusionStage rrfStage = new RrfFusionStage(RRF_K);
         RetrievalRequest request = new RetrievalRequest("test query", new float[]{1f}, TOP_K);
-        List<RetrievalCandidate> pipelineFused = rrfStage.process(request, combined);
+        List<RetrievalCandidate> pipelineFused = rrfStage.process(request, combined).candidates();
 
         // Compare: same paths in same order
         List<String> legacyPaths = legacyFused.stream().map(c -> c.path).toList();
@@ -99,8 +99,8 @@ class RetrievalParityTest {
         DedupStage dedupStage = new DedupStage();
         RetrievalRequest request = new RetrievalRequest("test query", new float[]{1f}, TOP_K);
 
-        List<RetrievalCandidate> afterRrf = rrfStage.process(request, combined);
-        List<RetrievalCandidate> afterDedup = dedupStage.process(request, afterRrf);
+        List<RetrievalCandidate> afterRrf = rrfStage.process(request, combined).candidates();
+        List<RetrievalCandidate> afterDedup = dedupStage.process(request, afterRrf).candidates();
 
         // Compare final paths
         List<String> legacyPaths = legacyFinal.stream().map(c -> c.path).toList();
@@ -123,8 +123,8 @@ class RetrievalParityTest {
         DedupStage dedupStage = new DedupStage();
         RetrievalRequest request = new RetrievalRequest("test query", null, TOP_K);
 
-        List<RetrievalCandidate> afterRrf = rrfStage.process(request, bm25Only);
-        List<RetrievalCandidate> afterDedup = dedupStage.process(request, afterRrf);
+        List<RetrievalCandidate> afterRrf = rrfStage.process(request, bm25Only).candidates();
+        List<RetrievalCandidate> afterDedup = dedupStage.process(request, afterRrf).candidates();
 
         List<String> legacyPaths = legacyFinal.stream().map(c -> c.path).toList();
         List<String> pipelinePaths = afterDedup.stream().map(RetrievalCandidate::path).toList();
@@ -160,8 +160,8 @@ class RetrievalParityTest {
         DedupStage dedupStage = new DedupStage();
         RetrievalRequest request = new RetrievalRequest("q", new float[]{1f}, 3);
 
-        List<RetrievalCandidate> afterRrf = rrfStage.process(request, combined);
-        List<RetrievalCandidate> afterDedup = dedupStage.process(request, afterRrf);
+        List<RetrievalCandidate> afterRrf = rrfStage.process(request, combined).candidates();
+        List<RetrievalCandidate> afterDedup = dedupStage.process(request, afterRrf).candidates();
 
         List<String> legacyPaths = legacyFinal.stream().map(c -> c.path).toList();
         List<String> pipelinePaths = afterDedup.stream().map(RetrievalCandidate::path).toList();
@@ -178,7 +178,7 @@ class RetrievalParityTest {
 
         RrfFusionStage rrfStage = new RrfFusionStage(RRF_K);
         RetrievalRequest request = new RetrievalRequest("q", new float[]{1f}, 10);
-        List<RetrievalCandidate> fused = rrfStage.process(request, combined);
+        List<RetrievalCandidate> fused = rrfStage.process(request, combined).candidates();
 
         for (int i = 1; i < fused.size(); i++) {
             assertTrue(fused.get(i - 1).score() >= fused.get(i).score(),
@@ -203,8 +203,8 @@ class RetrievalParityTest {
         RetrievalStage seedStage = new RetrievalStage() {
             @Override public String name() { return "seed"; }
             @Override
-            public List<RetrievalCandidate> process(RetrievalRequest req, List<RetrievalCandidate> in) {
-                return combined;
+            public StageOutput process(RetrievalRequest req, List<RetrievalCandidate> in) {
+                return StageOutput.of(combined);
             }
         };
 

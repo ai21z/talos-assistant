@@ -27,7 +27,7 @@ class DedupStageTest {
         );
 
         RetrievalRequest req = new RetrievalRequest("q", null, 10);
-        List<RetrievalCandidate> result = stage.process(req, candidates);
+        List<RetrievalCandidate> result = stage.process(req, candidates).candidates();
 
         assertEquals(3, result.size());
         assertEquals("A", result.get(0).path());
@@ -44,7 +44,7 @@ class DedupStageTest {
         }
 
         RetrievalRequest req = new RetrievalRequest("q", null, 3);
-        List<RetrievalCandidate> result = stage.process(req, candidates);
+        List<RetrievalCandidate> result = stage.process(req, candidates).candidates();
 
         assertEquals(3, result.size());
         assertEquals("file-0", result.get(0).path());
@@ -55,7 +55,7 @@ class DedupStageTest {
     @Test
     void empty_input_returns_empty() {
         RetrievalRequest req = new RetrievalRequest("q", null, 5);
-        List<RetrievalCandidate> result = stage.process(req, new ArrayList<>());
+        List<RetrievalCandidate> result = stage.process(req, new ArrayList<>()).candidates();
         assertTrue(result.isEmpty());
     }
 
@@ -67,7 +67,7 @@ class DedupStageTest {
         );
 
         RetrievalRequest req = new RetrievalRequest("q", null, 10);
-        List<RetrievalCandidate> result = stage.process(req, candidates);
+        List<RetrievalCandidate> result = stage.process(req, candidates).candidates();
 
         assertEquals(2, result.size());
     }
@@ -81,11 +81,10 @@ class DedupStageTest {
         );
 
         RetrievalRequest req = new RetrievalRequest("q", null, 10);
-        List<RetrievalCandidate> result = stage.process(req, candidates);
+        List<RetrievalCandidate> result = stage.process(req, candidates).candidates();
 
         assertEquals(1, result.size());
         assertEquals("same", result.get(0).path());
         assertEquals(1.0f, result.get(0).score(), 1e-6);
     }
 }
-

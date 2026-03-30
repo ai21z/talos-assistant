@@ -25,7 +25,7 @@ class RerankerStageTest {
         );
 
         RetrievalRequest req = new RetrievalRequest("q", null, 5);
-        List<RetrievalCandidate> result = stage.process(req, input);
+        List<RetrievalCandidate> result = stage.process(req, input).candidates();
 
         assertEquals(input, result);
     }
@@ -38,7 +38,7 @@ class RerankerStageTest {
         );
 
         RetrievalRequest req = new RetrievalRequest("q", null, 5);
-        List<RetrievalCandidate> result = stage.process(req, input);
+        List<RetrievalCandidate> result = stage.process(req, input).candidates();
 
         assertEquals(input, result);
     }
@@ -59,7 +59,7 @@ class RerankerStageTest {
         );
 
         RetrievalRequest req = new RetrievalRequest("q", null, 5);
-        List<RetrievalCandidate> result = stage.process(req, input);
+        List<RetrievalCandidate> result = stage.process(req, input).candidates();
 
         assertEquals("second", result.get(0).path());
         assertEquals("first", result.get(1).path());
@@ -78,9 +78,8 @@ class RerankerStageTest {
         );
 
         RetrievalRequest req = new RetrievalRequest("q", null, 5);
-        List<RetrievalCandidate> result = stage.process(req, input);
+        List<RetrievalCandidate> result = stage.process(req, input).candidates();
 
         assertEquals(input, result);
     }
 }
-
