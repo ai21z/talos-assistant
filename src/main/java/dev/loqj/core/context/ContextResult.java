@@ -51,7 +51,7 @@ public final class ContextResult {
     /** Number of snippets after budget trimming. */
     public int finalCount() { return finalCount; }
 
-    /** Whether any snippets were dropped to fit the budget. */
+    /** Whether packing had to reduce context: snippets dropped or text truncated. */
     public boolean wasTrimmed() { return wasTrimmed; }
 
     /** Estimated total tokens (system + query + snippets). */

@@ -1,5 +1,10 @@
 package dev.loqj.core.context;
 
+import dev.loqj.core.CfgUtil;
+import dev.loqj.core.Config;
+
+import java.util.Map;
+
 /**
  * Encapsulates token estimation and budget allocation for context packing.
  * Uses a lightweight chars/4 heuristic — dependency-free, conservative, and
@@ -45,6 +50,17 @@ public final class TokenBudget {
 
     public TokenBudget() {
         this(DEFAULT_CONTEXT_MAX_TOKENS);
+    }
+
+    /**
+     * Construct a TokenBudget from application config.
+     * Reads {@code limits.llm_context_max_tokens}, falling back to {@link #DEFAULT_CONTEXT_MAX_TOKENS}.
+     * This is the single source of truth for budget construction across all paths.
+     */
+    public static TokenBudget fromConfig(Config cfg) {
+        Map<String, Object> limits = CfgUtil.map(cfg.data.get("limits"));
+        int contextMax = CfgUtil.intAt(limits, "llm_context_max_tokens", DEFAULT_CONTEXT_MAX_TOKENS);
+        return new TokenBudget(contextMax);
     }
 
     // ───── token estimation ─────

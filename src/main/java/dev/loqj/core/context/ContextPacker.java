@@ -62,6 +62,7 @@ public final class ContextPacker {
         LinkedHashSet<String> seenPaths = new LinkedHashSet<>();
         List<ContextResult.Snippet> packed = new ArrayList<>();
         int usedChars = 0;
+        boolean anyTruncated = false;  // track text truncation, not just snippet drops
 
         // Phase 1: reservation for two-file comparison
         if (reservePerPinnedFile && pinnedSan.size() >= 2) {
@@ -79,6 +80,7 @@ public final class ContextPacker {
 
                     int take = Math.min(charBudget - usedChars, s.text().length());
                     if (take <= 0) continue;
+                    if (take < s.text().length()) anyTruncated = true;
                     packed.add(new ContextResult.Snippet(s.path(), s.text().substring(0, take)));
                     usedChars += take;
                     reservedBases.add(base);
@@ -93,6 +95,7 @@ public final class ContextPacker {
             if (!seenPaths.add(s.path())) continue;
             int take = Math.min(charBudget - usedChars, s.text().length());
             if (take <= 0) continue;
+            if (take < s.text().length()) anyTruncated = true;
             packed.add(new ContextResult.Snippet(s.path(), s.text().substring(0, take)));
             usedChars += take;
         }
@@ -103,6 +106,7 @@ public final class ContextPacker {
             if (!seenPaths.add(s.path())) continue;
             int take = Math.min(charBudget - usedChars, s.text().length());
             if (take <= 0) continue;
+            if (take < s.text().length()) anyTruncated = true;
             packed.add(new ContextResult.Snippet(s.path(), s.text().substring(0, take)));
             usedChars += take;
         }
@@ -122,7 +126,7 @@ public final class ContextPacker {
         int queryTokens = budget.estimateTokens(userQuery);
         int totalEstimated = systemTokens + queryTokens + snippetTokens;
 
-        boolean wasTrimmed = packed.size() < originalCount;
+        boolean wasTrimmed = packed.size() < originalCount || anyTruncated;
 
         return new ContextResult(
                 packed,

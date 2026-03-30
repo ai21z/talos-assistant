@@ -105,7 +105,7 @@ public class DiagnoseCmd implements Runnable {
                 System.out.println();
 
                 // 6. Pack context and validate token budget
-                ContextPacker packer = new ContextPacker(new TokenBudget(contextMaxTokens));
+                ContextPacker packer = new ContextPacker(TokenBudget.fromConfig(cfg));
                 java.util.List<ContextResult.Snippet> regular = new java.util.ArrayList<>();
                 for (var m : prepared.snippetMaps()) {
                     regular.add(new ContextResult.Snippet(m.get("path"), m.get("text")));

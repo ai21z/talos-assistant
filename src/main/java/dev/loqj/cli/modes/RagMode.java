@@ -70,7 +70,7 @@ public final class RagMode implements Mode {
         // Load system prompt (needed for token budget calculation)
         String system = readOrFallback("prompts/rag-system.txt", ctx);
 
-        ContextPacker packer = new ContextPacker(new TokenBudget(8192));
+        ContextPacker packer = new ContextPacker(TokenBudget.fromConfig(ctx.cfg()));
         ContextResult packed = packer.pack(system, q, pinnedCtx, regularCtx, isTwoFileComparison);
 
         // Anchor snippet paths with backticks for model clarity
