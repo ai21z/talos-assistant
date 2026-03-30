@@ -28,7 +28,7 @@ public final class RetrievalPipeline {
             candidates = stage.process(request, candidates);
             if (candidates == null) candidates = new ArrayList<>();
             long elapsed = System.nanoTime() - t0;
-            trace.record(stage.name(), elapsed, before, candidates.size());
+            trace.record(stage.name(), elapsed, before, candidates.size(), stage.lastNote());
         }
         return new RetrievalResult(request, candidates, trace);
     }

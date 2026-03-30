@@ -16,4 +16,11 @@ public interface RetrievalStage {
      * @return updated candidate list
      */
     List<RetrievalCandidate> process(RetrievalRequest request, List<RetrievalCandidate> candidates);
+
+    /**
+     * Optional note from the last invocation of {@link #process}, for trace recording.
+     * Returns null by default. Stages can override to report skip reasons or diagnostics.
+     * Called by the pipeline runner immediately after process().
+     */
+    default String lastNote() { return null; }
 }

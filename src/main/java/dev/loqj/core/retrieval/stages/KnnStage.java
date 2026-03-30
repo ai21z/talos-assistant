@@ -11,6 +11,7 @@ import java.util.List;
  */
 public final class KnnStage implements RetrievalStage {
     private final CorpusStore store;
+    private String note;
     public KnnStage(CorpusStore store) {
         this.store = store;
     }
@@ -19,8 +20,10 @@ public final class KnnStage implements RetrievalStage {
     @Override
     public List<RetrievalCandidate> process(RetrievalRequest request, List<RetrievalCandidate> candidates) {
         if (!request.hasVector()) {
+            note = "skipped: no query vector";
             return candidates; // no vector available, pass through
         }
+        note = null;
         int fetchK = Math.max(request.topK() * 3, request.topK());
         List<CorpusStore.Hit> hits = store.knn(request.queryVector(), fetchK);
         List<RetrievalCandidate> out = new ArrayList<>(candidates);
@@ -29,4 +32,6 @@ public final class KnnStage implements RetrievalStage {
         }
         return out;
     }
+    @Override
+    public String lastNote() { return note; }
 }

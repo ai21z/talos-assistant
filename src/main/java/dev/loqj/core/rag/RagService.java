@@ -47,7 +47,12 @@ public class RagService {
     }
 
     /** Answer type expected by RagAskCmd (has text() and citations()). */
-    public record Answer(String text, List<String> citations) {}
+    public record Answer(String text, List<String> citations, Prepared prepared) {
+        /** Backwards-compatible constructor for callers that do not supply Prepared. */
+        public Answer(String text, List<String> citations) {
+            this(text, citations, null);
+        }
+    }
 
     public RagService(Config cfg) {
         this.cfg = Objects.requireNonNull(cfg);
@@ -157,7 +162,7 @@ public class RagService {
 
             if (!netEnabled) {
                 String stub = "(net disabled) " + question;
-                return new Answer(stub, prepared.citations());
+                return new Answer(stub, prepared.citations(), prepared);
             }
 
             String sys = readCliSystemPromptOrDefault();
@@ -184,7 +189,7 @@ public class RagService {
                     validation.snippets.size(), validation.estimatedTokens, validation.budgetTokens);
             }
 
-            return new Answer(text, prepared.citations());
+            return new Answer(text, prepared.citations(), prepared);
         } catch (Exception e) {
             String msg = "Error: " + e.getClass().getSimpleName() + (e.getMessage() == null ? "" : (": " + e.getMessage()));
             return new Answer(msg, List.of());
