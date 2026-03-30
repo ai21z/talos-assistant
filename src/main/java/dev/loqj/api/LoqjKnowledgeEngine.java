@@ -38,15 +38,17 @@ public final class LoqjKnowledgeEngine {
 
     /**
      * Retrieve context and generate an answer using the configured LLM.
+     * Retrieval is performed once; snippets are obtained from the same pass.
      */
     public QueryResponse ask(QueryRequest request) {
         Objects.requireNonNull(request, "request must not be null");
         RagService.Answer answer = ragService.ask(
                 request.workspace(), request.query(), request.topK());
-        // Re-run prepare to get snippets (ask() doesn't expose them directly)
-        RagService.Prepared prepared = ragService.prepare(
-                request.workspace(), request.query(), request.topK());
-        return new QueryResponse(answer.text(), prepared.snippetMaps(), answer.citations());
+        // Answer now carries Prepared from the single retrieval pass
+        var snippets = answer.prepared() != null
+                ? answer.prepared().snippetMaps()
+                : List.<java.util.Map<String, String>>of();
+        return new QueryResponse(answer.text(), snippets, answer.citations());
     }
 
     /**

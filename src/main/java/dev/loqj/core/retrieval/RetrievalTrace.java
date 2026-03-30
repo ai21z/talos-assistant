@@ -8,18 +8,28 @@ import java.util.List;
  */
 public final class RetrievalTrace {
     /** A single trace entry from one pipeline stage. */
-    public record Entry(String stageName, long durationNanos, int candidatesBefore, int candidatesAfter) {
+    public record Entry(String stageName, long durationNanos, int candidatesBefore, int candidatesAfter, String note) {
+        /** Backwards-compatible constructor without note. */
+        public Entry(String stageName, long durationNanos, int candidatesBefore, int candidatesAfter) {
+            this(stageName, durationNanos, candidatesBefore, candidatesAfter, null);
+        }
         public double durationMs() { return durationNanos / 1_000_000.0; }
+        public boolean wasSkipped() { return candidatesBefore == candidatesAfter && note != null; }
         @Override
         public String toString() {
-            return stageName + " [" + String.format("%.1f", durationMs()) + "ms] "
+            String base = stageName + " [" + String.format("%.1f", durationMs()) + "ms] "
                     + candidatesBefore + " -> " + candidatesAfter;
+            return note != null ? base + " (" + note + ")" : base;
         }
     }
     private final List<Entry> entries = new ArrayList<>();
     /** Record a stage execution. Called by the pipeline runner. */
     public void record(String stageName, long durationNanos, int candidatesBefore, int candidatesAfter) {
-        entries.add(new Entry(stageName, durationNanos, candidatesBefore, candidatesAfter));
+        entries.add(new Entry(stageName, durationNanos, candidatesBefore, candidatesAfter, null));
+    }
+    /** Record a stage execution with an optional note (e.g., skip reason). */
+    public void record(String stageName, long durationNanos, int candidatesBefore, int candidatesAfter, String note) {
+        entries.add(new Entry(stageName, durationNanos, candidatesBefore, candidatesAfter, note));
     }
     /** All recorded entries in execution order. */
     public List<Entry> entries() {
