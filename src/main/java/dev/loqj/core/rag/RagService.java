@@ -8,6 +8,9 @@ import dev.loqj.core.index.Indexer;
 import dev.loqj.core.index.LuceneStore;
 import dev.loqj.core.llm.LlmClient;
 import dev.loqj.core.cache.CacheDb;
+import dev.loqj.core.context.ContextPacker;
+import dev.loqj.core.context.ContextResult;
+import dev.loqj.core.context.TokenBudget;
 import dev.loqj.core.rerank.NoOpReranker;
 import dev.loqj.core.retrieval.*;
 import dev.loqj.core.retrieval.stages.*;
@@ -167,26 +170,31 @@ public class RagService {
 
             String sys = readCliSystemPromptOrDefault();
 
-            // Validate and trim snippets to fit token budget
-            PromptValidator validator = new PromptValidator(cfg);
-            PromptValidator.ValidationResult validation = validator.validateAndTrim(
-                sys, question, prepared.snippetMaps()
-            );
+            // Pack retrieved snippets into context using unified ContextPacker
+            Map<String, Object> limits = CfgUtil.map(cfg.data.get("limits"));
+            int contextMax = CfgUtil.intAt(limits, "llm_context_max_tokens", TokenBudget.DEFAULT_CONTEXT_MAX_TOKENS);
+            ContextPacker packer = new ContextPacker(new TokenBudget(contextMax));
+
+            List<ContextResult.Snippet> regular = new java.util.ArrayList<>();
+            for (var m : prepared.snippetMaps()) {
+                regular.add(new ContextResult.Snippet(m.get("path"), m.get("text")));
+            }
+            ContextResult packed = packer.pack(sys, question, List.of(), regular);
 
             // Warn if trimming occurred
-            if (validation.wasTrimmed) {
+            if (packed.wasTrimmed()) {
                 LOG.warn("RAG_CONTEXT_TRIMMED: Reduced snippets from {} to {} to fit {} token budget (estimated {} tokens). Consider reducing :k or enabling vectors.",
-                    validation.originalCount, validation.finalCount, validation.budgetTokens, validation.estimatedTokens);
+                    packed.originalCount(), packed.finalCount(), packed.budgetTokens(), packed.estimatedTokens());
             }
 
             LlmClient llm = new LlmClient(cfg);
-            String text = llm.chat(sys, question, validation.snippets);
+            String text = llm.chat(sys, question, packed.toSnippetMaps());
             if (text == null) text = "";
 
             // Warn if we have retrieval but answer is empty
-            if (!validation.snippets.isEmpty() && text.trim().isEmpty()) {
+            if (!packed.isEmpty() && text.trim().isEmpty()) {
                 LOG.warn("RAG_GEN_EMPTY: Retrieved {} snippets but answer body is empty (promptTokens≈{}, budget={}). Check model capacity or reduce :k.",
-                    validation.snippets.size(), validation.estimatedTokens, validation.budgetTokens);
+                    packed.finalCount(), packed.estimatedTokens(), packed.budgetTokens());
             }
 
             return new Answer(text, prepared.citations(), prepared);
