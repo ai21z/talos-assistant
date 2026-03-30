@@ -49,7 +49,19 @@ public class RagService {
         public List<String> citations()                 { return citations;  }
     }
 
-    /** Answer type expected by RagAskCmd (has text() and citations()). */
+    /**
+     * Answer returned by {@link #ask(Path, String, Integer)}.
+     * <p>
+     * {@code packedContext} is the context actually sent to the LLM after packing
+     * and possible truncation. It is {@code null} on the net-disabled stub path
+     * (no model call occurs, so no packing is performed). Callers that inspect
+     * packed context must null-check first.
+     *
+     * @param text           generated answer text (or stub / error message)
+     * @param citations      deduplicated source-file citations
+     * @param prepared       full pre-packed retrieval result (nullable on error path)
+     * @param packedContext   packed context sent to model (null when net is disabled or on error)
+     */
     public record Answer(String text, List<String> citations, Prepared prepared, ContextResult packedContext) {
         /** Backwards-compatible constructor for callers that do not supply Prepared or packed context. */
         public Answer(String text, List<String> citations) {
@@ -155,11 +167,36 @@ public class RagService {
         return "You are LOQ-J (CLI). Answer briefly, cite local files when available. If context is insufficient, say so.";
     }
 
+    /**
+     * Retrieves context for the given question and generates an LLM answer.
+     * <p>
+     * <strong>Net-disabled stub path:</strong> When {@code net.enabled} is {@code false}
+     * in configuration, the LLM call is skipped entirely. The method returns an
+     * {@link Answer} whose text is a synthetic stub ({@code "(net disabled) <question>"}),
+     * whose citations come from the pre-packed retrieval set (i.e. {@link Prepared#citations()}),
+     * and whose {@link Answer#packedContext()} is {@code null} because context packing
+     * never runs (no model will consume it). Callers must therefore treat a null
+     * {@code packedContext} as "no packing was performed" — not as "packing produced
+     * nothing." The {@link Answer#prepared()} field is still populated, so the full
+     * retrieved snippet set is available for inspection.
+     * <p>
+     * This path exists to allow fast integration tests and air-gapped environments
+     * to exercise the retrieval pipeline without requiring a reachable LLM endpoint.
+     *
+     * @param ws          workspace root directory
+     * @param question    user query
+     * @param kOverride   optional override for top-K retrieval (null → config default)
+     * @return a non-null {@link Answer}; on unrecoverable error the answer text
+     *         contains the error message and citations are empty
+     */
     public Answer ask(Path ws, String question, Integer kOverride) {
         try {
             Prepared prepared = prepare(ws, question, kOverride);
 
-            // Check if network is disabled to short-circuit for fast tests
+            // Net-disabled stub path: skip LLM + context packing for fast tests / air-gap.
+            // packedContext is null because no packing is performed — no model will consume it.
+            // Citations come from the pre-packed retrieval set (Prepared).
+            // See Javadoc above for full semantics.
             Map<String,Object> net = CfgUtil.map(cfg.data.get("net"));
             boolean netEnabled = !(net.get("enabled") instanceof Boolean b) || b;
 

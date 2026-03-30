@@ -41,12 +41,19 @@ public final class LoqjKnowledgeEngine {
      * Retrieval is performed once; the returned snippets and citations
      * correspond to the <em>packed</em> context actually sent to the model,
      * not the broader pre-packed retrieval set.
+     * <p>
+     * <strong>Net-disabled fallback:</strong> When {@code net.enabled} is false,
+     * {@link RagService#ask} returns {@code packedContext == null} because context
+     * packing is skipped (no model will consume the packed prompt). In that case
+     * this method falls back to the pre-packed retrieval snippets from
+     * {@link RagService.Prepared} so callers still receive the retrieved evidence.
      */
     public QueryResponse ask(QueryRequest request) {
         Objects.requireNonNull(request, "request must not be null");
         RagService.Answer answer = ragService.ask(
                 request.workspace(), request.query(), request.topK());
-        // Prefer packed context (actual input to model) over raw retrieved set
+        // Prefer packed context (actual input to model) over raw retrieved set.
+        // packedContext is null on the net-disabled stub path — fall back to Prepared.
         var packedSnippets = answer.packedContext() != null
                 ? answer.packedContext().toSnippetMaps()
                 : (answer.prepared() != null ? answer.prepared().snippetMaps()
