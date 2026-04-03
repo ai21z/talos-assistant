@@ -3,11 +3,14 @@ import dev.loqj.core.retrieval.RetrievalCandidate;
 import dev.loqj.core.retrieval.RetrievalRequest;
 import dev.loqj.core.retrieval.RetrievalStage;
 import dev.loqj.core.retrieval.StageOutput;
+import dev.loqj.core.ingest.ChunkMetadata;
 import java.util.*;
 import java.util.stream.Collectors;
 /**
  * Reciprocal Rank Fusion stage. Merges candidates from multiple sources (e.g., BM25 + KNN)
  * into a single fused and ranked list using the formula: score(d) = Σ 1/(k + rank_i + 1).
+ * Metadata is preserved using first-seen-wins: the first candidate encountered for a given
+ * path determines the metadata carried through fusion.
  *
  * <p>The fused list is limited to {@code topK × }{@link #FUSED_LIMIT_MULTIPLIER} so that
  * downstream stages (reranker, dedup) still have room to drop or reorder candidates
@@ -36,6 +39,11 @@ public final class RrfFusionStage implements RetrievalStage {
     @Override
     public StageOutput process(RetrievalRequest request, List<RetrievalCandidate> candidates) {
         if (candidates.isEmpty()) return StageOutput.of(candidates);
+        // First-seen metadata per path (same chunk always has the same metadata)
+        Map<String, ChunkMetadata> metadataByPath = new HashMap<>();
+        for (RetrievalCandidate c : candidates) {
+            metadataByPath.putIfAbsent(c.path(), c.metadata());
+        }
         // Group candidates by source, preserving order within each source
         Map<String, List<RetrievalCandidate>> bySource = new LinkedHashMap<>();
         for (RetrievalCandidate c : candidates) {
@@ -55,7 +63,8 @@ public final class RrfFusionStage implements RetrievalStage {
         return StageOutput.of(fusedScores.entrySet().stream()
                 .sorted((a, b) -> Double.compare(b.getValue(), a.getValue()))
                 .limit(limit)
-                .map(e -> RetrievalCandidate.of(e.getKey(), e.getValue().floatValue(), "rrf"))
+                .map(e -> RetrievalCandidate.of(e.getKey(), e.getValue().floatValue(), "rrf",
+                        metadataByPath.getOrDefault(e.getKey(), ChunkMetadata.empty())))
                 .collect(Collectors.toList()));
     }
 }

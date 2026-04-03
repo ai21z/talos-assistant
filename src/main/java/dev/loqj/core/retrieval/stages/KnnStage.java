@@ -37,7 +37,7 @@ public final class KnnStage implements RetrievalStage {
         List<CorpusStore.Hit> hits = store.knn(request.queryVector(), fetchK);
         List<RetrievalCandidate> out = new ArrayList<>(candidates);
         for (CorpusStore.Hit h : hits) {
-            out.add(RetrievalCandidate.of(h.path(), h.score(), "knn"));
+            out.add(RetrievalCandidate.of(h.path(), h.score(), "knn", h.metadata()));
         }
         return StageOutput.of(out);
     }
