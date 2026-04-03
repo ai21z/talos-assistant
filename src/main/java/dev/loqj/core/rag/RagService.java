@@ -36,16 +36,28 @@ public class RagService {
     // very small session-memory field used by RAG+MEMORY mode (optional)
     private String sessionMemory;
 
-    /** Small data holder returned by prepare(). */
+    /**
+     * Small data holder returned by prepare().
+     * Carries typed snippets with metadata for downstream consumers.
+     */
     public static final class Prepared {
-        private final List<Map<String, String>> snippetMaps;
+        private final List<ContextResult.Snippet> snippets;
         private final List<String> citations;
 
-        public Prepared(List<Map<String, String>> snippetMaps, List<String> citations) {
-            this.snippetMaps = (snippetMaps == null ? List.of() : List.copyOf(snippetMaps));
-            this.citations   = (citations == null ? List.of()     : List.copyOf(citations));
+        public Prepared(List<ContextResult.Snippet> snippets, List<String> citations) {
+            this.snippets  = (snippets == null ? List.of() : List.copyOf(snippets));
+            this.citations = (citations == null ? List.of() : List.copyOf(citations));
         }
-        public List<Map<String, String>> snippetMaps() { return snippetMaps; }
+        /** Typed snippets with metadata for direct consumption. */
+        public List<ContextResult.Snippet> snippets() { return snippets; }
+        /** Legacy accessor: converts typed snippets to Map&lt;String,String&gt; for LlmClient. */
+        public List<Map<String, String>> snippetMaps() {
+            List<Map<String, String>> out = new ArrayList<>(snippets.size());
+            for (ContextResult.Snippet s : snippets) {
+                out.add(Map.of("path", s.path(), "text", s.text()));
+            }
+            return Collections.unmodifiableList(out);
+        }
         public List<String> citations()                 { return citations;  }
     }
 
@@ -102,7 +114,7 @@ public class RagService {
         }
 
         Path indexDir = indexer.indexDirFor(ws);
-        List<Map<String,String>> snippets = new ArrayList<>();
+        List<ContextResult.Snippet> snippets = new ArrayList<>();
         List<String> citations = new ArrayList<>();
 
         try (LuceneStore store = new LuceneStore(indexDir, 0)) {
@@ -124,15 +136,13 @@ public class RagService {
 
             LOG.debug("Retrieval pipeline trace:\n{}", result.trace().summary());
 
-            // Build snippet maps + citations from pipeline results
-            var citationSet = new LinkedHashSet<String>(result.candidates().size());
+            // Build typed snippets + rich citations from pipeline results
             for (RetrievalCandidate c : result.candidates()) {
                 String text = store.getTextByPath(c.path());
                 if (text == null || text.isBlank()) continue;
-                snippets.add(Map.of("path", c.path(), "text", text));
-                citationSet.add(stripChunkId(c.path()));
+                snippets.add(new ContextResult.Snippet(c.path(), text, c.metadata()));
             }
-            citations.addAll(citationSet);
+            citations.addAll(ContextPacker.buildCitations(snippets));
         } catch (Exception e) {
             // On any failure, return empty (don't explode CLI)
         }
@@ -155,10 +165,6 @@ public class RagService {
                 .build();
     }
 
-    private static String stripChunkId(String path) {
-        int i = path.indexOf('#');
-        return (i < 0) ? path : path.substring(0, i);
-    }
 
     public String readCliSystemPromptOrDefault() throws Exception {
         try (InputStream in = RagService.class.getClassLoader().getResourceAsStream("prompts/cli-system.txt")) {
@@ -210,11 +216,7 @@ public class RagService {
             // Pack retrieved snippets into context using unified ContextPacker
             ContextPacker packer = new ContextPacker(TokenBudget.fromConfig(cfg));
 
-            List<ContextResult.Snippet> regular = new java.util.ArrayList<>();
-            for (var m : prepared.snippetMaps()) {
-                regular.add(new ContextResult.Snippet(m.get("path"), m.get("text")));
-            }
-            ContextResult packed = packer.pack(sys, question, List.of(), regular);
+            ContextResult packed = packer.pack(sys, question, List.of(), prepared.snippets());
 
             // Warn if trimming occurred
             if (packed.wasTrimmed()) {

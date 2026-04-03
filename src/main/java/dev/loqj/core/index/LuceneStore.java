@@ -211,7 +211,7 @@ public class LuceneStore implements AutoCloseable, CorpusStore {
             var hits = new ArrayList<CorpusStore.Hit>(td.scoreDocs.length);
             for (ScoreDoc sd : td.scoreDocs) {
                 var d = stored.document(sd.doc);
-                hits.add(new CorpusStore.Hit(d.get(F_PATH), sd.score));
+                hits.add(new CorpusStore.Hit(d.get(F_PATH), sd.score, extractMetadata(d)));
             }
             return hits;
         } catch (Exception e) {
@@ -234,7 +234,7 @@ public class LuceneStore implements AutoCloseable, CorpusStore {
             var hits = new ArrayList<CorpusStore.Hit>(td.scoreDocs.length);
             for (ScoreDoc sd : td.scoreDocs) {
                 var d = stored.document(sd.doc);
-                hits.add(new CorpusStore.Hit(d.get(F_PATH), sd.score));
+                hits.add(new CorpusStore.Hit(d.get(F_PATH), sd.score, extractMetadata(d)));
             }
             return hits;
         } catch (Exception e) {
@@ -259,6 +259,42 @@ public class LuceneStore implements AutoCloseable, CorpusStore {
         } finally {
             if (s != null) try { sm.release(s); } catch (IOException ignore) {}
         }
+    }
+
+    @Override
+    public ChunkMetadata getMetadataByPath(String path) {
+        IndexSearcher s = null;
+        try {
+            s = sm.acquire();
+            var tq = new TermQuery(new Term(F_PATH, path));
+            TopDocs td = s.search(tq, 1);
+            if (td.scoreDocs.length == 0) return ChunkMetadata.empty();
+            var d = s.storedFields().document(td.scoreDocs[0].doc);
+            return extractMetadata(d);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        } finally {
+            if (s != null) try { sm.release(s); } catch (IOException ignore) {}
+        }
+    }
+
+    /**
+     * Extracts {@link ChunkMetadata} from a Lucene Document's stored fields.
+     * Returns {@link ChunkMetadata#empty()} when no metadata fields are present
+     * (e.g. indices created before metadata support was added).
+     * Emptiness is decided by {@link ChunkMetadata#hasContent()} so the
+     * definition stays centralized — adding new metadata fields only requires
+     * updating that method, not this extraction logic.
+     */
+    private static ChunkMetadata extractMetadata(Document d) {
+        String lang = d.get(F_LANG);
+        String heading = d.get(F_HEADING);
+        Number lineStartN = d.getField(F_LINE_START) != null ? d.getField(F_LINE_START).numericValue() : null;
+        Number lineEndN   = d.getField(F_LINE_END)   != null ? d.getField(F_LINE_END).numericValue()   : null;
+        int lineStart = lineStartN != null ? lineStartN.intValue() : -1;
+        int lineEnd   = lineEndN   != null ? lineEndN.intValue()   : -1;
+        var meta = new ChunkMetadata(lang, lineStart, lineEnd, heading);
+        return meta.hasContent() ? meta : ChunkMetadata.empty();
     }
 
     /* -------- Legacy methods retained for tests/compat -------- */

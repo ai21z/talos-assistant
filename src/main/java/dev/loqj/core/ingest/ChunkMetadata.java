@@ -24,7 +24,7 @@ public record ChunkMetadata(
 
     /** True if at least one meaningful field is populated. */
     public boolean hasContent() {
-        return language != null || lineStart > 0 || headingContext != null;
+        return language != null || lineStart > 0 || lineEnd > 0 || headingContext != null;
     }
 }
 

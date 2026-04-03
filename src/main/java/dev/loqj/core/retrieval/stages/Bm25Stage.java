@@ -37,7 +37,7 @@ public final class Bm25Stage implements RetrievalStage {
         List<CorpusStore.Hit> hits = store.bm25(request.query(), fetchK);
         List<RetrievalCandidate> out = new ArrayList<>(candidates);
         for (CorpusStore.Hit h : hits) {
-            out.add(RetrievalCandidate.of(h.path(), h.score(), "bm25"));
+            out.add(RetrievalCandidate.of(h.path(), h.score(), "bm25", h.metadata()));
         }
         return StageOutput.of(out);
     }
