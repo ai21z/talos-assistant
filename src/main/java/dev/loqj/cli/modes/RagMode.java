@@ -62,10 +62,7 @@ public final class RagMode implements Mode {
         for (var snip : pinnedSnips) {
             pinnedCtx.add(new ContextResult.Snippet(snip.path(), snip.text()));
         }
-        List<ContextResult.Snippet> regularCtx = new ArrayList<>();
-        for (var m : prepared.snippetMaps()) {
-            regularCtx.add(new ContextResult.Snippet(m.get("path"), m.get("text")));
-        }
+        List<ContextResult.Snippet> regularCtx = prepared.snippets();
 
         // Load system prompt (needed for token budget calculation)
         String system = readOrFallback("prompts/rag-system.txt", ctx);

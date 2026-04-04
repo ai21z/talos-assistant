@@ -211,7 +211,7 @@ public class LuceneStore implements AutoCloseable, CorpusStore {
             var hits = new ArrayList<CorpusStore.Hit>(td.scoreDocs.length);
             for (ScoreDoc sd : td.scoreDocs) {
                 var d = stored.document(sd.doc);
-                hits.add(new CorpusStore.Hit(d.get(F_PATH), sd.score));
+                hits.add(new CorpusStore.Hit(d.get(F_PATH), sd.score, extractMetadata(d)));
             }
             return hits;
         } catch (Exception e) {
@@ -234,7 +234,7 @@ public class LuceneStore implements AutoCloseable, CorpusStore {
             var hits = new ArrayList<CorpusStore.Hit>(td.scoreDocs.length);
             for (ScoreDoc sd : td.scoreDocs) {
                 var d = stored.document(sd.doc);
-                hits.add(new CorpusStore.Hit(d.get(F_PATH), sd.score));
+                hits.add(new CorpusStore.Hit(d.get(F_PATH), sd.score, extractMetadata(d)));
             }
             return hits;
         } catch (Exception e) {
@@ -254,6 +254,50 @@ public class LuceneStore implements AutoCloseable, CorpusStore {
             if (td.scoreDocs.length == 0) return null;
             var d = s.storedFields().document(td.scoreDocs[0].doc);
             return d.get(F_TEXT);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        } finally {
+            if (s != null) try { sm.release(s); } catch (IOException ignore) {}
+        }
+    }
+
+    /* -------- Metadata extraction -------- */
+
+    /**
+     * Extract structured chunk metadata from a loaded Lucene document.
+     * Returns {@link ChunkMetadata#empty()} when no metadata fields are present.
+     */
+    private static ChunkMetadata extractMetadata(Document d) {
+        String lang = d.get(F_LANG);
+        int lineStart = readStoredInt(d, F_LINE_START, -1);
+        int lineEnd   = readStoredInt(d, F_LINE_END, -1);
+        String heading = d.get(F_HEADING);
+
+        // If nothing meaningful is stored, return the shared empty instance
+        if (lang == null && lineStart < 0 && lineEnd < 0 && heading == null) {
+            return ChunkMetadata.empty();
+        }
+        return new ChunkMetadata(lang, lineStart, lineEnd, heading);
+    }
+
+    /** Read a stored int field, returning {@code fallback} if the field is missing. */
+    private static int readStoredInt(Document d, String field, int fallback) {
+        var f = d.getField(field);
+        if (f == null) return fallback;
+        Number n = f.numericValue();
+        return n != null ? n.intValue() : fallback;
+    }
+
+    @Override
+    public ChunkMetadata getMetadataByPath(String path) {
+        IndexSearcher s = null;
+        try {
+            s = sm.acquire();
+            var tq = new TermQuery(new Term(F_PATH, path));
+            TopDocs td = s.search(tq, 1);
+            if (td.scoreDocs.length == 0) return ChunkMetadata.empty();
+            var d = s.storedFields().document(td.scoreDocs[0].doc);
+            return extractMetadata(d);
         } catch (IOException e) {
             throw new RuntimeException(e);
         } finally {
