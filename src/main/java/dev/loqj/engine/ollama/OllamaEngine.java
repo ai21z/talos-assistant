@@ -1,5 +1,6 @@
 package dev.loqj.engine.ollama;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.loqj.spi.ModelEngine;
 import dev.loqj.spi.types.*;
 
@@ -9,6 +10,8 @@ import java.net.URI;
 import java.net.http.*;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.regex.*;
 import java.util.stream.Stream;
@@ -23,6 +26,7 @@ final class OllamaEngine implements ModelEngine {
     private final String host;
     private final String defaultModel;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+    private final ObjectMapper mapper = new ObjectMapper();
 
     // Cache for model context length (avoid repeated API calls)
     private volatile Integer cachedContextLength = null;
@@ -60,7 +64,7 @@ final class OllamaEngine implements ModelEngine {
         }
 
         try {
-            String json = "{\"name\":\"" + esc(modelName) + "\"}";
+            String json = mapper.writeValueAsString(Map.of("name", modelName));
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(host + "/api/show"))
                     .timeout(Duration.ofSeconds(5))
@@ -109,7 +113,13 @@ final class OllamaEngine implements ModelEngine {
         String sys = req.systemPrompt == null ? "" : req.systemPrompt;
         String usr = (req.userPrompt == null ? "" : req.userPrompt) + req.flattenedContext();
 
-        String json = "{\"model\":\"" + esc(model) + "\",\"prompt\":\"" + esc(usr) + "\",\"system\":\"" + esc(sys) + "\",\"stream\":false}";
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("model", model);
+        body.put("prompt", usr);
+        body.put("system", sys);
+        body.put("stream", false);
+        String json = mapper.writeValueAsString(body);
+
         HttpRequest httpReq = HttpRequest.newBuilder()
                 .uri(URI.create(host + "/api/generate"))
                 .timeout(req.timeout)
@@ -128,7 +138,13 @@ final class OllamaEngine implements ModelEngine {
         String sys = req.systemPrompt == null ? "" : req.systemPrompt;
         String usr = (req.userPrompt == null ? "" : req.userPrompt) + req.flattenedContext();
 
-        String json = "{\"model\":\"" + esc(model) + "\",\"prompt\":\"" + esc(usr) + "\",\"system\":\"" + esc(sys) + "\",\"stream\":true}";
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("model", model);
+        body.put("prompt", usr);
+        body.put("system", sys);
+        body.put("stream", true);
+        String json = mapper.writeValueAsString(body);
+
         HttpRequest httpReq = HttpRequest.newBuilder()
                 .uri(URI.create(host + "/api/generate"))
                 .timeout(req.timeout.plusSeconds(60))
@@ -154,6 +170,5 @@ final class OllamaEngine implements ModelEngine {
     }
 
     private static final Pattern RESPONSE = Pattern.compile("\"response\"\\s*:\\s*\"((?:\\\\.|[^\"])*)\"");
-    private static String esc(String s){ return s.replace("\\","\\\\").replace("\"","\\\"").replace("\n","\\n"); }
     private static String unesc(String s){ return s.replace("\\n","\n").replace("\\\"","\"").replace("\\\\","\\"); }
 }
