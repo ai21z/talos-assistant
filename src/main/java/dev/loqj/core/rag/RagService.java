@@ -36,10 +36,7 @@ public class RagService {
     // very small session-memory field used by RAG+MEMORY mode (optional)
     private String sessionMemory;
 
-    /**
-     * Small data holder returned by prepare().
-     * Carries typed snippets with metadata for downstream consumers.
-     */
+    /** Small data holder returned by prepare(). */
     public static final class Prepared {
         private final List<ContextResult.Snippet> snippets;
         private final List<String> citations;
@@ -48,17 +45,17 @@ public class RagService {
             this.snippets  = (snippets == null ? List.of() : List.copyOf(snippets));
             this.citations = (citations == null ? List.of() : List.copyOf(citations));
         }
-        /** Typed snippets with metadata for direct consumption. */
+        /** Typed snippets with structured metadata. */
         public List<ContextResult.Snippet> snippets() { return snippets; }
-        /** Legacy accessor: converts typed snippets to Map&lt;String,String&gt; for LlmClient. */
+        /** Legacy accessor: converts typed snippets to Map&lt;"path","text"&gt; for compatibility. */
         public List<Map<String, String>> snippetMaps() {
             List<Map<String, String>> out = new ArrayList<>(snippets.size());
-            for (ContextResult.Snippet s : snippets) {
+            for (var s : snippets) {
                 out.add(Map.of("path", s.path(), "text", s.text()));
             }
             return Collections.unmodifiableList(out);
         }
-        public List<String> citations()                 { return citations;  }
+        public List<String> citations() { return citations; }
     }
 
     /**
@@ -136,13 +133,15 @@ public class RagService {
 
             LOG.debug("Retrieval pipeline trace:\n{}", result.trace().summary());
 
-            // Build typed snippets + rich citations from pipeline results
+            // Build typed snippets + citations from pipeline results
+            var citationSet = new LinkedHashSet<String>(result.candidates().size());
             for (RetrievalCandidate c : result.candidates()) {
                 String text = store.getTextByPath(c.path());
                 if (text == null || text.isBlank()) continue;
                 snippets.add(new ContextResult.Snippet(c.path(), text, c.metadata()));
+                citationSet.add(stripChunkId(c.path()));
             }
-            citations.addAll(ContextPacker.buildCitations(snippets));
+            citations.addAll(citationSet);
         } catch (Exception e) {
             // On any failure, return empty (don't explode CLI)
         }
@@ -165,6 +164,10 @@ public class RagService {
                 .build();
     }
 
+    private static String stripChunkId(String path) {
+        int i = path.indexOf('#');
+        return (i < 0) ? path : path.substring(0, i);
+    }
 
     public String readCliSystemPromptOrDefault() throws Exception {
         try (InputStream in = RagService.class.getClassLoader().getResourceAsStream("prompts/cli-system.txt")) {
@@ -215,7 +218,6 @@ public class RagService {
 
             // Pack retrieved snippets into context using unified ContextPacker
             ContextPacker packer = new ContextPacker(TokenBudget.fromConfig(cfg));
-
             ContextResult packed = packer.pack(sys, question, List.of(), prepared.snippets());
 
             // Warn if trimming occurred

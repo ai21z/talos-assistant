@@ -261,6 +261,33 @@ public class LuceneStore implements AutoCloseable, CorpusStore {
         }
     }
 
+    /* -------- Metadata extraction -------- */
+
+    /**
+     * Extract structured chunk metadata from a loaded Lucene document.
+     * Returns {@link ChunkMetadata#empty()} when no metadata fields are present.
+     */
+    private static ChunkMetadata extractMetadata(Document d) {
+        String lang = d.get(F_LANG);
+        int lineStart = readStoredInt(d, F_LINE_START, -1);
+        int lineEnd   = readStoredInt(d, F_LINE_END, -1);
+        String heading = d.get(F_HEADING);
+
+        // If nothing meaningful is stored, return the shared empty instance
+        if (lang == null && lineStart < 0 && lineEnd < 0 && heading == null) {
+            return ChunkMetadata.empty();
+        }
+        return new ChunkMetadata(lang, lineStart, lineEnd, heading);
+    }
+
+    /** Read a stored int field, returning {@code fallback} if the field is missing. */
+    private static int readStoredInt(Document d, String field, int fallback) {
+        var f = d.getField(field);
+        if (f == null) return fallback;
+        Number n = f.numericValue();
+        return n != null ? n.intValue() : fallback;
+    }
+
     @Override
     public ChunkMetadata getMetadataByPath(String path) {
         IndexSearcher s = null;
@@ -276,25 +303,6 @@ public class LuceneStore implements AutoCloseable, CorpusStore {
         } finally {
             if (s != null) try { sm.release(s); } catch (IOException ignore) {}
         }
-    }
-
-    /**
-     * Extracts {@link ChunkMetadata} from a Lucene Document's stored fields.
-     * Returns {@link ChunkMetadata#empty()} when no metadata fields are present
-     * (e.g. indices created before metadata support was added).
-     * Emptiness is decided by {@link ChunkMetadata#hasContent()} so the
-     * definition stays centralized — adding new metadata fields only requires
-     * updating that method, not this extraction logic.
-     */
-    private static ChunkMetadata extractMetadata(Document d) {
-        String lang = d.get(F_LANG);
-        String heading = d.get(F_HEADING);
-        Number lineStartN = d.getField(F_LINE_START) != null ? d.getField(F_LINE_START).numericValue() : null;
-        Number lineEndN   = d.getField(F_LINE_END)   != null ? d.getField(F_LINE_END).numericValue()   : null;
-        int lineStart = lineStartN != null ? lineStartN.intValue() : -1;
-        int lineEnd   = lineEndN   != null ? lineEndN.intValue()   : -1;
-        var meta = new ChunkMetadata(lang, lineStart, lineEnd, heading);
-        return meta.hasContent() ? meta : ChunkMetadata.empty();
     }
 
     /* -------- Legacy methods retained for tests/compat -------- */
