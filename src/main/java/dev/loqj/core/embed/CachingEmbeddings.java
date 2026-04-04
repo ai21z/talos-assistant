@@ -34,7 +34,7 @@ public class CachingEmbeddings implements BatchEmbeddings, AutoCloseable {
             return cached;
         }
         float[] vec = delegate.embed(text);
-        if (vec != null && vec.length > 0) {
+        if (vec != null && vec.length > 0 && EmbeddingsClient.isValidVector(vec)) {
             db.putEmbedding(key, vec.length, vec);
             misses.incrementAndGet();
         }
@@ -91,7 +91,7 @@ public class CachingEmbeddings implements BatchEmbeddings, AutoCloseable {
 
             results.set(originalIndex, vec);
 
-            if (vec != null && vec.length > 0) {
+            if (vec != null && vec.length > 0 && EmbeddingsClient.isValidVector(vec)) {
                 // Cache the new embedding
                 String key = Hash.sha1Hex(modelName + "\n" + text);
                 db.putEmbedding(key, vec.length, vec);

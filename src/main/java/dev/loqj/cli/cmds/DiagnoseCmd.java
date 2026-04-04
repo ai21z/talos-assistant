@@ -6,7 +6,9 @@ import dev.loqj.core.Config;
 import dev.loqj.core.context.ContextPacker;
 import dev.loqj.core.context.ContextResult;
 import dev.loqj.core.context.TokenBudget;
+import dev.loqj.core.embed.EmbeddingsClient;
 import dev.loqj.core.rag.RagService;
+import dev.loqj.core.retrieval.RetrievalTrace;
 import picocli.CommandLine;
 
 import java.nio.file.Path;
@@ -39,6 +41,9 @@ public class DiagnoseCmd implements Runnable {
     @CommandLine.Option(names = {"--print-stats"}, description = "Print detailed statistics")
     boolean printStats;
 
+    @CommandLine.Option(names = {"--print-trace"}, description = "Print retrieval pipeline trace")
+    boolean printTrace;
+
     @Override
     public void run() {
         try {
@@ -68,6 +73,24 @@ public class DiagnoseCmd implements Runnable {
             System.out.println("Ollama:");
             System.out.println("  Host:  " + ollamaHost);
             System.out.println("  Model: " + ollamaModel);
+            System.out.println();
+
+            // 2b. Embedding health check
+            String embedModel = String.valueOf(ollama.getOrDefault("embed", "bge-m3"));
+            System.out.println("Embedding Health:");
+            System.out.println("  Model: " + embedModel);
+            try {
+                EmbeddingsClient embedClient = new EmbeddingsClient(cfg);
+                float[] probe = embedClient.embed("hello world");
+                if (probe != null && probe.length > 0 && EmbeddingsClient.isValidVector(probe)) {
+                    System.out.println("  Status:    OK");
+                    System.out.println("  Dimension: " + probe.length);
+                } else {
+                    System.out.println("  Status:    WARN — probe returned invalid vector (NaN/zero)");
+                }
+            } catch (Exception embErr) {
+                System.out.println("  Status:    ERROR — " + embErr.getMessage());
+            }
             System.out.println();
 
             // 3. Limits and caps
@@ -103,6 +126,13 @@ public class DiagnoseCmd implements Runnable {
                 int retrievedCount = prepared.snippets().size();
                 System.out.println("  Retrieved: " + retrievedCount + " snippets");
                 System.out.println();
+
+                // 5b. Print pipeline trace if requested
+                if (printTrace && prepared.trace() != null) {
+                    System.out.println("Retrieval Pipeline Trace:");
+                    System.out.print(prepared.trace().summary());
+                    System.out.println();
+                }
 
                 // 6. Pack context and validate token budget
                 ContextPacker packer = new ContextPacker(TokenBudget.fromConfig(cfg));

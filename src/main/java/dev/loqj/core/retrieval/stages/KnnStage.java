@@ -31,7 +31,11 @@ public final class KnnStage implements RetrievalStage {
     @Override
     public StageOutput process(RetrievalRequest request, List<RetrievalCandidate> candidates) {
         if (!request.hasVector()) {
-            return StageOutput.of(candidates, "skipped: no query vector");
+            String reason = request.embeddingFailureReason();
+            String note = reason != null
+                    ? "skipped: embedding failed — " + reason
+                    : "skipped: no query vector";
+            return StageOutput.of(candidates, note);
         }
         int fetchK = request.topK() * FETCH_MULTIPLIER;
         List<CorpusStore.Hit> hits = store.knn(request.queryVector(), fetchK);

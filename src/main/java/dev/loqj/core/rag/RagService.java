@@ -40,10 +40,16 @@ public class RagService {
     public static final class Prepared {
         private final List<ContextResult.Snippet> snippets;
         private final List<String> citations;
+        private final RetrievalTrace trace; // nullable — absent on error path
 
         public Prepared(List<ContextResult.Snippet> snippets, List<String> citations) {
+            this(snippets, citations, null);
+        }
+
+        public Prepared(List<ContextResult.Snippet> snippets, List<String> citations, RetrievalTrace trace) {
             this.snippets  = (snippets == null ? List.of() : List.copyOf(snippets));
             this.citations = (citations == null ? List.of() : List.copyOf(citations));
+            this.trace     = trace;
         }
         /** Typed snippets with structured metadata. */
         public List<ContextResult.Snippet> snippets() { return snippets; }
@@ -56,6 +62,8 @@ public class RagService {
             return Collections.unmodifiableList(out);
         }
         public List<String> citations() { return citations; }
+        /** Pipeline trace, or null if retrieval failed before pipeline execution. */
+        public RetrievalTrace trace() { return trace; }
     }
 
     /**
@@ -113,25 +121,30 @@ public class RagService {
         Path indexDir = indexer.indexDirFor(ws);
         List<ContextResult.Snippet> snippets = new ArrayList<>();
         List<String> citations = new ArrayList<>();
+        RetrievalTrace trace = null;
 
         try (LuceneStore store = new LuceneStore(indexDir, 0)) {
             // Compute query vector when vectors are enabled
             float[] qvec = null;
+            String embedFailReason = null;
             if (vecEnabled) {
                 try (CacheDb cache = new CacheDb();
                      CachingEmbeddings emb = new CachingEmbeddings(new EmbeddingsClient(cfg), cache, "query/ollama")) {
                     qvec = emb.embed(query);
-                } catch (Exception ignore) {
-                    // If embeddings fail, proceed BM25-only
+                } catch (Exception e) {
+                    // If embeddings fail, proceed BM25-only but record why
+                    embedFailReason = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                    LOG.warn("Embedding failed, proceeding BM25-only: {}", embedFailReason);
                 }
             }
 
             // Build and execute the retrieval pipeline
             RetrievalPipeline pipeline = buildDefaultPipeline(store);
-            RetrievalRequest request = new RetrievalRequest(query, qvec, k);
+            RetrievalRequest request = new RetrievalRequest(query, qvec, k, embedFailReason);
             RetrievalResult result = pipeline.execute(request);
 
-            LOG.debug("Retrieval pipeline trace:\n{}", result.trace().summary());
+            trace = result.trace();
+            LOG.debug("Retrieval pipeline trace:\n{}", trace.summary());
 
             // Build typed snippets + citations from pipeline results
             var citationSet = new LinkedHashSet<String>(result.candidates().size());
@@ -146,11 +159,15 @@ public class RagService {
             // On any failure, return empty (don't explode CLI)
         }
 
-        return new Prepared(snippets, citations);
+        return new Prepared(snippets, citations, trace);
     }
 
     /**
-     * Builds the default retrieval pipeline: BM25 → KNN → RRF Fusion → Rerank → Dedup.
+     * Builds the default retrieval pipeline:
+     * BM25 → KNN → RRF Fusion → Source Boost → Rerank → Dedup.
+     *
+     * <p>Source boost applies path-based scoring adjustments after fusion to
+     * bias results toward production code when the query is implementation-oriented.
      * The reranker stage uses NoOpReranker by default; swap in a real reranker later.
      * Package-private for testability.
      */
@@ -159,6 +176,7 @@ public class RagService {
                 .addStage(new Bm25Stage(store))
                 .addStage(new KnnStage(store))
                 .addStage(new RrfFusionStage(60))
+                .addStage(new SourceBoostStage())
                 .addStage(new RerankerStage(new NoOpReranker()))
                 .addStage(new DedupStage())
                 .build();

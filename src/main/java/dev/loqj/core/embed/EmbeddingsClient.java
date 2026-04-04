@@ -134,6 +134,10 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
                 Map<String,Object> root = mapper.readValue(resp.body(), new TypeReference<>() {});
                 float[] vec = parseEmbeddingFlexible(root);
                 if (vec != null && vec.length > 0) {
+                    if (!isValidVector(vec)) {
+                        LOG.warn("Embedding vector invalid (NaN/Inf/zero) from {} {} — skipping", ep.path, ep.param);
+                        continue;
+                    }
                     if (dim != null && dim > 0 && vec.length != dim) {
                         LOG.debug("Embedding dim changed ({} -> {}), updating cached dimension", dim, vec.length);
                         dim = vec.length;
@@ -176,6 +180,21 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
         float[] out = new float[list.size()];
         for (int i = 0; i < out.length; i++) out[i] = Float.parseFloat(list.get(i).toString());
         return out;
+    }
+
+    /**
+     * Returns {@code true} if the vector is usable for KNN search.
+     * Rejects NaN, Infinity, and all-zero vectors.
+     * Package-private for testability.
+     */
+    public static boolean isValidVector(float[] vec) {
+        if (vec == null || vec.length == 0) return false;
+        boolean allZero = true;
+        for (float v : vec) {
+            if (Float.isNaN(v) || Float.isInfinite(v)) return false;
+            if (v != 0.0f) allZero = false;
+        }
+        return !allZero;
     }
 
     private record Ep(String path, String param) {}
@@ -292,7 +311,12 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
             List<float[]> results = new ArrayList<>();
             for (Object item : listB) {
                 if (item instanceof List<?> vec) {
-                    results.add(toFloatArray(vec));
+                    float[] arr = toFloatArray(vec);
+                    if (!isValidVector(arr)) {
+                        LOG.warn("Batch embedding contains invalid vector (NaN/Inf/zero) — rejecting batch");
+                        return null;
+                    }
+                    results.add(arr);
                 }
             }
             if (results.size() == expectedSize) {
@@ -303,7 +327,12 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
         // Case B: {"embedding": [vec]} - single vector (fallback for batch of 1)
         Object single = root.get("embedding");
         if (single instanceof List<?> listA && expectedSize == 1) {
-            return List.of(toFloatArray(listA));
+            float[] arr = toFloatArray(listA);
+            if (!isValidVector(arr)) {
+                LOG.warn("Batch single embedding is invalid (NaN/Inf/zero)");
+                return null;
+            }
+            return List.of(arr);
         }
 
         return null;
