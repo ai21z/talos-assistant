@@ -100,17 +100,13 @@ public class DiagnoseCmd implements Runnable {
 
                 System.out.println("Retrieving snippets...");
                 RagService.Prepared prepared = ragService.prepare(root, question, effectiveK);
-                int retrievedCount = prepared.snippetMaps().size();
+                int retrievedCount = prepared.snippets().size();
                 System.out.println("  Retrieved: " + retrievedCount + " snippets");
                 System.out.println();
 
                 // 6. Pack context and validate token budget
                 ContextPacker packer = new ContextPacker(TokenBudget.fromConfig(cfg));
-                java.util.List<ContextResult.Snippet> regular = new java.util.ArrayList<>();
-                for (var m : prepared.snippetMaps()) {
-                    regular.add(new ContextResult.Snippet(m.get("path"), m.get("text")));
-                }
-                ContextResult packed = packer.pack(systemPrompt, question, java.util.List.of(), regular);
+                ContextResult packed = packer.pack(systemPrompt, question, java.util.List.of(), prepared.snippets());
 
                 System.out.println("Prompt Validation:");
                 System.out.println("  Original snippets:   " + packed.originalCount());

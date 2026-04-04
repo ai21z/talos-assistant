@@ -1,5 +1,6 @@
 package dev.loqj.core.context;
 
+import dev.loqj.core.ingest.ChunkMetadata;
 import dev.loqj.core.util.Sanitize;
 
 import java.util.*;
@@ -24,6 +25,8 @@ import java.util.*;
  *
  * <p>All snippet texts are sanitized for prompt safety before packing.
  * The result includes provenance metadata for diagnostics.
+ * Snippet metadata is preserved through packing and used for rich citation
+ * rendering (e.g. {@code src/Foo.java:10-25 § Architecture}).
  */
 public final class ContextPacker {
 
@@ -52,7 +55,7 @@ public final class ContextPacker {
         int availableTokens = budget.availableForSnippets(systemPrompt, userQuery);
         int charBudget = budget.tokensToChars(availableTokens);
 
-        // Sanitize inputs
+        // Sanitize inputs (metadata is preserved through sanitization)
         List<ContextResult.Snippet> pinnedSan = sanitizeAll(pinned);
         List<ContextResult.Snippet> regSan = sanitizeAll(regular);
 
@@ -81,7 +84,7 @@ public final class ContextPacker {
                     int take = Math.min(charBudget - usedChars, s.text().length());
                     if (take <= 0) continue;
                     if (take < s.text().length()) anyTruncated = true;
-                    packed.add(new ContextResult.Snippet(s.path(), s.text().substring(0, take)));
+                    packed.add(new ContextResult.Snippet(s.path(), s.text().substring(0, take), s.metadata()));
                     usedChars += take;
                     reservedBases.add(base);
                     if (reservedBases.size() == 2) break;
@@ -96,7 +99,7 @@ public final class ContextPacker {
             int take = Math.min(charBudget - usedChars, s.text().length());
             if (take <= 0) continue;
             if (take < s.text().length()) anyTruncated = true;
-            packed.add(new ContextResult.Snippet(s.path(), s.text().substring(0, take)));
+            packed.add(new ContextResult.Snippet(s.path(), s.text().substring(0, take), s.metadata()));
             usedChars += take;
         }
 
@@ -107,15 +110,12 @@ public final class ContextPacker {
             int take = Math.min(charBudget - usedChars, s.text().length());
             if (take <= 0) continue;
             if (take < s.text().length()) anyTruncated = true;
-            packed.add(new ContextResult.Snippet(s.path(), s.text().substring(0, take)));
+            packed.add(new ContextResult.Snippet(s.path(), s.text().substring(0, take), s.metadata()));
             usedChars += take;
         }
 
-        // Build citations (deduplicated base file paths)
-        LinkedHashSet<String> citationSet = new LinkedHashSet<>();
-        for (ContextResult.Snippet s : packed) {
-            citationSet.add(stripChunkId(s.path()));
-        }
+        // Build rich citations from packed snippets using metadata
+        List<String> citations = buildCitations(packed);
 
         // Compute token estimates for the result
         int snippetTokens = 0;
@@ -130,7 +130,7 @@ public final class ContextPacker {
 
         return new ContextResult(
                 packed,
-                new ArrayList<>(citationSet),
+                citations,
                 originalCount,
                 packed.size(),
                 wasTrimmed,
@@ -148,6 +148,48 @@ public final class ContextPacker {
 
     // ───── helpers ─────
 
+    /**
+     * Build deduplicated citations from packed snippets.
+     * When metadata is available, produces rich citations like:
+     * {@code src/Foo.java:10-25 § Architecture}.
+     * Falls back to plain file path when metadata is absent.
+     */
+    public static List<String> buildCitations(List<ContextResult.Snippet> packed) {
+        LinkedHashSet<String> citationSet = new LinkedHashSet<>();
+        for (ContextResult.Snippet s : packed) {
+            citationSet.add(formatCitation(stripChunkId(s.path()), s.metadata()));
+        }
+        return new ArrayList<>(citationSet);
+    }
+
+    /**
+     * Format a single citation from a base path and optional metadata.
+     * <ul>
+     *   <li>Full metadata: {@code src/Foo.java:10-25 § Architecture}</li>
+     *   <li>Lines only: {@code src/Foo.java:10-25}</li>
+     *   <li>Heading only: {@code src/Foo.java § Architecture}</li>
+     *   <li>No metadata: {@code src/Foo.java}</li>
+     * </ul>
+     * Package-private for testability.
+     */
+    public static String formatCitation(String basePath, ChunkMetadata meta) {
+        if (meta == null || !meta.hasContent()) return basePath;
+        StringBuilder sb = new StringBuilder(basePath);
+        if (meta.lineStart() > 0 && meta.lineEnd() > 0) {
+            sb.append(':').append(meta.lineStart()).append('-').append(meta.lineEnd());
+        } else if (meta.lineStart() > 0) {
+            sb.append(':').append(meta.lineStart());
+        }
+        if (meta.headingContext() != null && !meta.headingContext().isBlank()) {
+            // Strip leading '#' characters for display
+            String heading = meta.headingContext().replaceFirst("^#+\\s*", "");
+            if (!heading.isBlank()) {
+                sb.append(" \u00a7 ").append(heading);
+            }
+        }
+        return sb.toString();
+    }
+
     private static String stripChunkId(String path) {
         if (path == null) return "";
         int i = path.indexOf('#');
@@ -160,9 +202,8 @@ public final class ContextPacker {
         for (ContextResult.Snippet s : xs) {
             if (s == null) continue;
             String cleanText = Sanitize.sanitizeForPrompt(s.text());
-            out.add(new ContextResult.Snippet(s.path(), cleanText));
+            out.add(new ContextResult.Snippet(s.path(), cleanText, s.metadata()));
         }
         return out;
     }
 }
-

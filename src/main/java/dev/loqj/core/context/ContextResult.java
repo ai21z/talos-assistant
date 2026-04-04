@@ -1,5 +1,7 @@
 package dev.loqj.core.context;
 
+import dev.loqj.core.ingest.ChunkMetadata;
+
 import java.util.*;
 
 /**
@@ -9,11 +11,19 @@ import java.util.*;
  */
 public final class ContextResult {
 
-    /** A single packed snippet — path and sanitized text. */
-    public record Snippet(String path, String text) {
+    /**
+     * A single packed snippet — path, sanitized text, and optional structured metadata.
+     * Metadata enables richer citation rendering (line ranges, heading context, language).
+     */
+    public record Snippet(String path, String text, ChunkMetadata metadata) {
         public Snippet {
             path = Objects.requireNonNullElse(path, "");
             text = Objects.requireNonNullElse(text, "");
+            if (metadata == null) metadata = ChunkMetadata.empty();
+        }
+        /** Backwards-compatible constructor without metadata. */
+        public Snippet(String path, String text) {
+            this(path, text, ChunkMetadata.empty());
         }
     }
 

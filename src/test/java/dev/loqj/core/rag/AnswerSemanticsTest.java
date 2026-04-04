@@ -36,9 +36,9 @@ class AnswerSemanticsTest {
         // Simulate: retrieved 3 snippets, but packing drops 1 due to budget
         var retrieved = new RagService.Prepared(
                 List.of(
-                        Map.of("path", "A.java#0", "text", "a".repeat(300)),
-                        Map.of("path", "B.java#0", "text", "b".repeat(300)),
-                        Map.of("path", "C.java#0", "text", "c".repeat(300))
+                        snip("A.java#0", "a".repeat(300)),
+                        snip("B.java#0", "b".repeat(300)),
+                        snip("C.java#0", "c".repeat(300))
                 ),
                 List.of("A.java", "B.java", "C.java")
         );

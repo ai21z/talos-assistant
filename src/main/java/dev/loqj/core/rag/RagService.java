@@ -38,15 +38,24 @@ public class RagService {
 
     /** Small data holder returned by prepare(). */
     public static final class Prepared {
-        private final List<Map<String, String>> snippetMaps;
+        private final List<ContextResult.Snippet> snippets;
         private final List<String> citations;
 
-        public Prepared(List<Map<String, String>> snippetMaps, List<String> citations) {
-            this.snippetMaps = (snippetMaps == null ? List.of() : List.copyOf(snippetMaps));
-            this.citations   = (citations == null ? List.of()     : List.copyOf(citations));
+        public Prepared(List<ContextResult.Snippet> snippets, List<String> citations) {
+            this.snippets  = (snippets == null ? List.of() : List.copyOf(snippets));
+            this.citations = (citations == null ? List.of() : List.copyOf(citations));
         }
-        public List<Map<String, String>> snippetMaps() { return snippetMaps; }
-        public List<String> citations()                 { return citations;  }
+        /** Typed snippets with structured metadata. */
+        public List<ContextResult.Snippet> snippets() { return snippets; }
+        /** Legacy accessor: converts typed snippets to Map&lt;"path","text"&gt; for compatibility. */
+        public List<Map<String, String>> snippetMaps() {
+            List<Map<String, String>> out = new ArrayList<>(snippets.size());
+            for (var s : snippets) {
+                out.add(Map.of("path", s.path(), "text", s.text()));
+            }
+            return Collections.unmodifiableList(out);
+        }
+        public List<String> citations() { return citations; }
     }
 
     /**
@@ -102,7 +111,7 @@ public class RagService {
         }
 
         Path indexDir = indexer.indexDirFor(ws);
-        List<Map<String,String>> snippets = new ArrayList<>();
+        List<ContextResult.Snippet> snippets = new ArrayList<>();
         List<String> citations = new ArrayList<>();
 
         try (LuceneStore store = new LuceneStore(indexDir, 0)) {
@@ -124,12 +133,12 @@ public class RagService {
 
             LOG.debug("Retrieval pipeline trace:\n{}", result.trace().summary());
 
-            // Build snippet maps + citations from pipeline results
+            // Build typed snippets + citations from pipeline results
             var citationSet = new LinkedHashSet<String>(result.candidates().size());
             for (RetrievalCandidate c : result.candidates()) {
                 String text = store.getTextByPath(c.path());
                 if (text == null || text.isBlank()) continue;
-                snippets.add(Map.of("path", c.path(), "text", text));
+                snippets.add(new ContextResult.Snippet(c.path(), text, c.metadata()));
                 citationSet.add(stripChunkId(c.path()));
             }
             citations.addAll(citationSet);
@@ -209,12 +218,7 @@ public class RagService {
 
             // Pack retrieved snippets into context using unified ContextPacker
             ContextPacker packer = new ContextPacker(TokenBudget.fromConfig(cfg));
-
-            List<ContextResult.Snippet> regular = new java.util.ArrayList<>();
-            for (var m : prepared.snippetMaps()) {
-                regular.add(new ContextResult.Snippet(m.get("path"), m.get("text")));
-            }
-            ContextResult packed = packer.pack(sys, question, List.of(), regular);
+            ContextResult packed = packer.pack(sys, question, List.of(), prepared.snippets());
 
             // Warn if trimming occurred
             if (packed.wasTrimmed()) {

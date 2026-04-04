@@ -33,7 +33,7 @@ public final class LoqjKnowledgeEngine {
         Objects.requireNonNull(request, "request must not be null");
         RagService.Prepared prepared = ragService.prepare(
                 request.workspace(), request.query(), request.topK());
-        return new QueryResponse(null, prepared.snippetMaps(), prepared.citations());
+        return QueryResponse.fromSnippets(null, prepared.snippets(), prepared.citations());
     }
 
     /**
@@ -54,11 +54,11 @@ public final class LoqjKnowledgeEngine {
                 request.workspace(), request.query(), request.topK());
         // Prefer packed context (actual input to model) over raw retrieved set.
         // packedContext is null on the net-disabled stub path — fall back to Prepared.
-        var packedSnippets = answer.packedContext() != null
-                ? answer.packedContext().toSnippetMaps()
-                : (answer.prepared() != null ? answer.prepared().snippetMaps()
-                        : List.<java.util.Map<String, String>>of());
-        return new QueryResponse(answer.text(), packedSnippets, answer.citations());
+        var snippets = answer.packedContext() != null
+                ? answer.packedContext().snippets()
+                : (answer.prepared() != null ? answer.prepared().snippets()
+                        : List.<dev.loqj.core.context.ContextResult.Snippet>of());
+        return QueryResponse.fromSnippets(answer.text(), snippets, answer.citations());
     }
 
     /**
@@ -107,25 +107,52 @@ public final class LoqjKnowledgeEngine {
 
     /**
      * Immutable response from the knowledge engine.
+     * Carries typed snippets with structured metadata for richer provenance.
+     * <p>
+     * <strong>API compatibility note (v0.9.0-beta):</strong>
+     * {@link #snippets()} now returns {@code List<ContextResult.Snippet>} instead
+     * of the previous {@code List<Map<String, String>>}. This is a source-level
+     * breaking change for any external consumer that compiled against the old
+     * signature. The legacy {@link #snippetMaps()} accessor is retained as a
+     * compatibility bridge and produces the same {@code Map<"path","text">} view
+     * that the old {@code snippets()} returned. Repo-internal callers have been
+     * migrated; external consumers should migrate to typed snippets or use
+     * {@code snippetMaps()} as a short-term bridge.
      */
     public static final class QueryResponse {
         private final String answer;
-        private final List<java.util.Map<String, String>> snippets;
+        private final List<dev.loqj.core.context.ContextResult.Snippet> snippets;
         private final List<String> citations;
 
+        /** Primary constructor from typed snippets. */
         public QueryResponse(String answer,
-                             List<java.util.Map<String, String>> snippets,
+                             List<dev.loqj.core.context.ContextResult.Snippet> snippets,
                              List<String> citations) {
             this.answer = answer;
             this.snippets = snippets == null ? List.of() : List.copyOf(snippets);
             this.citations = citations == null ? List.of() : List.copyOf(citations);
         }
 
+        /** Factory from typed snippets (convenience name). */
+        static QueryResponse fromSnippets(String answer,
+                                          List<dev.loqj.core.context.ContextResult.Snippet> snippets,
+                                          List<String> citations) {
+            return new QueryResponse(answer, snippets, citations);
+        }
+
         /** The generated answer text, or null if only retrieval was performed. */
         public String answer()                              { return answer; }
-        /** Retrieved context snippets (each has "path" and "text" keys). */
-        public List<java.util.Map<String, String>> snippets() { return snippets; }
-        /** Deduplicated source file citations. */
+        /** Typed snippets with metadata. */
+        public List<dev.loqj.core.context.ContextResult.Snippet> snippets() { return snippets; }
+        /** Legacy accessor: converts typed snippets to Map&lt;String,String&gt; for compatibility. */
+        public List<java.util.Map<String, String>> snippetMaps() {
+            List<java.util.Map<String, String>> out = new java.util.ArrayList<>(snippets.size());
+            for (var s : snippets) {
+                out.add(java.util.Map.of("path", s.path(), "text", s.text()));
+            }
+            return java.util.Collections.unmodifiableList(out);
+        }
+        /** Deduplicated source file citations (rich format when metadata is available). */
         public List<String> citations()                     { return citations; }
         /** Whether an answer was generated (vs retrieval-only). */
         public boolean hasAnswer()                          { return answer != null && !answer.isBlank(); }
