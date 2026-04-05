@@ -23,6 +23,7 @@ public class Chunker {
 
         String fileHash = Hash.sha1Hex(content);
         String language = inferLanguage(relPath);
+        SourceIdentity sourceId = SourceClassifier.classify(relPath);
 
         // Pre-compute line-start offsets (index i → char offset where line i+1 begins)
         int[] lineOffsets = buildLineOffsets(content);
@@ -41,7 +42,7 @@ public class Chunker {
             // under the previous heading, not the heading from block b.
             if (buf.length() > 0 && buf.length() + b.length() > chunkChars) {
                 emit(relPath, fileHash, cid++, buf.toString(), language, lastHeading,
-                        bufStartChar, bufStartChar + buf.length(), lineOffsets, out);
+                        bufStartChar, bufStartChar + buf.length(), lineOffsets, sourceId, out);
                 // keep overlap chars at end of buffer
                 int keep = Math.min(overlap, buf.length());
                 int consumed = buf.length() - keep;
@@ -62,7 +63,7 @@ public class Chunker {
             // If buffer is now big, emit again
             while (buf.length() >= chunkChars) {
                 emit(relPath, fileHash, cid++, buf.substring(0, chunkChars), language, lastHeading,
-                        bufStartChar, bufStartChar + chunkChars, lineOffsets, out);
+                        bufStartChar, bufStartChar + chunkChars, lineOffsets, sourceId, out);
                 int keep = Math.min(overlap, chunkChars);
                 String tail = buf.substring(chunkChars - keep, Math.min(buf.length(), chunkChars));
                 int consumed = chunkChars - keep;
@@ -74,7 +75,7 @@ public class Chunker {
         }
         if (!buf.isEmpty()) {
             emit(relPath, fileHash, cid++, buf.toString(), language, lastHeading,
-                    bufStartChar, bufStartChar + buf.length(), lineOffsets, out);
+                    bufStartChar, bufStartChar + buf.length(), lineOffsets, sourceId, out);
         }
 
         return out;
@@ -83,6 +84,7 @@ public class Chunker {
     private static void emit(String relPath, String fileHash, int chunkId, String text,
                              String language, String headingContext,
                              int startChar, int endChar, int[] lineOffsets,
+                             SourceIdentity sourceId,
                              List<ParsedChunk> out) {
         String id = relPath + "#" + chunkId;
         String slice = text.trim();
@@ -91,7 +93,7 @@ public class Chunker {
         int lineStart = charOffsetToLine(startChar, lineOffsets);
         int lineEnd   = charOffsetToLine(Math.max(startChar, endChar - 1), lineOffsets);
 
-        var meta = new ChunkMetadata(language, lineStart, lineEnd, headingContext);
+        var meta = new ChunkMetadata(language, lineStart, lineEnd, headingContext, sourceId);
         out.add(new ParsedChunk(id, relPath, slice, fileHash, chunkId, meta));
     }
 
