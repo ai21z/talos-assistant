@@ -86,6 +86,9 @@ test-remote-config.yaml
 # /sandbox/
 # .loqj/            # if you ever generate a per-repo runtime dir (by default it lives under your HOME)
 
+# ---- Local planning docs (never push)
+V1_IMPLEMENTATION_BRIDGE.md
+
 # ---- Security: common secret patterns (use explicit names; avoid *.yaml wildcards)
 *.env
 *.env.*
