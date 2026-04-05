@@ -13,6 +13,10 @@ import static org.junit.jupiter.api.Assertions.*;
  * <p>These tests validate the actual user-facing routing, not just keyword
  * matching. The core invariant: <b>anything without strong workspace evidence
  * must route to ASSIST, never to RETRIEVE.</b>
+ *
+ * <p>Secondary invariant: <b>PascalCase alone is not sufficient for retrieval.</b>
+ * It requires question context to distinguish code inquiries from brand names
+ * and proper nouns.
  */
 class PromptRouterTest {
 
@@ -88,6 +92,11 @@ class PromptRouterTest {
         assertEquals(ASSIST, PromptRouter.route("I'm doing fine, what about you?"));
     }
 
+    @Test
+    void hello_how_are_you_routes_to_assist() {
+        assertEquals(ASSIST, PromptRouter.route("hello, how are you?"));
+    }
+
     // ── General knowledge questions (no workspace signals) ───────────────
 
     @ParameterizedTest
@@ -101,6 +110,7 @@ class PromptRouterTest {
         "who won the world cup",
         "explain quantum computing to me",
         "what is machine learning",
+        "translate this to French",
     })
     void general_knowledge_routes_to_assist(String input) {
         assertEquals(ASSIST, PromptRouter.route(input),
@@ -159,6 +169,49 @@ class PromptRouterTest {
                 "Generic English '" + input + "' must not trigger retrieval");
     }
 
+    // ── PascalCase without question context → ASSIST ─────────────────────
+    // These are the key false-positive cases that the new design prevents.
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "I use PowerPoint",
+        "IntelliJ is great",
+        "MaryJane said hello",
+        "check out YouTube",
+        "I prefer StackOverflow",
+        "LinkedIn is down",
+        "try GitHub Desktop",
+    })
+    void pascal_case_without_question_routes_to_assist(String input) {
+        assertEquals(ASSIST, PromptRouter.route(input),
+                "PascalCase without question '" + input + "' must NOT trigger retrieval");
+    }
+
+    @Test
+    void bare_pascal_case_without_question_routes_to_assist() {
+        // Bare PascalCase with no question context: not enough evidence.
+        // User can type "what is RagService" or ":mode rag RagService" instead.
+        assertEquals(ASSIST, PromptRouter.route("RagService"));
+        assertEquals(ASSIST, PromptRouter.route("ModeController"));
+    }
+
+    // ── Ambiguous technical English (no workspace anchor) ────────────────
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "how does dependency injection work",
+        "what is a REST API",
+        "explain microservices architecture",
+        "what is the difference between threads and processes",
+        "how does garbage collection work in general",
+        "what is a design pattern",
+        "how does a pipeline work",
+    })
+    void ambiguous_technical_english_routes_to_assist(String input) {
+        assertEquals(ASSIST, PromptRouter.route(input),
+                "Ambiguous tech '" + input + "' must not trigger retrieval without workspace anchor");
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     //  RETRIEVE: strong workspace signals
     // ═══════════════════════════════════════════════════════════════════════
@@ -172,7 +225,6 @@ class PromptRouterTest {
         "summarize README.md",
         "differences between Foo.java and Bar.java",
         "what is in pom.xml",
-        "show me build.gradle.kts",
     })
     void file_references_trigger_retrieval(String input) {
         assertEquals(RETRIEVE, PromptRouter.route(input),
@@ -195,7 +247,7 @@ class PromptRouterTest {
                 "Workspace frame '" + input + "' should trigger retrieval");
     }
 
-    // ── PascalCase code identifiers ──────────────────────────────────────
+    // ── PascalCase code identifiers WITH question context ────────────────
 
     @ParameterizedTest
     @ValueSource(strings = {
@@ -205,9 +257,9 @@ class PromptRouterTest {
         "where is RetrievalPipeline defined",
         "show me how PromptRouter decides",
     })
-    void pascal_case_identifiers_trigger_retrieval(String input) {
+    void pascal_case_in_question_triggers_retrieval(String input) {
         assertEquals(RETRIEVE, PromptRouter.route(input),
-                "PascalCase '" + input + "' should trigger retrieval");
+                "PascalCase+question '" + input + "' should trigger retrieval");
     }
 
     // ── Question + anchored technical noun ───────────────────────────────
@@ -269,17 +321,39 @@ class PromptRouterTest {
         "ls",
         "list docs",
         "dir src/main",
+        "list",
     })
     void dev_commands_route_to_command(String input) {
         assertEquals(COMMAND, PromptRouter.route(input),
                 "Dev command '" + input + "' should route to COMMAND");
     }
 
+    // ── "show me <file>" → COMMAND (not RETRIEVE) ───────────────────────
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "show me build.gradle.kts",
+        "show me README.md",
+        "show me src/Main.java",
+        "show me the Dockerfile",
+        "show me the README",
+    })
+    void show_me_file_routes_to_command(String input) {
+        assertEquals(COMMAND, PromptRouter.route(input),
+                "Show-me-file '" + input + "' should route to COMMAND (direct file display)");
+    }
+
+    // ── "show me <natural language>" → NOT COMMAND ───────────────────────
+
     @Test
-    void show_me_is_not_a_command() {
-        // "show me build.gradle.kts" has a file ref → RETRIEVE, not COMMAND
-        // because "show me" is natural language
-        assertEquals(RETRIEVE, PromptRouter.route("show me build.gradle.kts"));
+    void show_me_how_is_not_a_command() {
+        // "show me how X works" is a question, not a file display
+        assertEquals(RETRIEVE, PromptRouter.route("show me how PromptRouter decides"));
+    }
+
+    @Test
+    void show_me_joke_is_assist() {
+        assertEquals(ASSIST, PromptRouter.route("show me your best joke"));
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -294,12 +368,76 @@ class PromptRouterTest {
 
     @Test
     void greeting_with_pascal_case_triggers_retrieval() {
+        // "hey what is RagService" — prefix stripped, question + PascalCase
         assertEquals(RETRIEVE, PromptRouter.route("hey what is RagService"));
     }
 
     @Test
     void greeting_with_workspace_frame_triggers_retrieval() {
         assertEquals(RETRIEVE, PromptRouter.route("hey how does this project work"));
+    }
+
+    @Test
+    void hey_explain_ragservice_java_is_retrieval() {
+        // Mixed: greeting + explain + file ref → strongest signal wins
+        assertEquals(RETRIEVE, PromptRouter.route("hey, explain RagService.java"));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Follow-up context (sticky retrieval)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @Test
+    void follow_up_after_retrieve_stays_in_retrieve() {
+        // After a RETRIEVE turn, continuation questions inherit context
+        assertEquals(RETRIEVE, PromptRouter.route("what about the parse method?", RETRIEVE));
+        assertEquals(RETRIEVE, PromptRouter.route("and the constructor?", RETRIEVE));
+        assertEquals(RETRIEVE, PromptRouter.route("tell me more", RETRIEVE));
+        assertEquals(RETRIEVE, PromptRouter.route("how does it work?", RETRIEVE));
+        assertEquals(RETRIEVE, PromptRouter.route("what else is there?", RETRIEVE));
+        assertEquals(RETRIEVE, PromptRouter.route("go on", RETRIEVE));
+        assertEquals(RETRIEVE, PromptRouter.route("elaborate", RETRIEVE));
+        assertEquals(RETRIEVE, PromptRouter.route("continue", RETRIEVE));
+    }
+
+    @Test
+    void social_follow_up_after_retrieve_breaks_context() {
+        // Social follow-ups do NOT inherit retrieval context
+        assertEquals(ASSIST, PromptRouter.route("thanks", RETRIEVE));
+        assertEquals(ASSIST, PromptRouter.route("thank you", RETRIEVE));
+        assertEquals(ASSIST, PromptRouter.route("that's great", RETRIEVE));
+        assertEquals(ASSIST, PromptRouter.route("bye", RETRIEVE));
+        assertEquals(ASSIST, PromptRouter.route("see you", RETRIEVE));
+    }
+
+    @Test
+    void what_about_you_after_retrieve_is_social() {
+        // "what about you?" is social, not a code follow-up
+        assertEquals(ASSIST, PromptRouter.route("what about you?", RETRIEVE));
+        assertEquals(ASSIST, PromptRouter.route("how about you?", RETRIEVE));
+        assertEquals(ASSIST, PromptRouter.route("and you?", RETRIEVE));
+    }
+
+    @Test
+    void follow_up_after_assist_stays_assist() {
+        // No sticky retrieval when last turn was ASSIST
+        assertEquals(ASSIST, PromptRouter.route("what about it?", ASSIST));
+        assertEquals(ASSIST, PromptRouter.route("tell me more", ASSIST));
+        assertEquals(ASSIST, PromptRouter.route("go on", ASSIST));
+    }
+
+    @Test
+    void follow_up_without_context_stays_assist() {
+        // First turn (no lastRoute) — no sticky context
+        assertEquals(ASSIST, PromptRouter.route("what about it?"));
+        assertEquals(ASSIST, PromptRouter.route("tell me more"));
+    }
+
+    @Test
+    void strong_signal_overrides_follow_up_context() {
+        // Even after ASSIST, strong signals independently classify as RETRIEVE
+        assertEquals(RETRIEVE, PromptRouter.route("explain RagService.java", ASSIST));
+        assertEquals(RETRIEVE, PromptRouter.route("what does this project do", ASSIST));
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -309,6 +447,7 @@ class PromptRouterTest {
     @Test
     void null_input_routes_to_assist() {
         assertEquals(ASSIST, PromptRouter.route(null));
+        assertEquals(ASSIST, PromptRouter.route(null, RETRIEVE));
     }
 
     @Test
@@ -322,6 +461,8 @@ class PromptRouterTest {
         assertNotNull(PromptRouter.route("anything"));
         assertNotNull(PromptRouter.route(null));
         assertNotNull(PromptRouter.route(""));
+        assertNotNull(PromptRouter.route("test", RETRIEVE));
+        assertNotNull(PromptRouter.route("test", null));
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -340,6 +481,16 @@ class PromptRouterTest {
         assertTrue(PromptRouter.isQuestionLike("where is the file"));
         assertTrue(PromptRouter.isQuestionLike("explain the pipeline"));
         assertTrue(PromptRouter.isQuestionLike("describe the architecture"));
+        assertTrue(PromptRouter.isQuestionLike("tell me about the api"));
+    }
+
+    @Test
+    void conversational_prefix_stripped_for_question_detection() {
+        // "hey what is X" → strip "hey " → "what is X" → question-like
+        assertTrue(PromptRouter.isQuestionLike("hey what is ragservice"));
+        assertTrue(PromptRouter.isQuestionLike("ok explain the pipeline"));
+        assertTrue(PromptRouter.isQuestionLike("so how does this work"));
+        assertTrue(PromptRouter.isQuestionLike("well, what is this"));
     }
 
     @Test
@@ -348,5 +499,35 @@ class PromptRouterTest {
         assertFalse(PromptRouter.isQuestionLike("i like the pipeline"));
         assertFalse(PromptRouter.isQuestionLike("ok got it"));
     }
-}
 
+    // ═══════════════════════════════════════════════════════════════════════
+    //  isFollowUp helper
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @Test
+    void continuation_patterns_are_follow_ups() {
+        assertTrue(PromptRouter.isFollowUp("what about the parse method"));
+        assertTrue(PromptRouter.isFollowUp("and the constructor"));
+        assertTrue(PromptRouter.isFollowUp("tell me more"));
+        assertTrue(PromptRouter.isFollowUp("go on"));
+        assertTrue(PromptRouter.isFollowUp("elaborate"));
+        assertTrue(PromptRouter.isFollowUp("how does it work"));
+        assertTrue(PromptRouter.isFollowUp("what else"));
+    }
+
+    @Test
+    void social_patterns_are_not_follow_ups() {
+        assertFalse(PromptRouter.isFollowUp("what about you"));
+        assertFalse(PromptRouter.isFollowUp("thanks"));
+        assertFalse(PromptRouter.isFollowUp("that's great"));
+        assertFalse(PromptRouter.isFollowUp("no thanks"));
+        assertFalse(PromptRouter.isFollowUp("bye"));
+    }
+
+    @Test
+    void non_continuation_is_not_follow_up() {
+        assertFalse(PromptRouter.isFollowUp("hey"));
+        assertFalse(PromptRouter.isFollowUp("I am bored"));
+        assertFalse(PromptRouter.isFollowUp("just wondering"));
+    }
+}

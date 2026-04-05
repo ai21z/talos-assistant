@@ -25,6 +25,8 @@ public final class DevMode implements Mode {
     @Override
     public Optional<Result> handle(String raw, Path ws, Context ctx) {
         String s = raw.trim();
+        // Normalize "show me [the] X" → "show X" for correct path extraction
+        s = s.replaceFirst("(?i)^show\\s+me\\s+(?:the\\s+)?", "show ");
         Limits lim = ctx.limits();
 
         boolean isList = isListIntent(s);
