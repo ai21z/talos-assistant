@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.loqj.spi.ModelEngine;
 import dev.loqj.spi.types.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -11,7 +13,9 @@ import java.net.URI;
 import java.net.http.*;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.regex.*;
@@ -19,11 +23,11 @@ import java.util.stream.Stream;
 
 /**
  * Sends chat/generation requests to local Ollama.
- * HTTP: POST /api/generate
- * JSON keys: { "model": "<name>", "prompt": "<user>", "system": "<sys>", "stream": false|true }
- * Response: JSON with "response" field containing generated text
+ * HTTP: POST /api/generate and /api/chat
+ * Supports both single-turn (/api/generate) and multi-turn (/api/chat) conversations.
  */
 final class OllamaEngine implements ModelEngine {
+    private static final Logger LOG = LoggerFactory.getLogger(OllamaEngine.class);
     private final String host;
     private final String defaultModel;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
@@ -155,15 +159,33 @@ final class OllamaEngine implements ModelEngine {
      * Multi-turn conversation via Ollama /api/chat endpoint.
      * Uses the structured messages array so the model receives
      * proper role-tagged turns it was finetuned on.
+     *
+     * <p>System messages are extracted from the array and sent as the
+     * top-level {@code system} field for best model compatibility.
      */
     private String chatViaMessages(ChatRequest req) throws Exception {
         String model = Objects.toString(req.model, defaultModel);
 
+        // Separate system message from conversation turns
+        String systemPrompt = null;
+        List<Map<String, String>> conversationMsgs = new ArrayList<>();
+        for (var m : req.messages) {
+            if ("system".equals(m.role())) {
+                systemPrompt = m.content();
+            } else {
+                conversationMsgs.add(Map.of("role", m.role(), "content", m.content()));
+            }
+        }
+
+        LOG.debug("chat: {} conversation messages (system prompt: {} chars)",
+                conversationMsgs.size(), systemPrompt == null ? 0 : systemPrompt.length());
+
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", model);
-        body.put("messages", req.messages.stream()
-                .map(m -> Map.of("role", m.role(), "content", m.content()))
-                .toList());
+        if (systemPrompt != null && !systemPrompt.isBlank()) {
+            body.put("system", systemPrompt);
+        }
+        body.put("messages", conversationMsgs);
         body.put("stream", false);
         String json = mapper.writeValueAsString(body);
 
@@ -253,11 +275,26 @@ final class OllamaEngine implements ModelEngine {
     private Stream<TokenChunk> chatStreamViaMessages(ChatRequest req) throws Exception {
         String model = Objects.toString(req.model, defaultModel);
 
+        // Separate system message from conversation turns
+        String systemPrompt = null;
+        List<Map<String, String>> conversationMsgs = new ArrayList<>();
+        for (var m : req.messages) {
+            if ("system".equals(m.role())) {
+                systemPrompt = m.content();
+            } else {
+                conversationMsgs.add(Map.of("role", m.role(), "content", m.content()));
+            }
+        }
+
+        LOG.debug("chatStream: {} conversation messages (system prompt: {} chars)",
+                conversationMsgs.size(), systemPrompt == null ? 0 : systemPrompt.length());
+
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", model);
-        body.put("messages", req.messages.stream()
-                .map(m -> Map.of("role", m.role(), "content", m.content()))
-                .toList());
+        if (systemPrompt != null && !systemPrompt.isBlank()) {
+            body.put("system", systemPrompt);
+        }
+        body.put("messages", conversationMsgs);
         body.put("stream", true);
         String json = mapper.writeValueAsString(body);
 

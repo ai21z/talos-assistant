@@ -4,6 +4,8 @@ import dev.loqj.cli.repl.Context;
 import dev.loqj.cli.repl.Result;
 import dev.loqj.core.CfgUtil;
 import dev.loqj.spi.types.ChatMessage;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -16,6 +18,7 @@ import java.util.regex.Pattern;
 
 /** Ask mode: plain LLM chat (no RAG context). */
 public final class AskMode implements Mode {
+    private static final Logger LOG = LoggerFactory.getLogger(AskMode.class);
     @Override public String name() { return "ask"; }
 
     @Override public boolean canHandle(String rawLine) {
@@ -103,11 +106,17 @@ public final class AskMode implements Mode {
             List<ChatMessage> history = ctx.memory().getTurns();
             if (history != null && !history.isEmpty()) {
                 messages.addAll(history);
+                LOG.debug("buildMessages: including {} history turns ({} exchanges)",
+                        history.size(), history.size() / 2);
+            } else {
+                LOG.debug("buildMessages: no history turns (first message in session)");
             }
         }
 
         // Add current user message
         messages.add(ChatMessage.user(rawLine));
+        LOG.debug("buildMessages: total {} messages (1 system + {} history + 1 current)",
+                messages.size(), messages.size() - 2);
         return messages;
     }
 

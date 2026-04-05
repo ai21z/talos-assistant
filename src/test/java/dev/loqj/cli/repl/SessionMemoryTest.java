@@ -68,9 +68,9 @@ class SessionMemoryTest {
         var mem = new SessionMemory();
         // First update: small marker
         mem.update("MARKER_OLD", "ANSWER_OLD");
-        // Fill with enough to push the marker out
-        for (int i = 0; i < 10; i++) {
-            mem.update("q".repeat(300), "a".repeat(300));
+        // Fill with enough to push the marker out (MAX_CHARS = 64_000)
+        for (int i = 0; i < 50; i++) {
+            mem.update("q".repeat(1000), "a".repeat(1000));
         }
         // MARKER_OLD should have been trimmed away
         assertFalse(mem.get().contains("MARKER_OLD"),
@@ -128,19 +128,19 @@ class SessionMemoryTest {
 
     @Test void getTurns_prunes_oldest_when_exceeding_max() {
         var mem = new SessionMemory();
-        // MAX_TURNS is 40 — fill beyond that
-        for (int i = 0; i < 25; i++) {
+        // MAX_TURNS is 200 — fill beyond that (110 pairs = 220 messages)
+        for (int i = 0; i < 110; i++) {
             mem.update("q" + i, "a" + i);
         }
-        // 25 pairs = 50 messages, but capped at MAX_TURNS=40
+        // 110 pairs = 220 messages, but capped at MAX_TURNS=200
         List<ChatMessage> turns = mem.getTurns();
-        assertTrue(turns.size() <= 40,
+        assertTrue(turns.size() <= 200,
                 "Turns should be pruned to MAX_TURNS; got " + turns.size());
         // Oldest turns should have been dropped
         assertFalse(turns.stream().anyMatch(m -> "q0".equals(m.content())),
                 "Oldest turn should have been pruned");
         // Most recent should still be present
-        assertTrue(turns.stream().anyMatch(m -> "q24".equals(m.content())),
+        assertTrue(turns.stream().anyMatch(m -> "q109".equals(m.content())),
                 "Most recent turn should be present");
     }
 }
