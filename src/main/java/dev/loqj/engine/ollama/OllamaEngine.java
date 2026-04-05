@@ -127,7 +127,12 @@ final class OllamaEngine implements ModelEngine {
                 .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
                 .build();
         HttpResponse<String> resp = http.send(httpReq, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-        if (resp.statusCode() / 100 != 2) return "Engine error (" + resp.statusCode() + ")";
+        if (resp.statusCode() / 100 != 2) {
+            if (resp.statusCode() == 404) {
+                return "Model '" + model + "' not found. Run:  ollama pull " + model;
+            }
+            return "Engine error (" + resp.statusCode() + ")";
+        }
         Matcher m = RESPONSE.matcher(resp.body());
         return m.find() ? unesc(m.group(1)) : resp.body();
     }
@@ -153,7 +158,12 @@ final class OllamaEngine implements ModelEngine {
                 .build();
 
         HttpResponse<java.io.InputStream> resp = http.send(httpReq, HttpResponse.BodyHandlers.ofInputStream());
-        if (resp.statusCode() / 100 != 2) return Stream.of(TokenChunk.of("Engine error (" + resp.statusCode() + ")"), TokenChunk.eos());
+        if (resp.statusCode() / 100 != 2) {
+            String errMsg = resp.statusCode() == 404
+                    ? "Model '" + model + "' not found. Run:  ollama pull " + model
+                    : "Engine error (" + resp.statusCode() + ")";
+            return Stream.of(TokenChunk.of(errMsg), TokenChunk.eos());
+        }
 
         BufferedReader br = new BufferedReader(new InputStreamReader(resp.body(), StandardCharsets.UTF_8));
         return br.lines().map(line -> {
