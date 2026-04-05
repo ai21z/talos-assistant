@@ -1,5 +1,7 @@
 package dev.loqj.core.retrieval.stages;
 
+import dev.loqj.core.ingest.SourceIdentity;
+import dev.loqj.core.ingest.SourceType;
 import dev.loqj.core.retrieval.RetrievalCandidate;
 import dev.loqj.core.retrieval.RetrievalRequest;
 import dev.loqj.core.retrieval.RetrievalStage;
@@ -83,13 +85,12 @@ public final class SourceBoostStage implements RetrievalStage {
         int docsPenalized = 0;
 
         for (RetrievalCandidate c : candidates) {
-            String pathLower = c.path().toLowerCase(Locale.ROOT).replace('\\', '/');
-            float factor = classifyPath(pathLower);
+            float factor = classifyCandidate(c);
 
             if (factor != 1.0f) {
                 boosted.add(c.withScore(c.score() * factor).withSource(c.source()));
                 if (factor > 1.0f) prodBoosted++;
-                else if (isTestPath(pathLower)) testPenalized++;
+                else if (isTestOrUnknownTest(c)) testPenalized++;
                 else docsPenalized++;
             } else {
                 boosted.add(c);
@@ -104,9 +105,54 @@ public final class SourceBoostStage implements RetrievalStage {
     }
 
     /**
+     * Returns the score multiplier for a candidate, preferring the classified
+     * {@link SourceType} from metadata when available, falling back to
+     * path-based heuristics for pre-upgrade chunks without source identity.
+     */
+    static float classifyCandidate(RetrievalCandidate c) {
+        SourceIdentity si = c.metadata() != null ? c.metadata().sourceIdentity() : null;
+        if (si != null && si.isClassified()) {
+            return factorForSourceType(si.type(), c.path());
+        }
+        // Fallback: legacy path-based classification
+        String pathLower = c.path().toLowerCase(Locale.ROOT).replace('\\', '/');
+        return classifyPath(pathLower);
+    }
+
+    /**
+     * Map a {@link SourceType} to a score factor.
+     * Test paths still need path-based detection because SourceType does not
+     * distinguish production code from test code (both are CODE_FILE).
+     */
+    static float factorForSourceType(SourceType type, String path) {
+        return switch (type) {
+            case CODE_FILE -> {
+                // CODE_FILE could be prod or test — resolve via path
+                String p = path.toLowerCase(Locale.ROOT).replace('\\', '/');
+                if (isTestPath(p)) yield TEST_PENALTY;
+                if (isProdPath(p)) yield PROD_BOOST;
+                yield 1.0f;
+            }
+            case DOCUMENT -> DOCS_PENALTY;
+            case CONFIG   -> DOCS_PENALTY;
+            case BUILD_FILE -> 1.0f; // build files are neutral
+            case UNKNOWN  -> 1.0f;
+        };
+    }
+
+    /** Checks if a candidate should count as test-penalized for note formatting. */
+    private static boolean isTestOrUnknownTest(RetrievalCandidate c) {
+        String p = c.path().toLowerCase(Locale.ROOT).replace('\\', '/');
+        return isTestPath(p);
+    }
+
+    /**
      * Returns the score multiplier for a given path.
      * Production paths get boosted, test/doc paths get penalized,
      * and unclassified paths pass through unchanged.
+     *
+     * <p>Legacy path-only classification — used as fallback when metadata
+     * does not carry a {@link SourceIdentity}.
      */
     static float classifyPath(String pathLower) {
         // Check test first — more specific than prod (src/test overrides src/main)

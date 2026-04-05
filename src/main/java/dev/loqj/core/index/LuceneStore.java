@@ -1,6 +1,10 @@
 package dev.loqj.core.index;
 
 import dev.loqj.core.ingest.ChunkMetadata;
+import dev.loqj.core.ingest.MediaType;
+import dev.loqj.core.ingest.SourceFormat;
+import dev.loqj.core.ingest.SourceIdentity;
+import dev.loqj.core.ingest.SourceType;
 import dev.loqj.core.spi.CorpusStore;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
@@ -42,6 +46,11 @@ public class LuceneStore implements AutoCloseable, CorpusStore {
      * Kept as StoredField-only for now to avoid index bloat until a consumer exists.
      */
     public static final String F_HEADING    = "heading";
+
+    // Source identity fields (StringField, stored + filterable)
+    public static final String F_SOURCE_TYPE   = "sourceType";
+    public static final String F_SOURCE_FORMAT = "sourceFormat";
+    public static final String F_MEDIA_TYPE    = "mediaType";
 
     /** Legacy hit type kept for test compatibility. */
     public static class Hit {
@@ -134,6 +143,13 @@ public class LuceneStore implements AutoCloseable, CorpusStore {
                 }
                 if (metadata.headingContext() != null) {
                     doc.add(new StoredField(F_HEADING, metadata.headingContext()));
+                }
+                // Source identity
+                if (metadata.sourceIdentity() != null) {
+                    SourceIdentity si = metadata.sourceIdentity();
+                    doc.add(new StringField(F_SOURCE_TYPE, si.type().name(), Field.Store.YES));
+                    doc.add(new StringField(F_SOURCE_FORMAT, si.format().name(), Field.Store.YES));
+                    doc.add(new StringField(F_MEDIA_TYPE, si.mediaType().name(), Field.Store.YES));
                 }
             }
 
@@ -273,11 +289,51 @@ public class LuceneStore implements AutoCloseable, CorpusStore {
         int lineEnd   = readStoredInt(d, F_LINE_END, -1);
         String heading = d.get(F_HEADING);
 
+        // Reconstruct source identity if stored
+        SourceIdentity sourceId = extractSourceIdentity(d);
+
         // If nothing meaningful is stored, return the shared empty instance
-        if (lang == null && lineStart < 0 && lineEnd < 0 && heading == null) {
+        if (lang == null && lineStart < 0 && lineEnd < 0 && heading == null && sourceId == null) {
             return ChunkMetadata.empty();
         }
-        return new ChunkMetadata(lang, lineStart, lineEnd, heading);
+        return new ChunkMetadata(lang, lineStart, lineEnd, heading, sourceId);
+    }
+
+    /**
+     * Reconstruct a {@link SourceIdentity} from stored Lucene fields.
+     * Returns null if no source identity fields are present (pre-upgrade chunks).
+     */
+    private static SourceIdentity extractSourceIdentity(Document d) {
+        String typeName   = d.get(F_SOURCE_TYPE);
+        String formatName = d.get(F_SOURCE_FORMAT);
+        String mediaName  = d.get(F_MEDIA_TYPE);
+
+        if (typeName == null && formatName == null && mediaName == null) return null;
+
+        SourceType type     = safeEnum(SourceType.class, typeName, SourceType.UNKNOWN);
+        SourceFormat format = safeEnum(SourceFormat.class, formatName, SourceFormat.UNKNOWN);
+        MediaType media     = safeEnum(MediaType.class, mediaName, MediaType.UNKNOWN);
+
+        // Use the path from doc if available; fallback to empty
+        String docPath = d.get(F_PATH);
+        if (docPath != null) {
+            int hash = docPath.indexOf('#');
+            if (hash >= 0) docPath = docPath.substring(0, hash);
+        } else {
+            docPath = "";
+        }
+
+        return new SourceIdentity(docPath, type, format, media);
+    }
+
+    /** Safely parse an enum value, returning the fallback for null or unknown names. */
+    private static <E extends Enum<E>> E safeEnum(Class<E> cls, String name, E fallback) {
+        if (name == null) return fallback;
+        try {
+            return Enum.valueOf(cls, name);
+        } catch (IllegalArgumentException e) {
+            return fallback;
+        }
     }
 
     /** Read a stored int field, returning {@code fallback} if the field is missing. */

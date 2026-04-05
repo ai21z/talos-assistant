@@ -228,5 +228,42 @@ class ChunkerMetadataTest {
                     "All chunks under a single heading should carry that heading, chunk " + c.chunkId());
         }
     }
+
+    // ───── source identity propagation ─────
+
+    @Test
+    void chunks_carrySourceIdentity() {
+        String text = "public class Foo { }\n";
+        List<ParsedChunk> chunks = Chunker.chunk("src/main/java/Foo.java", text, 1000, 0);
+        assertFalse(chunks.isEmpty());
+        for (ParsedChunk c : chunks) {
+            SourceIdentity si = c.metadata().sourceIdentity();
+            assertNotNull(si, "Every chunk should carry a SourceIdentity");
+            assertEquals(SourceType.CODE_FILE, si.type());
+            assertEquals(SourceFormat.JAVA, si.format());
+            assertEquals(MediaType.TEXTUAL, si.mediaType());
+        }
+    }
+
+    @Test
+    void chunks_markdownFile_classifiedAsDocument() {
+        String text = "# Title\nSome content.\n";
+        List<ParsedChunk> chunks = Chunker.chunk("docs/guide.md", text, 1000, 0);
+        assertFalse(chunks.isEmpty());
+        SourceIdentity si = chunks.get(0).metadata().sourceIdentity();
+        assertEquals(SourceType.DOCUMENT, si.type());
+        assertEquals(SourceFormat.MARKDOWN, si.format());
+    }
+
+    @Test
+    void chunks_configFile_classifiedAsConfig() {
+        String text = "server:\n  port: 8080\n";
+        List<ParsedChunk> chunks = Chunker.chunk("config.yaml", text, 1000, 0);
+        assertFalse(chunks.isEmpty());
+        SourceIdentity si = chunks.get(0).metadata().sourceIdentity();
+        assertEquals(SourceType.CONFIG, si.type());
+        assertEquals(SourceFormat.YAML, si.format());
+        assertEquals(MediaType.STRUCTURED, si.mediaType());
+    }
 }
 

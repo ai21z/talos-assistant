@@ -1,5 +1,10 @@
 package dev.loqj.core.retrieval.stages;
 
+import dev.loqj.core.ingest.ChunkMetadata;
+import dev.loqj.core.ingest.MediaType;
+import dev.loqj.core.ingest.SourceFormat;
+import dev.loqj.core.ingest.SourceIdentity;
+import dev.loqj.core.ingest.SourceType;
 import dev.loqj.core.retrieval.RetrievalCandidate;
 import dev.loqj.core.retrieval.RetrievalRequest;
 import dev.loqj.core.retrieval.StageOutput;
@@ -170,6 +175,73 @@ class SourceBoostStageTest {
     @Test
     void stageName_is_source_boost() {
         assertEquals("source-boost", stage.name());
+    }
+
+    // ── Metadata-based classification (SourceType) ──
+
+    @Test
+    void candidateWithCodeMetadata_prodPath_boosted() {
+        var si = new SourceIdentity("src/main/java/Foo.java", SourceType.CODE_FILE, SourceFormat.JAVA, MediaType.TEXTUAL);
+        var meta = new ChunkMetadata("java", 1, 20, null, si);
+        var c = RetrievalCandidate.of("src/main/java/Foo.java#0", 1.0f, "rrf", meta);
+
+        float factor = SourceBoostStage.classifyCandidate(c);
+        assertEquals(SourceBoostStage.PROD_BOOST, factor, 0.001f);
+    }
+
+    @Test
+    void candidateWithCodeMetadata_testPath_penalized() {
+        var si = new SourceIdentity("src/test/java/FooTest.java", SourceType.CODE_FILE, SourceFormat.JAVA, MediaType.TEXTUAL);
+        var meta = new ChunkMetadata("java", 1, 20, null, si);
+        var c = RetrievalCandidate.of("src/test/java/FooTest.java#0", 1.0f, "rrf", meta);
+
+        float factor = SourceBoostStage.classifyCandidate(c);
+        assertEquals(SourceBoostStage.TEST_PENALTY, factor, 0.001f);
+    }
+
+    @Test
+    void candidateWithDocumentMetadata_penalized() {
+        var si = new SourceIdentity("docs/README.md", SourceType.DOCUMENT, SourceFormat.MARKDOWN, MediaType.TEXTUAL);
+        var meta = new ChunkMetadata("md", 1, 10, null, si);
+        var c = RetrievalCandidate.of("docs/README.md#0", 1.0f, "rrf", meta);
+
+        float factor = SourceBoostStage.classifyCandidate(c);
+        assertEquals(SourceBoostStage.DOCS_PENALTY, factor, 0.001f);
+    }
+
+    @Test
+    void candidateWithConfigMetadata_penalized() {
+        var si = new SourceIdentity("config.yaml", SourceType.CONFIG, SourceFormat.YAML, MediaType.STRUCTURED);
+        var meta = new ChunkMetadata(null, -1, -1, null, si);
+        var c = RetrievalCandidate.of("config.yaml#0", 1.0f, "rrf", meta);
+
+        float factor = SourceBoostStage.classifyCandidate(c);
+        assertEquals(SourceBoostStage.DOCS_PENALTY, factor, 0.001f);
+    }
+
+    @Test
+    void candidateWithBuildMetadata_neutral() {
+        var si = new SourceIdentity("Dockerfile", SourceType.BUILD_FILE, SourceFormat.DOCKERFILE, MediaType.TEXTUAL);
+        var meta = new ChunkMetadata(null, -1, -1, null, si);
+        var c = RetrievalCandidate.of("Dockerfile#0", 1.0f, "rrf", meta);
+
+        float factor = SourceBoostStage.classifyCandidate(c);
+        assertEquals(1.0f, factor, 0.001f);
+    }
+
+    @Test
+    void candidateWithoutMetadata_fallsBackToPathClassification() {
+        // No sourceIdentity — should use legacy path-based classification
+        var c = RetrievalCandidate.of("src/main/java/Foo.java#0", 1.0f, "rrf");
+
+        float factor = SourceBoostStage.classifyCandidate(c);
+        assertEquals(SourceBoostStage.PROD_BOOST, factor, 0.001f);
+    }
+
+    @Test
+    void factorForSourceType_codeFile_unknownPath_neutral() {
+        float factor = SourceBoostStage.factorForSourceType(SourceType.CODE_FILE, "lib/util.java");
+        assertEquals(1.0f, factor, 0.001f, "CODE_FILE at unclassifiable path should be neutral");
     }
 }
 
