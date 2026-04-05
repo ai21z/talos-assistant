@@ -79,8 +79,8 @@ public final class SessionMemory {
         turns.add(ChatMessage.assistant(answer));
         // Prune oldest turns (remove in pairs) if we exceed the limit
         while (turns.size() > MAX_TURNS) {
-            turns.remove(0);
-            if (!turns.isEmpty()) turns.remove(0);
+            turns.removeFirst();
+            if (!turns.isEmpty()) turns.removeFirst();
         }
     }
 }

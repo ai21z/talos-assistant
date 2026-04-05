@@ -110,6 +110,12 @@ public final class RagMode implements Mode {
                 }
             }
         }
+
+        // Update session memory so follow-up turns (even in AskMode) have conversation context
+        if (ctx.memory() != null && !answer.isBlank()) {
+            ctx.memory().update(q, answer);
+        }
+
         return Optional.of(new Result.Ok(out.toString()));
     }
 
