@@ -33,8 +33,9 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <h3>Caching</h3>
  * <p>Results are cached in a {@link ConcurrentHashMap} so each unique symbol
- * incurs at most one Lucene I/O per session. The cache is never invalidated;
- * if the user re-indexes, they should restart the REPL or create a new checker.
+ * incurs at most one Lucene I/O per session. The cache is invalidated on
+ * {@link #invalidateCache()}, which should be called after {@code :reindex}
+ * to ensure subsequent lookups reflect the updated index.
  *
  * <h3>Graceful degradation</h3>
  * <p>Returns {@code false} if the index directory does not exist, is empty,
@@ -72,6 +73,20 @@ public final class IndexedWorkspaceSymbolChecker implements WorkspaceSymbolCheck
         if (symbol == null || symbol.isBlank()) return false;
         String key = symbol.toLowerCase(Locale.ROOT);
         return cache.computeIfAbsent(key, this::lookupInIndex);
+    }
+
+    /**
+     * Clears the lookup cache so that subsequent calls to
+     * {@link #existsInWorkspace(String)} re-query the Lucene index.
+     *
+     * <p>Should be called after {@code :reindex} completes. Safe to call
+     * concurrently — ongoing lookups will simply re-populate the cache.
+     */
+    @Override
+    public void invalidateCache() {
+        int before = cache.size();
+        cache.clear();
+        LOG.debug("Symbol checker cache invalidated ({} → 0 entries)", before);
     }
 
     /**

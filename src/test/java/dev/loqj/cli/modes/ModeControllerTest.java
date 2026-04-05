@@ -411,6 +411,57 @@ class ModeControllerTest {
         assertTrue(rag.invoked, "Follow-up after workspace symbol should stay in rag");
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Cache invalidation delegation
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @Test
+    void invalidateSymbolCache_delegates_to_checker() {
+        var mc = new ModeController();
+        int[] invalidated = {0};
+        WorkspaceSymbolChecker checker = new WorkspaceSymbolChecker() {
+            @Override public boolean existsInWorkspace(String symbol) { return false; }
+            @Override public void invalidateCache() { invalidated[0]++; }
+        };
+        mc.setSymbolChecker(checker);
+
+        mc.invalidateSymbolCache();
+        assertEquals(1, invalidated[0], "Should delegate to checker's invalidateCache()");
+    }
+
+    @Test
+    void invalidateSymbolCache_is_safe_without_checker() {
+        var mc = new ModeController();
+        // No checker set — should be a safe no-op
+        assertDoesNotThrow(mc::invalidateSymbolCache);
+    }
+
+    @Test
+    void invalidateSymbolCache_can_be_called_multiple_times() {
+        var mc = new ModeController();
+        int[] count = {0};
+        mc.setSymbolChecker(new WorkspaceSymbolChecker() {
+            @Override public boolean existsInWorkspace(String symbol) { return false; }
+            @Override public void invalidateCache() { count[0]++; }
+        });
+
+        mc.invalidateSymbolCache();
+        mc.invalidateSymbolCache();
+        assertEquals(2, count[0], "Multiple invalidations should all delegate");
+    }
+
+    @Test
+    void getSymbolChecker_returns_set_checker() {
+        var mc = new ModeController();
+        assertNull(mc.getSymbolChecker(), "Should be null by default");
+
+        mc.setSymbolChecker(TEST_CHECKER);
+        assertSame(TEST_CHECKER, mc.getSymbolChecker());
+
+        mc.setSymbolChecker(null);
+        assertNull(mc.getSymbolChecker(), "Should be null after clearing");
+    }
+
     // ── Recording stub mode for isolated testing ─────────────────────────
 
     private static class RecordingStub implements Mode {

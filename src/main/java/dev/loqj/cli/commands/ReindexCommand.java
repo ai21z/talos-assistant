@@ -10,7 +10,19 @@ import java.util.List;
 
 public final class ReindexCommand implements Command {
     private final Path workspace;
-    public ReindexCommand(Path workspace) { this.workspace = workspace; }
+    private final Runnable postReindexHook;
+
+    public ReindexCommand(Path workspace) { this(workspace, null); }
+
+    /**
+     * @param workspace        the workspace root to reindex
+     * @param postReindexHook  optional callback invoked after a successful reindex
+     *                         (e.g. to invalidate the workspace symbol cache)
+     */
+    public ReindexCommand(Path workspace, Runnable postReindexHook) {
+        this.workspace = workspace;
+        this.postReindexHook = postReindexHook;
+    }
 
     @Override public CommandSpec spec() {
         return new CommandSpec("reindex", List.of("--stats", "--full", "--prune"),
@@ -79,6 +91,12 @@ public final class ReindexCommand implements Command {
 
             // Get and display statistics
             IndexingStats stats = indexer.getLastRunStats();
+
+            // Notify listeners (e.g. invalidate workspace symbol cache)
+            if (postReindexHook != null) {
+                postReindexHook.run();
+            }
+
             if (stats != null) {
                 String msg = String.format("Reindex complete: %s\n", stats.getSummary());
                 return new Result.Ok(msg);
