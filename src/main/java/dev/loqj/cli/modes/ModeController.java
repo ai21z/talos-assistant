@@ -10,16 +10,19 @@ import java.util.regex.Pattern;
 /**
  * Router over registered Mode strategies with an active-mode concept.
  *
- * <p>Auto-mode routing uses {@link IntentClassifier} to determine intent:
+ * <h3>Auto-mode routing (assistant-first)</h3>
+ * <p>Uses {@link PromptRouter} to make a definitive routing decision:
  * <ul>
- *   <li>CHAT → routes to chat/ask mode (no retrieval)</li>
- *   <li>RAG  → routes to rag mode (full retrieval pipeline)</li>
- *   <li>DEV  → routes to dev mode (file ops)</li>
- *   <li>UNKNOWN → candidate sweep: dev → rag → chat, first match wins</li>
+ *   <li>{@code COMMAND}  → DevMode (structural file ops)</li>
+ *   <li>{@code RETRIEVE} → RagMode (strong workspace evidence)</li>
+ *   <li>{@code ASSIST}   → AskMode/ChatMode (default — no retrieval)</li>
  * </ul>
  *
- * <p>When mode is explicitly set (not "auto"), that mode is tried first,
- * then fallback sweep runs in registration order.
+ * <p>There is no UNKNOWN state and no retrieval-biased fallback sweep.
+ * If the classified mode fails, the fallback is always ASSIST, never RAG.
+ *
+ * <p>When mode is explicitly set (not "auto"), that mode handles the input
+ * directly. Explicit mode selection overrides the router.
  */
 public final class ModeController {
     private final List<Mode> order = new ArrayList<>();
@@ -100,79 +103,82 @@ public final class ModeController {
 
     /**
      * Routes with a hint. If null/blank, activeName is used.
-     * Execution is performed in a single pass over a de-duplicated ordered set of candidates.
      */
     public Optional<Result> route(String rawLine, Path workspace, Context ctx, String hint) throws Exception {
         if (rawLine == null || rawLine.isBlank()) return Optional.empty();
 
         String h = (hint == null || hint.isBlank()) ? activeName : hint.toLowerCase(Locale.ROOT).trim();
 
-        // ── Auto-mode: intent-based routing ──────────────────────────────
+        // ── Auto-mode: assistant-first routing ───────────────────────────
         if ("auto".equals(h)) {
-
-            // Special case: "list files" queries → FilesCommand shortcut
-            if (LIST_FILES_PATTERN.matcher(rawLine.toLowerCase(Locale.ROOT)).find()) {
-                try {
-                    var filesCmd = new dev.loqj.cli.commands.FilesCommand(workspace);
-                    return Optional.of(filesCmd.execute("", ctx));
-                } catch (Exception e) {
-                    // Fallback to normal routing
-                }
-            }
-
-            // Classify intent
-            IntentClassifier.Intent intent = IntentClassifier.classify(rawLine);
-
-            switch (intent) {
-                case CHAT -> {
-                    Mode chatMode = resolveChat();
-                    if (chatMode != null && chatMode.canHandle(rawLine)) {
-                        Optional<Result> r = chatMode.handle(rawLine, workspace, ctx);
-                        if (r != null && r.isPresent()) return r;
-                    }
-                }
-                case DEV -> {
-                    Mode devMode = byName.get("dev");
-                    if (devMode != null && devMode.canHandle(rawLine)) {
-                        Optional<Result> r = devMode.handle(rawLine, workspace, ctx);
-                        if (r != null && r.isPresent()) return r;
-                    }
-                }
-                case RAG -> {
-                    Mode ragMode = byName.get("rag");
-                    if (ragMode != null && ragMode.canHandle(rawLine)) {
-                        Optional<Result> r = ragMode.handle(rawLine, workspace, ctx);
-                        if (r != null && r.isPresent()) return r;
-                    }
-                }
-                case UNKNOWN -> {
-                    // Fall through to candidate sweep below
-                }
-            }
+            return routeAuto(rawLine, workspace, ctx);
         }
 
-        // ── Candidate sweep (explicit mode or UNKNOWN fallback) ──────────
-        LinkedHashSet<Mode> seq = new LinkedHashSet<>();
+        // ── Explicit mode: use the selected mode, fallback to sweep ──────
+        Optional<Result> r = tryMode(byName.get(h), rawLine, workspace, ctx);
+        if (r.isPresent()) return r;
 
-        if ("auto".equals(h)) {
-            // UNKNOWN intent: try dev → rag → chat
-            addIfPresent(seq, byName.get("dev"));
-            addIfPresent(seq, byName.get("rag"));
-            addIfPresent(seq, resolveChat());
-        } else {
-            addIfPresent(seq, byName.get(h));
-        }
-        // Fallback: sweep all modes in registration order
-        for (Mode m : order) addIfPresent(seq, m);
-
-        // Single pass: first mode that canHandle + returns non-empty result wins
-        for (Mode m : seq) {
-            if (m == null) continue;
-            if (!m.canHandle(rawLine)) continue;
-            Optional<Result> r = m.handle(rawLine, workspace, ctx);
-            if (r != null && r.isPresent()) return r;
+        // Explicit mode failed — sweep all modes in registration order
+        for (Mode m : order) {
+            r = tryMode(m, rawLine, workspace, ctx);
+            if (r.isPresent()) return r;
         }
         return Optional.empty();
+    }
+
+    /**
+     * Auto-mode routing: assistant-first, retrieval requires evidence.
+     *
+     * <p>Flow:
+     * <ol>
+     *   <li>"list files" shortcut → FilesCommand</li>
+     *   <li>PromptRouter classifies → COMMAND / RETRIEVE / ASSIST</li>
+     *   <li>Classified mode is tried</li>
+     *   <li>If classified mode fails → always fall back to ASSIST</li>
+     * </ol>
+     *
+     * <p>RAG is never a fallback. If the router doesn't say RETRIEVE,
+     * retrieval doesn't happen.
+     */
+    private Optional<Result> routeAuto(String rawLine, Path workspace, Context ctx) throws Exception {
+        // Special case: "list files" queries → FilesCommand shortcut
+        if (LIST_FILES_PATTERN.matcher(rawLine.toLowerCase(Locale.ROOT)).find()) {
+            try {
+                var filesCmd = new dev.loqj.cli.commands.FilesCommand(workspace);
+                return Optional.of(filesCmd.execute("", ctx));
+            } catch (Exception e) {
+                // Fallback to normal routing
+            }
+        }
+
+        // Classify the prompt
+        PromptRouter.Route route = PromptRouter.route(rawLine);
+
+        // Try the classified mode
+        Optional<Result> r = switch (route) {
+            case COMMAND  -> tryMode(byName.get("dev"), rawLine, workspace, ctx);
+            case RETRIEVE -> tryMode(byName.get("rag"), rawLine, workspace, ctx);
+            case ASSIST   -> tryMode(resolveChat(), rawLine, workspace, ctx);
+        };
+        if (r.isPresent()) return r;
+
+        // Universal fallback: always assistant, never RAG
+        if (route != PromptRouter.Route.ASSIST) {
+            r = tryMode(resolveChat(), rawLine, workspace, ctx);
+            if (r.isPresent()) return r;
+        }
+
+        return Optional.empty();
+    }
+
+    /**
+     * Attempts to execute a mode. Returns empty if mode is null,
+     * can't handle the input, or returns empty.
+     */
+    private static Optional<Result> tryMode(Mode mode, String rawLine, Path workspace, Context ctx) throws Exception {
+        if (mode == null || !mode.canHandle(rawLine)) return Optional.empty();
+        Optional<Result> r = mode.handle(rawLine, workspace, ctx);
+        return (r != null) ? r : Optional.empty();
     }
 
     /**
@@ -181,10 +187,6 @@ public final class ModeController {
     private Mode resolveChat() {
         Mode m = byName.get("chat");
         return m != null ? m : byName.get("ask");
-    }
-
-    private static void addIfPresent(LinkedHashSet<Mode> seq, Mode m) {
-        if (m != null) seq.add(m);
     }
 
     /**
