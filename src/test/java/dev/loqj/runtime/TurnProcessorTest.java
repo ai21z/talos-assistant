@@ -27,9 +27,9 @@ class TurnProcessorTest {
     }
 
     @Test void turnCounterIncrements() throws Exception {
-        // Use a controller with a mode that always returns a result
+        // Use a controller with a stub registered as "ask" so auto-mode's ASSIST route finds it
         var modes = new ModeController();
-        modes.add(new StubMode("stub", true));
+        modes.add(new StubMode("ask", true));
         var tp = new TurnProcessor(modes);
         var session = new Session(WS, new Config());
         var ctx = Context.builder(new Config()).build();
@@ -47,7 +47,7 @@ class TurnProcessorTest {
 
     @Test void timingIsPositive() throws Exception {
         var modes = new ModeController();
-        modes.add(new StubMode("stub", true));
+        modes.add(new StubMode("ask", true));
         var tp = new TurnProcessor(modes);
         var session = new Session(WS, new Config());
         var ctx = Context.builder(new Config()).build();
@@ -70,7 +70,7 @@ class TurnProcessorTest {
 
     @Test void exceptionPropagatesForEnvelopeHandling() {
         var modes = new ModeController();
-        modes.add(new StubMode("boom", true) {
+        modes.add(new StubMode("ask", true) {
             @Override public Optional<Result> handle(String raw, Path ws, Context c) throws Exception {
                 throw new IllegalStateException("boom");
             }
