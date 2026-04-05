@@ -146,15 +146,14 @@ public class RagService {
             trace = result.trace();
             LOG.debug("Retrieval pipeline trace:\n{}", trace.summary());
 
-            // Build typed snippets + citations from pipeline results
-            var citationSet = new LinkedHashSet<String>(result.candidates().size());
+            // Build typed snippets from pipeline results
             for (RetrievalCandidate c : result.candidates()) {
                 String text = store.getTextByPath(c.path());
                 if (text == null || text.isBlank()) continue;
                 snippets.add(new ContextResult.Snippet(c.path(), text, c.metadata()));
-                citationSet.add(stripChunkId(c.path()));
             }
-            citations.addAll(citationSet);
+            // Build rich citations using the same metadata-aware formatting as ContextPacker
+            citations.addAll(ContextPacker.buildCitations(snippets));
         } catch (Exception e) {
             // On any failure, return empty (don't explode CLI)
         }
@@ -182,10 +181,6 @@ public class RagService {
                 .build();
     }
 
-    private static String stripChunkId(String path) {
-        int i = path.indexOf('#');
-        return (i < 0) ? path : path.substring(0, i);
-    }
 
     public String readCliSystemPromptOrDefault() throws Exception {
         try (InputStream in = RagService.class.getClassLoader().getResourceAsStream("prompts/cli-system.txt")) {

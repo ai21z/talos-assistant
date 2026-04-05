@@ -1,6 +1,8 @@
 package dev.loqj.core.rag;
 
+import dev.loqj.core.context.ContextPacker;
 import dev.loqj.core.context.ContextResult;
+import dev.loqj.core.ingest.ChunkMetadata;
 import dev.loqj.core.retrieval.RetrievalTrace;
 import org.junit.jupiter.api.Test;
 
@@ -68,6 +70,41 @@ class PreparedTraceTest {
         assertEquals(2, maps.size());
         assertEquals("x.java#0", maps.get(0).get("path"));
         assertEquals("code x", maps.get(0).get("text"));
+    }
+
+    @Test
+    void prepared_citations_with_metadata_are_rich() {
+        // Simulate what RagService.prepare() should now produce:
+        // snippets carry metadata, citations built via ContextPacker.buildCitations()
+        var snippets = List.of(
+                new ContextResult.Snippet("src/Foo.java#0", "code foo",
+                        new ChunkMetadata("java", 10, 25, "## Architecture")),
+                new ContextResult.Snippet("src/Bar.java#0", "code bar",
+                        new ChunkMetadata("java", 1, 50, null))
+        );
+        List<String> richCitations = ContextPacker.buildCitations(snippets);
+
+        var prepared = new RagService.Prepared(snippets, richCitations);
+
+        assertEquals(2, prepared.citations().size());
+        assertEquals("src/Foo.java:10-25 \u00A7 Architecture", prepared.citations().get(0));
+        assertEquals("src/Bar.java:1-50", prepared.citations().get(1));
+    }
+
+    @Test
+    void prepared_citations_without_metadata_are_bare_paths() {
+        // When snippets have no metadata, citations should be bare paths
+        var snippets = List.of(
+                new ContextResult.Snippet("src/X.java#0", "content"),
+                new ContextResult.Snippet("src/Y.java#1", "content2")
+        );
+        List<String> bareCitations = ContextPacker.buildCitations(snippets);
+
+        var prepared = new RagService.Prepared(snippets, bareCitations);
+
+        assertEquals(2, prepared.citations().size());
+        assertEquals("src/X.java", prepared.citations().get(0));
+        assertEquals("src/Y.java", prepared.citations().get(1));
     }
 }
 
