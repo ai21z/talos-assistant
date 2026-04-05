@@ -1,5 +1,8 @@
 package dev.loqj.cli.modes;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -220,6 +223,24 @@ public final class PromptRouter {
             "sure|right|actually|cool|yeah|yep|yup),?\\s+"
     );
 
+    // ── Result type ──────────────────────────────────────────────────────
+
+    /**
+     * Structured routing result with human-readable explanation.
+     *
+     * <p>Used by {@code :route} diagnostic command and debug logging to
+     * expose the reasoning behind each routing decision.
+     *
+     * @param route   the routing decision
+     * @param trigger concise label for the decisive signal (e.g. "file reference")
+     * @param steps   ordered trace of checks performed; empty list if not requested
+     */
+    public record RouteResult(Route route, String trigger, List<String> steps) {
+        public RouteResult {
+            steps = List.copyOf(steps);   // defensive copy, immutable
+        }
+    }
+
     // ── Public API ───────────────────────────────────────────────────────
 
     /**
@@ -251,14 +272,8 @@ public final class PromptRouter {
      * Routes a raw user prompt with conversation context and optional workspace
      * symbol resolution.
      *
-     * <p>When a {@link WorkspaceSymbolChecker} is provided, bare PascalCase
-     * identifiers (e.g. "RagService") that exist in the indexed workspace will
-     * trigger retrieval <b>without</b> requiring question context. This resolves
-     * the ambiguity between code symbols and brand names using workspace evidence
-     * rather than syntactic heuristics.
-     *
-     * <p>If the checker is {@code null}, behavior is identical to
-     * {@link #route(String, Route)}.
+     * <p>Delegates to {@link #explainRoute} and returns only the route.
+     * Use {@code explainRoute()} when the reasoning trace is needed.
      *
      * @param input     raw user input (may be null/blank)
      * @param lastRoute route of the previous turn, or null if first turn
@@ -266,51 +281,100 @@ public final class PromptRouter {
      * @return routing decision; never null
      */
     public static Route route(String input, Route lastRoute, WorkspaceSymbolChecker checker) {
-        if (input == null || input.isBlank()) return Route.ASSIST;
+        return explainRoute(input, lastRoute, checker).route();
+    }
+
+    /**
+     * Routes a raw user prompt and returns a full {@link RouteResult} with
+     * the routing decision, trigger label, and evaluation trace.
+     *
+     * <p>This is the single code path for all routing. The convenience
+     * {@code route()} methods delegate here and discard the explanation.
+     *
+     * @param input     raw user input (may be null/blank)
+     * @param lastRoute route of the previous turn, or null if first turn
+     * @param checker   workspace symbol checker, or null to skip workspace lookup
+     * @return structured result; never null
+     */
+    public static RouteResult explainRoute(String input, Route lastRoute, WorkspaceSymbolChecker checker) {
+        List<String> steps = new ArrayList<>();
+
+        if (input == null || input.isBlank()) {
+            return new RouteResult(Route.ASSIST, "empty input", steps);
+        }
 
         String trimmed = input.trim();
         String lower = trimmed.toLowerCase(Locale.ROOT);
 
         // Layer 1: structural dev commands
         if (DEV_COMMAND.matcher(trimmed).find()) {
-            return Route.COMMAND;
+            steps.add("matched dev command pattern");
+            return new RouteResult(Route.COMMAND, "dev command", steps);
         }
+        steps.add("no dev command match");
+
         // Layer 1b: "show me [the] <file>" compound command
         if (isShowMeFile(trimmed)) {
-            return Route.COMMAND;
+            steps.add("matched 'show me <file>' pattern");
+            return new RouteResult(Route.COMMAND, "show-me-file compound command", steps);
         }
+        steps.add("no show-me-file match");
 
         // Layer 2: strong retrieval signals (unconditional)
-        if (WORKSPACE_FRAME.matcher(lower).find()) return Route.RETRIEVE;
-        if (FILE_REF.matcher(trimmed).find())       return Route.RETRIEVE;
+        if (WORKSPACE_FRAME.matcher(lower).find()) {
+            steps.add("matched workspace framing phrase");
+            return new RouteResult(Route.RETRIEVE, "workspace framing", steps);
+        }
+        steps.add("no workspace framing");
+
+        if (FILE_REF.matcher(trimmed).find()) {
+            steps.add("matched file reference pattern");
+            return new RouteResult(Route.RETRIEVE, "file reference", steps);
+        }
+        steps.add("no file reference");
 
         // Layer 2b: retrieval signals requiring question context
-        //   PascalCase alone is NOT sufficient — "I use PowerPoint" must stay ASSIST.
-        //   Question-gating ensures only genuine code inquiries trigger retrieval.
         boolean isQ = isQuestionLike(lower);
-        if (isQ && CODE_IDENTIFIER.matcher(trimmed).find()) return Route.RETRIEVE;
-        if (isQ && ANCHORED_TECH_NOUN.matcher(lower).find()) return Route.RETRIEVE;
+        if (isQ && CODE_IDENTIFIER.matcher(trimmed).find()) {
+            steps.add("question context + PascalCase identifier");
+            return new RouteResult(Route.RETRIEVE, "PascalCase identifier in question", steps);
+        }
+        if (isQ && ANCHORED_TECH_NOUN.matcher(lower).find()) {
+            steps.add("question context + anchored tech noun");
+            return new RouteResult(Route.RETRIEVE, "anchored tech noun in question", steps);
+        }
+        if (isQ) {
+            steps.add("question-like but no code identifier or anchored tech noun");
+        } else {
+            steps.add("not question-like");
+        }
 
         // Layer 2c: workspace-aware PascalCase resolution
-        //   When a workspace checker is available, bare PascalCase identifiers
-        //   (e.g. "RagService") that exist in the indexed workspace trigger
-        //   retrieval WITHOUT question context. The workspace index provides
-        //   the evidence that question-gating would otherwise require.
-        //   Brand names (PowerPoint, LinkedIn) won't match because they're
-        //   not in the workspace index.
-        if (checker != null && hasWorkspaceSymbol(trimmed, checker)) {
-            return Route.RETRIEVE;
+        if (checker != null) {
+            if (hasWorkspaceSymbol(trimmed, checker)) {
+                steps.add("PascalCase confirmed in workspace index");
+                return new RouteResult(Route.RETRIEVE, "workspace symbol match", steps);
+            }
+            steps.add("no workspace symbol match");
+        } else {
+            steps.add("workspace checker not available");
         }
 
         // Layer 3: sticky retrieval for follow-ups
-        //   If the previous turn was a retrieval turn and the user is continuing
-        //   that thread (not switching to social), stay in retrieval mode.
-        if (lastRoute == Route.RETRIEVE && isFollowUp(lower)) {
-            return Route.RETRIEVE;
+        if (lastRoute == Route.RETRIEVE) {
+            if (isFollowUp(lower)) {
+                steps.add("follow-up after RETRIEVE turn");
+                return new RouteResult(Route.RETRIEVE, "sticky retrieval follow-up", steps);
+            }
+            steps.add("after RETRIEVE but not a follow-up pattern");
+        } else if (lastRoute != null) {
+            steps.add("last route was " + lastRoute + " (not RETRIEVE)");
+        } else {
+            steps.add("no conversation context");
         }
 
         // Layer 4: everything else → be an assistant
-        return Route.ASSIST;
+        return new RouteResult(Route.ASSIST, "default — no retrieval evidence", steps);
     }
 
     // ── Internal helpers ─────────────────────────────────────────────────

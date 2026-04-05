@@ -149,5 +149,138 @@ class IndexedWorkspaceSymbolCheckerTest {
         assertFalse(checker.existsInWorkspace("zzzNotInIndex"),
                 "Non-existent symbols should not match");
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Cache invalidation lifecycle
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @Test
+    void invalidateCache_clears_cached_results() throws Exception {
+        try (var store = new LuceneStore(tempDir, 0)) {
+            store.add("src/RagService.java#0", "class RagService {}", new float[0]);
+            store.commit();
+        }
+
+        var checker = new IndexedWorkspaceSymbolChecker(tempDir, true);
+
+        // Populate cache
+        assertTrue(checker.existsInWorkspace("RagService"));
+        assertFalse(checker.existsInWorkspace("NewClass"));
+
+        // Invalidate
+        checker.invalidateCache();
+
+        // Results should still be the same (re-queried from index)
+        assertTrue(checker.existsInWorkspace("RagService"),
+                "Should still find RagService after invalidation");
+        assertFalse(checker.existsInWorkspace("NewClass"),
+                "Should still not find NewClass after invalidation");
+    }
+
+    @Test
+    void invalidateCache_picks_up_newly_indexed_files() throws Exception {
+        // Phase 1: index only RagService
+        try (var store = new LuceneStore(tempDir, 0)) {
+            store.add("src/RagService.java#0", "class RagService {}", new float[0]);
+            store.commit();
+        }
+
+        var checker = new IndexedWorkspaceSymbolChecker(tempDir, true);
+
+        assertTrue(checker.existsInWorkspace("RagService"));
+        assertFalse(checker.existsInWorkspace("NewService"),
+                "NewService should not exist before reindex");
+
+        // Phase 2: reindex — add NewService
+        try (var store = new LuceneStore(tempDir, 0)) {
+            store.add("src/RagService.java#0", "class RagService {}", new float[0]);
+            store.add("src/NewService.java#0", "class NewService {}", new float[0]);
+            store.commit();
+        }
+
+        // Without invalidation, cache still returns false for NewService
+        assertFalse(checker.existsInWorkspace("NewService"),
+                "Cache should return stale false before invalidation");
+
+        // Invalidate cache
+        checker.invalidateCache();
+
+        // Now it should find NewService
+        assertTrue(checker.existsInWorkspace("NewService"),
+                "NewService should be found after invalidation + reindex");
+        assertTrue(checker.existsInWorkspace("RagService"),
+                "RagService should still be found after invalidation");
+    }
+
+    @Test
+    void invalidateCache_reflects_removed_files() throws Exception {
+        // Use a subdirectory so we can delete and recreate without tempDir issues
+        Path indexDir = tempDir.resolve("index");
+        java.nio.file.Files.createDirectories(indexDir);
+
+        // Phase 1: index RagService + OldService
+        try (var store = new LuceneStore(indexDir, 0)) {
+            store.add("src/RagService.java#0", "class RagService {}", new float[0]);
+            store.add("src/OldService.java#0", "class OldService {}", new float[0]);
+            store.commit();
+        }
+
+        var checker = new IndexedWorkspaceSymbolChecker(indexDir, true);
+        assertTrue(checker.existsInWorkspace("OldService"));
+
+        // Phase 2: full reindex without OldService (delete + recreate index)
+        deleteDirectory(indexDir);
+        java.nio.file.Files.createDirectories(indexDir);
+        try (var store = new LuceneStore(indexDir, 0)) {
+            store.add("src/RagService.java#0", "class RagService {}", new float[0]);
+            store.commit();
+        }
+
+        // Cache still says true
+        assertTrue(checker.existsInWorkspace("OldService"),
+                "Cache should return stale true before invalidation");
+
+        // Invalidate
+        checker.invalidateCache();
+
+        // Now it should correctly return false
+        assertFalse(checker.existsInWorkspace("OldService"),
+                "OldService should not be found after invalidation + reindex without it");
+    }
+
+    /** Recursively delete a directory and its contents. */
+    private static void deleteDirectory(Path dir) throws java.io.IOException {
+        if (!java.nio.file.Files.exists(dir)) return;
+        try (var walk = java.nio.file.Files.walk(dir)) {
+            walk.sorted(java.util.Comparator.reverseOrder())
+                .forEach(p -> { try { java.nio.file.Files.delete(p); } catch (Exception ignored) {} });
+        }
+    }
+
+    @Test
+    void invalidateCache_is_safe_when_called_multiple_times() throws Exception {
+        try (var store = new LuceneStore(tempDir, 0)) {
+            store.add("src/RagService.java#0", "class RagService {}", new float[0]);
+            store.commit();
+        }
+
+        var checker = new IndexedWorkspaceSymbolChecker(tempDir, true);
+        assertTrue(checker.existsInWorkspace("RagService"));
+
+        // Double invalidation should be safe
+        checker.invalidateCache();
+        checker.invalidateCache();
+
+        assertTrue(checker.existsInWorkspace("RagService"),
+                "Should work fine after double invalidation");
+    }
+
+    @Test
+    void invalidateCache_is_safe_on_empty_cache() {
+        // No lookups done — cache is empty
+        var checker = new IndexedWorkspaceSymbolChecker(tempDir, true);
+        assertDoesNotThrow(checker::invalidateCache,
+                "Invalidating an empty cache should not throw");
+    }
 }
 

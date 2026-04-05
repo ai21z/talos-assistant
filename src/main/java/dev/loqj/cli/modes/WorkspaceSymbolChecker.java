@@ -30,5 +30,13 @@ public interface WorkspaceSymbolChecker {
      * @return true if found in the workspace index, false otherwise
      */
     boolean existsInWorkspace(String symbol);
-}
 
+    /**
+     * Invalidates any cached lookup results.
+     *
+     * <p>Called after {@code :reindex} to ensure subsequent lookups reflect
+     * the updated index. Implementations that do not cache may leave this
+     * as a no-op.
+     */
+    default void invalidateCache() { /* no-op by default */ }
+}

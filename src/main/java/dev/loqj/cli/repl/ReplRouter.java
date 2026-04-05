@@ -145,7 +145,7 @@ public final class ReplRouter {
         registry.register(new ModeCommand(modes));
         registry.register(new StatusCommand(modes, this.workspace));
         registry.register(new WorkspaceCommand(this.workspace));
-        registry.register(new ReindexCommand(this.workspace));
+        registry.register(new ReindexCommand(this.workspace, modes::invalidateSymbolCache));
         registry.register(new MemoryCommand());
         // DX commands for workspace exploration
         registry.register(new FilesCommand(this.workspace));
@@ -153,5 +153,7 @@ public final class ReplRouter {
         registry.register(new ShowCommand(this.workspace));
         // Performance benchmarking
         registry.register(new BenchCommand(this.workspace));
+        // Routing diagnostics
+        registry.register(new RouteCommand(modes));
     }
 }

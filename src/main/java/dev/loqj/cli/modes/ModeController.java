@@ -93,6 +93,27 @@ public final class ModeController {
     }
 
     /**
+     * Returns the current workspace symbol checker (may be null).
+     * Exposed for the {@code :route} diagnostic command.
+     */
+    public WorkspaceSymbolChecker getSymbolChecker() {
+        return symbolChecker;
+    }
+
+    /**
+     * Invalidates the workspace symbol cache. Should be called after
+     * {@code :reindex} to ensure subsequent routing decisions reflect
+     * the updated index.
+     *
+     * <p>Safe to call when no checker is set (no-op).
+     */
+    public void invalidateSymbolCache() {
+        if (symbolChecker != null) {
+            symbolChecker.invalidateCache();
+        }
+    }
+
+    /**
      * Returns the current active mode name (e.g., "rag", "dev", "auto", "chat").
      */
     public String getActiveName() { return activeName; }
@@ -215,8 +236,8 @@ public final class ModeController {
         }
     }
 
-    /** Returns the last route for conversation context (visible for testing). */
-    PromptRouter.Route lastRoute() { return lastRoute; }
+    /** Returns the last route for conversation context (visible for :route command and testing). */
+    public PromptRouter.Route lastRoute() { return lastRoute; }
 
     /**
      * Attempts to execute a mode. Returns empty if mode is null,
