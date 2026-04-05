@@ -9,10 +9,17 @@ import java.util.regex.Pattern;
 
 /**
  * Router over registered Mode strategies with an active-mode concept.
- * Single-pass logic is used:
- *   - If hint == "auto": dev -> rag -> ask is tried, then all modes are swept
- *   - Else if hint matches a mode: hinted mode is tried first, then all modes are swept
- *   - Sweep is executed in registration order and runs only once
+ *
+ * <p>Auto-mode routing uses {@link IntentClassifier} to determine intent:
+ * <ul>
+ *   <li>CHAT → routes to chat/ask mode (no retrieval)</li>
+ *   <li>RAG  → routes to rag mode (full retrieval pipeline)</li>
+ *   <li>DEV  → routes to dev mode (file ops)</li>
+ *   <li>UNKNOWN → candidate sweep: dev → rag → chat, first match wins</li>
+ * </ul>
+ *
+ * <p>When mode is explicitly set (not "auto"), that mode is tried first,
+ * then fallback sweep runs in registration order.
  */
 public final class ModeController {
     private final List<Mode> order = new ArrayList<>();
@@ -20,19 +27,12 @@ public final class ModeController {
     private String activeName = "auto";
     private Runnable promptRefreshCallback;
 
-    // Intent patterns for auto-mode routing
+    // Intent pattern: "list files" queries → FilesCommand shortcut
     private static final Pattern LIST_FILES_PATTERN = Pattern.compile(
         "(?i)(?:what|which|show|list)\\s+(?:files|docs|documents)|" +
         "(?:list|show)\\s+(?:all\\s+)?files|" +
         "what.*(?:inside|in).*(?:dir|directory|folder|workspace)|" +
         "files\\s+(?:are\\s+)?(?:here|available|indexed)"
-    );
-
-    private static final Pattern TRIVIAL_QUERY_PATTERN = Pattern.compile(
-        "(?i)(?:how many|count)\\s+['\"]?[a-z]['\"]?\\s+in\\s+|" +
-        "(?:spell|define|what is|what does|who is|who was|when did)\\s+|" +
-        "(?:calculate|compute|solve)\\s+|" +
-        "\\d+\\s*[+\\-*/]\\s*\\d+"
     );
 
     /**
@@ -47,6 +47,17 @@ public final class ModeController {
     }
 
     /**
+     * Registers an additional alias for an existing mode instance.
+     * The alias does not appear in the order list (no duplicate sweep).
+     */
+    public ModeController alias(String alias, Mode m) {
+        if (alias != null && m != null) {
+            byName.put(alias.toLowerCase(Locale.ROOT), m);
+        }
+        return this;
+    }
+
+    /**
      * Sets a callback to refresh the REPL prompt when mode changes.
      */
     public void setPromptRefreshCallback(Runnable callback) {
@@ -54,7 +65,7 @@ public final class ModeController {
     }
 
     /**
-     * Returns the current active mode name (e.g., "rag", "dev", "auto").
+     * Returns the current active mode name (e.g., "rag", "dev", "auto", "chat").
      */
     public String getActiveName() { return activeName; }
 
@@ -65,14 +76,13 @@ public final class ModeController {
 
     /**
      * Sets the active mode. Returns true if accepted.
-     * Valid names are any registered mode names plus "auto".
+     * Valid names are any registered mode names, aliases, plus "auto".
      */
     public boolean setActive(String name) {
         if (name == null || name.isBlank()) return false;
         String n = name.toLowerCase(Locale.ROOT).trim();
         if ("auto".equals(n) || byName.containsKey(n)) {
             this.activeName = n;
-            // Prompt refresh is triggered if callback is set
             if (promptRefreshCallback != null) {
                 promptRefreshCallback.run();
             }
@@ -82,7 +92,7 @@ public final class ModeController {
     }
 
     /**
-     * Back-compatibility API: routes without hint provided; controller uses its activeName.
+     * Back-compatibility API: routes without hint; controller uses its activeName.
      */
     public Optional<Result> route(String rawLine, Path workspace, Context ctx) throws Exception {
         return route(rawLine, workspace, ctx, null);
@@ -97,45 +107,65 @@ public final class ModeController {
 
         String h = (hint == null || hint.isBlank()) ? activeName : hint.toLowerCase(Locale.ROOT).trim();
 
-        // Auto-mode intent detection
+        // ── Auto-mode: intent-based routing ──────────────────────────────
         if ("auto".equals(h)) {
-            String lower = rawLine.toLowerCase(Locale.ROOT);
 
-            // Intent 1: "list files" queries -> FilesCommand is invoked directly
-            if (LIST_FILES_PATTERN.matcher(lower).find()) {
+            // Special case: "list files" queries → FilesCommand shortcut
+            if (LIST_FILES_PATTERN.matcher(rawLine.toLowerCase(Locale.ROOT)).find()) {
                 try {
                     var filesCmd = new dev.loqj.cli.commands.FilesCommand(workspace);
                     return Optional.of(filesCmd.execute("", ctx));
                 } catch (Exception e) {
-                    // Fallback to normal routing if command fails
+                    // Fallback to normal routing
                 }
             }
 
-            // Intent 2: Trivial/non-workspace queries -> ASK mode is used directly
-            // Query is checked for file tokens and trivial patterns
-            if (TRIVIAL_QUERY_PATTERN.matcher(rawLine).find() && !containsFileTokens(rawLine)) {
-                Mode askMode = byName.get("ask");
-                if (askMode != null && askMode.canHandle(rawLine)) {
-                    Optional<Result> r = askMode.handle(rawLine, workspace, ctx);
-                    if (r != null && r.isPresent()) return r;
+            // Classify intent
+            IntentClassifier.Intent intent = IntentClassifier.classify(rawLine);
+
+            switch (intent) {
+                case CHAT -> {
+                    Mode chatMode = resolveChat();
+                    if (chatMode != null && chatMode.canHandle(rawLine)) {
+                        Optional<Result> r = chatMode.handle(rawLine, workspace, ctx);
+                        if (r != null && r.isPresent()) return r;
+                    }
+                }
+                case DEV -> {
+                    Mode devMode = byName.get("dev");
+                    if (devMode != null && devMode.canHandle(rawLine)) {
+                        Optional<Result> r = devMode.handle(rawLine, workspace, ctx);
+                        if (r != null && r.isPresent()) return r;
+                    }
+                }
+                case RAG -> {
+                    Mode ragMode = byName.get("rag");
+                    if (ragMode != null && ragMode.canHandle(rawLine)) {
+                        Optional<Result> r = ragMode.handle(rawLine, workspace, ctx);
+                        if (r != null && r.isPresent()) return r;
+                    }
+                }
+                case UNKNOWN -> {
+                    // Fall through to candidate sweep below
                 }
             }
         }
 
-        // Candidate sequence is built once
+        // ── Candidate sweep (explicit mode or UNKNOWN fallback) ──────────
         LinkedHashSet<Mode> seq = new LinkedHashSet<>();
 
         if ("auto".equals(h)) {
+            // UNKNOWN intent: try dev → rag → chat
             addIfPresent(seq, byName.get("dev"));
             addIfPresent(seq, byName.get("rag"));
-            addIfPresent(seq, byName.get("ask"));
+            addIfPresent(seq, resolveChat());
         } else {
             addIfPresent(seq, byName.get(h));
         }
-        // Fallback sweep in declared order
+        // Fallback: sweep all modes in registration order
         for (Mode m : order) addIfPresent(seq, m);
 
-        // Single pass: first mode that both "canHandle" and returns a non-empty result wins
+        // Single pass: first mode that canHandle + returns non-empty result wins
         for (Mode m : seq) {
             if (m == null) continue;
             if (!m.canHandle(rawLine)) continue;
@@ -146,29 +176,30 @@ public final class ModeController {
     }
 
     /**
-     * Checks if the raw line contains any file-like tokens (paths with extensions).
+     * Resolves the chat mode — prefers "chat" alias, falls back to "ask".
      */
-    private static boolean containsFileTokens(String rawLine) {
-        return rawLine.matches(".*\\b\\w+\\.(java|md|txt|yaml|yml|json|xml|properties|html|js|py|go|rs|cpp)\\b.*");
+    private Mode resolveChat() {
+        Mode m = byName.get("chat");
+        return m != null ? m : byName.get("ask");
     }
 
-    /**
-     * Adds a mode to the sequence if it's not null.
-     */
     private static void addIfPresent(LinkedHashSet<Mode> seq, Mode m) {
         if (m != null) seq.add(m);
     }
 
     /**
      * Creates a default controller with standard modes registered.
+     * "chat" is registered as an alias for AskMode.
      */
     public static ModeController defaultController() {
+        AskMode askMode = new AskMode();
         return new ModeController()
                 .add(new DevMode())
                 .add(new RagMode())
                 .add(new RagMemoryMode())
-                .add(new AskMode())
+                .add(askMode)
                 .add(new WebMode())
-                .add(new AutoMode());
+                .add(new AutoMode())
+                .alias("chat", askMode);
     }
 }
