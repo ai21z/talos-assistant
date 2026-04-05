@@ -4,6 +4,7 @@ import dev.loqj.cli.commands.*;
 import dev.loqj.cli.modes.ModeController;
 import dev.loqj.core.Audit;
 import dev.loqj.core.Config;
+import dev.loqj.core.index.IndexedWorkspaceSymbolChecker;
 import dev.loqj.core.llm.LlmClient;
 import dev.loqj.core.net.NetPolicy;
 import dev.loqj.core.rag.RagService;
@@ -44,6 +45,11 @@ public final class ReplRouter {
         this.session   = session;
         this.cfg       = (cfg == null ? new Config() : cfg);
         this.workspace = (workspace == null ? Path.of(".") : workspace);
+
+        // Wire workspace-aware PascalCase resolution for auto-mode routing.
+        // Bare PascalCase identifiers (e.g. "RagService") that match indexed
+        // workspace symbols will trigger retrieval without question context.
+        modes.setSymbolChecker(new IndexedWorkspaceSymbolChecker(this.workspace));
 
         // All components are composed explicitly
         Audit    audit    = new Audit();
