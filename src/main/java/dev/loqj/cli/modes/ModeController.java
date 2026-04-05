@@ -30,6 +30,13 @@ public final class ModeController {
     private String activeName = "auto";
     private Runnable promptRefreshCallback;
 
+    /**
+     * Conversation context: the route of the last successfully dispatched turn.
+     * Used by {@link PromptRouter} for sticky retrieval (follow-up detection).
+     * COMMAND routes are neutral — they don't reset the conversation context.
+     */
+    private PromptRouter.Route lastRoute;
+
     // Intent pattern: "list files" queries → FilesCommand shortcut
     private static final Pattern LIST_FILES_PATTERN = Pattern.compile(
         "(?i)(?:what|which|show|list)\\s+(?:files|docs|documents)|" +
@@ -142,6 +149,8 @@ public final class ModeController {
      */
     private Optional<Result> routeAuto(String rawLine, Path workspace, Context ctx) throws Exception {
         // Special case: "list files" queries → FilesCommand shortcut
+        // This intercept runs before PromptRouter because it maps to a
+        // specific CLI command (Lucene index listing), not a Mode.
         if (LIST_FILES_PATTERN.matcher(rawLine.toLowerCase(Locale.ROOT)).find()) {
             try {
                 var filesCmd = new dev.loqj.cli.commands.FilesCommand(workspace);
@@ -151,8 +160,8 @@ public final class ModeController {
             }
         }
 
-        // Classify the prompt
-        PromptRouter.Route route = PromptRouter.route(rawLine);
+        // Classify the prompt with conversation context
+        PromptRouter.Route route = PromptRouter.route(rawLine, lastRoute);
 
         // Try the classified mode
         Optional<Result> r = switch (route) {
@@ -160,16 +169,36 @@ public final class ModeController {
             case RETRIEVE -> tryMode(byName.get("rag"), rawLine, workspace, ctx);
             case ASSIST   -> tryMode(resolveChat(), rawLine, workspace, ctx);
         };
-        if (r.isPresent()) return r;
+        if (r.isPresent()) {
+            updateLastRoute(route);
+            return r;
+        }
 
         // Universal fallback: always assistant, never RAG
         if (route != PromptRouter.Route.ASSIST) {
             r = tryMode(resolveChat(), rawLine, workspace, ctx);
-            if (r.isPresent()) return r;
+            if (r.isPresent()) {
+                updateLastRoute(PromptRouter.Route.ASSIST);
+                return r;
+            }
         }
 
         return Optional.empty();
     }
+
+    /**
+     * Updates conversation context. COMMAND is neutral — it doesn't reset
+     * the retrieval context, so "explain X" → "ls src/" → "what about Y?"
+     * correctly stays in retrieval mode.
+     */
+    private void updateLastRoute(PromptRouter.Route route) {
+        if (route != PromptRouter.Route.COMMAND) {
+            this.lastRoute = route;
+        }
+    }
+
+    /** Returns the last route for conversation context (visible for testing). */
+    PromptRouter.Route lastRoute() { return lastRoute; }
 
     /**
      * Attempts to execute a mode. Returns empty if mode is null,
