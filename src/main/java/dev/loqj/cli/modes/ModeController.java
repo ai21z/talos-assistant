@@ -266,7 +266,6 @@ public final class ModeController {
         return new ModeController()
                 .add(new DevMode())
                 .add(new RagMode())
-                .add(new RagMemoryMode())
                 .add(askMode)
                 .add(new WebMode())
                 .add(new AutoMode())
