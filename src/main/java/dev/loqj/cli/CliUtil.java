@@ -22,7 +22,7 @@ public final class CliUtil {
     }
 
     /**
-     * Check if the workspace path indicates we're in the LOQ-J installer directory.
+     * Check if the workspace path indicates we're in the Loqs installer directory.
      * This is used to provide helpful hints when users run commands from the wrong location.
      */
     public static boolean isInstallerDirectory(Path workspace) {

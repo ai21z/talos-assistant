@@ -53,12 +53,12 @@ public class StatusCmd implements Runnable {
     }
 
     private void printStatus(Path workspace, Config cfg) {
-        System.out.println("LOQ-J Status:");
+        System.out.println("Loqs Status:");
         System.out.println("  Active workspace: " + workspace);
 
         // Check if we're in the installer directory and show hint
         if (dev.loqj.cli.CliUtil.isInstallerDirectory(workspace)) {
-            System.out.println("  Hint: You are in LOQ-J's install directory. Use --root <project> or set LOQJ_WORKSPACE.");
+            System.out.println("  Hint: You are in Loqs' install directory. Use --root <project> or set LOQJ_WORKSPACE.");
         }
 
         // Show index directory location

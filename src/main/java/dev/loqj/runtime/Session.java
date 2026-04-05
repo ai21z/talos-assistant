@@ -16,7 +16,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * and stays alive until the user quits. Turn count is the only mutable field
  * and is tracked via an atomic counter for safe concurrent access.
  *
- * <p>Session does <em>not</em> own LOQ-J retrieval internals or LLM state.
+ * <p>Session does <em>not</em> own Loqs retrieval internals or LLM state.
  * Those are composed separately in the runtime context.
  */
 public final class Session {

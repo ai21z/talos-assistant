@@ -3,7 +3,7 @@ package dev.loqj.tools;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Asynchronous tool contract for LOQ-J capabilities.
+ * Asynchronous tool contract for Loqs capabilities.
  * Mirrors {@link LoqjTool} but returns a CompletableFuture for non-blocking execution.
  * <p>
  * Use this when the caller (MCP server, agent loop) needs async/non-blocking tool calls.

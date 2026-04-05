@@ -55,7 +55,7 @@ public class DiagnoseCmd implements Runnable {
 
             Config cfg = new Config();
 
-            System.out.println("=== LOQ-J Diagnostics ===");
+            System.out.println("=== Loqs Diagnostics ===");
             System.out.println();
 
             // 1. Configuration info

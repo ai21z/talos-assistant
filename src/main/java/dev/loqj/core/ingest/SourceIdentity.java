@@ -7,7 +7,7 @@ import java.util.Objects;
  * classification (type, format, media type).
  *
  * <p>This is the "proper identity" that replaces bare path strings as the
- * system's root input abstraction. Every file ingested into LOQ-J gets
+ * system's root input abstraction. Every file ingested into Loqs gets
  * a {@code SourceIdentity} assigned by {@link SourceClassifier} at ingest
  * time, and that identity flows through indexing, retrieval, and context
  * assembly.

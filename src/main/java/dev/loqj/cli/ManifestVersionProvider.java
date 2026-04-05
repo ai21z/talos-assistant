@@ -38,7 +38,7 @@ public class ManifestVersionProvider implements CommandLine.IVersionProvider {
         String version = pkg.getImplementationVersion();
 
         // Fallback to manifest version (single source of truth)
-        if (title == null) title = "LOQ-J";
+        if (title == null) title = "Loqs";
         if (version == null) version = "0.9.0-beta";
 
         // Java runtime info

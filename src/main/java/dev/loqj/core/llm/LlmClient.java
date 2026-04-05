@@ -164,7 +164,7 @@ public final class LlmClient implements AutoCloseable {
 
     public String chatPlain(String prompt) {
         String p = Sanitize.sanitizeForPrompt(Objects.toString(prompt, ""));
-        return chat("(system) You are LOQ-J, a local-first assistant.", p, List.of());
+        return chat("(system) You are Loqs, a local-first knowledge engine.", p, List.of());
     }
 
     public String chatPlain(String system, String user) {

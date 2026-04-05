@@ -184,7 +184,7 @@ public class RagService {
         try (InputStream in = RagService.class.getClassLoader().getResourceAsStream("prompts/cli-system.txt")) {
             if (in != null) return new String(in.readAllBytes());
         }
-        return "You are LOQ-J (CLI). Answer briefly, cite local files when available. If context is insufficient, say so.";
+        return "You are Loqs (CLI). Answer briefly, cite local files when available. If context is insufficient, say so.";
     }
 
     /**
