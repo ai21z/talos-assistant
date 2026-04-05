@@ -1,5 +1,6 @@
 package dev.loqj.engine.ollama;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.loqj.spi.ModelEngine;
 import dev.loqj.spi.types.*;
@@ -140,7 +141,14 @@ final class OllamaEngine implements ModelEngine {
             return "Engine error (" + resp.statusCode() + ")";
         }
         Matcher m = RESPONSE.matcher(resp.body());
-        return m.find() ? unesc(m.group(1)) : resp.body();
+        if (m.find()) return unesc(m.group(1));
+        // Fallback: try Jackson tree parse for "response" field
+        try {
+            JsonNode root = mapper.readTree(resp.body());
+            JsonNode r = root.path("response");
+            if (!r.isMissingNode()) return r.asText("");
+        } catch (Exception ignored) {}
+        return resp.body();
     }
 
     /**
@@ -173,8 +181,27 @@ final class OllamaEngine implements ModelEngine {
             return "Engine error (" + resp.statusCode() + ")";
         }
         // /api/chat response format: {"message":{"role":"assistant","content":"..."}}
-        Matcher m = CHAT_CONTENT.matcher(resp.body());
-        return m.find() ? unesc(m.group(1)) : resp.body();
+        return extractChatContent(resp.body());
+    }
+
+    /**
+     * Extracts the assistant content from an /api/chat JSON response using Jackson tree parsing.
+     * More robust than regex: handles nested objects, field reordering, and special characters.
+     */
+    private String extractChatContent(String json) {
+        try {
+            JsonNode root = mapper.readTree(json);
+            JsonNode msg = root.path("message");
+            if (!msg.isMissingNode()) {
+                JsonNode content = msg.path("content");
+                if (!content.isMissingNode()) return content.asText("");
+            }
+        } catch (Exception e) {
+            // Fallback to regex if JSON parsing fails
+            Matcher m = CHAT_CONTENT.matcher(json);
+            if (m.find()) return unesc(m.group(1));
+        }
+        return json;
     }
 
     @Override
