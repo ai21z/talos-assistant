@@ -4,6 +4,7 @@ import dev.loqj.core.CfgUtil;
 import dev.loqj.core.Config;
 import dev.loqj.core.engine.EngineRegistry;
 import dev.loqj.core.util.Sanitize;
+import dev.loqj.spi.types.ChatMessage;
 import dev.loqj.spi.types.ChatRequest;
 import dev.loqj.spi.types.TokenChunk;
 
@@ -160,6 +161,29 @@ public final class LlmClient implements AutoCloseable {
                 (cancelled == null ? () -> false : cancelled));
     }
 
+    /* -------- Multi-turn conversation (structured messages) -------- */
+
+    /**
+     * Chat using structured conversation messages (system/user/assistant turns).
+     * <p>In ENGINE mode, this triggers the /api/chat endpoint with proper role tags.
+     * In PLACEHOLDER mode, falls back to extracting system/user for deterministic output.
+     */
+    public String chat(List<ChatMessage> messages) {
+        if (mode == TransportMode.PLACEHOLDER) {
+            return placeholderFromMessages(messages);
+        }
+        return engineAssembledWithMessages(messages, null, Duration.ofSeconds(90), () -> false);
+    }
+
+    /** Multi-turn chat with timeout. */
+    public String chat(List<ChatMessage> messages, Duration timeout) throws TimeoutException {
+        if (mode == TransportMode.PLACEHOLDER) {
+            return placeholderFromMessages(messages);
+        }
+        return engineAssembledWithMessages(messages, null,
+                (timeout == null ? Duration.ofSeconds(90) : timeout), () -> false);
+    }
+
     /* -------- Convenience (non-RAG) wrappers -------- */
 
     public String chatPlain(String prompt) {
@@ -283,6 +307,70 @@ public final class LlmClient implements AutoCloseable {
         if (cap > Integer.MAX_VALUE) return Integer.MAX_VALUE;
         if (cap < 1) return 1;
         return (int) cap;
+    }
+
+    /**
+     * PLACEHOLDER mode: extract system/user from structured messages and delegate
+     * to the existing deterministic answer generation (keeps tests working).
+     */
+    private String placeholderFromMessages(List<ChatMessage> messages) {
+        String sys = messages.stream()
+                .filter(m -> "system".equals(m.role()))
+                .map(ChatMessage::content)
+                .findFirst().orElse("");
+        String usr = messages.stream()
+                .filter(m -> "user".equals(m.role()))
+                .reduce((a, b) -> b)   // last user message
+                .map(ChatMessage::content)
+                .orElse("");
+        return placeholderAnswer(sys, usr, List.of());
+    }
+
+    /**
+     * ENGINE mode: assemble from token stream using structured messages via /api/chat.
+     * Sanitization and hard cap are applied identically to the legacy path.
+     */
+    private String engineAssembledWithMessages(List<ChatMessage> messages,
+                                               Consumer<String> onChunk,
+                                               Duration timeout,
+                                               Supplier<Boolean> cancelled) {
+        try {
+            // Sanitize all message contents
+            List<ChatMessage> sanitized = messages.stream()
+                    .map(m -> new ChatMessage(m.role(), Sanitize.sanitizeForPrompt(Objects.toString(m.content(), ""))))
+                    .toList();
+
+            ChatRequest req = new ChatRequest(backend, model, "", "", List.of(), timeout, sanitized);
+            StringBuilder acc = new StringBuilder();
+            int alreadyEmittedLen = 0;
+
+            for (TokenChunk ch : (Iterable<TokenChunk>) registry.engine().chatStream(req)::iterator) {
+                if (cancelled != null && Boolean.TRUE.equals(cancelled.get())) break;
+                if (ch == null || Boolean.TRUE.equals(ch.done())) break;
+
+                String deltaRaw = Objects.toString(ch.text(), "");
+                acc.append(deltaRaw);
+                String noThink = Sanitize.stripThinkTags(acc.toString());
+                String cleaned = Sanitize.sanitizeForOutput(noThink);
+                cleaned = Sanitize.hardTruncate(cleaned, safeCap());
+
+                int already = Math.min(alreadyEmittedLen, cleaned.length());
+                String emit = cleaned.substring(already);
+
+                acc.setLength(0);
+                acc.append(cleaned);
+                alreadyEmittedLen = cleaned.length();
+
+                if (onChunk != null && !emit.isEmpty()) onChunk.accept(emit);
+                if (acc.length() >= safeCap()) break;
+            }
+            return acc.toString();
+        } catch (Exception e) {
+            String msg = "(error calling backend: " + e.getMessage() + ")";
+            msg = Sanitize.sanitizeForOutput(msg);
+            msg = Sanitize.stripThinkTags(msg);
+            return Sanitize.hardTruncate(msg, safeCap());
+        }
     }
 
     private static String synthesizeLocalAnswer(String system, String user, String ctx) {

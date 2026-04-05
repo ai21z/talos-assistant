@@ -3,8 +3,11 @@ package dev.loqj.cli.modes;
 import dev.loqj.cli.repl.Context;
 import dev.loqj.cli.repl.Result;
 import dev.loqj.core.CfgUtil;
+import dev.loqj.spi.types.ChatMessage;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -53,13 +56,15 @@ public final class AskMode implements Mode {
         // System prompt for Ask
         String system = readResourceOrDefault("prompts/ask-system.txt");
 
+        // Build structured conversation messages for /api/chat
+        List<ChatMessage> messages = buildMessages(system, rawLine, ctx);
+
         StringBuilder out = new StringBuilder();
         out.append("\n");
         try {
-            final String sys = system;
-            final String q   = rawLine;
-
-            CompletableFuture<String> fut = CompletableFuture.supplyAsync(() -> ctx.llm().chat(sys, q, java.util.List.of()));
+            final List<ChatMessage> msgs = messages;
+            CompletableFuture<String> fut = CompletableFuture.supplyAsync(
+                    () -> ctx.llm().chat(msgs));
             String answer = fut.get(llmTimeoutMs, TimeUnit.MILLISECONDS);
             if (answer != null) {
                 if (answer.length() > responseMaxChars) {
@@ -67,6 +72,8 @@ public final class AskMode implements Mode {
                 } else {
                     out.append(answer);
                 }
+                // Update session memory with the user input and answer
+                updateMemory(ctx, rawLine, answer);
             } else {
                 out.append("(no answer)");
             }
@@ -78,6 +85,60 @@ public final class AskMode implements Mode {
         out.append("\n\n");
 
         return Optional.of(new Result.Ok(out.toString()));
+    }
+
+    /**
+     * Builds a structured list of ChatMessages for the /api/chat endpoint.
+     *
+     * <p>Includes: system prompt → prior conversation turns → current user message.
+     * This gives the model properly role-tagged conversation history, which is
+     * far more effective than injecting flat text into a single prompt.
+     */
+    static List<ChatMessage> buildMessages(String system, String rawLine, Context ctx) {
+        List<ChatMessage> messages = new ArrayList<>();
+        messages.add(ChatMessage.system(system));
+
+        // Add prior conversation turns from memory
+        if (ctx.memory() != null) {
+            List<ChatMessage> history = ctx.memory().getTurns();
+            if (history != null && !history.isEmpty()) {
+                messages.addAll(history);
+            }
+        }
+
+        // Add current user message
+        messages.add(ChatMessage.user(rawLine));
+        return messages;
+    }
+
+    /**
+     * Builds a contextual prompt by prepending recent conversation history.
+     *
+     * <p>If the session has prior turns, the prompt includes them so the LLM
+     * can maintain conversational continuity (e.g. remembering a request for
+     * ASCII art across follow-up turns).
+     *
+     * <p>When no history exists, the raw user input is returned unchanged.
+     *
+     * <p><b>Note:</b> This is the legacy flat-text approach, kept for backward
+     * compatibility and testing. The primary LLM call now uses
+     * {@link #buildMessages(String, String, Context)} with structured messages.
+     */
+    static String buildContextualPrompt(String rawLine, Context ctx) {
+        if (ctx.memory() == null) return rawLine;
+        String history = ctx.memory().get();
+        if (history == null || history.isBlank()) return rawLine;
+        return "[Conversation so far]\n" + history + "\n\n[Current message]\n" + rawLine;
+    }
+
+    /**
+     * Records the turn in session memory for future context.
+     * Safe to call with null memory (no-op).
+     */
+    private static void updateMemory(Context ctx, String userInput, String answer) {
+        if (ctx.memory() != null && answer != null && !answer.isBlank()) {
+            ctx.memory().update(userInput, answer);
+        }
     }
 
     private static String readResourceOrDefault(String resource) throws Exception {

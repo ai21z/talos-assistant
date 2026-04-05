@@ -1,6 +1,9 @@
 package dev.loqj.cli.repl;
 
+import dev.loqj.spi.types.ChatMessage;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -10,6 +13,13 @@ class SessionMemoryTest {
         var mem = new SessionMemory();
         assertNull(mem.get());
         assertFalse(mem.hasContent());
+    }
+
+    @Test void startsEmpty_getTurns_returns_empty_list() {
+        var mem = new SessionMemory();
+        List<ChatMessage> turns = mem.getTurns();
+        assertNotNull(turns);
+        assertTrue(turns.isEmpty());
     }
 
     @Test void updateStoresContent() {
@@ -65,6 +75,73 @@ class SessionMemoryTest {
         // MARKER_OLD should have been trimmed away
         assertFalse(mem.get().contains("MARKER_OLD"),
                 "Old content should have been trimmed from the rolling window");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Structured turns (getTurns)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @Test void getTurns_stores_user_and_assistant_messages() {
+        var mem = new SessionMemory();
+        mem.update("hello", "hi there");
+        List<ChatMessage> turns = mem.getTurns();
+        assertEquals(2, turns.size());
+        assertEquals("user", turns.get(0).role());
+        assertEquals("hello", turns.get(0).content());
+        assertEquals("assistant", turns.get(1).role());
+        assertEquals("hi there", turns.get(1).content());
+    }
+
+    @Test void getTurns_accumulates_multiple_pairs() {
+        var mem = new SessionMemory();
+        mem.update("q1", "a1");
+        mem.update("q2", "a2");
+        List<ChatMessage> turns = mem.getTurns();
+        assertEquals(4, turns.size());
+        assertEquals("user", turns.get(0).role());
+        assertEquals("q1", turns.get(0).content());
+        assertEquals("assistant", turns.get(1).role());
+        assertEquals("a1", turns.get(1).content());
+        assertEquals("user", turns.get(2).role());
+        assertEquals("q2", turns.get(2).content());
+        assertEquals("assistant", turns.get(3).role());
+        assertEquals("a2", turns.get(3).content());
+    }
+
+    @Test void getTurns_returns_unmodifiable_copy() {
+        var mem = new SessionMemory();
+        mem.update("q", "a");
+        List<ChatMessage> turns = mem.getTurns();
+        assertThrows(UnsupportedOperationException.class, () -> turns.add(ChatMessage.user("x")),
+                "Returned list should be unmodifiable");
+        // Original should still have the correct count
+        assertEquals(2, mem.getTurns().size());
+    }
+
+    @Test void clear_also_clears_structured_turns() {
+        var mem = new SessionMemory();
+        mem.update("q", "a");
+        assertFalse(mem.getTurns().isEmpty());
+        mem.clear();
+        assertTrue(mem.getTurns().isEmpty(), "Structured turns should be cleared");
+    }
+
+    @Test void getTurns_prunes_oldest_when_exceeding_max() {
+        var mem = new SessionMemory();
+        // MAX_TURNS is 40 — fill beyond that
+        for (int i = 0; i < 25; i++) {
+            mem.update("q" + i, "a" + i);
+        }
+        // 25 pairs = 50 messages, but capped at MAX_TURNS=40
+        List<ChatMessage> turns = mem.getTurns();
+        assertTrue(turns.size() <= 40,
+                "Turns should be pruned to MAX_TURNS; got " + turns.size());
+        // Oldest turns should have been dropped
+        assertFalse(turns.stream().anyMatch(m -> "q0".equals(m.content())),
+                "Oldest turn should have been pruned");
+        // Most recent should still be present
+        assertTrue(turns.stream().anyMatch(m -> "q24".equals(m.content())),
+                "Most recent turn should be present");
     }
 }
 

@@ -13,14 +13,27 @@ public final class ChatRequest {
     public final List<Map<String,String>> snippets;
     public final Duration timeout;
 
+    /**
+     * Structured conversation history (system + user/assistant turns).
+     * When non-empty, engines should prefer the /api/chat path over /api/generate.
+     */
+    public final List<ChatMessage> messages;
+
     public ChatRequest(String backend, String model, String systemPrompt, String userPrompt,
                        List<Map<String,String>> snippets, Duration timeout) {
+        this(backend, model, systemPrompt, userPrompt, snippets, timeout, List.of());
+    }
+
+    public ChatRequest(String backend, String model, String systemPrompt, String userPrompt,
+                       List<Map<String,String>> snippets, Duration timeout,
+                       List<ChatMessage> messages) {
         this.backend = Objects.requireNonNullElse(backend, "");
         this.model = Objects.requireNonNullElse(model, "");
         this.systemPrompt = Objects.requireNonNullElse(systemPrompt, "");
         this.userPrompt = Objects.requireNonNullElse(userPrompt, "");
         this.snippets = snippets == null ? List.of() : List.copyOf(snippets);
         this.timeout = timeout == null ? Duration.ofSeconds(60) : timeout;
+        this.messages = messages == null ? List.of() : List.copyOf(messages);
     }
 
     public String flattenedContext() {
