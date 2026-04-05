@@ -13,7 +13,7 @@ public final class MemoryCommand implements Command {
     @Override public Result execute(String args, Context ctx) {
         String a = args == null ? "" : args.trim().toLowerCase();
         if (!a.equals("clear")) return new Result.Error("Usage: :memory clear", 200);
-        ctx.rag().clearMemory();
+        ctx.memory().clear();
         return new Result.Info("Memory cleared.");
     }
 }

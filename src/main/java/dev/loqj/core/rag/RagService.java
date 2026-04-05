@@ -33,8 +33,6 @@ public class RagService {
     // Guard against re-entrant lazy indexing
     private final AtomicBoolean indexingNow = new AtomicBoolean(false);
 
-    // very small session-memory field used by RAG+MEMORY mode (optional)
-    private String sessionMemory;
 
     /** Small data holder returned by prepare(). */
     public static final class Prepared {
@@ -257,13 +255,6 @@ public class RagService {
         }
     }
 
-    /* ====== Minimal session memory for RAG+MEMORY mode ====== */
-    public String getMemory() { return sessionMemory; }
-    public void clearMemory() { sessionMemory = null; }
-    public void updateMemory(String userInput, String answer, int maxItems, int maxNames) {
-        String s = (sessionMemory == null ? "" : sessionMemory + "\n") + userInput + "\n" + answer;
-        sessionMemory = (s.length() > 4000 ? s.substring(s.length() - 4000) : s);
-    }
 
     /**
      * Ensures index exists for the given workspace. If missing or unreadable, performs lazy indexing.

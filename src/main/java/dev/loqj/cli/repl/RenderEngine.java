@@ -177,12 +177,12 @@ public final class RenderEngine {
         // Content with word wrapping
         for (String line : lines) {
             if (line.length() <= MAX_WIDTH) {
-                println("│ " + line + " ".repeat(MAX_WIDTH - line.length() - 1) + "│");
+                println("│ " + line + " ".repeat(Math.max(0, MAX_WIDTH - line.length() - 1)) + "│");
             } else {
                 // Long lines are word-wrapped
                 List<String> wrapped = wrapLine(line, MAX_WIDTH - 2);
                 for (String wl : wrapped) {
-                    println("│ " + wl + " ".repeat(MAX_WIDTH - wl.length() - 1) + "│");
+                    println("│ " + wl + " ".repeat(Math.max(0, MAX_WIDTH - wl.length() - 1)) + "│");
                 }
             }
         }

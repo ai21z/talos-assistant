@@ -9,6 +9,9 @@ import dev.loqj.core.net.NetPolicy;
 import dev.loqj.core.rag.RagService;
 import dev.loqj.core.security.Redactor;
 import dev.loqj.core.security.Sandbox;
+import dev.loqj.runtime.Session;
+import dev.loqj.runtime.TurnProcessor;
+import dev.loqj.runtime.TurnResult;
 
 import java.io.PrintStream;
 import java.nio.file.Path;
@@ -32,6 +35,8 @@ public final class ReplRouter {
     private final LineClassifier classifier = new LineClassifier();
     private final Context ctx;
     private final Path workspace;
+    private final Session runtimeSession;
+    private final TurnProcessor turnProcessor;
 
     private final ModeController modes = ModeController.defaultController();
 
@@ -48,6 +53,7 @@ public final class ReplRouter {
         LlmClient llm     = new LlmClient(this.cfg);
         NetPolicy net     = new NetPolicy(this.cfg);
         Limits    limits  = Limits.fromConfig(this.cfg);
+        SessionMemory memory = new SessionMemory();
 
         this.ctx = Context.builder(this.cfg)
                 .limits(limits)
@@ -58,7 +64,12 @@ public final class ReplRouter {
                 .rag(rag)
                 .llm(llm)
                 .netPolicy(net)
+                .memory(memory)
                 .build();
+
+        // Create runtime session and turn processor
+        this.runtimeSession = new Session(this.workspace, this.cfg, memory);
+        this.turnProcessor  = new TurnProcessor(modes);
 
         this.render = new RenderEngine(this.cfg, redactor, out == null ? System.out : out);
 
@@ -84,13 +95,13 @@ public final class ReplRouter {
         LineClassifier.Classified c = classifier.classify(rawLine);
         if (c.type() != LineClassifier.LineType.PROMPT) return false;
 
-        Path ws = (workspaceOverride == null ? this.workspace : workspaceOverride);
-
         // Spinner is started before execution
         render.startSpinner();
 
-        Result r = pipe.run(() ->
-                        modes.route(rawLine, ws, ctx, activeModeName).orElse(null),
+        Result r = pipe.run(() -> {
+                    TurnResult tr = turnProcessor.process(runtimeSession, rawLine, ctx);
+                    return (tr == null) ? null : tr.result();
+                },
                 ctx, "(prompt)"
         );
 
@@ -103,6 +114,9 @@ public final class ReplRouter {
     public boolean shouldQuit() { return quit.get(); }
 
     public ModeController getModes() { return modes; }
+
+    /** The runtime session bound to this router. */
+    public Session getRuntimeSession() { return runtimeSession; }
 
     private void registerCommands() {
         // :k and :debug operate on SessionState

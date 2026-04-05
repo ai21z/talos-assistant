@@ -7,6 +7,8 @@ import dev.loqj.core.net.NetPolicy;
 import dev.loqj.core.rag.RagService;
 import dev.loqj.core.security.Redactor;
 import dev.loqj.core.security.Sandbox;
+import dev.loqj.runtime.ApprovalGate;
+import dev.loqj.runtime.NoOpApprovalGate;
 
 import java.nio.file.Path;
 import java.util.Map;
@@ -21,7 +23,9 @@ public record Context(
         Sandbox sandbox,
         RagService rag,
         LlmClient llm,
-        NetPolicy netPolicy
+        NetPolicy netPolicy,
+        SessionMemory memory,
+        ApprovalGate approvalGate
 ) {
     /** Fluent builder for tests and advanced wiring. Prefer explicit setter calls over withDefaults in prod. */
     public static Builder builder(Config cfg) { return new Builder(cfg); }
@@ -36,6 +40,8 @@ public record Context(
         private RagService rag;
         private LlmClient llm;
         private NetPolicy net;
+        private SessionMemory memory;
+        private ApprovalGate approvalGate;
 
         public Builder(Config cfg) { this.cfg = (cfg == null ? new Config() : cfg); }
 
@@ -47,6 +53,8 @@ public record Context(
         public Builder rag(RagService r)             { this.rag = r; return this; }
         public Builder llm(LlmClient l)              { this.llm = l; return this; }
         public Builder netPolicy(NetPolicy n)        { this.net = n; return this; }
+        public Builder memory(SessionMemory m)       { this.memory = m; return this; }
+        public Builder approvalGate(ApprovalGate g)  { this.approvalGate = g; return this; }
 
         /** Convenience for ad-hoc usage; tests should prefer explicit setters for control. */
         public Builder withDefaults(Path workspace, SessionState session) {
@@ -63,6 +71,8 @@ public record Context(
             if (this.rag == null)      this.rag      = new RagService(cfg);
             if (this.llm == null)      this.llm      = new LlmClient(cfg);
             if (this.net == null)      this.net      = new NetPolicy(cfg);
+            if (this.memory == null)   this.memory   = new SessionMemory();
+            if (this.approvalGate == null) this.approvalGate = new NoOpApprovalGate();
             return this;
         }
 
@@ -79,8 +89,10 @@ public record Context(
             if (rag == null)      rag      = new RagService(cfg);
             if (llm == null)      llm      = new LlmClient(cfg);
             if (net == null)      net      = new NetPolicy(cfg);
+            if (memory == null)   memory   = new SessionMemory();
+            if (approvalGate == null) approvalGate = new NoOpApprovalGate();
 
-            return new Context(cfg, limits, session, audit, redactor, sandbox, rag, llm, net);
+            return new Context(cfg, limits, session, audit, redactor, sandbox, rag, llm, net, memory, approvalGate);
         }
     }
 }
