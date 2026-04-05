@@ -114,7 +114,7 @@ application {
 tasks.withType<Jar>().configureEach {
     manifest {
         attributes(
-            "Implementation-Title" to "LOQ-J",
+            "Implementation-Title" to "Loqs",
             "Implementation-Version" to project.version,
             "Implementation-Vendor" to System.currentTimeMillis().toString(), // Build timestamp
             "Main-Class" to "dev.loqj.app.Main"

@@ -1,5 +1,6 @@
 package dev.loqj.cli.repl;
 
+import dev.loqj.cli.ui.AnsiColor;
 import dev.loqj.core.CfgUtil;
 import dev.loqj.core.Config;
 import dev.loqj.core.security.Redactor;
@@ -16,6 +17,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Renders Results to the terminal with consistent sanitize → redact → print pipeline.
+ * Uses colored left-border for answers, colored prefixes for errors/info,
+ * and a smooth spinner during generation.
  */
 public final class RenderEngine {
     private final Config cfg;
@@ -29,26 +32,28 @@ public final class RenderEngine {
     private final AtomicInteger spinnerFrame = new AtomicInteger(0);
     private Thread spinnerThread;
     private Instant spinnerStartTime;
-    private static final String[] SPINNER_FRAMES = {"|", "/", "-", "\\"};
+
+    // Braille spinner for Unicode-capable terminals, classic for others
+    private static final String[] SPINNER_UNICODE = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
+    private static final String[] SPINNER_ASCII   = {"|", "/", "-", "\\"};
+
+    private final String[] spinnerFrames;
 
     public RenderEngine(Config cfg, Redactor redactor, PrintStream out) {
         this.cfg = (cfg == null ? new Config() : cfg);
         this.redactor = (redactor == null ? new Redactor() : redactor);
         this.out = (out == null ? System.out : out);
 
-        // UI config is read for status label
+        // UI config
         Map<String, Object> ui = CfgUtil.map(this.cfg.data.get("ui"));
-        String rawLabel = ui == null ? "Answering…" : String.valueOf(ui.getOrDefault("status_label", "Answering…"));
-
-        // ASCII fallback: ellipsis is replaced with three dots if Unicode is not supported
-        this.statusLabel = supportsUnicode() ? rawLabel : rawLabel.replace("…", "...");
-
+        String rawLabel = ui == null ? "Thinking" : String.valueOf(ui.getOrDefault("status_label", "Thinking"));
+        this.statusLabel = AnsiColor.isUnicodeSafe() ? rawLabel : rawLabel.replace("…", "...");
         this.showStatusDuringAnswer = ui == null || !(ui.get("show_status_during_answer") instanceof Boolean b) || b;
+        this.spinnerFrames = AnsiColor.isUnicodeSafe() ? SPINNER_UNICODE : SPINNER_ASCII;
     }
 
     /**
      * Starts the spinner (non-blocking).
-     * Honors ui.show_status_during_answer configuration.
      */
     public void startSpinner() {
         if (!showStatusDuringAnswer) return;
@@ -57,25 +62,26 @@ public final class RenderEngine {
         spinnerStartTime = Instant.now();
         spinnerThread = new Thread(() -> {
             while (spinnerActive.get()) {
-                int frame = spinnerFrame.getAndIncrement() % SPINNER_FRAMES.length;
+                int frame = spinnerFrame.getAndIncrement() % spinnerFrames.length;
 
-                // Elapsed time is calculated in mm:ss format
                 long secs = spinnerStartTime.until(Instant.now(), ChronoUnit.SECONDS);
-                long mm = secs / 60;
-                long ss = secs % 60;
-                String elapsed = String.format(Locale.ROOT, "%d:%02d", mm, ss);
+                String elapsed = secs < 60
+                        ? secs + "s"
+                        : String.format(Locale.ROOT, "%d:%02d", secs / 60, secs % 60);
 
-                out.print("\r" + statusLabel + " " + SPINNER_FRAMES[frame] + " " + elapsed + "   ");
+                // Colored spinner: orange dot + grey label + dim time
+                out.print("\r  " + AnsiColor.ORANGE + spinnerFrames[frame] + AnsiColor.RESET
+                        + " " + AnsiColor.GREY + statusLabel + AnsiColor.RESET
+                        + "  " + AnsiColor.DIM + elapsed + AnsiColor.RESET + "   ");
                 out.flush();
                 try {
-                    Thread.sleep(150);
+                    Thread.sleep(120);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     break;
                 }
             }
-            // Spinner line is cleared
-            out.print("\r" + " ".repeat(statusLabel.length() + 20) + "\r");
+            out.print("\r" + " ".repeat(statusLabel.length() + 30) + "\r");
             out.flush();
         });
         spinnerThread.setDaemon(true);
@@ -87,30 +93,13 @@ public final class RenderEngine {
      */
     public void stopSpinner() {
         if (!spinnerActive.compareAndSet(true, false)) return;
-
         if (spinnerThread != null) {
-            try {
-                spinnerThread.join(200);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
+            try { spinnerThread.join(200); }
+            catch (InterruptedException e) { Thread.currentThread().interrupt(); }
         }
-    }
-
-    /**
-     * Heuristic check for Unicode support.
-     * On Windows cmd.exe, Unicode ellipsis often renders as '?'.
-     */
-    private boolean supportsUnicode() {
-        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-        if (os.contains("win")) {
-            return false;
-        }
-        return true;
     }
 
     public void render(Result r) {
-        // Spinner is stopped on any result rendering
         stopSpinner();
 
         if (r == null) {
@@ -119,23 +108,23 @@ public final class RenderEngine {
         }
 
         if (r instanceof Result.Ok ok) {
-            printBoxed(sro(ok.text));
+            printResponse(sro(ok.text));
             return;
         }
         if (r instanceof Result.Info info) {
-            println(sro(info.text));
+            println("  " + sro(info.text));
             return;
         }
         if (r instanceof Result.TrustedInfo trustedInfo) {
-            // Path redaction is bypassed for trusted workspace information
             String cleaned = Sanitize.sanitizeForOutput(trustedInfo.text == null ? "" : trustedInfo.text);
             println(cleaned);
             return;
         }
         if (r instanceof Result.Error err) {
             String msg = sro(err.message);
-            if (err.code > 0) println("[error " + err.code + "] " + msg);
-            else println("[error] " + msg);
+            String prefix = AnsiColor.red(AnsiColor.isUnicodeSafe() ? "✗" : "[error]");
+            if (err.code > 0) println("  " + prefix + " " + AnsiColor.DIM + "[" + err.code + "]" + AnsiColor.RESET + " " + msg);
+            else println("  " + prefix + " " + msg);
             return;
         }
         if (r instanceof Result.Table tbl) {
@@ -158,37 +147,32 @@ public final class RenderEngine {
             return;
         }
 
-        // Fallback for any future Result variants
         println(sro(r.toString()));
     }
 
-    private void printBoxed(String content) {
+    // ── Response rendering (left-border style) ────────────────────────────
+
+    private void printResponse(String content) {
         if (content == null || content.isEmpty()) {
-            println("(empty response)");
+            println("  " + AnsiColor.dim("(empty response)"));
             return;
         }
 
-        final int MAX_WIDTH = 100;
+        final int MAX_WIDTH = 96;
+        String border = AnsiColor.VIOLET + "│" + AnsiColor.RESET;
         String[] lines = content.split("\n");
 
-        // Top border
-        println("┌" + "─".repeat(MAX_WIDTH) + "┐");
-
-        // Content with word wrapping
+        println("");  // breathing room before response
         for (String line : lines) {
             if (line.length() <= MAX_WIDTH) {
-                println("│ " + line + " ".repeat(Math.max(0, MAX_WIDTH - line.length() - 1)) + "│");
+                println("  " + border + " " + line);
             } else {
-                // Long lines are word-wrapped
-                List<String> wrapped = wrapLine(line, MAX_WIDTH - 2);
-                for (String wl : wrapped) {
-                    println("│ " + wl + " ".repeat(Math.max(0, MAX_WIDTH - wl.length() - 1)) + "│");
+                for (String wl : wrapLine(line, MAX_WIDTH)) {
+                    println("  " + border + " " + wl);
                 }
             }
         }
-
-        // Bottom border
-        println("└" + "─".repeat(MAX_WIDTH) + "┘");
+        println("");  // breathing room after response
     }
 
     private List<String> wrapLine(String line, int maxWidth) {
@@ -198,30 +182,28 @@ public final class RenderEngine {
 
         for (String word : words) {
             if (current.length() + word.length() + 1 > maxWidth) {
-                if (current.length() > 0) {
+                if (!current.isEmpty()) {
                     result.add(current.toString());
                     current = new StringBuilder();
                 }
-                // Very long words are handled
                 if (word.length() > maxWidth) {
                     result.add(word.substring(0, maxWidth));
                     word = word.substring(maxWidth);
                 }
             }
-            if (current.length() > 0) current.append(" ");
+            if (!current.isEmpty()) current.append(" ");
             current.append(word);
         }
-
-        if (current.length() > 0) {
-            result.add(current.toString());
-        }
+        if (!current.isEmpty()) result.add(current.toString());
 
         return result.isEmpty() ? List.of("") : result;
     }
 
+    // ── Table rendering ───────────────────────────────────────────────────
+
     private void renderTable(Result.Table tbl) {
         String title = sro(tbl.title);
-        if (!title.isEmpty()) println(title);
+        if (!title.isEmpty()) println("  " + AnsiColor.bold(title));
 
         List<String> cols = (tbl.columns == null ? List.of() : tbl.columns);
         List<List<String>> rows = (tbl.rows == null ? List.of() : tbl.rows);
@@ -229,46 +211,40 @@ public final class RenderEngine {
         if (!cols.isEmpty()) {
             StringBuilder header = new StringBuilder();
             for (int i = 0; i < cols.size(); i++) {
-                if (i > 0) header.append(" | ");
-                header.append(sroInline(cols.get(i)));
+                if (i > 0) header.append(AnsiColor.dim(" │ "));
+                header.append(AnsiColor.bold(sroInline(cols.get(i))));
             }
-            println(header.toString());
-            println("-".repeat(Math.max(3, header.length())));
+            println("  " + header);
+            println("  " + AnsiColor.dim("─".repeat(Math.max(3, stripAnsi(header.toString()).length()))));
         }
 
         for (List<String> row : rows) {
             StringBuilder line = new StringBuilder();
             for (int i = 0; i < row.size(); i++) {
-                if (i > 0) line.append(" | ");
+                if (i > 0) line.append(AnsiColor.dim(" │ "));
                 line.append(sroInline(row.get(i)));
             }
-            println(line.toString());
+            println("  " + line);
         }
     }
 
-    /**
-     * Applies sanitize → redact pipeline for multi-line blocks.
-     */
+    /** Strip ANSI escape codes for width calculation. */
+    private static String stripAnsi(String s) {
+        return s.replaceAll("\033\\[[;\\d]*m", "");
+    }
+
+    // ── Sanitize → redact pipeline ────────────────────────────────────────
+
     private String sro(String s) {
         String cleaned = Sanitize.sanitizeForOutput(s == null ? "" : s);
         return redactor.redactBlock(cleaned);
     }
 
-    /**
-     * Applies sanitize → redact pipeline for inline text (e.g., table cells, streaming chunks).
-     */
     private String sroInline(String s) {
         String cleaned = Sanitize.sanitizeForOutput(s == null ? "" : s);
         return redactor.redactLine(cleaned);
     }
 
-    private void print(String s) {
-        out.print(s);
-        out.flush();
-    }
-
-    private void println(String s) {
-        out.println(s);
-        out.flush();
-    }
+    private void print(String s) { out.print(s); out.flush(); }
+    private void println(String s) { out.println(s); out.flush(); }
 }

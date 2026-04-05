@@ -17,7 +17,7 @@ public class VersionCmd implements Runnable {
         } catch (Exception e) {
             // Use same ASCII fallback logic as ManifestVersionProvider
             String bullet = getAsciiSafeBullet();
-            System.out.println("LOQ-J 0.9.0-beta " + bullet + " Java " +
+            System.out.println("Loqs 0.9.0-beta " + bullet + " Java " +
                 System.getProperty("java.runtime.version", "unknown") +
                 " " + bullet + " " + System.getProperty("os.name", "unknown") +
                 " " + System.getProperty("os.arch", "unknown"));

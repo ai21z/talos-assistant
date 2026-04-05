@@ -8,12 +8,12 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Programmatic entry point for LOQ-J as a knowledge engine.
+ * Programmatic entry point for Loqs as a knowledge engine.
  * Provides a clean consumer-facing API for retrieval and question answering
  * without requiring CLI or REPL infrastructure.
  * <p>
  * This is the seam through which future consumers (Loqs Core, MCP server,
- * library users) should interact with LOQ-J's capabilities.
+ * library users) should interact with Loqs' capabilities.
  */
 public final class LoqjKnowledgeEngine {
 

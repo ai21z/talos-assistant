@@ -36,7 +36,7 @@ public class FirstRunWizard extends Application {
 
     @Override
     public void start(Stage stage) {
-        stage.setTitle("LOQ-J - First Run");
+        stage.setTitle("Loqs - First Run");
 
         var status = new Label(checkOllamaInstalled() ? "Ollama detected." : "Ollama not found.");
         var installBtn = new Button("Install Ollama (winget)");

@@ -56,7 +56,7 @@ public class TopLevelStatusCmd implements Runnable {
     }
 
     private void printStatus(Path workspace, Config cfg) {
-        System.out.println("LOQ-J Status:");
+        System.out.println("Loqs Status:");
 
         // Workspace and index directory
         Path indexDir = dev.loqj.core.IndexPathResolver.getIndexDirectory(workspace);
@@ -69,7 +69,7 @@ public class TopLevelStatusCmd implements Runnable {
 
         // Check if we're in the installer directory and show hint
         if (dev.loqj.cli.CliUtil.isInstallerDirectory(workspace)) {
-            System.out.println("  Hint: You are in LOQ-J's install directory. Use --root <project> or set LOQJ_WORKSPACE.");
+            System.out.println("  Hint: You are in Loqs' install directory. Use --root <project> or set LOQJ_WORKSPACE.");
         }
 
         // Vector mode configuration

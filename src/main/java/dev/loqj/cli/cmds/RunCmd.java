@@ -2,6 +2,8 @@ package dev.loqj.cli.cmds;
 
 import dev.loqj.cli.repl.ReplRouter;
 import dev.loqj.cli.repl.SessionState;
+import dev.loqj.cli.ui.AnsiColor;
+import dev.loqj.cli.ui.LoqsBanner;
 import dev.loqj.core.CfgUtil;
 import dev.loqj.core.Config;
 import org.jline.reader.EndOfFileException;
@@ -17,7 +19,7 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 
-@CommandLine.Command(name="run", description="Interactive LOQ-J REPL")
+@CommandLine.Command(name="run", description="Loqs interactive REPL")
 public class RunCmd implements Runnable, SessionState {
 
     @CommandLine.Option(names="--root", description="Workspace root (default: .)")
@@ -76,14 +78,11 @@ public class RunCmd implements Runnable, SessionState {
         ReplRouter router = new ReplRouter(this, cfg, System.out, ws);
 
         // Show banner unless --no-logo
+        String activeMode = router.getModes().getActiveName();
         if (!noLogo) {
-            banner(ws, cfg);
-            System.out.println("Type your question. Commands: :help  :models  :set model <name>  :mode <m>  :k <int>  :debug on|off  :status [--verbose]  :reindex  :memory clear  :q");
-            System.out.println();
+            LoqsBanner.print(ws, cfg, activeMode, System.out);
         } else {
-            // Still show active mode and workspace in compact form
-            String currentMode = router.getModes().getActiveName();
-            System.out.println("Active mode: " + currentMode + " • Workspace: " + dev.loqj.cli.CliUtil.shortenPath(ws));
+            LoqsBanner.printCompact(ws, cfg, activeMode, System.out);
         }
 
         try {
@@ -93,24 +92,19 @@ public class RunCmd implements Runnable, SessionState {
             // Set up prompt refresh callback for mode changes
             final AtomicReference<String> currentPrompt = new AtomicReference<>();
             router.getModes().setPromptRefreshCallback(() -> {
-                // This will be called when mode changes
                 String newMode = router.getModes().getActiveName();
-                String newPrompt = "loqj@" + newMode + "_ > ";
-                currentPrompt.set(newPrompt);
+                currentPrompt.set(buildPrompt(newMode));
             });
 
             // Initialize the prompt
             String initialMode = router.getModes().getActiveName();
-            String initialPrompt = "loqj@" + initialMode + "_ > ";
-            currentPrompt.set(initialPrompt);
+            currentPrompt.set(buildPrompt(initialMode));
 
             boolean quit = false;
             while (!quit) {
-                // Get the current prompt (updated by mode changes)
                 String prompt = currentPrompt.get();
                 if (prompt == null) {
-                    String currentMode = router.getModes().getActiveName();
-                    prompt = "loqj@" + currentMode + "_ > ";
+                    prompt = buildPrompt(router.getModes().getActiveName());
                 }
 
                 String line;
@@ -209,54 +203,16 @@ public class RunCmd implements Runnable, SessionState {
 
     /* ===== UI ===== */
 
-    private static void banner(Path ws, Config cfg) {
-        final String BORDER = "█████████████████████████████████████████████████████████████████████████";
-        final int inner = BORDER.length() - 4;
-
-        String[] logo = new String[] {
-                "                                                                     ",
-                " ██╗      ██████╗  ██████╗      ██╗               ██████╗██╗     ██╗ ",
-                " ██║     ██╔═══██╗██╔═══██╗     ██║              ██╔════╝██║     ██║ ",
-                " ██║     ██║   ██║██║   ██║     ██║    █████╗    ██║     ██║     ██║ ",
-                " ██║     ██║   ██║██║▄▄ ██║██   ██║    ╚════╝    ██║     ██║     ██║ ",
-                " ███████╗╚██████╔╝╚██████╔╝╚█████╔╝              ╚██████╗███████╗██║ ",
-                " ╚══════╝ ╚═════╝  ╚══▀▀═╝  ╚════╝                ╚═════╝╚══════╝╚═╝ ",
-                "                                                                     "
-        };
-
-        System.out.println(BORDER);
-        for (String ln : logo) printBoxLine(ln, inner);
-        printBoxLine("", inner);
-        printBoxLine("Quickstart", inner);
-        printBoxLine("Use :mode rag for project-aware answers. Ask something like:", inner);
-        printBoxLine("  \"How does Indexer build the Lucene store?\"", inner);
-        System.out.println(BORDER);
-        System.out.println();
+    private static String buildPrompt(String mode) {
+        return AnsiColor.VIOLET + "loqs " + AnsiColor.DIM + "["
+                + AnsiColor.BLUE + mode + AnsiColor.DIM + "]"
+                + AnsiColor.RESET + " > ";
     }
 
     private static void printMan() {
-        System.out.println("""
-Commands:
-  :help                 show this help
-  :models               list installed models
-  :set model <name>     switch active model
-  :mode ask|rag|rag+memory|dev|web|auto
-  :k <int>              set retrieval top-K (max from config)
-  :debug on|off         toggle debug snippet view
-  :status [--verbose]   show current configuration (with limits)
-  :reindex              rebuild local index
-  :memory clear         clear session memory (RAG+MEMORY)
-  :q                    quit
-""");
-    }
-
-    private static String color(String s, int code) { return "\u001B[" + code + "m" + s + "\u001B[0m"; }
-
-    private static void printBoxLine(String content, int inner) {
-        String c = content == null ? "" : content;
-        if (c.length() > inner) c = c.substring(0, inner);
-        int pad = inner - c.length();
-        System.out.println("█▌ " + c + " ".repeat(pad) + " ▐█");
+        System.out.println(AnsiColor.grey("  Use ") + AnsiColor.blue(":help")
+                + AnsiColor.grey(" for available commands"));
+        System.out.println();
     }
 
     private static String maskPath(Path path) { return path.getFileName().toString(); }

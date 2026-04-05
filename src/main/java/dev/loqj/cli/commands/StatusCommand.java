@@ -3,6 +3,7 @@ package dev.loqj.cli.commands;
 import dev.loqj.cli.modes.ModeController;
 import dev.loqj.cli.repl.Context;
 import dev.loqj.cli.repl.Result;
+import dev.loqj.cli.ui.AnsiColor;
 import dev.loqj.core.CfgUtil;
 import dev.loqj.core.IndexPathResolver;
 
@@ -39,13 +40,13 @@ public final class StatusCommand implements Command {
         var sb = new StringBuilder();
         var cfg = ctx.cfg();
 
-        // Always show workspace and index directory at the top
         Path absWorkspace = workspace.toAbsolutePath().normalize();
         Path indexDir = IndexPathResolver.getIndexDirectory(absWorkspace);
         boolean indexExists = java.nio.file.Files.exists(indexDir);
 
-        sb.append("Workspace : ").append(absWorkspace).append("\n");
-        sb.append("Index dir : ").append(indexDir).append("\n\n");
+        sb.append(AnsiColor.bold("Loqs Status")).append("\n\n");
+        sb.append(AnsiColor.grey("  Workspace ")).append(absWorkspace).append("\n");
+        sb.append(AnsiColor.grey("  Index     ")).append(indexDir).append("\n\n");
 
         var lim = CfgUtil.map(cfg.data.get("limits"));
         int topKMax          = CfgUtil.intAt(lim, "top_k_max", 100);
@@ -68,65 +69,57 @@ public final class StatusCommand implements Command {
 
         var oll = CfgUtil.map(cfg.data.get("ollama"));
         String host = Objects.toString(oll.getOrDefault("host", "http://127.0.0.1:11434"));
-        // Get active model from LlmClient instead of config default
         String activeModel = ctx.llm().getModel();
         String embedModel = Objects.toString(oll.getOrDefault("embed", "bge-m3"));
 
-        sb.append("Current configuration:\n");
-        sb.append("  Mode:        ").append(modes.getActiveName()).append("\n");
-        sb.append("  Model:       ").append(activeModel).append("\n");
-        sb.append("  Scope:       ").append(workspace.getFileName()).append("\n");
-        sb.append("  Vectors:     ").append(vectors ? "ON" : "OFF").append("\n");
+        sb.append(AnsiColor.grey("  Mode      ")).append(AnsiColor.blue(modes.getActiveName())).append("\n");
+        sb.append(AnsiColor.grey("  Model     ")).append(activeModel).append("\n");
+        sb.append(AnsiColor.grey("  Scope     ")).append(workspace.getFileName()).append("\n");
+        sb.append(AnsiColor.grey("  Vectors   ")).append(vectors ? AnsiColor.green("ON") : AnsiColor.yellow("OFF")).append("\n");
 
         if (verbose) {
-            sb.append("  Host:        ").append(host).append("\n");
-            sb.append("  Embed Model: ").append(embedModel).append("\n");
-            sb.append("  Embed Conc:  ").append(CfgUtil.intAt(rag, "embed_concurrency", 4)).append("\n");
-            sb.append("  Force Full:  ").append(CfgUtil.intAt(rag, "force_full_reindex", 0) == 1 ? "ON" : "OFF").append("\n");
+            sb.append(AnsiColor.grey("  Host      ")).append(host).append("\n");
+            sb.append(AnsiColor.grey("  Embed     ")).append(embedModel).append("\n");
+            sb.append(AnsiColor.grey("  Concurr.  ")).append(CfgUtil.intAt(rag, "embed_concurrency", 4)).append("\n");
         }
 
-        sb.append("  Limits:\n");
-        sb.append(String.format("    top_k_max=%d, response_max_chars=%d\n", topKMax, responseMax));
-        sb.append(String.format("    dir_depth_max=%d, dir_entries_max=%d\n", dirDepthMax, dirEntriesMax));
-        sb.append(String.format("    file_bytes_max=%d, file_lines_max=%d\n", fileBytesMax, fileLinesMax));
-        sb.append(String.format("    llm_timeout=%ds, file_timeout=%ds, rate_per_sec=%d\n",
+        sb.append("\n").append(AnsiColor.grey("  Limits")).append("\n");
+        sb.append(AnsiColor.dim(String.format("    top_k_max=%d  response_max=%d\n", topKMax, responseMax)));
+        sb.append(AnsiColor.dim(String.format("    dir_depth=%d  dir_entries=%d\n", dirDepthMax, dirEntriesMax)));
+        sb.append(AnsiColor.dim(String.format("    file_bytes=%d  file_lines=%d\n", fileBytesMax, fileLinesMax)));
+        sb.append(AnsiColor.dim(String.format("    llm_timeout=%ds  file_timeout=%ds  rate=%d/s\n",
                 Duration.ofMillis(llmTimeoutMs).toSeconds(),
                 Duration.ofMillis(fileTimeoutMs).toSeconds(),
-                ratePerSec));
+                ratePerSec)));
 
-        sb.append("  Config:\n");
-        sb.append("    loadedFrom=").append(cfg.getReport().loadedFrom).append(", ");
-        sb.append("strict=").append(cfg.getReport().strictMode).append(", ");
-        sb.append("defaults=").append(cfg.getReport().defaultedKeys.size());
-        if (!verbose) sb.append("  (use :status --verbose)");
+        sb.append("\n").append(AnsiColor.grey("  Config")).append("\n");
+        sb.append(AnsiColor.dim("    from=")).append(AnsiColor.dim(String.valueOf(cfg.getReport().loadedFrom)));
+        sb.append(AnsiColor.dim("  strict=")).append(AnsiColor.dim(String.valueOf(cfg.getReport().strictMode)));
+        sb.append(AnsiColor.dim("  defaults=")).append(AnsiColor.dim(String.valueOf(cfg.getReport().defaultedKeys.size())));
+        if (!verbose) sb.append(AnsiColor.grey("  (:status --verbose)"));
         sb.append("\n");
 
         if (verbose) {
-            // Add detailed indexing stats if available
             try {
                 var indexer = ctx.rag().getIndexer();
                 var stats = indexer.getLastRunStats();
                 if (stats != null) {
-                    sb.append("  Last Index Run:\n");
-                    sb.append("    ").append(stats.getSummary()).append("\n");
-                    sb.append("    ").append(stats.getDetailedTimings()).append("\n");
+                    sb.append("\n").append(AnsiColor.grey("  Last Index Run")).append("\n");
+                    sb.append(AnsiColor.dim("    " + stats.getSummary())).append("\n");
+                    sb.append(AnsiColor.dim("    " + stats.getDetailedTimings())).append("\n");
                 }
-            } catch (Exception ignore) {
-                // Indexer might not be available in all contexts
-            }
+            } catch (Exception ignore) {}
 
-            // Add cache statistics
             try (var cache = new dev.loqj.core.cache.CacheDb()) {
                 var cacheStats = cache.getStats();
-                sb.append("  Cache:\n");
-                sb.append("    ").append(cacheStats.summary()).append("\n");
+                sb.append("\n").append(AnsiColor.grey("  Cache")).append("\n");
+                sb.append(AnsiColor.dim("    " + cacheStats.summary())).append("\n");
             } catch (Exception ignore) {
-                sb.append("  Cache: unavailable\n");
+                sb.append(AnsiColor.dim("  Cache: unavailable")).append("\n");
             }
 
-            // Show defaulted config keys if any
             if (!cfg.getReport().defaultedKeys.isEmpty()) {
-                sb.append("  Defaulted keys: ").append(String.join(", ", cfg.getReport().defaultedKeys)).append("\n");
+                sb.append(AnsiColor.dim("  Defaulted: " + String.join(", ", cfg.getReport().defaultedKeys))).append("\n");
             }
         }
 

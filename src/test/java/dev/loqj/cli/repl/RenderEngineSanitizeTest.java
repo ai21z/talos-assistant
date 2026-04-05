@@ -62,7 +62,7 @@ final class RenderEngineSanitizeTest {
         re.render(new Result.Error("Boom \u001B[33m<think>x</think>", 500));
         String out = out(sink);
 
-        assertTrue(out.startsWith("[error 500]") || out.contains("[error 500]"), "Error code should be rendered");
+        assertTrue(out.contains("[error]") || out.contains("[500]"), "Error code should be rendered");
         assertNoAnsiOrThink(out);
     }
 

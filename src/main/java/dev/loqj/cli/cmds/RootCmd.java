@@ -4,10 +4,10 @@ import dev.loqj.cli.ManifestVersionProvider;
 import picocli.CommandLine;
 
 @CommandLine.Command(
-        name = "loqj",
+        name = "loqs",
         mixinStandardHelpOptions = true,
         versionProvider = ManifestVersionProvider.class,
-        description = "LOQ-J local RAG agent",
+        description = "Loqs - Local Knowledge Engine",
         subcommands = {
                 SetupCmd.class, RagIndexCmd.class, RagAskCmd.class, RunCmd.class,
                 NetCmd.class, TopLevelStatusCmd.class, VersionCmd.class, DiagnoseCmd.class
@@ -23,7 +23,7 @@ public class RootCmd implements Runnable {
 
     @Override
     public void run() {
-        // If no subcommand specified, default to interactive REPL (loqj run)
+        // If no subcommand specified, default to interactive REPL (loqs run)
         RunCmd runCmd = new RunCmd();
         runCmd.noLogo = this.noLogo; // Pass the no-logo flag
         runCmd.run();

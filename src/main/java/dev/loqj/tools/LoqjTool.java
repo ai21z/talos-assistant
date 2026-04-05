@@ -1,7 +1,7 @@
 package dev.loqj.tools;
 /**
- * Synchronous tool contract for LOQ-J capabilities exposed to external callers.
- * Implementations wrap LOQ-J operations (retrieval, indexing, etc.) as callable
+ * Synchronous tool contract for Loqs capabilities exposed to external callers.
+ * Implementations wrap Loqs operations (retrieval, indexing, etc.) as callable
  * tools with standardized descriptors and results.
  * <p>
  * Future MCP/tool integration layers discover tools via {@link ToolRegistry}.
