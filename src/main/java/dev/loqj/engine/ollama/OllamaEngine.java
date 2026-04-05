@@ -109,6 +109,12 @@ final class OllamaEngine implements ModelEngine {
 
     @Override
     public String chat(ChatRequest req) throws Exception {
+        // When structured messages are provided, use the /api/chat endpoint
+        if (req.messages != null && !req.messages.isEmpty()) {
+            return chatViaMessages(req);
+        }
+
+        // Legacy path: /api/generate (single-turn, no conversation history)
         String model = Objects.toString(req.model, defaultModel);
         String sys = req.systemPrompt == null ? "" : req.systemPrompt;
         String usr = (req.userPrompt == null ? "" : req.userPrompt) + req.flattenedContext();
@@ -137,8 +143,48 @@ final class OllamaEngine implements ModelEngine {
         return m.find() ? unesc(m.group(1)) : resp.body();
     }
 
+    /**
+     * Multi-turn conversation via Ollama /api/chat endpoint.
+     * Uses the structured messages array so the model receives
+     * proper role-tagged turns it was finetuned on.
+     */
+    private String chatViaMessages(ChatRequest req) throws Exception {
+        String model = Objects.toString(req.model, defaultModel);
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("model", model);
+        body.put("messages", req.messages.stream()
+                .map(m -> Map.of("role", m.role(), "content", m.content()))
+                .toList());
+        body.put("stream", false);
+        String json = mapper.writeValueAsString(body);
+
+        HttpRequest httpReq = HttpRequest.newBuilder()
+                .uri(URI.create(host + "/api/chat"))
+                .timeout(req.timeout)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
+                .build();
+        HttpResponse<String> resp = http.send(httpReq, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (resp.statusCode() / 100 != 2) {
+            if (resp.statusCode() == 404) {
+                return "Model '" + model + "' not found. Run:  ollama pull " + model;
+            }
+            return "Engine error (" + resp.statusCode() + ")";
+        }
+        // /api/chat response format: {"message":{"role":"assistant","content":"..."}}
+        Matcher m = CHAT_CONTENT.matcher(resp.body());
+        return m.find() ? unesc(m.group(1)) : resp.body();
+    }
+
     @Override
     public Stream<TokenChunk> chatStream(ChatRequest req) throws Exception {
+        // When structured messages are provided, use the /api/chat endpoint
+        if (req.messages != null && !req.messages.isEmpty()) {
+            return chatStreamViaMessages(req);
+        }
+
+        // Legacy path: /api/generate (single-turn)
         String model = Objects.toString(req.model, defaultModel);
         String sys = req.systemPrompt == null ? "" : req.systemPrompt;
         String usr = (req.userPrompt == null ? "" : req.userPrompt) + req.flattenedContext();
@@ -173,6 +219,45 @@ final class OllamaEngine implements ModelEngine {
         });
     }
 
+    /**
+     * Multi-turn streaming conversation via Ollama /api/chat endpoint.
+     * Streaming response lines: {"message":{"role":"assistant","content":"token"},"done":false}
+     */
+    private Stream<TokenChunk> chatStreamViaMessages(ChatRequest req) throws Exception {
+        String model = Objects.toString(req.model, defaultModel);
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("model", model);
+        body.put("messages", req.messages.stream()
+                .map(m -> Map.of("role", m.role(), "content", m.content()))
+                .toList());
+        body.put("stream", true);
+        String json = mapper.writeValueAsString(body);
+
+        HttpRequest httpReq = HttpRequest.newBuilder()
+                .uri(URI.create(host + "/api/chat"))
+                .timeout(req.timeout.plusSeconds(60))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
+                .build();
+
+        HttpResponse<java.io.InputStream> resp = http.send(httpReq, HttpResponse.BodyHandlers.ofInputStream());
+        if (resp.statusCode() / 100 != 2) {
+            String errMsg = resp.statusCode() == 404
+                    ? "Model '" + model + "' not found. Run:  ollama pull " + model
+                    : "Engine error (" + resp.statusCode() + ")";
+            return Stream.of(TokenChunk.of(errMsg), TokenChunk.eos());
+        }
+
+        BufferedReader br = new BufferedReader(new InputStreamReader(resp.body(), StandardCharsets.UTF_8));
+        return br.lines().map(line -> {
+            // /api/chat streaming: {"message":{"content":"token"},"done":false}
+            if (line.contains("\"done\":true")) return TokenChunk.eos();
+            Matcher m = CHAT_CONTENT.matcher(line);
+            return m.find() ? TokenChunk.of(unesc(m.group(1))) : TokenChunk.of("");
+        });
+    }
+
     @Override
     public EmbeddingResult embed(java.util.List<String> texts) throws Exception {
         // Minimal implementation: return empty to satisfy SPI (we're not using embeddings yet)
@@ -180,5 +265,7 @@ final class OllamaEngine implements ModelEngine {
     }
 
     private static final Pattern RESPONSE = Pattern.compile("\"response\"\\s*:\\s*\"((?:\\\\.|[^\"])*)\"");
+    /** Matches "content":"..." inside the /api/chat response message object. */
+    private static final Pattern CHAT_CONTENT = Pattern.compile("\"content\"\\s*:\\s*\"((?:\\\\.|[^\"])*)\"");
     private static String unesc(String s){ return s.replace("\\n","\n").replace("\\\"","\"").replace("\\\\","\\"); }
 }
