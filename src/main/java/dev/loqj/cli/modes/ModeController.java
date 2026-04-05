@@ -37,6 +37,13 @@ public final class ModeController {
      */
     private PromptRouter.Route lastRoute;
 
+    /**
+     * Optional workspace symbol checker for resolving bare PascalCase identifiers
+     * against the indexed workspace. When set, bare PascalCase like "RagService"
+     * can trigger retrieval without question context if the symbol exists in the index.
+     */
+    private WorkspaceSymbolChecker symbolChecker;
+
     // Intent pattern: "list files" queries → FilesCommand shortcut
     private static final Pattern LIST_FILES_PATTERN = Pattern.compile(
         "(?i)(?:what|which|show|list)\\s+(?:files|docs|documents)|" +
@@ -72,6 +79,17 @@ public final class ModeController {
      */
     public void setPromptRefreshCallback(Runnable callback) {
         this.promptRefreshCallback = callback;
+    }
+
+    /**
+     * Sets the workspace symbol checker for workspace-aware PascalCase resolution.
+     * When set, bare PascalCase identifiers that match indexed workspace symbols
+     * will trigger retrieval in auto-mode without requiring question context.
+     *
+     * @param checker the symbol checker, or null to disable workspace-aware resolution
+     */
+    public void setSymbolChecker(WorkspaceSymbolChecker checker) {
+        this.symbolChecker = checker;
     }
 
     /**
@@ -160,8 +178,8 @@ public final class ModeController {
             }
         }
 
-        // Classify the prompt with conversation context
-        PromptRouter.Route route = PromptRouter.route(rawLine, lastRoute);
+        // Classify the prompt with conversation context and workspace awareness
+        PromptRouter.Route route = PromptRouter.route(rawLine, lastRoute, symbolChecker);
 
         // Try the classified mode
         Optional<Result> r = switch (route) {

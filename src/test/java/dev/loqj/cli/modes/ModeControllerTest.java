@@ -286,6 +286,131 @@ class ModeControllerTest {
         assertFalse(rag.invoked, "Social follow-up must NOT route to rag");
     }
 
+    @Test
+    void prefixed_follow_up_after_retrieve_routes_to_rag() throws Exception {
+        var dev = new RecordingStub("dev");
+        var rag = new RecordingStub("rag");
+        var ask = new RecordingStub("ask");
+        var mc = stubController(dev, rag, ask);
+        var ctx = Context.builder(new Config()).build();
+
+        mc.route("explain RagService.java", WS, ctx); // → RETRIEVE
+        rag.reset();
+
+        mc.route("cool, and the parser?", WS, ctx); // → prefixed follow-up → RETRIEVE
+        assertTrue(rag.invoked, "Prefixed follow-up after RETRIEVE should route to rag");
+    }
+
+    @Test
+    void new_tech_noun_question_routes_to_rag() throws Exception {
+        var dev = new RecordingStub("dev");
+        var rag = new RecordingStub("rag");
+        var ask = new RecordingStub("ask");
+        var mc = stubController(dev, rag, ask);
+        var ctx = Context.builder(new Config()).build();
+
+        mc.route("what does the constructor do", WS, ctx);
+        assertTrue(rag.invoked, "New tech noun + question should route to rag");
+        assertFalse(ask.invoked, "New tech noun + question should NOT route to ask");
+    }
+
+    @Test
+    void show_me_quoted_file_routes_to_dev() throws Exception {
+        var dev = new RecordingStub("dev");
+        var rag = new RecordingStub("rag");
+        var ask = new RecordingStub("ask");
+        var mc = stubController(dev, rag, ask);
+        var ctx = Context.builder(new Config()).build();
+
+        mc.route("show me \"docs/My Guide.md\"", WS, ctx);
+        assertTrue(dev.invoked, "show me quoted file should route to dev");
+        assertFalse(rag.invoked, "show me quoted file should NOT route to rag");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Workspace-aware PascalCase routing (Layer 2c via ModeController)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /** Stub checker: recognizes "RagService" and "ModeController" as workspace symbols. */
+    private static final WorkspaceSymbolChecker TEST_CHECKER = symbol -> {
+        String lower = symbol.toLowerCase(java.util.Locale.ROOT);
+        return "ragservice".equals(lower) || "modecontroller".equals(lower);
+    };
+
+    @Test
+    void bare_workspace_symbol_routes_to_rag_with_checker() throws Exception {
+        var dev = new RecordingStub("dev");
+        var rag = new RecordingStub("rag");
+        var ask = new RecordingStub("ask");
+        var mc = stubController(dev, rag, ask);
+        mc.setSymbolChecker(TEST_CHECKER);
+        var ctx = Context.builder(new Config()).build();
+
+        mc.route("RagService", WS, ctx);
+        assertTrue(rag.invoked, "Bare workspace symbol should route to rag");
+        assertFalse(ask.invoked, "Bare workspace symbol should NOT route to ask");
+    }
+
+    @Test
+    void bare_brand_name_routes_to_ask_with_checker() throws Exception {
+        var dev = new RecordingStub("dev");
+        var rag = new RecordingStub("rag");
+        var ask = new RecordingStub("ask");
+        var mc = stubController(dev, rag, ask);
+        mc.setSymbolChecker(TEST_CHECKER);
+        var ctx = Context.builder(new Config()).build();
+
+        mc.route("PowerPoint", WS, ctx);
+        assertTrue(ask.invoked, "Brand name should route to ask even with checker");
+        assertFalse(rag.invoked, "Brand name must NOT route to rag");
+    }
+
+    @Test
+    void bare_workspace_symbol_without_checker_routes_to_ask() throws Exception {
+        var dev = new RecordingStub("dev");
+        var rag = new RecordingStub("rag");
+        var ask = new RecordingStub("ask");
+        var mc = stubController(dev, rag, ask);
+        // No checker set — original behavior
+        var ctx = Context.builder(new Config()).build();
+
+        mc.route("RagService", WS, ctx);
+        assertTrue(ask.invoked, "Without checker, bare PascalCase should route to ask");
+        assertFalse(rag.invoked, "Without checker, bare PascalCase must NOT route to rag");
+    }
+
+    @Test
+    void workspace_symbol_lastRoute_tracks_retrieve() throws Exception {
+        var dev = new RecordingStub("dev");
+        var rag = new RecordingStub("rag");
+        var ask = new RecordingStub("ask");
+        var mc = stubController(dev, rag, ask);
+        mc.setSymbolChecker(TEST_CHECKER);
+        var ctx = Context.builder(new Config()).build();
+
+        mc.route("RagService", WS, ctx);
+        assertEquals(PromptRouter.Route.RETRIEVE, mc.lastRoute(),
+                "Workspace symbol should update lastRoute to RETRIEVE");
+    }
+
+    @Test
+    void workspace_symbol_then_follow_up_stays_in_rag() throws Exception {
+        var dev = new RecordingStub("dev");
+        var rag = new RecordingStub("rag");
+        var ask = new RecordingStub("ask");
+        var mc = stubController(dev, rag, ask);
+        mc.setSymbolChecker(TEST_CHECKER);
+        var ctx = Context.builder(new Config()).build();
+
+        // Turn 1: bare workspace symbol → RETRIEVE
+        mc.route("RagService", WS, ctx);
+        rag.reset();
+
+        // Turn 2: follow-up → stays in RETRIEVE
+        mc.route("what about the parse method?", WS, ctx);
+        assertTrue(rag.invoked, "Follow-up after workspace symbol should stay in rag");
+    }
+
     // ── Recording stub mode for isolated testing ─────────────────────────
 
     private static class RecordingStub implements Mode {
