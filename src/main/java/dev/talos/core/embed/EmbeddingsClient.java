@@ -97,6 +97,10 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
 
     @Override
     public float[] embed(String text) throws Exception {
+        // Normalize input: strip control chars and collapse whitespace to reduce
+        // the chance of NaN embeddings from models that choke on unusual input.
+        String cleaned = normalizeEmbedInput(text);
+
         // Try modern + legacy permutations:
         // 1) /api/embed with "input"
         // 2) /api/embed with "prompt"
@@ -114,7 +118,10 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
             try {
                 Map<String,Object> body = new LinkedHashMap<>();
                 body.put("model", model);
-                body.put(ep.param, text);
+                body.put(ep.param, cleaned);
+                // Ask Ollama to truncate input that exceeds model context —
+                // prevents server-side NaN when input is too long for the model.
+                body.put("truncate", Boolean.TRUE);
                 String json = mapper.writeValueAsString(body);
 
                 HttpRequest req = HttpRequest.newBuilder()
@@ -199,6 +206,24 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
 
     private record Ep(String path, String param) {}
 
+    /**
+     * Normalizes text before sending to the embedding model.
+     * Strips control characters (except newline/tab), collapses runs of whitespace,
+     * and trims — reducing the chance of NaN embeddings from models that choke on
+     * unusual input. Empty/blank input becomes a single space to avoid zero-length
+     * requests.
+     * Package-private for testability.
+     */
+    static String normalizeEmbedInput(String text) {
+        if (text == null || text.isBlank()) return " ";
+        // Strip control chars except \n and \t
+        String cleaned = text.replaceAll("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\x7F]", "");
+        // Collapse runs of whitespace
+        cleaned = cleaned.replaceAll("[ \\t]+", " ");
+        cleaned = cleaned.trim();
+        return cleaned.isEmpty() ? " " : cleaned;
+    }
+
     private static String truncate(String s, int max) {
         if (s == null) return "";
         return s.length() <= max ? s : s.substring(0, max) + "…";
@@ -239,6 +264,9 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
     }
 
     private List<float[]> embedBatchInternal(List<String> texts) throws Exception {
+        // Normalize all texts before sending
+        List<String> cleaned = texts.stream().map(EmbeddingsClient::normalizeEmbedInput).toList();
+
         // Try modern + legacy batch permutations
         var attempts = List.of(
                 new Ep("/api/embeddings", "input"),
@@ -252,12 +280,13 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
             try {
                 Map<String, Object> body = new LinkedHashMap<>();
                 body.put("model", model);
+                body.put("truncate", Boolean.TRUE);
 
                 // Send array of texts for batch processing
                 if ("input".equals(ep.param)) {
-                    body.put("input", texts);
+                    body.put("input", cleaned);
                 } else {
-                    body.put("prompt", texts);
+                    body.put("prompt", cleaned);
                 }
 
                 String json = mapper.writeValueAsString(body);
