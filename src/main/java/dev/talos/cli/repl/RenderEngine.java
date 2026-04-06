@@ -146,6 +146,14 @@ public final class RenderEngine {
             println("");
             return;
         }
+        if (r instanceof Result.Streamed streamed) {
+            // Body was already printed during streaming; only render the suffix
+            if (!streamed.suffix.isEmpty()) {
+                println(sro(streamed.suffix));
+            }
+            println("");
+            return;
+        }
 
         println(sro(r.toString()));
     }

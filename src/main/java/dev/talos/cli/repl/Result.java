@@ -6,7 +6,7 @@ package dev.talos.cli.repl;
  */
 public sealed interface Result
         permits Result.Ok, Result.Info, Result.Error, Result.Table,
-        Result.StreamStart, Result.StreamChunk, Result.StreamEnd, Result.TrustedInfo {
+        Result.StreamStart, Result.StreamChunk, Result.StreamEnd, Result.Streamed, Result.TrustedInfo {
 
     /* -------- Simple text results -------- */
 
@@ -70,6 +70,21 @@ public sealed interface Result
 
     public static final class StreamEnd implements Result {
         @Override public String toString() { return "<end>"; }
+    }
+
+    /**
+     * Content was already streamed to the terminal during execution.
+     * The {@code suffix} (e.g., citations, metadata) is rendered after the streamed body.
+     * The {@code fullText} is kept for memory/listener updates but NOT re-rendered.
+     */
+    public static final class Streamed implements Result {
+        public final String fullText;
+        public final String suffix;
+        public Streamed(String fullText, String suffix) {
+            this.fullText = fullText == null ? "" : fullText;
+            this.suffix = suffix == null ? "" : suffix;
+        }
+        @Override public String toString() { return fullText + suffix; }
     }
 
     /* -------- Convenience factories -------- */
