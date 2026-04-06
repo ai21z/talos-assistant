@@ -7,7 +7,9 @@ import dev.talos.tools.*;
 
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Processes a single user turn (prompt → result) through the mode system.
@@ -20,7 +22,7 @@ import java.util.Optional;
  *   <li>timing and trace capture</li>
  *   <li>tool execution with sandbox enforcement</li>
  *   <li>approval gate integration for sensitive tools</li>
- *   <li>future transcript persistence</li>
+ *   <li>centralized post-turn hooks via {@link SessionListener}</li>
  * </ul>
  *
  * <p>Commands (colon-prefixed) bypass TurnProcessor and are handled
@@ -31,6 +33,7 @@ public final class TurnProcessor {
     private final ModeController modes;
     private final ApprovalGate approvalGate;
     private final ToolRegistry toolRegistry;
+    private final List<SessionListener> listeners = new CopyOnWriteArrayList<>();
 
     public TurnProcessor(ModeController modes, ApprovalGate approvalGate, ToolRegistry toolRegistry) {
         this.modes = modes;
@@ -46,13 +49,31 @@ public final class TurnProcessor {
         this(modes, new NoOpApprovalGate(), new ToolRegistry());
     }
 
+    /** Register a session lifecycle listener for post-turn hooks. */
+    public void addListener(SessionListener listener) {
+        if (listener != null) {
+            listeners.add(listener);
+        }
+    }
+
+    /** Fire onSessionEnd on all registered listeners. */
+    public void fireSessionEnd() {
+        for (SessionListener l : listeners) {
+            try { l.onSessionEnd(); } catch (Exception ignored) { }
+        }
+    }
+
     /**
      * Process a single user prompt through the mode system.
      *
+     * <p>After a successful turn, all registered {@link SessionListener}s
+     * receive an {@code onTurnComplete} callback with the result and the
+     * original user input. This centralizes memory updates, audit logging,
+     * and future transcript persistence.
+     *
      * <p>Exceptions are <em>not</em> caught here — they propagate to the caller
      * (typically {@code ExecutionPipeline}) which owns the error envelope,
-     * redaction, and audit logging. TurnProcessor only handles turn tracking
-     * and timing on the success path.
+     * redaction, and audit logging.
      *
      * @param session   the active session
      * @param userInput raw user input (not a colon-command)
@@ -76,12 +97,23 @@ public final class TurnProcessor {
         }
 
         long elapsedNanos = System.nanoTime() - startNanos;
-        return new TurnResult(
+        TurnResult turnResult = new TurnResult(
                 result.get(),
                 null, // trace — extracted from Prepared in future pass
                 turn,
                 Duration.ofNanos(elapsedNanos)
         );
+
+        // Fire post-turn hooks on all listeners
+        for (SessionListener listener : listeners) {
+            try {
+                listener.onTurnComplete(turnResult, userInput);
+            } catch (Exception ignored) {
+                // Listener errors must not break the turn pipeline
+            }
+        }
+
+        return turnResult;
     }
 
     /**

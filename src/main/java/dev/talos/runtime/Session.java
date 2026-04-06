@@ -5,7 +5,10 @@ import dev.talos.core.Config;
 
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -16,16 +19,22 @@ import java.util.concurrent.atomic.AtomicInteger;
  * and stays alive until the user quits. Turn count is the only mutable field
  * and is tracked via an atomic counter for safe concurrent access.
  *
+ * <p>Call {@link #close()} when the session ends to fire lifecycle callbacks
+ * and release resources. Session implements {@link AutoCloseable} for
+ * try-with-resources support.
+ *
  * <p>Session does <em>not</em> own Talos retrieval internals or LLM state.
  * Those are composed separately in the runtime context.
  */
-public final class Session {
+public final class Session implements AutoCloseable {
 
     private final Path workspace;
     private final Config config;
     private final Instant startedAt;
     private final AtomicInteger turnCount;
     private final SessionMemory memory;
+    private final List<SessionListener> closeListeners = new CopyOnWriteArrayList<>();
+    private final AtomicBoolean closed = new AtomicBoolean(false);
 
     public Session(Path workspace, Config config) {
         this(workspace, config, new SessionMemory());
@@ -56,5 +65,34 @@ public final class Session {
 
     /** Session-scoped conversational memory (rolling window). */
     public SessionMemory memory() { return memory; }
+
+    /** Register a listener to be notified when the session closes. */
+    public void addCloseListener(SessionListener listener) {
+        if (listener != null) {
+            closeListeners.add(listener);
+        }
+    }
+
+    /** Whether this session has been closed. */
+    public boolean isClosed() {
+        return closed.get();
+    }
+
+    /**
+     * Close the session, firing all registered close listeners.
+     * Safe to call multiple times — only the first call fires listeners.
+     */
+    @Override
+    public void close() {
+        if (closed.compareAndSet(false, true)) {
+            for (SessionListener listener : closeListeners) {
+                try {
+                    listener.onSessionEnd();
+                } catch (Exception ignored) {
+                    // Close listener errors must not prevent other listeners from running
+                }
+            }
+        }
+    }
 }
 
