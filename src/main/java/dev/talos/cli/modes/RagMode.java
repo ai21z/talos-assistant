@@ -123,6 +123,12 @@ public final class RagMode implements Mode {
                     answer = loopResult.finalAnswer();
                     LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked",
                             loopResult.iterations(), loopResult.toolsInvoked());
+
+                    // Surface tool-use feedback to the user
+                    String summary = loopResult.summary();
+                    if (summary != null) {
+                        out.append(summary).append("\n\n");
+                    }
                 }
 
                 answer = sanitizeAnswer(answer);

@@ -295,6 +295,94 @@ class PromptRouterTest {
                 "Statement '" + input + "' should NOT trigger retrieval");
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    //  RETRIEVE: action-intent with workspace signals
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // ── Action verb + PascalCase identifier → RETRIEVE ────────────────────
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "write a test for RagService",
+        "create a unit test for ModeController",
+        "refactor ContextPacker",
+        "fix RagService",
+        "add logging to PromptRouter",
+        "implement a new RetrievalPipeline stage",
+        "update DevMode to support new feature",
+        "delete the old ChunkMetadata",
+        "rename RetrievalPipeline to SearchPipeline",
+        "generate a test for LuceneStore",
+        "rewrite ModeController routing logic",
+        "debug RagService pipeline flow",
+        "optimize ContextPacker token counting",
+        "extract a method from ModeController",
+        "wire ToolCallLoop into RagMode",
+    })
+    void action_with_pascal_case_triggers_retrieval(String input) {
+        assertEquals(RETRIEVE, PromptRouter.route(input),
+                "Action+PascalCase '" + input + "' should trigger retrieval");
+    }
+
+    // ── Action verb + anchored tech noun → RETRIEVE ───────────────────────
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "fix the parser",
+        "refactor the pipeline",
+        "add logging to the service",
+        "update the config",
+        "rewrite the handler",
+        "optimize the indexing",
+        "test the retrieval",
+        "debug the reranker",
+        "migrate the schema",
+        "configure the endpoint",
+        "implement the interface",
+        "delete the test",
+        "move the controller",
+        "build the module",
+    })
+    void action_with_anchored_noun_triggers_retrieval(String input) {
+        assertEquals(RETRIEVE, PromptRouter.route(input),
+                "Action+anchor '" + input + "' should trigger retrieval");
+    }
+
+    // ── Action verb WITHOUT workspace signal → ASSIST ─────────────────────
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "write a poem",
+        "create a haiku about spring",
+        "fix my broken heart",
+        "add some humor",
+        "generate a random number",
+        "build a sandcastle",
+        "delete my worries",
+        "move on to something else",
+        "run a marathon",
+        "test my patience",
+    })
+    void action_without_workspace_signal_routes_to_assist(String input) {
+        assertEquals(ASSIST, PromptRouter.route(input),
+                "Action without workspace signal '" + input + "' must NOT trigger retrieval");
+    }
+
+    // ── Action verb with conversational prefix ────────────────────────────
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "hey, write a test for RagService",
+        "ok fix the parser",
+        "actually, refactor ModeController",
+        "so, add logging to the service",
+        "well, rewrite the handler",
+    })
+    void prefixed_action_with_workspace_signal_triggers_retrieval(String input) {
+        assertEquals(RETRIEVE, PromptRouter.route(input),
+                "Prefixed action '" + input + "' should trigger retrieval");
+    }
+
     // ── Generic "a/an" vs specific "the/this" ────────────────────────────
 
     @Test
@@ -498,6 +586,66 @@ class PromptRouterTest {
         assertFalse(PromptRouter.isQuestionLike("the design is nice"));
         assertFalse(PromptRouter.isQuestionLike("i like the pipeline"));
         assertFalse(PromptRouter.isQuestionLike("ok got it"));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  isActionLike helper
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @Test
+    void action_verbs_are_action_like() {
+        assertTrue(PromptRouter.isActionLike("write a test"));
+        assertTrue(PromptRouter.isActionLike("create a file"));
+        assertTrue(PromptRouter.isActionLike("edit the config"));
+        assertTrue(PromptRouter.isActionLike("fix the bug"));
+        assertTrue(PromptRouter.isActionLike("add logging"));
+        assertTrue(PromptRouter.isActionLike("implement the interface"));
+        assertTrue(PromptRouter.isActionLike("refactor the class"));
+        assertTrue(PromptRouter.isActionLike("update the version"));
+        assertTrue(PromptRouter.isActionLike("delete the old file"));
+        assertTrue(PromptRouter.isActionLike("remove unused imports"));
+        assertTrue(PromptRouter.isActionLike("rename the variable"));
+        assertTrue(PromptRouter.isActionLike("move the method"));
+        assertTrue(PromptRouter.isActionLike("generate a report"));
+        assertTrue(PromptRouter.isActionLike("modify the schema"));
+        assertTrue(PromptRouter.isActionLike("rewrite the handler"));
+        assertTrue(PromptRouter.isActionLike("extract a helper method"));
+        assertTrue(PromptRouter.isActionLike("optimize the query"));
+        assertTrue(PromptRouter.isActionLike("debug the flow"));
+        assertTrue(PromptRouter.isActionLike("migrate the database"));
+        assertTrue(PromptRouter.isActionLike("convert to records"));
+        assertTrue(PromptRouter.isActionLike("test the parser"));
+        assertTrue(PromptRouter.isActionLike("run the tests"));
+        assertTrue(PromptRouter.isActionLike("build the project"));
+        assertTrue(PromptRouter.isActionLike("deploy to staging"));
+        assertTrue(PromptRouter.isActionLike("set up the config"));
+        assertTrue(PromptRouter.isActionLike("setup logging"));
+        assertTrue(PromptRouter.isActionLike("configure the endpoint"));
+        assertTrue(PromptRouter.isActionLike("scaffold a new module"));
+        assertTrue(PromptRouter.isActionLike("bootstrap the project"));
+        assertTrue(PromptRouter.isActionLike("wire the tool loop"));
+        assertTrue(PromptRouter.isActionLike("hook up the listener"));
+        assertTrue(PromptRouter.isActionLike("integrate the embeddings client"));
+    }
+
+    @Test
+    void conversational_prefix_stripped_for_action_detection() {
+        assertTrue(PromptRouter.isActionLike("hey, write a test"));
+        assertTrue(PromptRouter.isActionLike("ok fix the bug"));
+        assertTrue(PromptRouter.isActionLike("actually, refactor the class"));
+        assertTrue(PromptRouter.isActionLike("so, add logging to the service"));
+        assertTrue(PromptRouter.isActionLike("cool, rewrite the handler"));
+    }
+
+    @Test
+    void non_action_is_not_action_like() {
+        assertFalse(PromptRouter.isActionLike("hey"));
+        assertFalse(PromptRouter.isActionLike("what is this"));
+        assertFalse(PromptRouter.isActionLike("I like the pipeline"));
+        assertFalse(PromptRouter.isActionLike("the parser is broken"));
+        assertFalse(PromptRouter.isActionLike("ok got it"));
+        assertFalse(PromptRouter.isActionLike("how does this work"));
+        assertFalse(PromptRouter.isActionLike("explain the constructor"));
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -883,5 +1031,41 @@ class PromptRouterTest {
         assertEquals(RETRIEVE, PromptRouter.route("what does RagService do", null));
         assertEquals(RETRIEVE, PromptRouter.route("what about the parse method?", RETRIEVE));
         assertEquals(ASSIST, PromptRouter.route("thanks", RETRIEVE));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Action-intent: end-to-end multi-turn sequences
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @Test
+    void multi_turn_action_then_follow_up() {
+        // Turn 1: action + PascalCase → RETRIEVE
+        assertEquals(RETRIEVE, PromptRouter.route("write a test for RagService"));
+        // Turn 2: follow-up → stays in RETRIEVE
+        assertEquals(RETRIEVE, PromptRouter.route("what about edge cases?", RETRIEVE));
+        // Turn 3: social → breaks to ASSIST
+        assertEquals(ASSIST, PromptRouter.route("thanks", RETRIEVE));
+    }
+
+    @Test
+    void action_after_assist_triggers_retrieval_independently() {
+        // Even after ASSIST, action + workspace signal independently triggers RETRIEVE
+        assertEquals(RETRIEVE, PromptRouter.route("fix the parser", ASSIST));
+        assertEquals(RETRIEVE, PromptRouter.route("refactor ModeController", ASSIST));
+    }
+
+    @Test
+    void action_with_workspace_checker() {
+        // Action + bare PascalCase confirmed by workspace checker
+        assertEquals(RETRIEVE, PromptRouter.route("refactor RagService", null, WORKSPACE_CHECKER));
+        // Action without PascalCase + no tech noun → ASSIST even with checker
+        assertEquals(ASSIST, PromptRouter.route("write a poem", null, WORKSPACE_CHECKER));
+    }
+
+    @Test
+    void action_with_file_reference_already_routes() {
+        // File references fire before Layer 2b — already RETRIEVE
+        assertEquals(RETRIEVE, PromptRouter.route("edit build.gradle.kts"));
+        assertEquals(RETRIEVE, PromptRouter.route("fix RagService.java"));
     }
 }
