@@ -24,8 +24,8 @@ import java.util.regex.Pattern;
  *       <ul>
  *         <li>Workspace framing: "this project", "the codebase", "our repo"</li>
  *         <li>File reference: {@code RagService.java}, {@code build.gradle.kts}</li>
- *         <li>PascalCase identifier <b>in question context</b></li>
- *         <li>Anchored tech noun (the/this + tech noun) <b>in question context</b></li>
+ *         <li>PascalCase identifier <b>in question or action context</b></li>
+ *         <li>Anchored tech noun (the/this + tech noun) <b>in question or action context</b></li>
  *         <li>PascalCase identifier <b>confirmed in workspace index</b> (no question
  *             required — the index disambiguates code symbols from brand names)</li>
  *       </ul></li>
@@ -45,16 +45,16 @@ import java.util.regex.Pattern;
  *       <td><b>RETRIEVE</b> — always</td></tr>
  *   <tr><td>File reference (path with extension, pom.xml, etc.)</td>
  *       <td><b>RETRIEVE</b> — always</td></tr>
- *   <tr><td>PascalCase identifier + question/explain context</td>
+ *   <tr><td>PascalCase identifier + question or action context</td>
  *       <td><b>RETRIEVE</b></td></tr>
- *   <tr><td>PascalCase identifier without question context</td>
+ *   <tr><td>PascalCase identifier without question/action context</td>
  *       <td><b>ASSIST</b> — not enough evidence (unless workspace checker confirms)</td></tr>
  *   <tr><td>PascalCase identifier confirmed in workspace index</td>
  *       <td><b>RETRIEVE</b> — workspace evidence replaces question gating</td></tr>
- *   <tr><td>"the/this" + tech noun + question context</td>
+ *   <tr><td>"the/this" + tech noun + question or action context</td>
  *       <td><b>RETRIEVE</b></td></tr>
- *   <tr><td>"the/this" + tech noun without question context</td>
- *       <td><b>ASSIST</b> — statement, not inquiry</td></tr>
+ *   <tr><td>"the/this" + tech noun without question/action context</td>
+ *       <td><b>ASSIST</b> — statement, not inquiry or action</td></tr>
  *   <tr><td>Follow-up after RETRIEVE (not social)</td>
  *       <td><b>RETRIEVE</b> — sticky context</td></tr>
  *   <tr><td>Social follow-up after RETRIEVE ("thanks", "what about you?")</td>
@@ -144,10 +144,11 @@ public final class PromptRouter {
      * PascalCase code identifiers: names like {@code RagService},
      * {@code ModeController}. Must have at least two capitalized segments.
      *
-     * <p><b>Requires question context to trigger retrieval.</b> PascalCase alone
-     * is insufficient because proper nouns and brand names (PowerPoint, LinkedIn,
-     * YouTube, IntelliJ) also use PascalCase. Question context disambiguates
-     * code inquiries from general mentions.
+     * <p><b>Requires question or action context to trigger retrieval.</b>
+     * PascalCase alone is insufficient because proper nouns and brand names
+     * (PowerPoint, LinkedIn, YouTube, IntelliJ) also use PascalCase.
+     * Question or action context disambiguates code inquiries from general
+     * mentions.
      */
     private static final Pattern CODE_IDENTIFIER = Pattern.compile(
         "\\b[A-Z][a-z]+(?:[A-Z][a-z0-9]+)+\\b"
@@ -160,8 +161,8 @@ public final class PromptRouter {
      * infrastructure terms, and domain-specific retrieval/indexing vocabulary.
      *
      * <p>Only triggers retrieval when the input also looks like a question
-     * (checked separately), to avoid matching casual statements like
-     * "the design is nice".
+     * or action (checked separately), to avoid matching casual statements
+     * like "the design is nice".
      */
     private static final Pattern ANCHORED_TECH_NOUN = Pattern.compile(
         "(?i)\\b(?:the|this)\\s+(?:" +
@@ -333,20 +334,28 @@ public final class PromptRouter {
         }
         steps.add("no file reference");
 
-        // Layer 2b: retrieval signals requiring question context
+        // Layer 2b: retrieval signals requiring question or action context
         boolean isQ = isQuestionLike(lower);
-        if (isQ && CODE_IDENTIFIER.matcher(trimmed).find()) {
-            steps.add("question context + PascalCase identifier");
-            return new RouteResult(Route.RETRIEVE, "PascalCase identifier in question", steps);
+        boolean isAction = isActionLike(lower);
+        boolean hasIntentContext = isQ || isAction;
+
+        if (hasIntentContext && CODE_IDENTIFIER.matcher(trimmed).find()) {
+            String intentType = isAction ? "action" : "question";
+            steps.add(intentType + " context + PascalCase identifier");
+            return new RouteResult(Route.RETRIEVE,
+                    "PascalCase identifier in " + intentType, steps);
         }
-        if (isQ && ANCHORED_TECH_NOUN.matcher(lower).find()) {
-            steps.add("question context + anchored tech noun");
-            return new RouteResult(Route.RETRIEVE, "anchored tech noun in question", steps);
+        if (hasIntentContext && ANCHORED_TECH_NOUN.matcher(lower).find()) {
+            String intentType = isAction ? "action" : "question";
+            steps.add(intentType + " context + anchored tech noun");
+            return new RouteResult(Route.RETRIEVE,
+                    "anchored tech noun in " + intentType, steps);
         }
-        if (isQ) {
-            steps.add("question-like but no code identifier or anchored tech noun");
+        if (hasIntentContext) {
+            steps.add((isAction ? "action" : "question") +
+                    "-like but no code identifier or anchored tech noun");
         } else {
-            steps.add("not question-like");
+            steps.add("not question-like or action-like");
         }
 
         // Layer 2c: workspace-aware PascalCase resolution
@@ -423,6 +432,44 @@ public final class PromptRouter {
             || stripped.startsWith("should ") || stripped.startsWith("could ")
             || stripped.startsWith("explain ") || stripped.startsWith("describe ")
             || stripped.startsWith("show me ") || stripped.startsWith("tell me about ");
+    }
+
+    /**
+     * Checks whether the input looks like an imperative action request.
+     *
+     * <p>Action verbs like "write", "create", "fix", "refactor" indicate
+     * the user wants to <em>do something</em> (often involving tool use).
+     * When combined with a PascalCase identifier or an anchored tech noun,
+     * these trigger retrieval so that the LLM has workspace context for the
+     * action.
+     *
+     * <p>Action-like alone does NOT trigger retrieval — it only gates the
+     * PascalCase and anchored-tech-noun checks, mirroring the question-like
+     * gate. "write a poem" stays ASSIST; "write a test for RagService"
+     * routes to RETRIEVE.
+     *
+     * <p>Strips common conversational prefixes ("hey", "ok", etc.) before
+     * checking, so "hey, fix the parser" is recognized as action-like.
+     */
+    static boolean isActionLike(String lower) {
+        String stripped = CONVERSATIONAL_PREFIX.matcher(lower).replaceFirst("");
+        return stripped.startsWith("write ")     || stripped.startsWith("create ")
+            || stripped.startsWith("edit ")      || stripped.startsWith("fix ")
+            || stripped.startsWith("add ")       || stripped.startsWith("implement ")
+            || stripped.startsWith("refactor ")  || stripped.startsWith("update ")
+            || stripped.startsWith("delete ")    || stripped.startsWith("remove ")
+            || stripped.startsWith("rename ")    || stripped.startsWith("move ")
+            || stripped.startsWith("generate ")  || stripped.startsWith("modify ")
+            || stripped.startsWith("rewrite ")   || stripped.startsWith("extract ")
+            || stripped.startsWith("optimize ")  || stripped.startsWith("debug ")
+            || stripped.startsWith("migrate ")   || stripped.startsWith("convert ")
+            || stripped.startsWith("test ")      || stripped.startsWith("run ")
+            || stripped.startsWith("build ")     || stripped.startsWith("deploy ")
+            || stripped.startsWith("set up ")    || stripped.startsWith("setup ")
+            || stripped.startsWith("configure ")
+            || stripped.startsWith("scaffold ")  || stripped.startsWith("bootstrap ")
+            || stripped.startsWith("wire ")      || stripped.startsWith("hook up ")
+            || stripped.startsWith("integrate ");
     }
 
     /**

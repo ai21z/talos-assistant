@@ -69,14 +69,29 @@ public final class ToolCallLoop {
      * @param finalAnswer  the LLM's final text (with tool_call blocks stripped)
      * @param iterations   number of tool-call round-trips executed (0 if no tools called)
      * @param toolsInvoked total number of individual tool calls across all iterations
+     * @param toolNames    names of tools invoked (in call order, may contain duplicates)
      * @param messages     the full message list including all tool interactions
      */
     public record LoopResult(
             String finalAnswer,
             int iterations,
             int toolsInvoked,
+            List<String> toolNames,
             List<ChatMessage> messages
-    ) {}
+    ) {
+        /**
+         * Returns a user-facing summary line, or null if no tools were invoked.
+         * Example: {@code "[Used 2 tool(s): read_file, grep | 1 iteration]"}
+         */
+        public String summary() {
+            if (toolsInvoked <= 0) return null;
+            // Deduplicate tool names preserving first-seen order
+            var unique = new java.util.LinkedHashSet<>(toolNames != null ? toolNames : List.of());
+            String names = unique.isEmpty() ? "" : ": " + String.join(", ", unique);
+            return "[Used " + toolsInvoked + " tool(s)" + names + " | "
+                    + iterations + " iteration(s)]";
+        }
+    }
 
     /**
      * Run the tool-call loop on an initial LLM response.
@@ -97,7 +112,7 @@ public final class ToolCallLoop {
      */
     public LoopResult run(String initialAnswer, List<ChatMessage> messages, Path workspace, Context ctx) {
         if (initialAnswer == null || !ToolCallParser.containsToolCalls(initialAnswer)) {
-            return new LoopResult(initialAnswer != null ? initialAnswer : "", 0, 0, messages);
+            return new LoopResult(initialAnswer != null ? initialAnswer : "", 0, 0, List.of(), messages);
         }
 
         // Lightweight session for tool execution context
@@ -106,6 +121,7 @@ public final class ToolCallLoop {
         String currentAnswer = initialAnswer;
         int iterations = 0;
         int totalToolsInvoked = 0;
+        List<String> toolNames = new ArrayList<>();
 
         while (iterations < maxIterations && ToolCallParser.containsToolCalls(currentAnswer)) {
             iterations++;
@@ -125,6 +141,7 @@ public final class ToolCallLoop {
             // 3. Execute each tool call and append results
             for (ToolCall call : calls) {
                 totalToolsInvoked++;
+                toolNames.add(call.toolName());
                 LOG.debug("  Executing tool: {} (params: {})", call.toolName(), call.parameters());
 
                 ToolResult result = turnProcessor.executeTool(toolSession, call, ctx);
@@ -163,7 +180,7 @@ public final class ToolCallLoop {
 
         LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked", iterations, totalToolsInvoked);
 
-        return new LoopResult(finalAnswer, iterations, totalToolsInvoked, messages);
+        return new LoopResult(finalAnswer, iterations, totalToolsInvoked, List.copyOf(toolNames), messages);
     }
 
     /**

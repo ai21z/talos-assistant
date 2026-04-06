@@ -293,6 +293,69 @@ class PromptRouterExplainTest {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    //  Action-intent trigger labels and traces
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @Test
+    void action_with_pascal_case_trigger() {
+        var r = PromptRouter.explainRoute("write a test for RagService", null, null);
+        assertEquals(RETRIEVE, r.route());
+        assertEquals("PascalCase identifier in action", r.trigger());
+        assertTrue(r.steps().contains("action context + PascalCase identifier"));
+    }
+
+    @Test
+    void action_with_anchored_noun_trigger() {
+        var r = PromptRouter.explainRoute("fix the parser", null, null);
+        assertEquals(RETRIEVE, r.route());
+        assertEquals("anchored tech noun in action", r.trigger());
+        assertTrue(r.steps().contains("action context + anchored tech noun"));
+    }
+
+    @Test
+    void action_without_workspace_signal_shows_action_like_step() {
+        var r = PromptRouter.explainRoute("write a poem", null, null);
+        assertEquals(ASSIST, r.route());
+        assertTrue(r.steps().stream().anyMatch(s -> s.contains("action-like but")));
+    }
+
+    @Test
+    void question_still_uses_question_label() {
+        // Verify questions still get "question" labels, not "action"
+        var r = PromptRouter.explainRoute("what does RagService do", null, null);
+        assertEquals(RETRIEVE, r.route());
+        assertEquals("PascalCase identifier in question", r.trigger());
+        assertTrue(r.steps().contains("question context + PascalCase identifier"));
+    }
+
+    @Test
+    void action_label_takes_priority_when_both_action_and_question() {
+        // "fix the parser?" is both action-like and question-like (ends with ?)
+        var r = PromptRouter.explainRoute("fix the parser?", null, null);
+        assertEquals(RETRIEVE, r.route());
+        // Action is checked first in the ternary
+        assertEquals("anchored tech noun in action", r.trigger());
+    }
+
+    @Test
+    void prefixed_action_trigger() {
+        var r = PromptRouter.explainRoute("hey, refactor ModeController", null, null);
+        assertEquals(RETRIEVE, r.route());
+        assertEquals("PascalCase identifier in action", r.trigger());
+    }
+
+    @Test
+    void scenario_refactor_ragservice() {
+        var r = PromptRouter.explainRoute("refactor RagService", null, null);
+        assertEquals(RETRIEVE, r.route());
+        assertEquals("PascalCase identifier in action", r.trigger());
+        var steps = r.steps();
+        assertTrue(steps.contains("no workspace framing"));
+        assertTrue(steps.contains("no file reference"));
+        assertTrue(steps.contains("action context + PascalCase identifier"));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     //  Route result consistency: route(args) == explainRoute(args).route()
     // ═══════════════════════════════════════════════════════════════════════
 

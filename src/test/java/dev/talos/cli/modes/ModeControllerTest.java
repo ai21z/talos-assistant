@@ -462,6 +462,80 @@ class ModeControllerTest {
         assertNull(mc.getSymbolChecker(), "Should be null after clearing");
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Action-intent routing through auto-mode
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @Test
+    void action_with_pascal_case_routes_to_rag() throws Exception {
+        var dev = new RecordingStub("dev");
+        var rag = new RecordingStub("rag");
+        var ask = new RecordingStub("ask");
+        var mc = stubController(dev, rag, ask);
+        var ctx = Context.builder(new Config()).build();
+
+        mc.route("write a test for RagService", WS, ctx);
+
+        assertTrue(rag.invoked, "Action+PascalCase should route to rag");
+        assertFalse(ask.invoked, "Action+PascalCase should NOT route to ask");
+    }
+
+    @Test
+    void action_with_anchored_noun_routes_to_rag() throws Exception {
+        var dev = new RecordingStub("dev");
+        var rag = new RecordingStub("rag");
+        var ask = new RecordingStub("ask");
+        var mc = stubController(dev, rag, ask);
+        var ctx = Context.builder(new Config()).build();
+
+        mc.route("fix the parser", WS, ctx);
+
+        assertTrue(rag.invoked, "Action+tech noun should route to rag");
+        assertFalse(ask.invoked, "Action+tech noun should NOT route to ask");
+    }
+
+    @Test
+    void action_without_workspace_signal_routes_to_ask() throws Exception {
+        var dev = new RecordingStub("dev");
+        var rag = new RecordingStub("rag");
+        var ask = new RecordingStub("ask");
+        var mc = stubController(dev, rag, ask);
+        var ctx = Context.builder(new Config()).build();
+
+        mc.route("write a poem", WS, ctx);
+
+        assertTrue(ask.invoked, "Action without workspace signal should route to ask");
+        assertFalse(rag.invoked, "Action without workspace signal should NOT route to rag");
+    }
+
+    @Test
+    void action_updates_lastRoute_to_retrieve() throws Exception {
+        var dev = new RecordingStub("dev");
+        var rag = new RecordingStub("rag");
+        var ask = new RecordingStub("ask");
+        var mc = stubController(dev, rag, ask);
+        var ctx = Context.builder(new Config()).build();
+
+        mc.route("refactor ModeController", WS, ctx);
+        assertEquals(PromptRouter.Route.RETRIEVE, mc.lastRoute(),
+                "Action+PascalCase should update lastRoute to RETRIEVE");
+    }
+
+    @Test
+    void follow_up_after_action_stays_in_rag() throws Exception {
+        var dev = new RecordingStub("dev");
+        var rag = new RecordingStub("rag");
+        var ask = new RecordingStub("ask");
+        var mc = stubController(dev, rag, ask);
+        var ctx = Context.builder(new Config()).build();
+
+        mc.route("fix the parser", WS, ctx); // → RETRIEVE
+        rag.reset();
+
+        mc.route("what about edge cases?", WS, ctx); // → follow-up → RETRIEVE
+        assertTrue(rag.invoked, "Follow-up after action should stay in rag");
+    }
+
     // ── Recording stub mode for isolated testing ─────────────────────────
 
     private static class RecordingStub implements Mode {
