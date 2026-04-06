@@ -19,6 +19,8 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnProcessor;
 import dev.talos.runtime.TurnResult;
 import dev.talos.tools.ToolRegistry;
+import dev.talos.tools.impl.FileEditTool;
+import dev.talos.tools.impl.FileWriteTool;
 import dev.talos.tools.impl.GrepTool;
 import dev.talos.tools.impl.ReadFileTool;
 import dev.talos.tools.impl.RetrieveTool;
@@ -73,6 +75,8 @@ public final class ReplRouter {
         // Register concrete tools
         ToolRegistry toolRegistry = new ToolRegistry();
         toolRegistry.register(new ReadFileTool());
+        toolRegistry.register(new FileWriteTool());
+        toolRegistry.register(new FileEditTool());
         toolRegistry.register(new GrepTool());
         toolRegistry.register(new RetrieveTool(rag));
 
