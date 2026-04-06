@@ -116,12 +116,12 @@ talos
 
 **In the REPL:**
 ```
-:reindex          # Build Lucene index for current directory
+/reindex          # Build Lucene index for current directory
 What does this project do?    # Ask questions about your code
-:mode rag         # Switch to RAG mode (project-aware)
-:k 10             # Set retrieval top-K to 10
-:debug on         # Show retrieved chunks
-:q                # Quit
+/mode rag         # Switch to RAG mode (project-aware)
+/k 10             # Set retrieval top-K to 10
+/debug on         # Show retrieved chunks
+/q                # Quit
 ```
 
 **Non-interactive usage:**
@@ -175,18 +175,18 @@ talos rag-ask --root C:\other\project "What are the main components?"
 
 | Command | Purpose | Example | Notes |
 |---------|---------|---------|-------|
-| `:help` | Show available commands | `:help` | Lists all REPL commands |
-| `:files` | List directories and files | `:files` | Shows workspace directory structure and indexed files |
-| `:grep <regex>` | Search for patterns in files | `:grep "TODO"` | Searches workspace files with line numbers |
-| `:workspace` | Show current workspace info | `:workspace` | Displays workspace path, index location, and doc count |
-| `:mode <mode>` | Switch active mode | `:mode rag` | Modes: ask, rag, dev, auto |
-| `:k <number>` | Set retrieval top-K | `:k 10` | Range: 1-100, affects context size |
-| `:debug on\|off` | Toggle debug output | `:debug on` | Shows retrieved chunks and scores |
-| `:models` | List available models | `:models` | Shows Ollama models |
-| `:set model <name>` | Switch LLM model | `:set model qwen2.5:7b` | Must be pulled in Ollama first |
-| `:set <key> <value>` | Set configuration value | `:set top_k 10` | Runtime configuration changes |
-| `:show <key>` | Show configuration value | `:show top_k` | Display current setting |
-| `:reindex` | Rebuild current index | `:reindex` | Forces full reindex of workspace |
+| `/help` | Show available commands | `/help` | Lists all REPL commands |
+| `/files` | List directories and files | `/files` | Shows workspace directory structure and indexed files |
+| `/grep <regex>` | Search for patterns in files | `/grep "TODO"` | Searches workspace files with line numbers |
+| `/workspace` | Show current workspace info | `/workspace` | Displays workspace path, index location, and doc count |
+| `/mode <mode>` | Switch active mode | `/mode rag` | Modes: ask, rag, dev, auto |
+| `/k <number>` | Set retrieval top-K | `/k 10` | Range: 1-100, affects context size |
+| `/debug on\|off` | Toggle debug output | `/debug on` | Shows retrieved chunks and scores |
+| `/models` | List available models | `/models` | Shows Ollama models |
+| `/set model <name>` | Switch LLM model | `/set model qwen2.5:7b` | Must be pulled in Ollama first |
+| `/set <key> <value>` | Set configuration value | `/set top_k 10` | Runtime configuration changes |
+| `/show <key>` | Show configuration value | `/show top_k` | Display current setting |
+| `/reindex` | Rebuild current index | `/reindex` | Forces full reindex of workspace |
 | `:status` | Show workspace info | `:status --verbose` | Configuration and index stats |
 | `:q` | Quit | `:q` | Exit REPL |
 
@@ -321,7 +321,7 @@ rag:
 
 ### Prompting Per Mode
 
-**RAG mode (`:mode rag`):**
+**RAG mode (`/mode rag`):**
 ```
 # Good prompts - specific and context-aware
 How does the authentication system work in this codebase?
@@ -347,7 +347,7 @@ Help me code.
 - Example: `docs\landing.md` and `docs/landing.md` refer to the same file
 - Sources are always displayed with forward slashes for cross-platform consistency
 
-**Ask mode (`:mode ask`):**
+**Ask mode (`/mode ask`):**
 ```
 # Good prompts - general programming questions
 What's the difference between REST and GraphQL?
@@ -355,7 +355,7 @@ How do I handle exceptions in Java?
 Explain microservices architecture.
 ```
 
-**Dev mode (`:mode dev`):**
+**Dev mode (`/mode dev`):**
 ```
 # File operations
 ls                    # List current directory

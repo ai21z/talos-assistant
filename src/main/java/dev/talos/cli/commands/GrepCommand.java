@@ -21,13 +21,13 @@ public final class GrepCommand implements Command {
     @Override public CommandSpec spec() {
         return new CommandSpec("grep",
                 List.of(),
-                ":grep <regex>",
-                "Search for regex patterns in workspace files with line numbers. Patterns are regex; quotes are optional for literals with spaces or punctuation. Example: :grep \"SMOKEPROBE-\"");
+                "/grep <regex>",
+                "Search for regex patterns in workspace files with line numbers. Patterns are regex; quotes are optional for literals with spaces or punctuation. Example: /grep \"SMOKEPROBE-\"");
     }
 
     @Override public Result execute(String args, Context ctx) {
         if (args == null || args.trim().isEmpty()) {
-            return new Result.Error("Usage: :grep <regex>", 400);
+            return new Result.Error("Usage: /grep <regex>", 400);
         }
 
         String regex = args.trim();

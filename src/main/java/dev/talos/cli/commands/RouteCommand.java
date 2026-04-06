@@ -32,7 +32,7 @@ public final class RouteCommand implements Command {
     @Override
     public CommandSpec spec() {
         return new CommandSpec("route", List.of("explain-route"),
-                ":route <prompt>",
+                "/route <prompt>",
                 "Explain how a prompt would be routed in auto mode (diagnostic).",
                 CommandGroup.DEBUG);
     }
@@ -41,9 +41,9 @@ public final class RouteCommand implements Command {
     public Result execute(String args, Context ctx) {
         if (args == null || args.isBlank()) {
             return new Result.Info(
-                    "Usage: :route <prompt>\n" +
+                    "Usage: /route <prompt>\n" +
                     "Shows how the prompt would be routed in auto mode.\n" +
-                    "Example: :route explain RagService.java\n");
+                    "Example: /route explain RagService.java\n");
         }
 
         PromptRouter.Route lastRoute = modes.lastRoute();

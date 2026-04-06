@@ -8,7 +8,7 @@ import java.nio.file.Path;
 import java.util.*;
 
 /**
- * `:files` — List all indexed files in the workspace.
+ * `/files` — List all indexed files in the workspace.
  * Provides deterministic file inventory without LLM hallucinations.
  */
 public class FilesCommand implements Command {
@@ -23,7 +23,7 @@ public class FilesCommand implements Command {
     public CommandSpec spec() {
         return new CommandSpec("files",
                 List.of(),
-                ":files",
+                "/files",
                 "List all indexed files in the workspace",
                 CommandGroup.WORKSPACE);
     }
@@ -72,9 +72,9 @@ public class FilesCommand implements Command {
                 if (fileChunkCounts.isEmpty()) {
                     int docCount = store.numDocs();
                     if (docCount == 0) {
-                        return new Result.Info("No files indexed. Run :reindex to build the index.");
+                        return new Result.Info("No files indexed. Run /reindex to build the index.");
                     }
-                    return new Result.Info("Index has " + docCount + " chunks but no file paths found. Try :reindex --full.");
+                    return new Result.Info("Index has " + docCount + " chunks but no file paths found. Try /reindex --full.");
                 }
             }
 

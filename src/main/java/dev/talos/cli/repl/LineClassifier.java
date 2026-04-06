@@ -6,12 +6,12 @@ public final class LineClassifier {
 
     public record Classified(LineType type, String commandName, String argsText) {}
 
-    /** Returns COMMAND if line starts with ":" at col 0; PROMPT otherwise; EMPTY if blank. */
+    /** Returns COMMAND if line starts with "/" at col 0; PROMPT otherwise; EMPTY if blank. */
     public Classified classify(String raw) {
         if (raw == null || raw.trim().isEmpty()) {
             return new Classified(LineType.EMPTY, "", "");
         }
-        if (raw.startsWith(":")) {
+        if (raw.startsWith("/")) {
             // grab token up to whitespace
             int i = 1;
             while (i < raw.length() && !Character.isWhitespace(raw.charAt(i))) i++;

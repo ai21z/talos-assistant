@@ -135,7 +135,7 @@ public final class TalosBanner {
     private static void printHint(PrintStream out) {
         out.println();
         out.println("  " + AnsiColor.grey("Type a question or ")
-                + AnsiColor.blue(":help")
+                + AnsiColor.blue("/help")
                 + AnsiColor.grey(" for commands"));
         out.println();
     }
