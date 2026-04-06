@@ -26,7 +26,7 @@ public final class ReindexCommand implements Command {
 
     @Override public CommandSpec spec() {
         return new CommandSpec("reindex", List.of("--stats", "--full", "--prune"),
-            ":reindex [--stats|--full|--prune <days>]",
+            "/reindex [--stats|--full|--prune <days>]",
             "Rebuild the local index. --stats: show last run stats, --full: ignore cache, --prune: cleanup old cache",
             CommandGroup.RAG);
     }

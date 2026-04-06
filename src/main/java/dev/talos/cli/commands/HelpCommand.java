@@ -13,7 +13,7 @@ public final class HelpCommand implements Command {
     public HelpCommand(CommandRegistry reg) { this.reg = reg; }
 
     @Override public CommandSpec spec() {
-        return new CommandSpec("help", List.of("h","?"), ":help [cmd]",
+        return new CommandSpec("help", List.of("h","?"), "/help [cmd]",
                 "Show available commands or details for a specific command.",
                 CommandGroup.BASICS);
     }
@@ -23,7 +23,7 @@ public final class HelpCommand implements Command {
         if (!q.isEmpty()) {
             return reg.has(q)
                     ? new Result.Ok(detail(reg.allSpecs().stream().filter(s -> s.name().equals(q)).findFirst().orElse(null)))
-                    : new Result.Error("No such command: :" + q, 204);
+                    : new Result.Error("No such command: /" + q, 204);
         }
 
         var specs = reg.allSpecs();
@@ -61,7 +61,7 @@ public final class HelpCommand implements Command {
             }
         }
 
-        sb.append("\n  ").append(AnsiColor.grey(":help <command> for details")).append("\n");
+        sb.append("\n  ").append(AnsiColor.grey("/help <command> for details")).append("\n");
         return new Result.Ok(sb.toString());
     }
 
@@ -69,14 +69,14 @@ public final class HelpCommand implements Command {
         if (s == null) return "(no details)";
 
         var sb = new StringBuilder();
-        sb.append(AnsiColor.bold(":" + s.name())).append("\n\n");
+        sb.append(AnsiColor.bold("/" + s.name())).append("\n\n");
         sb.append("  ").append(AnsiColor.grey("Usage   ")).append(AnsiColor.blue(s.usage())).append("\n");
         sb.append("  ").append(AnsiColor.grey("Summary ")).append(s.summary()).append("\n");
 
         if (!s.aliases().isEmpty()) {
             sb.append("  ").append(AnsiColor.grey("Aliases "));
             sb.append(s.aliases().stream()
-                .map(alias -> AnsiColor.blue(":" + alias))
+                .map(alias -> AnsiColor.blue("/" + alias))
                 .collect(Collectors.joining(", ")));
             sb.append("\n");
         }

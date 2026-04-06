@@ -8,7 +8,7 @@ import java.util.List;
 
 public final class PolicyCommand implements Command {
     @Override public CommandSpec spec() {
-        return new CommandSpec("policy", List.of(), ":policy", "Show active network & workspace policy.");
+        return new CommandSpec("policy", List.of(), "/policy", "Show active network & workspace policy.");
     }
 
     @Override public Result execute(String args, Context ctx) {

@@ -30,8 +30,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * REPL router that dispatches commands and prompts:
- *  - Colon-commands are dispatched via CommandRegistry and ExecutionPipeline
- *  - Non-colon prompts are routed through ModeController
+ *  - Slash-commands are dispatched via CommandRegistry and ExecutionPipeline
+ *  - Non-slash prompts are routed through ModeController
  *  - Results are rendered via RenderEngine
  */
 public final class ReplRouter {
@@ -120,7 +120,7 @@ public final class ReplRouter {
 
         Result r = pipe.run(() ->
                         registry.execute(name, c.argsText(), ctx),
-                ctx, ":" + name
+                ctx, "/" + name
         );
 
         render.render(r);
@@ -155,7 +155,7 @@ public final class ReplRouter {
     public Session getRuntimeSession() { return runtimeSession; }
 
     private void registerCommands() {
-        // :k and :debug operate on SessionState
+        // /k and /debug operate on SessionState
         CliRuntime rt = new CliRuntime() {
             @Override public int getK() { return session.getK(); }
             @Override public void setK(int k) { session.setK(k); }

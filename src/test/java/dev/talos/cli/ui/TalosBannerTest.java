@@ -52,7 +52,7 @@ class TalosBannerTest {
     @Test
     void print_contains_help_hint() {
         String output = capturePrint(Path.of("."), "rag");
-        assertTrue(output.contains(":help"), "Banner should contain :help hint");
+        assertTrue(output.contains("/help"), "Banner should contain /help hint");
     }
     @Test
     void print_shows_different_modes() {
@@ -98,6 +98,12 @@ class TalosBannerTest {
         Config empty = new Config();
         empty.data.remove("ollama");
         String model = TalosBanner.resolveModel(empty);
-        assertEquals("unknown", model);
+        String envModel = System.getenv("TALOS_OLLAMA_MODEL");
+        if (envModel != null && !envModel.isBlank()) {
+            // env var takes priority over config
+            assertEquals(envModel, model, "Should use TALOS_OLLAMA_MODEL env var");
+        } else {
+            assertEquals("unknown", model);
+        }
     }
 }

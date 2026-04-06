@@ -26,7 +26,7 @@ public final class BenchCommand implements Command {
     @Override public CommandSpec spec() {
         return new CommandSpec("bench",
                 List.of(),
-                ":bench [--runs=N] [--models=model1,model2] [--concurrency=1,2,4]",
+                "/bench [--runs=N] [--models=model1,model2] [--concurrency=1,2,4]",
                 "Run micro-benchmarks comparing model+concurrency combinations.");
     }
 

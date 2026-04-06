@@ -121,8 +121,8 @@ public class RunCmd implements Runnable, SessionState {
                     continue;
                 }
 
-                // Colon-commands: router handles *all* registered commands
-                if (line.startsWith(":")) {
+                // Slash-commands: router handles *all* registered commands
+                if (line.startsWith("/")) {
                     if (router.tryHandle(line)) {
                         if (router.shouldQuit()) { quit = true; }
                         continue;
@@ -210,7 +210,7 @@ public class RunCmd implements Runnable, SessionState {
     }
 
     private static void printMan() {
-        System.out.println(AnsiColor.grey("  Use ") + AnsiColor.blue(":help")
+        System.out.println(AnsiColor.grey("  Use ") + AnsiColor.blue("/help")
                 + AnsiColor.grey(" for available commands"));
         System.out.println();
     }
