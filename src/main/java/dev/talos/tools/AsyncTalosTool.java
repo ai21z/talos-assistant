@@ -12,11 +12,19 @@ import java.util.concurrent.CompletableFuture;
 public interface AsyncTalosTool extends TalosTool {
 
     /**
-     * Execute the tool asynchronously.
+     * Execute the tool asynchronously (legacy, no context).
      * Default implementation delegates to the synchronous {@link #execute(ToolCall)}.
      */
     default CompletableFuture<ToolResult> executeAsync(ToolCall call) {
         return CompletableFuture.supplyAsync(() -> execute(call));
+    }
+
+    /**
+     * Execute the tool asynchronously with workspace context (preferred).
+     * Default implementation delegates to the synchronous {@link #execute(ToolCall, ToolContext)}.
+     */
+    default CompletableFuture<ToolResult> executeAsync(ToolCall call, ToolContext ctx) {
+        return CompletableFuture.supplyAsync(() -> execute(call, ctx));
     }
 }
 

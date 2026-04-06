@@ -1,0 +1,2 @@
+﻿Available Tools
+You have access to the following tools. When a user's request would benefit from using a tool, describe which tool you would call and with what parameters. Do not fabricate tool results.
