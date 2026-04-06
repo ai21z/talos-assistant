@@ -2,6 +2,7 @@ package dev.talos.engine.ollama;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.talos.spi.EngineException;
 import dev.talos.spi.ModelEngine;
 import dev.talos.spi.types.*;
 import org.slf4j.Logger;
@@ -9,6 +10,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.net.ConnectException;
 import java.net.URI;
 import java.net.http.*;
 import java.nio.charset.StandardCharsets;
@@ -137,13 +139,18 @@ final class OllamaEngine implements ModelEngine {
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
                 .build();
-        HttpResponse<String> resp = http.send(httpReq, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-        if (resp.statusCode() / 100 != 2) {
-            if (resp.statusCode() == 404) {
-                return "Model '" + model + "' not found. Run:  ollama pull " + model;
-            }
-            return "Engine error (" + resp.statusCode() + ")";
+
+        HttpResponse<String> resp;
+        try {
+            resp = http.send(httpReq, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        } catch (ConnectException ce) {
+            throw new EngineException.ConnectionFailed(host, ce);
+        } catch (HttpTimeoutException te) {
+            throw new EngineException.Transient("Request timed out", te, 408);
         }
+
+        checkStatus(resp.statusCode(), model, resp.body());
+
         Matcher m = RESPONSE.matcher(resp.body());
         if (m.find()) return unesc(m.group(1));
         // Fallback: try Jackson tree parse for "response" field
@@ -195,13 +202,17 @@ final class OllamaEngine implements ModelEngine {
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
                 .build();
-        HttpResponse<String> resp = http.send(httpReq, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-        if (resp.statusCode() / 100 != 2) {
-            if (resp.statusCode() == 404) {
-                return "Model '" + model + "' not found. Run:  ollama pull " + model;
-            }
-            return "Engine error (" + resp.statusCode() + ")";
+        HttpResponse<String> resp;
+        try {
+            resp = http.send(httpReq, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        } catch (ConnectException ce) {
+            throw new EngineException.ConnectionFailed(host, ce);
+        } catch (HttpTimeoutException te) {
+            throw new EngineException.Transient("Request timed out", te, 408);
         }
+
+        checkStatus(resp.statusCode(), model, resp.body());
+
         // /api/chat response format: {"message":{"role":"assistant","content":"..."}}
         return extractChatContent(resp.body());
     }
@@ -252,13 +263,16 @@ final class OllamaEngine implements ModelEngine {
                 .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
                 .build();
 
-        HttpResponse<java.io.InputStream> resp = http.send(httpReq, HttpResponse.BodyHandlers.ofInputStream());
-        if (resp.statusCode() / 100 != 2) {
-            String errMsg = resp.statusCode() == 404
-                    ? "Model '" + model + "' not found. Run:  ollama pull " + model
-                    : "Engine error (" + resp.statusCode() + ")";
-            return Stream.of(TokenChunk.of(errMsg), TokenChunk.eos());
+        HttpResponse<java.io.InputStream> resp;
+        try {
+            resp = http.send(httpReq, HttpResponse.BodyHandlers.ofInputStream());
+        } catch (ConnectException ce) {
+            throw new EngineException.ConnectionFailed(host, ce);
+        } catch (HttpTimeoutException te) {
+            throw new EngineException.Transient("Request timed out", te, 408);
         }
+
+        checkStatus(resp.statusCode(), model, null);
 
         BufferedReader br = new BufferedReader(new InputStreamReader(resp.body(), StandardCharsets.UTF_8));
         return br.lines().map(line -> {
@@ -305,13 +319,16 @@ final class OllamaEngine implements ModelEngine {
                 .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
                 .build();
 
-        HttpResponse<java.io.InputStream> resp = http.send(httpReq, HttpResponse.BodyHandlers.ofInputStream());
-        if (resp.statusCode() / 100 != 2) {
-            String errMsg = resp.statusCode() == 404
-                    ? "Model '" + model + "' not found. Run:  ollama pull " + model
-                    : "Engine error (" + resp.statusCode() + ")";
-            return Stream.of(TokenChunk.of(errMsg), TokenChunk.eos());
+        HttpResponse<java.io.InputStream> resp;
+        try {
+            resp = http.send(httpReq, HttpResponse.BodyHandlers.ofInputStream());
+        } catch (ConnectException ce) {
+            throw new EngineException.ConnectionFailed(host, ce);
+        } catch (HttpTimeoutException te) {
+            throw new EngineException.Transient("Request timed out", te, 408);
         }
+
+        checkStatus(resp.statusCode(), model, null);
 
         BufferedReader br = new BufferedReader(new InputStreamReader(resp.body(), StandardCharsets.UTF_8));
         return br.lines().map(line -> {
@@ -332,4 +349,15 @@ final class OllamaEngine implements ModelEngine {
     /** Matches "content":"..." inside the /api/chat response message object. */
     private static final Pattern CHAT_CONTENT = Pattern.compile("\"content\"\\s*:\\s*\"((?:\\\\.|[^\"])*)\"");
     private static String unesc(String s){ return s.replace("\\n","\n").replace("\\\"","\"").replace("\\\\","\\"); }
+
+    /**
+     * Checks an HTTP status code and throws the appropriate {@link EngineException} subtype
+     * for non-2xx responses. Called from all chat/chatStream methods.
+     */
+    private static void checkStatus(int status, String model, String body) {
+        if (status / 100 == 2) return;
+        if (status == 404) throw new EngineException.ModelNotFound(model);
+        if (status == 429 || status == 503) throw new EngineException.Transient("Backend returned " + status, status);
+        throw new EngineException.ResponseError(status, body);
+    }
 }

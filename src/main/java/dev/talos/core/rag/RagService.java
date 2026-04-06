@@ -39,15 +39,21 @@ public class RagService {
         private final List<ContextResult.Snippet> snippets;
         private final List<String> citations;
         private final RetrievalTrace trace; // nullable — absent on error path
+        private final String errorReason;   // nullable — set when retrieval failed
 
         public Prepared(List<ContextResult.Snippet> snippets, List<String> citations) {
-            this(snippets, citations, null);
+            this(snippets, citations, null, null);
         }
 
         public Prepared(List<ContextResult.Snippet> snippets, List<String> citations, RetrievalTrace trace) {
-            this.snippets  = (snippets == null ? List.of() : List.copyOf(snippets));
-            this.citations = (citations == null ? List.of() : List.copyOf(citations));
-            this.trace     = trace;
+            this(snippets, citations, trace, null);
+        }
+
+        public Prepared(List<ContextResult.Snippet> snippets, List<String> citations, RetrievalTrace trace, String errorReason) {
+            this.snippets    = (snippets == null ? List.of() : List.copyOf(snippets));
+            this.citations   = (citations == null ? List.of() : List.copyOf(citations));
+            this.trace       = trace;
+            this.errorReason = errorReason;
         }
         /** Typed snippets with structured metadata. */
         public List<ContextResult.Snippet> snippets() { return snippets; }
@@ -62,6 +68,10 @@ public class RagService {
         public List<String> citations() { return citations; }
         /** Pipeline trace, or null if retrieval failed before pipeline execution. */
         public RetrievalTrace trace() { return trace; }
+        /** Non-null when retrieval failed; describes the failure reason. */
+        public String errorReason() { return errorReason; }
+        /** True when retrieval encountered an error and snippets may be incomplete. */
+        public boolean hasError() { return errorReason != null && !errorReason.isBlank(); }
     }
 
     /**
@@ -153,7 +163,10 @@ public class RagService {
             // Build rich citations using the same metadata-aware formatting as ContextPacker
             citations.addAll(ContextPacker.buildCitations(snippets));
         } catch (Exception e) {
-            // On any failure, return empty (don't explode CLI)
+            // Log the failure so it's visible in debug/audit, but don't explode the CLI
+            String reason = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            LOG.warn("Retrieval pipeline failed: {}", reason, e);
+            return new Prepared(snippets, citations, trace, reason);
         }
 
         return new Prepared(snippets, citations, trace);
