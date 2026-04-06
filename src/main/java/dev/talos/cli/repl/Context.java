@@ -11,6 +11,7 @@ import dev.talos.core.security.Redactor;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.ApprovalGate;
 import dev.talos.runtime.NoOpApprovalGate;
+import dev.talos.runtime.ToolCallLoop;
 import dev.talos.tools.ToolRegistry;
 
 import java.nio.file.Path;
@@ -30,9 +31,19 @@ public record Context(
         SessionMemory memory,
         ApprovalGate approvalGate,
         ToolRegistry toolRegistry,
-        ConversationManager conversationManager
+        ConversationManager conversationManager,
+        ToolCallLoop toolCallLoop
 ) {
-    /** Backward-compatible constructor without conversationManager. */
+    /** Backward-compatible constructor without toolCallLoop. */
+    public Context(Config cfg, Limits limits, SessionState session, Audit audit,
+                   Redactor redactor, Sandbox sandbox, RagService rag, LlmClient llm,
+                   NetPolicy netPolicy, SessionMemory memory, ApprovalGate approvalGate,
+                   ToolRegistry toolRegistry, ConversationManager conversationManager) {
+        this(cfg, limits, session, audit, redactor, sandbox, rag, llm, netPolicy,
+             memory, approvalGate, toolRegistry, conversationManager, null);
+    }
+
+    /** Backward-compatible constructor without conversationManager or toolCallLoop. */
     public Context(Config cfg, Limits limits, SessionState session, Audit audit,
                    Redactor redactor, Sandbox sandbox, RagService rag, LlmClient llm,
                    NetPolicy netPolicy, SessionMemory memory, ApprovalGate approvalGate,
@@ -42,7 +53,7 @@ public record Context(
              new ConversationManager(memory != null ? memory : new SessionMemory(), TokenBudget.fromConfig(cfg)));
     }
 
-    /** Backward-compatible constructor without toolRegistry or conversationManager. */
+    /** Backward-compatible constructor without toolRegistry, conversationManager, or toolCallLoop. */
     public Context(Config cfg, Limits limits, SessionState session, Audit audit,
                    Redactor redactor, Sandbox sandbox, RagService rag, LlmClient llm,
                    NetPolicy netPolicy, SessionMemory memory, ApprovalGate approvalGate) {
@@ -67,6 +78,7 @@ public record Context(
         private ApprovalGate approvalGate;
         private ToolRegistry toolRegistry;
         private ConversationManager conversationManager;
+        private ToolCallLoop toolCallLoop;
 
         public Builder(Config cfg) { this.cfg = (cfg == null ? new Config() : cfg); }
 
@@ -82,6 +94,7 @@ public record Context(
         public Builder approvalGate(ApprovalGate g)  { this.approvalGate = g; return this; }
         public Builder toolRegistry(ToolRegistry t)  { this.toolRegistry = t; return this; }
         public Builder conversationManager(ConversationManager cm) { this.conversationManager = cm; return this; }
+        public Builder toolCallLoop(ToolCallLoop l)  { this.toolCallLoop = l; return this; }
 
         /** Convenience for ad-hoc usage; tests should prefer explicit setters for control. */
         public Builder withDefaults(Path workspace, SessionState session) {
@@ -126,7 +139,7 @@ public record Context(
                     new ConversationManager(memory, TokenBudget.fromConfig(cfg));
 
             return new Context(cfg, limits, session, audit, redactor, sandbox, rag, llm, net,
-                    memory, approvalGate, toolRegistry, conversationManager);
+                    memory, approvalGate, toolRegistry, conversationManager, toolCallLoop);
         }
     }
 }
