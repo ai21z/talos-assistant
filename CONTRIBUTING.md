@@ -169,11 +169,11 @@ talos
 ```
 
 ```
-:help
-:status
-:mode rag
-:k 5
-:q
+/help
+/status
+/mode rag
+/k 5
+/q
 ```
 
 ### 3. Documentation Updates

@@ -8,7 +8,7 @@ import java.util.List;
 
 public final class ModelsCommand implements Command {
     @Override public CommandSpec spec() {
-        return new CommandSpec("models", List.of(), ":models", "List installed models across all backends.", CommandGroup.MODELS);
+        return new CommandSpec("models", List.of(), "/models", "List installed models across all backends.", CommandGroup.MODELS);
     }
 
     @Override public Result execute(String args, Context ctx) throws Exception {

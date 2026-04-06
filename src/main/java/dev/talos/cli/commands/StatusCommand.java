@@ -25,7 +25,7 @@ public final class StatusCommand implements Command {
     @Override public CommandSpec spec() {
         return new CommandSpec("status",
                 java.util.List.of("--verbose", "-v"),
-                ":status [--verbose]",
+                "/status [--verbose]",
                 "Show current configuration and limits.");
     }
 

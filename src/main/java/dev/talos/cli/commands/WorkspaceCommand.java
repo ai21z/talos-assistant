@@ -24,7 +24,7 @@ public final class WorkspaceCommand implements Command {
     public CommandSpec spec() {
         return new CommandSpec("workspace",
                 List.of("where"),
-                ":workspace",
+                "/workspace",
                 "Show active workspace and index paths.",
                 CommandGroup.BASICS);
     }
