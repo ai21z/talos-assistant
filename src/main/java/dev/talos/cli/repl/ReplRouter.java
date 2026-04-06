@@ -22,6 +22,7 @@ import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
 import dev.talos.tools.impl.GrepTool;
+import dev.talos.tools.impl.ListDirTool;
 import dev.talos.tools.impl.ReadFileTool;
 import dev.talos.tools.impl.RetrieveTool;
 
@@ -78,6 +79,7 @@ public final class ReplRouter {
         toolRegistry.register(new FileWriteTool());
         toolRegistry.register(new FileEditTool());
         toolRegistry.register(new GrepTool());
+        toolRegistry.register(new ListDirTool());
         toolRegistry.register(new RetrieveTool(rag));
 
         // Create ConversationManager for budget-aware conversation history
