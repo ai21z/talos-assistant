@@ -3,6 +3,7 @@ package dev.talos.cli.modes;
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
 import dev.talos.core.CfgUtil;
+import dev.talos.core.llm.SystemPromptBuilder;
 import dev.talos.spi.types.ChatMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,8 +57,13 @@ public final class AskMode implements Mode {
         long responseMaxChars = CfgUtil.longAt(lim, "response_max_chars", 10 * 1024 * 1024L);
         long llmTimeoutMs     = CfgUtil.longAt(lim, "llm_timeout_ms", 300_000L);
 
-        // System prompt for Ask
-        String system = readResourceOrDefault("prompts/ask-system.txt");
+        // System prompt — composed from sections, tool-aware, history-aware
+        boolean hasHistory = (ctx.conversationManager() != null && ctx.conversationManager().hasHistory())
+                || (ctx.memory() != null && ctx.memory().hasContent());
+        String system = SystemPromptBuilder.forAsk()
+                .withTools(ctx.toolRegistry())
+                .withHistory(hasHistory)
+                .build();
 
         // Build structured conversation messages for /api/chat
         List<ChatMessage> messages = buildMessages(system, rawLine, ctx);
@@ -145,11 +151,4 @@ public final class AskMode implements Mode {
     }
 
 
-    private static String readResourceOrDefault(String resource) throws Exception {
-        try (var in = AskMode.class.getClassLoader().getResourceAsStream(resource)) {
-            if (in != null) return new String(in.readAllBytes());
-        }
-        // minimal default
-        return "You are a concise assistant. Answer clearly.\n";
-    }
 }

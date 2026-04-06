@@ -8,6 +8,7 @@ import dev.talos.core.rag.RagService;
 import dev.talos.core.context.ContextPacker;
 import dev.talos.core.context.ContextResult;
 import dev.talos.core.context.TokenBudget;
+import dev.talos.core.llm.SystemPromptBuilder;
 import dev.talos.core.search.SnippetBuilder;
 import dev.talos.core.util.Sanitize;
 import dev.talos.core.security.Sandbox;
@@ -64,8 +65,10 @@ public final class RagMode implements Mode {
         }
         List<ContextResult.Snippet> regularCtx = prepared.snippets();
 
-        // Load system prompt (needed for token budget calculation)
-        String system = readOrFallback("prompts/rag-system.txt", ctx);
+        // Load system prompt — composed from sections, tool-aware
+        String system = SystemPromptBuilder.forRag()
+                .withTools(ctx.toolRegistry())
+                .build();
 
         ContextPacker packer = new ContextPacker(TokenBudget.fromConfig(ctx.cfg()));
         ContextResult packed = packer.pack(system, q, pinnedCtx, regularCtx, isTwoFileComparison);
@@ -281,15 +284,6 @@ public final class RagMode implements Mode {
         return path.replace('\\', '/');
     }
 
-    /**
-     * Reads a resource from the classpath or falls back to context default.
-     */
-    private static String readOrFallback(String resource, Context ctx) throws Exception {
-        try (var in = RagMode.class.getClassLoader().getResourceAsStream(resource)) {
-            if (in != null) return new String(in.readAllBytes());
-        }
-        return ctx.rag().readCliSystemPromptOrDefault();
-    }
 
     /**
      * Strips chunk ID suffix from a path (everything after #).
