@@ -96,7 +96,7 @@ public final class StatusCommand implements Command {
         sb.append(AnsiColor.dim("    from=")).append(AnsiColor.dim(String.valueOf(cfg.getReport().loadedFrom)));
         sb.append(AnsiColor.dim("  strict=")).append(AnsiColor.dim(String.valueOf(cfg.getReport().strictMode)));
         sb.append(AnsiColor.dim("  defaults=")).append(AnsiColor.dim(String.valueOf(cfg.getReport().defaultedKeys.size())));
-        if (!verbose) sb.append(AnsiColor.grey("  (:status --verbose)"));
+        if (!verbose) sb.append(AnsiColor.grey("  (/status --verbose)"));
         sb.append("\n");
 
         if (verbose) {
