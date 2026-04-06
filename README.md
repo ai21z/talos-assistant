@@ -1,15 +1,15 @@
-# LOQ-J — Local-Only Java CLI for RAG
+# Talos — Local-Only Java CLI for RAG
 
 **Version:** `v0.9.0-beta`  
 **Last verified commit:** `ec2f6e9`
 
-Fast, private, citation-backed answers grounded in your current directory. LOQ-J is a local-first RAG (Retrieval-Augmented Generation) CLI that indexes your project files and enables intelligent questioning without sending data to external services.
+Fast, private, citation-backed answers grounded in your current directory. Talos is a local-first RAG (Retrieval-Augmented Generation) CLI that indexes your project files and enables intelligent questioning without sending data to external services.
 
 ---
 
 ## Table of Contents
 
-- [Why LOQ-J?](#why-loq-j)
+- [Why Talos?](#why-Talos)
 - [Prerequisites (Windows)](#prerequisites-windows)
 - [Installation (Windows)](#installation-windows)
 - [Quick Start](#quick-start)
@@ -27,7 +27,7 @@ Fast, private, citation-backed answers grounded in your current directory. LOQ-J
 
 ---
 
-## Why LOQ-J?
+## Why Talos?
 
 - **Privacy**: Your code never leaves your machine
 - **Speed**: No network latency for indexing or retrieval
@@ -37,7 +37,7 @@ Fast, private, citation-backed answers grounded in your current directory. LOQ-J
 - **Offline**: Works completely disconnected from the internet
 
 **Note on "Air-Gap" Operation:**
-LOQ-J requires no external internet connectivity once models are downloaded. All processing happens locally via Ollama (which uses localhost HTTP communication). This is "air-gapped" in the sense that no data leaves your machine, though the localhost network stack is used for inter-process communication.
+Talos requires no external internet connectivity once models are downloaded. All processing happens locally via Ollama (which uses localhost HTTP communication). This is "air-gapped" in the sense that no data leaves your machine, though the localhost network stack is used for inter-process communication.
 
 ---
 
@@ -73,7 +73,7 @@ pwsh tools\install-windows.ps1
 
 ```powershell
 # 3. Open new terminal window and verify
-loqj --version
+talos --version
 ```
 
 ### After Making Changes
@@ -95,9 +95,9 @@ pwsh tools\install-windows.ps1
 
 ### What Installation Creates
 
-- **Installation Directory**: `%LOCALAPPDATA%\Programs\loqj\`
-- **User Data**: `%USERPROFILE%\.loqj\` (indices, cache, logs, config overrides)
-- **PATH Entry**: Adds `%LOCALAPPDATA%\Programs\loqj\bin` to user PATH
+- **Installation Directory**: `%LOCALAPPDATA%\Programs\talos\`
+- **User Data**: `%USERPROFILE%\.talos\` (indices, cache, logs, config overrides)
+- **PATH Entry**: Adds `%LOCALAPPDATA%\Programs\talos\bin` to user PATH
 - **No Admin Rights**: User-level installation only
 
 ---
@@ -111,7 +111,7 @@ cd C:\path\to\your\project
 
 ```powershell
 # Start interactive mode (shows banner and workspace info)
-loqj
+talos
 ```
 
 **In the REPL:**
@@ -127,30 +127,30 @@ What does this project do?    # Ask questions about your code
 **Non-interactive usage:**
 ```powershell
 # Index current directory
-loqj rag-index
+talos rag-index
 ```
 
 ```powershell
 # Ask questions directly
-loqj rag-ask "How does authentication work?"
+talos rag-ask "How does authentication work?"
 ```
 
 ```powershell
 # Check workspace status
-loqj status
+talos status
 ```
 
 ```powershell
-loqj status --verbose
+talos status --verbose
 ```
 
 ```powershell
 # Work with different directories
-loqj rag-index --root C:\other\project
+talos rag-index --root C:\other\project
 ```
 
 ```powershell
-loqj rag-ask --root C:\other\project "What are the main components?"
+talos rag-ask --root C:\other\project "What are the main components?"
 ```
 
 ---
@@ -161,15 +161,15 @@ loqj rag-ask --root C:\other\project "What are the main components?"
 
 | Command | Purpose | Key Options | Example |
 |---------|---------|-------------|---------|
-| `loqj` | Interactive REPL (default) | `--no-logo`, `--root`, `--k`, `--bm25-only` | `loqj --root C:\myproject` |
-| `loqj run` | Interactive REPL (explicit) | `--no-logo`, `--root`, `--k`, `--bm25-only` | `loqj run --no-logo` |
-| `loqj rag-index` | Index repository files | `--root`, `--full`, `--json`, `--stats` | `loqj rag-index --full` |
-| `loqj rag-ask` | Ask with RAG retrieval | `--root`, `--k` + `<question>` | `loqj rag-ask --k 5 "How does login work?"` |
-| `loqj status` | Show workspace status | `--root`, `--verbose` | `loqj status --verbose` |
-| `loqj diagnose` | Diagnose RAG configuration | `--mode`, `--k`, `-q/--question`, `--print-stats` | `loqj diagnose --mode rag --q "test" --print-stats` |
-| `loqj version` | Version information | None | `loqj version` |
-| `loqj setup` | First-run configuration | Various setup options | `loqj setup` |
-| `loqj net` | Network configuration | Network-related options | `loqj net` |
+| `talos` | Interactive REPL (default) | `--no-logo`, `--root`, `--k`, `--bm25-only` | `talos --root C:\myproject` |
+| `talos run` | Interactive REPL (explicit) | `--no-logo`, `--root`, `--k`, `--bm25-only` | `talos run --no-logo` |
+| `talos rag-index` | Index repository files | `--root`, `--full`, `--json`, `--stats` | `talos rag-index --full` |
+| `talos rag-ask` | Ask with RAG retrieval | `--root`, `--k` + `<question>` | `talos rag-ask --k 5 "How does login work?"` |
+| `talos status` | Show workspace status | `--root`, `--verbose` | `talos status --verbose` |
+| `talos diagnose` | Diagnose RAG configuration | `--mode`, `--k`, `-q/--question`, `--print-stats` | `talos diagnose --mode rag --q "test" --print-stats` |
+| `talos version` | Version information | None | `talos version` |
+| `talos setup` | First-run configuration | Various setup options | `talos setup` |
+| `talos net` | Network configuration | Network-related options | `talos net` |
 
 ### Interactive REPL Commands
 
@@ -197,7 +197,7 @@ loqj rag-ask --root C:\other\project "What are the main components?"
 | `ask` | General Q&A (no indexing) | General questions, no project context needed |
 | `rag` | Project-aware retrieval | Questions about your indexed codebase |
 | `dev` | Local file operations | View files and list directories (`ls`, `open`, `show`) |
-| `auto` | Smart mode selection | Let LOQ-J choose the best mode for your question |
+| `auto` | Smart mode selection | Let Talos choose the best mode for your question |
 
 **Notes on modes:**
 - `rag+memory` mode exists in code but is **deprecated and non-functional** (just redirects to `rag`)
@@ -208,7 +208,7 @@ loqj rag-ask --root C:\other\project "What are the main components?"
 
 ## Embeddings: bge-m3
 
-LOQ-J uses **`bge-m3`** via Ollama for high-quality multilingual embeddings:
+Talos uses **`bge-m3`** via Ollama for high-quality multilingual embeddings:
 
 ```powershell
 # Pull the embeddings model
@@ -220,7 +220,7 @@ ollama pull bge-m3
 ollama list
 ```
 
-**Configuration** (in `%USERPROFILE%\.loqj\config.yaml` or default):
+**Configuration** (in `%USERPROFILE%\.talos\config.yaml` or default):
 ```yaml
 ollama:
   embed: "bge-m3"           # Embeddings model name
@@ -234,7 +234,7 @@ rag:
 
 **Disable vectors** (BM25-only mode for faster indexing):
 ```powershell
-loqj run --bm25-only
+talos run --bm25-only
 ```
 
 ---
@@ -275,7 +275,7 @@ limits:
 
 ```powershell
 # At runtime
-loqj rag-ask --k 10 "How does auth work?"
+talos rag-ask --k 10 "How does auth work?"
 ```
 **Or in REPL:**
 ```
@@ -343,7 +343,7 @@ Help me code.
 
 **Path Separator Equivalence:**
 - You can reference files with either `\` (Windows) or `/` (POSIX) separators
-- LOQ-J treats them identically and normalizes paths in `[Sources]` output
+- Talos treats them identically and normalizes paths in `[Sources]` output
 - Example: `docs\landing.md` and `docs/landing.md` refer to the same file
 - Sources are always displayed with forward slashes for cross-platform consistency
 
@@ -367,20 +367,20 @@ show config/app.yml  # View configuration file
 ### Performance Tips
 
 **Hardware optimization:**
-- **SSD storage** for index files (`%USERPROFILE%\.loqj\indices\`)
+- **SSD storage** for index files (`%USERPROFILE%\.talos\indices\`)
 - **Java 21+** for Vector API performance
-- **ZGC garbage collector** (default in LOQ-J)
+- **ZGC garbage collector** (default in Talos)
 - **Ollama on same machine** (avoid network latency)
 
 **Initial setup:**
 ```powershell
 # First index takes longest (full parsing + embeddings)
-loqj rag-index --full
+talos rag-index --full
 ```
 
 ```powershell
 # Subsequent reindexes are incremental (file hash checking)
-loqj rag-index
+talos rag-index
 ```
 
 **Reindex cadence:**
@@ -392,17 +392,17 @@ loqj rag-index
 
 ## Per-Workspace Indexing
 
-LOQ-J creates a separate search index for each workspace directory you work with.
+Talos creates a separate search index for each workspace directory you work with.
 
 ### How It Works
 
 **One workspace per terminal session:**
-- Each `loqj` process works with **one workspace at a time**
-- The workspace is determined by: `--root` flag, `LOQJ_WORKSPACE` environment variable, or current directory
+- Each `talos` process works with **one workspace at a time**
+- The workspace is determined by: `--root` flag, `TALOS_WORKSPACE` environment variable, or current directory
 - Different terminal windows can work with different workspaces independently
 
 **Isolated indices:**
-- Each workspace gets its own Lucene index stored at `%USERPROFILE%\.loqj\indices\<workspace-hash>\`
+- Each workspace gets its own Lucene index stored at `%USERPROFILE%\.talos\indices\<workspace-hash>\`
 - The hash is computed from the absolute workspace path
 - Switching workspaces means switching to a completely different index
 - No mixing of results across workspaces
@@ -414,66 +414,66 @@ LOQ-J creates a separate search index for each workspace directory you work with
 ```powershell
 # Terminal 1: Working with web app
 cd C:\projects\webapp
-loqj rag-index
-loqj rag-ask "What APIs are exposed?"
+talos rag-index
+talos rag-ask "What APIs are exposed?"
 ```
 
 ```powershell
 # Terminal 2: Working with mobile app (completely separate)
 cd C:\projects\mobile-app
-loqj rag-index
-loqj rag-ask "How is data stored locally?"
+talos rag-index
+talos rag-ask "How is data stored locally?"
 ```
 
 ```powershell
 # Terminal 3: Working with desktop app (another separate workspace)
 cd C:\projects\desktop-app
-loqj rag-index
-loqj rag-ask "What frameworks are used?"
+talos rag-index
+talos rag-ask "What frameworks are used?"
 ```
 
 **Switching workspaces in the same terminal:**
 
 ```powershell
 # Index first project
-loqj rag-index --root C:\projects\webapp
-loqj rag-ask --root C:\projects\webapp "What APIs are exposed?"
+talos rag-index --root C:\projects\webapp
+talos rag-ask --root C:\projects\webapp "What APIs are exposed?"
 ```
 
 ```powershell
 # Switch to second project
-loqj rag-index --root C:\projects\mobile-app
-loqj rag-ask --root C:\projects\mobile-app "How is data stored locally?"
+talos rag-index --root C:\projects\mobile-app
+talos rag-ask --root C:\projects\mobile-app "How is data stored locally?"
 ```
 
 ```powershell
 # Switch to third project
-loqj rag-index --root C:\projects\desktop-app
-loqj rag-ask --root C:\projects\desktop-app "What frameworks are used?"
+talos rag-index --root C:\projects\desktop-app
+talos rag-ask --root C:\projects\desktop-app "What frameworks are used?"
 ```
 
 **Using environment variable for default workspace:**
 
 ```powershell
 # Set default workspace (avoids typing --root every time)
-$env:LOQJ_WORKSPACE = "C:\projects\webapp"
+$env:TALOS_WORKSPACE = "C:\projects\webapp"
 ```
 
 ```powershell
-loqj status          # Now uses webapp by default
-loqj rag-ask "question"
+talos status          # Now uses webapp by default
+talos rag-ask "question"
 ```
 
 ### Index Management
 
 **Index storage:**
-- Location: `%USERPROFILE%\.loqj\indices\<workspace-hash>\`
+- Location: `%USERPROFILE%\.talos\indices\<workspace-hash>\`
 - Each workspace gets its own subdirectory based on a hash of its path
-- Indices persist across loqj sessions
+- Indices persist across talos sessions
 
 **Cleaning indices:**
 - **No built-in index cleanup command** - indices are kept indefinitely
-- Manual cleanup: Delete `%USERPROFILE%\.loqj\indices\` directory or specific workspace subdirectories
+- Manual cleanup: Delete `%USERPROFILE%\.talos\indices\` directory or specific workspace subdirectories
 - Uninstall with cleanup: `pwsh tools\uninstall-windows.ps1 -Purge` removes all indices
 
 **Index isolation guarantees:**
@@ -487,8 +487,8 @@ loqj rag-ask "question"
 
 Configuration precedence (highest to lowest):
 1. **Command-line flags** (`--root`, `--k`, etc.)
-2. **Environment variables** (`LOQJ_WORKSPACE`, `LOQJ_OLLAMA_HOST`)  
-3. **User config** (`%USERPROFILE%\.loqj\config.yaml`)
+2. **Environment variables** (`TALOS_WORKSPACE`, `TALOS_OLLAMA_HOST`)  
+3. **User config** (`%USERPROFILE%\.talos\config.yaml`)
 4. **Default config** (`src/main/resources/config/default-config.yaml`)
 
 ### Key Configuration Values
@@ -531,25 +531,25 @@ limits:
 
 ```powershell
 # Default workspace (avoids --root flags)
-$env:LOQJ_WORKSPACE = "C:\path\to\project"
+$env:TALOS_WORKSPACE = "C:\path\to\project"
 ```
 
 ```powershell
 # Ollama connection
-$env:LOQJ_OLLAMA_HOST = "http://127.0.0.1:11434"
+$env:TALOS_OLLAMA_HOST = "http://127.0.0.1:11434"
 ```
 
 ```powershell
-$env:LOQJ_OLLAMA_MODEL = "qwen2.5:7b"
+$env:TALOS_OLLAMA_MODEL = "qwen2.5:7b"
 ```
 
 ```powershell
 # Then just run:
-loqj status
+talos status
 ```
 
 ```powershell
-loqj rag-ask "What does this project do?"
+talos rag-ask "What does this project do?"
 ```
 
 ---
@@ -562,7 +562,7 @@ loqj rag-ask "What does this project do?"
 ```powershell
 # Open new terminal window (PATH changes require refresh)
 # Check if PATH was updated:
-$env:PATH -split ';' | Where-Object { $_ -like '*loqj*' }
+$env:PATH -split ';' | Where-Object { $_ -like '*talos*' }
 ```
 
 ```powershell
@@ -574,10 +574,10 @@ pwsh tools\uninstall-windows.ps1
 pwsh tools\install-windows.ps1
 ```
 
-**"loqj is not recognized" in scripts:**
+**"talos is not recognized" in scripts:**
 ```powershell
 # In PowerShell scripts, use full path or refresh PATH:
-& "$env:LOCALAPPDATA\Programs\loqj\bin\loqj.bat" --version
+& "$env:LOCALAPPDATA\Programs\talos\bin\talos.bat" --version
 ```
 
 ### Ollama Connection Issues
@@ -588,8 +588,8 @@ curl http://127.0.0.1:11434/api/version
 ```
 
 ```powershell
-# Test with LOQ-J
-loqj status --verbose
+# Test with Talos
+talos status --verbose
 ```
 
 ```powershell
@@ -606,22 +606,22 @@ ollama list     # Verify models are available
 **Empty or slow indices:**
 ```powershell
 # See what files were found
-loqj status --verbose
+talos status --verbose
 ```
 
 ```powershell
 # Check include/exclude patterns
-loqj rag-index --stats
+talos rag-index --stats
 ```
 
 ```powershell
 # Force complete reindex
-loqj rag-index --full
+talos rag-index --full
 ```
 
 ```powershell
 # Use faster BM25-only mode
-loqj run --bm25-only
+talos run --bm25-only
 ```
 
 **"No embeddings model" errors:**
@@ -636,7 +636,7 @@ ollama list | findstr bge-m3
 
 ```powershell
 # Check configuration
-loqj status --verbose
+talos status --verbose
 ```
 
 ### Performance Issues
@@ -667,7 +667,7 @@ If you see citations but no answer text (or "citations-only" output), this usual
 **Quick Diagnosis:**
 ```powershell
 # Run diagnostics to check prompt size and model capacity
-loqj diagnose --mode rag --q "Summarize this project" --k 12 --print-stats
+talos diagnose --mode rag --q "Summarize this project" --k 12 --print-stats
 ```
 
 The diagnose command shows:
@@ -682,7 +682,7 @@ The diagnose command shows:
 1. **Context window exceeded (K too high)**
    ```powershell
    # Reduce top-K retrieval count
-   loqj rag-ask --k 5 "Your question"
+   talos rag-ask --k 5 "Your question"
    # Or in REPL:
    :k 5
    ```
@@ -696,7 +696,7 @@ The diagnose command shows:
 
 3. **Model context limit reached**
    - Default fallback: 8192 tokens
-   - Configure in `%USERPROFILE%\.loqj\config.yaml`:
+   - Configure in `%USERPROFILE%\.talos\config.yaml`:
    ```yaml
    limits:
      llm_context_max_tokens: 16384  # If your model supports more
@@ -710,7 +710,7 @@ The diagnose command shows:
        enabled: true
    ```
    ```powershell
-   loqj rag-index --full  # Reindex with embeddings
+   talos rag-index --full  # Reindex with embeddings
    ```
 
 5. **Network/transport disabled**

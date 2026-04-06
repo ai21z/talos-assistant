@@ -1,7 +1,7 @@
-# LOQ-J Windows Installer
-# Installs LOQ-J to your system by:
-# - Copying distribution files to %LOCALAPPDATA%\Programs\loqj
-# - Adding LOQ-J bin directory to User PATH
+# Talos Windows Installer
+# Installs Talos to your system by:
+# - Copying distribution files to %LOCALAPPDATA%\Programs\talos
+# - Adding Talos bin directory to User PATH
 # - Broadcasting PATH changes to other applications
 # - No admin privileges required (user-level installation only)
 
@@ -11,7 +11,7 @@ param(
 )
 
 if ($Help) {
-    Write-Host "LOQ-J Windows Installer"
+    Write-Host "Talos Windows Installer"
     Write-Host ""
     Write-Host "Usage: pwsh install-windows.ps1 [-Force]"
     Write-Host ""
@@ -23,26 +23,26 @@ if ($Help) {
 
 $ErrorActionPreference = "Stop"
 
-# Check if LOQ-J distribution exists
-$sourceDir = Join-Path $PSScriptRoot "..\build\install\loqj"
+# Check if Talos distribution exists
+$sourceDir = Join-Path $PSScriptRoot "..\build\install\talos"
 if (-not (Test-Path $sourceDir)) {
-    Write-Error "LOQ-J distribution not found at $sourceDir"
+    Write-Error "Talos distribution not found at $sourceDir"
     Write-Host "Please run: ./gradlew clean installDist"
     exit 1
 }
 
 # Target installation directory
-$installDir = Join-Path $env:LOCALAPPDATA "Programs\loqj"
+$installDir = Join-Path $env:LOCALAPPDATA "Programs\talos"
 $binDir = Join-Path $installDir "bin"
 
 # Check if already installed
 if ((Test-Path $installDir) -and -not $Force) {
-    Write-Host "LOQ-J is already installed at $installDir"
-    Write-Host "Use -Force to reinstall or run: loqj --version"
+    Write-Host "Talos is already installed at $installDir"
+    Write-Host "Use -Force to reinstall or run: talos --version"
     exit 0
 }
 
-Write-Host "Installing LOQ-J to $installDir..."
+Write-Host "Installing Talos to $installDir..."
 
 # Remove existing installation if present
 if (Test-Path $installDir) {
@@ -86,14 +86,14 @@ if ($binDir -notin $pathEntries) {
 }
 
 Write-Host ""
-Write-Host "✅ LOQ-J installed successfully!"
+Write-Host "✅ Talos installed successfully!"
 Write-Host ""
 Write-Host "To verify installation:"
 Write-Host "  1. Open a new PowerShell/Command Prompt window"
-Write-Host "  2. Run: loqj --version"
+Write-Host "  2. Run: talos --version"
 Write-Host ""
-Write-Host "To start using LOQ-J:"
-Write-Host "  loqj                    # Interactive mode"
-Write-Host "  loqj status             # Check workspace status"
-Write-Host "  loqj rag-index          # Index current directory"
-Write-Host "  loqj rag-ask \"question\" # Ask about your code"
+Write-Host "To start using Talos:"
+Write-Host "  talos                    # Interactive mode"
+Write-Host "  talos status             # Check workspace status"
+Write-Host "  talos rag-index          # Index current directory"
+Write-Host "  talos rag-ask \"question\" # Ask about your code"
