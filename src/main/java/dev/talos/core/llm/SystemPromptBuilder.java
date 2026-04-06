@@ -217,9 +217,18 @@ public final class SystemPromptBuilder {
 
     private static final String DEFAULT_TOOLS_PREAMBLE = """
             Available Tools
-            You have access to the following tools. When a user's request would benefit \
-            from using a tool, describe which tool you would call and with what parameters. \
-            Do not fabricate tool results.""";
+            You have access to the following tools. To invoke a tool, emit a tool_call block:
+            
+            <tool_call>
+            {"name": "tool_name", "parameters": {"key": "value"}}
+            </tool_call>
+            
+            Rules:
+            - You may emit multiple tool_call blocks in one response.
+            - After each tool call, the result will be returned in a follow-up message. Use the result to answer the user.
+            - Do NOT fabricate tool results. Wait for the actual result.
+            - Only call tools that are listed below. Do not invent tool names.
+            - If a tool returns an error, explain the issue to the user.""";
 
     private static final String DEFAULT_CONVERSATION = """
             Conversation Continuity (CRITICAL)
