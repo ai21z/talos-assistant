@@ -93,6 +93,19 @@ public final class ReplRouter {
         // Create ToolCallLoop for agentic tool execution in modes
         ToolCallLoop toolCallLoop = new ToolCallLoop(this.turnProcessor);
 
+        // Build RenderEngine early so the stream sink can reference it
+        this.render = new RenderEngine(this.cfg, redactor, out == null ? System.out : out);
+
+        // Stream sink: stops spinner on first chunk and prints directly to stdout.
+        // Modes use ctx.streamSink() to emit tokens as they arrive from the LLM.
+        final PrintStream stdout = (out == null ? System.out : out);
+        final RenderEngine renderRef = this.render;
+        java.util.function.Consumer<String> sink = chunk -> {
+            renderRef.stopSpinner();
+            stdout.print(chunk);
+            stdout.flush();
+        };
+
         this.ctx = Context.builder(this.cfg)
                 .limits(limits)
                 .session(this.session)
@@ -106,6 +119,7 @@ public final class ReplRouter {
                 .toolRegistry(toolRegistry)
                 .conversationManager(conversationManager)
                 .toolCallLoop(toolCallLoop)
+                .streamSink(sink)
                 .build();
 
 
@@ -113,7 +127,6 @@ public final class ReplRouter {
         // after each turn instead of modes calling ctx.memory().update() directly
         this.turnProcessor.addListener(new MemoryUpdateListener(conversationManager));
 
-        this.render = new RenderEngine(this.cfg, redactor, out == null ? System.out : out);
 
         registerCommands();
     }

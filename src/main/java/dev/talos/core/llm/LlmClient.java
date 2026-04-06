@@ -184,6 +184,39 @@ public final class LlmClient implements AutoCloseable {
                 (timeout == null ? Duration.ofSeconds(90) : timeout), () -> false);
     }
 
+    /**
+     * Streaming chat using structured conversation messages.
+     * Each token chunk is delivered via the {@code onChunk} callback as it arrives.
+     * Returns the fully assembled response.
+     */
+    public String chatStream(List<ChatMessage> messages, Consumer<String> onChunk) {
+        if (mode == TransportMode.PLACEHOLDER) {
+            String full = placeholderFromMessages(messages);
+            if (onChunk != null && !full.isEmpty()) onChunk.accept(full);
+            return full;
+        }
+        return engineAssembledWithMessages(messages, onChunk, Duration.ofSeconds(90), () -> false);
+    }
+
+    /**
+     * Streaming chat with timeout and cancellation support.
+     */
+    public String chatStream(List<ChatMessage> messages,
+                             Consumer<String> onChunk,
+                             Duration timeout,
+                             Supplier<Boolean> cancelled) throws TimeoutException {
+        if (mode == TransportMode.PLACEHOLDER) {
+            if (cancelled != null && Boolean.TRUE.equals(cancelled.get())) return "";
+            String full = placeholderFromMessages(messages);
+            if (cancelled != null && Boolean.TRUE.equals(cancelled.get())) return "";
+            if (onChunk != null && !full.isEmpty()) onChunk.accept(full);
+            return full;
+        }
+        return engineAssembledWithMessages(messages, onChunk,
+                (timeout == null ? Duration.ofSeconds(90) : timeout),
+                (cancelled == null ? () -> false : cancelled));
+    }
+
     /* -------- Convenience (non-RAG) wrappers -------- */
 
     public String chatPlain(String prompt) {

@@ -72,36 +72,64 @@ public final class AskMode implements Mode {
 
         StringBuilder out = new StringBuilder();
         out.append("\n");
+        boolean streamed = false;
         try {
             final List<ChatMessage> msgs = messages;
-            CompletableFuture<String> fut = CompletableFuture.supplyAsync(
-                    () -> ctx.llm().chat(msgs));
-            String answer = fut.get(llmTimeoutMs, TimeUnit.MILLISECONDS);
-            if (answer != null) {
-                // Run tool-call loop if the response contains tool_call blocks
-                if (ctx.toolCallLoop() != null && ToolCallParser.containsToolCalls(answer)) {
-                    LOG.debug("Tool calls detected in LLM response, entering tool-call loop");
-                    ToolCallLoop.LoopResult loopResult = ctx.toolCallLoop().run(
-                            answer, messages, workspace, ctx);
-                    answer = loopResult.finalAnswer();
-                    LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked",
-                            loopResult.iterations(), loopResult.toolsInvoked());
 
-                    // Surface tool-use feedback to the user
-                    String summary = loopResult.summary();
-                    if (summary != null) {
-                        out.append(summary).append("\n\n");
+            // Use streaming when a streamSink is available — tokens appear as they arrive
+            if (ctx.streamSink() != null) {
+                out.append(""); // leading newline already added above
+                String answer = ctx.llm().chatStream(msgs, ctx.streamSink());
+                if (answer != null) {
+                    // If tool calls detected, fall back to non-streaming loop
+                    if (ctx.toolCallLoop() != null && ToolCallParser.containsToolCalls(answer)) {
+                        LOG.debug("Tool calls detected in streamed response, entering tool-call loop");
+                        ToolCallLoop.LoopResult loopResult = ctx.toolCallLoop().run(
+                                answer, messages, workspace, ctx);
+                        answer = loopResult.finalAnswer();
+                        LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked",
+                                loopResult.iterations(), loopResult.toolsInvoked());
+                        String summary = loopResult.summary();
+                        if (summary != null) {
+                            out.append("\n").append(summary).append("\n\n");
+                        }
+                        // Tool-call path: content was NOT fully streamed, use normal result
+                        out.append(answer);
+                    } else {
+                        // No tool calls — content was streamed; record full text for memory
+                        streamed = true;
+                        // Full text kept in out for memory/listener use via Streamed result
+                        out.append(answer);
                     }
-                }
-
-                if (answer.length() > responseMaxChars) {
-                    out.append(answer, 0, (int) responseMaxChars).append("\n\n[output truncated]\n");
                 } else {
-                    out.append(answer);
+                    out.append("(no answer)");
                 }
-                // Memory update is now centralized in TurnProcessor via SessionListener
             } else {
-                out.append("(no answer)");
+                // Non-streaming fallback (tests, non-interactive)
+                CompletableFuture<String> fut = CompletableFuture.supplyAsync(
+                        () -> ctx.llm().chat(msgs));
+                String answer = fut.get(llmTimeoutMs, TimeUnit.MILLISECONDS);
+                if (answer != null) {
+                    if (ctx.toolCallLoop() != null && ToolCallParser.containsToolCalls(answer)) {
+                        LOG.debug("Tool calls detected in LLM response, entering tool-call loop");
+                        ToolCallLoop.LoopResult loopResult = ctx.toolCallLoop().run(
+                                answer, messages, workspace, ctx);
+                        answer = loopResult.finalAnswer();
+                        LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked",
+                                loopResult.iterations(), loopResult.toolsInvoked());
+                        String summary = loopResult.summary();
+                        if (summary != null) {
+                            out.append(summary).append("\n\n");
+                        }
+                    }
+                    if (answer.length() > responseMaxChars) {
+                        out.append(answer, 0, (int) responseMaxChars).append("\n\n[output truncated]\n");
+                    } else {
+                        out.append(answer);
+                    }
+                } else {
+                    out.append("(no answer)");
+                }
             }
         } catch (java.util.concurrent.TimeoutException te) {
             out.append("\n[Timeout: LLM response took too long]\n");
@@ -110,6 +138,9 @@ public final class AskMode implements Mode {
         }
         out.append("\n\n");
 
+        if (streamed) {
+            return Optional.of(new Result.Streamed(out.toString(), ""));
+        }
         return Optional.of(new Result.Ok(out.toString()));
     }
 
