@@ -11,7 +11,7 @@ import dev.talos.core.cache.CacheDb;
 import dev.talos.core.context.ContextPacker;
 import dev.talos.core.context.ContextResult;
 import dev.talos.core.context.TokenBudget;
-import dev.talos.core.rerank.NoOpReranker;
+import dev.talos.core.rerank.ScoreThresholdReranker;
 import dev.talos.core.retrieval.*;
 import dev.talos.core.retrieval.stages.*;
 import dev.talos.core.spi.CorpusStore;
@@ -165,7 +165,8 @@ public class RagService {
      *
      * <p>Source boost applies path-based scoring adjustments after fusion to
      * bias results toward production code when the query is implementation-oriented.
-     * The reranker stage uses NoOpReranker by default; swap in a real reranker later.
+     * The reranker stage uses ScoreThresholdReranker to filter low-confidence
+     * candidates and cap results for focused context packing.
      * Package-private for testability.
      */
     RetrievalPipeline buildDefaultPipeline(CorpusStore store) {
@@ -174,7 +175,7 @@ public class RagService {
                 .addStage(new KnnStage(store))
                 .addStage(new RrfFusionStage(60))
                 .addStage(new SourceBoostStage())
-                .addStage(new RerankerStage(new NoOpReranker()))
+                .addStage(new RerankerStage(new ScoreThresholdReranker()))
                 .addStage(new DedupStage())
                 .build();
     }
