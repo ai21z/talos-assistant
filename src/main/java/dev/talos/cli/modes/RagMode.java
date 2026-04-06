@@ -3,6 +3,7 @@ package dev.talos.cli.modes;
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Limits;
 import dev.talos.cli.repl.Result;
+import dev.talos.core.CfgUtil;
 import dev.talos.core.ingest.ParserUtil;
 import dev.talos.core.rag.RagService;
 import dev.talos.core.context.ContextPacker;
@@ -12,12 +13,17 @@ import dev.talos.core.llm.SystemPromptBuilder;
 import dev.talos.core.search.SnippetBuilder;
 import dev.talos.core.util.Sanitize;
 import dev.talos.core.security.Sandbox;
+import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.ToolCallParser;
+import dev.talos.spi.types.ChatMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -43,6 +49,10 @@ public final class RagMode implements Mode {
         final Limits lim = ctx.limits();
         final int topK = Math.max(1, Math.min(lim.topKMax(), ctx.session().getK()));
 
+        // Limits for timeout
+        var limMap = CfgUtil.map(ctx.cfg().data.get("limits"));
+        long llmTimeoutMs = CfgUtil.longAt(limMap, "llm_timeout_ms", 300_000L);
+
         // Pin files mentioned in the question
         var pinnedSnips = pinFiles(workspace, q, 3, 1600, lim.dirDepthMax());
 
@@ -65,9 +75,12 @@ public final class RagMode implements Mode {
         }
         List<ContextResult.Snippet> regularCtx = prepared.snippets();
 
-        // Load system prompt — composed from sections, tool-aware
+        // Load system prompt — composed from sections, tool-aware, history-aware
+        boolean hasHistory = (ctx.conversationManager() != null && ctx.conversationManager().hasHistory())
+                || (ctx.memory() != null && ctx.memory().hasContent());
         String system = SystemPromptBuilder.forRag()
                 .withTools(ctx.toolRegistry())
+                .withHistory(hasHistory)
                 .build();
 
         ContextPacker packer = new ContextPacker(TokenBudget.fromConfig(ctx.cfg()));
@@ -80,7 +93,6 @@ public final class RagMode implements Mode {
             ctxMaps.add(Map.of("path", anchoredPath, "text", s.text()));
         }
 
-
         // Prepend comparison intent if exactly two files are pinned
         String userMessage = q;
         if (isTwoFileComparison) {
@@ -92,17 +104,44 @@ public final class RagMode implements Mode {
                         + q;
         }
 
-        // Call LLM (non-stream), sanitize output (strip preambles & model-added sources), then cap
-        String answer = ctx.llm().chat(system, userMessage, ctxMaps);
-        answer = sanitizeAnswer(answer);
-        answer = Sanitize.sanitizeForOutput(answer);
-        if (answer.length() > lim.responseMaxChars()) {
-            answer = answer.substring(0, (int) lim.responseMaxChars()) + "\n\n[output truncated]";
+        // Build structured conversation messages for /api/chat
+        List<ChatMessage> messages = buildMessages(system, userMessage, ctxMaps, ctx);
+
+        // Call LLM with structured messages (with timeout)
+        StringBuilder out = new StringBuilder();
+        try {
+            CompletableFuture<String> fut = CompletableFuture.supplyAsync(
+                    () -> ctx.llm().chat(messages));
+            String answer = fut.get(llmTimeoutMs, TimeUnit.MILLISECONDS);
+
+            if (answer != null) {
+                // Run tool-call loop if the response contains tool_call blocks
+                if (ctx.toolCallLoop() != null && ToolCallParser.containsToolCalls(answer)) {
+                    LOG.debug("Tool calls detected in RAG response, entering tool-call loop");
+                    ToolCallLoop.LoopResult loopResult = ctx.toolCallLoop().run(
+                            answer, messages, workspace, ctx);
+                    answer = loopResult.finalAnswer();
+                    LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked",
+                            loopResult.iterations(), loopResult.toolsInvoked());
+                }
+
+                answer = sanitizeAnswer(answer);
+                answer = Sanitize.sanitizeForOutput(answer);
+                if (answer.length() > lim.responseMaxChars()) {
+                    answer = answer.substring(0, (int) lim.responseMaxChars()) + "\n\n[output truncated]";
+                }
+                out.append(answer);
+            } else {
+                out.append("(no answer)");
+            }
+        } catch (java.util.concurrent.TimeoutException te) {
+            out.append("\n[Timeout: LLM response took too long]\n");
+        } catch (Exception e) {
+            LOG.warn("LLM call failed in RAG mode: {}", e.getMessage());
+            out.append("\n[Error during LLM call]\n");
         }
 
         // Build citations section from ContextResult - paths normalized to forward slashes
-        StringBuilder out = new StringBuilder();
-        out.append(answer);
         if (!packed.citations().isEmpty()) {
             out.append("\n\n[Sources]\n");
             Set<String> shown = new LinkedHashSet<>();
@@ -117,6 +156,69 @@ public final class RagMode implements Mode {
         // Memory update is now centralized in TurnProcessor via SessionListener
 
         return Optional.of(new Result.Ok(out.toString()));
+    }
+
+    /**
+     * Builds a structured list of ChatMessages for the /api/chat endpoint.
+     *
+     * <p>Includes: system prompt → budget-aware prior conversation turns →
+     * RAG context block (snippets) → current user message.
+     * Uses {@code ConversationManager.buildHistory()} when available to respect
+     * context window limits. Falls back to raw {@code SessionMemory.getTurns()}
+     * for backward compatibility.
+     *
+     * <p>RAG context snippets are injected as a user-role message immediately
+     * before the current question, keeping the system prompt stable across turns.
+     *
+     * @param system      the system prompt text
+     * @param userMessage the current user question (possibly with comparison prefix)
+     * @param ctxMaps     the packed RAG context snippets (path → text maps)
+     * @param ctx         runtime context (provides conversation history)
+     * @return mutable list of ChatMessages ready for the LLM
+     */
+    static List<ChatMessage> buildMessages(String system, String userMessage,
+                                           List<Map<String,String>> ctxMaps, Context ctx) {
+        List<ChatMessage> messages = new ArrayList<>();
+        messages.add(ChatMessage.system(system));
+
+        // Add prior conversation turns from ConversationManager (budget-aware) or memory (legacy)
+        List<ChatMessage> history = List.of();
+        if (ctx.conversationManager() != null) {
+            history = ctx.conversationManager().buildHistory();
+        } else if (ctx.memory() != null) {
+            history = ctx.memory().getTurns();
+        }
+
+        if (!history.isEmpty()) {
+            messages.addAll(history);
+            LOG.debug("buildMessages: including {} history turns ({} exchanges)",
+                    history.size(), history.size() / 2);
+        } else {
+            LOG.debug("buildMessages: no history turns (first message in session)");
+        }
+
+        // Inject RAG context as a user-role message before the actual question.
+        // This keeps the system prompt stable across turns while giving the model
+        // the retrieved evidence it needs to ground its answer.
+        if (ctxMaps != null && !ctxMaps.isEmpty()) {
+            StringBuilder contextBlock = new StringBuilder();
+            contextBlock.append("Here is the retrieved context from the codebase. ");
+            contextBlock.append("Use these snippets to answer the question that follows.\n\n");
+            for (var m : ctxMaps) {
+                String path = m.getOrDefault("path", "");
+                String text = m.getOrDefault("text", "");
+                if (!path.isBlank()) contextBlock.append("[").append(path).append("]\n");
+                if (!text.isBlank()) contextBlock.append(text).append("\n\n");
+            }
+            messages.add(ChatMessage.user(contextBlock.toString().stripTrailing()));
+        }
+
+        // Add current user message
+        messages.add(ChatMessage.user(userMessage));
+        LOG.debug("buildMessages: total {} messages (1 system + {} history + {} context + 1 current)",
+                messages.size(), history.size(),
+                (ctxMaps != null && !ctxMaps.isEmpty()) ? 1 : 0);
+        return messages;
     }
 
     /**
