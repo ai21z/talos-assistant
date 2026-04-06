@@ -5,7 +5,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 /**
  * Registry of available TalosTool instances.
- * Future MCP/tool integration layers discover tools via this registry.
+ * Tools are discovered and executed via this registry by the runtime
+ * (TurnProcessor) and future MCP/tool integration layers.
  */
 public final class ToolRegistry {
     private final Map<String, TalosTool> tools = new ConcurrentHashMap<>();
@@ -18,18 +19,30 @@ public final class ToolRegistry {
     public Map<String, TalosTool> all() {
         return Map.copyOf(tools);
     }
-    /** List descriptors of all registered tools (for MCP discovery). */
+    /** Returns true if at least one tool is registered. */
+    public boolean isEmpty() {
+        return tools.isEmpty();
+    }
+    /** List descriptors of all registered tools (for MCP discovery and system prompt). */
     public List<ToolDescriptor> descriptors() {
         return tools.values().stream()
                 .map(TalosTool::descriptor)
                 .collect(Collectors.toUnmodifiableList());
     }
-    /** Execute a tool call by name, returning a ToolResult. */
+    /** Execute a tool call by name (legacy, no context). */
     public ToolResult execute(ToolCall call) {
         TalosTool tool = tools.get(call.toolName());
         if (tool == null) {
             return ToolResult.fail(ToolError.notFound("Unknown tool: " + call.toolName()));
         }
         return tool.execute(call);
+    }
+    /** Execute a tool call by name with workspace context (preferred). */
+    public ToolResult execute(ToolCall call, ToolContext ctx) {
+        TalosTool tool = tools.get(call.toolName());
+        if (tool == null) {
+            return ToolResult.fail(ToolError.notFound("Unknown tool: " + call.toolName()));
+        }
+        return tool.execute(call, ctx);
     }
 }
