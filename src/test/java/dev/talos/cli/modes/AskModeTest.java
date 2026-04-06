@@ -153,33 +153,29 @@ class AskModeTest {
     }
 
     @Test
-    void handle_stores_structured_turns_in_memory() throws Exception {
+    void handle_does_not_update_memory_directly() throws Exception {
+        // Memory updates are now centralized in TurnProcessor via MemoryUpdateListener.
+        // AskMode.handle() should NOT call memory.update() — that's the TurnProcessor's job.
         var memory = new SessionMemory();
         var ctx = Context.builder(new Config()).memory(memory).build();
         var mode = new AskMode();
 
         mode.handle("first question", WS, ctx);
-        List<ChatMessage> turns = memory.getTurns();
-        assertEquals(2, turns.size(), "One turn = user + assistant");
-        assertEquals("user", turns.get(0).role());
-        assertEquals("first question", turns.get(0).content());
-        assertEquals("assistant", turns.get(1).role());
-
-        mode.handle("second question", WS, ctx);
-        turns = memory.getTurns();
-        assertEquals(4, turns.size(), "Two turns = 2 × (user + assistant)");
-        assertEquals("second question", turns.get(2).content());
+        // Memory should be empty because AskMode no longer writes to it directly
+        assertFalse(memory.hasContent(),
+                "AskMode should not update memory directly (centralized in TurnProcessor)");
+        assertTrue(memory.getTurns().isEmpty(),
+                "No structured turns should be added by AskMode directly");
     }
 
     @Test
-    void handle_second_turn_buildMessages_includes_first_turn() throws Exception {
+    void handle_second_turn_buildMessages_uses_conversationManager() throws Exception {
+        // Simulate what happens when ConversationManager has history from prior turns
+        // (populated by TurnProcessor's MemoryUpdateListener, not AskMode)
         var memory = new SessionMemory();
+        memory.update("make me ascii art", "Here is some ASCII art!");
         var ctx = Context.builder(new Config()).memory(memory).build();
-        var mode = new AskMode();
 
-        mode.handle("make me ascii art", WS, ctx);
-
-        // Now buildMessages for a second turn should include the first
         List<ChatMessage> msgs = AskMode.buildMessages("sys", "a shield", ctx);
         assertTrue(msgs.size() >= 4, "Should have system + prior pair + current user");
         assertTrue(msgs.stream().anyMatch(m -> "make me ascii art".equals(m.content())),
@@ -189,29 +185,26 @@ class AskModeTest {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  Memory updates after LLM call
+    //  Memory updates are now centralized in TurnProcessor
     // ═══════════════════════════════════════════════════════════════════════
 
     @Test
-    void handle_updates_memory_after_successful_response() throws Exception {
-        var memory = new SessionMemory();
-        var ctx = Context.builder(new Config()).memory(memory).build();
+    void handle_returns_ok_result_for_memory_listener() throws Exception {
+        // TurnProcessor's MemoryUpdateListener extracts the answer from Result.Ok
+        // Verify AskMode returns a Result.Ok with content that can be recorded
+        var ctx = Context.builder(new Config()).build();
         var mode = new AskMode();
 
-        assertFalse(memory.hasContent(), "Memory should be empty before first turn");
-
-        // PLACEHOLDER mode produces a deterministic response
         Optional<Result> result = mode.handle("hello there", WS, ctx);
         assertTrue(result.isPresent());
-
-        assertTrue(memory.hasContent(), "Memory should have content after first turn");
-        String content = memory.get();
-        assertTrue(content.contains("hello there"),
-                "Memory should contain user input");
+        assertInstanceOf(Result.Ok.class, result.get());
+        assertFalse(result.get().toString().isBlank(),
+                "Result should contain content for memory recording");
     }
 
     @Test
-    void handle_accumulates_multiple_turns_in_memory() throws Exception {
+    void handle_does_not_accumulate_memory_directly() throws Exception {
+        // Verifies the architectural change: modes don't own memory management
         var memory = new SessionMemory();
         var ctx = Context.builder(new Config()).memory(memory).build();
         var mode = new AskMode();
@@ -219,41 +212,25 @@ class AskModeTest {
         mode.handle("first question", WS, ctx);
         mode.handle("second question", WS, ctx);
 
-        String content = memory.get();
-        assertTrue(content.contains("first question"),
-                "Memory should contain first turn");
-        assertTrue(content.contains("second question"),
-                "Memory should contain second turn");
+        // Memory should remain empty — only TurnProcessor writes to it
+        assertFalse(memory.hasContent(),
+                "AskMode should not accumulate turns in memory directly");
     }
 
     @Test
-    void handle_sends_history_to_llm_on_second_turn() throws Exception {
+    void handle_returns_content_across_multiple_turns() throws Exception {
         var memory = new SessionMemory();
         var ctx = Context.builder(new Config()).memory(memory).build();
         var mode = new AskMode();
 
         // Turn 1
-        mode.handle("make me ascii art", WS, ctx);
-        assertTrue(memory.hasContent(), "Memory should have content after turn 1");
+        Optional<Result> r1 = mode.handle("make me ascii art", WS, ctx);
+        assertTrue(r1.isPresent());
 
-        // Verify that buildContextualPrompt now includes the history
-        String prompt = AskMode.buildContextualPrompt("a cat please", ctx);
-        assertTrue(prompt.contains("[Conversation so far]"),
-                "Second turn prompt should include conversation history header");
-        assertTrue(prompt.contains("make me ascii art"),
-                "Second turn prompt should include first turn's input");
-        assertTrue(prompt.contains("[Current message]"),
-                "Second turn prompt should include current message header");
-        assertTrue(prompt.endsWith("a cat please"),
-                "Second turn prompt should end with current input");
-
-        // Turn 2
-        mode.handle("a cat please", WS, ctx);
-        String afterTurn2 = memory.get();
-        assertTrue(afterTurn2.contains("make me ascii art"),
-                "Memory after turn 2 should still contain turn 1 input");
-        assertTrue(afterTurn2.contains("a cat please"),
-                "Memory after turn 2 should contain turn 2 input");
+        // Turn 2 — AskMode reads history from ConversationManager
+        // (history would be populated by TurnProcessor, not by AskMode)
+        Optional<Result> r2 = mode.handle("a cat please", WS, ctx);
+        assertTrue(r2.isPresent());
     }
 
     // ═══════════════════════════════════════════════════════════════════════

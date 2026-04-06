@@ -3,6 +3,7 @@ package dev.talos.cli.modes;
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
 import dev.talos.core.CfgUtil;
+import dev.talos.core.llm.SystemPromptBuilder;
 import dev.talos.spi.types.ChatMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,8 +57,13 @@ public final class AskMode implements Mode {
         long responseMaxChars = CfgUtil.longAt(lim, "response_max_chars", 10 * 1024 * 1024L);
         long llmTimeoutMs     = CfgUtil.longAt(lim, "llm_timeout_ms", 300_000L);
 
-        // System prompt for Ask
-        String system = readResourceOrDefault("prompts/ask-system.txt");
+        // System prompt — composed from sections, tool-aware, history-aware
+        boolean hasHistory = (ctx.conversationManager() != null && ctx.conversationManager().hasHistory())
+                || (ctx.memory() != null && ctx.memory().hasContent());
+        String system = SystemPromptBuilder.forAsk()
+                .withTools(ctx.toolRegistry())
+                .withHistory(hasHistory)
+                .build();
 
         // Build structured conversation messages for /api/chat
         List<ChatMessage> messages = buildMessages(system, rawLine, ctx);
@@ -75,8 +81,7 @@ public final class AskMode implements Mode {
                 } else {
                     out.append(answer);
                 }
-                // Update session memory with the user input and answer
-                updateMemory(ctx, rawLine, answer);
+                // Memory update is now centralized in TurnProcessor via SessionListener
             } else {
                 out.append("(no answer)");
             }
@@ -93,24 +98,29 @@ public final class AskMode implements Mode {
     /**
      * Builds a structured list of ChatMessages for the /api/chat endpoint.
      *
-     * <p>Includes: system prompt → prior conversation turns → current user message.
-     * This gives the model properly role-tagged conversation history, which is
-     * far more effective than injecting flat text into a single prompt.
+     * <p>Includes: system prompt → budget-aware prior conversation turns → current user message.
+     * Uses {@code ConversationManager.buildHistory()} when available to respect
+     * context window limits. Falls back to raw {@code SessionMemory.getTurns()}
+     * for backward compatibility.
      */
     static List<ChatMessage> buildMessages(String system, String rawLine, Context ctx) {
         List<ChatMessage> messages = new ArrayList<>();
         messages.add(ChatMessage.system(system));
 
-        // Add prior conversation turns from memory
-        if (ctx.memory() != null) {
-            List<ChatMessage> history = ctx.memory().getTurns();
-            if (history != null && !history.isEmpty()) {
-                messages.addAll(history);
-                LOG.debug("buildMessages: including {} history turns ({} exchanges)",
-                        history.size(), history.size() / 2);
-            } else {
-                LOG.debug("buildMessages: no history turns (first message in session)");
-            }
+        // Add prior conversation turns from ConversationManager (budget-aware) or memory (legacy)
+        List<ChatMessage> history = List.of();
+        if (ctx.conversationManager() != null) {
+            history = ctx.conversationManager().buildHistory();
+        } else if (ctx.memory() != null) {
+            history = ctx.memory().getTurns();
+        }
+
+        if (!history.isEmpty()) {
+            messages.addAll(history);
+            LOG.debug("buildMessages: including {} history turns ({} exchanges)",
+                    history.size(), history.size() / 2);
+        } else {
+            LOG.debug("buildMessages: no history turns (first message in session)");
         }
 
         // Add current user message
@@ -140,21 +150,5 @@ public final class AskMode implements Mode {
         return "[Conversation so far]\n" + history + "\n\n[Current message]\n" + rawLine;
     }
 
-    /**
-     * Records the turn in session memory for future context.
-     * Safe to call with null memory (no-op).
-     */
-    private static void updateMemory(Context ctx, String userInput, String answer) {
-        if (ctx.memory() != null && answer != null && !answer.isBlank()) {
-            ctx.memory().update(userInput, answer);
-        }
-    }
 
-    private static String readResourceOrDefault(String resource) throws Exception {
-        try (var in = AskMode.class.getClassLoader().getResourceAsStream(resource)) {
-            if (in != null) return new String(in.readAllBytes());
-        }
-        // minimal default
-        return "You are a concise assistant. Answer clearly.\n";
-    }
 }

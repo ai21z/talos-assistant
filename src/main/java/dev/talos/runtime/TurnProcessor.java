@@ -3,10 +3,13 @@ package dev.talos.runtime;
 import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
+import dev.talos.tools.*;
 
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Processes a single user turn (prompt → result) through the mode system.
@@ -17,8 +20,9 @@ import java.util.Optional;
  * <ul>
  *   <li>session-aware turn tracking</li>
  *   <li>timing and trace capture</li>
- *   <li>future approval gate integration</li>
- *   <li>future transcript persistence</li>
+ *   <li>tool execution with sandbox enforcement</li>
+ *   <li>approval gate integration for sensitive tools</li>
+ *   <li>centralized post-turn hooks via {@link SessionListener}</li>
  * </ul>
  *
  * <p>Commands (colon-prefixed) bypass TurnProcessor and are handled
@@ -28,23 +32,48 @@ public final class TurnProcessor {
 
     private final ModeController modes;
     private final ApprovalGate approvalGate;
+    private final ToolRegistry toolRegistry;
+    private final List<SessionListener> listeners = new CopyOnWriteArrayList<>();
 
-    public TurnProcessor(ModeController modes, ApprovalGate approvalGate) {
+    public TurnProcessor(ModeController modes, ApprovalGate approvalGate, ToolRegistry toolRegistry) {
         this.modes = modes;
         this.approvalGate = (approvalGate != null) ? approvalGate : new NoOpApprovalGate();
+        this.toolRegistry = (toolRegistry != null) ? toolRegistry : new ToolRegistry();
+    }
+
+    public TurnProcessor(ModeController modes, ApprovalGate approvalGate) {
+        this(modes, approvalGate, new ToolRegistry());
     }
 
     public TurnProcessor(ModeController modes) {
-        this(modes, new NoOpApprovalGate());
+        this(modes, new NoOpApprovalGate(), new ToolRegistry());
+    }
+
+    /** Register a session lifecycle listener for post-turn hooks. */
+    public void addListener(SessionListener listener) {
+        if (listener != null) {
+            listeners.add(listener);
+        }
+    }
+
+    /** Fire onSessionEnd on all registered listeners. */
+    public void fireSessionEnd() {
+        for (SessionListener l : listeners) {
+            try { l.onSessionEnd(); } catch (Exception ignored) { }
+        }
     }
 
     /**
      * Process a single user prompt through the mode system.
      *
+     * <p>After a successful turn, all registered {@link SessionListener}s
+     * receive an {@code onTurnComplete} callback with the result and the
+     * original user input. This centralizes memory updates, audit logging,
+     * and future transcript persistence.
+     *
      * <p>Exceptions are <em>not</em> caught here — they propagate to the caller
      * (typically {@code ExecutionPipeline}) which owns the error envelope,
-     * redaction, and audit logging. TurnProcessor only handles turn tracking
-     * and timing on the success path.
+     * redaction, and audit logging.
      *
      * @param session   the active session
      * @param userInput raw user input (not a colon-command)
@@ -68,17 +97,82 @@ public final class TurnProcessor {
         }
 
         long elapsedNanos = System.nanoTime() - startNanos;
-        return new TurnResult(
+        TurnResult turnResult = new TurnResult(
                 result.get(),
                 null, // trace — extracted from Prepared in future pass
                 turn,
                 Duration.ofNanos(elapsedNanos)
         );
+
+        // Fire post-turn hooks on all listeners
+        for (SessionListener listener : listeners) {
+            try {
+                listener.onTurnComplete(turnResult, userInput);
+            } catch (Exception ignored) {
+                // Listener errors must not break the turn pipeline
+            }
+        }
+
+        return turnResult;
+    }
+
+    /**
+     * Execute a tool call with full sandbox enforcement and approval gating.
+     *
+     * <p>If the tool's risk level requires approval ({@code WRITE} or {@code DESTRUCTIVE}),
+     * the {@link ApprovalGate} is consulted first. Denied operations return a
+     * failed {@link ToolResult} without executing the tool.
+     *
+     * <p>Builds a {@link ToolContext} from the session and delegates
+     * to the registry. Returns a {@link ToolResult} — never throws.
+     *
+     * @param session the active session (provides workspace + config)
+     * @param call    the tool call to execute
+     * @param ctx     runtime context (provides sandbox)
+     * @return tool execution result
+     */
+    public ToolResult executeTool(Session session, ToolCall call, Context ctx) {
+        if (call == null) {
+            return ToolResult.fail(ToolError.invalidParams("Tool call is null"));
+        }
+
+        // Check if the tool exists
+        TalosTool tool = toolRegistry.get(call.toolName());
+        if (tool == null) {
+            return ToolResult.fail(ToolError.notFound("Unknown tool: " + call.toolName()));
+        }
+
+        // Check risk level and gate approval
+        ToolRiskLevel risk = tool.descriptor().riskLevel();
+        if (risk.requiresApproval()) {
+            String desc = risk.name().toLowerCase().replace('_', ' ')
+                    + " operation: " + call.toolName();
+            String detail = call.param("path") != null
+                    ? "target: " + call.param("path")
+                    : null;
+            if (!approvalGate.approve(desc, detail)) {
+                return ToolResult.fail(ToolError.denied(
+                        "Operation denied by user: " + call.toolName()));
+            }
+        }
+
+        ToolContext toolCtx = new ToolContext(
+                session.workspace(),
+                ctx.sandbox(),
+                session.config()
+        );
+
+        return toolRegistry.execute(call, toolCtx);
     }
 
     /** Access the approval gate (for future use by modes/capabilities). */
     public ApprovalGate approvalGate() {
         return approvalGate;
+    }
+
+    /** Access the tool registry for tool discovery and registration. */
+    public ToolRegistry toolRegistry() {
+        return toolRegistry;
     }
 }
 

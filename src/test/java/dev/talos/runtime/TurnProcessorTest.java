@@ -4,9 +4,11 @@ import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
 import dev.talos.core.Config;
+import dev.talos.tools.*;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -100,6 +102,83 @@ class TurnProcessorTest {
         assertFalse(tp.approvalGate().approve("anything", null));
     }
 
+    // ---- Tool dispatch tests ----
+
+    @Test void executeToolDispatchesToRegisteredTool() {
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new EchoTool());
+
+        var tp = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+        var session = new Session(WS, new Config());
+        var ctx = Context.builder(new Config()).build();
+
+        ToolCall call = new ToolCall("test.echo", Map.of("input", "hello"));
+        ToolResult result = tp.executeTool(session, call, ctx);
+
+        assertTrue(result.success());
+        assertEquals("Echo: hello", result.output());
+    }
+
+    @Test void executeToolReturnsErrorForUnknownTool() {
+        var tp = new TurnProcessor(ModeController.defaultController());
+        var session = new Session(WS, new Config());
+        var ctx = Context.builder(new Config()).build();
+
+        ToolCall call = new ToolCall("nonexistent.tool", Map.of());
+        ToolResult result = tp.executeTool(session, call, ctx);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.NOT_FOUND, result.error().code());
+    }
+
+    @Test void executeToolWithNullCallReturnsError() {
+        var tp = new TurnProcessor(ModeController.defaultController());
+        var session = new Session(WS, new Config());
+        var ctx = Context.builder(new Config()).build();
+
+        ToolResult result = tp.executeTool(session, null, ctx);
+        assertFalse(result.success());
+    }
+
+    @Test void toolRegistryAccessor() {
+        ToolRegistry registry = new ToolRegistry();
+        var tp = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+        assertSame(registry, tp.toolRegistry());
+    }
+
+    @Test void toolReceivesWorkspaceFromSession() {
+        ToolRegistry registry = new ToolRegistry();
+        // Tool that records the workspace it received
+        registry.register(new TalosTool() {
+            @Override public String name() { return "test.ws"; }
+            @Override public String description() { return "test"; }
+            @Override public ToolDescriptor descriptor() { return new ToolDescriptor("test.ws", "test"); }
+            @Override public ToolResult execute(ToolCall call) { return ToolResult.fail("no context"); }
+            @Override public ToolResult execute(ToolCall call, ToolContext ctx) {
+                return ToolResult.ok(ctx.workspace().toString());
+            }
+        });
+
+        var tp = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+        var session = new Session(WS, new Config());
+        var ctx = Context.builder(new Config()).build();
+
+        ToolResult result = tp.executeTool(session, new ToolCall("test.ws", Map.of()), ctx);
+        assertTrue(result.success());
+        assertEquals(WS.toString(), result.output());
+    }
+
+    // ---- Test tools ----
+
+    private static class EchoTool implements TalosTool {
+        @Override public String name() { return "test.echo"; }
+        @Override public String description() { return "Echoes input"; }
+        @Override public ToolDescriptor descriptor() { return new ToolDescriptor("test.echo", "Echoes input"); }
+        @Override public ToolResult execute(ToolCall call) {
+            return ToolResult.ok("Echo: " + call.param("input", "(empty)"));
+        }
+    }
+
     // ---- Stub mode for isolated testing ----
 
     private static class StubMode implements dev.talos.cli.modes.Mode {
@@ -118,6 +197,4 @@ class TurnProcessorTest {
         }
     }
 }
-
-
 
