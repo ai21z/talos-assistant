@@ -190,7 +190,7 @@ class PromptRouterTest {
     @Test
     void bare_pascal_case_without_question_routes_to_assist() {
         // Bare PascalCase with no question context: not enough evidence.
-        // User can type "what is RagService" or ":mode rag RagService" instead.
+        // User can type "what is RagService" or "/mode rag RagService" instead.
         assertEquals(ASSIST, PromptRouter.route("RagService"));
         assertEquals(ASSIST, PromptRouter.route("ModeController"));
     }

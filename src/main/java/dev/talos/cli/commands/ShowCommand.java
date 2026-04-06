@@ -18,13 +18,13 @@ public final class ShowCommand implements Command {
     @Override public CommandSpec spec() {
         return new CommandSpec("show",
                 List.of(),
-                ":show <rel>#<chunk>",
+                "/show <rel>#<chunk>",
                 "Display specific snippet by file path and chunk ID.");
     }
 
     @Override public Result execute(String args, Context ctx) {
         if (args == null || args.trim().isEmpty()) {
-            return new Result.Error("Usage: :show <rel>#<chunk>  (e.g., :show src/main/Main.java#0)", 400);
+            return new Result.Error("Usage: /show <rel>#<chunk>  (e.g., /show src/main/Main.java#0)", 400);
         }
 
         String input = args.trim();

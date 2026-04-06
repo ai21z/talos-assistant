@@ -21,7 +21,7 @@ public final class ExecutionPipeline {
      *
      * @param op     Work that returns a Result (may return null) and can throw
      * @param ctx    Runtime context (limits, audit, redactor, etc.)
-     * @param label  Short label for audit/diagnostics (e.g., ":help", "(prompt)")
+     * @param label  Short label for audit/diagnostics (e.g., "/help", "(prompt)")
      */
     public Result run(Op<Result> op, Context ctx, String label) {
         // 1) Rate limit (global per ReplRouter instance)

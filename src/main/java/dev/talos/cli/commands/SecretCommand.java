@@ -31,7 +31,7 @@ public final class SecretCommand implements Command {
 
     @Override
     public CommandSpec spec() {
-        return new CommandSpec("secret", List.of(), ":secret set|get|del <key>",
+        return new CommandSpec("secret", List.of(), "/secret set|get|del <key>",
                 "Manage local secrets (encrypted-at-rest).");
     }
 
@@ -95,7 +95,7 @@ public final class SecretCommand implements Command {
     }
 
     private Result usage() {
-        return new Result.Error("Usage: :secret set|get|del <key>", 201);
+        return new Result.Error("Usage: /secret set|get|del <key>", 201);
     }
 
     /* ---------- io helpers ---------- */

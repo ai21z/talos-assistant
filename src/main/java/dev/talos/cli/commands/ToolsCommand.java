@@ -14,7 +14,7 @@ public final class ToolsCommand implements Command {
 
     @Override
     public CommandSpec spec() {
-        return new CommandSpec("tools", List.of("t"), ":tools", "List registered tools.", CommandGroup.DEBUG);
+        return new CommandSpec("tools", List.of("t"), "/tools", "List registered tools.", CommandGroup.DEBUG);
     }
 
     @Override
