@@ -83,7 +83,7 @@ public final class CfgUtil {
         Map<String, Object> result = new LinkedHashMap<>();
         System.getenv().forEach((key, val) -> {
             if (!key.startsWith("TALOS__")) return;
-            String rest = key.substring(6); // strip "TALOS__"
+            String rest = key.substring(7); // strip "TALOS__" (7 chars)
             String[] parts = rest.split("__");
             if (parts.length == 0) return;
 

@@ -54,7 +54,7 @@ dependencies {
 
     // Config / Storage / Logging
     implementation("org.yaml:snakeyaml:${project.property("snakeyamlVersion")}")
-    implementation("org.xerial:sqlite-jdbc:${project.property("sqliteJdbcVersion")}")
+    implementation("org.xerial:sqlite-jdbc:3.46.0.0")
     implementation("com.fasterxml.jackson.core:jackson-databind:${project.property("jacksonVersion")}")
     implementation("com.fasterxml.jackson.core:jackson-annotations:${project.property("jacksonVersion")}")
     implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:${project.property("jacksonVersion")}")
@@ -73,8 +73,6 @@ dependencies {
     implementation("org.jline:jline:3.26.3")
     implementation("org.fusesource.jansi:jansi:2.4.1")
 
-    // SQLite (for caching/memory; harmless if unused)
-    implementation("org.xerial:sqlite-jdbc:3.46.0.0")
 
     // --- Security override: CVE-2025-48924 (commons-lang3) ---
     // poi-ooxml (and possibly others) can bring a vulnerable commons-lang3 transitively.
