@@ -117,7 +117,11 @@ public final class TurnProcessor {
     }
 
     /**
-     * Execute a tool call with full sandbox enforcement.
+     * Execute a tool call with full sandbox enforcement and approval gating.
+     *
+     * <p>If the tool's risk level requires approval ({@code WRITE} or {@code DESTRUCTIVE}),
+     * the {@link ApprovalGate} is consulted first. Denied operations return a
+     * failed {@link ToolResult} without executing the tool.
      *
      * <p>Builds a {@link ToolContext} from the session and delegates
      * to the registry. Returns a {@link ToolResult} — never throws.
@@ -130,6 +134,26 @@ public final class TurnProcessor {
     public ToolResult executeTool(Session session, ToolCall call, Context ctx) {
         if (call == null) {
             return ToolResult.fail(ToolError.invalidParams("Tool call is null"));
+        }
+
+        // Check if the tool exists
+        TalosTool tool = toolRegistry.get(call.toolName());
+        if (tool == null) {
+            return ToolResult.fail(ToolError.notFound("Unknown tool: " + call.toolName()));
+        }
+
+        // Check risk level and gate approval
+        ToolRiskLevel risk = tool.descriptor().riskLevel();
+        if (risk.requiresApproval()) {
+            String desc = risk.name().toLowerCase().replace('_', ' ')
+                    + " operation: " + call.toolName();
+            String detail = call.param("path") != null
+                    ? "target: " + call.param("path")
+                    : null;
+            if (!approvalGate.approve(desc, detail)) {
+                return ToolResult.fail(ToolError.denied(
+                        "Operation denied by user: " + call.toolName()));
+            }
         }
 
         ToolContext toolCtx = new ToolContext(

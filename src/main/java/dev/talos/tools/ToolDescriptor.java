@@ -3,18 +3,29 @@ package dev.talos.tools;
 import java.util.Objects;
 
 /**
- * Describes a tool's identity, purpose, and parameter schema.
+ * Describes a tool's identity, purpose, parameter schema, and risk level.
  * Used for tool discovery and documentation by external callers (MCP, agent layers).
+ *
+ * <p>The {@link #riskLevel()} determines whether the {@link dev.talos.runtime.ApprovalGate}
+ * requires user confirmation before execution. {@link ToolRiskLevel#READ_ONLY} tools
+ * are auto-approved; {@link ToolRiskLevel#WRITE} and {@link ToolRiskLevel#DESTRUCTIVE}
+ * tools require explicit approval.
  */
-public record ToolDescriptor(String name, String description, String parametersSchema) {
+public record ToolDescriptor(String name, String description, String parametersSchema, ToolRiskLevel riskLevel) {
     public ToolDescriptor {
         Objects.requireNonNull(name, "name must not be null");
         Objects.requireNonNull(description, "description must not be null");
+        if (riskLevel == null) riskLevel = ToolRiskLevel.READ_ONLY;
     }
 
-    /** Convenience constructor for tools without a formal schema. */
+    /** Constructor with schema but no explicit risk level (defaults to READ_ONLY). */
+    public ToolDescriptor(String name, String description, String parametersSchema) {
+        this(name, description, parametersSchema, ToolRiskLevel.READ_ONLY);
+    }
+
+    /** Convenience constructor for tools without schema or risk level. */
     public ToolDescriptor(String name, String description) {
-        this(name, description, null);
+        this(name, description, null, ToolRiskLevel.READ_ONLY);
     }
 }
 
