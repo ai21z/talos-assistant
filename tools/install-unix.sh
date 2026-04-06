@@ -1,12 +1,12 @@
 #!/bin/bash
-# LOQ-J Unix/Linux/macOS Installation Script
-# Installs LOQ-J to user's local directory and adds to PATH
+# Talos Unix/Linux/macOS Installation Script
+# Installs Talos to user's local directory and adds to PATH
 
 set -e
 
 show_help() {
     cat << EOF
-LOQ-J Unix/Linux/macOS Installer
+Talos Unix/Linux/macOS Installer
 
 Usage: bash install-unix.sh [OPTIONS]
 
@@ -16,8 +16,8 @@ Options:
   --help      Show this help message
 
 Default behavior:
-  - Installs to ~/.local/loqj
-  - Adds ~/.local/loqj/bin to PATH via shell profile
+  - Installs to ~/.local/talos
+  - Adds ~/.local/talos/bin to PATH via shell profile
 EOF
 }
 
@@ -47,34 +47,34 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Check if LOQ-J distribution exists
-SOURCE_DIR="$(dirname "$0")/../build/install/loqj"
+# Check if Talos distribution exists
+SOURCE_DIR="$(dirname "$0")/../build/install/talos"
 if [[ ! -d "$SOURCE_DIR" ]]; then
-    echo "Error: LOQ-J distribution not found at $SOURCE_DIR"
+    echo "Error: Talos distribution not found at $SOURCE_DIR"
     echo "Please run: ./gradlew clean installDist"
     exit 1
 fi
 
 # Determine installation directory
 if [[ "$USE_SUDO" == "true" ]]; then
-    INSTALL_DIR="/usr/local/loqj"
+    INSTALL_DIR="/usr/local/talos"
     BIN_DIR="/usr/local/bin"
     NEEDS_SUDO=true
 else
-    INSTALL_DIR="$HOME/.local/loqj"
-    BIN_DIR="$HOME/.local/loqj/bin"
+    INSTALL_DIR="$HOME/.local/talos"
+    BIN_DIR="$HOME/.local/talos/bin"
     NEEDS_SUDO=false
     mkdir -p "$HOME/.local"
 fi
 
 # Check if already installed
 if [[ -d "$INSTALL_DIR" ]] && [[ "$FORCE" != "true" ]]; then
-    echo "LOQ-J is already installed at $INSTALL_DIR"
-    echo "Use --force to reinstall or run: loqj --version"
+    echo "Talos is already installed at $INSTALL_DIR"
+    echo "Use --force to reinstall or run: talos --version"
     exit 0
 fi
 
-echo "Installing LOQ-J to $INSTALL_DIR..."
+echo "Installing Talos to $INSTALL_DIR..."
 
 # Remove existing installation if present
 if [[ -d "$INSTALL_DIR" ]]; then
@@ -90,18 +90,18 @@ fi
 echo "Copying files..."
 if [[ "$NEEDS_SUDO" == "true" ]]; then
     sudo cp -r "$SOURCE_DIR" "$INSTALL_DIR"
-    sudo chmod +x "$INSTALL_DIR/bin/loqj"
+    sudo chmod +x "$INSTALL_DIR/bin/talos"
 else
     cp -r "$SOURCE_DIR" "$INSTALL_DIR"
-    chmod +x "$INSTALL_DIR/bin/loqj"
+    chmod +x "$INSTALL_DIR/bin/talos"
 fi
 
 # Handle PATH setup
 if [[ "$USE_SUDO" == "true" ]]; then
     # System-wide installation - create symlink
-    if [[ ! -f "/usr/local/bin/loqj" ]]; then
+    if [[ ! -f "/usr/local/bin/talos" ]]; then
         echo "Creating symlink in /usr/local/bin..."
-        sudo ln -sf "$INSTALL_DIR/bin/loqj" "/usr/local/bin/loqj"
+        sudo ln -sf "$INSTALL_DIR/bin/talos" "/usr/local/bin/talos"
     fi
 else
     # User installation - update shell profile
@@ -119,12 +119,12 @@ else
     fi
 
     # Check if PATH entry already exists
-    PATH_ENTRY="export PATH=\"\$HOME/.local/loqj/bin:\$PATH\""
+    PATH_ENTRY="export PATH=\"\$HOME/.local/talos/bin:\$PATH\""
 
-    if ! grep -q "\.local/loqj/bin" "$SHELL_PROFILE" 2>/dev/null; then
-        echo "Adding LOQ-J to PATH in $SHELL_PROFILE..."
+    if ! grep -q "\.local/talos/bin" "$SHELL_PROFILE" 2>/dev/null; then
+        echo "Adding Talos to PATH in $SHELL_PROFILE..."
         echo "" >> "$SHELL_PROFILE"
-        echo "# Added by LOQ-J installer" >> "$SHELL_PROFILE"
+        echo "# Added by Talos installer" >> "$SHELL_PROFILE"
         echo "$PATH_ENTRY" >> "$SHELL_PROFILE"
         echo "PATH entry added to $SHELL_PROFILE"
     else
@@ -133,22 +133,22 @@ else
 fi
 
 echo ""
-echo "✅ LOQ-J installed successfully!"
+echo "✅ Talos installed successfully!"
 echo ""
 echo "To verify installation:"
 if [[ "$USE_SUDO" == "true" ]]; then
-    echo "  loqj --version"
+    echo "  talos --version"
 else
     echo "  1. Open a new terminal window (to reload PATH)"
-    echo "  2. Run: loqj --version"
+    echo "  2. Run: talos --version"
     echo ""
     echo "Or source your shell profile now:"
     echo "  source $SHELL_PROFILE"
-    echo "  loqj --version"
+    echo "  talos --version"
 fi
 echo ""
-echo "To start using LOQ-J:"
-echo "  loqj                    # Interactive mode"
-echo "  loqj status             # Check workspace status"
-echo "  loqj rag-index          # Index current directory"
-echo "  loqj rag-ask \"question\" # Ask about your code"
+echo "To start using Talos:"
+echo "  talos                    # Interactive mode"
+echo "  talos status             # Check workspace status"
+echo "  talos rag-index          # Index current directory"
+echo "  talos rag-ask \"question\" # Ask about your code"

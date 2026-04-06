@@ -101,7 +101,7 @@ dependencies {
 /* ---------- Application runtime flags ---------- */
 
 application {
-    mainClass.set("dev.loqj.app.Main")
+    mainClass.set("dev.talos.app.Main")
     applicationDefaultJvmArgs = listOf(
         "--add-modules", "jdk.incubator.vector",
         "-Dfile.encoding=UTF-8",
@@ -114,10 +114,10 @@ application {
 tasks.withType<Jar>().configureEach {
     manifest {
         attributes(
-            "Implementation-Title" to "Loqs",
+            "Implementation-Title" to "Talos",
             "Implementation-Version" to project.version,
             "Implementation-Vendor" to System.currentTimeMillis().toString(), // Build timestamp
-            "Main-Class" to "dev.loqj.app.Main"
+            "Main-Class" to "dev.talos.app.Main"
         )
     }
 }
@@ -125,8 +125,8 @@ tasks.withType<Jar>().configureEach {
 /* ---------- Jar naming ---------- */
 
 tasks.jar {
-    archiveBaseName.set("loqj")
-    archiveVersion.set("") //TODO Now only stable name: loqj.jar; add versioned one too?
+    archiveBaseName.set("talos")
+    archiveVersion.set("") //TODO Now only stable name: talos.jar; add versioned one too?
 }
 
 /* ---------- jpackage (MSI) ---------- */
@@ -139,7 +139,7 @@ tasks.register<Exec>("jpackageApp") {
         .map { file("$it/bin/jpackage.exe").absolutePath }
         .orElse("jpackage")
 
-    val appDir   = layout.buildDirectory.dir("install/loqj")
+    val appDir   = layout.buildDirectory.dir("install/talos")
     val inputDir = appDir.map { it.dir("lib") }
     val destDir  = layout.buildDirectory.dir("dist")
     val appVer   = providers.provider { version.toString() }
@@ -149,13 +149,13 @@ tasks.register<Exec>("jpackageApp") {
         val args = mutableListOf(
             jpackageExe.get(),
             "--type", "msi",
-            "--name", "LOQ-J",
+            "--name", "Talos",
             "--app-version", appVer.get(),
-            "--vendor", "LOQ-J Project",
+            "--vendor", "Talos Project",
             "--dest", destDir.get().asFile.absolutePath,
             "--input", inputDir.get().asFile.absolutePath,
-            "--main-jar", "loqj.jar",
-            "--main-class", "dev.loqj.app.Main",
+            "--main-jar", "talos.jar",
+            "--main-class", "dev.talos.app.Main",
             // class-path wildcard so the launcher sees all libs in /lib
             "--class-path", "*",
             // Include the incubator Vector module in the runtime image...

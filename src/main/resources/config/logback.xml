@@ -6,7 +6,7 @@
     </appender>
 
     <logger name="org.apache.lucene" level="WARN"/>
-    <logger name="dev.loqj" level="INFO"/>
+    <logger name="dev.talos" level="INFO"/>
 
     <root level="WARN">
         <appender-ref ref="STDOUT"/>
