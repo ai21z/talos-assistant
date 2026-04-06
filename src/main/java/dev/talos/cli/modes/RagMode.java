@@ -15,6 +15,7 @@ import dev.talos.core.util.Sanitize;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
+import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -67,6 +68,11 @@ public final class RagMode implements Mode {
 
         // Prepare RAG context once (BM25F + vectors if enabled)
         RagService.Prepared prepared = ctx.rag().prepare(workspace, q, topK);
+
+        // Surface retrieval warnings when empty due to error (vs. genuinely no matches)
+        if (prepared.hasError() && prepared.snippets().isEmpty()) {
+            LOG.warn("Retrieval returned empty due to error: {}", prepared.errorReason());
+        }
 
         // Pack snippets using unified ContextPacker (pinned-first, budget-aware, deduplicated)
         List<ContextResult.Snippet> pinnedCtx = new ArrayList<>();
@@ -176,9 +182,25 @@ public final class RagMode implements Mode {
             }
         } catch (java.util.concurrent.TimeoutException te) {
             out.append("\n[Timeout: LLM response took too long]\n");
+        } catch (EngineException.ConnectionFailed cf) {
+            LOG.warn("Ollama not reachable in RAG mode: {}", cf.getMessage());
+            out.append("\n[Ollama not reachable — ").append(cf.guidance()).append("]\n");
+        } catch (EngineException.ModelNotFound mnf) {
+            LOG.warn("Model not found in RAG mode: {}", mnf.model());
+            out.append("\n[Model '").append(mnf.model()).append("' not found. ")
+               .append(mnf.guidance()).append("]\n");
+        } catch (EngineException.Transient tr) {
+            LOG.warn("Transient engine error in RAG mode: {}", tr.getMessage());
+            out.append("\n[").append(tr.guidance()).append("]\n");
+        } catch (EngineException ee) {
+            LOG.warn("Engine error in RAG mode: {}", ee.getMessage());
+            out.append("\n[Engine error: ").append(ee.getMessage()).append("]\n");
         } catch (Exception e) {
-            LOG.warn("LLM call failed in RAG mode: {}", e.getMessage());
-            out.append("\n[Error during LLM call]\n");
+            String detail = e.getMessage();
+            LOG.warn("LLM call failed in RAG mode: {}", detail);
+            out.append("\n[Error during LLM call")
+               .append(detail != null && !detail.isBlank() ? ": " + detail : "")
+               .append("]\n");
         }
 
         // Build citations section from ContextResult - paths normalized to forward slashes

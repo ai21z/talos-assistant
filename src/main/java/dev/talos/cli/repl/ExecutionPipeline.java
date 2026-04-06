@@ -1,6 +1,9 @@
 package dev.talos.cli.repl;
 
+import dev.talos.spi.EngineException;
+
 import java.util.Map;
+import java.util.concurrent.TimeoutException;
 
 /**
  * ExecutionPipeline
@@ -44,16 +47,46 @@ public final class ExecutionPipeline {
             if (msg == null || msg.isBlank()) msg = ex.getClass().getSimpleName();
             msg = ctx.redactor().redactLine(msg);
 
+            // Append guidance from EngineException subtypes
+            String guidance = "";
+            if (ex instanceof EngineException ee && !ee.guidance().isEmpty()) {
+                guidance = "\n  → " + ee.guidance();
+            }
+
+            // Classify the error code from the exception type
+            int code = classifyError(ex);
+
             // minimal redacted audit
             try {
                 ctx.audit().log("error", Map.of(
                         "op", label,
-                        "ex", ex.getClass().getName()
+                        "ex", ex.getClass().getName(),
+                        "code", code
                 ));
             } catch (Throwable ignore) {}
 
-            return new Result.Error(msg, 500);
+            return new Result.Error(msg + guidance, code);
         }
+    }
+
+    /**
+     * Maps an exception to an appropriate error code:
+     * <ul>
+     *   <li>404 — model not found</li>
+     *   <li>408 — timeout</li>
+     *   <li>503 — connection failed or transient backend error</li>
+     *   <li>400 — illegal argument / validation</li>
+     *   <li>500 — everything else (unexpected)</li>
+     * </ul>
+     */
+    static int classifyError(Throwable ex) {
+        if (ex instanceof EngineException.ModelNotFound)    return 404;
+        if (ex instanceof EngineException.ConnectionFailed) return 503;
+        if (ex instanceof EngineException.Transient)        return 503;
+        if (ex instanceof EngineException.ResponseError re) return re.httpStatus() > 0 ? re.httpStatus() : 500;
+        if (ex instanceof TimeoutException)                 return 408;
+        if (ex instanceof IllegalArgumentException)         return 400;
+        return 500;
     }
 
     private static Throwable unwrap(Throwable t) {

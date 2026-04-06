@@ -4,6 +4,7 @@ import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
 import dev.talos.core.engine.EngineRegistry;
 import dev.talos.core.util.Sanitize;
+import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.TokenChunk;
@@ -261,6 +262,10 @@ public final class LlmClient implements AutoCloseable {
      * This guarantees:
      *  - stream vs non-stream parity (both use this path)
      *  - no ANSI/control or <think> survives
+     *
+     * <p>Transient engine errors are retried up to {@link #MAX_RETRIES} times with
+     * exponential back-off. Non-transient {@link EngineException} subtypes (connection
+     * refused, model not found) propagate immediately for structured handling upstream.
      */
     private String engineAssembled(String system,
                                    String user,
@@ -268,59 +273,27 @@ public final class LlmClient implements AutoCloseable {
                                    Consumer<String> onChunk,
                                    Duration timeout,
                                    Supplier<Boolean> cancelled) {
-        try {
-            // sanitize prompt parts for model consumption
-            final String sys = Sanitize.sanitizeForPrompt(Objects.toString(system, ""));
-            final String usr = Sanitize.sanitizeForPrompt(Objects.toString(user, ""));
+        // sanitize prompt parts for model consumption
+        final String sys = Sanitize.sanitizeForPrompt(Objects.toString(system, ""));
+        final String usr = Sanitize.sanitizeForPrompt(Objects.toString(user, ""));
+        List<Map<String,String>> sn = sanitizeSnippets(snippets);
 
-            // pre-sanitize snippets for prompt and also keep a flattened context (deterministic)
-            List<Map<String,String>> sn = sanitizeSnippets(snippets);
-
-            ChatRequest req = new ChatRequest(backend, model, sys, usr, sn, timeout);
-            StringBuilder acc = new StringBuilder();
-
-            int alreadyEmittedLen = 0;
-
-            for (TokenChunk ch : (Iterable<TokenChunk>) registry.engine().chatStream(req)::iterator) {
-                if (cancelled != null && Boolean.TRUE.equals(cancelled.get())) break;
-                if (ch == null || Boolean.TRUE.equals(ch.done())) break;
-
-                String deltaRaw = Objects.toString(ch.text(), "");
-                // 1) Append raw delta to the aggregate
-                acc.append(deltaRaw);
-
-                // 2) Strip think on the WHOLE aggregate (handles tags split across chunks)
-                String noThink = Sanitize.stripThinkTags(acc.toString());
-
-                // 3) Now do output sanitization on the WHOLE thing
-                String cleaned = Sanitize.sanitizeForOutput(noThink);
-
-                // 4) Enforce the hard cap
-                cleaned = Sanitize.hardTruncate(cleaned, safeCap());
-
-                // 5) Figure out just the new suffix to emit
-                int already = Math.min(alreadyEmittedLen, cleaned.length()); // keep a local int alreadyEmittedLen = 0; outside loop
-                String emit = cleaned.substring(already);
-
-                // 6) Update acc and counters
-                acc.setLength(0);
-                acc.append(cleaned);
-                alreadyEmittedLen = cleaned.length();
-
-                if (onChunk != null && !emit.isEmpty()) onChunk.accept(emit);
-                if (acc.length() >= safeCap()) break;
+        EngineException lastTransient = null;
+        for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+            if (attempt > 0) backoff(attempt);
+            try {
+                ChatRequest req = new ChatRequest(backend, model, sys, usr, sn, timeout);
+                return assembleFromStream(registry.engine().chatStream(req), onChunk, cancelled);
+            } catch (EngineException.Transient t) {
+                lastTransient = t;
+                // retry on next iteration
+            } catch (EngineException ee) {
+                throw ee; // connection, model-not-found, response error — no retry
+            } catch (Exception e) {
+                throw new EngineException.ResponseError(0, e.getMessage(), e);
             }
-
-            // final aggregate is already sanitized and capped; return as-is
-            return acc.toString();
-
-        } catch (Exception e) {
-            // Keep behavior predictable and safe
-            String msg = "(error calling backend: " + e.getMessage() + ")";
-            msg = Sanitize.sanitizeForOutput(msg);
-            msg = Sanitize.stripThinkTags(msg);
-            return Sanitize.hardTruncate(msg, safeCap());
         }
+        throw lastTransient; // retries exhausted
     }
 
     private static List<Map<String,String>> sanitizeSnippets(List<Map<String,String>> xs) {
@@ -361,49 +334,75 @@ public final class LlmClient implements AutoCloseable {
 
     /**
      * ENGINE mode: assemble from token stream using structured messages via /api/chat.
-     * Sanitization and hard cap are applied identically to the legacy path.
+     * Sanitization, hard cap, and retry logic are applied identically to the legacy path.
      */
     private String engineAssembledWithMessages(List<ChatMessage> messages,
                                                Consumer<String> onChunk,
                                                Duration timeout,
                                                Supplier<Boolean> cancelled) {
-        try {
-            // Sanitize all message contents
-            List<ChatMessage> sanitized = messages.stream()
-                    .map(m -> new ChatMessage(m.role(), Sanitize.sanitizeForPrompt(Objects.toString(m.content(), ""))))
-                    .toList();
+        List<ChatMessage> sanitized = messages.stream()
+                .map(m -> new ChatMessage(m.role(), Sanitize.sanitizeForPrompt(Objects.toString(m.content(), ""))))
+                .toList();
 
-            ChatRequest req = new ChatRequest(backend, model, "", "", List.of(), timeout, sanitized);
-            StringBuilder acc = new StringBuilder();
-            int alreadyEmittedLen = 0;
-
-            for (TokenChunk ch : (Iterable<TokenChunk>) registry.engine().chatStream(req)::iterator) {
-                if (cancelled != null && Boolean.TRUE.equals(cancelled.get())) break;
-                if (ch == null || Boolean.TRUE.equals(ch.done())) break;
-
-                String deltaRaw = Objects.toString(ch.text(), "");
-                acc.append(deltaRaw);
-                String noThink = Sanitize.stripThinkTags(acc.toString());
-                String cleaned = Sanitize.sanitizeForOutput(noThink);
-                cleaned = Sanitize.hardTruncate(cleaned, safeCap());
-
-                int already = Math.min(alreadyEmittedLen, cleaned.length());
-                String emit = cleaned.substring(already);
-
-                acc.setLength(0);
-                acc.append(cleaned);
-                alreadyEmittedLen = cleaned.length();
-
-                if (onChunk != null && !emit.isEmpty()) onChunk.accept(emit);
-                if (acc.length() >= safeCap()) break;
+        EngineException lastTransient = null;
+        for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+            if (attempt > 0) backoff(attempt);
+            try {
+                ChatRequest req = new ChatRequest(backend, model, "", "", List.of(), timeout, sanitized);
+                return assembleFromStream(registry.engine().chatStream(req), onChunk, cancelled);
+            } catch (EngineException.Transient t) {
+                lastTransient = t;
+            } catch (EngineException ee) {
+                throw ee;
+            } catch (Exception e) {
+                throw new EngineException.ResponseError(0, e.getMessage(), e);
             }
-            return acc.toString();
-        } catch (Exception e) {
-            String msg = "(error calling backend: " + e.getMessage() + ")";
-            msg = Sanitize.sanitizeForOutput(msg);
-            msg = Sanitize.stripThinkTags(msg);
-            return Sanitize.hardTruncate(msg, safeCap());
         }
+        throw lastTransient;
+    }
+
+    // ── Retry / back-off constants ────────────────────────────────────────
+
+    /** Max retries for transient engine errors (per call, not per session). */
+    static final int MAX_RETRIES = 2;
+
+    private static void backoff(int attempt) {
+        try { Thread.sleep(attempt * 400L); } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
+     * Shared streaming assembly loop used by both engine methods.
+     * Sanitizes, strips think-tags, enforces hard cap, and emits chunks.
+     */
+    private String assembleFromStream(java.util.stream.Stream<TokenChunk> stream,
+                                      Consumer<String> onChunk,
+                                      Supplier<Boolean> cancelled) {
+        StringBuilder acc = new StringBuilder();
+        int alreadyEmittedLen = 0;
+
+        for (TokenChunk ch : (Iterable<TokenChunk>) stream::iterator) {
+            if (cancelled != null && Boolean.TRUE.equals(cancelled.get())) break;
+            if (ch == null || Boolean.TRUE.equals(ch.done())) break;
+
+            String deltaRaw = Objects.toString(ch.text(), "");
+            acc.append(deltaRaw);
+            String noThink = Sanitize.stripThinkTags(acc.toString());
+            String cleaned = Sanitize.sanitizeForOutput(noThink);
+            cleaned = Sanitize.hardTruncate(cleaned, safeCap());
+
+            int already = Math.min(alreadyEmittedLen, cleaned.length());
+            String emit = cleaned.substring(already);
+
+            acc.setLength(0);
+            acc.append(cleaned);
+            alreadyEmittedLen = cleaned.length();
+
+            if (onChunk != null && !emit.isEmpty()) onChunk.accept(emit);
+            if (acc.length() >= safeCap()) break;
+        }
+        return acc.toString();
     }
 
     private static String synthesizeLocalAnswer(String system, String user, String ctx) {

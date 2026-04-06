@@ -1,0 +1,127 @@
+package dev.talos.spi;
+
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+/**
+ * Tests for the {@link EngineException} sealed hierarchy.
+ * Validates exception metadata, guidance strings, and sealed-permit structure.
+ */
+class EngineExceptionTest {
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  ModelNotFound
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @Test
+    void modelNotFound_carries_model_name() {
+        var ex = new EngineException.ModelNotFound("qwen3:8b");
+        assertEquals("qwen3:8b", ex.model());
+        assertEquals(404, ex.httpStatus());
+        assertTrue(ex.getMessage().contains("qwen3:8b"));
+    }
+
+    @Test
+    void modelNotFound_guidance_tells_user_to_pull() {
+        var ex = new EngineException.ModelNotFound("llama3:latest");
+        assertTrue(ex.guidance().contains("ollama pull"));
+        assertTrue(ex.guidance().contains("llama3:latest"));
+    }
+
+    @Test
+    void modelNotFound_null_model_safe() {
+        var ex = new EngineException.ModelNotFound(null);
+        assertEquals("", ex.model());
+        assertNotNull(ex.guidance());
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  ConnectionFailed
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @Test
+    void connectionFailed_carries_host_and_guidance() {
+        var cause = new java.net.ConnectException("Connection refused");
+        var ex = new EngineException.ConnectionFailed("http://127.0.0.1:11434", cause);
+
+        assertEquals(0, ex.httpStatus());
+        assertTrue(ex.getMessage().contains("127.0.0.1:11434"));
+        assertTrue(ex.guidance().contains("ollama serve"));
+        assertSame(cause, ex.getCause());
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Transient
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @Test
+    void transient_carries_status_and_guidance() {
+        var ex = new EngineException.Transient("Backend returned 503", 503);
+        assertEquals(503, ex.httpStatus());
+        assertTrue(ex.guidance().contains("try again"));
+    }
+
+    @Test
+    void transient_with_cause() {
+        var cause = new RuntimeException("timeout");
+        var ex = new EngineException.Transient("timed out", cause, 408);
+        assertEquals(408, ex.httpStatus());
+        assertSame(cause, ex.getCause());
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  ResponseError
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @Test
+    void responseError_carries_status_and_body() {
+        var ex = new EngineException.ResponseError(500, "internal server error");
+        assertEquals(500, ex.httpStatus());
+        assertTrue(ex.getMessage().contains("500"));
+        assertTrue(ex.getMessage().contains("internal server error"));
+    }
+
+    @Test
+    void responseError_truncates_long_body() {
+        String longBody = "x".repeat(500);
+        var ex = new EngineException.ResponseError(502, longBody);
+        // Should be truncated to ~200 chars
+        assertTrue(ex.getMessage().length() < longBody.length());
+    }
+
+    @Test
+    void responseError_null_body_safe() {
+        var ex = new EngineException.ResponseError(418, null);
+        assertEquals(418, ex.httpStatus());
+        assertNotNull(ex.getMessage());
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Sealed hierarchy
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @Test
+    void all_subtypes_are_engine_exceptions() {
+        assertInstanceOf(EngineException.class, new EngineException.ModelNotFound("m"));
+        assertInstanceOf(EngineException.class, new EngineException.ConnectionFailed("h", null));
+        assertInstanceOf(EngineException.class, new EngineException.Transient("t", 503));
+        assertInstanceOf(EngineException.class, new EngineException.ResponseError(500, "b"));
+    }
+
+    @Test
+    void subtypes_are_runtime_exceptions() {
+        // Unchecked so callers can catch or let propagate
+        assertInstanceOf(RuntimeException.class, new EngineException.ModelNotFound("m"));
+        assertInstanceOf(RuntimeException.class, new EngineException.ConnectionFailed("h", null));
+    }
+
+    @Test
+    void guidance_never_null() {
+        assertEquals("", new EngineException.ResponseError(500, "x").guidance());
+        assertNotNull(new EngineException.ModelNotFound("m").guidance());
+        assertNotNull(new EngineException.ConnectionFailed("h", null).guidance());
+        assertNotNull(new EngineException.Transient("t", 503).guidance());
+    }
+}
+

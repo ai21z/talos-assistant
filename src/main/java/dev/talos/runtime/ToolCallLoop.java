@@ -1,6 +1,7 @@
 package dev.talos.runtime;
 
 import dev.talos.cli.repl.Context;
+import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolResult;
@@ -162,6 +163,36 @@ public final class ToolCallLoop {
                     currentAnswer = "(no answer from model after tool execution)";
                     break;
                 }
+            } catch (EngineException.ConnectionFailed cf) {
+                LOG.warn("Ollama not reachable during tool-call loop iteration {}: {}", iterations, cf.getMessage());
+                currentAnswer = "[Ollama not reachable — tool loop aborted. " + cf.guidance() + "]";
+                break;
+            } catch (EngineException.ModelNotFound mnf) {
+                LOG.warn("Model not found during tool-call loop iteration {}: {}", iterations, mnf.model());
+                currentAnswer = "[Model '" + mnf.model() + "' not found — tool loop aborted. " + mnf.guidance() + "]";
+                break;
+            } catch (EngineException.Transient tr) {
+                LOG.warn("Transient error during tool-call loop iteration {}: {}", iterations, tr.getMessage());
+                // One retry for transient errors in the tool loop
+                try {
+                    Thread.sleep(400);
+                    currentAnswer = ctx.llm().chat(messages);
+                    if (currentAnswer == null) {
+                        currentAnswer = "(no answer from model after retry)";
+                        break;
+                    }
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    currentAnswer = "[Interrupted during tool-call loop]";
+                    break;
+                } catch (Exception retryEx) {
+                    currentAnswer = "[" + tr.guidance() + "]";
+                    break;
+                }
+            } catch (EngineException ee) {
+                LOG.warn("Engine error during tool-call loop iteration {}: {}", iterations, ee.getMessage());
+                currentAnswer = "[Engine error during tool loop: " + ee.getMessage() + "]";
+                break;
             } catch (Exception e) {
                 LOG.warn("LLM call failed during tool-call loop iteration {}: {}", iterations, e.getMessage());
                 currentAnswer = "(error during follow-up LLM call: " + e.getMessage() + ")";

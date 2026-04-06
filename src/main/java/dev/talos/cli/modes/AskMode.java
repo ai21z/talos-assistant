@@ -6,6 +6,7 @@ import dev.talos.core.CfgUtil;
 import dev.talos.core.llm.SystemPromptBuilder;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
+import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -133,8 +134,20 @@ public final class AskMode implements Mode {
             }
         } catch (java.util.concurrent.TimeoutException te) {
             out.append("\n[Timeout: LLM response took too long]\n");
+        } catch (EngineException.ConnectionFailed cf) {
+            out.append("\n[Ollama not reachable — ").append(cf.guidance()).append("]\n");
+        } catch (EngineException.ModelNotFound mnf) {
+            out.append("\n[Model '").append(mnf.model()).append("' not found. ")
+               .append(mnf.guidance()).append("]\n");
+        } catch (EngineException.Transient tr) {
+            out.append("\n[").append(tr.guidance()).append("]\n");
+        } catch (EngineException ee) {
+            out.append("\n[Engine error: ").append(ee.getMessage()).append("]\n");
         } catch (Exception e) {
-            out.append("\n[Error during LLM call]\n");
+            String detail = e.getMessage();
+            out.append("\n[Error during LLM call")
+               .append(detail != null && !detail.isBlank() ? ": " + detail : "")
+               .append("]\n");
         }
         out.append("\n\n");
 
