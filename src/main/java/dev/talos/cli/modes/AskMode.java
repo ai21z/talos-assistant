@@ -4,6 +4,8 @@ import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.llm.SystemPromptBuilder;
+import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.ToolCallParser;
 import dev.talos.spi.types.ChatMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -76,6 +78,16 @@ public final class AskMode implements Mode {
                     () -> ctx.llm().chat(msgs));
             String answer = fut.get(llmTimeoutMs, TimeUnit.MILLISECONDS);
             if (answer != null) {
+                // Run tool-call loop if the response contains tool_call blocks
+                if (ctx.toolCallLoop() != null && ToolCallParser.containsToolCalls(answer)) {
+                    LOG.debug("Tool calls detected in LLM response, entering tool-call loop");
+                    ToolCallLoop.LoopResult loopResult = ctx.toolCallLoop().run(
+                            answer, messages, workspace, ctx);
+                    answer = loopResult.finalAnswer();
+                    LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked",
+                            loopResult.iterations(), loopResult.toolsInvoked());
+                }
+
                 if (answer.length() > responseMaxChars) {
                     out.append(answer, 0, (int) responseMaxChars).append("\n\n[output truncated]\n");
                 } else {

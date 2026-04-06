@@ -15,6 +15,7 @@ import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.MemoryUpdateListener;
 import dev.talos.runtime.NoOpApprovalGate;
 import dev.talos.runtime.Session;
+import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnProcessor;
 import dev.talos.runtime.TurnResult;
 import dev.talos.tools.ToolRegistry;
@@ -79,6 +80,13 @@ public final class ReplRouter {
         ConversationManager conversationManager =
                 new ConversationManager(memory, TokenBudget.fromConfig(this.cfg));
 
+        // Create runtime session and turn processor
+        this.runtimeSession = new Session(this.workspace, this.cfg, memory);
+        this.turnProcessor  = new TurnProcessor(modes, new NoOpApprovalGate(), toolRegistry);
+
+        // Create ToolCallLoop for agentic tool execution in modes
+        ToolCallLoop toolCallLoop = new ToolCallLoop(this.turnProcessor);
+
         this.ctx = Context.builder(this.cfg)
                 .limits(limits)
                 .session(this.session)
@@ -91,11 +99,9 @@ public final class ReplRouter {
                 .memory(memory)
                 .toolRegistry(toolRegistry)
                 .conversationManager(conversationManager)
+                .toolCallLoop(toolCallLoop)
                 .build();
 
-        // Create runtime session and turn processor
-        this.runtimeSession = new Session(this.workspace, this.cfg, memory);
-        this.turnProcessor  = new TurnProcessor(modes, new NoOpApprovalGate(), toolRegistry);
 
         // Centralized memory updates: TurnProcessor fires MemoryUpdateListener
         // after each turn instead of modes calling ctx.memory().update() directly
