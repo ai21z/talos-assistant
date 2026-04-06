@@ -17,6 +17,7 @@ public record ToolError(String code, String message) {
     public static final String NOT_FOUND      = "NOT_FOUND";
     public static final String INTERNAL_ERROR = "INTERNAL_ERROR";
     public static final String TOOL_ERROR     = "TOOL_ERROR";
+    public static final String DENIED         = "DENIED";
 
     public static ToolError invalidParams(String message) {
         return new ToolError(INVALID_PARAMS, message);
@@ -28,6 +29,11 @@ public record ToolError(String code, String message) {
 
     public static ToolError internal(String message) {
         return new ToolError(INTERNAL_ERROR, message);
+    }
+
+    /** Operation denied by the approval gate. */
+    public static ToolError denied(String message) {
+        return new ToolError(DENIED, message);
     }
 }
 
