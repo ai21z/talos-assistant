@@ -3,6 +3,7 @@ package dev.talos.runtime;
 import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
+import dev.talos.tools.*;
 
 import java.nio.file.Path;
 import java.time.Duration;
@@ -17,7 +18,8 @@ import java.util.Optional;
  * <ul>
  *   <li>session-aware turn tracking</li>
  *   <li>timing and trace capture</li>
- *   <li>future approval gate integration</li>
+ *   <li>tool execution with sandbox enforcement</li>
+ *   <li>approval gate integration for sensitive tools</li>
  *   <li>future transcript persistence</li>
  * </ul>
  *
@@ -28,14 +30,20 @@ public final class TurnProcessor {
 
     private final ModeController modes;
     private final ApprovalGate approvalGate;
+    private final ToolRegistry toolRegistry;
 
-    public TurnProcessor(ModeController modes, ApprovalGate approvalGate) {
+    public TurnProcessor(ModeController modes, ApprovalGate approvalGate, ToolRegistry toolRegistry) {
         this.modes = modes;
         this.approvalGate = (approvalGate != null) ? approvalGate : new NoOpApprovalGate();
+        this.toolRegistry = (toolRegistry != null) ? toolRegistry : new ToolRegistry();
+    }
+
+    public TurnProcessor(ModeController modes, ApprovalGate approvalGate) {
+        this(modes, approvalGate, new ToolRegistry());
     }
 
     public TurnProcessor(ModeController modes) {
-        this(modes, new NoOpApprovalGate());
+        this(modes, new NoOpApprovalGate(), new ToolRegistry());
     }
 
     /**
@@ -76,9 +84,39 @@ public final class TurnProcessor {
         );
     }
 
+    /**
+     * Execute a tool call with full sandbox enforcement.
+     *
+     * <p>Builds a {@link ToolContext} from the session and delegates
+     * to the registry. Returns a {@link ToolResult} — never throws.
+     *
+     * @param session the active session (provides workspace + config)
+     * @param call    the tool call to execute
+     * @param ctx     runtime context (provides sandbox)
+     * @return tool execution result
+     */
+    public ToolResult executeTool(Session session, ToolCall call, Context ctx) {
+        if (call == null) {
+            return ToolResult.fail(ToolError.invalidParams("Tool call is null"));
+        }
+
+        ToolContext toolCtx = new ToolContext(
+                session.workspace(),
+                ctx.sandbox(),
+                session.config()
+        );
+
+        return toolRegistry.execute(call, toolCtx);
+    }
+
     /** Access the approval gate (for future use by modes/capabilities). */
     public ApprovalGate approvalGate() {
         return approvalGate;
+    }
+
+    /** Access the tool registry for tool discovery and registration. */
+    public ToolRegistry toolRegistry() {
+        return toolRegistry;
     }
 }
 

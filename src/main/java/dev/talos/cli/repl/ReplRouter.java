@@ -10,9 +10,14 @@ import dev.talos.core.net.NetPolicy;
 import dev.talos.core.rag.RagService;
 import dev.talos.core.security.Redactor;
 import dev.talos.core.security.Sandbox;
+import dev.talos.runtime.NoOpApprovalGate;
 import dev.talos.runtime.Session;
 import dev.talos.runtime.TurnProcessor;
 import dev.talos.runtime.TurnResult;
+import dev.talos.tools.ToolRegistry;
+import dev.talos.tools.impl.GrepTool;
+import dev.talos.tools.impl.ReadFileTool;
+import dev.talos.tools.impl.RetrieveTool;
 
 import java.io.PrintStream;
 import java.nio.file.Path;
@@ -61,6 +66,12 @@ public final class ReplRouter {
         Limits    limits  = Limits.fromConfig(this.cfg);
         SessionMemory memory = new SessionMemory();
 
+        // Register concrete tools
+        ToolRegistry toolRegistry = new ToolRegistry();
+        toolRegistry.register(new ReadFileTool());
+        toolRegistry.register(new GrepTool());
+        toolRegistry.register(new RetrieveTool(rag));
+
         this.ctx = Context.builder(this.cfg)
                 .limits(limits)
                 .session(this.session)
@@ -71,11 +82,12 @@ public final class ReplRouter {
                 .llm(llm)
                 .netPolicy(net)
                 .memory(memory)
+                .toolRegistry(toolRegistry)
                 .build();
 
         // Create runtime session and turn processor
         this.runtimeSession = new Session(this.workspace, this.cfg, memory);
-        this.turnProcessor  = new TurnProcessor(modes);
+        this.turnProcessor  = new TurnProcessor(modes, new NoOpApprovalGate(), toolRegistry);
 
         this.render = new RenderEngine(this.cfg, redactor, out == null ? System.out : out);
 
@@ -155,5 +167,7 @@ public final class ReplRouter {
         registry.register(new BenchCommand(this.workspace));
         // Routing diagnostics
         registry.register(new RouteCommand(modes));
+        // Tool introspection
+        registry.register(new ToolsCommand());
     }
 }

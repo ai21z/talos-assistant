@@ -9,6 +9,7 @@ import dev.talos.core.security.Redactor;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.ApprovalGate;
 import dev.talos.runtime.NoOpApprovalGate;
+import dev.talos.tools.ToolRegistry;
 
 import java.nio.file.Path;
 import java.util.Map;
@@ -25,8 +26,17 @@ public record Context(
         LlmClient llm,
         NetPolicy netPolicy,
         SessionMemory memory,
-        ApprovalGate approvalGate
+        ApprovalGate approvalGate,
+        ToolRegistry toolRegistry
 ) {
+    /** Backward-compatible constructor without toolRegistry. */
+    public Context(Config cfg, Limits limits, SessionState session, Audit audit,
+                   Redactor redactor, Sandbox sandbox, RagService rag, LlmClient llm,
+                   NetPolicy netPolicy, SessionMemory memory, ApprovalGate approvalGate) {
+        this(cfg, limits, session, audit, redactor, sandbox, rag, llm, netPolicy,
+             memory, approvalGate, new ToolRegistry());
+    }
+
     /** Fluent builder for tests and advanced wiring. Prefer explicit setter calls over withDefaults in prod. */
     public static Builder builder(Config cfg) { return new Builder(cfg); }
 
@@ -42,6 +52,7 @@ public record Context(
         private NetPolicy net;
         private SessionMemory memory;
         private ApprovalGate approvalGate;
+        private ToolRegistry toolRegistry;
 
         public Builder(Config cfg) { this.cfg = (cfg == null ? new Config() : cfg); }
 
@@ -55,6 +66,7 @@ public record Context(
         public Builder netPolicy(NetPolicy n)        { this.net = n; return this; }
         public Builder memory(SessionMemory m)       { this.memory = m; return this; }
         public Builder approvalGate(ApprovalGate g)  { this.approvalGate = g; return this; }
+        public Builder toolRegistry(ToolRegistry t)  { this.toolRegistry = t; return this; }
 
         /** Convenience for ad-hoc usage; tests should prefer explicit setters for control. */
         public Builder withDefaults(Path workspace, SessionState session) {
@@ -73,6 +85,7 @@ public record Context(
             if (this.net == null)      this.net      = new NetPolicy(cfg);
             if (this.memory == null)   this.memory   = new SessionMemory();
             if (this.approvalGate == null) this.approvalGate = new NoOpApprovalGate();
+            if (this.toolRegistry == null) this.toolRegistry = new ToolRegistry();
             return this;
         }
 
@@ -91,8 +104,10 @@ public record Context(
             if (net == null)      net      = new NetPolicy(cfg);
             if (memory == null)   memory   = new SessionMemory();
             if (approvalGate == null) approvalGate = new NoOpApprovalGate();
+            if (toolRegistry == null) toolRegistry = new ToolRegistry();
 
-            return new Context(cfg, limits, session, audit, redactor, sandbox, rag, llm, net, memory, approvalGate);
+            return new Context(cfg, limits, session, audit, redactor, sandbox, rag, llm, net,
+                    memory, approvalGate, toolRegistry);
         }
     }
 }
