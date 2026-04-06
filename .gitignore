@@ -84,7 +84,7 @@ test-remote-config.yaml
 # /local/
 # /corpus/
 # /sandbox/
-# .loqj/            # if you ever generate a per-repo runtime dir (by default it lives under your HOME)
+# .talos/            # if you ever generate a per-repo runtime dir (by default it lives under your HOME)
 
 # ---- Local planning docs (never push)
 /docs

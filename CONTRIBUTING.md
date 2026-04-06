@@ -1,9 +1,9 @@
-# Contributing to LOQ-J
+# Contributing to Talos
 
 **Version:** `v0.9.0-beta`  
 **Last verified commit:** `ec2f6e9`
 
-Thank you for your interest in contributing to LOQ-J! This guide outlines the development workflow, coding standards, and contribution process for the project.
+Thank you for your interest in contributing to Talos! This guide outlines the development workflow, coding standards, and contribution process for the project.
 
 ---
 
@@ -66,7 +66,7 @@ git clone <repository-url>
 ```
 
 ```powershell
-cd loqj
+cd talos
 ```
 
 ```powershell
@@ -97,11 +97,11 @@ pwsh tools\install-windows.ps1
 
 ```powershell
 # Run smoke tests
-loqj --version
+talos --version
 ```
 
 ```powershell
-loqj status
+talos status
 ```
 
 ```powershell
@@ -110,11 +110,11 @@ cd C:\some\test\project
 ```
 
 ```powershell
-loqj rag-index --stats
+talos rag-index --stats
 ```
 
 ```powershell
-loqj rag-ask "What files are in this project?"
+talos rag-ask "What files are in this project?"
 ```
 
 ---
@@ -124,9 +124,9 @@ loqj rag-ask "What files are in this project?"
 ### 1. Code Changes
 
 **Key areas to understand:**
-- **CLI commands**: `src/main/java/dev/loqj/cli/cmds/`
-- **REPL modes**: `src/main/java/dev/loqj/cli/modes/`
-- **RAG pipeline**: `src/main/java/dev/loqj/core/rag/`
+- **CLI commands**: `src/main/java/dev/talos/cli/cmds/`
+- **REPL modes**: `src/main/java/dev/talos/cli/modes/`
+- **RAG pipeline**: `src/main/java/dev/talos/core/rag/`
 - **Configuration**: `src/main/resources/config/default-config.yaml`
 
 **Coding standards:**
@@ -141,7 +141,7 @@ loqj rag-ask "What files are in this project?"
 **Unit tests** (required for all new code):
 ```powershell
 # Run specific test class
-.\gradlew test --tests "dev.loqj.core.rag.RagFlowSmokeTest"
+.\gradlew test --tests "dev.talos.core.rag.RagFlowSmokeTest"
 ```
 
 ```powershell
@@ -152,20 +152,20 @@ loqj rag-ask "What files are in this project?"
 **Integration tests** (for CLI and RAG changes):
 ```powershell
 # Test CLI commands
-loqj setup --help
+talos setup --help
 ```
 
 ```powershell
-loqj rag-index --stats
+talos rag-index --stats
 ```
 
 ```powershell
-loqj rag-ask "test question"
+talos rag-ask "test question"
 ```
 
 ```powershell
 # Test REPL commands
-loqj
+talos
 ```
 
 ```
@@ -344,7 +344,7 @@ public class RagService {
 **Import organization:**
 1. Java standard library (`java.*`, `javax.*`)
 2. Third-party libraries (alphabetical)
-3. Project imports (`dev.loqj.*`)
+3. Project imports (`dev.talos.*`)
 
 ### Configuration Style
 
@@ -377,12 +377,12 @@ pwsh tools\install-windows.ps1
 ```
 
 ```powershell
-loqj --version
+talos --version
 ```
 
 ```powershell
 # Bad - don't chain commands
-.\gradlew clean build && pwsh tools\install-windows.ps1 && loqj --version
+.\gradlew clean build && pwsh tools\install-windows.ps1 && talos --version
 ```
 
 ---
@@ -419,7 +419,7 @@ loqj --version
 Brief description of the issue.
 
 ## Steps to Reproduce
-1. Run command: `loqj rag-index`
+1. Run command: `talos rag-index`
 2. Observe error: [error message]
 
 ## Expected Behavior
@@ -429,7 +429,7 @@ What should happen instead.
 - OS: Windows 10/11
 - Java version: `java -version`
 - Ollama version: `ollama --version`
-- LOQ-J version: `loqj --version`
+- Talos version: `talos --version`
 
 ## Additional Context
 Logs, screenshots, or other relevant information.
@@ -470,7 +470,7 @@ Other ways this could be addressed.
 # Update README.md version references
 # Update technical analysis version
 # Tag release commit
-git tag -a v0.9.0-beta -m "LOQ-J v0.9.0-beta release"
+git tag -a v0.9.0-beta -m "Talos v0.9.0-beta release"
 ```
 
 ---
@@ -512,15 +512,15 @@ Project maintainers are responsible for clarifying standards and taking correcti
 ### Development Support
 
 **Common development questions:**
-- **"How do I add a new CLI command?"** - See `dev.loqj.cli.cmds` package
-- **"How do I add a new REPL mode?"** - Implement `dev.loqj.cli.modes.Mode` interface
-- **"How do I modify the RAG pipeline?"** - Start with `dev.loqj.core.rag.RagService`
+- **"How do I add a new CLI command?"** - See `dev.talos.cli.cmds` package
+- **"How do I add a new REPL mode?"** - Implement `dev.talos.cli.modes.Mode` interface
+- **"How do I modify the RAG pipeline?"** - Start with `dev.talos.core.rag.RagService`
 - **"How do I add configuration options?"** - Update `default-config.yaml` and related classes
 
 **Debugging tips:**
 ```powershell
 # Enable debug logging
-loqj run
+talos run
 ```
 
 ```
@@ -533,19 +533,19 @@ $env:JAVA_OPTS="-Dloqj.debug=true"
 ```
 
 ```powershell
-loqj status --verbose
+talos status --verbose
 ```
 
 ```powershell
 # Check configuration loading
-loqj status --verbose
+talos status --verbose
 ```
 
 ---
 
-**Thank you for contributing to LOQ-J!**
+**Thank you for contributing to Talos!**
 
-LOQ-J thrives on community contributions. Whether you're fixing bugs, adding features, improving documentation, or helping other users, your contributions make the project better for everyone.
+Talos thrives on community contributions. Whether you're fixing bugs, adding features, improving documentation, or helping other users, your contributions make the project better for everyone.
 
 ---
 
