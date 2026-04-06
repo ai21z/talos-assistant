@@ -30,12 +30,12 @@ public final class ParserUtil {
             case "yaml", "yml", "json", "properties", "conf", "cfg", "ini" -> {
                 return raw.trim();
             }
-            case "html", "htm", "xml" -> {
-                // naive tag stripper for quick context (not an HTML parser)
-                String noScripts = raw.replaceAll("(?is)<script.*?</script>", " ");
-                String noStyles  = noScripts.replaceAll("(?is)<style.*?</style>", " ");
-                String textOnly  = noStyles.replaceAll("(?is)<[^>]+>", " ");
-                return textOnly.replaceAll("[\\t ]+", " ").replaceAll("\\s+\\n", "\n").trim();
+            case "html", "htm", "xml", "svg", "xhtml" -> {
+                // Developer agent: preserve full source for code review and indexing.
+                // The previous behaviour stripped <script>, <style>, and all tags,
+                // destroying CSS/JS and reducing 190-line files to ~200 chars of
+                // plain text — causing single-chunk indexing and context starvation.
+                return raw.trim();
             }
             default -> {
                 // Treat code & other plaintext as-is
