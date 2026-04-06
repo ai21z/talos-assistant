@@ -524,7 +524,7 @@ talos run
 ```
 
 ```
-:debug on
+/debug on
 ```
 
 ```powershell

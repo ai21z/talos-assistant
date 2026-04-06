@@ -27,11 +27,12 @@ public final class Redactor {
     private final List<Pattern> secretPatterns;
 
     // Absolute *filesystem* paths (Windows & POSIX). Avoids matching dotted package names.
+    // POSIX arm requires at least one internal '/' to avoid matching REPL commands like /help.
     private static final Pattern ABS_PATH = Pattern.compile(
             // Windows: C:\... or C:/...
             "(?i)(?:\\b[A-Z]:[\\\\/](?:[^\\s\"'<>|]{1,200}[\\\\/])*[^\\s\"'<>|]{1,200})" +
-                    // OR POSIX: /usr/... (avoid matching URLs by excluding : after scheme)
-                    "|(?:\\B/(?:[^\\s\"'<>|]{1,200}/)*[^\\s\"'<>|]{1,200})"
+                    // OR POSIX: /usr/... (must contain at least one internal /)
+                    "|(?:/[^\\s\"'<>|/]{1,200}(?:/[^\\s\"'<>|]{1,200})+)"
     );
 
     private static final Pattern IPV4 = Pattern.compile("\\b(?!127(?:\\.\\d{1,3}){3})((?:\\d{1,3}\\.){3}\\d{1,3})\\b");
