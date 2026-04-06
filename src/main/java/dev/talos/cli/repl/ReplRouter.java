@@ -12,8 +12,8 @@ import dev.talos.core.net.NetPolicy;
 import dev.talos.core.rag.RagService;
 import dev.talos.core.security.Redactor;
 import dev.talos.core.security.Sandbox;
+import dev.talos.runtime.CliApprovalGate;
 import dev.talos.runtime.MemoryUpdateListener;
-import dev.talos.runtime.NoOpApprovalGate;
 import dev.talos.runtime.Session;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnProcessor;
@@ -86,7 +86,7 @@ public final class ReplRouter {
 
         // Create runtime session and turn processor
         this.runtimeSession = new Session(this.workspace, this.cfg, memory);
-        this.turnProcessor  = new TurnProcessor(modes, new NoOpApprovalGate(), toolRegistry);
+        this.turnProcessor  = new TurnProcessor(modes, new CliApprovalGate(), toolRegistry);
 
         // Create ToolCallLoop for agentic tool execution in modes
         ToolCallLoop toolCallLoop = new ToolCallLoop(this.turnProcessor);
