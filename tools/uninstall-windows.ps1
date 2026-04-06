@@ -1,23 +1,23 @@
 <#
 .SYNOPSIS
-  Uninstall LOQ-J from a Windows user profile.
+  Uninstall Talos from a Windows user profile.
 
 .DESCRIPTION
   Reverses tools/install-windows.ps1:
-   - Stops running LOQ-J Java processes (best-effort).
-   - Removes %LOCALAPPDATA%\Programs\loqj (or custom -InstallDir).
-   - Removes the LOQ-J bin path from the User PATH only.
-   - Optionally deletes user data at "$HOME\.loqj" (indices, caches, config).
+   - Stops running Talos Java processes (best-effort).
+   - Removes %LOCALAPPDATA%\Programs\talos (or custom -InstallDir).
+   - Removes the Talos bin path from the User PATH only.
+   - Optionally deletes user data at "$HOME\.talos" (indices, caches, config).
    - Idempotent; safe to run multiple times.
 
 .PARAMETER InstallDir
-  The root installation directory. Default: "$env:LOCALAPPDATA\Programs\loqj"
+  The root installation directory. Default: "$env:LOCALAPPDATA\Programs\talos"
 
 .PARAMETER Purge
   Shortcut for -RemoveUserData.
 
 .PARAMETER RemoveUserData
-  Remove "$HOME\.loqj" (indices, caches, config). Does not touch Ollama models.
+  Remove "$HOME\.talos" (indices, caches, config). Does not touch Ollama models.
 
 .PARAMETER Quiet
   Suppress confirmation prompt.
@@ -37,7 +37,7 @@
 
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
-    [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'Programs\loqj'),
+    [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'Programs\talos'),
     [switch]$Purge,
     [Alias('RemoveData')][switch]$RemoveUserData,
     [switch]$Quiet
@@ -54,13 +54,13 @@ if ($Purge) { $RemoveUserData = $true }
 $resolved = Resolve-Path -LiteralPath $InstallDir -ErrorAction SilentlyContinue
 if ($resolved) { $InstallDir = $resolved.Path }
 $BinDir   = Join-Path $InstallDir 'bin'
-$UserData = Join-Path $HOME '.loqj'
+$UserData = Join-Path $HOME '.talos'
 
 # 0) Confirm (unless -Quiet or -WhatIf or -Confirm:$false)
 if (-not $Quiet -and -not $WhatIfPreference) {
     $dataRemovalText = if ($RemoveUserData) { "YES" } else { "NO" }
-    $msg = "Uninstall LOQ-J from:`n  Install: $InstallDir`n  Remove PATH entry: $BinDir`n  Remove user data (~\.loqj): $dataRemovalText"
-    $title = "Confirm LOQ-J uninstall"
+    $msg = "Uninstall Talos from:`n  Install: $InstallDir`n  Remove PATH entry: $BinDir`n  Remove user data (~\.talos): $dataRemovalText"
+    $title = "Confirm Talos uninstall"
     $choices = New-Object Collections.ObjectModel.Collection[Management.Automation.Host.ChoiceDescription]
     $choices.Add((New-Object Management.Automation.Host.ChoiceDescription "&Yes", "Proceed"))
     $choices.Add((New-Object Management.Automation.Host.ChoiceDescription "&No", "Cancel"))
@@ -73,15 +73,15 @@ if ($Quiet) {
     $ConfirmPreference = 'None'
 }
 
-# 1) Stop any LOQ-J Java processes (best-effort)
-Write-Step "Stopping running LOQ-J processes (if any)"
+# 1) Stop any Talos Java processes (best-effort)
+Write-Step "Stopping running Talos processes (if any)"
 try {
     $procs = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
             Where-Object {
                 $_.CommandLine -and (
                 $_.CommandLine -match [regex]::Escape($InstallDir) -or
-                        $_.CommandLine -match 'dev\.loqj' -or
-                        $_.CommandLine -match 'loqj\.jar'
+                        $_.CommandLine -match 'dev\.talos' -or
+                        $_.CommandLine -match 'talos\.jar'
                 )
             }
     if ($procs) {
@@ -100,8 +100,8 @@ try {
     Write-Warn2 ("Process scan failed (continuing): {0}" -f $_.Exception.Message)
 }
 
-# 2) Remove LOQ-J bin from User PATH
-Write-Step "Removing LOQ-J bin from User PATH"
+# 2) Remove Talos bin from User PATH
+Write-Step "Removing Talos bin from User PATH"
 
 if ($PSCmdlet.ShouldProcess($BinDir, "Remove from User PATH")) {
     $current = [Environment]::GetEnvironmentVariable('Path', 'User')
@@ -147,9 +147,9 @@ if (Test-Path -LiteralPath $InstallDir) {
     Write-Info "Install directory not found (already removed?)."
 }
 
-# 4) Optional: remove user data (~\.loqj)
+# 4) Optional: remove user data (~\.talos)
 if ($RemoveUserData) {
-    Write-Step ("Removing LOQ-J user data ({0})" -f $UserData)
+    Write-Step ("Removing Talos user data ({0})" -f $UserData)
     if (Test-Path -LiteralPath $UserData) {
         if ($PSCmdlet.ShouldProcess($UserData, "Remove-Item -Recurse -Force")) {
             try {
@@ -166,5 +166,5 @@ if ($RemoveUserData) {
     Write-Info ("Keeping user data at: {0}" -f $UserData)
 }
 
-Write-Host "LOQ-J uninstall complete." -ForegroundColor Green
+Write-Host "Talos uninstall complete." -ForegroundColor Green
 Write-Host "Open a NEW terminal to pick up PATH changes." -ForegroundColor Yellow
