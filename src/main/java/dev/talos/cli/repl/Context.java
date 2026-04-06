@@ -2,6 +2,8 @@ package dev.talos.cli.repl;
 
 import dev.talos.core.Audit;
 import dev.talos.core.Config;
+import dev.talos.core.context.ConversationManager;
+import dev.talos.core.context.TokenBudget;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.core.net.NetPolicy;
 import dev.talos.core.rag.RagService;
@@ -27,9 +29,20 @@ public record Context(
         NetPolicy netPolicy,
         SessionMemory memory,
         ApprovalGate approvalGate,
-        ToolRegistry toolRegistry
+        ToolRegistry toolRegistry,
+        ConversationManager conversationManager
 ) {
-    /** Backward-compatible constructor without toolRegistry. */
+    /** Backward-compatible constructor without conversationManager. */
+    public Context(Config cfg, Limits limits, SessionState session, Audit audit,
+                   Redactor redactor, Sandbox sandbox, RagService rag, LlmClient llm,
+                   NetPolicy netPolicy, SessionMemory memory, ApprovalGate approvalGate,
+                   ToolRegistry toolRegistry) {
+        this(cfg, limits, session, audit, redactor, sandbox, rag, llm, netPolicy,
+             memory, approvalGate, toolRegistry,
+             new ConversationManager(memory != null ? memory : new SessionMemory(), TokenBudget.fromConfig(cfg)));
+    }
+
+    /** Backward-compatible constructor without toolRegistry or conversationManager. */
     public Context(Config cfg, Limits limits, SessionState session, Audit audit,
                    Redactor redactor, Sandbox sandbox, RagService rag, LlmClient llm,
                    NetPolicy netPolicy, SessionMemory memory, ApprovalGate approvalGate) {
@@ -53,6 +66,7 @@ public record Context(
         private SessionMemory memory;
         private ApprovalGate approvalGate;
         private ToolRegistry toolRegistry;
+        private ConversationManager conversationManager;
 
         public Builder(Config cfg) { this.cfg = (cfg == null ? new Config() : cfg); }
 
@@ -67,6 +81,7 @@ public record Context(
         public Builder memory(SessionMemory m)       { this.memory = m; return this; }
         public Builder approvalGate(ApprovalGate g)  { this.approvalGate = g; return this; }
         public Builder toolRegistry(ToolRegistry t)  { this.toolRegistry = t; return this; }
+        public Builder conversationManager(ConversationManager cm) { this.conversationManager = cm; return this; }
 
         /** Convenience for ad-hoc usage; tests should prefer explicit setters for control. */
         public Builder withDefaults(Path workspace, SessionState session) {
@@ -86,6 +101,8 @@ public record Context(
             if (this.memory == null)   this.memory   = new SessionMemory();
             if (this.approvalGate == null) this.approvalGate = new NoOpApprovalGate();
             if (this.toolRegistry == null) this.toolRegistry = new ToolRegistry();
+            if (this.conversationManager == null) this.conversationManager =
+                    new ConversationManager(this.memory, TokenBudget.fromConfig(cfg));
             return this;
         }
 
@@ -105,9 +122,11 @@ public record Context(
             if (memory == null)   memory   = new SessionMemory();
             if (approvalGate == null) approvalGate = new NoOpApprovalGate();
             if (toolRegistry == null) toolRegistry = new ToolRegistry();
+            if (conversationManager == null) conversationManager =
+                    new ConversationManager(memory, TokenBudget.fromConfig(cfg));
 
             return new Context(cfg, limits, session, audit, redactor, sandbox, rag, llm, net,
-                    memory, approvalGate, toolRegistry);
+                    memory, approvalGate, toolRegistry, conversationManager);
         }
     }
 }
