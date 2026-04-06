@@ -238,18 +238,19 @@ public class RagService {
                     packed.originalCount(), packed.finalCount(), packed.budgetTokens(), packed.estimatedTokens());
             }
 
-            LlmClient llm = new LlmClient(cfg);
-            String text = llm.chat(sys, question, packed.toSnippetMaps());
-            if (text == null) text = "";
+            try (LlmClient llm = new LlmClient(cfg)) {
+                String text = llm.chat(sys, question, packed.toSnippetMaps());
+                if (text == null) text = "";
 
-            // Warn if we have retrieval but answer is empty
-            if (!packed.isEmpty() && text.trim().isEmpty()) {
-                LOG.warn("RAG_GEN_EMPTY: Retrieved {} snippets but answer body is empty (promptTokens={}, budget={}). Check model capacity or reduce :k.",
-                    packed.finalCount(), packed.estimatedTokens(), packed.budgetTokens());
+                // Warn if we have retrieval but answer is empty
+                if (!packed.isEmpty() && text.trim().isEmpty()) {
+                    LOG.warn("RAG_GEN_EMPTY: Retrieved {} snippets but answer body is empty (promptTokens={}, budget={}). Check model capacity or reduce :k.",
+                        packed.finalCount(), packed.estimatedTokens(), packed.budgetTokens());
+                }
+
+                // Return packed citations (what the model actually saw), not pre-packed
+                return new Answer(text, packed.citations(), prepared, packed);
             }
-
-            // Return packed citations (what the model actually saw), not pre-packed
-            return new Answer(text, packed.citations(), prepared, packed);
         } catch (Exception e) {
             String msg = "Error: " + e.getClass().getSimpleName() + (e.getMessage() == null ? "" : (": " + e.getMessage()));
             return new Answer(msg, List.of());
