@@ -95,7 +95,7 @@ public class TopLevelStatusCmd implements Runnable {
             }
 
             String model = System.getenv("TALOS_OLLAMA_MODEL");
-            if (model == null) model = Objects.toString(ollama.getOrDefault("chat", "qwen2.5:7b"));
+            if (model == null) model = Objects.toString(ollama.getOrDefault("model", "qwen3:8b"));
 
             System.out.println("  Ollama host : " + host);
             System.out.println("  Chat model  : " + model);
