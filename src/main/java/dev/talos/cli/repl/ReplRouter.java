@@ -196,6 +196,7 @@ public final class ReplRouter {
         registry.register(new WorkspaceCommand(this.workspace));
         registry.register(new ReindexCommand(this.workspace, modes::invalidateSymbolCache));
         registry.register(new MemoryCommand());
+        registry.register(new ClearCommand());
         // DX commands for workspace exploration
         registry.register(new FilesCommand(this.workspace));
         registry.register(new GrepCommand(this.workspace));
