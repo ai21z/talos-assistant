@@ -73,5 +73,68 @@ class TokenBudgetTest {
         assertEquals(TokenBudget.DEFAULT_RESPONSE_RESERVE, budget.responseReserveFraction());
         assertEquals(TokenBudget.DEFAULT_OVERHEAD_TOKENS, budget.overheadTokens());
     }
+
+    // ───── P0: history-aware budget coordination ─────
+
+    @Test
+    void availableForSnippets_deductsHistoryTokens() {
+        // 1000 tokens total, 30% response reserve = 300, overhead = 50
+        var budget = new TokenBudget(1000, 0.30, 50);
+        // system = 80 chars -> 20 tokens, query = 40 chars -> 10 tokens
+        int withoutHistory = budget.availableForSnippets("x".repeat(80), "y".repeat(40), 0);
+        int withHistory    = budget.availableForSnippets("x".repeat(80), "y".repeat(40), 200);
+        // Without history: 1000 - 20 - 10 - 300 - 50 = 620
+        assertEquals(620, withoutHistory);
+        // With history:    1000 - 20 - 10 - 200 - 300 - 50 = 420
+        assertEquals(420, withHistory);
+        assertEquals(200, withoutHistory - withHistory, "Difference should equal historyTokens");
+    }
+
+    @Test
+    void availableForSnippets_twoArgDelegatesToThreeArgWithZeroHistory() {
+        var budget = new TokenBudget(1000, 0.30, 50);
+        String sys = "x".repeat(80);
+        String q = "y".repeat(40);
+        assertEquals(
+                budget.availableForSnippets(sys, q, 0),
+                budget.availableForSnippets(sys, q),
+                "Two-arg form should equal three-arg with historyTokens=0");
+    }
+
+    @Test
+    void availableForSnippets_negativeHistoryIsTreatedAsZero() {
+        var budget = new TokenBudget(1000, 0.30, 50);
+        String sys = "x".repeat(80);
+        String q = "y".repeat(40);
+        assertEquals(
+                budget.availableForSnippets(sys, q, 0),
+                budget.availableForSnippets(sys, q, -100),
+                "Negative historyTokens should be clamped to 0");
+    }
+
+    @Test
+    void availableForSnippets_historyOverflowReturnsZero() {
+        var budget = new TokenBudget(1000, 0.30, 50);
+        // Giant history that exceeds the full budget
+        int available = budget.availableForSnippets("x".repeat(80), "y".repeat(40), 9999);
+        assertEquals(0, available, "Should clamp to 0 when history overflows budget");
+    }
+
+    @Test
+    void availableForSnippets_fullBudgetLayout_sumsCorrectly() {
+        // Verify system + query + history + snippets + overhead + response <= contextMaxTokens
+        int ctxMax = 8192;
+        var budget = new TokenBudget(ctxMax, 0.30, 100);
+        String sys = "x".repeat(800);  // 200 tokens
+        String q = "y".repeat(160);    // 40 tokens
+        int historyTokens = 500;
+
+        int snippetTokens = budget.availableForSnippets(sys, q, historyTokens);
+        int responseReserve = (int) (ctxMax * 0.30);
+
+        int total = budget.estimateTokens(sys) + budget.estimateTokens(q)
+                  + historyTokens + snippetTokens + 100 + responseReserve;
+        assertEquals(ctxMax, total, "All components should exactly fill the context window");
+    }
 }
 

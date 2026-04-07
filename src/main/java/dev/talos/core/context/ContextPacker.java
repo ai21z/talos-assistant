@@ -37,22 +37,24 @@ public final class ContextPacker {
     }
 
     /**
-     * Pack pinned + regular snippets within the token budget.
+     * Pack pinned + regular snippets within the token budget,
+     * accounting for tokens already consumed by conversation history.
      *
      * @param systemPrompt       the system prompt (used for budget calculation)
      * @param userQuery           the user question (used for budget calculation)
+     * @param historyTokens       estimated tokens consumed by conversation history
      * @param pinned              pinned snippets (highest priority)
      * @param regular             regular (retrieved) snippets
      * @param reservePerPinnedFile if true and exactly 2 distinct base files are pinned,
      *                             guarantee at least one snippet per base file
      * @return packed context result with provenance
      */
-    public ContextResult pack(String systemPrompt, String userQuery,
+    public ContextResult pack(String systemPrompt, String userQuery, int historyTokens,
                               List<ContextResult.Snippet> pinned,
                               List<ContextResult.Snippet> regular,
                               boolean reservePerPinnedFile) {
-        // Compute available character budget from token budget
-        int availableTokens = budget.availableForSnippets(systemPrompt, userQuery);
+        // Compute available character budget from token budget (history-aware)
+        int availableTokens = budget.availableForSnippets(systemPrompt, userQuery, historyTokens);
         int charBudget = budget.tokensToChars(availableTokens);
 
         // Sanitize inputs (metadata is preserved through sanitization)
@@ -124,7 +126,7 @@ public final class ContextPacker {
         }
         int systemTokens = budget.estimateTokens(systemPrompt);
         int queryTokens = budget.estimateTokens(userQuery);
-        int totalEstimated = systemTokens + queryTokens + snippetTokens;
+        int totalEstimated = systemTokens + queryTokens + Math.max(0, historyTokens) + snippetTokens;
 
         boolean wasTrimmed = packed.size() < originalCount || anyTruncated;
 
@@ -137,6 +139,25 @@ public final class ContextPacker {
                 totalEstimated,
                 budget.contextMaxTokens()
         );
+    }
+
+    /**
+     * Pack pinned + regular snippets within the token budget.
+     * Assumes no conversation history tokens.
+     *
+     * @param systemPrompt       the system prompt (used for budget calculation)
+     * @param userQuery           the user question (used for budget calculation)
+     * @param pinned              pinned snippets (highest priority)
+     * @param regular             regular (retrieved) snippets
+     * @param reservePerPinnedFile if true and exactly 2 distinct base files are pinned,
+     *                             guarantee at least one snippet per base file
+     * @return packed context result with provenance
+     */
+    public ContextResult pack(String systemPrompt, String userQuery,
+                              List<ContextResult.Snippet> pinned,
+                              List<ContextResult.Snippet> regular,
+                              boolean reservePerPinnedFile) {
+        return pack(systemPrompt, userQuery, 0, pinned, regular, reservePerPinnedFile);
     }
 
     /** Convenience overload without reservation. */
