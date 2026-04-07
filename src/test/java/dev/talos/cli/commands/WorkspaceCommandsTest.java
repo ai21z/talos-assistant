@@ -1,0 +1,174 @@
+package dev.talos.cli.commands;
+
+import dev.talos.cli.repl.Context;
+import dev.talos.cli.repl.Result;
+import dev.talos.core.Config;
+import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+/**
+ * Tests for workspace-bound commands: GrepCommand, WorkspaceCommand.
+ *
+ * <p>Uses {@code @TempDir} for isolated filesystem operations.
+ */
+@DisplayName("REPL commands — workspace-bound")
+class WorkspaceCommandsTest {
+
+    @TempDir
+    Path ws;
+
+    private final Context ctx = Context.builder(new Config()).build();
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  GrepCommand
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @Nested
+    @DisplayName("GrepCommand")
+    class Grep {
+
+        @Test
+        void finds_matching_text() throws IOException {
+            Files.writeString(ws.resolve("hello.java"), "public class Hello {\n  // greeting\n}\n");
+            var cmd = new GrepCommand(ws);
+
+            Result r = cmd.execute("greeting", ctx);
+            assertInstanceOf(Result.Ok.class, r);
+            assertTrue(r.toString().contains("greeting"));
+            assertTrue(r.toString().contains("1 matches"));
+        }
+
+        @Test
+        void no_matches_returns_info() throws IOException {
+            Files.writeString(ws.resolve("hello.java"), "public class Hello {}\n");
+            var cmd = new GrepCommand(ws);
+
+            Result r = cmd.execute("nonexistent_string_xyz", ctx);
+            assertInstanceOf(Result.Info.class, r);
+            assertTrue(r.toString().contains("No matches"));
+        }
+
+        @Test
+        void empty_args_returns_error() {
+            var cmd = new GrepCommand(ws);
+            Result r = cmd.execute("", ctx);
+            assertInstanceOf(Result.Error.class, r);
+        }
+
+        @Test
+        void null_args_returns_error() {
+            var cmd = new GrepCommand(ws);
+            Result r = cmd.execute(null, ctx);
+            assertInstanceOf(Result.Error.class, r);
+        }
+
+        @Test
+        void quoted_pattern_strips_quotes() throws IOException {
+            Files.writeString(ws.resolve("data.txt"), "SMOKEPROBE-123\n");
+            var cmd = new GrepCommand(ws);
+
+            Result r = cmd.execute("\"SMOKEPROBE-\"", ctx);
+            assertInstanceOf(Result.Ok.class, r);
+            assertTrue(r.toString().contains("SMOKEPROBE"));
+        }
+
+        @Test
+        void case_insensitive_matching() throws IOException {
+            Files.writeString(ws.resolve("test.java"), "FooBarBaz\n");
+            var cmd = new GrepCommand(ws);
+
+            Result r = cmd.execute("foobarbaz", ctx);
+            assertInstanceOf(Result.Ok.class, r);
+        }
+
+        @Test
+        void shows_line_numbers() throws IOException {
+            Files.writeString(ws.resolve("lines.java"), "line1\nline2\ntarget_here\nline4\n");
+            var cmd = new GrepCommand(ws);
+
+            Result r = cmd.execute("target_here", ctx);
+            assertInstanceOf(Result.Ok.class, r);
+            assertTrue(r.toString().contains("3:"), "Should show line number 3");
+        }
+
+        @Test
+        void skips_build_directories() throws IOException {
+            Path buildDir = ws.resolve("build");
+            Files.createDirectories(buildDir);
+            Files.writeString(buildDir.resolve("output.java"), "should_not_find_this\n");
+            Files.writeString(ws.resolve("src.java"), "findable content\n");
+            var cmd = new GrepCommand(ws);
+
+            Result r = cmd.execute("should_not_find_this", ctx);
+            assertInstanceOf(Result.Info.class, r, "build/ should be excluded");
+        }
+
+        @Test
+        void spec_name() {
+            var cmd = new GrepCommand(ws);
+            assertEquals("grep", cmd.spec().name());
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  WorkspaceCommand
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @Nested
+    @DisplayName("WorkspaceCommand")
+    class Workspace {
+
+        @Test
+        void returns_trusted_info() {
+            var cmd = new WorkspaceCommand(ws);
+            Result r = cmd.execute("", ctx);
+            assertInstanceOf(Result.TrustedInfo.class, r);
+        }
+
+        @Test
+        void output_contains_workspace_path() {
+            var cmd = new WorkspaceCommand(ws);
+            Result r = cmd.execute("", ctx);
+            String text = r.toString();
+            assertTrue(text.contains("Workspace"), "Should show workspace label");
+        }
+
+        @Test
+        void output_contains_index_dir() {
+            var cmd = new WorkspaceCommand(ws);
+            Result r = cmd.execute("", ctx);
+            String text = r.toString();
+            assertTrue(text.contains("Index dir"), "Should show index dir");
+        }
+
+        @Test
+        void output_contains_vectors_status() {
+            var cmd = new WorkspaceCommand(ws);
+            Result r = cmd.execute("", ctx);
+            String text = r.toString();
+            assertTrue(text.contains("Vectors"), "Should show vector status");
+        }
+
+        @Test
+        void output_shows_no_index_for_empty_workspace() {
+            var cmd = new WorkspaceCommand(ws);
+            Result r = cmd.execute("", ctx);
+            String text = r.toString();
+            assertTrue(text.contains("NO"), "Empty workspace should have no index");
+        }
+
+        @Test
+        void spec_name_and_alias() {
+            var cmd = new WorkspaceCommand(ws);
+            assertEquals("workspace", cmd.spec().name());
+            assertTrue(cmd.spec().aliases().contains("where"));
+        }
+    }
+}
+

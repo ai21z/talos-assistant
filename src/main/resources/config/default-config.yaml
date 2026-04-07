@@ -50,6 +50,7 @@ rag:
     - "**/.git/**"
     - "**/.idea/**"
     - "**/.vscode/**"
+    - "**/.claude/**"
     - "**/.gradle/**"
     - "**/.mvn/**"
     - "**/node_modules/**"
