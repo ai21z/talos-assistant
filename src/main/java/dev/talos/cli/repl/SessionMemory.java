@@ -91,5 +91,37 @@ public final class SessionMemory {
             if (!turns.isEmpty()) turns.removeFirst();
         }
     }
+
+    /**
+     * Remove the oldest N entries from the structured turns list.
+     * Used by {@link dev.talos.core.context.ConversationManager} after
+     * compaction to discard turns that have been summarized into a sketch.
+     *
+     * <p>The flat buffer is rebuilt from the remaining turns.
+     *
+     * @param count number of entries (not pairs) to remove from the front
+     */
+    public synchronized void pruneOldest(int count) {
+        int toRemove = Math.min(count, turns.size());
+        for (int i = 0; i < toRemove; i++) {
+            if (!turns.isEmpty()) turns.removeFirst();
+        }
+
+        // Rebuild flat buffer from remaining turns
+        if (turns.isEmpty()) {
+            buffer = null;
+        } else {
+            StringBuilder sb = new StringBuilder();
+            for (ChatMessage msg : turns) {
+                if (!sb.isEmpty()) sb.append('\n');
+                sb.append(msg.content());
+            }
+            String s = sb.toString();
+            if (s.length() > MAX_CHARS) {
+                s = s.substring(s.length() - MAX_CHARS);
+            }
+            buffer = s;
+        }
+    }
 }
 

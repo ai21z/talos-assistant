@@ -2,6 +2,9 @@ package dev.talos.runtime;
 
 import dev.talos.cli.repl.Result;
 import dev.talos.core.context.ConversationManager;
+import dev.talos.core.llm.LlmClient;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * SessionListener that centralizes memory updates after each turn.
@@ -11,6 +14,10 @@ import dev.talos.core.context.ConversationManager;
  * listener after every successful turn, and it records the user input
  * and the assistant's response in the ConversationManager.
  *
+ * <p>After recording the turn, checks whether compaction is needed.
+ * If the conversation history has grown beyond the token budget threshold,
+ * older turns are summarized into a compact sketch via the LLM.
+ *
  * <p>The assistant response is extracted from the {@link TurnResult}
  * using {@link #extractText(Result)}, which handles all text-carrying
  * result types — including {@link Result.Streamed} (the primary streaming
@@ -18,10 +25,23 @@ import dev.talos.core.context.ConversationManager;
  */
 public final class MemoryUpdateListener implements SessionListener {
 
-    private final ConversationManager conversationManager;
+    private static final Logger LOG = LoggerFactory.getLogger(MemoryUpdateListener.class);
 
-    public MemoryUpdateListener(ConversationManager conversationManager) {
+    private final ConversationManager conversationManager;
+    private final LlmClient llm;
+
+    /**
+     * @param conversationManager the conversation manager to record turns into
+     * @param llm                 the LLM client for compaction calls (may be null to disable compaction)
+     */
+    public MemoryUpdateListener(ConversationManager conversationManager, LlmClient llm) {
         this.conversationManager = conversationManager;
+        this.llm = llm;
+    }
+
+    /** Constructor without LLM — compaction is disabled. */
+    public MemoryUpdateListener(ConversationManager conversationManager) {
+        this(conversationManager, null);
     }
 
     @Override
@@ -31,6 +51,18 @@ public final class MemoryUpdateListener implements SessionListener {
         String answer = extractText(result.result());
         if (answer != null && !answer.isBlank()) {
             conversationManager.addTurn(userInput, answer.strip());
+
+            // Trigger compaction check (non-blocking — if LLM is null, this is a no-op)
+            if (llm != null) {
+                try {
+                    boolean compacted = conversationManager.maybeCompact(llm);
+                    if (compacted) {
+                        LOG.debug("Conversation compacted after turn");
+                    }
+                } catch (Exception e) {
+                    LOG.warn("Compaction check failed (non-fatal): {}", e.getMessage());
+                }
+            }
         }
     }
 
