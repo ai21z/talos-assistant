@@ -63,8 +63,16 @@ public final class AskMode implements Mode {
                 .withHistory(hasHistory)
                 .build();
 
+        // Build conversation history up front (consistent with RagMode's coordinated flow)
+        List<ChatMessage> history = List.of();
+        if (ctx.conversationManager() != null) {
+            history = ctx.conversationManager().buildHistory();
+        } else if (ctx.memory() != null) {
+            history = ctx.memory().getTurns();
+        }
+
         // Build structured conversation messages for /api/chat
-        List<ChatMessage> messages = buildMessages(system, rawLine, ctx);
+        List<ChatMessage> messages = buildMessages(system, rawLine, history);
 
         // Execute LLM turn via shared executor
         var opts = new AssistantTurnExecutor.Options()
@@ -85,24 +93,20 @@ public final class AskMode implements Mode {
     /**
      * Builds a structured list of ChatMessages for the /api/chat endpoint.
      *
-     * <p>Includes: system prompt → budget-aware prior conversation turns → current user message.
-     * Uses {@code ConversationManager.buildHistory()} when available to respect
-     * context window limits. Falls back to raw {@code SessionMemory.getTurns()}
-     * for backward compatibility.
+     * <p>Includes: system prompt → pre-built conversation history → current user message.
+     * The caller is responsible for building history (and measuring its token cost)
+     * before invoking this method.
+     *
+     * @param system   the system prompt text
+     * @param rawLine  the current user message
+     * @param history  pre-built conversation history messages (may be empty)
+     * @return mutable list of ChatMessages ready for the LLM
      */
-    static List<ChatMessage> buildMessages(String system, String rawLine, Context ctx) {
+    static List<ChatMessage> buildMessages(String system, String rawLine, List<ChatMessage> history) {
         List<ChatMessage> messages = new ArrayList<>();
         messages.add(ChatMessage.system(system));
 
-        // Add prior conversation turns from ConversationManager (budget-aware) or memory (legacy)
-        List<ChatMessage> history = List.of();
-        if (ctx.conversationManager() != null) {
-            history = ctx.conversationManager().buildHistory();
-        } else if (ctx.memory() != null) {
-            history = ctx.memory().getTurns();
-        }
-
-        if (!history.isEmpty()) {
+        if (history != null && !history.isEmpty()) {
             messages.addAll(history);
             LOG.debug("buildMessages: including {} history turns ({} exchanges)",
                     history.size(), history.size() / 2);
@@ -113,8 +117,22 @@ public final class AskMode implements Mode {
         // Add current user message
         messages.add(ChatMessage.user(rawLine));
         LOG.debug("buildMessages: total {} messages (1 system + {} history + 1 current)",
-                messages.size(), messages.size() - 2);
+                messages.size(), (history != null ? history.size() : 0));
         return messages;
+    }
+
+    /**
+     * Legacy overload: builds history from context internally.
+     * Kept for backward compatibility with existing tests.
+     */
+    static List<ChatMessage> buildMessages(String system, String rawLine, Context ctx) {
+        List<ChatMessage> history = List.of();
+        if (ctx.conversationManager() != null) {
+            history = ctx.conversationManager().buildHistory();
+        } else if (ctx.memory() != null) {
+            history = ctx.memory().getTurns();
+        }
+        return buildMessages(system, rawLine, history);
     }
 
     /**

@@ -6,6 +6,7 @@ import dev.talos.cli.repl.Result;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.ingest.ParserUtil;
 import dev.talos.core.rag.RagService;
+import dev.talos.core.context.ConversationManager;
 import dev.talos.core.context.ContextPacker;
 import dev.talos.core.context.ContextResult;
 import dev.talos.core.context.TokenBudget;
@@ -93,8 +94,20 @@ public final class RagMode implements Mode {
                 .withHistory(hasHistory)
                 .build();
 
-        ContextPacker packer = new ContextPacker(TokenBudget.fromConfig(ctx.cfg()));
-        ContextResult packed = packer.pack(system, q, pinnedCtx, regularCtx, isTwoFileComparison);
+        // Build conversation history BEFORE packing so we can account for its
+        // token cost in the snippet budget (P0 budget coordination fix).
+        List<ChatMessage> history = List.of();
+        if (ctx.conversationManager() != null) {
+            history = ctx.conversationManager().buildHistory();
+        } else if (ctx.memory() != null) {
+            history = ctx.memory().getTurns();
+        }
+
+        TokenBudget tokenBudget = TokenBudget.fromConfig(ctx.cfg());
+        int historyTokens = ConversationManager.estimateTokens(history, tokenBudget);
+
+        ContextPacker packer = new ContextPacker(tokenBudget);
+        ContextResult packed = packer.pack(system, q, historyTokens, pinnedCtx, regularCtx, isTwoFileComparison);
 
         // Anchor snippet paths with backticks for model clarity
         List<Map<String,String>> ctxMaps = new ArrayList<>(packed.finalCount());
@@ -115,7 +128,7 @@ public final class RagMode implements Mode {
         }
 
         // Build structured conversation messages for /api/chat
-        List<ChatMessage> messages = buildMessages(system, userMessage, ctxMaps, ctx);
+        List<ChatMessage> messages = buildMessages(system, userMessage, ctxMaps, history);
 
         // Execute LLM turn via shared executor (streaming, tool-call loop, error handling)
         var opts = new AssistantTurnExecutor.Options()
@@ -153,11 +166,12 @@ public final class RagMode implements Mode {
     /**
      * Builds a structured list of ChatMessages for the /api/chat endpoint.
      *
-     * <p>Includes: system prompt → budget-aware prior conversation turns →
+     * <p>Includes: system prompt → pre-built conversation history →
      * RAG context block (snippets) → current user message.
-     * Uses {@code ConversationManager.buildHistory()} when available to respect
-     * context window limits. Falls back to raw {@code SessionMemory.getTurns()}
-     * for backward compatibility.
+     *
+     * <p>The history list must be built by the caller (and its token cost
+     * measured) <em>before</em> context packing, so that the snippet budget
+     * correctly accounts for history tokens.
      *
      * <p>RAG context snippets are injected as a user-role message immediately
      * before the current question, keeping the system prompt stable across turns.
@@ -165,23 +179,17 @@ public final class RagMode implements Mode {
      * @param system      the system prompt text
      * @param userMessage the current user question (possibly with comparison prefix)
      * @param ctxMaps     the packed RAG context snippets (path → text maps)
-     * @param ctx         runtime context (provides conversation history)
+     * @param history     pre-built conversation history messages (may be empty)
      * @return mutable list of ChatMessages ready for the LLM
      */
     static List<ChatMessage> buildMessages(String system, String userMessage,
-                                           List<Map<String,String>> ctxMaps, Context ctx) {
+                                           List<Map<String,String>> ctxMaps,
+                                           List<ChatMessage> history) {
         List<ChatMessage> messages = new ArrayList<>();
         messages.add(ChatMessage.system(system));
 
-        // Add prior conversation turns from ConversationManager (budget-aware) or memory (legacy)
-        List<ChatMessage> history = List.of();
-        if (ctx.conversationManager() != null) {
-            history = ctx.conversationManager().buildHistory();
-        } else if (ctx.memory() != null) {
-            history = ctx.memory().getTurns();
-        }
-
-        if (!history.isEmpty()) {
+        // Add pre-built conversation history (already budget-trimmed by caller)
+        if (history != null && !history.isEmpty()) {
             messages.addAll(history);
             LOG.debug("buildMessages: including {} history turns ({} exchanges)",
                     history.size(), history.size() / 2);

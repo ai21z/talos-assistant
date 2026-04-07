@@ -9,7 +9,6 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -35,8 +34,7 @@ class RagModeToolLoopTest {
 
         @Test
         void no_history_no_context_returns_system_and_user() {
-            var ctx = Context.builder(new Config()).build();
-            List<ChatMessage> msgs = RagMode.buildMessages("sys prompt", "my question", List.of(), ctx);
+            List<ChatMessage> msgs = RagMode.buildMessages("sys prompt", "my question", List.of(), List.of());
 
             assertEquals(2, msgs.size());
             assertEquals("system", msgs.get(0).role());
@@ -47,12 +45,11 @@ class RagModeToolLoopTest {
 
         @Test
         void with_context_injects_context_message_before_question() {
-            var ctx = Context.builder(new Config()).build();
             List<Map<String, String>> snippets = List.of(
                     Map.of("path", "`src/Main.java#0`", "text", "public class Main {}")
             );
 
-            List<ChatMessage> msgs = RagMode.buildMessages("sys", "explain Main", snippets, ctx);
+            List<ChatMessage> msgs = RagMode.buildMessages("sys", "explain Main", snippets, List.of());
 
             // system + context + user = 3
             assertEquals(3, msgs.size());
@@ -72,14 +69,13 @@ class RagModeToolLoopTest {
 
         @Test
         void multiple_snippets_all_included_in_context_block() {
-            var ctx = Context.builder(new Config()).build();
             List<Map<String, String>> snippets = List.of(
                     Map.of("path", "`file1.java`", "text", "class One {}"),
                     Map.of("path", "`file2.java`", "text", "class Two {}"),
                     Map.of("path", "`file3.java`", "text", "class Three {}")
             );
 
-            List<ChatMessage> msgs = RagMode.buildMessages("sys", "q", snippets, ctx);
+            List<ChatMessage> msgs = RagMode.buildMessages("sys", "q", snippets, List.of());
 
             assertEquals(3, msgs.size()); // system + context + user
             String ctxContent = msgs.get(1).content();
@@ -94,12 +90,12 @@ class RagModeToolLoopTest {
         void with_history_includes_prior_turns_between_system_and_context() {
             var memory = new SessionMemory();
             memory.update("what is foo?", "foo is a variable");
-            var ctx = Context.builder(new Config()).memory(memory).build();
+            List<ChatMessage> history = memory.getTurns();
             List<Map<String, String>> snippets = List.of(
                     Map.of("path", "`bar.java`", "text", "int bar = 42;")
             );
 
-            List<ChatMessage> msgs = RagMode.buildMessages("sys", "explain bar", snippets, ctx);
+            List<ChatMessage> msgs = RagMode.buildMessages("sys", "explain bar", snippets, history);
 
             // system + 2 history + context + user = 5
             assertEquals(5, msgs.size());
@@ -122,9 +118,9 @@ class RagModeToolLoopTest {
             var memory = new SessionMemory();
             memory.update("turn1-q", "turn1-a");
             memory.update("turn2-q", "turn2-a");
-            var ctx = Context.builder(new Config()).memory(memory).build();
+            List<ChatMessage> history = memory.getTurns();
 
-            List<ChatMessage> msgs = RagMode.buildMessages("sys", "turn3-q", List.of(), ctx);
+            List<ChatMessage> msgs = RagMode.buildMessages("sys", "turn3-q", List.of(), history);
 
             // system + 4 history + user = 6 (no context snippets)
             assertEquals(6, msgs.size());
@@ -138,19 +134,14 @@ class RagModeToolLoopTest {
 
         @Test
         void empty_history_same_as_no_history() {
-            var memory = new SessionMemory();
-            var ctx = Context.builder(new Config()).memory(memory).build();
+            List<ChatMessage> msgs = RagMode.buildMessages("sys", "hello", List.of(), List.of());
 
-            List<ChatMessage> msgs = RagMode.buildMessages("sys", "hello", List.of(), ctx);
-
-            assertEquals(2, msgs.size(), "Empty memory should produce just system + user");
+            assertEquals(2, msgs.size(), "Empty history should produce just system + user");
         }
 
         @Test
         void empty_snippet_list_skips_context_message() {
-            var ctx = Context.builder(new Config()).build();
-
-            List<ChatMessage> msgs = RagMode.buildMessages("sys", "hello", List.of(), ctx);
+            List<ChatMessage> msgs = RagMode.buildMessages("sys", "hello", List.of(), List.of());
 
             assertEquals(2, msgs.size(), "Empty snippet list should not add context message");
             assertEquals("system", msgs.get(0).role());
@@ -159,9 +150,7 @@ class RagModeToolLoopTest {
 
         @Test
         void null_snippet_list_skips_context_message() {
-            var ctx = Context.builder(new Config()).build();
-
-            List<ChatMessage> msgs = RagMode.buildMessages("sys", "hello", null, ctx);
+            List<ChatMessage> msgs = RagMode.buildMessages("sys", "hello", null, List.of());
 
             assertEquals(2, msgs.size(), "Null snippet list should not add context message");
         }
@@ -170,8 +159,7 @@ class RagModeToolLoopTest {
         void messages_list_is_mutable() {
             // ToolCallLoop mutates the message list in-place, so buildMessages
             // must return a mutable list.
-            var ctx = Context.builder(new Config()).build();
-            List<ChatMessage> msgs = RagMode.buildMessages("sys", "q", List.of(), ctx);
+            List<ChatMessage> msgs = RagMode.buildMessages("sys", "q", List.of(), List.of());
 
             assertDoesNotThrow(
                     () -> msgs.add(ChatMessage.assistant("test")),
@@ -254,12 +242,11 @@ class RagModeToolLoopTest {
         void buildMessages_returns_list_compatible_with_tool_loop() {
             // The ToolCallLoop.run() signature takes List<ChatMessage> messages.
             // Verify our buildMessages produces a compatible list.
-            var ctx = Context.builder(new Config()).build();
             List<Map<String, String>> snippets = List.of(
                     Map.of("path", "`test.java`", "text", "code")
             );
 
-            List<ChatMessage> msgs = RagMode.buildMessages("sys", "q", snippets, ctx);
+            List<ChatMessage> msgs = RagMode.buildMessages("sys", "q", snippets, List.of());
 
             // Must have at least system + user (context optional)
             assertTrue(msgs.size() >= 2);
