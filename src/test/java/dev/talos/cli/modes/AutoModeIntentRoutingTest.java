@@ -10,12 +10,6 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class AutoModeIntentRoutingTest {
 
-    private static final Pattern LIST_FILES_PATTERN = Pattern.compile(
-        "(?i)(?:what|which|show|list)\\s+(?:files|docs|documents)|" +
-        "(?:list|show)\\s+(?:all\\s+)?files|" +
-        "what.*(?:inside|in).*(?:dir|directory|folder|workspace)|" +
-        "files\\s+(?:are\\s+)?(?:here|available|indexed)"
-    );
 
     private static final Pattern TRIVIAL_QUERY_PATTERN = Pattern.compile(
         "(?i)(?:how many|count)\\s+['\"]?[a-z]['\"]?\\s+in\\s+|" +
@@ -25,18 +19,23 @@ class AutoModeIntentRoutingTest {
     );
 
     @Test
-    void testListFilesIntentDetection() {
-        // Should match "list files" queries
-        assertTrue(LIST_FILES_PATTERN.matcher("what files are here?").find());
-        assertTrue(LIST_FILES_PATTERN.matcher("What is this directory, what files are inside?").find());
-        assertTrue(LIST_FILES_PATTERN.matcher("list all files").find());
-        assertTrue(LIST_FILES_PATTERN.matcher("show files").find());
-        assertTrue(LIST_FILES_PATTERN.matcher("which files are indexed").find());
-        assertTrue(LIST_FILES_PATTERN.matcher("what docs are available").find());
-        
-        // Should NOT match other queries
-        assertFalse(LIST_FILES_PATTERN.matcher("explain this file").find());
-        assertFalse(LIST_FILES_PATTERN.matcher("what does this code do").find());
+    void listFilesQueriesRouteToAssistForToolHandling() {
+        // "list files" queries are no longer intercepted by a special pattern.
+        // They route through PromptRouter normally — typically to ASSIST,
+        // where the LLM can use the talos.list_dir tool. Users can also
+        // use /files for explicit indexed-file listing.
+        assertEquals(PromptRouter.Route.ASSIST,
+                PromptRouter.route("what files are here?"));
+        assertEquals(PromptRouter.Route.ASSIST,
+                PromptRouter.route("list all files"));
+        assertEquals(PromptRouter.Route.ASSIST,
+                PromptRouter.route("which files are indexed"));
+        assertEquals(PromptRouter.Route.ASSIST,
+                PromptRouter.route("what docs are available"));
+
+        // "show files" routes to COMMAND (DEV_COMMAND pattern matches "show <non-excluded>")
+        assertEquals(PromptRouter.Route.COMMAND,
+                PromptRouter.route("show files"));
     }
 
     @Test
