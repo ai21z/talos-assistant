@@ -12,13 +12,16 @@ import java.util.Map;
  *
  * <p>Budget layout for a typical call:
  * <pre>
- *   ┌──────────────────────────────────────────────┐
- *   │ contextMaxTokens                             │
- *   │  ┌─────────┬─────┬──────────┬────┬─────────┐ │
- *   │  │ system  │query│ snippets │ovhd│response │ │
- *   │  └─────────┴─────┴──────────┴────┴─────────┘ │
- *   └──────────────────────────────────────────────┘
+ *   ┌──────────────────────────────────────────────────────┐
+ *   │ contextMaxTokens                                     │
+ *   │  ┌────────┬─────┬────────┬──────────┬────┬─────────┐ │
+ *   │  │ system │query│history │ snippets │ovhd│response │ │
+ *   │  └────────┴─────┴────────┴──────────┴────┴─────────┘ │
+ *   └──────────────────────────────────────────────────────┘
  * </pre>
+ *
+ * <p>History tokens are measured <em>before</em> snippet packing so that
+ * the snippet budget accurately reflects the remaining space.
  */
 public final class TokenBudget {
 
@@ -80,16 +83,30 @@ public final class TokenBudget {
 
     /**
      * Compute how many tokens are available for snippet context,
+     * given the system prompt, user query, and conversation history
+     * that must also fit within the context window.
+     *
+     * @param historyTokens estimated tokens already consumed by conversation history
+     * @return available tokens for snippets, or 0 if already over budget
+     */
+    public int availableForSnippets(String systemPrompt, String userQuery, int historyTokens) {
+        int systemTokens = estimateTokens(systemPrompt);
+        int queryTokens = estimateTokens(userQuery);
+        int responseReserve = (int) (contextMaxTokens * responseReserveFraction);
+        int available = contextMaxTokens - systemTokens - queryTokens
+                      - Math.max(0, historyTokens) - responseReserve - overheadTokens;
+        return Math.max(0, available);
+    }
+
+    /**
+     * Compute how many tokens are available for snippet context,
      * given the system prompt and user query that must also fit.
+     * Assumes no conversation history.
      *
      * @return available tokens for snippets, or 0 if already over budget
      */
     public int availableForSnippets(String systemPrompt, String userQuery) {
-        int systemTokens = estimateTokens(systemPrompt);
-        int queryTokens = estimateTokens(userQuery);
-        int responseReserve = (int) (contextMaxTokens * responseReserveFraction);
-        int available = contextMaxTokens - systemTokens - queryTokens - responseReserve - overheadTokens;
-        return Math.max(0, available);
+        return availableForSnippets(systemPrompt, userQuery, 0);
     }
 
     /**

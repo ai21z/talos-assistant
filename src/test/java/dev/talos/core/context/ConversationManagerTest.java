@@ -194,5 +194,47 @@ class ConversationManagerTest {
         assertSame(memory, cm.memory());
         assertSame(budget, cm.budget());
     }
+
+    // ───── P0: static estimateTokens for budget coordination ─────
+
+    @Test
+    void staticEstimateTokens_matchesBudgetEstimation() {
+        var budget = new TokenBudget();
+        var history = List.of(
+                ChatMessage.user("hello world"),       // 11 chars -> 2 tokens
+                ChatMessage.assistant("goodbye world") // 13 chars -> 3 tokens
+        );
+        int estimated = ConversationManager.estimateTokens(history, budget);
+        assertEquals(2 + 3, estimated);
+    }
+
+    @Test
+    void staticEstimateTokens_nullAndEmptyReturnZero() {
+        var budget = new TokenBudget();
+        assertEquals(0, ConversationManager.estimateTokens(null, budget));
+        assertEquals(0, ConversationManager.estimateTokens(List.of(), budget));
+        assertEquals(0, ConversationManager.estimateTokens(List.of(ChatMessage.user("hi")), null));
+    }
+
+    @Test
+    void buildHistoryTokenCount_matchesStaticEstimate() {
+        var memory = new SessionMemory();
+        var budget = new TokenBudget(8192);
+        var cm = new ConversationManager(memory, budget);
+
+        cm.addTurn("question one", "answer one");
+        cm.addTurn("question two", "answer two");
+
+        List<ChatMessage> history = cm.buildHistory();
+        int estimated = ConversationManager.estimateTokens(history, budget);
+
+        assertTrue(estimated > 0, "Non-empty history should have positive token estimate");
+        // The static method should give the same result as estimating each message individually
+        int manual = 0;
+        for (ChatMessage msg : history) {
+            manual += budget.estimateTokens(msg.content());
+        }
+        assertEquals(manual, estimated);
+    }
 }
 

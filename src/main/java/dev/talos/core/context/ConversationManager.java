@@ -82,9 +82,23 @@ public final class ConversationManager {
 
     /** Estimate total token count of all stored history. */
     public int estimateHistoryTokens() {
-        List<ChatMessage> turns = memory.getTurns();
+        return estimateTokens(memory.getTurns(), budget);
+    }
+
+    /**
+     * Estimate token cost of a pre-built history message list.
+     * Use this after {@link #buildHistory()} to measure how many tokens
+     * the selected history consumes, so the caller can subtract them
+     * from the snippet budget.
+     *
+     * @param history the history messages (from {@link #buildHistory()})
+     * @param budget  the token budget to use for estimation
+     * @return estimated token count for the history messages
+     */
+    public static int estimateTokens(List<ChatMessage> history, TokenBudget budget) {
+        if (history == null || history.isEmpty() || budget == null) return 0;
         int total = 0;
-        for (ChatMessage msg : turns) {
+        for (ChatMessage msg : history) {
             total += budget.estimateTokens(msg.content());
         }
         return total;

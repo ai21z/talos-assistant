@@ -176,5 +176,88 @@ class ContextPackerTest {
     private static ContextResult.Snippet snip(String path, String text) {
         return new ContextResult.Snippet(path, text);
     }
+
+    // ───── P0: history-aware budget coordination ─────
+
+    @Test
+    void pack_historyTokensReduceSnippetBudget() {
+        // 500 tokens, 30% response = 150, overhead = 100
+        // system ~7 tokens, query ~4 tokens
+        // Without history: available ≈ 500 - 7 - 4 - 150 - 100 = 239 tokens → 956 chars
+        // With 100 history tokens: available ≈ 239 - 100 = 139 tokens → 556 chars
+        var budget = new TokenBudget(500, 0.30, 100);
+        var packer = new ContextPacker(budget);
+
+        var snippets = List.of(
+                snip("A.java#0", "a".repeat(400)),
+                snip("B.java#0", "b".repeat(400))
+        );
+
+        ContextResult withoutHistory = packer.pack(SYS, QUERY, 0, List.of(), snippets, false);
+        ContextResult withHistory    = packer.pack(SYS, QUERY, 100, List.of(), snippets, false);
+
+        int charsWithout = withoutHistory.snippets().stream().mapToInt(s -> s.text().length()).sum();
+        int charsWith    = withHistory.snippets().stream().mapToInt(s -> s.text().length()).sum();
+
+        assertTrue(charsWith < charsWithout,
+                "History tokens should reduce snippet space: without=" + charsWithout + ", with=" + charsWith);
+    }
+
+    @Test
+    void pack_withHistoryTokens_totalEstimateIncludesHistory() {
+        var budget = new TokenBudget(8192);
+        var packer = new ContextPacker(budget);
+
+        int historyTokens = 500;
+        var regular = List.of(snip("A.java#0", "a".repeat(200)));
+
+        ContextResult result = packer.pack(SYS, QUERY, historyTokens, List.of(), regular, false);
+
+        // estimatedTokens should include the history contribution
+        assertTrue(result.estimatedTokens() >= historyTokens,
+                "Estimated tokens should include history: got " + result.estimatedTokens());
+    }
+
+    @Test
+    void pack_withHistoryTokens_neverExceedsBudget() {
+        // Tight budget: 500 tokens total
+        var budget = new TokenBudget(500, 0.30, 50);
+        var packer = new ContextPacker(budget);
+
+        int historyTokens = 100;
+        // Feed more data than fits
+        var regular = List.of(
+                snip("A.java#0", "a".repeat(1000)),
+                snip("B.java#0", "b".repeat(1000)),
+                snip("C.java#0", "c".repeat(1000))
+        );
+
+        ContextResult result = packer.pack(SYS, QUERY, historyTokens, List.of(), regular, false);
+
+        int snippetChars = result.snippets().stream().mapToInt(s -> s.text().length()).sum();
+        int snippetTokens = snippetChars / 4; // chars/4 heuristic
+        int responseReserve = (int) (500 * 0.30);
+        int systemTokens = budget.estimateTokens(SYS);
+        int queryTokens = budget.estimateTokens(QUERY);
+
+        int totalTokens = systemTokens + queryTokens + historyTokens + snippetTokens + 50 + responseReserve;
+        assertTrue(totalTokens <= 500,
+                "Total tokens (" + totalTokens + ") should not exceed budget (500)");
+    }
+
+    @Test
+    void pack_zeroArgOverloadEqualsZeroHistory() {
+        var budget = new TokenBudget(8192);
+        var packer = new ContextPacker(budget);
+        var pinned = List.of(snip("A.java#0", "pinned"));
+        var regular = List.of(snip("B.java#0", "regular"));
+
+        ContextResult r1 = packer.pack(SYS, QUERY, pinned, regular);
+        ContextResult r2 = packer.pack(SYS, QUERY, 0, pinned, regular, false);
+
+        // Both should pack identically (sans reservation flag)
+        assertEquals(r1.finalCount(), r2.finalCount());
+        assertEquals(r1.estimatedTokens(), r2.estimatedTokens());
+    }
 }
 
