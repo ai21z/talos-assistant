@@ -12,7 +12,9 @@ import dev.talos.core.context.ConversationManager;
  * and the assistant's response in the ConversationManager.
  *
  * <p>The assistant response is extracted from the {@link TurnResult}
- * by taking the text content of the rendered result.
+ * using {@link #extractText(Result)}, which handles all text-carrying
+ * result types — including {@link Result.Streamed} (the primary streaming
+ * path) and {@link Result.Ok} (non-streaming / tool-call fallback).
  */
 public final class MemoryUpdateListener implements SessionListener {
 
@@ -26,13 +28,40 @@ public final class MemoryUpdateListener implements SessionListener {
     public void onTurnComplete(TurnResult result, String userInput) {
         if (result == null || userInput == null || userInput.isBlank()) return;
 
-        Result r = result.result();
-        if (r instanceof Result.Ok ok) {
-            String answer = ok.toString();
-            if (answer != null && !answer.isBlank()) {
-                conversationManager.addTurn(userInput, answer.strip());
-            }
+        String answer = extractText(result.result());
+        if (answer != null && !answer.isBlank()) {
+            conversationManager.addTurn(userInput, answer.strip());
         }
+    }
+
+    /**
+     * Extracts memorizable text from a Result.
+     *
+     * <p>Only LLM response types are memorized:
+     * <ul>
+     *   <li>{@link Result.Ok}       — non-streamed LLM answers (tool-call fallback, non-interactive)</li>
+     *   <li>{@link Result.Streamed}  — streamed LLM answers (primary path; uses fullText, excludes suffix)</li>
+     * </ul>
+     *
+     * <p>System messages (Info, TrustedInfo), errors, tables, and streaming lifecycle
+     * markers are NOT memorized — they are not conversational exchanges.
+     *
+     * @param r the result to extract text from
+     * @return the text content, or null if the result type is not memorizable
+     */
+    static String extractText(Result r) {
+        if (r == null) return null;
+        return switch (r) {
+            case Result.Ok ok           -> ok.text;
+            case Result.Streamed s      -> s.fullText;
+            case Result.Info ignored     -> null;
+            case Result.TrustedInfo ignored -> null;
+            case Result.Error ignored   -> null;
+            case Result.Table ignored   -> null;
+            case Result.StreamStart ignored  -> null;
+            case Result.StreamChunk ignored  -> null;
+            case Result.StreamEnd ignored    -> null;
+        };
     }
 }
 
