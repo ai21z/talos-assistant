@@ -1,136 +1,72 @@
 package dev.talos.cli.repl;
 
-import dev.talos.cli.commands.*;
+import dev.talos.cli.commands.CommandRegistry;
 import dev.talos.cli.modes.ModeController;
-import dev.talos.core.Audit;
 import dev.talos.core.Config;
-import dev.talos.core.context.ConversationManager;
-import dev.talos.core.context.TokenBudget;
-import dev.talos.core.index.IndexedWorkspaceSymbolChecker;
-import dev.talos.core.llm.LlmClient;
-import dev.talos.core.net.NetPolicy;
-import dev.talos.core.rag.RagService;
-import dev.talos.core.security.Redactor;
-import dev.talos.core.security.Sandbox;
-import dev.talos.runtime.CliApprovalGate;
-import dev.talos.runtime.MemoryUpdateListener;
 import dev.talos.runtime.Session;
-import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnProcessor;
 import dev.talos.runtime.TurnResult;
-import dev.talos.tools.ToolRegistry;
-import dev.talos.tools.impl.FileEditTool;
-import dev.talos.tools.impl.FileWriteTool;
-import dev.talos.tools.impl.GrepTool;
-import dev.talos.tools.impl.ListDirTool;
-import dev.talos.tools.impl.ReadFileTool;
-import dev.talos.tools.impl.RetrieveTool;
 
 import java.io.PrintStream;
 import java.nio.file.Path;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * REPL router that dispatches commands and prompts:
- *  - Slash-commands are dispatched via CommandRegistry and ExecutionPipeline
- *  - Non-slash prompts are routed through ModeController
- *  - Results are rendered via RenderEngine
+ * Thin REPL dispatcher.
+ *
+ * <p>Routes slash-commands via {@link CommandRegistry} and prompts via
+ * {@link TurnProcessor}, rendering results through {@link RenderEngine}.
+ *
+ * <p>All dependencies are injected — construction and wiring live in
+ * {@link TalosBootstrap}. This class only knows <em>how to dispatch</em>,
+ * not <em>what to construct</em>.
  */
 public final class ReplRouter {
 
-    private final SessionState session;
-    private final Config cfg;
-    private final RenderEngine render;
-    private final ExecutionPipeline pipe = new ExecutionPipeline();
-    private final AtomicBoolean quit = new AtomicBoolean(false);
-    private final CommandRegistry registry = new CommandRegistry();
-    private final LineClassifier classifier = new LineClassifier();
-    private final Context ctx;
-    private final Path workspace;
-    private final Session runtimeSession;
+    private final ModeController modes;
     private final TurnProcessor turnProcessor;
+    private final Session runtimeSession;
+    private final Context ctx;
+    private final RenderEngine render;
+    private final CommandRegistry registry;
+    private final LineClassifier classifier = new LineClassifier();
+    private final ExecutionPipeline pipe = new ExecutionPipeline();
+    private final AtomicBoolean quit;
 
-    private final ModeController modes = ModeController.defaultController();
-
-    public ReplRouter(SessionState session, Config cfg, PrintStream out, Path workspace) {
-        this.session   = session;
-        this.cfg       = (cfg == null ? new Config() : cfg);
-        this.workspace = (workspace == null ? Path.of(".") : workspace);
-
-        // Wire workspace-aware PascalCase resolution for auto-mode routing.
-        // Bare PascalCase identifiers (e.g. "RagService") that match indexed
-        // workspace symbols will trigger retrieval without question context.
-        modes.setSymbolChecker(new IndexedWorkspaceSymbolChecker(this.workspace));
-
-        // All components are composed explicitly
-        Audit    audit    = new Audit();
-        Redactor redactor = new Redactor();
-        Sandbox  sandbox  = new Sandbox(this.workspace, Map.of());
-        RagService rag    = new RagService(this.cfg);
-        LlmClient llm     = new LlmClient(this.cfg);
-        NetPolicy net     = new NetPolicy(this.cfg);
-        Limits    limits  = Limits.fromConfig(this.cfg);
-        SessionMemory memory = new SessionMemory();
-
-        // Register concrete tools
-        ToolRegistry toolRegistry = new ToolRegistry();
-        toolRegistry.register(new ReadFileTool());
-        toolRegistry.register(new FileWriteTool());
-        toolRegistry.register(new FileEditTool());
-        toolRegistry.register(new GrepTool());
-        toolRegistry.register(new ListDirTool());
-        toolRegistry.register(new RetrieveTool(rag));
-
-        // Create ConversationManager for budget-aware conversation history
-        ConversationManager conversationManager =
-                new ConversationManager(memory, TokenBudget.fromConfig(this.cfg));
-
-        // Create runtime session and turn processor
-        this.runtimeSession = new Session(this.workspace, this.cfg, memory);
-        this.turnProcessor  = new TurnProcessor(modes, new CliApprovalGate(), toolRegistry);
-
-        // Create ToolCallLoop for agentic tool execution in modes
-        ToolCallLoop toolCallLoop = new ToolCallLoop(this.turnProcessor);
-
-        // Build RenderEngine early so the stream sink can reference it
-        this.render = new RenderEngine(this.cfg, redactor, out == null ? System.out : out);
-
-        // Stream sink: stops spinner on first chunk and prints directly to stdout.
-        // Modes use ctx.streamSink() to emit tokens as they arrive from the LLM.
-        final PrintStream stdout = (out == null ? System.out : out);
-        final RenderEngine renderRef = this.render;
-        java.util.function.Consumer<String> sink = chunk -> {
-            renderRef.stopSpinner();
-            stdout.print(chunk);
-            stdout.flush();
-        };
-
-        this.ctx = Context.builder(this.cfg)
-                .limits(limits)
-                .session(this.session)
-                .audit(audit)
-                .redactor(redactor)
-                .sandbox(sandbox)
-                .rag(rag)
-                .llm(llm)
-                .netPolicy(net)
-                .memory(memory)
-                .toolRegistry(toolRegistry)
-                .conversationManager(conversationManager)
-                .toolCallLoop(toolCallLoop)
-                .streamSink(sink)
-                .build();
-
-
-        // Centralized memory updates: TurnProcessor fires MemoryUpdateListener
-        // after each turn instead of modes calling ctx.memory().update() directly
-        this.turnProcessor.addListener(new MemoryUpdateListener(conversationManager));
-
-
-        registerCommands();
+    /**
+     * Primary constructor — called by {@link TalosBootstrap}.
+     * All dependencies are pre-wired; the router only dispatches.
+     */
+    ReplRouter(ModeController modes, TurnProcessor turnProcessor, Session runtimeSession,
+               Context ctx, RenderEngine render, CommandRegistry registry,
+               Path workspace, AtomicBoolean quit) {
+        this.modes          = modes;
+        this.turnProcessor  = turnProcessor;
+        this.runtimeSession = runtimeSession;
+        this.ctx            = ctx;
+        this.render         = render;
+        this.registry       = registry;
+        this.quit           = quit;
     }
 
+    /**
+     * Backward-compatible factory — delegates to {@link TalosBootstrap}.
+     * Existing callers (RunCmd) continue to work without changes.
+     */
+    public ReplRouter(SessionState session, Config cfg, PrintStream out, Path workspace) {
+        ReplRouter wired = TalosBootstrap.create(session, cfg, out, workspace);
+        this.modes          = wired.modes;
+        this.turnProcessor  = wired.turnProcessor;
+        this.runtimeSession = wired.runtimeSession;
+        this.ctx            = wired.ctx;
+        this.render         = wired.render;
+        this.registry       = wired.registry;
+        this.quit           = wired.quit;
+    }
+
+    // ── Dispatch ─────────────────────────────────────────────────────────
+
+    /** Try to handle a slash-command. Returns true if handled. */
     public boolean tryHandle(String line) {
         LineClassifier.Classified c = classifier.classify(line);
         if (c.type() != LineClassifier.LineType.COMMAND) return false;
@@ -146,11 +82,11 @@ public final class ReplRouter {
         return true;
     }
 
+    /** Try to handle a non-command prompt. Returns true if handled. */
     public boolean tryHandlePrompt(String rawLine) {
         LineClassifier.Classified c = classifier.classify(rawLine);
         if (c.type() != LineClassifier.LineType.PROMPT) return false;
 
-        // Spinner is started before execution
         render.startSpinner();
 
         Result r = pipe.run(() -> {
@@ -160,52 +96,14 @@ public final class ReplRouter {
                 ctx, "(prompt)"
         );
 
-        // Spinner is stopped automatically by render
         if (r == null) return false;
         render.render(r);
         return true;
     }
 
-    public boolean shouldQuit() { return quit.get(); }
+    // ── Accessors ────────────────────────────────────────────────────────
 
-    public ModeController getModes() { return modes; }
-
-    /** The runtime session bound to this router. */
-    public Session getRuntimeSession() { return runtimeSession; }
-
-    private void registerCommands() {
-        // /k and /debug operate on SessionState
-        CliRuntime rt = new CliRuntime() {
-            @Override public int getK() { return session.getK(); }
-            @Override public void setK(int k) { session.setK(k); }
-            @Override public boolean isDebug() { return session.isDebug(); }
-            @Override public void setDebug(boolean on) { session.setDebug(on); }
-        };
-
-        registry.register(new HelpCommand(registry));
-        registry.register(new KCommand(rt));
-        registry.register(new DebugCommand(rt));
-        registry.register(new QuitCommand(quit));
-        registry.register(new PolicyCommand());
-        registry.register(new AuditToggleCommand());
-        registry.register(new SecretCommand(cfg, ctx.audit()));
-        registry.register(new ModelsCommand());
-        registry.register(new SetModelCommand());
-        registry.register(new ModeCommand(modes));
-        registry.register(new StatusCommand(modes, this.workspace));
-        registry.register(new WorkspaceCommand(this.workspace));
-        registry.register(new ReindexCommand(this.workspace, modes::invalidateSymbolCache));
-        registry.register(new MemoryCommand());
-        registry.register(new ClearCommand());
-        // DX commands for workspace exploration
-        registry.register(new FilesCommand(this.workspace));
-        registry.register(new GrepCommand(this.workspace));
-        registry.register(new ShowCommand(this.workspace));
-        // Performance benchmarking
-        registry.register(new BenchCommand(this.workspace));
-        // Routing diagnostics
-        registry.register(new RouteCommand(modes));
-        // Tool introspection
-        registry.register(new ToolsCommand());
-    }
+    public boolean shouldQuit()          { return quit.get(); }
+    public ModeController getModes()     { return modes; }
+    public Session getRuntimeSession()   { return runtimeSession; }
 }
