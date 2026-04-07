@@ -9,11 +9,10 @@ import java.util.*;
  * Unified context assembly: sanitizes, deduplicates, and packs snippets
  * within a token budget, producing a {@link ContextResult}.
  *
- * <p>Replaces the split logic previously spread across:
- * <ul>
- *   <li>{@code SnippetBuilder.packWithPinned()} — character-based budget, dedup, sanitize</li>
- *   <li>{@code PromptValidator.validateAndTrim()} — token-based trimming from end of list</li>
- * </ul>
+ * <p>Supersedes the legacy split logic that was spread across
+ * {@code SnippetBuilder.packWithPinned()} (character-based budget, dedup)
+ * and the now-removed {@code PromptValidator.validateAndTrim()}
+ * (token-based trimming from end of list).
  *
  * <p>Packing order:
  * <ol>
