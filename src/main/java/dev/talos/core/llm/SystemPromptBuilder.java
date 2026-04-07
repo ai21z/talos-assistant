@@ -217,13 +217,20 @@ public final class SystemPromptBuilder {
 
     private static final String DEFAULT_TOOLS_PREAMBLE = """
             Available Tools
-            You have access to the following tools. To invoke a tool, emit a tool_call block:
+            You have access to the following tools. To invoke a tool, you MUST emit a tool_call block in EXACTLY this format:
             
             <tool_call>
             {"name": "tool_name", "parameters": {"key": "value"}}
             </tool_call>
             
+            Example:
+            <tool_call>
+            {"name": "talos.read_file", "parameters": {"path": "src/Main.java"}}
+            </tool_call>
+            
             Rules:
+            - You MUST use <tool_call> and </tool_call> tags. Do not use ```json blocks or bare JSON.
+            - The JSON must have "name" and "parameters" keys exactly as shown.
             - You may emit multiple tool_call blocks in one response.
             - After each tool call, the result will be returned in a follow-up message. Use the result to answer the user.
             - Do NOT fabricate tool results. Wait for the actual result.
