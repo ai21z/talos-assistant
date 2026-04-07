@@ -126,7 +126,7 @@ public final class TalosBootstrap {
                 .build();
 
         // ── Post-turn hooks ──────────────────────────────────────────────
-        turnProcessor.addListener(new MemoryUpdateListener(conversationManager));
+        turnProcessor.addListener(new MemoryUpdateListener(conversationManager, llm));
 
         // ── Commands ─────────────────────────────────────────────────────
         AtomicBoolean quit = new AtomicBoolean(false);
