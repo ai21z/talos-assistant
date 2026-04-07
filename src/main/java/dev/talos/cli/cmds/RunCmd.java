@@ -134,7 +134,7 @@ public class RunCmd implements Runnable, SessionState {
                 }
 
                 // Non-command prompt: route via modes (controller uses its own active mode)
-                if (router.tryHandlePrompt(line, ws, null)) {
+                if (router.tryHandlePrompt(line)) {
                     if (router.shouldQuit()) { quit = true; }
                     continue;
                 }
