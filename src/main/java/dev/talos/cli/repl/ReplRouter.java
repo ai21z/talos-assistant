@@ -146,7 +146,7 @@ public final class ReplRouter {
         return true;
     }
 
-    public boolean tryHandlePrompt(String rawLine, Path workspaceOverride, String activeModeName) {
+    public boolean tryHandlePrompt(String rawLine) {
         LineClassifier.Classified c = classifier.classify(rawLine);
         if (c.type() != LineClassifier.LineType.PROMPT) return false;
 
