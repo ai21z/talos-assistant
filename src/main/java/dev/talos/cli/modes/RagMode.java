@@ -117,95 +117,14 @@ public final class RagMode implements Mode {
         // Build structured conversation messages for /api/chat
         List<ChatMessage> messages = buildMessages(system, userMessage, ctxMaps, ctx);
 
-        // Call LLM with structured messages (with timeout)
-        StringBuilder out = new StringBuilder();
-        boolean streamed = false;
-        try {
-            // Use streaming when a streamSink is available — tokens appear as they arrive
-            if (ctx.streamSink() != null) {
-                String answer = ctx.llm().chatStream(messages, ctx.streamSink());
-                if (answer != null) {
-                    // If tool calls detected, fall back to non-streaming loop
-                    if (ctx.toolCallLoop() != null && ToolCallParser.containsToolCalls(answer)) {
-                        LOG.debug("Tool calls detected in streamed RAG response, entering tool-call loop");
-                        ToolCallLoop.LoopResult loopResult = ctx.toolCallLoop().run(
-                                answer, messages, workspace, ctx);
-                        answer = loopResult.finalAnswer();
-                        LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked",
-                                loopResult.iterations(), loopResult.toolsInvoked());
-                        String summary = loopResult.summary();
-                        if (summary != null) {
-                            out.append(summary).append("\n\n");
-                        }
-                        answer = sanitizeAnswer(answer);
-                        answer = Sanitize.sanitizeForOutput(answer);
-                        if (answer.length() > lim.responseMaxChars()) {
-                            answer = answer.substring(0, (int) lim.responseMaxChars()) + "\n\n[output truncated]";
-                        }
-                        out.append(answer);
-                    } else {
-                        // No tool calls — content was streamed; record full text for memory
-                        streamed = true;
-                        out.append(answer);
-                    }
-                } else {
-                    out.append("(no answer)");
-                }
-            } else {
-                // Non-streaming fallback (tests, non-interactive)
-                CompletableFuture<String> fut = CompletableFuture.supplyAsync(
-                        () -> ctx.llm().chat(messages));
-                String answer = fut.get(llmTimeoutMs, TimeUnit.MILLISECONDS);
+        // Execute LLM turn via shared executor (streaming, tool-call loop, error handling)
+        var opts = new AssistantTurnExecutor.Options()
+                .llmTimeoutMs(llmTimeoutMs)
+                .responseMaxChars(lim.responseMaxChars())
+                .answerSanitizer(a -> Sanitize.sanitizeForOutput(sanitizeAnswer(a)));
 
-                if (answer != null) {
-                    // Run tool-call loop if the response contains tool_call blocks
-                    if (ctx.toolCallLoop() != null && ToolCallParser.containsToolCalls(answer)) {
-                        LOG.debug("Tool calls detected in RAG response, entering tool-call loop");
-                        ToolCallLoop.LoopResult loopResult = ctx.toolCallLoop().run(
-                                answer, messages, workspace, ctx);
-                        answer = loopResult.finalAnswer();
-                        LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked",
-                                loopResult.iterations(), loopResult.toolsInvoked());
-
-                        // Surface tool-use feedback to the user
-                        String summary = loopResult.summary();
-                        if (summary != null) {
-                            out.append(summary).append("\n\n");
-                        }
-                    }
-
-                    answer = sanitizeAnswer(answer);
-                    answer = Sanitize.sanitizeForOutput(answer);
-                    if (answer.length() > lim.responseMaxChars()) {
-                        answer = answer.substring(0, (int) lim.responseMaxChars()) + "\n\n[output truncated]";
-                    }
-                    out.append(answer);
-                } else {
-                    out.append("(no answer)");
-                }
-            }
-        } catch (java.util.concurrent.TimeoutException te) {
-            out.append("\n[Timeout: LLM response took too long]\n");
-        } catch (EngineException.ConnectionFailed cf) {
-            LOG.warn("Ollama not reachable in RAG mode: {}", cf.getMessage());
-            out.append("\n[Ollama not reachable — ").append(cf.guidance()).append("]\n");
-        } catch (EngineException.ModelNotFound mnf) {
-            LOG.warn("Model not found in RAG mode: {}", mnf.model());
-            out.append("\n[Model '").append(mnf.model()).append("' not found. ")
-               .append(mnf.guidance()).append("]\n");
-        } catch (EngineException.Transient tr) {
-            LOG.warn("Transient engine error in RAG mode: {}", tr.getMessage());
-            out.append("\n[").append(tr.guidance()).append("]\n");
-        } catch (EngineException ee) {
-            LOG.warn("Engine error in RAG mode: {}", ee.getMessage());
-            out.append("\n[Engine error: ").append(ee.getMessage()).append("]\n");
-        } catch (Exception e) {
-            String detail = e.getMessage();
-            LOG.warn("LLM call failed in RAG mode: {}", detail);
-            out.append("\n[Error during LLM call")
-               .append(detail != null && !detail.isBlank() ? ": " + detail : "")
-               .append("]\n");
-        }
+        AssistantTurnExecutor.TurnOutput turnOut =
+                AssistantTurnExecutor.execute(messages, workspace, ctx, opts);
 
         // Build citations section from ContextResult - paths normalized to forward slashes
         String citationsSuffix = "";
@@ -220,15 +139,15 @@ public final class RagMode implements Mode {
                 }
             }
             citationsSuffix = citBuf.toString();
-            out.append(citationsSuffix);
         }
 
         // Memory update is now centralized in TurnProcessor via SessionListener
 
-        if (streamed) {
-            return Optional.of(new Result.Streamed(out.toString(), citationsSuffix));
+        String fullText = turnOut.text() + citationsSuffix;
+        if (turnOut.streamed()) {
+            return Optional.of(new Result.Streamed(fullText, citationsSuffix));
         }
-        return Optional.of(new Result.Ok(out.toString()));
+        return Optional.of(new Result.Ok(fullText));
     }
 
     /**

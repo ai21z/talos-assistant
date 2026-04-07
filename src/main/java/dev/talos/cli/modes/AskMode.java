@@ -4,9 +4,6 @@ import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.llm.SystemPromptBuilder;
-import dev.talos.runtime.ToolCallLoop;
-import dev.talos.runtime.ToolCallParser;
-import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,8 +12,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -71,90 +66,20 @@ public final class AskMode implements Mode {
         // Build structured conversation messages for /api/chat
         List<ChatMessage> messages = buildMessages(system, rawLine, ctx);
 
-        StringBuilder out = new StringBuilder();
-        out.append("\n");
-        boolean streamed = false;
-        try {
-            final List<ChatMessage> msgs = messages;
+        // Execute LLM turn via shared executor
+        var opts = new AssistantTurnExecutor.Options()
+                .llmTimeoutMs(llmTimeoutMs)
+                .responseMaxChars(responseMaxChars);
 
-            // Use streaming when a streamSink is available — tokens appear as they arrive
-            if (ctx.streamSink() != null) {
-                out.append(""); // leading newline already added above
-                String answer = ctx.llm().chatStream(msgs, ctx.streamSink());
-                if (answer != null) {
-                    // If tool calls detected, fall back to non-streaming loop
-                    if (ctx.toolCallLoop() != null && ToolCallParser.containsToolCalls(answer)) {
-                        LOG.debug("Tool calls detected in streamed response, entering tool-call loop");
-                        ToolCallLoop.LoopResult loopResult = ctx.toolCallLoop().run(
-                                answer, messages, workspace, ctx);
-                        answer = loopResult.finalAnswer();
-                        LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked",
-                                loopResult.iterations(), loopResult.toolsInvoked());
-                        String summary = loopResult.summary();
-                        if (summary != null) {
-                            out.append("\n").append(summary).append("\n\n");
-                        }
-                        // Tool-call path: content was NOT fully streamed, use normal result
-                        out.append(answer);
-                    } else {
-                        // No tool calls — content was streamed; record full text for memory
-                        streamed = true;
-                        // Full text kept in out for memory/listener use via Streamed result
-                        out.append(answer);
-                    }
-                } else {
-                    out.append("(no answer)");
-                }
-            } else {
-                // Non-streaming fallback (tests, non-interactive)
-                CompletableFuture<String> fut = CompletableFuture.supplyAsync(
-                        () -> ctx.llm().chat(msgs));
-                String answer = fut.get(llmTimeoutMs, TimeUnit.MILLISECONDS);
-                if (answer != null) {
-                    if (ctx.toolCallLoop() != null && ToolCallParser.containsToolCalls(answer)) {
-                        LOG.debug("Tool calls detected in LLM response, entering tool-call loop");
-                        ToolCallLoop.LoopResult loopResult = ctx.toolCallLoop().run(
-                                answer, messages, workspace, ctx);
-                        answer = loopResult.finalAnswer();
-                        LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked",
-                                loopResult.iterations(), loopResult.toolsInvoked());
-                        String summary = loopResult.summary();
-                        if (summary != null) {
-                            out.append(summary).append("\n\n");
-                        }
-                    }
-                    if (answer.length() > responseMaxChars) {
-                        out.append(answer, 0, (int) responseMaxChars).append("\n\n[output truncated]\n");
-                    } else {
-                        out.append(answer);
-                    }
-                } else {
-                    out.append("(no answer)");
-                }
-            }
-        } catch (java.util.concurrent.TimeoutException te) {
-            out.append("\n[Timeout: LLM response took too long]\n");
-        } catch (EngineException.ConnectionFailed cf) {
-            out.append("\n[Ollama not reachable — ").append(cf.guidance()).append("]\n");
-        } catch (EngineException.ModelNotFound mnf) {
-            out.append("\n[Model '").append(mnf.model()).append("' not found. ")
-               .append(mnf.guidance()).append("]\n");
-        } catch (EngineException.Transient tr) {
-            out.append("\n[").append(tr.guidance()).append("]\n");
-        } catch (EngineException ee) {
-            out.append("\n[Engine error: ").append(ee.getMessage()).append("]\n");
-        } catch (Exception e) {
-            String detail = e.getMessage();
-            out.append("\n[Error during LLM call")
-               .append(detail != null && !detail.isBlank() ? ": " + detail : "")
-               .append("]\n");
-        }
-        out.append("\n\n");
+        AssistantTurnExecutor.TurnOutput turnOut =
+                AssistantTurnExecutor.execute(messages, workspace, ctx, opts);
 
-        if (streamed) {
-            return Optional.of(new Result.Streamed(out.toString(), ""));
+        String body = "\n" + turnOut.text() + "\n\n";
+
+        if (turnOut.streamed()) {
+            return Optional.of(new Result.Streamed(body, ""));
         }
-        return Optional.of(new Result.Ok(out.toString()));
+        return Optional.of(new Result.Ok(body));
     }
 
     /**
@@ -211,6 +136,5 @@ public final class AskMode implements Mode {
         if (history == null || history.isBlank()) return rawLine;
         return "[Conversation so far]\n" + history + "\n\n[Current message]\n" + rawLine;
     }
-
 
 }
