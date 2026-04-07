@@ -5,7 +5,6 @@ import dev.talos.cli.repl.Result;
 
 import java.nio.file.Path;
 import java.util.*;
-import java.util.regex.Pattern;
 
 /**
  * Router over registered Mode strategies with an active-mode concept.
@@ -44,13 +43,6 @@ public final class ModeController {
      */
     private WorkspaceSymbolChecker symbolChecker;
 
-    // Intent pattern: "list files" queries → FilesCommand shortcut
-    private static final Pattern LIST_FILES_PATTERN = Pattern.compile(
-        "(?i)(?:what|which|show|list)\\s+(?:files|docs|documents)|" +
-        "(?:list|show)\\s+(?:all\\s+)?files|" +
-        "what.*(?:inside|in).*(?:dir|directory|folder|workspace)|" +
-        "files\\s+(?:are\\s+)?(?:here|available|indexed)"
-    );
 
     /**
      * Adds a mode to the controller's registry.
@@ -177,27 +169,17 @@ public final class ModeController {
      *
      * <p>Flow:
      * <ol>
-     *   <li>"list files" shortcut → FilesCommand</li>
      *   <li>PromptRouter classifies → COMMAND / RETRIEVE / ASSIST</li>
      *   <li>Classified mode is tried</li>
      *   <li>If classified mode fails → always fall back to ASSIST</li>
      * </ol>
      *
      * <p>RAG is never a fallback. If the router doesn't say RETRIEVE,
-     * retrieval doesn't happen.
+     * retrieval doesn't happen. "List files" style queries are handled
+     * naturally by the LLM via the {@code talos.list_dir} tool, or
+     * explicitly via the {@code /files} slash command.
      */
     private Optional<Result> routeAuto(String rawLine, Path workspace, Context ctx) throws Exception {
-        // Special case: "list files" queries → FilesCommand shortcut
-        // This intercept runs before PromptRouter because it maps to a
-        // specific CLI command (Lucene index listing), not a Mode.
-        if (LIST_FILES_PATTERN.matcher(rawLine.toLowerCase(Locale.ROOT)).find()) {
-            try {
-                var filesCmd = new dev.talos.cli.commands.FilesCommand(workspace);
-                return Optional.of(filesCmd.execute("", ctx));
-            } catch (Exception e) {
-                // Fallback to normal routing
-            }
-        }
 
         // Classify the prompt with conversation context and workspace awareness
         PromptRouter.Route route = PromptRouter.route(rawLine, lastRoute, symbolChecker);
