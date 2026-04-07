@@ -259,5 +259,296 @@ class ToolCallParserTest {
         assertEquals(1, calls.size());
         assertEquals("hello", calls.get(0).param("pattern"));
     }
+
+    // ── Protocol hardening: variant XML tags ─────────────────────────
+
+    @Test
+    void parseFunctionCallTag() {
+        String response = """
+                I'll read the file.
+                <function_call>
+                {"name": "talos.read_file", "parameters": {"path": "src/Main.java"}}
+                </function_call>
+                """;
+
+        List<ToolCall> calls = ToolCallParser.parse(response);
+        assertEquals(1, calls.size());
+        assertEquals("talos.read_file", calls.get(0).toolName());
+        assertEquals("src/Main.java", calls.get(0).param("path"));
+    }
+
+    @Test
+    void parseToolTag() {
+        String response = """
+                <tool>
+                {"name": "talos.grep", "parameters": {"pattern": "TODO"}}
+                </tool>
+                """;
+
+        List<ToolCall> calls = ToolCallParser.parse(response);
+        assertEquals(1, calls.size());
+        assertEquals("talos.grep", calls.get(0).toolName());
+    }
+
+    @Test
+    void parseFunctionTag() {
+        String response = """
+                <function>
+                {"name": "talos.list_dir", "parameters": {"path": "src"}}
+                </function>
+                """;
+
+        List<ToolCall> calls = ToolCallParser.parse(response);
+        assertEquals(1, calls.size());
+        assertEquals("talos.list_dir", calls.get(0).toolName());
+    }
+
+    @Test
+    void parseMixedVariantTags() {
+        String response = """
+                <tool_call>
+                {"name": "talos.grep", "parameters": {"pattern": "TODO"}}
+                </tool_call>
+                <function_call>
+                {"name": "talos.read_file", "parameters": {"path": "a.java"}}
+                </function_call>
+                """;
+
+        List<ToolCall> calls = ToolCallParser.parse(response);
+        assertEquals(2, calls.size());
+        assertEquals("talos.grep", calls.get(0).toolName());
+        assertEquals("talos.read_file", calls.get(1).toolName());
+    }
+
+    @Test
+    void containsToolCallsDetectsVariantTags() {
+        assertTrue(ToolCallParser.containsToolCalls(
+                "<function_call>{\"name\":\"talos.x\"}</function_call>"));
+        assertTrue(ToolCallParser.containsToolCalls(
+                "<tool>{\"name\":\"talos.x\"}</tool>"));
+        assertTrue(ToolCallParser.containsToolCalls(
+                "<function>{\"name\":\"talos.x\"}</function>"));
+    }
+
+    @Test
+    void stripToolCallsRemovesVariantTags() {
+        String response = "Before.\n<function_call>\n{\"name\":\"talos.x\"}\n</function_call>\nAfter.";
+        String stripped = ToolCallParser.stripToolCalls(response);
+        assertFalse(stripped.contains("function_call"));
+        assertFalse(stripped.contains("talos.x"));
+        assertTrue(stripped.contains("Before."));
+        assertTrue(stripped.contains("After."));
+    }
+
+    // ── Protocol hardening: code-fenced JSON ─────────────────────────
+
+    @Test
+    void parseCodeFencedJson() {
+        String response = """
+                Let me read that file.
+                ```json
+                {"name": "talos.read_file", "parameters": {"path": "build.gradle.kts"}}
+                ```
+                """;
+
+        List<ToolCall> calls = ToolCallParser.parse(response);
+        assertEquals(1, calls.size());
+        assertEquals("talos.read_file", calls.get(0).toolName());
+        assertEquals("build.gradle.kts", calls.get(0).param("path"));
+    }
+
+    @Test
+    void parseCodeFenceWithoutJsonLabel() {
+        String response = """
+                ```
+                {"name": "talos.grep", "parameters": {"pattern": "class"}}
+                ```
+                """;
+
+        List<ToolCall> calls = ToolCallParser.parse(response);
+        assertEquals(1, calls.size());
+        assertEquals("talos.grep", calls.get(0).toolName());
+    }
+
+    @Test
+    void containsToolCallsDetectsCodeFence() {
+        String response = "```json\n{\"name\": \"talos.x\"}\n```";
+        assertTrue(ToolCallParser.containsToolCalls(response));
+    }
+
+    @Test
+    void stripToolCallsRemovesCodeFence() {
+        String response = "Before.\n```json\n{\"name\": \"talos.x\"}\n```\nAfter.";
+        String stripped = ToolCallParser.stripToolCalls(response);
+        assertFalse(stripped.contains("talos.x"));
+        assertTrue(stripped.contains("Before."));
+        assertTrue(stripped.contains("After."));
+    }
+
+    // ── Protocol hardening: bare JSON ────────────────────────────────
+
+    @Test
+    void parseBareJson() {
+        String response = """
+                I'll read the file now.
+                {"name": "talos.read_file", "parameters": {"path": "README.md"}}
+                """;
+
+        List<ToolCall> calls = ToolCallParser.parse(response);
+        assertEquals(1, calls.size());
+        assertEquals("talos.read_file", calls.get(0).toolName());
+        assertEquals("README.md", calls.get(0).param("path"));
+    }
+
+    @Test
+    void bareJsonNotUsedWhenTaggedBlockExists() {
+        // If a tagged block exists, bare JSON should not double-parse
+        String response = """
+                <tool_call>
+                {"name": "talos.grep", "parameters": {"pattern": "x"}}
+                </tool_call>
+                {"name": "talos.read_file", "parameters": {"path": "y"}}
+                """;
+
+        List<ToolCall> calls = ToolCallParser.parse(response);
+        // Should only get the tagged one
+        assertEquals(1, calls.size());
+        assertEquals("talos.grep", calls.get(0).toolName());
+    }
+
+    @Test
+    void containsToolCallsDetectsBareJson() {
+        assertTrue(ToolCallParser.containsToolCalls(
+                "\n{\"name\": \"talos.read_file\", \"parameters\": {\"path\": \"x\"}}"));
+    }
+
+    // ── Protocol hardening: JSON key normalization ───────────────────
+
+    @Test
+    void parseFunctionKeyAsName() {
+        String response = """
+                <tool_call>
+                {"function": "talos.read_file", "parameters": {"path": "x.java"}}
+                </tool_call>
+                """;
+
+        List<ToolCall> calls = ToolCallParser.parse(response);
+        assertEquals(1, calls.size());
+        assertEquals("talos.read_file", calls.get(0).toolName());
+    }
+
+    @Test
+    void parseToolNameKeyAsName() {
+        String response = """
+                <tool_call>
+                {"tool_name": "talos.grep", "parameters": {"pattern": "hello"}}
+                </tool_call>
+                """;
+
+        List<ToolCall> calls = ToolCallParser.parse(response);
+        assertEquals(1, calls.size());
+        assertEquals("talos.grep", calls.get(0).toolName());
+    }
+
+    @Test
+    void parseArgumentsKeyAsParameters() {
+        String response = """
+                <tool_call>
+                {"name": "talos.read_file", "arguments": {"path": "a.txt"}}
+                </tool_call>
+                """;
+
+        List<ToolCall> calls = ToolCallParser.parse(response);
+        assertEquals(1, calls.size());
+        assertEquals("a.txt", calls.get(0).param("path"));
+    }
+
+    @Test
+    void parseArgsKeyAsParameters() {
+        String response = """
+                <tool_call>
+                {"name": "talos.read_file", "args": {"path": "b.txt"}}
+                </tool_call>
+                """;
+
+        List<ToolCall> calls = ToolCallParser.parse(response);
+        assertEquals(1, calls.size());
+        assertEquals("b.txt", calls.get(0).param("path"));
+    }
+
+    @Test
+    void parseParamsKeyAsParameters() {
+        String response = """
+                <tool_call>
+                {"name": "talos.grep", "params": {"pattern": "test"}}
+                </tool_call>
+                """;
+
+        List<ToolCall> calls = ToolCallParser.parse(response);
+        assertEquals(1, calls.size());
+        assertEquals("test", calls.get(0).param("pattern"));
+    }
+
+    // ── Protocol hardening: nested wrapper ───────────────────────────
+
+    @Test
+    void parseNestedToolCallWrapper() {
+        String response = """
+                <tool_call>
+                {"tool_call": {"name": "talos.read_file", "parameters": {"path": "x.java"}}}
+                </tool_call>
+                """;
+
+        List<ToolCall> calls = ToolCallParser.parse(response);
+        assertEquals(1, calls.size());
+        assertEquals("talos.read_file", calls.get(0).toolName());
+        assertEquals("x.java", calls.get(0).param("path"));
+    }
+
+    @Test
+    void parseNestedFunctionCallWrapper() {
+        String response = """
+                <tool_call>
+                {"function_call": {"name": "talos.grep", "parameters": {"pattern": "bug"}}}
+                </tool_call>
+                """;
+
+        List<ToolCall> calls = ToolCallParser.parse(response);
+        assertEquals(1, calls.size());
+        assertEquals("talos.grep", calls.get(0).toolName());
+        assertEquals("bug", calls.get(0).param("pattern"));
+    }
+
+    // ── Protocol hardening: combined variants ────────────────────────
+
+    @Test
+    void parseFunctionTagWithArgumentsKey() {
+        // function tag + "function" name key + "arguments" params key
+        String response = """
+                <function>
+                {"function": "talos.list_dir", "arguments": {"path": "."}}
+                </function>
+                """;
+
+        List<ToolCall> calls = ToolCallParser.parse(response);
+        assertEquals(1, calls.size());
+        assertEquals("talos.list_dir", calls.get(0).toolName());
+        assertEquals(".", calls.get(0).param("path"));
+    }
+
+    @Test
+    void parseJsonMethodIsPackagePrivate() throws Exception {
+        // Direct test of parseJson with variant keys
+        ToolCall call = ToolCallParser.parseJson(
+                "{\"tool_name\": \"talos.x\", \"args\": {\"k\": \"v\"}}");
+        assertNotNull(call);
+        assertEquals("talos.x", call.toolName());
+        assertEquals("v", call.param("k"));
+    }
+
+    @Test
+    void parseJsonReturnsNullForNoNameVariants() throws Exception {
+        assertNull(ToolCallParser.parseJson("{\"unknown_key\": \"value\"}"));
+    }
 }
 
