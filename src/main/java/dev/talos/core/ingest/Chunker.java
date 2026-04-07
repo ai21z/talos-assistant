@@ -28,8 +28,8 @@ public class Chunker {
         // Pre-compute line-start offsets (index i → char offset where line i+1 begins)
         int[] lineOffsets = buildLineOffsets(content);
 
-        // Split into blocks that try to respect code fences and headings
-        List<String> blocks = splitBlocks(content);
+        // Split into blocks that respect structural boundaries
+        List<String> blocks = splitBlocks(content, sourceId);
 
         int cid = 0;
         String lastHeading = null; // most recent Markdown heading seen
@@ -142,7 +142,23 @@ public class Chunker {
 
     // ───── block splitting ─────
 
-    private static List<String> splitBlocks(String s) {
+    /**
+     * Splits content into structural blocks.
+     * <ul>
+     *   <li>{@code CODE_FILE} → delegates to {@link CodeBlockSplitter} for
+     *       language-aware structural boundaries (brace-depth, indent-level).</li>
+     *   <li>{@code DOCUMENT} and others → existing markdown-fence + heading logic.</li>
+     * </ul>
+     */
+    private static List<String> splitBlocks(String s, SourceIdentity sourceId) {
+        if (sourceId != null && sourceId.type() == SourceType.CODE_FILE) {
+            return CodeBlockSplitter.split(s, sourceId.format());
+        }
+        return splitMarkdownBlocks(s);
+    }
+
+    /** Original markdown-aware block splitting: respects code fences and headings. */
+    private static List<String> splitMarkdownBlocks(String s) {
         var blocks = new ArrayList<String>();
         var m = CODE_FENCE.matcher(s);
         int last = 0;
