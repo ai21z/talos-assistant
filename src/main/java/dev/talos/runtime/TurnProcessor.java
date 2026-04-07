@@ -3,6 +3,7 @@ package dev.talos.runtime;
 import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
+import dev.talos.core.retrieval.RetrievalTrace;
 import dev.talos.tools.*;
 
 import java.nio.file.Path;
@@ -97,9 +98,14 @@ public final class TurnProcessor {
         }
 
         long elapsedNanos = System.nanoTime() - startNanos;
+
+        // Consume any retrieval trace captured during mode dispatch (e.g. by RagMode).
+        // For non-RAG turns (AskMode, DevMode), this returns null — expected and correct.
+        RetrievalTrace trace = TurnTraceCapture.consume();
+
         TurnResult turnResult = new TurnResult(
                 result.get(),
-                null, // trace — extracted from Prepared in future pass
+                trace,
                 turn,
                 Duration.ofNanos(elapsedNanos)
         );

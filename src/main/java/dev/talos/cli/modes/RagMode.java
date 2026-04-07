@@ -15,6 +15,7 @@ import dev.talos.core.util.Sanitize;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
+import dev.talos.runtime.TurnTraceCapture;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import org.slf4j.Logger;
@@ -68,6 +69,9 @@ public final class RagMode implements Mode {
 
         // Prepare RAG context once (BM25F + vectors if enabled)
         RagService.Prepared prepared = ctx.rag().prepare(workspace, q, topK);
+
+        // Capture trace for runtime visibility (TurnProcessor reads this after dispatch)
+        TurnTraceCapture.capture(prepared.trace());
 
         // Surface retrieval warnings when empty due to error (vs. genuinely no matches)
         if (prepared.hasError() && prepared.snippets().isEmpty()) {

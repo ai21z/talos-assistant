@@ -3,8 +3,13 @@ package dev.talos.runtime;
 import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
+import dev.talos.cli.repl.SessionMemory;
 import dev.talos.core.Config;
+import dev.talos.core.context.ConversationManager;
+import dev.talos.core.context.TokenBudget;
+import dev.talos.core.retrieval.RetrievalTrace;
 import dev.talos.tools.*;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
@@ -16,6 +21,12 @@ import static org.junit.jupiter.api.Assertions.*;
 class TurnProcessorTest {
 
     private static final Path WS = Path.of(".").toAbsolutePath().normalize();
+
+    @AfterEach
+    void cleanupTrace() {
+        // Clear any leftover trace from tests
+        TurnTraceCapture.consume();
+    }
 
     @Test void nullInputReturnsNull() throws Exception {
         var tp = new TurnProcessor(ModeController.defaultController());
@@ -177,6 +188,99 @@ class TurnProcessorTest {
         @Override public ToolResult execute(ToolCall call) {
             return ToolResult.ok("Echo: " + call.param("input", "(empty)"));
         }
+    }
+
+    // ---- Trace capture tests ----
+
+    @Test void traceIsCapturedFromRagLikeMode() throws Exception {
+        // Simulate a mode that captures a trace (like RagMode does)
+        var modes = new ModeController();
+        modes.add(new StubMode("ask", true) {
+            @Override public Optional<Result> handle(String raw, Path ws, Context ctx) {
+                RetrievalTrace trace = new RetrievalTrace();
+                trace.record("Bm25Stage", 1_000_000, 0, 5);
+                trace.record("DedupStage", 500_000, 5, 4);
+                TurnTraceCapture.capture(trace);
+                return Optional.of(new Result.Ok("rag-answer"));
+            }
+        });
+        var tp = new TurnProcessor(modes);
+        var session = new Session(WS, new Config());
+        var ctx = Context.builder(new Config()).build();
+
+        TurnResult r = tp.process(session, "explain X", ctx);
+        assertNotNull(r);
+        assertNotNull(r.trace(), "Trace should be populated from capture");
+        assertEquals(2, r.trace().entries().size());
+        assertEquals("Bm25Stage", r.trace().entries().get(0).stageName());
+    }
+
+    @Test void traceIsNullForNonRagMode() throws Exception {
+        // AskMode doesn't capture a trace → trace should be null
+        var modes = new ModeController();
+        modes.add(new StubMode("ask", true));
+        var tp = new TurnProcessor(modes);
+        var session = new Session(WS, new Config());
+        var ctx = Context.builder(new Config()).build();
+
+        TurnResult r = tp.process(session, "hello", ctx);
+        assertNotNull(r);
+        assertNull(r.trace(), "Non-RAG modes should produce null trace");
+    }
+
+    @Test void traceIsClearedBetweenTurns() throws Exception {
+        var modes = new ModeController();
+        // First turn: RAG-like (captures trace)
+        // Second turn: plain (no capture)
+        var callCount = new int[]{0};
+        modes.add(new StubMode("ask", true) {
+            @Override public Optional<Result> handle(String raw, Path ws, Context ctx) {
+                callCount[0]++;
+                if (callCount[0] == 1) {
+                    RetrievalTrace trace = new RetrievalTrace();
+                    trace.record("Bm25Stage", 100, 0, 3);
+                    TurnTraceCapture.capture(trace);
+                }
+                // Second call: no capture → should see null trace
+                return Optional.of(new Result.Ok("answer-" + callCount[0]));
+            }
+        });
+        var tp = new TurnProcessor(modes);
+        var session = new Session(WS, new Config());
+        var ctx = Context.builder(new Config()).build();
+
+        TurnResult r1 = tp.process(session, "rag question", ctx);
+        assertNotNull(r1.trace());
+
+        TurnResult r2 = tp.process(session, "plain question", ctx);
+        assertNull(r2.trace(), "Trace from previous turn must not leak");
+    }
+
+    // ---- Memory listener integration with streamed results ----
+
+    @Test void memoryListenerRecordsStreamedResults() throws Exception {
+        SessionMemory memory = new SessionMemory();
+        ConversationManager cm = new ConversationManager(memory, new TokenBudget());
+
+        var modes = new ModeController();
+        modes.add(new StubMode("ask", true) {
+            @Override public Optional<Result> handle(String raw, Path ws, Context ctx) {
+                return Optional.of(new Result.Streamed("streamed answer body", "\n[Sources]"));
+            }
+        });
+        var tp = new TurnProcessor(modes);
+        tp.addListener(new MemoryUpdateListener(cm));
+
+        var session = new Session(WS, new Config());
+        var ctx = Context.builder(new Config()).build();
+
+        tp.process(session, "explain something", ctx);
+
+        assertEquals(1, cm.turnCount());
+        var history = cm.buildHistory();
+        assertEquals(2, history.size());
+        assertEquals("explain something", history.get(0).content());
+        assertEquals("streamed answer body", history.get(1).content());
     }
 
     // ---- Stub mode for isolated testing ----
