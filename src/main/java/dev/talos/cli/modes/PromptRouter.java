@@ -157,6 +157,26 @@ public final class PromptRouter {
     );
 
     /**
+     * Workspace-proximity terms: deictic references to the current workspace.
+     *
+     * <p>In a workspace-scoped CLI, "here" means "in this workspace", "workspace"
+     * means "the current workspace", and "working on" implies the current project.
+     * These are strong workspace signals but require question or action context
+     * to avoid false positives like "I'm here to help" or "I like workspaces".
+     *
+     * <p>Catches:
+     * <ul>
+     *   <li>"what am I working on here?" — "here" + question → RETRIEVE</li>
+     *   <li>"what workspace is this?" — "workspace" + question → RETRIEVE</li>
+     *   <li>"what am I working on?" — "working on" + question → RETRIEVE</li>
+     *   <li>"what's in here?" — "here" + question → RETRIEVE</li>
+     * </ul>
+     */
+    private static final Pattern WORKSPACE_PROXIMITY = Pattern.compile(
+        "(?i)\\bhere\\b|\\bworkspace\\b|\\bworking\\s+on\\b"
+    );
+
+    /**
      * Definite-article + technical noun: "the pipeline", "this constructor",
      * "the Sandbox class", etc.
      * Covers architecture patterns, language constructs (constructor, enum, record,
@@ -359,6 +379,12 @@ public final class PromptRouter {
             return new RouteResult(Route.RETRIEVE,
                     "PascalCase identifier in " + intentType, steps);
         }
+        if (hasIntentContext && WORKSPACE_PROXIMITY.matcher(lower).find()) {
+            String intentType = isAction ? "action" : "question";
+            steps.add(intentType + " context + workspace proximity term");
+            return new RouteResult(Route.RETRIEVE,
+                    "workspace proximity in " + intentType, steps);
+        }
         if (hasIntentContext && ANCHORED_TECH_NOUN.matcher(lower).find()) {
             String intentType = isAction ? "action" : "question";
             steps.add(intentType + " context + anchored tech noun");
@@ -441,11 +467,16 @@ public final class PromptRouter {
             || stripped.startsWith("how ")    || stripped.startsWith("what ")
             || stripped.startsWith("where ")  || stripped.startsWith("why ")
             || stripped.startsWith("when ")   || stripped.startsWith("who ")
+            || stripped.startsWith("which ")  || stripped.startsWith("do ")
             || stripped.startsWith("does ")   || stripped.startsWith("is ")
             || stripped.startsWith("are ")    || stripped.startsWith("can ")
             || stripped.startsWith("should ") || stripped.startsWith("could ")
             || stripped.startsWith("explain ") || stripped.startsWith("describe ")
-            || stripped.startsWith("show me ") || stripped.startsWith("tell me about ");
+            || stripped.startsWith("show me ") || stripped.startsWith("tell me about ")
+            || stripped.startsWith("tell me ")
+            || stripped.startsWith("what's ")  || stripped.startsWith("where's ")
+            || stripped.startsWith("how's ")   || stripped.startsWith("who's ")
+            || stripped.startsWith("which ");
     }
 
     /**
