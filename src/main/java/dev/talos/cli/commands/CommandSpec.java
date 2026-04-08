@@ -13,23 +13,9 @@ public record CommandSpec(
     public CommandSpec(String name, List<String> aliases, String usage, String summary) {
         this(name, aliases, usage, summary, CommandGroup.BASICS);
     }
-}
 
-enum CommandGroup {
-    BASICS("Basics"),
-    MODELS("Models"),
-    RAG("RAG"),
-    DEBUG("Debug"),
-    SECURITY("Security"),
-    WORKSPACE("Workspace");
-
-    private final String displayName;
-
-    CommandGroup(String displayName) {
-        this.displayName = displayName;
-    }
-
-    public String getDisplayName() {
-        return displayName;
+    /** Returns the display name of the command group (e.g., "Basics", "RAG"). */
+    public String groupDisplayName() {
+        return group != null ? group.getDisplayName() : null;
     }
 }

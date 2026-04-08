@@ -106,4 +106,5 @@ public final class ReplRouter {
     public boolean shouldQuit()          { return quit.get(); }
     public ModeController getModes()     { return modes; }
     public Session getRuntimeSession()   { return runtimeSession; }
+    public CommandRegistry getRegistry() { return registry; }
 }
