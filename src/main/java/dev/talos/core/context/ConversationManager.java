@@ -42,11 +42,19 @@ public final class ConversationManager {
     static final int COMPACTION_THRESHOLD_PAIRS = 6;
 
     /**
-     * Fraction of context window allocated to history.
+     * Fraction of context window allocated to history in RAG mode.
      * Used both for buildHistory budget and as the trigger threshold
      * for compaction (when stored history exceeds this budget).
      */
     static final double HISTORY_BUDGET_FRACTION = 0.25;
+
+    /**
+     * Fraction of context window allocated to history in assist/ask mode.
+     * Assist mode has no RAG snippets competing for context space, so
+     * history gets a much larger share — critical for multi-turn creative
+     * tasks where the user iterates on the assistant's prior output.
+     */
+    static final double ASSIST_HISTORY_BUDGET_FRACTION = 0.55;
 
     private final SessionMemory memory;
     private final TokenBudget budget;
@@ -131,9 +139,24 @@ public final class ConversationManager {
         return List.copyOf(selected);
     }
 
-    /** Build history using 25% of context window as default budget. */
+    /** Build history using 25% of context window as default budget (for RAG mode). */
     public List<ChatMessage> buildHistory() {
         int historyBudget = (int) (budget.contextMaxTokens() * HISTORY_BUDGET_FRACTION);
+        return buildHistory(historyBudget);
+    }
+
+    /**
+     * Build history using 55% of context window (for assist/ask mode).
+     *
+     * <p>In assist mode there are no RAG snippets competing for context space,
+     * so history gets a much larger share. This is critical for multi-turn
+     * creative tasks where the user iterates on the assistant's prior output
+     * (e.g., "make the ASCII cat bigger", "add more detail to the poem").
+     *
+     * @return list of ChatMessage in chronological order
+     */
+    public List<ChatMessage> buildHistoryForAssist() {
+        int historyBudget = (int) (budget.contextMaxTokens() * ASSIST_HISTORY_BUDGET_FRACTION);
         return buildHistory(historyBudget);
     }
 

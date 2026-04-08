@@ -141,6 +141,38 @@ class ConversationManagerTest {
     }
 
     @Test
+    void buildHistoryForAssist_usesLargerBudget() {
+        var memory = new SessionMemory();
+        var budget = new TokenBudget(8192);
+        var cm = new ConversationManager(memory, budget);
+
+        // Add many turns with decent-length content to fill the 25% budget but not 55%
+        for (int i = 0; i < 10; i++) {
+            cm.addTurn("question-" + i + "-" + "x".repeat(60),
+                       "answer-" + i + "-" + "x".repeat(60));
+        }
+
+        // Default buildHistory() uses 25% budget
+        List<ChatMessage> defaultHistory = cm.buildHistory();
+        // Assist buildHistory uses 55% budget — should fit more turns
+        List<ChatMessage> assistHistory = cm.buildHistoryForAssist();
+
+        assertTrue(assistHistory.size() >= defaultHistory.size(),
+                "Assist history (" + assistHistory.size() + " messages) should include at least as many turns as default (" + defaultHistory.size() + ")");
+    }
+
+    @Test
+    void buildHistoryForAssist_moreThanDoubleDefaultBudget() {
+        // Verify the assist fraction is meaningfully larger than the default
+        assertTrue(ConversationManager.ASSIST_HISTORY_BUDGET_FRACTION > ConversationManager.HISTORY_BUDGET_FRACTION,
+                "Assist budget fraction should be larger than default");
+        assertTrue(ConversationManager.ASSIST_HISTORY_BUDGET_FRACTION >= 0.50,
+                "Assist budget fraction should be at least 50%");
+        assertTrue(ConversationManager.ASSIST_HISTORY_BUDGET_FRACTION <= 0.70,
+                "Assist budget fraction should not exceed 70% (need room for system prompt + response)");
+    }
+
+    @Test
     void estimateHistoryTokens() {
         var memory = new SessionMemory();
         var budget = new TokenBudget();

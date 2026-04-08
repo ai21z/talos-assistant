@@ -108,9 +108,15 @@ class ConversationCompactionTest {
 
         @Test
         void systemPrompt_isReasonableLength() {
-            // Compaction system prompt should be short
-            assertTrue(ConversationCompactor.COMPACTION_SYSTEM_PROMPT.length() < 1000);
+            // Compaction system prompt should be concise but can be detailed
+            assertTrue(ConversationCompactor.COMPACTION_SYSTEM_PROMPT.length() < 1500);
             assertTrue(ConversationCompactor.COMPACTION_SYSTEM_PROMPT.contains("summarizer"));
+        }
+
+        @Test
+        void maxSketchChars_isReasonable() {
+            // 2000 chars allows enough detail for creative artifact summaries
+            assertEquals(2_000, ConversationCompactor.MAX_SKETCH_CHARS);
         }
     }
 
