@@ -33,8 +33,7 @@ class AskModeTest {
 
     @Test
     void buildMessages_no_history_returns_system_and_user() {
-        var ctx = Context.builder(new Config()).build();
-        List<ChatMessage> msgs = AskMode.buildMessages("You are helpful.", "hello", ctx);
+        List<ChatMessage> msgs = AskMode.buildMessages("You are helpful.", "hello", List.of());
         assertEquals(2, msgs.size());
         assertEquals("system", msgs.get(0).role());
         assertEquals("You are helpful.", msgs.get(0).content());
@@ -46,19 +45,15 @@ class AskModeTest {
     void buildMessages_includes_prior_turns_between_system_and_current() {
         var memory = new SessionMemory();
         memory.update("make me ascii art", "Sure! What kind?");
-        var ctx = Context.builder(new Config()).memory(memory).build();
+        List<ChatMessage> history = memory.getTurns();
 
-        List<ChatMessage> msgs = AskMode.buildMessages("sys", "a cat", ctx);
+        List<ChatMessage> msgs = AskMode.buildMessages("sys", "a cat", history);
         assertEquals(4, msgs.size());
-        // system first
         assertEquals("system", msgs.get(0).role());
-        // prior user turn
         assertEquals("user", msgs.get(1).role());
         assertEquals("make me ascii art", msgs.get(1).content());
-        // prior assistant turn
         assertEquals("assistant", msgs.get(2).role());
         assertEquals("Sure! What kind?", msgs.get(2).content());
-        // current user message last
         assertEquals("user", msgs.get(3).role());
         assertEquals("a cat", msgs.get(3).content());
     }
@@ -68,11 +63,10 @@ class AskModeTest {
         var memory = new SessionMemory();
         memory.update("turn1-q", "turn1-a");
         memory.update("turn2-q", "turn2-a");
-        var ctx = Context.builder(new Config()).memory(memory).build();
+        List<ChatMessage> history = memory.getTurns();
 
-        List<ChatMessage> msgs = AskMode.buildMessages("sys", "turn3-q", ctx);
+        List<ChatMessage> msgs = AskMode.buildMessages("sys", "turn3-q", history);
         assertEquals(6, msgs.size());
-        // system + 2 prior pairs + current
         assertEquals("system", msgs.get(0).role());
         assertEquals("turn1-q", msgs.get(1).content());
         assertEquals("turn1-a", msgs.get(2).content());
@@ -82,74 +76,29 @@ class AskModeTest {
     }
 
     @Test
-    void buildMessages_empty_memory_same_as_no_history() {
+    void buildMessages_empty_history_same_as_no_history() {
+        List<ChatMessage> msgs = AskMode.buildMessages("sys", "hello", List.of());
+        assertEquals(2, msgs.size(), "Empty history should produce just system + user");
+    }
+
+    @Test
+    void buildMessages_null_history_same_as_no_history() {
+        List<ChatMessage> msgs = AskMode.buildMessages("sys", "hello", (List<ChatMessage>) null);
+        assertEquals(2, msgs.size(), "Null history should produce just system + user");
+    }
+
+    @Test
+    void buildMessages_with_prior_turns_for_second_turn() {
         var memory = new SessionMemory();
-        var ctx = Context.builder(new Config()).memory(memory).build();
+        memory.update("make me ascii art", "Here is some ASCII art!");
+        List<ChatMessage> history = memory.getTurns();
 
-        List<ChatMessage> msgs = AskMode.buildMessages("sys", "hello", ctx);
-        assertEquals(2, msgs.size(), "Empty memory should produce just system + user");
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //  buildContextualPrompt (legacy flat-text — backward compat)
-    // ═══════════════════════════════════════════════════════════════════════
-
-    @Test
-    void contextualPrompt_with_no_history_returns_raw_input() {
-        var ctx = Context.builder(new Config()).build();
-        String result = AskMode.buildContextualPrompt("hello", ctx);
-        assertEquals("hello", result);
-    }
-
-    @Test
-    void contextualPrompt_with_empty_memory_returns_raw_input() {
-        var memory = new SessionMemory();
-        var ctx = Context.builder(new Config()).memory(memory).build();
-        String result = AskMode.buildContextualPrompt("hello", ctx);
-        assertEquals("hello", result);
-    }
-
-    @Test
-    void contextualPrompt_includes_history_when_available() {
-        var memory = new SessionMemory();
-        memory.update("make me ascii art", "Sure! What would you like?");
-        var ctx = Context.builder(new Config()).memory(memory).build();
-
-        String result = AskMode.buildContextualPrompt("a cat", ctx);
-
-        assertTrue(result.contains("[Conversation so far]"),
-                "Should include conversation header");
-        assertTrue(result.contains("make me ascii art"),
-                "Should include prior user input");
-        assertTrue(result.contains("Sure! What would you like?"),
-                "Should include prior assistant response");
-        assertTrue(result.contains("[Current message]"),
-                "Should include current message header");
-        assertTrue(result.endsWith("a cat"),
-                "Should end with current user input");
-    }
-
-    @Test
-    void contextualPrompt_includes_multiple_turns() {
-        var memory = new SessionMemory();
-        memory.update("make me ascii art", "What would you like?");
-        memory.update("a cat", "Here is an ASCII cat!");
-        var ctx = Context.builder(new Config()).memory(memory).build();
-
-        String result = AskMode.buildContextualPrompt("make it bigger", ctx);
-
-        assertTrue(result.contains("make me ascii art"));
-        assertTrue(result.contains("a cat"));
-        assertTrue(result.contains("Here is an ASCII cat"));
-        assertTrue(result.contains("make it bigger"));
-    }
-
-    @Test
-    void contextualPrompt_with_null_memory_returns_raw_input() {
-        // Context.builder defaults memory to a new SessionMemory, so
-        // we verify that even with an empty one it's safe
-        var ctx = Context.builder(new Config()).build();
-        assertDoesNotThrow(() -> AskMode.buildContextualPrompt("test", ctx));
+        List<ChatMessage> msgs = AskMode.buildMessages("sys", "a shield", history);
+        assertTrue(msgs.size() >= 4, "Should have system + prior pair + current user");
+        assertTrue(msgs.stream().anyMatch(m -> "make me ascii art".equals(m.content())),
+                "Prior user turn should be in structured messages");
+        assertEquals("a shield", msgs.get(msgs.size() - 1).content(),
+                "Current user message should be last");
     }
 
     @Test
@@ -168,21 +117,6 @@ class AskModeTest {
                 "No structured turns should be added by AskMode directly");
     }
 
-    @Test
-    void handle_second_turn_buildMessages_uses_conversationManager() throws Exception {
-        // Simulate what happens when ConversationManager has history from prior turns
-        // (populated by TurnProcessor's MemoryUpdateListener, not AskMode)
-        var memory = new SessionMemory();
-        memory.update("make me ascii art", "Here is some ASCII art!");
-        var ctx = Context.builder(new Config()).memory(memory).build();
-
-        List<ChatMessage> msgs = AskMode.buildMessages("sys", "a shield", ctx);
-        assertTrue(msgs.size() >= 4, "Should have system + prior pair + current user");
-        assertTrue(msgs.stream().anyMatch(m -> "make me ascii art".equals(m.content())),
-                "Prior user turn should be in structured messages");
-        assertEquals("a shield", msgs.get(msgs.size() - 1).content(),
-                "Current user message should be last");
-    }
 
     // ═══════════════════════════════════════════════════════════════════════
     //  Memory updates are now centralized in TurnProcessor

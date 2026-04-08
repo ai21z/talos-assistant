@@ -1,4 +1,4 @@
-# LOQ-J Technical Analysis
+# Talos Technical Analysis (formerly LOQ-J)
 
 **Version:** `v0.9.0-beta`  
 **Last verified commit:** `ec2f6e9`
