@@ -33,7 +33,7 @@ public final class RouteCommand implements Command {
     public CommandSpec spec() {
         return new CommandSpec("route", List.of("explain-route"),
                 "/route <prompt>",
-                "Explain how a prompt would be routed in auto mode (diagnostic).",
+                "Explain prompt routing.",
                 CommandGroup.DEBUG);
     }
 

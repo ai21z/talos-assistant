@@ -19,7 +19,8 @@ public final class ShowCommand implements Command {
         return new CommandSpec("show",
                 List.of(),
                 "/show <rel>#<chunk>",
-                "Display specific snippet by file path and chunk ID.");
+                "Display a snippet.",
+                CommandGroup.KNOWLEDGE);
     }
 
     @Override public Result execute(String args, Context ctx) {

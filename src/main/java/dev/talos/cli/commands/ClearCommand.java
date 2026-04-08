@@ -17,8 +17,8 @@ public final class ClearCommand implements Command {
 
     @Override
     public CommandSpec spec() {
-        return new CommandSpec("clear", List.of("cls"), "/clear", "Reset conversation history.",
-                CommandGroup.BASICS);
+        return new CommandSpec("clear", List.of("cls"), "/clear", "Reset conversation.",
+                CommandGroup.SESSION);
     }
 
     @Override

@@ -7,7 +7,8 @@ import java.util.List;
 
 public final class AuditToggleCommand implements Command {
     @Override public CommandSpec spec() {
-        return new CommandSpec("audit", List.of(), "/audit on|off", "Toggle JSONL audit logging for this session.");
+        return new CommandSpec("audit", List.of(), "/audit on|off", "Toggle audit logging.",
+                CommandGroup.SECURITY);
     }
 
     @Override public Result execute(String args, Context ctx) {

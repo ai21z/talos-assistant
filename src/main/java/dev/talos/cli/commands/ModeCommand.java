@@ -12,7 +12,7 @@ public final class ModeCommand implements Command {
     public ModeCommand(ModeController modes) { this.modes = modes; }
 
     @Override public CommandSpec spec() {
-        return new CommandSpec("mode", List.of(), "/mode auto|rag|chat|dev|ask", "Switch active mode.", CommandGroup.RAG);
+        return new CommandSpec("mode", List.of(), "/mode <mode>", "Switch active mode.", CommandGroup.MODELS);
     }
 
     @Override public Result execute(String args, Context ctx) {

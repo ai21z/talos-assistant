@@ -8,7 +8,8 @@ import java.util.List;
 
 public final class SetModelCommand implements Command {
     @Override public CommandSpec spec() {
-        return new CommandSpec("set", List.of(), "/set model <name>", "Switch active LLM model.");
+        return new CommandSpec("set", List.of(), "/set model <name>", "Switch active model.",
+                CommandGroup.MODELS);
     }
 
     @Override public Result execute(String args, Context ctx) throws Exception {
