@@ -335,5 +335,101 @@ class SystemPromptBuilderTest {
             @Override public ToolResult execute(ToolCall call) { return ToolResult.ok("stub"); }
         };
     }
+
+    // ── File operation prompt reinforcement ──────────────────────────
+
+    @Test
+    void toolsPreambleContainsWriteFileExample() {
+        var registry = new ToolRegistry();
+        registry.register(stubTool("talos.write_file", "Create or overwrite a file"));
+
+        String prompt = SystemPromptBuilder.forAsk()
+                .withTools(registry)
+                .build();
+
+        assertTrue(prompt.contains("talos.write_file"),
+                "Prompt should contain write_file tool name");
+        assertTrue(prompt.contains("creating/writing a file") || prompt.contains("talos.write_file"),
+                "Prompt should contain write_file example section");
+    }
+
+    @Test
+    void toolsPreambleContainsCriticalFileModificationSection() {
+        var registry = new ToolRegistry();
+        registry.register(stubTool("talos.write_file", "Create or overwrite a file"));
+
+        String prompt = SystemPromptBuilder.forAsk()
+                .withTools(registry)
+                .build();
+
+        assertTrue(prompt.contains("FILE CREATION AND MODIFICATION"),
+                "Prompt should contain the elevated File Modification section");
+        assertTrue(prompt.contains("CRITICAL"),
+                "File Modification section should be marked CRITICAL");
+    }
+
+    @Test
+    void identityContainsExplicitFileCreationCapability() {
+        String prompt = SystemPromptBuilder.forAsk().build();
+
+        assertTrue(prompt.contains("CAN create files"),
+                "Identity should explicitly state file creation capability");
+        assertTrue(prompt.contains("talos.write_file"),
+                "Identity should mention talos.write_file by name");
+    }
+
+    @Test
+    void askRulesContainWriteFileReinforcement() {
+        String prompt = SystemPromptBuilder.forAsk().build();
+
+        assertTrue(prompt.contains("NEVER output code blocks as a substitute"),
+                "Ask rules should reinforce never dumping code blocks");
+    }
+
+    @Test
+    void ragRulesContainWriteFileReinforcement() {
+        String prompt = SystemPromptBuilder.forRag().build();
+
+        assertTrue(prompt.contains("NEVER say \"I cannot create files\"")
+                        || prompt.contains("You CAN create files"),
+                "RAG rules should reinforce file creation capability");
+    }
+
+    @Test
+    void fileModificationProtocolAppearsBeforeToolList() {
+        var registry = new ToolRegistry();
+        registry.register(stubTool("talos.write_file", "Create or overwrite a file"));
+        registry.register(stubTool("talos.read_file", "Read a workspace file"));
+
+        String prompt = SystemPromptBuilder.forAsk()
+                .withTools(registry)
+                .build();
+
+        int criticalPos = prompt.indexOf("FILE CREATION AND MODIFICATION");
+        int toolListPos = prompt.indexOf("- **talos.");
+
+        assertTrue(criticalPos >= 0, "CRITICAL section should be present");
+        assertTrue(toolListPos >= 0, "Tool list should be present");
+        assertTrue(criticalPos < toolListPos,
+                "File Modification Protocol should appear BEFORE the tool list");
+    }
+
+    @Test
+    void writeFileExampleAppearsInWritableToolPrompt() {
+        var registry = new ToolRegistry();
+        registry.register(stubTool("talos.write_file", "Create or overwrite a file"));
+
+        String prompt = SystemPromptBuilder.forRag()
+                .withTools(registry)
+                .build();
+
+        // Verify the concrete write_file example is in the prompt
+        assertTrue(prompt.contains("\"name\": \"talos.write_file\"")
+                        || prompt.contains("talos.write_file"),
+                "Prompt should contain a concrete write_file usage example");
+        assertTrue(prompt.contains("output/summary.txt")
+                        || prompt.contains("talos.write_file"),
+                "Prompt should show a write_file example with a file path");
+    }
 }
 
