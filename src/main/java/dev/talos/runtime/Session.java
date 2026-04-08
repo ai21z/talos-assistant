@@ -33,19 +33,25 @@ public final class Session implements AutoCloseable {
     private final Instant startedAt;
     private final AtomicInteger turnCount;
     private final SessionMemory memory;
+    private final SessionStore store;
     private final List<SessionListener> closeListeners = new CopyOnWriteArrayList<>();
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
     public Session(Path workspace, Config config) {
-        this(workspace, config, new SessionMemory());
+        this(workspace, config, new SessionMemory(), new NoOpSessionStore());
     }
 
     public Session(Path workspace, Config config, SessionMemory memory) {
+        this(workspace, config, memory, new NoOpSessionStore());
+    }
+
+    public Session(Path workspace, Config config, SessionMemory memory, SessionStore store) {
         this.workspace = Objects.requireNonNull(workspace, "workspace must not be null");
         this.config = Objects.requireNonNull(config, "config must not be null");
         this.startedAt = Instant.now();
         this.turnCount = new AtomicInteger(0);
         this.memory = (memory != null) ? memory : new SessionMemory();
+        this.store = (store != null) ? store : new NoOpSessionStore();
     }
 
     /** The workspace root this session is bound to. */
@@ -65,6 +71,9 @@ public final class Session implements AutoCloseable {
 
     /** Session-scoped conversational memory (rolling window). */
     public SessionMemory memory() { return memory; }
+
+    /** The session store used for persistence (NoOp by default). */
+    public SessionStore store() { return store; }
 
     /** Register a listener to be notified when the session closes. */
     public void addCloseListener(SessionListener listener) {
