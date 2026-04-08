@@ -26,6 +26,7 @@ public final class RenderEngine {
     private final PrintStream out;
     private final String statusLabel;
     private final boolean showStatusDuringAnswer;
+    private final boolean interactive;
 
     // Spinner state
     private final AtomicBoolean spinnerActive = new AtomicBoolean(false);
@@ -40,9 +41,19 @@ public final class RenderEngine {
     private final String[] spinnerFrames;
 
     public RenderEngine(Config cfg, Redactor redactor, PrintStream out) {
+        this(cfg, redactor, out, isInteractiveTerminal(out));
+    }
+
+    /**
+     * @param interactive when false (piped / redirected output), the spinner is
+     *                    suppressed to avoid flooding non-terminal consumers with
+     *                    hundreds of carriage-return lines.
+     */
+    public RenderEngine(Config cfg, Redactor redactor, PrintStream out, boolean interactive) {
         this.cfg = (cfg == null ? new Config() : cfg);
         this.redactor = (redactor == null ? new Redactor() : redactor);
         this.out = (out == null ? System.out : out);
+        this.interactive = interactive;
 
         // UI config
         Map<String, Object> ui = CfgUtil.map(this.cfg.data.get("ui"));
@@ -53,10 +64,22 @@ public final class RenderEngine {
     }
 
     /**
+     * Detect whether stdout is connected to an interactive terminal.
+     * When output is piped or redirected, {@code System.console()} returns null.
+     */
+    private static boolean isInteractiveTerminal(PrintStream target) {
+        // If output is not System.out (e.g., test harness), assume non-interactive
+        if (target != null && target != System.out) return false;
+        return System.console() != null;
+    }
+
+    /**
      * Starts the spinner (non-blocking).
+     * Suppressed in non-interactive mode to avoid flooding piped output.
      */
     public void startSpinner() {
         if (!showStatusDuringAnswer) return;
+        if (!interactive) return;
         if (!spinnerActive.compareAndSet(false, true)) return;
 
         spinnerStartTime = Instant.now();
