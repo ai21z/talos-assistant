@@ -2,6 +2,7 @@ package dev.talos.cli.cmds;
 
 import dev.talos.cli.repl.ReplRouter;
 import dev.talos.cli.repl.SessionState;
+import dev.talos.cli.repl.SlashCommandCompleter;
 import dev.talos.cli.ui.AnsiColor;
 import dev.talos.cli.ui.TalosBanner;
 import dev.talos.core.CfgUtil;
@@ -87,7 +88,10 @@ public class RunCmd implements Runnable, SessionState {
 
         try {
             Terminal term = TerminalBuilder.builder().system(true).jna(true).build();
-            LineReader reader = LineReaderBuilder.builder().terminal(term).build();
+            LineReader reader = LineReaderBuilder.builder()
+                    .terminal(term)
+                    .completer(new SlashCommandCompleter(router.getRegistry()))
+                    .build();
 
             // Set up prompt refresh callback for mode changes
             final AtomicReference<String> currentPrompt = new AtomicReference<>();

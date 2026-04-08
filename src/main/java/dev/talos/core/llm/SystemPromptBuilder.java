@@ -231,15 +231,26 @@ public final class SystemPromptBuilder {
             {"name": "tool_name", "parameters": {"key": "value"}}
             </tool_call>
             
-            Example:
+            Example — reading a file:
             <tool_call>
             {"name": "talos.read_file", "parameters": {"path": "src/Main.java"}}
             </tool_call>
             
+            Example — creating/writing a file:
+            <tool_call>
+            {"name": "talos.write_file", "parameters": {"path": "output/summary.txt", "content": "This is the file content.\\nLine two.\\n"}}
+            </tool_call>
+            
+            FILE CREATION AND MODIFICATION (CRITICAL):
+            - You CAN create files. You have talos.write_file. USE IT.
+            - When the user asks you to CREATE, WRITE, SAVE, PUT, or GENERATE a file → call talos.write_file with the full content.
+            - When the user asks you to EDIT an existing file → call talos.edit_file with old_string and new_string.
+            - NEVER say "I cannot create files." NEVER just print code in a code block. ALWAYS call the tool.
+            - After writing or editing, briefly confirm what you did.
+            
             Rules:
             - CONTEXT FIRST: If the provided context snippets already answer the user's question, respond directly from context. Do NOT call a tool when the answer is already in front of you.
             - Only call a tool when you need to PERFORM an action (read a file, run a search, etc.) that the current context cannot satisfy.
-            - If the user asks you to DESCRIBE, LIST, or EXPLAIN something and the context already covers it, answer from context — do not call a tool.
             - You MUST use <tool_call> and </tool_call> tags. Do not use ```json blocks or bare JSON.
             - The JSON must have "name" and "parameters" keys exactly as shown.
             - You may emit multiple tool_call blocks in one response.
