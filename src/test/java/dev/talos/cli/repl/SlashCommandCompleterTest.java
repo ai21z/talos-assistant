@@ -27,13 +27,13 @@ class SlashCommandCompleterTest {
     @BeforeEach
     void setUp() {
         registry = new CommandRegistry();
-        registry.register(stubCommand("help", List.of("h", "?"), "Show help", CommandGroup.BASICS));
-        registry.register(stubCommand("reindex", List.of(), "Reindex workspace", CommandGroup.RAG));
+        registry.register(stubCommand("help", List.of("h", "?"), "Show help", CommandGroup.SESSION));
+        registry.register(stubCommand("reindex", List.of(), "Reindex workspace", CommandGroup.KNOWLEDGE));
         registry.register(stubCommand("route", List.of(), "Test routing", CommandGroup.DEBUG));
-        registry.register(stubCommand("mode", List.of("m"), "Switch mode", CommandGroup.BASICS));
+        registry.register(stubCommand("mode", List.of("m"), "Switch mode", CommandGroup.MODELS));
         registry.register(stubCommand("models", List.of(), "List models", CommandGroup.MODELS));
-        registry.register(stubCommand("status", List.of(), "Show status", CommandGroup.BASICS));
-        registry.register(stubCommand("quit", List.of("q", "exit"), "Quit Talos", CommandGroup.BASICS));
+        registry.register(stubCommand("status", List.of(), "Show status", CommandGroup.SESSION));
+        registry.register(stubCommand("quit", List.of("q", "exit"), "Quit Talos", CommandGroup.SESSION));
         completer = new SlashCommandCompleter(registry);
     }
 
@@ -112,7 +112,7 @@ class SlashCommandCompleterTest {
                 .orElse(null);
 
         assertNotNull(reindexCandidate, "Should find /reindex candidate");
-        assertEquals("RAG", reindexCandidate.group(),
+        assertEquals("Knowledge", reindexCandidate.group(),
                 "Candidate should include command group");
     }
 

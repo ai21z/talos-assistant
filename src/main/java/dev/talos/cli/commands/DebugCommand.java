@@ -10,7 +10,7 @@ public final class DebugCommand implements Command {
     public DebugCommand(CliRuntime rt) { this.rt = rt; }
 
     @Override public CommandSpec spec() {
-        return new CommandSpec("debug", List.of(), "/debug on|off", "Toggle debug printing.", CommandGroup.DEBUG);
+        return new CommandSpec("debug", List.of(), "/debug on|off", "Toggle debug output.", CommandGroup.DEBUG);
     }
 
     @Override public Result execute(String args, Context ctx) {
