@@ -121,38 +121,5 @@ public final class AskMode implements Mode {
         return messages;
     }
 
-    /**
-     * Legacy overload: builds history from context internally.
-     * Kept for backward compatibility with existing tests.
-     */
-    static List<ChatMessage> buildMessages(String system, String rawLine, Context ctx) {
-        List<ChatMessage> history = List.of();
-        if (ctx.conversationManager() != null) {
-            history = ctx.conversationManager().buildHistory();
-        } else if (ctx.memory() != null) {
-            history = ctx.memory().getTurns();
-        }
-        return buildMessages(system, rawLine, history);
-    }
-
-    /**
-     * Builds a contextual prompt by prepending recent conversation history.
-     *
-     * <p>If the session has prior turns, the prompt includes them so the LLM
-     * can maintain conversational continuity (e.g. remembering a request for
-     * ASCII art across follow-up turns).
-     *
-     * <p>When no history exists, the raw user input is returned unchanged.
-     *
-     * <p><b>Note:</b> This is the legacy flat-text approach, kept for backward
-     * compatibility and testing. The primary LLM call now uses
-     * {@link #buildMessages(String, String, Context)} with structured messages.
-     */
-    static String buildContextualPrompt(String rawLine, Context ctx) {
-        if (ctx.memory() == null) return rawLine;
-        String history = ctx.memory().get();
-        if (history == null || history.isBlank()) return rawLine;
-        return "[Conversation so far]\n" + history + "\n\n[Current message]\n" + rawLine;
-    }
 
 }

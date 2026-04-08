@@ -529,7 +529,7 @@ talos run
 
 ```powershell
 # Run with JVM debug flags
-$env:JAVA_OPTS="-Dloqj.debug=true"
+$env:JAVA_OPTS="-Dtalos.debug=true"
 ```
 
 ```powershell
