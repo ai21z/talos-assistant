@@ -38,9 +38,6 @@ public final class SystemPromptBuilder {
     private static final String RES_TOOLS         = "prompts/sections/tools-preamble.txt";
     private static final String RES_CONVERSATION  = "prompts/sections/conversation.txt";
 
-    // --- Fallback: legacy monolithic prompt files ---
-    private static final String RES_LEGACY_ASK = "prompts/ask-system.txt";
-    private static final String RES_LEGACY_RAG = "prompts/rag-system.txt";
 
     private final Mode mode;
     private ToolRegistry toolRegistry;
@@ -80,28 +77,20 @@ public final class SystemPromptBuilder {
      *
      * <p>Strategy:
      * <ol>
-     *   <li>Try to load composable sections from {@code prompts/sections/}</li>
-     *   <li>If the identity section exists, compose from parts</li>
-     *   <li>Otherwise, fall back to the legacy monolithic prompt file</li>
+     *   <li>Load composable sections from {@code prompts/sections/}</li>
+     *   <li>If the identity section exists, compose from parts (identity + mode rules + tools + conversation)</li>
+     *   <li>Otherwise, use a minimal inline default prompt with dynamic sections appended</li>
      * </ol>
-     *
-     * <p>This allows incremental migration: as long as the legacy files
-     * exist, they remain the source of truth. Once composable sections
-     * are added, they take precedence.
      */
     public String build() {
-        // Try composable path first
+        // Composable path: load identity section, compose with mode rules + dynamic sections
         String identity = readResource(RES_IDENTITY);
         if (identity != null) {
             return buildComposed(identity);
         }
 
-        // Fall back to legacy monolithic prompt + tool/conversation appendix
-        String legacy = readResource(mode == Mode.ASK ? RES_LEGACY_ASK : RES_LEGACY_RAG);
-        if (legacy == null) {
-            legacy = defaultPrompt();
-        }
-        return appendDynamicSections(legacy);
+        // Fallback: inline default prompt + dynamic sections (no external resource files needed)
+        return appendDynamicSections(defaultPrompt());
     }
 
     /** Compose from individual sections. */

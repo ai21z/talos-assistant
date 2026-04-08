@@ -119,7 +119,7 @@ public class DiagnoseCmd implements Runnable {
 
                 // 5. Prepare retrieval and validate prompt
                 RagService ragService = new RagService(cfg);
-                String systemPrompt = ragService.readCliSystemPromptOrDefault();
+                String systemPrompt = ragService.buildSystemPrompt();
 
                 System.out.println("Retrieving snippets...");
                 RagService.Prepared prepared = ragService.prepare(root, question, effectiveK);

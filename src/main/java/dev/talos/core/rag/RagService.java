@@ -7,6 +7,7 @@ import dev.talos.core.embed.EmbeddingsClient;
 import dev.talos.core.index.Indexer;
 import dev.talos.core.index.LuceneStore;
 import dev.talos.core.llm.LlmClient;
+import dev.talos.core.llm.SystemPromptBuilder;
 import dev.talos.core.cache.CacheDb;
 import dev.talos.core.context.ContextPacker;
 import dev.talos.core.context.ContextResult;
@@ -19,7 +20,6 @@ import dev.talos.runtime.ToolCallParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
@@ -195,11 +195,12 @@ public class RagService {
     }
 
 
-    public String readCliSystemPromptOrDefault() throws Exception {
-        try (InputStream in = RagService.class.getClassLoader().getResourceAsStream("prompts/cli-system.txt")) {
-            if (in != null) return new String(in.readAllBytes());
-        }
-        return "You are Talos (CLI). Answer briefly, cite local files when available. If context is insufficient, say so.";
+    /**
+     * Build system prompt using the composable SystemPromptBuilder.
+     * Used by the legacy {@code ask()} path and {@code DiagnoseCmd}.
+     */
+    public String buildSystemPrompt() {
+        return SystemPromptBuilder.forRag().build();
     }
 
     /**
@@ -240,7 +241,7 @@ public class RagService {
                 return new Answer(stub, prepared.citations(), prepared, null);
             }
 
-            String sys = readCliSystemPromptOrDefault();
+            String sys = buildSystemPrompt();
 
             // Pack retrieved snippets into context using unified ContextPacker
             ContextPacker packer = new ContextPacker(TokenBudget.fromConfig(cfg));
