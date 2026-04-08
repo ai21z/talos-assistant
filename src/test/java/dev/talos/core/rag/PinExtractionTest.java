@@ -169,7 +169,8 @@ public class PinExtractionTest {
 
     // Helper to extract path from Snippet object
     private String extractPath(Object snippet) throws Exception {
-        Method pathMethod = snippet.getClass().getMethod("path");
+        Method pathMethod = snippet.getClass().getDeclaredMethod("path");
+        pathMethod.setAccessible(true);
         return (String) pathMethod.invoke(snippet);
     }
 }
