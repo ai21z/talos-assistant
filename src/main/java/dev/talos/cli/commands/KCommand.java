@@ -10,7 +10,8 @@ public final class KCommand implements Command {
     public KCommand(CliRuntime rt) { this.rt = rt; }
 
     @Override public CommandSpec spec() {
-        return new CommandSpec("k", List.of(), "/k <int>", "Set or show retrieval breadth (top-k).");
+        return new CommandSpec("k", List.of(), "/k <int>", "Set retrieval top-k.",
+                CommandGroup.KNOWLEDGE);
     }
 
     @Override public Result execute(String args, Context ctx) {

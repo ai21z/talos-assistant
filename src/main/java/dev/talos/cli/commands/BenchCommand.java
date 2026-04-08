@@ -27,7 +27,8 @@ public final class BenchCommand implements Command {
         return new CommandSpec("bench",
                 List.of(),
                 "/bench [--runs=N] [--models=model1,model2] [--concurrency=1,2,4]",
-                "Run micro-benchmarks comparing model+concurrency combinations.");
+                "Run benchmarks.",
+                CommandGroup.DEBUG);
     }
 
     @Override public Result execute(String args, Context ctx) {

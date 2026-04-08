@@ -195,7 +195,7 @@ class InfraCommandsTest {
         @Test void spec_name_and_group() {
             var cmd = new FilesCommand(ws);
             assertEquals("files", cmd.spec().name());
-            assertEquals(CommandGroup.WORKSPACE, cmd.spec().group());
+            assertEquals(CommandGroup.KNOWLEDGE, cmd.spec().group());
         }
     }
 
@@ -244,7 +244,7 @@ class InfraCommandsTest {
         @Test void spec_name_and_group() {
             var cmd = new ReindexCommand(ws);
             assertEquals("reindex", cmd.spec().name());
-            assertEquals(CommandGroup.RAG, cmd.spec().group());
+            assertEquals(CommandGroup.KNOWLEDGE, cmd.spec().group());
             assertTrue(cmd.spec().aliases().contains("--stats"));
             assertTrue(cmd.spec().aliases().contains("--full"));
             assertTrue(cmd.spec().aliases().contains("--prune"));

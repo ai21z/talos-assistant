@@ -32,7 +32,8 @@ public final class SecretCommand implements Command {
     @Override
     public CommandSpec spec() {
         return new CommandSpec("secret", List.of(), "/secret set|get|del <key>",
-                "Manage local secrets (encrypted-at-rest).");
+                "Manage local secrets.",
+                CommandGroup.SECURITY);
     }
 
     @Override

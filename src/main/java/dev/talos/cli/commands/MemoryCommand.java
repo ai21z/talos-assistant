@@ -7,7 +7,8 @@ import java.util.List;
 
 public final class MemoryCommand implements Command {
     @Override public CommandSpec spec() {
-        return new CommandSpec("memory", List.of(), "/memory clear", "Clear session memory (RAG+MEMORY).");
+        return new CommandSpec("memory", List.of(), "/memory clear", "Clear session memory.",
+                CommandGroup.SESSION);
     }
 
     @Override public Result execute(String args, Context ctx) {

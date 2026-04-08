@@ -22,7 +22,8 @@ public final class GrepCommand implements Command {
         return new CommandSpec("grep",
                 List.of(),
                 "/grep <regex>",
-                "Search for regex patterns in workspace files with line numbers. Patterns are regex; quotes are optional for literals with spaces or punctuation. Example: /grep \"SMOKEPROBE-\"");
+                "Search workspace files.",
+                CommandGroup.KNOWLEDGE);
     }
 
     @Override public Result execute(String args, Context ctx) {
