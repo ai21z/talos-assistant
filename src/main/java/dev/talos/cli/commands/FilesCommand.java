@@ -24,8 +24,8 @@ public class FilesCommand implements Command {
         return new CommandSpec("files",
                 List.of(),
                 "/files",
-                "List all indexed files in the workspace",
-                CommandGroup.WORKSPACE);
+                "List indexed files.",
+                CommandGroup.KNOWLEDGE);
     }
 
     @Override

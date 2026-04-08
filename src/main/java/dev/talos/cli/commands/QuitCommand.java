@@ -13,7 +13,7 @@ public final class QuitCommand implements Command {
     public QuitCommand(AtomicBoolean quitFlag) { this.quitFlag = quitFlag; }
 
     @Override public CommandSpec spec() {
-        return new CommandSpec("q", List.of("quit","exit"), "/q", "Exit the REPL.", CommandGroup.BASICS);
+        return new CommandSpec("q", List.of("quit","exit"), "/q", "Exit.", CommandGroup.SESSION);
     }
 
     @Override public Result execute(String args, Context ctx) {

@@ -6,12 +6,11 @@ package dev.talos.cli.commands;
  * {@link dev.talos.cli.repl.SlashCommandCompleter} for autocomplete grouping.
  */
 public enum CommandGroup {
-    BASICS("Basics"),
+    SESSION("Session"),
     MODELS("Models"),
-    RAG("RAG"),
-    DEBUG("Debug"),
+    KNOWLEDGE("Knowledge"),
     SECURITY("Security"),
-    WORKSPACE("Workspace");
+    DEBUG("Debug");
 
     private final String displayName;
 
