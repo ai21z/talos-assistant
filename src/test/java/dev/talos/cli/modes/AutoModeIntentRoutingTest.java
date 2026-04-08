@@ -20,11 +20,10 @@ class AutoModeIntentRoutingTest {
 
     @Test
     void listFilesQueriesRouteToAssistForToolHandling() {
-        // "list files" queries are no longer intercepted by a special pattern.
-        // They route through PromptRouter normally — typically to ASSIST,
-        // where the LLM can use the talos.list_dir tool. Users can also
-        // use /files for explicit indexed-file listing.
-        assertEquals(PromptRouter.Route.ASSIST,
+        // "list files" queries route through PromptRouter normally.
+        // "what files are here?" now routes to RETRIEVE because "here" is
+        // a workspace proximity signal — the user is asking about THIS workspace.
+        assertEquals(PromptRouter.Route.RETRIEVE,
                 PromptRouter.route("what files are here?"));
         assertEquals(PromptRouter.Route.ASSIST,
                 PromptRouter.route("list all files"));

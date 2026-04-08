@@ -1174,4 +1174,94 @@ class PromptRouterTest {
         assertEquals(ASSIST, PromptRouter.route("check out YouTube"));
         assertEquals(ASSIST, PromptRouter.route("check this out"));
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Workspace proximity: "here", "workspace", "working on" (G14b fix)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "what am I working on here?",
+        "what am I working on here",
+        "what is here?",
+        "what's here",
+        "what do we have here",
+        "what files are here",
+        "can you tell me what's here",
+        "describe what's here",
+        "show me what's here",
+    })
+    void here_in_question_routes_to_retrieve(String input) {
+        assertEquals(RETRIEVE, PromptRouter.route(input),
+                "'" + input + "' should trigger retrieval — 'here' = the workspace");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "what workspace is this?",
+        "do you know what workspace this is",
+        "which workspace am I in",
+        "what workspace are we in",
+        "describe this workspace",
+        "tell me about this workspace",
+        "explain the workspace",
+    })
+    void workspace_in_question_routes_to_retrieve(String input) {
+        assertEquals(RETRIEVE, PromptRouter.route(input),
+                "'" + input + "' should trigger retrieval — mentions 'workspace'");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "what am I working on?",
+        "what am I working on",
+        "what are we working on",
+        "show me what I'm working on",
+        "describe what we're working on",
+    })
+    void working_on_in_question_routes_to_retrieve(String input) {
+        assertEquals(RETRIEVE, PromptRouter.route(input),
+                "'" + input + "' should trigger retrieval — 'working on' = current project");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "I'm here to help",
+        "here is my question",
+        "I am here",
+        "hello, I'm here",
+    })
+    void here_without_question_stays_assist(String input) {
+        assertEquals(ASSIST, PromptRouter.route(input),
+                "'" + input + "' should stay ASSIST — 'here' without question context");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "I like workspaces in general",
+        "workspace is a cool concept",
+    })
+    void workspace_without_question_stays_assist(String input) {
+        assertEquals(ASSIST, PromptRouter.route(input),
+                "'" + input + "' should stay ASSIST — 'workspace' without question context");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "I'm working on something",
+        "still working on it",
+    })
+    void working_on_without_question_stays_assist(String input) {
+        assertEquals(ASSIST, PromptRouter.route(input),
+                "'" + input + "' should stay ASSIST — 'working on' without question context");
+    }
+
+    @Test
+    void real_session_transcript_questions_route_correctly() {
+        // These are the exact questions from the failing user session
+        assertEquals(RETRIEVE, PromptRouter.route("what am I working on here?"),
+                "Real session Q1 should RETRIEVE");
+        assertEquals(RETRIEVE, PromptRouter.route("do you know what workspace this is?"),
+                "Real session Q3 should RETRIEVE");
+    }
 }
