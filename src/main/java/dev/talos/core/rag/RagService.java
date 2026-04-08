@@ -15,6 +15,7 @@ import dev.talos.core.rerank.ScoreThresholdReranker;
 import dev.talos.core.retrieval.*;
 import dev.talos.core.retrieval.stages.*;
 import dev.talos.core.spi.CorpusStore;
+import dev.talos.runtime.ToolCallParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -254,6 +255,12 @@ public class RagService {
             try (LlmClient llm = new LlmClient(cfg)) {
                 String text = llm.chat(sys, question, packed.toSnippetMaps());
                 if (text == null) text = "";
+
+                // Defensive: strip any tool-call blocks the model may emit.
+                // The rag-ask path has no tool dispatcher — tool calls are never
+                // valid here. They leak when the model sees tool-call format
+                // instructions in retrieved context (e.g., tools-preamble.txt).
+                text = ToolCallParser.stripToolCalls(text);
 
                 // Warn if we have retrieval but answer is empty
                 if (!packed.isEmpty() && text.trim().isEmpty()) {

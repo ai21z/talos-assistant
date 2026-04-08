@@ -355,8 +355,15 @@ public final class RagMode implements Mode {
     }
 
     /**
-     * Sanitizes LLM answer by stripping chatty preambles and model-added Sources/Citations blocks.
-     * Expanded patterns are used to catch common model chattiness.
+     * Sanitizes LLM answer by stripping chatty preambles, leaked tool-call blocks,
+     * and model-added Sources/Citations blocks.
+     *
+     * <p>Tool-call blocks may leak into the final answer when:
+     * <ul>
+     *   <li>The model emits a tool call for an informational query (P1 bug)</li>
+     *   <li>The tool-call loop processes the call but the XML tags survive in the prose</li>
+     * </ul>
+     * This method defensively strips them so the user never sees raw {@code <tool_call>} XML.
      */
     private static String sanitizeAnswer(String answer) {
         if (answer == null || answer.isBlank()) return "";
@@ -371,6 +378,9 @@ public final class RagMode implements Mode {
             ")\\b[^\\n]*(?:\\n\\n|\\n|$)",
             ""
         );
+
+        // Defensive: strip any leaked tool-call blocks (tagged or code-fenced)
+        answer = ToolCallParser.stripToolCalls(answer);
 
         // Remove model-added Sources/Citations blocks
         answer = answer.replaceAll("(?is)\\n\\s*\\[?\\s*(?:citations?|sources?)\\s*\\]?\\s*:?\\s*\\n(?:\\s*[-*]\\s+[^\\n]+\\n)*", "");

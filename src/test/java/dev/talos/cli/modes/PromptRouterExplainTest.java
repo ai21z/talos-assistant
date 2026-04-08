@@ -161,7 +161,7 @@ class PromptRouterExplainTest {
 
     @Test
     void sticky_follow_up_trigger() {
-        var r = PromptRouter.explainRoute("what about the parse method?", RETRIEVE, null);
+        var r = PromptRouter.explainRoute("what about it?", RETRIEVE, null);
         assertEquals(RETRIEVE, r.route());
         assertEquals("sticky retrieval follow-up", r.trigger());
         assertTrue(r.steps().contains("follow-up after RETRIEVE turn"));
@@ -280,7 +280,7 @@ class PromptRouterExplainTest {
 
     @Test
     void scenario_follow_up_after_retrieve() {
-        var r = PromptRouter.explainRoute("what about the parse method?", RETRIEVE, null);
+        var r = PromptRouter.explainRoute("what about it?", RETRIEVE, null);
         assertEquals(RETRIEVE, r.route());
         assertEquals("sticky retrieval follow-up", r.trigger());
     }

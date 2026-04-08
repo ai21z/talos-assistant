@@ -11,6 +11,9 @@ Example:
 </tool_call>
 
 Rules:
+- CONTEXT FIRST: If the provided context snippets already answer the user's question, respond directly from context. Do NOT call a tool when the answer is already in front of you.
+- Only call a tool when you need to PERFORM an action (read a file, run a search, etc.) that the current context cannot satisfy.
+- If the user asks you to DESCRIBE, LIST, or EXPLAIN something and the context already covers it, answer from context — do not call a tool.
 - You MUST use <tool_call> and </tool_call> tags. Do not use ```json blocks or bare JSON.
 - The JSON must have "name" and "parameters" keys exactly as shown.
 - You may emit multiple tool_call blocks in one response.
