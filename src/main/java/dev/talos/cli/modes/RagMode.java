@@ -99,6 +99,7 @@ public final class RagMode implements Mode {
                 || (ctx.memory() != null && ctx.memory().hasContent());
         String system = SystemPromptBuilder.forRag()
                 .withTools(ctx.toolRegistry())
+                .withWorkspace(workspace)
                 .withHistory(hasHistory)
                 .build();
 
@@ -219,6 +220,14 @@ public final class RagMode implements Mode {
                 if (!text.isBlank()) contextBlock.append(text).append("\n\n");
             }
             messages.add(ChatMessage.user(contextBlock.toString().stripTrailing()));
+        } else {
+            // Empty retrieval: guide the model to use tools instead of saying "I can't see"
+            messages.add(ChatMessage.user(
+                "No context snippets were retrieved for this query. " +
+                "The workspace may not be indexed yet, or the query didn't match any indexed content. " +
+                "Use your tools (talos.list_dir, talos.read_file, talos.grep) to explore the workspace " +
+                "and answer the user's question directly. Do NOT say 'I can't see your files' — you have tools."
+            ));
         }
 
         // Add current user message

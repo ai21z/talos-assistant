@@ -3,6 +3,8 @@ package dev.talos.core.llm;
 import dev.talos.tools.*;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Path;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -245,6 +247,84 @@ class SystemPromptBuilderTest {
         assertTrue(identity.contains("Talos"));
     }
 
+    // ── Workspace awareness ─────────────────────────────────────────
+
+    @Test
+    void withWorkspaceInjectsPathIntoPrompt() {
+        Path ws = Path.of("/home/user/my-project");
+        String prompt = SystemPromptBuilder.forAsk()
+                .withWorkspace(ws)
+                .build();
+
+        assertTrue(prompt.contains("Workspace:"),
+                "Prompt should contain 'Workspace:' label");
+        assertTrue(prompt.contains("my-project"),
+                "Prompt should contain the workspace path");
+    }
+
+    @Test
+    void withWorkspaceNullIsNoOp() {
+        String withNull = SystemPromptBuilder.forAsk()
+                .withWorkspace(null)
+                .build();
+        String without = SystemPromptBuilder.forAsk().build();
+
+        assertEquals(without, withNull,
+                "null workspace should produce identical prompt");
+    }
+
+    @Test
+    void workspaceAppearsBeforeModeRules() {
+        Path ws = Path.of("/tmp/test-ws");
+        String prompt = SystemPromptBuilder.forAsk()
+                .withWorkspace(ws)
+                .build();
+
+        int wsPos = prompt.indexOf("Workspace:");
+        int rulesPos = prompt.indexOf("Behavior Rules");
+
+        assertTrue(wsPos >= 0, "Workspace label should be present");
+        assertTrue(rulesPos >= 0, "Mode rules should be present");
+        assertTrue(wsPos < rulesPos,
+                "Workspace should appear before mode rules");
+    }
+
+    @Test
+    void withWorkspaceWorksWithRagMode() {
+        Path ws = Path.of("/tmp/rag-ws");
+        String prompt = SystemPromptBuilder.forRag()
+                .withWorkspace(ws)
+                .build();
+
+        assertTrue(prompt.contains("Workspace:"),
+                "RAG prompt should also include workspace");
+        assertTrue(prompt.contains("rag-ws"),
+                "RAG prompt should contain the workspace name");
+    }
+
+    @Test
+    void withWorkspaceWorksWithToolsAndHistory() {
+        var registry = new ToolRegistry();
+        registry.register(stubTool("talos.grep", "Search workspace"));
+
+        Path ws = Path.of("/tmp/full-ws");
+        String prompt = SystemPromptBuilder.forAsk()
+                .withWorkspace(ws)
+                .withTools(registry)
+                .withHistory(true)
+                .build();
+
+        assertTrue(prompt.contains("Workspace:"), "Workspace present");
+        assertTrue(prompt.contains("Available Tools"), "Tools present");
+        assertTrue(prompt.contains("Conversation Continuity"), "Conversation present");
+
+        // Verify order: identity < workspace < rules < tools < conversation
+        int wsPos = prompt.indexOf("Workspace:");
+        int toolsPos = prompt.indexOf("Available Tools");
+        assertTrue(wsPos < toolsPos,
+                "Workspace should appear before tools section");
+    }
+
     // ── Helper ──────────────────────────────────────────────────────
 
     private static TalosTool stubTool(String name, String description) {
@@ -256,5 +336,4 @@ class SystemPromptBuilderTest {
         };
     }
 }
-
 

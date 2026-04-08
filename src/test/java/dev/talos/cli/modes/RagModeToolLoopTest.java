@@ -33,14 +33,19 @@ class RagModeToolLoopTest {
     class BuildMessages {
 
         @Test
-        void no_history_no_context_returns_system_and_user() {
+        void no_history_no_context_returns_system_guidance_and_user() {
             List<ChatMessage> msgs = RagMode.buildMessages("sys prompt", "my question", List.of(), List.of());
 
-            assertEquals(2, msgs.size());
+            // system + empty-retrieval guidance + user = 3
+            assertEquals(3, msgs.size());
             assertEquals("system", msgs.get(0).role());
             assertEquals("sys prompt", msgs.get(0).content());
+            // guidance message for empty retrieval
             assertEquals("user", msgs.get(1).role());
-            assertEquals("my question", msgs.get(1).content());
+            assertTrue(msgs.get(1).content().contains("No context snippets"),
+                    "Empty retrieval should inject guidance message");
+            assertEquals("user", msgs.get(2).role());
+            assertEquals("my question", msgs.get(2).content());
         }
 
         @Test
@@ -122,37 +127,43 @@ class RagModeToolLoopTest {
 
             List<ChatMessage> msgs = RagMode.buildMessages("sys", "turn3-q", List.of(), history);
 
-            // system + 4 history + user = 6 (no context snippets)
-            assertEquals(6, msgs.size());
+            // system + 4 history + guidance + user = 7 (empty context → guidance message)
+            assertEquals(7, msgs.size());
             assertEquals("system", msgs.get(0).role());
             assertEquals("turn1-q", msgs.get(1).content());
             assertEquals("turn1-a", msgs.get(2).content());
             assertEquals("turn2-q", msgs.get(3).content());
             assertEquals("turn2-a", msgs.get(4).content());
-            assertEquals("turn3-q", msgs.get(5).content());
+            assertTrue(msgs.get(5).content().contains("No context snippets"),
+                    "Empty retrieval should inject guidance message");
+            assertEquals("turn3-q", msgs.get(6).content());
         }
 
         @Test
         void empty_history_same_as_no_history() {
             List<ChatMessage> msgs = RagMode.buildMessages("sys", "hello", List.of(), List.of());
 
-            assertEquals(2, msgs.size(), "Empty history should produce just system + user");
+            assertEquals(3, msgs.size(), "Empty history + empty snippets should produce system + guidance + user");
         }
 
         @Test
-        void empty_snippet_list_skips_context_message() {
+        void empty_snippet_list_injects_guidance_message() {
             List<ChatMessage> msgs = RagMode.buildMessages("sys", "hello", List.of(), List.of());
 
-            assertEquals(2, msgs.size(), "Empty snippet list should not add context message");
+            assertEquals(3, msgs.size(), "Empty snippet list should add guidance message");
             assertEquals("system", msgs.get(0).role());
-            assertEquals("user", msgs.get(1).role());
+            assertTrue(msgs.get(1).content().contains("No context snippets"),
+                    "Should inject empty-retrieval guidance");
+            assertEquals("user", msgs.get(2).role());
         }
 
         @Test
-        void null_snippet_list_skips_context_message() {
+        void null_snippet_list_injects_guidance_message() {
             List<ChatMessage> msgs = RagMode.buildMessages("sys", "hello", null, List.of());
 
-            assertEquals(2, msgs.size(), "Null snippet list should not add context message");
+            assertEquals(3, msgs.size(), "Null snippet list should add guidance message");
+            assertTrue(msgs.get(1).content().contains("No context snippets"),
+                    "Should inject empty-retrieval guidance for null snippets");
         }
 
         @Test

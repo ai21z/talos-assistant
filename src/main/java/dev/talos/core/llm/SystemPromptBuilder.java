@@ -42,6 +42,7 @@ public final class SystemPromptBuilder {
     private final Mode mode;
     private ToolRegistry toolRegistry;
     private boolean hasHistory;
+    private java.nio.file.Path workspace;
 
     /** The two prompt modes. */
     public enum Mode { ASK, RAG }
@@ -63,6 +64,12 @@ public final class SystemPromptBuilder {
     /** Include tool descriptions from the given registry. */
     public SystemPromptBuilder withTools(ToolRegistry registry) {
         this.toolRegistry = registry;
+        return this;
+    }
+
+    /** Include the workspace path in the system prompt so the model knows where it's working. */
+    public SystemPromptBuilder withWorkspace(java.nio.file.Path workspace) {
+        this.workspace = workspace;
         return this;
     }
 
@@ -100,6 +107,11 @@ public final class SystemPromptBuilder {
         // 1. Identity
         sb.append(identity.strip());
 
+        // 1b. Workspace path (if set)
+        if (workspace != null) {
+            sb.append("\n\nWorkspace: ").append(workspace.toAbsolutePath().toString().replace('\\', '/'));
+        }
+
         // 2. Mode-specific rules
         String modeRules = readResource(mode == Mode.ASK ? RES_ASK_RULES : RES_RAG_RULES);
         if (modeRules != null) {
@@ -119,9 +131,16 @@ public final class SystemPromptBuilder {
     private String appendDynamicSections(String base) {
         String dynamic = buildDynamicSections();
         if (dynamic.isEmpty()) {
+            if (workspace != null) {
+                return base.strip() + "\n\nWorkspace: " + workspace.toAbsolutePath().toString().replace('\\', '/');
+            }
             return base;
         }
-        return base.strip() + "\n\n" + dynamic;
+        String result = base.strip();
+        if (workspace != null) {
+            result += "\n\nWorkspace: " + workspace.toAbsolutePath().toString().replace('\\', '/');
+        }
+        return result + "\n\n" + dynamic;
     }
 
     /** Build the dynamic (tool + conversation) sections. */
@@ -255,4 +274,3 @@ public final class SystemPromptBuilder {
                 + ", history=" + hasHistory + "]";
     }
 }
-
