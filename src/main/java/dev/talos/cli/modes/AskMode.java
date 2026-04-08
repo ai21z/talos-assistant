@@ -60,6 +60,7 @@ public final class AskMode implements Mode {
                 || (ctx.memory() != null && ctx.memory().hasContent());
         String system = SystemPromptBuilder.forAsk()
                 .withTools(ctx.toolRegistry())
+                .withWorkspace(workspace)
                 .withHistory(hasHistory)
                 .build();
 

@@ -136,8 +136,10 @@ public final class PromptRouter {
      */
     private static final Pattern WORKSPACE_FRAME = Pattern.compile(
         "(?i)" +
-        "\\b(?:this|the|our|my)\\s+(?:project|code(?:base)?|repo(?:sitory)?|workspace|source\\s*code)\\b|" +
-        "\\b(?:in|from|of)\\s+(?:the|this|our)\\s+(?:project|code(?:base)?|repo(?:sitory)?|workspace)\\b"
+        "\\b(?:this|the|our|my)\\s+(?:project|code(?:base)?|repo(?:sitory)?|workspace|source\\s*code|" +
+            "site|app(?:lication)?|webapp|folder|directory|file\\s*structure|project\\s*structure|setup)\\b|" +
+        "\\b(?:in|from|of)\\s+(?:the|this|our)\\s+(?:project|code(?:base)?|repo(?:sitory)?|workspace|" +
+            "site|app(?:lication)?|folder|directory)\\b"
     );
 
     /**
@@ -180,7 +182,14 @@ public final class PromptRouter {
             "embed(?:ding|der)?|pars(?:er|ing)|build(?:er)?|" +
             "schema|migration|database|table|" +
             "api|cli|repl|engine|stage|mode|router|factory|" +
-            "error|exception|bug|test(?:s|ing)?" +
+            "error|exception|bug|test(?:s|ing)?|" +
+            "directory|folder|file|page|component|view|template|layout|" +
+            "stylesheet|style(?:s)?|script|markup|element|section|form|" +
+            "header|footer|sidebar|container|wrapper|route|" +
+            "plugin|middleware|filter|listener|observer|" +
+            "model|entity|dto|dao|repository|store|" +
+            "util(?:ity)?|helper|adapter|provider|" +
+            "server|client|socket|connection|request|response" +
         ")\\b"
     );
 
@@ -474,7 +483,17 @@ public final class PromptRouter {
             || stripped.startsWith("configure ")
             || stripped.startsWith("scaffold ")  || stripped.startsWith("bootstrap ")
             || stripped.startsWith("wire ")      || stripped.startsWith("hook up ")
-            || stripped.startsWith("integrate ");
+            || stripped.startsWith("integrate ")
+            || stripped.startsWith("inspect ")
+            || stripped.startsWith("review ")    || stripped.startsWith("verify ")
+            || stripped.startsWith("scan ")      || stripped.startsWith("analyze ")
+            || stripped.startsWith("analyse ")   || stripped.startsWith("examine ")
+            || stripped.startsWith("look at ")   || stripped.startsWith("find ")
+            || stripped.startsWith("search ")    || stripped.startsWith("explore ")
+            || stripped.startsWith("read ")      || stripped.startsWith("change ")
+            || stripped.startsWith("install ")   || stripped.startsWith("upgrade ")
+            || stripped.startsWith("clean ")     || stripped.startsWith("lint ")
+            || stripped.startsWith("format ")    || stripped.startsWith("document ");
     }
 
     /**

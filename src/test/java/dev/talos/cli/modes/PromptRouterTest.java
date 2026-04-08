@@ -1068,4 +1068,110 @@ class PromptRouterTest {
         assertEquals(RETRIEVE, PromptRouter.route("edit build.gradle.kts"));
         assertEquals(RETRIEVE, PromptRouter.route("fix RagService.java"));
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Expanded workspace framing (G14 fix)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "what is this site about",
+        "describe my app",
+        "what does the application do",
+        "tell me about this webapp",
+        "what's in this folder",
+        "describe the directory structure",
+        "how is this setup organized",
+    })
+    void expanded_workspace_framing_routes_to_retrieve(String input) {
+        assertEquals(RETRIEVE, PromptRouter.route(input),
+                "Workspace framing '" + input + "' should trigger retrieval");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Expanded anchored tech nouns (G14 fix)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "what does the directory contain",
+        "explain the page layout",
+        "how does the component work",
+        "describe the template structure",
+        "what is the stylesheet for",
+        "how does the route handle requests",
+        "explain the middleware logic",
+        "what does the model represent",
+        "describe the repository pattern",
+        "how does the adapter work",
+    })
+    void expanded_tech_nouns_with_question_route_to_retrieve(String input) {
+        assertEquals(RETRIEVE, PromptRouter.route(input),
+                "Tech noun question '" + input + "' should trigger retrieval");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Expanded action verbs (G14 fix)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "inspect the RagService",
+        "review ModeController",
+        "verify the Sandbox implementation",
+        "scan the TokenBudget class",
+        "analyze PromptRouter",
+        "examine the ConversationManager",
+        "look at the ContextPacker code",
+        "find RagService usages",
+        "search for TokenBudget references",
+        "explore the ToolCallLoop",
+        "change the SystemPromptBuilder",
+        "install dependencies for RagService",
+        "lint the PromptRouter code",
+        "format ModeController",
+        "document the ConversationCompactor",
+    })
+    void expanded_action_verbs_with_pascal_case_route_to_retrieve(String input) {
+        assertEquals(RETRIEVE, PromptRouter.route(input),
+                "Action verb with PascalCase '" + input + "' should trigger retrieval");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "inspect the pipeline",
+        "review the handler logic",
+        "verify the controller works",
+        "scan the directory structure",
+        "analyze the component hierarchy",
+        "explore the template files",
+    })
+    void expanded_action_verbs_with_tech_noun_route_to_retrieve(String input) {
+        assertEquals(RETRIEVE, PromptRouter.route(input),
+                "Action verb with tech noun '" + input + "' should trigger retrieval");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "inspect my car",
+        "review the movie",
+        "scan the horizon",
+        "explore the universe",
+    })
+    void expanded_action_verbs_without_workspace_signals_route_to_assist(String input) {
+        assertEquals(ASSIST, PromptRouter.route(input),
+                "Action verb without workspace signal '" + input + "' should route to ASSIST");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Empty-retrieval guidance (RagMode test already covers buildMessages)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @Test
+    void check_out_youtube_still_routes_to_assist() {
+        // Regression guard: "check" was removed from isActionLike()
+        // because "check out YouTube" is casual speech, not a workspace action
+        assertEquals(ASSIST, PromptRouter.route("check out YouTube"));
+        assertEquals(ASSIST, PromptRouter.route("check this out"));
+    }
 }
