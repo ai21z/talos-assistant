@@ -44,13 +44,16 @@ public final class ConversationCompactor {
     static final String COMPACTION_SYSTEM_PROMPT = """
             You are a conversation summarizer for a developer CLI tool.
             Given a prior sketch (if any) and recent conversation turns,
-            produce a concise summary of 2-4 sentences capturing:
+            produce a concise summary of 4-8 sentences capturing:
             - The user's current goal or task
             - Key decisions or facts established so far
             - Important file names, symbols, or technical details mentioned
+            - Any specific creative output the user was iterating on (code, ASCII art, prose, diagrams) — preserve enough detail to continue refinement
+            - The direction of iteration: what the user liked, what they wanted changed
             
             Return ONLY the summary text. No JSON, no markdown, no bullet points.
-            Be factual and compact — every word should carry information.""";
+            Be factual and compact — every word should carry information.
+            When the user was refining a specific artifact, include a brief description of its current state so the next turn can build on it.""";
 
     /**
      * Maximum characters for the user prompt sent to the compaction LLM.
@@ -63,7 +66,7 @@ public final class ConversationCompactor {
      * Maximum characters for the returned sketch.
      * Summaries longer than this are truncated.
      */
-    static final int MAX_SKETCH_CHARS = 1_000;
+    static final int MAX_SKETCH_CHARS = 2_000;
 
     /**
      * Compact old conversation turns into a sketch.

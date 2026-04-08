@@ -234,7 +234,11 @@ public final class SystemPromptBuilder {
             - You are in a multi-turn conversation. Prior messages are provided as history.
             - ALWAYS use conversation history to understand references like "it", "that", "this".
             - If you created or discussed something in a previous turn, remember it and build on it.
-            - Treat every follow-up as continuing the same conversation thread.""";
+            - Treat every follow-up as continuing the same conversation thread.
+            - YOUR LAST RESPONSE is the most important context. If the user says "make it better" or "try again", work from your most recent output.
+            - When refining creative output (ASCII art, code, prose), modify the specific artifact — do NOT start from scratch.
+            - NEVER say "I don't have access to our previous conversation" — the history IS provided to you.
+            - If a [Conversation context] summary appears, treat it as established facts.""";
 
     /**
      * Estimate token count for the built prompt.

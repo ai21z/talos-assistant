@@ -63,10 +63,12 @@ public final class AskMode implements Mode {
                 .withHistory(hasHistory)
                 .build();
 
-        // Build conversation history up front (consistent with RagMode's coordinated flow)
+        // Build conversation history — AskMode uses a larger budget (55% vs 25%)
+        // because there are no RAG snippets competing for context space.
+        // This is critical for multi-turn creative tasks.
         List<ChatMessage> history = List.of();
         if (ctx.conversationManager() != null) {
-            history = ctx.conversationManager().buildHistory();
+            history = ctx.conversationManager().buildHistoryForAssist();
         } else if (ctx.memory() != null) {
             history = ctx.memory().getTurns();
         }
