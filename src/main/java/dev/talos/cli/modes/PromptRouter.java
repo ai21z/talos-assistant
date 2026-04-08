@@ -155,17 +155,22 @@ public final class PromptRouter {
     );
 
     /**
-     * Definite-article + technical noun: "the pipeline", "this constructor", etc.
+     * Definite-article + technical noun: "the pipeline", "this constructor",
+     * "the Sandbox class", etc.
      * Covers architecture patterns, language constructs (constructor, enum, record,
      * annotation, field, variable, property, import, implementation, dependency),
      * infrastructure terms, and domain-specific retrieval/indexing vocabulary.
+     *
+     * <p>Allows an optional intervening qualifier word so that
+     * "the Sandbox class" and "this Config handler" are matched in addition
+     * to direct adjacency like "the pipeline" and "this constructor".
      *
      * <p>Only triggers retrieval when the input also looks like a question
      * or action (checked separately), to avoid matching casual statements
      * like "the design is nice".
      */
     private static final Pattern ANCHORED_TECH_NOUN = Pattern.compile(
-        "(?i)\\b(?:the|this)\\s+(?:" +
+        "(?i)\\b(?:the|this)\\s+(?:\\S+\\s+)?(?:" +
             "pipeline|service|class|method|function|interface|module|package|" +
             "constructor|enum(?:eration)?|record|annotation|" +
             "variable|field|property|properties|import|" +

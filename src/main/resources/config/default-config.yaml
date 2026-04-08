@@ -58,6 +58,8 @@ rag:
     - "**/out/**"
     - "**/target/**"
     - "**/dist/**"
+    - "**/prompts/**"
+    - "**/META-INF/**"
     - "**/*.class"
     - "**/*.jar"
     - "**/*.zip"
