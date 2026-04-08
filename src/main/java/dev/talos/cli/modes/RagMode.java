@@ -11,7 +11,7 @@ import dev.talos.core.context.ContextPacker;
 import dev.talos.core.context.ContextResult;
 import dev.talos.core.context.TokenBudget;
 import dev.talos.core.llm.SystemPromptBuilder;
-import dev.talos.core.search.SnippetBuilder;
+
 import dev.talos.core.util.Sanitize;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.ToolCallLoop;
@@ -37,6 +37,14 @@ import java.util.regex.Pattern;
 public final class RagMode implements Mode {
 
     private static final Logger LOG = LoggerFactory.getLogger(RagMode.class);
+
+    /** Local record for pinned file snippets — replaces legacy PinnedSnippet. */
+    record PinnedSnippet(String path, String text) {
+        PinnedSnippet {
+            path = java.util.Objects.requireNonNullElse(path, "");
+            text = java.util.Objects.requireNonNullElse(text, "");
+        }
+    }
 
     @Override public String name() { return "rag"; }
 
@@ -269,8 +277,8 @@ public final class RagMode implements Mode {
      * @param maxDepth maximum directory depth for file search
      * @return list of pinned file snippets
      */
-    private static List<SnippetBuilder.Snippet> pinFiles(Path ws, String question, int maxPins, int maxChars, int maxDepth) {
-        List<SnippetBuilder.Snippet> out = new ArrayList<>();
+    private static List<PinnedSnippet> pinFiles(Path ws, String question, int maxPins, int maxChars, int maxDepth) {
+        List<PinnedSnippet> out = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
         Sandbox sandbox = new Sandbox(ws, Map.of());
 
@@ -344,11 +352,11 @@ public final class RagMode implements Mode {
     /**
      * Adds a file snippet to the output list after parsing and truncating if necessary.
      */
-    private static void addSnippet(Path ws, List<SnippetBuilder.Snippet> out, Path p, int maxChars, String relPath) {
+    private static void addSnippet(Path ws, List<PinnedSnippet> out, Path p, int maxChars, String relPath) {
         try {
             String text = ParserUtil.smartParse(p);
             if (text.length() > maxChars) text = text.substring(0, maxChars);
-            out.add(new SnippetBuilder.Snippet(relPath + "#0", text));
+            out.add(new PinnedSnippet(relPath + "#0", text));
         } catch (Exception e) {
             LOG.debug("Failed to read pinned file {}: {}", relPath, e.getMessage());
         }

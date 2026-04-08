@@ -148,6 +148,9 @@ public class RunCmd implements Runnable, SessionState {
             System.err.println("run failed: " + e.getClass().getName() +
                     (e.getMessage() == null ? "" : (": " + sanitizeErrorMessage(e.getMessage()))));
             if (Boolean.getBoolean("talos.debug")) e.printStackTrace(System.err);
+        } finally {
+            // Fire session lifecycle callbacks (memory flush, audit, listener cleanup)
+            try { router.getRuntimeSession().close(); } catch (Exception ignored) { }
         }
     }
 
