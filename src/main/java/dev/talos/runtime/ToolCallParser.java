@@ -13,83 +13,41 @@ import java.util.regex.Pattern;
 /**
  * Parses tool-call blocks from LLM text responses.
  *
- * <p>LLMs are instructed (via {@link dev.talos.core.llm.SystemPromptBuilder})
- * to emit tool calls in this XML-like format:
- *
- * <pre>{@code
- * <tool_call>
- * {"name": "talos.read_file", "parameters": {"path": "src/Main.java"}}
- * </tool_call>
- * }</pre>
- *
- * <h3>Protocol hardening</h3>
- * <p>Local models (especially smaller ones) inconsistently emit tool calls.
- * This parser accepts several common variants while keeping the canonical
- * {@code <tool_call>} format as the primary path:
- *
- * <ul>
- *   <li><b>Variant XML tags</b>: {@code <function_call>}, {@code <tool>},
- *       {@code <function>} are accepted alongside {@code <tool_call>}</li>
- *   <li><b>Code-fenced JSON</b>: {@code ```json … ```} blocks containing
- *       a JSON object with a {@code "name"} field and {@code "talos."} prefix</li>
- *   <li><b>Key normalization</b>: {@code "function"}, {@code "tool_name"},
- *       {@code "tool"} are accepted as aliases for {@code "name"};
- *       {@code "arguments"}, {@code "args"} are accepted as aliases for
- *       {@code "parameters"}</li>
- *   <li><b>Nested wrapper</b>: {@code {"tool_call": {"name": …}}} unwrapped
- *       automatically</li>
- * </ul>
- *
- * <p>Malformed blocks are logged and skipped. The parser is stateless and
- * thread-safe.
+ * <p>Accepts the canonical {@code <tool_call>} XML format plus common variants:
+ * variant XML tags, code-fenced JSON, bare JSON with {@code "talos."} prefix,
+ * and key aliases ({@code "function"}, {@code "arguments"}, etc.).
+ * Malformed blocks are logged and skipped. Stateless and thread-safe.
  */
 public final class ToolCallParser {
 
     private static final Logger LOG = LoggerFactory.getLogger(ToolCallParser.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    /**
-     * Canonical pattern: {@code <tool_call>…</tool_call>}.
-     * Kept as the primary pattern for backward compatibility.
-     */
+    /** Canonical XML pattern: {@code <tool_call>…</tool_call>}. */
     private static final Pattern TOOL_CALL_PATTERN = Pattern.compile(
             "<tool_call>\\s*(.*?)\\s*</tool_call>",
             Pattern.DOTALL
     );
 
-    /**
-     * Extended pattern: accepts variant XML tags used by local models.
-     * Matches {@code <tool_call>}, {@code <function_call>}, {@code <tool>},
-     * {@code <function>} with their corresponding closing tags.
-     */
+    /** Variant XML tags: tool_call, function_call, tool, function. */
     private static final Pattern VARIANT_TAG_PATTERN = Pattern.compile(
             "<(tool_call|function_call|tool|function)>\\s*(.*?)\\s*</\\1>",
             Pattern.DOTALL
     );
 
-    /**
-     * Code-fence pattern: {@code ```json … ```} blocks.
-     * Only matches if the JSON contains a "name" key (to avoid matching
-     * arbitrary code blocks).
-     */
+    /** Code-fenced JSON blocks containing a "name" key. */
     private static final Pattern CODE_FENCE_PATTERN = Pattern.compile(
             "```(?:json)?\\s*\\n(\\{[^`]*\"name\"[^`]*\\})\\s*\\n?```",
             Pattern.DOTALL
     );
 
-    /**
-     * Bare JSON pattern: standalone JSON objects at line boundaries that
-     * look like tool calls (contain "name" key with "talos." prefix).
-     * This catches cases where the model forgets the XML wrapper entirely.
-     */
+    /** Bare JSON at line boundaries with "talos." prefix (model forgot XML wrapper). */
     private static final Pattern BARE_JSON_PATTERN = Pattern.compile(
             "(?:^|\\n)\\s*(\\{\\s*\"(?:name|function|tool_name|tool)\"\\s*:\\s*\"talos\\.(?:[^{}]*|\\{[^{}]*\\})*\\})",
             Pattern.DOTALL
     );
 
-    /**
-     * Combined strip pattern: removes all recognized tool-call block formats.
-     */
+    /** Combined pattern for stripping all recognized tool-call block formats. */
     private static final Pattern STRIP_PATTERN = Pattern.compile(
             "<(?:tool_call|function_call|tool|function)>\\s*.*?\\s*</(?:tool_call|function_call|tool|function)>",
             Pattern.DOTALL
@@ -99,20 +57,7 @@ public final class ToolCallParser {
 
     /**
      * Parse all tool-call blocks from an LLM response.
-     *
-     * <p>Tries extraction in priority order:
-     * <ol>
-     *   <li>XML-tagged blocks (canonical + variant tags)</li>
-     *   <li>Code-fenced JSON blocks</li>
-     *   <li>Bare JSON objects at line boundaries</li>
-     * </ol>
-     *
-     * <p>Higher-priority matches consume their text range; lower-priority
-     * patterns only match in unconsumed regions. This prevents double-parsing
-     * a tool call that appears both in tags and as bare JSON.
-     *
-     * @param llmResponse the raw LLM text response
-     * @return list of parsed ToolCall records (empty if none found)
+     * Tries XML tags first, then code-fenced JSON, then bare JSON.
      */
     public static List<ToolCall> parse(String llmResponse) {
         if (llmResponse == null || llmResponse.isBlank()) {
@@ -148,13 +93,7 @@ public final class ToolCallParser {
                 || BARE_JSON_PATTERN.matcher(llmResponse).find();
     }
 
-    /**
-     * Strip all recognized tool-call blocks from the text, returning only
-     * the LLM's reasoning/explanation text.
-     *
-     * @param llmResponse the raw LLM text response
-     * @return the text with tool-call blocks removed and excess whitespace collapsed
-     */
+    /** Strip all recognized tool-call blocks, returning only the LLM's prose. */
     public static String stripToolCalls(String llmResponse) {
         if (llmResponse == null) return "";
         String stripped = STRIP_PATTERN.matcher(llmResponse).replaceAll("");
@@ -169,15 +108,7 @@ public final class ToolCallParser {
 
     // ── Internal extraction helpers ──────────────────────────────────
 
-    /**
-     * Extract tool calls from all matches of a pattern.
-     *
-     * @param pattern  the regex pattern to match
-     * @param group    the capture group index containing the JSON payload
-     * @param text     the LLM response text
-     * @param calls    accumulator for parsed calls
-     * @param consumed set of normalized payloads already parsed (dedup)
-     */
+    /** Extract tool calls from all matches of a pattern, deduplicating by payload. */
     private static void extractFromPattern(Pattern pattern, int group,
                                            String text, List<ToolCall> calls,
                                            Set<String> consumed) {
@@ -202,18 +133,7 @@ public final class ToolCallParser {
         }
     }
 
-    /**
-     * Parse a single JSON payload into a ToolCall.
-     *
-     * <p>Accepts the canonical format plus common variants:
-     * <ul>
-     *   <li>{@code "name"}, {@code "function"}, {@code "tool_name"},
-     *       {@code "tool"} → tool name</li>
-     *   <li>{@code "parameters"}, {@code "arguments"}, {@code "args"},
-     *       {@code "params"} → parameter map</li>
-     *   <li>{@code {"tool_call": {"name": …}}} → auto-unwrap</li>
-     * </ul>
-     */
+    /** Parse a single JSON payload into a ToolCall (handles key aliases and nested wrappers). */
     static ToolCall parseJson(String json) throws Exception {
         JsonNode root = MAPPER.readTree(json);
 
@@ -233,10 +153,7 @@ public final class ToolCallParser {
         return new ToolCall(name, params);
     }
 
-    /**
-     * Unwrap common nesting patterns:
-     * {@code {"tool_call": {...}}}, {@code {"function_call": {...}}}.
-     */
+    /** Unwrap {@code {"tool_call": {...}}} or {@code {"function_call": {...}}} nesting. */
     private static JsonNode unwrapIfNeeded(JsonNode root) {
         for (String wrapper : List.of("tool_call", "function_call")) {
             JsonNode inner = root.path(wrapper);
@@ -247,10 +164,7 @@ public final class ToolCallParser {
         return root;
     }
 
-    /**
-     * Extract the tool name from the JSON root, trying canonical and
-     * variant key names.
-     */
+    /** Extract tool name, trying "name", "function", "tool_name", "tool". */
     private static String extractName(JsonNode root) {
         for (String key : List.of("name", "function", "tool_name", "tool")) {
             JsonNode node = root.path(key);
@@ -261,10 +175,7 @@ public final class ToolCallParser {
         return null;
     }
 
-    /**
-     * Extract the parameters map from the JSON root, trying canonical
-     * and variant key names. Values are coerced to strings.
-     */
+    /** Extract params map, trying "parameters", "arguments", "args", "params". */
     private static Map<String, String> extractParams(JsonNode root) {
         Map<String, String> params = new LinkedHashMap<>();
         for (String key : List.of("parameters", "arguments", "args", "params")) {
