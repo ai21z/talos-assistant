@@ -1,8 +1,8 @@
 # 22. Reference Codebase Analysis — OpenClaw & NemoClaw vs TALOS
 
 **Date:** 2026-04-09 (revised four times)  
-**Baseline:** `v0.9.0-beta-dev` (1681 tests, 0 failures)  
-**Previous baselines:** `2df38f4` (1653 tests), `879cfd0` (1572 tests), `7e63677` (802 tests), 1575 tests (pre-G14), 1623 tests (G14 first pass)  
+**Baseline:** `v0.9.0-beta-dev` (1736 tests, 0 failures)  
+**Previous baselines:** `d1b36bd` (1736 tests — G18), `efca54d` (1681 tests), `2df38f4` (1653 tests), `879cfd0` (1572 tests), `7e63677` (802 tests), 1575 tests (pre-G14), 1623 tests (G14 first pass)  
 **Purpose:** Extract actionable patterns from OpenClaw and NemoClaw, map them against TALOS's **current** state, and define remaining work.
 
 ---
@@ -257,6 +257,8 @@ The following significant work was completed after the original four slices, dri
 | **G14.3: File-ops prompt hardening** | `tools-preamble.txt` restructured (write_file example, CRITICAL section elevated before tool list, 6 NEVER rules), `identity.txt` explicit file-creation capability, `ask-rules.txt` + `rag-rules.txt` write_file reinforcement, `SystemPromptBuilder` DEFAULT_TOOLS_PREAMBLE mirrored | Fixes Gemma 4 refusing to call `talos.write_file` and dumping code blocks instead. Concrete write_file example early in prompt. CRITICAL section with strong NEVER language. Repeated across identity + mode rules + tools preamble to counter attention decay in small LLMs. 8 new SystemPromptBuilder tests. |
 | **G15: Slash command autocomplete** | `SlashCommandCompleter` (JLine Completer), `CommandGroup` extracted to own public file, `CommandSpec.groupDisplayName()`, `ReplRouter.getRegistry()`, `RunCmd` wired into `LineReaderBuilder` | Tab-completion for `/` slash commands. Typing `/` lists all commands, further typing filters by prefix. Aliases included. Groups and descriptions shown in completion menu. Case-insensitive. Non-slash input produces no completions (doesn't interfere with chat). 20 new SlashCommandCompleterTest tests. |
 | **G16: Help layout redesign** | `CommandGroup` enum redesigned (SESSION, MODELS, KNOWLEDGE, SECURITY, DEBUG), `HelpCommand` rewritten (clean columns, group headers, footer hints), all 21 command summaries tightened to <30 chars, `CommandSpec` backward-compat default updated | Clean, scannable `/help` output. 5 logical groups with visual hierarchy (violet headers, blue usage, grey descriptions). 24-char aligned columns. Footer shows `/help <cmd>` hint + Tab autocomplete. Fixes 5 compilation errors from inconsistent enum values. 24 files changed, 0 test regressions. |
+| **G17: Tools command redesign** | `ToolsCommand` rewritten — explanatory header, risk badges (green `read`/yellow `write`), parameter signatures from JSON schema, `talos.` prefix stripped, usage examples, alphabetical sort. `extractParams()` static method. 10 new tests (up from 3). | `/tools` output explains what tools are (AI-invocable, not user commands), shows risk level and parameters at a glance, includes usage examples in footer. Fixed Unicode em-dash rendering as `?` in non-Unicode terminals. |
+| **G18: Tool-calling routing fix** | `PromptRouter` Layer 1c action-verb gate with PascalCase exemption, `isMutationOrInspection()` method (16 verb prefixes), `isActionLike()` expanded (+6 verbs: list, ls, grep, save, make, put), `rag-rules.txt` priority hierarchy restructured. `PromptRouterExplainTest` step traces updated. ~130 new/updated routing tests. | Fixes critical bug: "create settings.json" and "list the files" were routing to RETRIEVE (RAG mode) instead of ASSIST (tool-calling mode). Model hallucinated file creation from context instead of calling `talos.write_file`. Layer 1c intercepts mutation/inspection verbs → ASSIST, unless PascalCase code entity present (e.g. "write a test for RagService" still → RETRIEVE). Prompt hierarchy: file ops → tools ALWAYS, info questions → context first, missing → tools fallback. |
 
 ---
 
@@ -275,26 +277,28 @@ The following significant work was completed after the original four slices, dri
 Plugin ecosystem, MCP server, SSRF, blueprint runner, multi-workspace, channel/gateway, legacy compat proxy.
 
 ### Current project stats:
-- **1681 tests**, 0 failures
+- **1736 tests**, 0 failures
 - **6 LLM-invocable tools** with sandbox + approval gate
 - **Composable system prompt** with tool awareness, workspace awareness, and conversation continuity
 - **Auto-compacting conversation** with sketch-based memory (2000 char / 4-8 sentence sketches)
 - **Mode-aware history budgets** — AskMode 55%, RagMode 25%
-- **Assistant-first routing** with workspace-aware disambiguation and expanded vocabulary
+- **Assistant-first routing** with workspace-aware disambiguation, expanded vocabulary, and action-verb gate for tool-calling
 - **Code-aware chunking** with 3 language strategies
 - **Full streaming** with tool-call loop integration
 - **Natural CLI feel** — model knows workspace path, proactively uses tools, handles empty retrieval gracefully
 - **File-ops prompt hardening** — concrete write_file examples, CRITICAL section, attention-decay countermeasures for small LLMs
+- **Tool-calling routing** — mutation/inspection verbs (create, list, grep, delete, etc.) route to ASSIST for tool execution instead of RETRIEVE
 - **Slash command autocomplete** — JLine tab-completion for `/` commands with prefix filtering, groups, descriptions
 - **Clean help layout** — 5 logical command groups, tight summaries, aligned columns, visual hierarchy
+- **Clean tools display** — risk badges, parameter signatures, usage examples, explains AI-invocable nature
 
 ### Remaining priorities (next slices):
 
-1. **G14 — Real-world validation.** File-ops prompt hardening is shipped. Needs manual testing with Gemma 4 on real workspaces to confirm the model uses write_file proactively and doesn't dump code blocks.
+1. **Layer 3 — Native Ollama tool calling.** `OllamaEngine.chatViaMessages()` sends requests without the `tools` field. Ollama supports native function calling via `tools` array in the API. Wiring this would give structured `tool_calls` responses instead of relying on the model emitting `<tool_call>` XML in free text — much more reliable for 12B models. Requires extending `ChatRequest` to carry `ToolDescriptor` metadata and handling structured responses.
 
-2. **G12 — Context narrowing.** `Context` is a 15-field dependency bag. Future refactoring could split it into narrower interfaces (`ModeDeps`, `ToolExecutionDeps`, `CommandDeps`). Not urgent but improves testability.
+2. **Real-world validation.** Routing fix (G18) and prompt hierarchy are shipped. Needs manual testing with Gemma 4 on real workspaces: does "create settings.json" actually call `talos.write_file`? Does "list the files" call `talos.list_dir`? If the model still fails with Layer 1+2, Layer 3 (native tool calling) becomes critical.
 
-3. **G10 — Structured task model.** For post-V1 agent capabilities, a task/subtask/completion model would allow multi-step workflows. The current turn model is correct for V1 CLI use.
+3. **G12 — Context narrowing.** `Context` is a 15-field dependency bag. Future refactoring could split it into narrower interfaces (`ModeDeps`, `ToolExecutionDeps`, `CommandDeps`). Not urgent but improves testability.
 
 ### What NOT to do next:
 - Do not add MCP server mode — tool execution is internal-first and working
