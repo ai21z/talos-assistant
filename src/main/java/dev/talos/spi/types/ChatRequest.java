@@ -19,14 +19,27 @@ public final class ChatRequest {
      */
     public final List<ChatMessage> messages;
 
+    /**
+     * Tool definitions to include in the API request (Ollama native tool calling).
+     * When non-empty, the engine advertises these tools to the model so it can
+     * return structured {@code tool_calls} instead of free-text answers.
+     */
+    public final List<ToolSpec> tools;
+
     public ChatRequest(String backend, String model, String systemPrompt, String userPrompt,
                        List<Map<String,String>> snippets, Duration timeout) {
-        this(backend, model, systemPrompt, userPrompt, snippets, timeout, List.of());
+        this(backend, model, systemPrompt, userPrompt, snippets, timeout, List.of(), List.of());
     }
 
     public ChatRequest(String backend, String model, String systemPrompt, String userPrompt,
                        List<Map<String,String>> snippets, Duration timeout,
                        List<ChatMessage> messages) {
+        this(backend, model, systemPrompt, userPrompt, snippets, timeout, messages, List.of());
+    }
+
+    public ChatRequest(String backend, String model, String systemPrompt, String userPrompt,
+                       List<Map<String,String>> snippets, Duration timeout,
+                       List<ChatMessage> messages, List<ToolSpec> tools) {
         this.backend = Objects.requireNonNullElse(backend, "");
         this.model = Objects.requireNonNullElse(model, "");
         this.systemPrompt = Objects.requireNonNullElse(systemPrompt, "");
@@ -34,6 +47,7 @@ public final class ChatRequest {
         this.snippets = snippets == null ? List.of() : List.copyOf(snippets);
         this.timeout = timeout == null ? Duration.ofSeconds(60) : timeout;
         this.messages = messages == null ? List.of() : List.copyOf(messages);
+        this.tools = tools == null ? List.of() : List.copyOf(tools);
     }
 
     public String flattenedContext() {
