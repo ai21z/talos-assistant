@@ -90,6 +90,12 @@ test-remote-config.yaml
 /docs
 V1_IMPLEMENTATION_BRIDGE.md
 
+# ---- Local-only directories and files
+/playground/
+/.github/
+.claude/
+/test-output.txt
+
 # ---- Security: common secret patterns (use explicit names; avoid *.yaml wildcards)
 *.env
 *.env.*
