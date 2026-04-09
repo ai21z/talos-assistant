@@ -8,7 +8,6 @@ import dev.talos.core.context.ContextResult;
 import dev.talos.core.context.TokenBudget;
 import dev.talos.core.embed.EmbeddingsClient;
 import dev.talos.core.rag.RagService;
-import dev.talos.core.retrieval.RetrievalTrace;
 import picocli.CommandLine;
 
 import java.nio.file.Path;

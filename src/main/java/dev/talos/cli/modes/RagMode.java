@@ -14,10 +14,8 @@ import dev.talos.core.llm.SystemPromptBuilder;
 
 import dev.talos.core.util.Sanitize;
 import dev.talos.core.security.Sandbox;
-import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.TurnTraceCapture;
-import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,8 +23,6 @@ import org.slf4j.LoggerFactory;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -173,23 +169,8 @@ public final class RagMode implements Mode {
     }
 
     /**
-     * Builds a structured list of ChatMessages for the /api/chat endpoint.
-     *
-     * <p>Includes: system prompt → pre-built conversation history →
-     * RAG context block (snippets) → current user message.
-     *
-     * <p>The history list must be built by the caller (and its token cost
-     * measured) <em>before</em> context packing, so that the snippet budget
-     * correctly accounts for history tokens.
-     *
-     * <p>RAG context snippets are injected as a user-role message immediately
-     * before the current question, keeping the system prompt stable across turns.
-     *
-     * @param system      the system prompt text
-     * @param userMessage the current user question (possibly with comparison prefix)
-     * @param ctxMaps     the packed RAG context snippets (path → text maps)
-     * @param history     pre-built conversation history messages (may be empty)
-     * @return mutable list of ChatMessages ready for the LLM
+     * Builds ChatMessages for /api/chat: system → history → RAG context → user message.
+     * History must be built before packing so its token cost is accounted for.
      */
     static List<ChatMessage> buildMessages(String system, String userMessage,
                                            List<Map<String,String>> ctxMaps,
@@ -206,9 +187,7 @@ public final class RagMode implements Mode {
             LOG.debug("buildMessages: no history turns (first message in session)");
         }
 
-        // Inject RAG context as a user-role message before the actual question.
-        // This keeps the system prompt stable across turns while giving the model
-        // the retrieved evidence it needs to ground its answer.
+        // Inject RAG context as a user-role message before the question
         if (ctxMaps != null && !ctxMaps.isEmpty()) {
             StringBuilder contextBlock = new StringBuilder();
             contextBlock.append("Here is the retrieved context from the codebase. ");
@@ -238,16 +217,7 @@ public final class RagMode implements Mode {
         return messages;
     }
 
-    /**
-     * FILE_TOKEN pattern for matching file references in user queries.
-     * Supports:
-     * - Case-insensitive extensions
-     * - Both path separators (backslash and forward slash)
-     * - Quoted paths with spaces
-     * - Common script/config/web/build extensions
-     * - Dotfiles with no extension (e.g., .editorconfig, .env)
-     * - Captures the entire token for secure resolution
-     */
+    /** Matches file references in user queries (quoted paths, extensions, dotfiles, extensionless names). */
     private static final Pattern FILE_TOKEN = Pattern.compile(
         "(?:" +
             // Branch 1: Quoted path (with spaces allowed)
@@ -275,17 +245,7 @@ public final class RagMode implements Mode {
         Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CHARACTER_CLASS
     );
 
-    /**
-     * Pins files mentioned in the question by extracting file-like tokens and resolving them
-     * against the workspace. Files are validated against workspace boundaries for security.
-     *
-     * @param ws workspace root path
-     * @param question user's question text
-     * @param maxPins maximum number of files to pin
-     * @param maxChars maximum characters per file snippet
-     * @param maxDepth maximum directory depth for file search
-     * @return list of pinned file snippets
-     */
+    /** Pins files mentioned in the question, resolving against workspace with sandbox validation. */
     private static List<PinnedSnippet> pinFiles(Path ws, String question, int maxPins, int maxChars, int maxDepth) {
         List<PinnedSnippet> out = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
@@ -371,17 +331,7 @@ public final class RagMode implements Mode {
         }
     }
 
-    /**
-     * Sanitizes LLM answer by stripping chatty preambles, leaked tool-call blocks,
-     * and model-added Sources/Citations blocks.
-     *
-     * <p>Tool-call blocks may leak into the final answer when:
-     * <ul>
-     *   <li>The model emits a tool call for an informational query (P1 bug)</li>
-     *   <li>The tool-call loop processes the call but the XML tags survive in the prose</li>
-     * </ul>
-     * This method defensively strips them so the user never sees raw {@code <tool_call>} XML.
-     */
+    /** Strips chatty preambles, leaked tool-call XML, and model-added Sources/Citations blocks. */
     private static String sanitizeAnswer(String answer) {
         if (answer == null || answer.isBlank()) return "";
 

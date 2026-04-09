@@ -29,24 +29,14 @@ public final class ModeController {
     private String activeName = "auto";
     private Runnable promptRefreshCallback;
 
-    /**
-     * Conversation context: the route of the last successfully dispatched turn.
-     * Used by {@link PromptRouter} for sticky retrieval (follow-up detection).
-     * COMMAND routes are neutral — they don't reset the conversation context.
-     */
+    /** Last dispatched route — used by PromptRouter for sticky retrieval. COMMAND is neutral. */
     private PromptRouter.Route lastRoute;
 
-    /**
-     * Optional workspace symbol checker for resolving bare PascalCase identifiers
-     * against the indexed workspace. When set, bare PascalCase like "RagService"
-     * can trigger retrieval without question context if the symbol exists in the index.
-     */
+    /** Optional workspace symbol checker for PascalCase → index resolution in auto-mode. */
     private WorkspaceSymbolChecker symbolChecker;
 
 
-    /**
-     * Adds a mode to the controller's registry.
-     */
+    /** Adds a mode to the controller's registry. */
     public ModeController add(Mode m) {
         if (m != null) {
             order.add(m);
@@ -55,10 +45,7 @@ public final class ModeController {
         return this;
     }
 
-    /**
-     * Registers an additional alias for an existing mode instance.
-     * The alias does not appear in the order list (no duplicate sweep).
-     */
+    /** Registers an alias for an existing mode (does not appear in sweep order). */
     public ModeController alias(String alias, Mode m) {
         if (alias != null && m != null) {
             byName.put(alias.toLowerCase(Locale.ROOT), m);
@@ -66,59 +53,35 @@ public final class ModeController {
         return this;
     }
 
-    /**
-     * Sets a callback to refresh the REPL prompt when mode changes.
-     */
+    /** Sets a callback to refresh the REPL prompt when mode changes. */
     public void setPromptRefreshCallback(Runnable callback) {
         this.promptRefreshCallback = callback;
     }
 
-    /**
-     * Sets the workspace symbol checker for workspace-aware PascalCase resolution.
-     * When set, bare PascalCase identifiers that match indexed workspace symbols
-     * will trigger retrieval in auto-mode without requiring question context.
-     *
-     * @param checker the symbol checker, or null to disable workspace-aware resolution
-     */
+    /** Sets the workspace symbol checker (null to disable). */
     public void setSymbolChecker(WorkspaceSymbolChecker checker) {
         this.symbolChecker = checker;
     }
 
-    /**
-     * Returns the current workspace symbol checker (may be null).
-     * Exposed for the {@code :route} diagnostic command.
-     */
+    /** Returns the current symbol checker (may be null). */
     public WorkspaceSymbolChecker getSymbolChecker() {
         return symbolChecker;
     }
 
-    /**
-     * Invalidates the workspace symbol cache. Should be called after
-     * {@code :reindex} to ensure subsequent routing decisions reflect
-     * the updated index.
-     *
-     * <p>Safe to call when no checker is set (no-op).
-     */
+    /** Invalidates the symbol cache. Safe to call when no checker is set. */
     public void invalidateSymbolCache() {
         if (symbolChecker != null) {
             symbolChecker.invalidateCache();
         }
     }
 
-    /**
-     * Returns the current active mode name (e.g., "rag", "dev", "auto", "chat").
-     */
+    /** Returns the active mode name ("rag", "dev", "auto", "chat", etc.). */
     public String getActiveName() { return activeName; }
 
-    /**
-     * Gets the active Mode if it's not "auto".
-     */
+    /** Gets the active Mode if not "auto". */
     public Optional<Mode> getActive() { return Optional.ofNullable(byName.get(activeName)); }
 
-    /**
-     * Sets the active mode. Returns true if accepted.
-     * Valid names are any registered mode names, aliases, plus "auto".
-     */
+    /** Sets the active mode. Returns true if accepted (registered name or "auto"). */
     public boolean setActive(String name) {
         if (name == null || name.isBlank()) return false;
         String n = name.toLowerCase(Locale.ROOT).trim();
@@ -132,16 +95,12 @@ public final class ModeController {
         return false;
     }
 
-    /**
-     * Back-compatibility API: routes without hint; controller uses its activeName.
-     */
+    /** Routes without hint; uses activeName. */
     public Optional<Result> route(String rawLine, Path workspace, Context ctx) throws Exception {
         return route(rawLine, workspace, ctx, null);
     }
 
-    /**
-     * Routes with a hint. If null/blank, activeName is used.
-     */
+    /** Routes with a hint. If null/blank, activeName is used. */
     public Optional<Result> route(String rawLine, Path workspace, Context ctx, String hint) throws Exception {
         if (rawLine == null || rawLine.isBlank()) return Optional.empty();
 
@@ -164,21 +123,7 @@ public final class ModeController {
         return Optional.empty();
     }
 
-    /**
-     * Auto-mode routing: assistant-first, retrieval requires evidence.
-     *
-     * <p>Flow:
-     * <ol>
-     *   <li>PromptRouter classifies → COMMAND / RETRIEVE / ASSIST</li>
-     *   <li>Classified mode is tried</li>
-     *   <li>If classified mode fails → always fall back to ASSIST</li>
-     * </ol>
-     *
-     * <p>RAG is never a fallback. If the router doesn't say RETRIEVE,
-     * retrieval doesn't happen. "List files" style queries are handled
-     * naturally by the LLM via the {@code talos.list_dir} tool, or
-     * explicitly via the {@code /files} slash command.
-     */
+    /** Auto-mode: classify → try classified mode → fallback to ASSIST (never RAG). */
     private Optional<Result> routeAuto(String rawLine, Path workspace, Context ctx) throws Exception {
 
         // Classify the prompt with conversation context and workspace awareness

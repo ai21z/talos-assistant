@@ -3,47 +3,18 @@ package dev.talos.runtime;
 import java.util.Optional;
 
 /**
- * Persistence seam for session state.
- *
- * <p>V1 uses {@link NoOpSessionStore} — sessions are ephemeral and all
- * methods are no-ops. Future implementations (e.g. {@code SqliteSessionStore})
- * can persist conversation sketches, entity lists, and turn summaries
- * to {@code ~/.talos/sessions/} for resume capability.
- *
- * <p>Contract:
- * <ul>
- *   <li>{@link #save} is fire-and-forget — implementations must never throw.</li>
- *   <li>{@link #load} returns empty when no prior state exists.</li>
- *   <li>{@link #delete} returns {@code true} if state was present and removed.</li>
- * </ul>
- *
- * @see SessionData
- * @see NoOpSessionStore
+ * Persistence seam for session state. V1 uses {@link NoOpSessionStore} (ephemeral).
+ * Save is fire-and-forget (never throws), load returns empty if absent.
  */
 public interface SessionStore {
 
-    /**
-     * Persist session state. Implementations must be idempotent —
-     * saving the same ID twice overwrites the previous snapshot.
-     *
-     * @param data non-null session data to persist
-     */
+    /** Persist session state (idempotent — overwrites on same ID). */
     void save(SessionData data);
 
-    /**
-     * Load a previously saved session.
-     *
-     * @param sessionId the session identifier
-     * @return the stored data, or empty if no session with that ID exists
-     */
+    /** Load a previously saved session, or empty if absent. */
     Optional<SessionData> load(String sessionId);
 
-    /**
-     * Delete a stored session.
-     *
-     * @param sessionId the session identifier
-     * @return {@code true} if a session was found and removed
-     */
+    /** Delete a stored session. Returns true if found and removed. */
     boolean delete(String sessionId);
 }
 

@@ -2,7 +2,6 @@ package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
-import dev.talos.cli.repl.SessionMemory;
 import dev.talos.core.Config;
 import org.junit.jupiter.api.Test;
 

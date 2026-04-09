@@ -1,7 +1,6 @@
 package dev.talos.cli.modes;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.regex.Matcher;
@@ -10,63 +9,19 @@ import java.util.regex.Pattern;
 /**
  * Assistant-first prompt router for auto-mode with conversation context.
  *
- * <h3>Design principle</h3>
  * <p><b>The assistant is the default.</b> Everything is a conversation turn
  * unless there is strong evidence that workspace retrieval is needed.
- * Retrieval is a capability that requires justification, not a default lane.
  *
  * <h3>Routing layers</h3>
  * <ol>
- *   <li><b>COMMAND</b> — structural file operations: open, show, view, ls, dir,
- *       including "show me &lt;file&gt;" compound commands
- *       (supports quoted paths for files with spaces).</li>
- *   <li><b>RETRIEVE</b> — strong workspace evidence:
- *       <ul>
- *         <li>Workspace framing: "this project", "the codebase", "our repo"</li>
- *         <li>File reference: {@code RagService.java}, {@code build.gradle.kts}</li>
- *         <li>PascalCase identifier <b>in question or action context</b></li>
- *         <li>Anchored tech noun (the/this + tech noun) <b>in question or action context</b></li>
- *         <li>PascalCase identifier <b>confirmed in workspace index</b> (no question
- *             required — the index disambiguates code symbols from brand names)</li>
- *       </ul></li>
- *   <li><b>Sticky retrieval</b> — follow-up turns inherit retrieval context
- *       from the previous turn (e.g. "what about the parse method?" after
- *       a retrieval turn). Social follow-ups are excluded.</li>
- *   <li><b>ASSIST</b> — default. Plain LLM conversation with no retrieval.
- *       Handles greetings, casual chat, general questions, anything without
- *       workspace anchors.</li>
+ *   <li><b>COMMAND</b> — structural file operations (open, show, ls, dir)</li>
+ *   <li><b>RETRIEVE</b> — workspace framing, file references, PascalCase identifiers
+ *       in question/action context, or identifiers confirmed in workspace index</li>
+ *   <li><b>Sticky retrieval</b> — non-social follow-ups inherit retrieval context</li>
+ *   <li><b>ASSIST</b> — default LLM conversation, no retrieval</li>
  * </ol>
  *
- * <h3>Retrieval policy</h3>
- * <table>
- *   <caption>Retrieval decision matrix</caption>
- *   <tr><th>Signal</th><th>Decision</th></tr>
- *   <tr><td>Workspace framing ("this project", "the codebase")</td>
- *       <td><b>RETRIEVE</b> — always</td></tr>
- *   <tr><td>File reference (path with extension, pom.xml, etc.)</td>
- *       <td><b>RETRIEVE</b> — always</td></tr>
- *   <tr><td>PascalCase identifier + question or action context</td>
- *       <td><b>RETRIEVE</b></td></tr>
- *   <tr><td>PascalCase identifier without question/action context</td>
- *       <td><b>ASSIST</b> — not enough evidence (unless workspace checker confirms)</td></tr>
- *   <tr><td>PascalCase identifier confirmed in workspace index</td>
- *       <td><b>RETRIEVE</b> — workspace evidence replaces question gating</td></tr>
- *   <tr><td>"the/this" + tech noun + question or action context</td>
- *       <td><b>RETRIEVE</b></td></tr>
- *   <tr><td>"the/this" + tech noun without question/action context</td>
- *       <td><b>ASSIST</b> — statement, not inquiry or action</td></tr>
- *   <tr><td>Follow-up after RETRIEVE (not social)</td>
- *       <td><b>RETRIEVE</b> — sticky context</td></tr>
- *   <tr><td>Social follow-up after RETRIEVE ("thanks", "what about you?")</td>
- *       <td><b>ASSIST</b></td></tr>
- *   <tr><td>No workspace signals</td>
- *       <td><b>ASSIST</b> — always</td></tr>
- * </table>
- *
- * <h3>Asymmetric cost rationale</h3>
- * <p>False retrieval (bizarre repo-grounded answer to "hey") is far worse than
- * missed retrieval (user can re-ask with {@code :mode rag}). We optimize for
- * precision: when in doubt, be an assistant.
+ * <p>False retrieval is worse than missed retrieval — when in doubt, be an assistant.
  */
 public final class PromptRouter {
 
@@ -84,17 +39,7 @@ public final class PromptRouter {
 
     // ── Layer 1: structural dev commands ─────────────────────────────────
 
-    /**
-     * Matches explicit file/directory commands.
-     * <ul>
-     *   <li>{@code ls}, {@code dir} — always (standalone or with path)</li>
-     *   <li>{@code list} — standalone (workspace listing)</li>
-     *   <li>{@code list <path>} — but not "list all/the/every/files/me"</li>
-     *   <li>{@code open/view <path>} — but not "open me/the/all/every"</li>
-     *   <li>{@code show <path>} — but not "show me/the/all/every/how/why/what"
-     *       ("show me &lt;file&gt;" is caught by the compound check instead)</li>
-     * </ul>
-     */
+    /** Matches explicit file/directory commands: ls, dir, list, open, view, show. */
     private static final Pattern DEV_COMMAND = Pattern.compile(
         "(?i)^\\s*(?:" +
             "(?:ls|dir)(?:\\s+|$)|" +
@@ -105,21 +50,14 @@ public final class PromptRouter {
         ")"
     );
 
-    /**
-     * "show me [the] &lt;file&gt;" — compound command prefix.
-     * Catches natural requests like "show me build.gradle.kts" as direct file
-     * display, while letting "show me how X works" fall through to retrieval.
-     */
+    /** "show me [the] &lt;file&gt;" — compound command prefix (supports quoted paths). */
     private static final Pattern SHOW_ME_PREFIX = Pattern.compile(
         "(?i)^\\s*show\\s+me\\s+(?:the\\s+)?"
     );
 
     // ── Layer 2: retrieval signals ──────────────────────────────────────
 
-    /**
-     * Explicit file references: word.ext patterns and well-known filenames.
-     * This is the strongest workspace signal — unconditional retrieval trigger.
-     */
+    /** File references: word.ext patterns and well-known filenames. Unconditional retrieval trigger. */
     private static final Pattern FILE_REF = Pattern.compile(
         "(?i)\\b[\\w./\\\\-]+\\.(?:" +
             "java|kt|py|js|ts|jsx|tsx|go|rs|cpp|c|h|hpp|cs|rb|php|" +
@@ -143,53 +81,21 @@ public final class PromptRouter {
     );
 
     /**
-     * PascalCase code identifiers: names like {@code RagService},
-     * {@code ModeController}. Must have at least two capitalized segments.
-     *
-     * <p><b>Requires question or action context to trigger retrieval.</b>
-     * PascalCase alone is insufficient because proper nouns and brand names
-     * (PowerPoint, LinkedIn, YouTube, IntelliJ) also use PascalCase.
-     * Question or action context disambiguates code inquiries from general
-     * mentions.
+     * PascalCase identifiers (e.g. {@code RagService}). At least two segments.
+     * Requires question/action context to trigger retrieval (brand names also use PascalCase).
      */
     private static final Pattern CODE_IDENTIFIER = Pattern.compile(
         "\\b[A-Z][a-z]+(?:[A-Z][a-z0-9]+)+\\b"
     );
 
-    /**
-     * Workspace-proximity terms: deictic references to the current workspace.
-     *
-     * <p>In a workspace-scoped CLI, "here" means "in this workspace", "workspace"
-     * means "the current workspace", and "working on" implies the current project.
-     * These are strong workspace signals but require question or action context
-     * to avoid false positives like "I'm here to help" or "I like workspaces".
-     *
-     * <p>Catches:
-     * <ul>
-     *   <li>"what am I working on here?" — "here" + question → RETRIEVE</li>
-     *   <li>"what workspace is this?" — "workspace" + question → RETRIEVE</li>
-     *   <li>"what am I working on?" — "working on" + question → RETRIEVE</li>
-     *   <li>"what's in here?" — "here" + question → RETRIEVE</li>
-     * </ul>
-     */
+    /** Workspace-proximity terms ("here", "workspace", "working on"). Requires question/action context. */
     private static final Pattern WORKSPACE_PROXIMITY = Pattern.compile(
         "(?i)\\bhere\\b|\\bworkspace\\b|\\bworking\\s+on\\b"
     );
 
     /**
-     * Definite-article + technical noun: "the pipeline", "this constructor",
-     * "the Sandbox class", etc.
-     * Covers architecture patterns, language constructs (constructor, enum, record,
-     * annotation, field, variable, property, import, implementation, dependency),
-     * infrastructure terms, and domain-specific retrieval/indexing vocabulary.
-     *
-     * <p>Allows an optional intervening qualifier word so that
-     * "the Sandbox class" and "this Config handler" are matched in addition
-     * to direct adjacency like "the pipeline" and "this constructor".
-     *
-     * <p>Only triggers retrieval when the input also looks like a question
-     * or action (checked separately), to avoid matching casual statements
-     * like "the design is nice".
+     * "the/this [qualifier] &lt;tech-noun&gt;" pattern. Allows an optional intervening
+     * word (e.g. "the Sandbox class"). Requires question/action context.
      */
     private static final Pattern ANCHORED_TECH_NOUN = Pattern.compile(
         "(?i)\\b(?:the|this)\\s+(?:\\S+\\s+)?(?:" +
@@ -246,13 +152,7 @@ public final class PromptRouter {
         ")"
     );
 
-    /**
-     * Common conversational prefixes stripped before question-word and
-     * follow-up detection. Covers greetings ("hey", "hello") and
-     * acknowledgments ("sure", "right", "actually", "cool", "yeah"),
-     * ensuring "cool, what does the parser do" is recognized as question-like
-     * and "actually, what about it" is recognized as a follow-up.
-     */
+    /** Conversational prefixes stripped before question/follow-up detection ("hey", "ok", "cool", etc.). */
     private static final Pattern CONVERSATIONAL_PREFIX = Pattern.compile(
         "(?i)^(?:hey|hi|hello|ok(?:ay)?|so|well|um+|hmm+|oh|ah|yo|alright|" +
             "sure|right|actually|cool|yeah|yep|yup),?\\s+"
@@ -260,16 +160,7 @@ public final class PromptRouter {
 
     // ── Result type ──────────────────────────────────────────────────────
 
-    /**
-     * Structured routing result with human-readable explanation.
-     *
-     * <p>Used by {@code :route} diagnostic command and debug logging to
-     * expose the reasoning behind each routing decision.
-     *
-     * @param route   the routing decision
-     * @param trigger concise label for the decisive signal (e.g. "file reference")
-     * @param steps   ordered trace of checks performed; empty list if not requested
-     */
+    /** Routing result with trigger label and evaluation trace (used by {@code :route} diagnostic). */
     public record RouteResult(Route route, String trigger, List<String> steps) {
         public RouteResult {
             steps = List.copyOf(steps);   // defensive copy, immutable
@@ -278,59 +169,22 @@ public final class PromptRouter {
 
     // ── Public API ───────────────────────────────────────────────────────
 
-    /**
-     * Routes a raw user prompt (stateless — no conversation context).
-     *
-     * @param input raw user input (may be null/blank)
-     * @return routing decision; never null
-     */
+    /** Routes a prompt (stateless — no conversation context). */
     public static Route route(String input) {
         return route(input, null);
     }
 
-    /**
-     * Routes a raw user prompt with conversation context.
-     *
-     * <p>When {@code lastRoute} is {@link Route#RETRIEVE} and the current input
-     * looks like a non-social follow-up, the routing is upgraded from ASSIST to
-     * RETRIEVE, allowing multi-turn retrieval conversations.
-     *
-     * @param input     raw user input (may be null/blank)
-     * @param lastRoute route of the previous turn, or null if first turn
-     * @return routing decision; never null
-     */
+    /** Routes with conversation context (sticky retrieval for non-social follow-ups). */
     public static Route route(String input, Route lastRoute) {
         return route(input, lastRoute, null);
     }
 
-    /**
-     * Routes a raw user prompt with conversation context and optional workspace
-     * symbol resolution.
-     *
-     * <p>Delegates to {@link #explainRoute} and returns only the route.
-     * Use {@code explainRoute()} when the reasoning trace is needed.
-     *
-     * @param input     raw user input (may be null/blank)
-     * @param lastRoute route of the previous turn, or null if first turn
-     * @param checker   workspace symbol checker, or null to skip workspace lookup
-     * @return routing decision; never null
-     */
+    /** Routes with conversation context and optional workspace symbol resolution. */
     public static Route route(String input, Route lastRoute, WorkspaceSymbolChecker checker) {
         return explainRoute(input, lastRoute, checker).route();
     }
 
-    /**
-     * Routes a raw user prompt and returns a full {@link RouteResult} with
-     * the routing decision, trigger label, and evaluation trace.
-     *
-     * <p>This is the single code path for all routing. The convenience
-     * {@code route()} methods delegate here and discard the explanation.
-     *
-     * @param input     raw user input (may be null/blank)
-     * @param lastRoute route of the previous turn, or null if first turn
-     * @param checker   workspace symbol checker, or null to skip workspace lookup
-     * @return structured result; never null
-     */
+    /** Full routing with explanation trace. Single code path for all routing decisions. */
     public static RouteResult explainRoute(String input, Route lastRoute, WorkspaceSymbolChecker checker) {
         List<String> steps = new ArrayList<>();
 
@@ -449,12 +303,7 @@ public final class PromptRouter {
 
     // ── Internal helpers ─────────────────────────────────────────────────
 
-    /**
-     * Checks if the input matches "show me [the] &lt;file-reference&gt;".
-     * Supports quoted paths: {@code show me "docs/My Guide.md"}.
-     * For unquoted paths, the first whitespace-delimited token after the prefix
-     * must be a file reference for this to be a direct file display command.
-     */
+    /** Checks if input matches "show me [the] &lt;file-reference&gt;" (supports quoted paths). */
     private static boolean isShowMeFile(String trimmed) {
         Matcher m = SHOW_ME_PREFIX.matcher(trimmed);
         if (!m.find()) return false;
@@ -475,13 +324,7 @@ public final class PromptRouter {
         return FILE_REF.matcher(firstToken).find();
     }
 
-    /**
-     * Checks whether the input looks like a question or inquiry.
-     *
-     * <p>Strips common conversational prefixes ("hey", "ok", "so", etc.)
-     * before checking for question words, so that "hey what is RagService"
-     * is correctly recognized as question-like.
-     */
+    /** True if the input looks like a question (strips conversational prefixes first). */
     static boolean isQuestionLike(String lower) {
         String stripped = CONVERSATIONAL_PREFIX.matcher(lower).replaceFirst("");
         return stripped.endsWith("?")
@@ -501,21 +344,8 @@ public final class PromptRouter {
     }
 
     /**
-     * Checks whether the input looks like an imperative action request.
-     *
-     * <p>Action verbs like "write", "create", "fix", "refactor" indicate
-     * the user wants to <em>do something</em> (often involving tool use).
-     * When combined with a PascalCase identifier or an anchored tech noun,
-     * these trigger retrieval so that the LLM has workspace context for the
-     * action.
-     *
-     * <p>Action-like alone does NOT trigger retrieval — it only gates the
-     * PascalCase and anchored-tech-noun checks, mirroring the question-like
-     * gate. "write a poem" stays ASSIST; "write a test for RagService"
-     * routes to RETRIEVE.
-     *
-     * <p>Strips common conversational prefixes ("hey", "ok", etc.) before
-     * checking, so "hey, fix the parser" is recognized as action-like.
+     * True if input starts with an imperative action verb ("write", "create", "fix", etc.).
+     * Does NOT trigger retrieval alone — only gates the PascalCase/tech-noun checks.
      */
     static boolean isActionLike(String lower) {
         String stripped = CONVERSATIONAL_PREFIX.matcher(lower).replaceFirst("");
@@ -552,15 +382,8 @@ public final class PromptRouter {
     }
 
     /**
-     * Returns true for action verbs that unambiguously require tool execution:
-     * file creation/mutation, directory inspection, or workspace search.
-     *
-     * <p>These verbs should route to ASSIST (tool-calling path) even when
-     * file references or workspace framing are present. "Create settings.json"
-     * is a tool action, not a retrieval query about settings.json.
-     *
-     * <p>Does NOT include ambiguous verbs like "fix", "refactor", "implement"
-     * which may refer to code discussion rather than direct file mutation.
+     * True for unambiguous tool-execution verbs (create, write, delete, list, grep, etc.).
+     * These route to ASSIST (tool-calling) even when file/workspace signals are present.
      */
     static boolean isMutationOrInspection(String lower) {
         String stripped = CONVERSATIONAL_PREFIX.matcher(lower).replaceFirst("");
@@ -574,31 +397,14 @@ public final class PromptRouter {
             || stripped.startsWith("grep ")      || stripped.startsWith("scan ");
     }
 
-    /**
-     * Checks whether the input is a conversational follow-up that should
-     * inherit retrieval context from the previous turn.
-     *
-     * <p>Strips common conversational prefixes ("cool", "actually", "right")
-     * before checking patterns, so "cool, and the parser?" is recognized
-     * as a follow-up.
-     *
-     * <p>Returns {@code false} for social follow-ups like "thanks" or
-     * "what about you?" to prevent casual conversation from accidentally
-     * staying in retrieval mode.
-     */
+    /** True if input is a non-social follow-up (strips conversational prefixes first). */
     static boolean isFollowUp(String lower) {
         if (SOCIAL_FOLLOW_UP.matcher(lower).find()) return false;
         String stripped = CONVERSATIONAL_PREFIX.matcher(lower).replaceFirst("");
         return FOLLOW_UP.matcher(stripped).find();
     }
 
-    /**
-     * Checks whether any PascalCase identifier in the input exists in the
-     * indexed workspace. Uses the provided checker to resolve symbols.
-     *
-     * <p>Iterates over all {@link #CODE_IDENTIFIER} matches and returns
-     * {@code true} as soon as any match is confirmed by the checker.
-     */
+    /** True if any PascalCase identifier in the input exists in the workspace index. */
     private static boolean hasWorkspaceSymbol(String trimmed, WorkspaceSymbolChecker checker) {
         Matcher m = CODE_IDENTIFIER.matcher(trimmed);
         while (m.find()) {
