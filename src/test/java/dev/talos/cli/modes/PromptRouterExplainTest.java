@@ -206,11 +206,12 @@ class PromptRouterExplainTest {
 
         // Verify the trace shows all negative checks in order
         var steps = r.steps();
-        assertTrue(steps.size() >= 6, "Should traverse all layers, got: " + steps);
+        assertTrue(steps.size() >= 7, "Should traverse all layers, got: " + steps);
         assertEquals("no dev command match", steps.get(0));
         assertEquals("no show-me-file match", steps.get(1));
-        assertEquals("no workspace framing", steps.get(2));
-        assertEquals("no file reference", steps.get(3));
+        assertEquals("not action-like — continuing", steps.get(2));
+        assertEquals("no workspace framing", steps.get(3));
+        assertEquals("no file reference", steps.get(4));
         // isQ check
         assertTrue(steps.stream().anyMatch(s ->
                 s.contains("not question-like") || s.contains("question-like but")));
@@ -316,7 +317,8 @@ class PromptRouterExplainTest {
     void action_without_workspace_signal_shows_action_like_step() {
         var r = PromptRouter.explainRoute("write a poem", null, null);
         assertEquals(ASSIST, r.route());
-        assertTrue(r.steps().stream().anyMatch(s -> s.contains("action-like but")));
+        // "write" is mutation/inspection with no PascalCase → exits via Layer 1c
+        assertTrue(r.steps().stream().anyMatch(s -> s.contains("mutation/inspection intent")));
     }
 
     @Test

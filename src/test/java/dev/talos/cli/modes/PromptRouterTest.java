@@ -237,7 +237,6 @@ class PromptRouterTest {
     @ValueSource(strings = {
         "how does this project handle authentication",
         "what is the codebase structure",
-        "find errors in this codebase",
         "what patterns are used in our project",
         "explain the architecture of this workspace",
         "in this project how is logging done",
@@ -339,8 +338,6 @@ class PromptRouterTest {
         "migrate the schema",
         "configure the endpoint",
         "implement the interface",
-        "delete the test",
-        "move the controller",
         "build the module",
     })
     void action_with_anchored_noun_triggers_retrieval(String input) {
@@ -1142,7 +1139,6 @@ class PromptRouterTest {
         "inspect the pipeline",
         "review the handler logic",
         "verify the controller works",
-        "scan the directory structure",
         "analyze the component hierarchy",
         "explore the template files",
     })
@@ -1263,5 +1259,130 @@ class PromptRouterTest {
                 "Real session Q1 should RETRIEVE");
         assertEquals(RETRIEVE, PromptRouter.route("do you know what workspace this is?"),
                 "Real session Q3 should RETRIEVE");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  ACTION VERB GATE: mutation/inspection → ASSIST (tool-calling path)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "create a new file called settings.json",
+        "create a settings.json file",
+        "write a hello.py with Flask",
+        "generate a README.md for this project",
+        "save the output to results.txt",
+        "make a new config.yaml",
+        "put this in a file called notes.txt",
+    })
+    void file_creation_actions_route_to_assist(String input) {
+        assertEquals(ASSIST, PromptRouter.route(input),
+                "File creation '" + input + "' must route to ASSIST (tools), not RETRIEVE");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "delete the old config.json",
+        "remove settings.json from the project",
+        "rename Main.java to App.java",
+        "move utils.py to the lib folder",
+    })
+    void file_mutation_actions_route_to_assist(String input) {
+        assertEquals(ASSIST, PromptRouter.route(input),
+                "File mutation '" + input + "' must route to ASSIST (tools), not RETRIEVE");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "list the files in this directory",
+        "list all files in the workspace",
+        "search for TODO comments",
+        "find all references to Config.java",
+        "grep for SMOKEPROBE in the project",
+        "scan the directory for .env files",
+        "find errors in this codebase",
+        "scan the directory structure",
+    })
+    void inspection_actions_route_to_assist(String input) {
+        assertEquals(ASSIST, PromptRouter.route(input),
+                "Inspection '" + input + "' must route to ASSIST (tools), not RETRIEVE");
+    }
+
+    // Mutation/inspection verbs override anchored tech nouns when no PascalCase
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "delete the test",
+        "move the controller",
+        "remove the file",
+        "rename the script",
+        "list the directory",
+    })
+    void mutation_verbs_override_anchored_nouns_to_assist(String input) {
+        assertEquals(ASSIST, PromptRouter.route(input),
+                "Mutation '" + input + "' must route to ASSIST (tools) even with tech noun");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "create a new empty file in this workspace called settings.json",
+        "list the files in the directory please",
+    })
+    void exact_failing_prompts_now_route_to_assist(String input) {
+        assertEquals(ASSIST, PromptRouter.route(input),
+                "The exact prompt '" + input + "' that failed must now route to ASSIST");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "what does Main.java do?",
+        "explain the Config.java file",
+        "how does RagService.java work?",
+        "describe settings.json",
+    })
+    void information_questions_about_files_still_retrieve(String input) {
+        assertEquals(RETRIEVE, PromptRouter.route(input),
+                "Information question '" + input + "' should still RETRIEVE");
+    }
+
+    // ── isMutationOrInspection unit tests ───────────────────────────────
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "create a file",
+        "write something",
+        "generate a readme",
+        "save the output",
+        "make a new file",
+        "put this here",
+        "delete the old one",
+        "remove it",
+        "rename the file",
+        "move it to lib",
+        "list all files",
+        "ls the directory",
+        "search for TODO",
+        "find references",
+        "grep for errors",
+        "scan for secrets",
+    })
+    void isMutationOrInspection_true(String input) {
+        assertTrue(PromptRouter.isMutationOrInspection(input),
+                "'" + input + "' should be mutation/inspection");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "fix the parser",
+        "refactor the code",
+        "implement the interface",
+        "explain how it works",
+        "what is a binary tree",
+        "update the tests",
+        "review the changes",
+        "analyze the code",
+    })
+    void isMutationOrInspection_false(String input) {
+        assertFalse(PromptRouter.isMutationOrInspection(input),
+                "'" + input + "' should NOT be mutation/inspection");
     }
 }
