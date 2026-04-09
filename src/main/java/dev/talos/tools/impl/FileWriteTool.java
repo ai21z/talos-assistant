@@ -32,10 +32,13 @@ public final class FileWriteTool implements TalosTool {
 
     @Override
     public ToolDescriptor descriptor() {
+        // IMPORTANT: 'path' is listed FIRST in the schema so the model generates
+        // it before the (potentially very long) 'content' parameter. This prevents
+        // the model from forgetting 'path' when generating large file content.
         return new ToolDescriptor(NAME, description(),
                 """
                 {"type":"object","properties":{
-                  "path":{"type":"string","description":"Relative path to the file in the workspace"},
+                  "path":{"type":"string","description":"Relative file path to write (REQUIRED, generate this FIRST)"},
                   "content":{"type":"string","description":"Full content to write to the file"}
                 },"required":["path","content"]}""",
                 ToolRiskLevel.WRITE);

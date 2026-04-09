@@ -217,4 +217,56 @@ class ToolRegistryTest {
             return ToolResult.ok(ctx != null ? "has-context" : "null-context");
         }
     }
+
+    // --- Fuzzy tool name matching tests ---
+
+    @Test
+    void fuzzy_match_without_talos_prefix() {
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new EchoTool());
+
+        // "echo" should resolve to "talos.echo" via prefix addition
+        assertNotNull(registry.get("echo"), "Should match talos.echo via prefix");
+        assertSame(registry.get("talos.echo"), registry.get("echo"));
+    }
+
+    @Test
+    void fuzzy_match_known_alias_file_write() {
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new dev.talos.tools.impl.FileWriteTool());
+
+        // "file_write" is a known alias for "talos.write_file"
+        assertNotNull(registry.get("file_write"), "Should match talos.write_file via alias");
+        assertEquals("talos.write_file", registry.get("file_write").name());
+    }
+
+    @Test
+    void fuzzy_match_known_alias_read_file() {
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new dev.talos.tools.impl.ReadFileTool());
+
+        assertNotNull(registry.get("read_file"), "Should match talos.read_file via alias");
+        assertNotNull(registry.get("file_read"), "Should match talos.read_file via alias");
+    }
+
+    @Test
+    void fuzzy_match_does_not_match_garbage() {
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new EchoTool());
+
+        assertNull(registry.get("totally_unknown"));
+        assertNull(registry.get(""));
+        assertNull(registry.get(null));
+    }
+
+    @Test
+    void fuzzy_execute_resolves_alias() {
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new EchoTool());
+
+        // Execute via alias "echo" (without talos. prefix)
+        ToolResult result = registry.execute(new ToolCall("echo", Map.of("input", "fuzzy")));
+        assertTrue(result.success());
+        assertEquals("Echo: fuzzy", result.output());
+    }
 }

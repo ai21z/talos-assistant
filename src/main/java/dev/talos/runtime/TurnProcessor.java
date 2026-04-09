@@ -153,9 +153,15 @@ public final class TurnProcessor {
         if (risk.requiresApproval()) {
             String desc = risk.name().toLowerCase().replace('_', ' ')
                     + " operation: " + call.toolName();
-            String detail = call.param("path") != null
-                    ? "target: " + call.param("path")
-                    : null;
+            String path = call.param("path");
+            String detail;
+            if (path != null && !path.isBlank()) {
+                detail = "target: " + path;
+            } else {
+                // Warn the user that path is missing — they'll get an error anyway,
+                // but this avoids wasting approval on a doomed call
+                detail = "(warning: no target path specified — may fail)";
+            }
             if (!approvalGate.approve(desc, detail)) {
                 return ToolResult.fail(ToolError.denied(
                         "Operation denied by user: " + call.toolName()));
