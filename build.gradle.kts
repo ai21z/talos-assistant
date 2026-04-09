@@ -53,7 +53,6 @@ dependencies {
     implementation("org.apache.lucene:lucene-queryparser:${project.property("luceneVersion")}")
 
     // Config / Storage / Logging
-    implementation("org.yaml:snakeyaml:${project.property("snakeyamlVersion")}")
     implementation("org.xerial:sqlite-jdbc:3.46.0.0")
     implementation("com.fasterxml.jackson.core:jackson-databind:${project.property("jacksonVersion")}")
     implementation("com.fasterxml.jackson.core:jackson-annotations:${project.property("jacksonVersion")}")
@@ -61,39 +60,14 @@ dependencies {
     implementation("org.slf4j:slf4j-api:${project.property("slf4jVersion")}")
     runtimeOnly("ch.qos.logback:logback-classic:${project.property("logbackVersion")}")
 
-    // Parsing libs (HTML/PDF/Office)
-    implementation("org.jsoup:jsoup:1.18.1")
-    implementation("org.apache.pdfbox:pdfbox:3.0.3")
-    implementation("org.apache.poi:poi-ooxml:5.4.0")
-
-    // Utilities
-    implementation("commons-io:commons-io:2.16.1")
-
     // REPL
     implementation("org.jline:jline:3.26.3")
-    implementation("org.fusesource.jansi:jansi:2.4.1")
-
-
-    // --- Security override: CVE-2025-48924 (commons-lang3) ---
-    // poi-ooxml (and possibly others) can bring a vulnerable commons-lang3 transitively.
-    // The direct dependency to 3.18.0 declared to force an upgrade everywhere.
-    implementation("org.apache.commons:commons-lang3:3.18.0")
-    testImplementation("org.apache.commons:commons-lang3:3.18.0")
 
     // JUnit 5 (explicit engine to avoid Gradle 9 deprecation)
     testImplementation(platform("org.junit:junit-bom:5.10.2"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
-
-    // (Optional) If is best to *lock* all configs to 3.18.0 regardless of
-    // how they are brought in, keep constraints too:
-    constraints {
-        implementation("org.apache.commons:commons-lang3:3.18.0") {
-            because("CVE-2025-48924 – force safe version across transitive graphs")
-        }
-        testImplementation("org.apache.commons:commons-lang3:3.18.0")
-    }
 }
 
 /* ---------- Application runtime flags ---------- */
@@ -124,7 +98,7 @@ tasks.withType<Jar>().configureEach {
 
 tasks.jar {
     archiveBaseName.set("talos")
-    archiveVersion.set("") //TODO Now only stable name: talos.jar; add versioned one too?
+    archiveVersion.set("") // stable name: talos.jar (referenced by installDist + jpackage)
 }
 
 /* ---------- jpackage (MSI) ---------- */
