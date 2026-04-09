@@ -259,6 +259,7 @@ The following significant work was completed after the original four slices, dri
 | **G16: Help layout redesign** | `CommandGroup` enum redesigned (SESSION, MODELS, KNOWLEDGE, SECURITY, DEBUG), `HelpCommand` rewritten (clean columns, group headers, footer hints), all 21 command summaries tightened to <30 chars, `CommandSpec` backward-compat default updated | Clean, scannable `/help` output. 5 logical groups with visual hierarchy (violet headers, blue usage, grey descriptions). 24-char aligned columns. Footer shows `/help <cmd>` hint + Tab autocomplete. Fixes 5 compilation errors from inconsistent enum values. 24 files changed, 0 test regressions. |
 | **G17: Tools command redesign** | `ToolsCommand` rewritten — explanatory header, risk badges (green `read`/yellow `write`), parameter signatures from JSON schema, `talos.` prefix stripped, usage examples, alphabetical sort. `extractParams()` static method. 10 new tests (up from 3). | `/tools` output explains what tools are (AI-invocable, not user commands), shows risk level and parameters at a glance, includes usage examples in footer. Fixed Unicode em-dash rendering as `?` in non-Unicode terminals. |
 | **G18: Tool-calling routing fix** | `PromptRouter` Layer 1c action-verb gate with PascalCase exemption, `isMutationOrInspection()` method (16 verb prefixes), `isActionLike()` expanded (+6 verbs: list, ls, grep, save, make, put), `rag-rules.txt` priority hierarchy restructured. `PromptRouterExplainTest` step traces updated. ~130 new/updated routing tests. | Fixes critical bug: "create settings.json" and "list the files" were routing to RETRIEVE (RAG mode) instead of ASSIST (tool-calling mode). Model hallucinated file creation from context instead of calling `talos.write_file`. Layer 1c intercepts mutation/inspection verbs → ASSIST, unless PascalCase code entity present (e.g. "write a test for RagService" still → RETRIEVE). Prompt hierarchy: file ops → tools ALWAYS, info questions → context first, missing → tools fallback. |
+| **G19: Native Ollama tool calling** | New `ToolSpec` record in SPI, `ChatRequest.tools` field, `ChatMessage` extended with `NativeToolCall`/`toolCallId` for native format. `OllamaEngine`: converts `ToolSpec` → Ollama native tool format, includes `tools` in both `chatViaMessages()` and `chatStreamViaMessages()`, parses `tool_calls` from responses (non-streaming: full JSON, streaming: single chunk detection), converts to `<tool_call>` XML at engine boundary. `LlmClient`: stores `toolSpecs`, includes in every `ChatRequest`. `TalosBootstrap`: wires `ToolRegistry` descriptors → `LlmClient` at boot. `ListDirTool`: path defaults to `"."` if omitted. `OllamaEngineNativeToolsTest` (10 tests). | **Root cause fix**: `OllamaEngine` sent requests without the `tools` field — the model had zero API-level awareness that tools existed. Now Ollama receives structured tool definitions in every request, returns structured `tool_calls` instead of free text. XML conversion at engine boundary preserves the entire existing ToolCallParser/ToolCallLoop/AssistantTurnExecutor pipeline unchanged. Streaming tool calls (arrive as ONE chunk, not incremental) are detected and converted in the stream mapper. |
 
 ---
 
@@ -277,8 +278,8 @@ The following significant work was completed after the original four slices, dri
 Plugin ecosystem, MCP server, SSRF, blueprint runner, multi-workspace, channel/gateway, legacy compat proxy.
 
 ### Current project stats:
-- **1736 tests**, 0 failures
-- **6 LLM-invocable tools** with sandbox + approval gate
+- **1746+ tests**, 0 failures
+- **6 LLM-invocable tools** with sandbox + approval gate + **native Ollama tool calling**
 - **Composable system prompt** with tool awareness, workspace awareness, and conversation continuity
 - **Auto-compacting conversation** with sketch-based memory (2000 char / 4-8 sentence sketches)
 - **Mode-aware history budgets** — AskMode 55%, RagMode 25%
@@ -288,15 +289,16 @@ Plugin ecosystem, MCP server, SSRF, blueprint runner, multi-workspace, channel/g
 - **Natural CLI feel** — model knows workspace path, proactively uses tools, handles empty retrieval gracefully
 - **File-ops prompt hardening** — concrete write_file examples, CRITICAL section, attention-decay countermeasures for small LLMs
 - **Tool-calling routing** — mutation/inspection verbs (create, list, grep, delete, etc.) route to ASSIST for tool execution instead of RETRIEVE
+- **Native tool calling** — `tools` array in Ollama API requests, structured `tool_calls` responses converted to XML at engine boundary
 - **Slash command autocomplete** — JLine tab-completion for `/` commands with prefix filtering, groups, descriptions
 - **Clean help layout** — 5 logical command groups, tight summaries, aligned columns, visual hierarchy
 - **Clean tools display** — risk badges, parameter signatures, usage examples, explains AI-invocable nature
 
 ### Remaining priorities (next slices):
 
-1. **Layer 3 — Native Ollama tool calling.** `OllamaEngine.chatViaMessages()` sends requests without the `tools` field. Ollama supports native function calling via `tools` array in the API. Wiring this would give structured `tool_calls` responses instead of relying on the model emitting `<tool_call>` XML in free text — much more reliable for 12B models. Requires extending `ChatRequest` to carry `ToolDescriptor` metadata and handling structured responses.
+1. **Real-world validation.** Native tool calling (G19) and routing fix (G18) are shipped. Needs live testing with Gemma 4 / Qwen3 on real workspaces: does "create settings.json" actually call `talos.write_file`? Does "list the files" call `talos.list_dir`? Does the full tool-call → execute → re-prompt cycle work end-to-end?
 
-2. **Real-world validation.** Routing fix (G18) and prompt hierarchy are shipped. Needs manual testing with Gemma 4 on real workspaces: does "create settings.json" actually call `talos.write_file`? Does "list the files" call `talos.list_dir`? If the model still fails with Layer 1+2, Layer 3 (native tool calling) becomes critical.
+2. **Phase 2 — Shell/Exec tool.** The 6 existing tools cover file ops, but some tasks need terminal commands (e.g., `gradle build`, `npm install`). A carefully sandboxed exec tool would close this gap. Requires approval gate hardening and timeout enforcement.
 
 3. **G12 — Context narrowing.** `Context` is a 15-field dependency bag. Future refactoring could split it into narrower interfaces (`ModeDeps`, `ToolExecutionDeps`, `CommandDeps`). Not urgent but improves testability.
 
