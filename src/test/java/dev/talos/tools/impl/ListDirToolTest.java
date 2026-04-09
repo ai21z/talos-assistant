@@ -124,12 +124,12 @@ class ListDirToolTest {
     }
 
     @Test
-    void missingPathParam() {
+    void missingPathParam_defaultsToWorkspaceRoot() {
         ToolCall call = new ToolCall("talos.list_dir", Map.of());
         ToolResult r = tool.execute(call, ctx);
 
-        assertFalse(r.success());
-        assertEquals(ToolError.INVALID_PARAMS, r.error().code());
+        // Missing path now defaults to "." (workspace root) instead of returning an error
+        assertTrue(r.success(), "Expected success when path is omitted (defaults to workspace root)");
     }
 
     @Test

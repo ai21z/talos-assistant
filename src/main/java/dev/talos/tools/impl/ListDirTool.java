@@ -56,7 +56,7 @@ public final class ListDirTool implements TalosTool {
 
         String pathParam = call.param("path");
         if (pathParam == null || pathParam.isBlank()) {
-            return ToolResult.fail(ToolError.invalidParams("Missing required parameter: path"));
+            pathParam = "."; // default to workspace root
         }
 
         // Resolve and sandbox-check the path

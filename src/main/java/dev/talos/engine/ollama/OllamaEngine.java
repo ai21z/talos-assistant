@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.ModelEngine;
 import dev.talos.spi.types.*;
+import dev.talos.spi.types.ChatMessage.NativeToolCall;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,6 +28,7 @@ import java.util.stream.Stream;
  * Sends chat/generation requests to local Ollama.
  * HTTP: POST /api/generate and /api/chat
  * Supports both single-turn (/api/generate) and multi-turn (/api/chat) conversations.
+ * Supports native tool calling via Ollama's tools API field.
  */
 final class OllamaEngine implements ModelEngine {
     private static final Logger LOG = LoggerFactory.getLogger(OllamaEngine.class);
@@ -169,18 +171,22 @@ final class OllamaEngine implements ModelEngine {
      *
      * <p>System messages are extracted from the array and sent as the
      * top-level {@code system} field for best model compatibility.
+     *
+     * <p>When tools are present in the request, they are converted to
+     * Ollama's native tool format and included in the request body.
+     * The model may return structured {@code tool_calls} instead of text.
      */
     private String chatViaMessages(ChatRequest req) throws Exception {
         String model = Objects.toString(req.model, defaultModel);
 
         // Separate system message from conversation turns
         String systemPrompt = null;
-        List<Map<String, String>> conversationMsgs = new ArrayList<>();
+        List<Map<String, Object>> conversationMsgs = new ArrayList<>();
         for (var m : req.messages) {
             if ("system".equals(m.role())) {
                 systemPrompt = m.content();
             } else {
-                conversationMsgs.add(Map.of("role", m.role(), "content", m.content()));
+                conversationMsgs.add(serializeChatMessage(m));
             }
         }
 
@@ -194,6 +200,13 @@ final class OllamaEngine implements ModelEngine {
         }
         body.put("messages", conversationMsgs);
         body.put("stream", false);
+
+        // Include native tools if available
+        List<Map<String, Object>> toolDefs = convertToolSpecs(req.tools);
+        if (!toolDefs.isEmpty()) {
+            body.put("tools", toolDefs);
+        }
+
         String json = mapper.writeValueAsString(body);
 
         HttpRequest httpReq = HttpRequest.newBuilder()
@@ -213,28 +226,104 @@ final class OllamaEngine implements ModelEngine {
 
         checkStatus(resp.statusCode(), model, resp.body());
 
-        // /api/chat response format: {"message":{"role":"assistant","content":"..."}}
-        return extractChatContent(resp.body());
+        // /api/chat response may contain tool_calls — extract and convert
+        return extractChatContentOrToolCalls(resp.body());
     }
 
     /**
-     * Extracts the assistant content from an /api/chat JSON response using Jackson tree parsing.
-     * More robust than regex: handles nested objects, field reordering, and special characters.
+     * Extracts the assistant content from an /api/chat JSON response.
+     * If the response contains native tool_calls, they are converted
+     * to {@code <tool_call>} XML format so existing ToolCallParser/ToolCallLoop
+     * can process them without changes.
      */
-    private String extractChatContent(String json) {
+    private String extractChatContentOrToolCalls(String json) {
         try {
             JsonNode root = mapper.readTree(json);
             JsonNode msg = root.path("message");
-            if (!msg.isMissingNode()) {
-                JsonNode content = msg.path("content");
-                if (!content.isMissingNode()) return content.asText("");
+            if (msg.isMissingNode()) return json;
+
+            // Check for tool_calls first
+            JsonNode toolCallsNode = msg.path("tool_calls");
+            if (!toolCallsNode.isMissingNode() && toolCallsNode.isArray() && toolCallsNode.size() > 0) {
+                String textContent = msg.path("content").asText("");
+                return convertNativeToolCallsToXml(textContent, toolCallsNode);
             }
+
+            // No tool calls — return content as before
+            JsonNode content = msg.path("content");
+            if (!content.isMissingNode()) return content.asText("");
         } catch (Exception e) {
             // Fallback to regex if JSON parsing fails
             Matcher m = CHAT_CONTENT.matcher(json);
             if (m.find()) return unesc(m.group(1));
         }
         return json;
+    }
+
+    /**
+     * Convert native Ollama tool_calls JSON to {@code <tool_call>} XML format
+     * so the existing ToolCallParser can parse them.
+     *
+     * <p>Ollama returns:
+     * <pre>
+     * "tool_calls": [{
+     *   "function": {"name": "talos.list_dir", "arguments": {"path": "."}}
+     * }]
+     * </pre>
+     *
+     * <p>This method converts to:
+     * <pre>
+     * &lt;tool_call&gt;
+     * {"name": "talos.list_dir", "parameters": {"path": "."}}
+     * &lt;/tool_call&gt;
+     * </pre>
+     */
+    private String convertNativeToolCallsToXml(String textContent, JsonNode toolCallsNode) {
+        StringBuilder sb = new StringBuilder();
+
+        // Preserve any text content (e.g. thinking/reasoning) before tool calls
+        if (textContent != null && !textContent.isBlank()) {
+            sb.append(textContent).append("\n\n");
+        }
+
+        for (JsonNode tc : toolCallsNode) {
+            JsonNode fn = tc.path("function");
+            if (fn.isMissingNode()) continue;
+
+            String name = fn.path("name").asText("");
+            JsonNode argsNode = fn.path("arguments");
+
+            sb.append("<tool_call>\n");
+
+            // Build a JSON object in the format ToolCallParser expects
+            Map<String, Object> callObj = new LinkedHashMap<>();
+            callObj.put("name", name);
+
+            // arguments is already a parsed object from Ollama
+            if (!argsNode.isMissingNode() && argsNode.isObject()) {
+                Map<String, Object> params = new LinkedHashMap<>();
+                var fields = argsNode.fields();
+                while (fields.hasNext()) {
+                    var entry = fields.next();
+                    params.put(entry.getKey(), entry.getValue().asText(""));
+                }
+                callObj.put("parameters", params);
+            } else {
+                callObj.put("parameters", Map.of());
+            }
+
+            try {
+                sb.append(mapper.writeValueAsString(callObj));
+            } catch (Exception e) {
+                sb.append("{\"name\":\"").append(name).append("\",\"parameters\":{}}");
+            }
+
+            sb.append("\n</tool_call>\n");
+        }
+
+        String result = sb.toString().strip();
+        LOG.debug("Converted {} native tool_call(s) to XML format", toolCallsNode.size());
+        return result;
     }
 
     @Override
@@ -284,19 +373,26 @@ final class OllamaEngine implements ModelEngine {
 
     /**
      * Multi-turn streaming conversation via Ollama /api/chat endpoint.
-     * Streaming response lines: {"message":{"role":"assistant","content":"token"},"done":false}
+     *
+     * <p>Streaming response lines: {@code {"message":{"role":"assistant","content":"token"},"done":false}}
+     *
+     * <p>When tools are present and the model invokes them, the stream sends
+     * thinking tokens first (with empty content), then ONE chunk with the
+     * complete {@code tool_calls} array, then {@code done:true}.
+     * This method detects tool_calls in the stream and converts them to
+     * XML format in a single TokenChunk.
      */
     private Stream<TokenChunk> chatStreamViaMessages(ChatRequest req) throws Exception {
         String model = Objects.toString(req.model, defaultModel);
 
         // Separate system message from conversation turns
         String systemPrompt = null;
-        List<Map<String, String>> conversationMsgs = new ArrayList<>();
+        List<Map<String, Object>> conversationMsgs = new ArrayList<>();
         for (var m : req.messages) {
             if ("system".equals(m.role())) {
                 systemPrompt = m.content();
             } else {
-                conversationMsgs.add(Map.of("role", m.role(), "content", m.content()));
+                conversationMsgs.add(serializeChatMessage(m));
             }
         }
 
@@ -310,6 +406,13 @@ final class OllamaEngine implements ModelEngine {
         }
         body.put("messages", conversationMsgs);
         body.put("stream", true);
+
+        // Include native tools if available
+        List<Map<String, Object>> toolDefs = convertToolSpecs(req.tools);
+        if (!toolDefs.isEmpty()) {
+            body.put("tools", toolDefs);
+        }
+
         String json = mapper.writeValueAsString(body);
 
         HttpRequest httpReq = HttpRequest.newBuilder()
@@ -332,11 +435,107 @@ final class OllamaEngine implements ModelEngine {
 
         BufferedReader br = new BufferedReader(new InputStreamReader(resp.body(), StandardCharsets.UTF_8));
         return br.lines().map(line -> {
-            // /api/chat streaming: {"message":{"content":"token"},"done":false}
+            // Check for tool_calls in the streaming chunk (arrives as ONE single chunk)
+            if (line.contains("\"tool_calls\"")) {
+                try {
+                    JsonNode root = mapper.readTree(line);
+                    JsonNode msg = root.path("message");
+                    JsonNode toolCallsNode = msg.path("tool_calls");
+                    if (!toolCallsNode.isMissingNode() && toolCallsNode.isArray() && toolCallsNode.size() > 0) {
+                        String textContent = msg.path("content").asText("");
+                        String xmlToolCalls = convertNativeToolCallsToXml(textContent, toolCallsNode);
+                        LOG.debug("Stream: received native tool_calls chunk, converted to XML");
+                        return TokenChunk.of(xmlToolCalls);
+                    }
+                } catch (Exception e) {
+                    LOG.warn("Failed to parse tool_calls from stream chunk: {}", e.getMessage());
+                }
+            }
+
+            // Normal streaming: extract content token
             if (line.contains("\"done\":true")) return TokenChunk.eos();
             Matcher m = CHAT_CONTENT.matcher(line);
             return m.find() ? TokenChunk.of(unesc(m.group(1))) : TokenChunk.of("");
         });
+    }
+
+    // ── Tool spec conversion ─────────────────────────────────────────────
+
+    /**
+     * Convert {@link ToolSpec} list to Ollama's native tool format.
+     *
+     * <p>Ollama expects:
+     * <pre>
+     * [{"type": "function", "function": {"name": "...", "description": "...", "parameters": {...}}}]
+     * </pre>
+     */
+    private List<Map<String, Object>> convertToolSpecs(List<ToolSpec> specs) {
+        if (specs == null || specs.isEmpty()) return List.of();
+
+        List<Map<String, Object>> tools = new ArrayList<>(specs.size());
+        for (ToolSpec spec : specs) {
+            Map<String, Object> fnDef = new LinkedHashMap<>();
+            fnDef.put("name", spec.name());
+            fnDef.put("description", spec.description());
+
+            // Parse the JSON schema string into a tree so it's embedded as object, not string
+            if (spec.parametersSchemaJson() != null && !spec.parametersSchemaJson().isBlank()) {
+                try {
+                    JsonNode schemaNode = mapper.readTree(spec.parametersSchemaJson());
+                    fnDef.put("parameters", schemaNode);
+                } catch (Exception e) {
+                    LOG.warn("Failed to parse parameters schema for tool '{}': {}", spec.name(), e.getMessage());
+                    // Fallback: empty object schema
+                    fnDef.put("parameters", Map.of("type", "object", "properties", Map.of()));
+                }
+            } else {
+                fnDef.put("parameters", Map.of("type", "object", "properties", Map.of()));
+            }
+
+            Map<String, Object> tool = new LinkedHashMap<>();
+            tool.put("type", "function");
+            tool.put("function", fnDef);
+            tools.add(tool);
+        }
+        return tools;
+    }
+
+    // ── Message serialization ────────────────────────────────────────────
+
+    /**
+     * Serialize a ChatMessage to the map format Ollama expects in the messages array.
+     *
+     * <p>Handles three cases:
+     * <ol>
+     *   <li>Normal message: {@code {"role": "...", "content": "..."}}</li>
+     *   <li>Assistant with tool_calls: includes structured tool_calls array</li>
+     *   <li>Tool result: {@code {"role": "tool", "content": "...", "tool_call_id": "..."}}</li>
+     * </ol>
+     */
+    private Map<String, Object> serializeChatMessage(ChatMessage m) {
+        Map<String, Object> msg = new LinkedHashMap<>();
+        msg.put("role", m.role());
+        msg.put("content", m.content() != null ? m.content() : "");
+
+        // Include tool_calls for assistant messages that carry them
+        if (m.hasNativeToolCalls()) {
+            List<Map<String, Object>> toolCalls = new ArrayList<>();
+            for (NativeToolCall tc : m.toolCalls()) {
+                Map<String, Object> call = new LinkedHashMap<>();
+                // Ollama expects function.name and function.arguments
+                Map<String, Object> fn = new LinkedHashMap<>();
+                fn.put("name", tc.name());
+                fn.put("arguments", tc.arguments() != null ? tc.arguments() : Map.of());
+                call.put("function", fn);
+                toolCalls.add(call);
+            }
+            msg.put("tool_calls", toolCalls);
+        }
+
+        // Include tool_call_id for tool-result messages
+        // (Ollama doesn't actually require this yet, but it's correct protocol)
+
+        return msg;
     }
 
     @Override
