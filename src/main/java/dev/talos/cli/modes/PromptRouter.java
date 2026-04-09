@@ -355,6 +355,27 @@ public final class PromptRouter {
         }
         steps.add("no show-me-file match");
 
+        // Layer 1c: action-verb gate — mutation/inspection actions route to
+        // ASSIST (tool-calling path) even if they mention files or the workspace.
+        // "create settings.json" is a tool action, not a retrieval query.
+        //
+        // Exception: when the prompt contains a PascalCase code identifier
+        // (e.g. "write a test for RagService"), it is a code-context action
+        // that needs retrieval, so we let it fall through.
+        boolean isAction = isActionLike(lower);
+        if (isAction && isMutationOrInspection(lower)) {
+            boolean hasCodeTarget = CODE_IDENTIFIER.matcher(trimmed).find();
+            if (!hasCodeTarget) {
+                steps.add("mutation/inspection intent, no code entity → tool path");
+                return new RouteResult(Route.ASSIST, "action intent (tool-calling)", steps);
+            }
+            steps.add("mutation/inspection but targets code entity — continuing to retrieval");
+        } else if (isAction) {
+            steps.add("action-like but not mutation/inspection — continuing");
+        } else {
+            steps.add("not action-like — continuing");
+        }
+
         // Layer 2: strong retrieval signals (unconditional)
         if (WORKSPACE_FRAME.matcher(lower).find()) {
             steps.add("matched workspace framing phrase");
@@ -370,7 +391,7 @@ public final class PromptRouter {
 
         // Layer 2b: retrieval signals requiring question or action context
         boolean isQ = isQuestionLike(lower);
-        boolean isAction = isActionLike(lower);
+        // isAction already computed in Layer 1c above
         boolean hasIntentContext = isQ || isAction;
 
         if (hasIntentContext && CODE_IDENTIFIER.matcher(trimmed).find()) {
@@ -524,7 +545,33 @@ public final class PromptRouter {
             || stripped.startsWith("read ")      || stripped.startsWith("change ")
             || stripped.startsWith("install ")   || stripped.startsWith("upgrade ")
             || stripped.startsWith("clean ")     || stripped.startsWith("lint ")
-            || stripped.startsWith("format ")    || stripped.startsWith("document ");
+            || stripped.startsWith("format ")    || stripped.startsWith("document ")
+            || stripped.startsWith("list ")      || stripped.startsWith("ls ")
+            || stripped.startsWith("grep ")      || stripped.startsWith("save ")
+            || stripped.startsWith("make ")      || stripped.startsWith("put ");
+    }
+
+    /**
+     * Returns true for action verbs that unambiguously require tool execution:
+     * file creation/mutation, directory inspection, or workspace search.
+     *
+     * <p>These verbs should route to ASSIST (tool-calling path) even when
+     * file references or workspace framing are present. "Create settings.json"
+     * is a tool action, not a retrieval query about settings.json.
+     *
+     * <p>Does NOT include ambiguous verbs like "fix", "refactor", "implement"
+     * which may refer to code discussion rather than direct file mutation.
+     */
+    static boolean isMutationOrInspection(String lower) {
+        String stripped = CONVERSATIONAL_PREFIX.matcher(lower).replaceFirst("");
+        return stripped.startsWith("create ")    || stripped.startsWith("write ")
+            || stripped.startsWith("generate ")  || stripped.startsWith("save ")
+            || stripped.startsWith("make ")      || stripped.startsWith("put ")
+            || stripped.startsWith("delete ")    || stripped.startsWith("remove ")
+            || stripped.startsWith("rename ")    || stripped.startsWith("move ")
+            || stripped.startsWith("list ")      || stripped.startsWith("ls ")
+            || stripped.startsWith("search ")    || stripped.startsWith("find ")
+            || stripped.startsWith("grep ")      || stripped.startsWith("scan ");
     }
 
     /**
