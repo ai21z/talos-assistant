@@ -8,6 +8,7 @@ import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.TokenChunk;
+import dev.talos.spi.types.ToolSpec;
 
 import java.time.Duration;
 import java.util.List;
@@ -35,6 +36,9 @@ public final class LlmClient implements AutoCloseable {
     private volatile String backend;          // ENGINE mode: current backend id (e.g., "ollama")
     private volatile String model;            // model name (or backend-qualified accepted via setModel)
     private final long responseMaxChars;
+
+    /** Tool definitions to include in engine chat requests (native tool calling). */
+    private volatile List<ToolSpec> toolSpecs = List.of();
 
     // Telemetry: track truncation events
     private volatile int truncationCount = 0;
@@ -113,6 +117,19 @@ public final class LlmClient implements AutoCloseable {
             this.model = sanitized;
             if (mode == TransportMode.ENGINE && registry != null) try { registry.select(this.backend, this.model); } catch (Exception ignore) {}
         }
+    }
+
+    /**
+     * Set the tool specifications that will be included in engine chat requests.
+     * Called during bootstrap after tools are registered.
+     */
+    public void setToolSpecs(List<ToolSpec> specs) {
+        this.toolSpecs = (specs == null || specs.isEmpty()) ? List.of() : List.copyOf(specs);
+    }
+
+    /** Get the current tool specifications (for testing). */
+    public List<ToolSpec> getToolSpecs() {
+        return toolSpecs;
     }
 
     /** Non-streaming chat: sanitized, capped; in ENGINE mode uses the same streaming path for parity. */
@@ -282,7 +299,7 @@ public final class LlmClient implements AutoCloseable {
         for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
             if (attempt > 0) backoff(attempt);
             try {
-                ChatRequest req = new ChatRequest(backend, model, sys, usr, sn, timeout);
+                ChatRequest req = new ChatRequest(backend, model, sys, usr, sn, timeout, List.of(), toolSpecs);
                 return assembleFromStream(registry.engine().chatStream(req), onChunk, cancelled);
             } catch (EngineException.Transient t) {
                 lastTransient = t;
@@ -348,7 +365,7 @@ public final class LlmClient implements AutoCloseable {
         for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
             if (attempt > 0) backoff(attempt);
             try {
-                ChatRequest req = new ChatRequest(backend, model, "", "", List.of(), timeout, sanitized);
+                ChatRequest req = new ChatRequest(backend, model, "", "", List.of(), timeout, sanitized, toolSpecs);
                 return assembleFromStream(registry.engine().chatStream(req), onChunk, cancelled);
             } catch (EngineException.Transient t) {
                 lastTransient = t;

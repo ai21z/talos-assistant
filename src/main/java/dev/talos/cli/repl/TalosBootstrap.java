@@ -29,6 +29,7 @@ import java.io.PrintStream;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 
 /**
  * Composition root for the Talos CLI.
@@ -82,6 +83,13 @@ public final class TalosBootstrap {
         toolRegistry.register(new GrepTool());
         toolRegistry.register(new ListDirTool());
         toolRegistry.register(new RetrieveTool(rag));
+
+        // Wire tool definitions into LlmClient so engine requests include native tools
+        llm.setToolSpecs(
+                toolRegistry.descriptors().stream()
+                        .map(d -> new dev.talos.spi.types.ToolSpec(d.name(), d.description(), d.parametersSchema()))
+                        .collect(Collectors.toList())
+        );
 
         // ── Conversation ─────────────────────────────────────────────────
         ConversationManager conversationManager =
