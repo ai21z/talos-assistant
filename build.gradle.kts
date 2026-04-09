@@ -1,5 +1,6 @@
 ﻿plugins {
     application
+    jacoco
 }
 
 /* ---------- Compile / test flags ---------- */
@@ -148,4 +149,36 @@ tasks.register<Exec>("jpackageApp") {
 
         commandLine(args)
     }
+}
+
+/* ---------- JaCoCo code coverage ---------- */
+
+jacoco {
+    toolVersion = "0.8.12"
+}
+
+tasks.jacocoTestReport {
+    dependsOn(tasks.test)
+    reports {
+        xml.required.set(true)       // consumed by Sonar / CI
+        html.required.set(true)      // human-readable local report
+        csv.required.set(false)
+    }
+}
+
+tasks.jacocoTestCoverageVerification {
+    dependsOn(tasks.jacocoTestReport)
+    violationRules {
+        rule {
+            limit {
+                // Start low — tighten as coverage grows
+                minimum = "0.20".toBigDecimal()
+            }
+        }
+    }
+}
+
+// Wire: `gradle check` now runs coverage verification
+tasks.check {
+    dependsOn(tasks.jacocoTestCoverageVerification)
 }
