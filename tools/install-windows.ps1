@@ -44,10 +44,57 @@ if ((Test-Path $installDir) -and -not $Force) {
 
 Write-Host "Installing Talos to $installDir..."
 
+# Kill any running Talos/Java processes that may lock installation files.
+# This also catches the Gradle daemon which keeps dependency jars open
+# after installDist — its command line won't mention 'talos' but it holds
+# file locks on jars inside the install directory.
+$javaProcs = Get-Process -Name "java","javaw" -ErrorAction SilentlyContinue
+if ($javaProcs) {
+    $talosProcs = @()
+    $gradleDaemons = @()
+    foreach ($proc in $javaProcs) {
+        try {
+            $cmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId=$($proc.Id)" -ErrorAction SilentlyContinue).CommandLine
+            if (-not $cmdLine) { continue }
+            if ($cmdLine -match 'talos' -or $cmdLine -match [regex]::Escape($installDir)) {
+                $talosProcs += $proc
+            } elseif ($cmdLine -match 'GradleDaemon') {
+                $gradleDaemons += $proc
+            }
+        } catch { }
+    }
+    if ($talosProcs) {
+        Write-Host "Stopping $($talosProcs.Count) running Talos process(es)..."
+        $talosProcs | Stop-Process -Force -ErrorAction SilentlyContinue
+    }
+    if ($gradleDaemons) {
+        Write-Host "Stopping $($gradleDaemons.Count) Gradle daemon(s)..."
+        $gradleDaemons | Stop-Process -Force -ErrorAction SilentlyContinue
+    }
+    if ($talosProcs -or $gradleDaemons) {
+        Start-Sleep -Seconds 2
+    }
+}
+
 # Remove existing installation if present
 if (Test-Path $installDir) {
     Write-Host "Removing existing installation..."
-    Remove-Item -Path $installDir -Recurse -Force
+    # Retry up to 5 times — processes may take a moment to release files
+    $retries = 5
+    for ($i = 1; $i -le $retries; $i++) {
+        try {
+            Remove-Item -Path $installDir -Recurse -Force -ErrorAction Stop
+            break
+        } catch {
+            if ($i -eq $retries) {
+                Write-Host "  Could not remove $installDir after $retries attempts."
+                Write-Host "  Please close any running Talos/Gradle/Java processes and retry."
+                throw
+            }
+            Write-Host "  Files still locked, retrying in 2s ($i/$retries)..."
+            Start-Sleep -Seconds 2
+        }
+    }
 }
 
 # Copy distribution
