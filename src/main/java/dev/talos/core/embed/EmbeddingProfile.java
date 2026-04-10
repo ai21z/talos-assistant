@@ -53,11 +53,14 @@ public record EmbeddingProfile(
      * Qwen/Qwen3-Embedding-8B: instruction-aware, 4096 native dims
      * (recommended at 1024 via Matryoshka for index compat with bge-m3).
      * Requires vLLM or OpenAI-compatible backend.
+     * <p>
+     * The query instruction uses a neutral retrieval prompt. Override via
+     * {@code embed.query_instruction} in config for domain-specific tuning.
      */
     public static final EmbeddingProfile QWEN3_EMBED_8B = new EmbeddingProfile(
             "vllm", "Qwen/Qwen3-Embedding-8B", 1024,
             true,
-            "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: ",
+            "Instruct: Given a query, retrieve relevant passages that answer the query\nQuery: ",
             null,
             32768, true
     );
@@ -69,21 +72,38 @@ public record EmbeddingProfile(
      * vector space. Two profiles with different fingerprints produce
      * incompatible embeddings — they must not share an index or cache.
      * <p>
-     * Format: {@code provider:model:dims:instr|plain:norm|raw}
+     * Includes a hash of instruction strings so that changing the query or
+     * document instruction template invalidates compatibility.
+     * <p>
+     * Format: {@code provider:model:dims:instr|plain:norm|raw[:ihash]}
      */
     public String fingerprint() {
-        return provider + ":" + model + ":" + dimensions + ":"
+        String base = provider + ":" + model + ":" + dimensions + ":"
                 + (instructionAware ? "instr" : "plain") + ":"
                 + (normalize ? "norm" : "raw");
+        if (instructionAware) {
+            String instrContent = (queryInstruction == null ? "" : queryInstruction)
+                    + "|" + (documentInstruction == null ? "" : documentInstruction);
+            base += ":" + String.format("%08x", instrContent.hashCode());
+        }
+        return base;
     }
 
     /**
      * Cache namespace for embedding cache isolation.
-     * Shorter than fingerprint — suitable for SQLite cache keys.
-     * Format: {@code provider/model}
+     * <p>
+     * Delegates to {@link #fingerprint()} so that any parameter change that
+     * affects the vector space also changes the cache key — preventing stale
+     * vector reuse across incompatible profiles.
+     * <p>
+     * <strong>Note:</strong> This intentionally breaks backward compatibility
+     * with the legacy {@code "ollama/bge-m3"} cache keys. Existing cached
+     * embeddings will become cache misses on first run after upgrade — they
+     * will be recomputed and cached under the new key. This is the correct
+     * trade-off: cache safety &gt; one-time cold start.
      */
     public String cacheNamespace() {
-        return provider + "/" + model;
+        return fingerprint();
     }
 
     /**

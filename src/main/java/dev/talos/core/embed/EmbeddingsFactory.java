@@ -15,9 +15,10 @@ import java.util.Objects;
  * prefix.
  * <p>
  * <strong>PR1 scope:</strong> Only the Ollama transport is implemented.
- * The factory always constructs {@link EmbeddingsClient} as the raw
- * transport. Future PRs will add OpenAI-compatible transport selection
- * based on {@code embed.provider} in config.
+ * Requesting a non-Ollama provider (e.g. {@code vllm}) will throw
+ * {@link UnsupportedOperationException} rather than silently falling
+ * back to the wrong transport. Future PRs will add OpenAI-compatible
+ * transport selection based on {@code embed.provider} in config.
  */
 public final class EmbeddingsFactory {
     private EmbeddingsFactory() {}
@@ -68,7 +69,7 @@ public final class EmbeddingsFactory {
      */
     public static Embeddings forQuery(Config cfg) {
         EmbeddingProfile profile = profileFrom(cfg);
-        Embeddings raw = createRawClient(cfg);
+        Embeddings raw = createRawClient(cfg, profile);
         if (profile.instructionAware() && hasContent(profile.queryInstruction())) {
             return new InstructionEmbeddings(raw, profile.queryInstruction());
         }
@@ -83,7 +84,7 @@ public final class EmbeddingsFactory {
      */
     public static Embeddings forDocument(Config cfg) {
         EmbeddingProfile profile = profileFrom(cfg);
-        Embeddings raw = createRawClient(cfg);
+        Embeddings raw = createRawClient(cfg, profile);
         if (profile.instructionAware() && hasContent(profile.documentInstruction())) {
             return new InstructionEmbeddings(raw, profile.documentInstruction());
         }
@@ -93,11 +94,21 @@ public final class EmbeddingsFactory {
     /**
      * Construct the raw transport-level embeddings client.
      * <p>
-     * PR1: always returns {@link EmbeddingsClient} (Ollama transport).
-     * Future PRs will switch on {@code embed.provider} to select
-     * OpenAI-compatible or other transports.
+     * PR1: only the Ollama transport ({@link EmbeddingsClient}) is implemented.
+     * Any other provider value fails fast with a clear error rather than
+     * silently falling back to Ollama — which would create a mismatch
+     * between the profile identity and the actual transport.
+     *
+     * @throws UnsupportedOperationException if {@code profile.provider()} is
+     *         not {@code "ollama"}
      */
-    private static Embeddings createRawClient(Config cfg) {
+    private static Embeddings createRawClient(Config cfg, EmbeddingProfile profile) {
+        if (!"ollama".equals(profile.provider())) {
+            throw new UnsupportedOperationException(
+                    "Embedding provider '" + profile.provider() + "' is not yet supported. "
+                    + "Only 'ollama' is implemented in this version. "
+                    + "To use " + profile.model() + ", an OpenAI-compatible transport is required (planned for PR2).");
+        }
         return new EmbeddingsClient(cfg);
     }
     private static String stringOr(Object o, String fallback) {
