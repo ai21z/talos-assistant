@@ -87,29 +87,66 @@ class EmbeddingsFactoryTest {
     void forQueryWrapsForInstructionAwareProfile() {
         Config cfg = localOnlyConfig();
         Map<String, Object> embedSection = new LinkedHashMap<>();
-        embedSection.put("model", "Qwen/Qwen3-Embedding-8B");
-        embedSection.put("provider", "vllm");
+        embedSection.put("model", "custom-instr-model");
+        embedSection.put("provider", "ollama");
+        embedSection.put("query_instruction", "search: ");
         cfg.data.put("embed", embedSection);
         Embeddings emb = EmbeddingsFactory.forQuery(cfg);
         assertInstanceOf(InstructionEmbeddings.class, emb,
                 "Instruction-aware model should wrap query embedder");
     }
     @Test
-    void forDocumentDoesNotWrapForQwen3() {
+    void forDocumentDoesNotWrapWhenNoDocumentInstruction() {
+        Config cfg = localOnlyConfig();
+        Map<String, Object> embedSection = new LinkedHashMap<>();
+        embedSection.put("model", "custom-instr-model");
+        embedSection.put("provider", "ollama");
+        embedSection.put("query_instruction", "search: ");
+        // No document_instruction
+        cfg.data.put("embed", embedSection);
+        Embeddings emb = EmbeddingsFactory.forDocument(cfg);
+        assertFalse(emb instanceof InstructionEmbeddings,
+                "Profile with no document instruction should not wrap documents");
+    }
+    @Test
+    void defaultProfileCacheNamespaceUsesFingerprint() {
+        Config cfg = new Config();
+        EmbeddingProfile profile = EmbeddingsFactory.profileFrom(cfg);
+        assertEquals(profile.fingerprint(), profile.cacheNamespace(),
+                "Cache namespace must equal fingerprint for safe isolation");
+    }
+    // ── Fail-fast for unsupported providers ─────────────────────────────
+    @Test
+    void forQueryThrowsForUnsupportedProvider() {
         Config cfg = localOnlyConfig();
         Map<String, Object> embedSection = new LinkedHashMap<>();
         embedSection.put("model", "Qwen/Qwen3-Embedding-8B");
         embedSection.put("provider", "vllm");
         cfg.data.put("embed", embedSection);
-        Embeddings emb = EmbeddingsFactory.forDocument(cfg);
-        assertFalse(emb instanceof InstructionEmbeddings,
-                "Qwen3 documents have no instruction, should not wrap");
+        var ex = assertThrows(UnsupportedOperationException.class,
+                () -> EmbeddingsFactory.forQuery(cfg));
+        assertTrue(ex.getMessage().contains("vllm"), "Error should mention the unsupported provider");
     }
     @Test
-    void defaultProfileCacheNamespaceMatchesLegacyIndexerKey() {
+    void forDocumentThrowsForUnsupportedProvider() {
+        Config cfg = localOnlyConfig();
+        Map<String, Object> embedSection = new LinkedHashMap<>();
+        embedSection.put("model", "some-model");
+        embedSection.put("provider", "openai_compat");
+        cfg.data.put("embed", embedSection);
+        assertThrows(UnsupportedOperationException.class,
+                () -> EmbeddingsFactory.forDocument(cfg));
+    }
+    @Test
+    void profileResolutionAloneDoesNotThrowForUnsupportedProvider() {
+        // profileFrom is pure resolution — no transport construction
         Config cfg = new Config();
-        EmbeddingProfile profile = EmbeddingsFactory.profileFrom(cfg);
-        assertEquals("ollama/bge-m3", profile.cacheNamespace());
+        Map<String, Object> embedSection = new LinkedHashMap<>();
+        embedSection.put("model", "Qwen/Qwen3-Embedding-8B");
+        embedSection.put("provider", "vllm");
+        cfg.data.put("embed", embedSection);
+        assertDoesNotThrow(() -> EmbeddingsFactory.profileFrom(cfg),
+                "profileFrom should resolve without touching transport");
     }
     private static Config localOnlyConfig() {
         Config cfg = new Config();

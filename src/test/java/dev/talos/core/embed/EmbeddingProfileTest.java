@@ -32,7 +32,9 @@ class EmbeddingProfileTest {
         assertEquals(1024, p.dimensions());
         assertTrue(p.instructionAware());
         assertNotNull(p.queryInstruction());
-        assertTrue(p.queryInstruction().contains("Instruct:"));
+        assertTrue(p.queryInstruction().startsWith("Instruct:"));
+        assertFalse(p.queryInstruction().contains("web search"),
+                "Default instruction should be domain-neutral");
         assertNull(p.documentInstruction());
         assertEquals(32768, p.maxInputTokens());
         assertTrue(p.normalize());
@@ -83,6 +85,31 @@ class EmbeddingProfileTest {
     }
 
     @Test
+    void fingerprintDiffersWhenQueryInstructionContentDiffers() {
+        var a = new EmbeddingProfile("vllm", "model", 1024, true, "search: ", null, 8192, true);
+        var b = new EmbeddingProfile("vllm", "model", 1024, true, "retrieve: ", null, 8192, true);
+        assertNotEquals(a.fingerprint(), b.fingerprint(),
+                "Different instruction content must produce different fingerprints");
+    }
+
+    @Test
+    void fingerprintDiffersWhenDocumentInstructionContentDiffers() {
+        var a = new EmbeddingProfile("vllm", "model", 1024, true, "q: ", "doc: ", 8192, true);
+        var b = new EmbeddingProfile("vllm", "model", 1024, true, "q: ", "passage: ", 8192, true);
+        assertNotEquals(a.fingerprint(), b.fingerprint(),
+                "Different document instruction must produce different fingerprints");
+    }
+
+    @Test
+    void fingerprintIncludesInstructionHashForInstructionAwareProfiles() {
+        var plain = new EmbeddingProfile("ollama", "model", 1024, false, null, null, 8192, true);
+        var instr = new EmbeddingProfile("ollama", "model", 1024, true, "q: ", null, 8192, true);
+        // Instruction-aware fingerprint should have an extra segment (the hash)
+        assertTrue(instr.fingerprint().split(":").length > plain.fingerprint().split(":").length,
+                "Instruction-aware fingerprint should include instruction hash segment");
+    }
+
+    @Test
     void fingerprintEncodesAllKeyFields() {
         String f = EmbeddingProfile.BGE_M3.fingerprint();
         assertTrue(f.contains("ollama"), "should contain provider");
@@ -102,9 +129,13 @@ class EmbeddingProfileTest {
     }
 
     @Test
-    void cacheNamespaceForBgeM3MatchesLegacyKey() {
-        // Must equal "ollama/bge-m3" to preserve existing Indexer cache keys
-        assertEquals("ollama/bge-m3", EmbeddingProfile.BGE_M3.cacheNamespace());
+    void cacheNamespaceDelegatesToFingerprint() {
+        // cacheNamespace must equal fingerprint — any vector-space-affecting
+        // parameter change must invalidate the cache key
+        assertEquals(EmbeddingProfile.BGE_M3.fingerprint(),
+                EmbeddingProfile.BGE_M3.cacheNamespace());
+        assertEquals(EmbeddingProfile.QWEN3_EMBED_8B.fingerprint(),
+                EmbeddingProfile.QWEN3_EMBED_8B.cacheNamespace());
     }
 
     @Test
