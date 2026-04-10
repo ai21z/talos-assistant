@@ -3,7 +3,8 @@ package dev.talos.core.rag;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
 import dev.talos.core.embed.CachingEmbeddings;
-import dev.talos.core.embed.EmbeddingsClient;
+import dev.talos.core.embed.EmbeddingProfile;
+import dev.talos.core.embed.EmbeddingsFactory;
 import dev.talos.core.index.Indexer;
 import dev.talos.core.index.LuceneStore;
 import dev.talos.core.llm.LlmClient;
@@ -137,8 +138,10 @@ public class RagService {
             float[] qvec = null;
             String embedFailReason = null;
             if (vecEnabled) {
+                EmbeddingProfile profile = EmbeddingsFactory.profileFrom(cfg);
                 try (CacheDb cache = new CacheDb();
-                     CachingEmbeddings emb = new CachingEmbeddings(new EmbeddingsClient(cfg), cache, "query/ollama")) {
+                     CachingEmbeddings emb = new CachingEmbeddings(
+                             EmbeddingsFactory.forQuery(cfg), cache, "query/" + profile.cacheNamespace())) {
                     qvec = emb.embed(query);
                 } catch (Exception e) {
                     // If embeddings fail, proceed BM25-only but record why

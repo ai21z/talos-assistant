@@ -5,7 +5,8 @@ import dev.talos.core.Config;
 import dev.talos.core.cache.CacheDb;
 import dev.talos.core.embed.BatchEmbeddings;
 import dev.talos.core.embed.CachingEmbeddings;
-import dev.talos.core.embed.EmbeddingsClient;
+import dev.talos.core.embed.EmbeddingProfile;
+import dev.talos.core.embed.EmbeddingsFactory;
 import dev.talos.core.ingest.Chunker;
 import dev.talos.core.ingest.FileWalker;
 import dev.talos.core.ingest.ParsedChunk;
@@ -24,7 +25,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import java.util.concurrent.*;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
@@ -105,15 +105,12 @@ public class Indexer {
             if (en instanceof Boolean b) vecEnabled = b;
         }
 
-        // Build an embeddings client (cached) once per indexing run
-        Embeddings rawEmb = new EmbeddingsClient(cfg);
-
-        // Choose a stable cache key: "ollama/<embed-model>"
-        Map<String,Object> oll = CfgUtil.map(cfg.data.get("ollama"));
-        String embedModel = Objects.toString(oll.getOrDefault("embed", "bge-m3"));
+        // Resolve embedding profile and build a document embedder (cached)
+        EmbeddingProfile profile = EmbeddingsFactory.profileFrom(cfg);
+        Embeddings rawEmb = EmbeddingsFactory.forDocument(cfg);
 
         try (CacheDb cache = new CacheDb();
-             CachingEmbeddings cachedEmb = new CachingEmbeddings(rawEmb, cache, "ollama/" + embedModel)) {
+             CachingEmbeddings cachedEmb = new CachingEmbeddings(rawEmb, cache, profile.cacheNamespace())) {
 
             int dim = 0;
             boolean useVectors = vecEnabled;
