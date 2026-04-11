@@ -40,10 +40,86 @@ class EmbeddingsFactoryTest {
         Config cfg = new Config();
         Map<String, Object> embedSection = new LinkedHashMap<>();
         embedSection.put("model", "Qwen/Qwen3-Embedding-8B");
-        embedSection.put("provider", "vllm");
         cfg.data.put("embed", embedSection);
         EmbeddingProfile profile = EmbeddingsFactory.profileFrom(cfg);
-        assertSame(EmbeddingProfile.QWEN3_EMBED_8B, profile);
+        assertSame(EmbeddingProfile.QWEN3_EMBED_8B, profile,
+                "Qwen model with no overrides should return the built-in singleton");
+        assertEquals("ollama", profile.provider());
+    }
+
+    @Test
+    void qwen3WithProviderOverridePreservesConfigProvider() {
+        Config cfg = new Config();
+        Map<String, Object> embedSection = new LinkedHashMap<>();
+        embedSection.put("model", "Qwen/Qwen3-Embedding-8B");
+        embedSection.put("provider", "openai_compat");
+        cfg.data.put("embed", embedSection);
+        EmbeddingProfile profile = EmbeddingsFactory.profileFrom(cfg);
+        assertNotSame(EmbeddingProfile.QWEN3_EMBED_8B, profile,
+                "Overridden provider must produce a new profile, not the built-in singleton");
+        assertEquals("openai_compat", profile.provider(),
+                "Resolved profile must preserve the config provider override");
+        assertEquals("Qwen/Qwen3-Embedding-8B", profile.model());
+        // Other fields should inherit from built-in defaults
+        assertEquals(1024, profile.dimensions());
+        assertTrue(profile.instructionAware());
+    }
+
+    @Test
+    void qwen3WithDimensionsOverride() {
+        Config cfg = new Config();
+        Map<String, Object> embedSection = new LinkedHashMap<>();
+        embedSection.put("model", "Qwen/Qwen3-Embedding-8B");
+        embedSection.put("dimensions", 2048);
+        cfg.data.put("embed", embedSection);
+        EmbeddingProfile profile = EmbeddingsFactory.profileFrom(cfg);
+        assertNotSame(EmbeddingProfile.QWEN3_EMBED_8B, profile,
+                "Overridden dimensions must produce a new profile");
+        assertEquals(2048, profile.dimensions(),
+                "Resolved profile must preserve the config dimensions override");
+        assertEquals("ollama", profile.provider(),
+                "Non-overridden provider should default to ollama");
+        assertTrue(profile.instructionAware(),
+                "Should inherit instruction-aware from built-in");
+    }
+
+    @Test
+    void qwen3WithQueryInstructionOverride() {
+        Config cfg = new Config();
+        Map<String, Object> embedSection = new LinkedHashMap<>();
+        embedSection.put("model", "Qwen/Qwen3-Embedding-8B");
+        embedSection.put("query_instruction", "custom: search for relevant code\n");
+        cfg.data.put("embed", embedSection);
+        EmbeddingProfile profile = EmbeddingsFactory.profileFrom(cfg);
+        assertNotSame(EmbeddingProfile.QWEN3_EMBED_8B, profile,
+                "Overridden query instruction must produce a new profile");
+        assertEquals("custom: search for relevant code\n", profile.queryInstruction(),
+                "Resolved profile must preserve the config query_instruction override");
+        assertTrue(profile.instructionAware());
+        assertEquals(1024, profile.dimensions(),
+                "Non-overridden dimensions should inherit built-in default");
+    }
+
+    @Test
+    void qwen3WithMultipleOverridesPreservesAll() {
+        Config cfg = new Config();
+        Map<String, Object> embedSection = new LinkedHashMap<>();
+        embedSection.put("model", "Qwen/Qwen3-Embedding-8B");
+        embedSection.put("provider", "openai_compat");
+        embedSection.put("dimensions", 4096);
+        embedSection.put("query_instruction", "domain: ");
+        embedSection.put("normalize", false);
+        cfg.data.put("embed", embedSection);
+        EmbeddingProfile profile = EmbeddingsFactory.profileFrom(cfg);
+        assertNotSame(EmbeddingProfile.QWEN3_EMBED_8B, profile);
+        assertEquals("openai_compat", profile.provider());
+        assertEquals("Qwen/Qwen3-Embedding-8B", profile.model());
+        assertEquals(4096, profile.dimensions());
+        assertEquals("domain: ", profile.queryInstruction());
+        assertFalse(profile.normalize());
+        assertTrue(profile.instructionAware());
+        assertEquals(32768, profile.maxInputTokens(),
+                "Non-overridden maxInputTokens should inherit built-in default");
     }
     @Test
     void customModelBuildsDynamicProfile() {

@@ -52,13 +52,15 @@ public record EmbeddingProfile(
     /**
      * Qwen/Qwen3-Embedding-8B: instruction-aware, 4096 native dims
      * (recommended at 1024 via Matryoshka for index compat with bge-m3).
-     * Requires vLLM or OpenAI-compatible backend.
+     * <p>
+     * Default provider is {@code "ollama"} — the only transport currently
+     * implemented. Future PRs may add vLLM/OpenAI-compatible transport.
      * <p>
      * The query instruction uses a neutral retrieval prompt. Override via
      * {@code embed.query_instruction} in config for domain-specific tuning.
      */
     public static final EmbeddingProfile QWEN3_EMBED_8B = new EmbeddingProfile(
-            "vllm", "Qwen/Qwen3-Embedding-8B", 1024,
+            "ollama", "Qwen/Qwen3-Embedding-8B", 1024,
             true,
             "Instruct: Given a query, retrieve relevant passages that answer the query\nQuery: ",
             null,

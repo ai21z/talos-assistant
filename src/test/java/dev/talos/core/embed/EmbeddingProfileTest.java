@@ -27,7 +27,7 @@ class EmbeddingProfileTest {
     @Test
     void qwen3ProfileHasExpectedValues() {
         EmbeddingProfile p = EmbeddingProfile.QWEN3_EMBED_8B;
-        assertEquals("vllm", p.provider());
+        assertEquals("ollama", p.provider());
         assertEquals("Qwen/Qwen3-Embedding-8B", p.model());
         assertEquals(1024, p.dimensions());
         assertTrue(p.instructionAware());
