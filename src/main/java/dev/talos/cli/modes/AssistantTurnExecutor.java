@@ -2,6 +2,7 @@ package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
+import dev.talos.runtime.CodeBlockToolExtractor;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.spi.EngineException;
@@ -35,6 +36,12 @@ final class AssistantTurnExecutor {
     private static final Logger LOG = LoggerFactory.getLogger(AssistantTurnExecutor.class);
 
     private AssistantTurnExecutor() {} // utility class
+
+    /** Returns true if the answer contains canonical tool calls OR code-block file operations. */
+    private static boolean hasAnyToolCalls(String answer) {
+        return ToolCallParser.containsToolCalls(answer)
+                || CodeBlockToolExtractor.containsExtractableBlocks(answer);
+    }
 
     /**
      * Output of a turn execution.
@@ -84,7 +91,7 @@ final class AssistantTurnExecutor {
                 // ── Streaming path ──────────────────────────────────────────
                 String answer = ctx.llm().chatStream(messages, ctx.streamSink());
                 if (answer != null) {
-                    if (ctx.toolCallLoop() != null && ToolCallParser.containsToolCalls(answer)) {
+                    if (ctx.toolCallLoop() != null && hasAnyToolCalls(answer)) {
                         LOG.debug("Tool calls detected in streamed response, entering tool-call loop");
                         ToolCallLoop.LoopResult loopResult = ctx.toolCallLoop().run(
                                 answer, messages, workspace, ctx);
@@ -108,7 +115,7 @@ final class AssistantTurnExecutor {
                         () -> ctx.llm().chat(messages));
                 String answer = fut.get(opts.llmTimeoutMs, TimeUnit.MILLISECONDS);
                 if (answer != null) {
-                    if (ctx.toolCallLoop() != null && ToolCallParser.containsToolCalls(answer)) {
+                    if (ctx.toolCallLoop() != null && hasAnyToolCalls(answer)) {
                         LOG.debug("Tool calls detected in LLM response, entering tool-call loop");
                         ToolCallLoop.LoopResult loopResult = ctx.toolCallLoop().run(
                                 answer, messages, workspace, ctx);
