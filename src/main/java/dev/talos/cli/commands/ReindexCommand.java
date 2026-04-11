@@ -2,7 +2,9 @@ package dev.talos.cli.commands;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
+import dev.talos.cli.ui.AnsiColor;
 import dev.talos.core.cache.CacheDb;
+import dev.talos.core.index.IndexProgressListener;
 import dev.talos.core.index.IndexingStats;
 
 import java.nio.file.Path;
@@ -83,10 +85,26 @@ public final class ReindexCommand implements Command {
             // Handle --full flag or regular reindex
             boolean forceFullReindex = args.equals("--full");
 
+            // Build a progress listener for live terminal feedback
+            boolean interactive = System.console() != null;
+            IndexProgressListener progress = interactive ? (completed, total, file) -> {
+                int pct = total > 0 ? (completed * 100) / total : 0;
+                String display = file.length() > 40
+                        ? "…" + file.substring(file.length() - 39) : file;
+                System.out.print("\r  " + AnsiColor.DIM + "Indexing: "
+                        + completed + "/" + total + " (" + pct + "%)  " + display
+                        + AnsiColor.RESET + "          ");
+                System.out.flush();
+                if (completed >= total) {
+                    System.out.print("\r" + " ".repeat(80) + "\r");
+                    System.out.flush();
+                }
+            } : IndexProgressListener.NOOP;
+
             if (forceFullReindex) {
-                indexer.index(workspace, true);
+                indexer.index(workspace, true, progress);
             } else {
-                var summary = indexer.reindex(workspace);
+                indexer.reindex(workspace, progress);
             }
 
             // Get and display statistics
