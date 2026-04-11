@@ -109,6 +109,9 @@ limits:
 tools:
   native_calling: true   # Use Ollama's native tool API; set false to fall back to XML prompt injection
 
+session:
+  persistence: true      # Auto-save/load conversation across REPL restarts; set false for ephemeral sessions
+
 ui:
   show_status_during_answer: true
   show_timing_after_answer: true
