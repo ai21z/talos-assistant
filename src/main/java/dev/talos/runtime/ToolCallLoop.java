@@ -112,8 +112,16 @@ public final class ToolCallLoop {
      * @return loop result with the final answer and execution stats
      */
     public LoopResult run(String initialAnswer, List<ChatMessage> messages, Path workspace, Context ctx) {
-        if (initialAnswer == null || !ToolCallParser.containsToolCalls(initialAnswer)) {
-            return new LoopResult(initialAnswer != null ? initialAnswer : "", 0, 0, List.of(), messages);
+        if (initialAnswer == null) {
+            return new LoopResult("", 0, 0, List.of(), messages);
+        }
+
+        if (!ToolCallParser.containsToolCalls(initialAnswer)) {
+            // Safety-net: check for implicit file operations in code blocks with filename hints
+            if (CodeBlockToolExtractor.containsExtractableBlocks(initialAnswer)) {
+                return runCodeBlockFallback(initialAnswer, messages, workspace, ctx);
+            }
+            return new LoopResult(initialAnswer, 0, 0, List.of(), messages);
         }
 
         // Lightweight session for tool execution context
@@ -212,6 +220,36 @@ public final class ToolCallLoop {
         LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked", iterations, totalToolsInvoked);
 
         return new LoopResult(finalAnswer, iterations, totalToolsInvoked, List.copyOf(toolNames), messages);
+    }
+
+    /**
+     * Fallback: execute implicit write_file calls extracted from code blocks
+     * with filename hints. Single-pass (no re-prompting) — the LLM already
+     * produced the final answer, it just used code fences instead of
+     * {@code <tool_call>} blocks.
+     */
+    private LoopResult runCodeBlockFallback(String answer, List<ChatMessage> messages,
+                                            Path workspace, Context ctx) {
+        List<ToolCall> calls = CodeBlockToolExtractor.extract(answer);
+        if (calls.isEmpty()) {
+            return new LoopResult(answer, 0, 0, List.of(), messages);
+        }
+
+        Session toolSession = new Session(workspace, ctx.cfg());
+        List<String> toolNames = new ArrayList<>();
+        int executed = 0;
+
+        LOG.info("Detected {} implicit write_file call(s) from code blocks (safety-net extraction)", calls.size());
+
+        for (ToolCall call : calls) {
+            toolNames.add(call.toolName());
+            ToolResult result = turnProcessor.executeTool(toolSession, call, ctx);
+            executed++;
+            LOG.debug("  Code-block tool {} → {}", call.toolName(),
+                    result.success() ? "success" : "error: " + result.errorMessage());
+        }
+
+        return new LoopResult(answer, 1, executed, List.copyOf(toolNames), messages);
     }
 
     /**
