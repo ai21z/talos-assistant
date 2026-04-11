@@ -37,11 +37,17 @@ public final class OllamaEngineProvider implements ModelEngineProvider {
         return "qwen3:8b";
     }
 
+    private static boolean nativeToolCallingFrom(Config cfg) {
+        Map<String,Object> tools = CfgUtil.map(cfg == null ? null : cfg.data.get("tools"));
+        return CfgUtil.boolAt(tools, "native_calling", true);
+    }
+
     @Override public String id() { return BACKEND; }
 
     @Override public ModelEngine create(Config cfg) {
         // Engine is not model-bound; ChatRequest carries the model.
-        return new OllamaEngine(hostFrom(cfg), defaultModelFrom(cfg));
+        boolean nativeTools = nativeToolCallingFrom(cfg);
+        return new OllamaEngine(hostFrom(cfg), defaultModelFrom(cfg), nativeTools);
     }
 
     @Override public ModelCatalog catalog(Config cfg) {
