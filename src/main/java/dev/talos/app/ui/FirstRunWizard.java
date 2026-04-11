@@ -18,6 +18,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
+/**
+ * @deprecated Replaced by {@link TerminalFirstRun} which works on all platforms
+ * including headless (WSL, SSH, Docker). Will be removed in a future version
+ * along with the JavaFX dependency.
+ */
+@Deprecated(since = "0.9.0", forRemoval = true)
 public class FirstRunWizard extends Application {
     private static final Logger LOG = LoggerFactory.getLogger(FirstRunWizard.class);
 
