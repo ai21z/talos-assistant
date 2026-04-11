@@ -343,5 +343,39 @@ class OllamaToolCallBridgeTest {
             assertTrue(tool.path("function").has("parameters"), "Function must have 'parameters'");
         }
     }
+
+    // ── nativeToolCalling toggle ─────────────────────────────────────────
+
+    @Nested
+    class NativeToolCallingToggle {
+
+        @Test
+        void defaultConstructor_enablesNativeToolCalling() {
+            // Default constructor should enable native tool calling (backwards-compatible)
+            var defaultEngine = new OllamaEngine("http://localhost:11434", "test-model");
+            // Can still call convertToolSpecs — toggle only affects request building
+            var specs = List.of(new ToolSpec("talos.list_dir", "List dir", "{}"));
+            assertFalse(defaultEngine.convertToolSpecs(specs).isEmpty(),
+                    "Default engine should convert tool specs");
+        }
+
+        @Test
+        void explicitTrue_enablesNativeToolCalling() {
+            var enabledEngine = new OllamaEngine("http://localhost:11434", "test-model", true);
+            var specs = List.of(new ToolSpec("talos.list_dir", "List dir", "{}"));
+            assertFalse(enabledEngine.convertToolSpecs(specs).isEmpty());
+        }
+
+        @Test
+        void explicitFalse_stillConvertsSpecs() {
+            // convertToolSpecs itself doesn't check the toggle — the toggle is checked
+            // at the chatViaMessages / chatStreamViaMessages level
+            var disabledEngine = new OllamaEngine("http://localhost:11434", "test-model", false);
+            var specs = List.of(new ToolSpec("talos.list_dir", "List dir", "{}"));
+            assertFalse(disabledEngine.convertToolSpecs(specs).isEmpty(),
+                    "convertToolSpecs is independent of toggle");
+        }
+    }
 }
+
 

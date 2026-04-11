@@ -34,6 +34,7 @@ final class OllamaEngine implements ModelEngine {
     private static final Logger LOG = LoggerFactory.getLogger(OllamaEngine.class);
     private final String host;
     private final String defaultModel;
+    private final boolean nativeToolCalling;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     private final ObjectMapper mapper = new ObjectMapper();
 
@@ -42,8 +43,13 @@ final class OllamaEngine implements ModelEngine {
     private volatile String cachedModelName = null;
 
     OllamaEngine(String host, String defaultModel) {
+        this(host, defaultModel, true);
+    }
+
+    OllamaEngine(String host, String defaultModel, boolean nativeToolCalling) {
         this.host = (host == null || host.isBlank()) ? "http://127.0.0.1:11434" : host.trim();
         this.defaultModel = defaultModel;
+        this.nativeToolCalling = nativeToolCalling;
     }
 
     @Override public String id() { return OllamaCatalog.BACKEND; }
@@ -201,10 +207,12 @@ final class OllamaEngine implements ModelEngine {
         body.put("messages", conversationMsgs);
         body.put("stream", false);
 
-        // Include native tools if available
-        List<Map<String, Object>> toolDefs = convertToolSpecs(req.tools);
-        if (!toolDefs.isEmpty()) {
-            body.put("tools", toolDefs);
+        // Include native tools if available and enabled
+        if (nativeToolCalling) {
+            List<Map<String, Object>> toolDefs = convertToolSpecs(req.tools);
+            if (!toolDefs.isEmpty()) {
+                body.put("tools", toolDefs);
+            }
         }
 
         String json = mapper.writeValueAsString(body);
@@ -408,10 +416,12 @@ final class OllamaEngine implements ModelEngine {
         body.put("messages", conversationMsgs);
         body.put("stream", true);
 
-        // Include native tools if available
-        List<Map<String, Object>> toolDefs = convertToolSpecs(req.tools);
-        if (!toolDefs.isEmpty()) {
-            body.put("tools", toolDefs);
+        // Include native tools if available and enabled
+        if (nativeToolCalling) {
+            List<Map<String, Object>> toolDefs = convertToolSpecs(req.tools);
+            if (!toolDefs.isEmpty()) {
+                body.put("tools", toolDefs);
+            }
         }
 
         String json = mapper.writeValueAsString(body);

@@ -106,6 +106,9 @@ limits:
   rate_per_sec: 10
   llm_context_max_tokens: 8192   # Default token budget for prompt validation (fallback if model info unavailable)
 
+tools:
+  native_calling: true   # Use Ollama's native tool API; set false to fall back to XML prompt injection
+
 ui:
   show_status_during_answer: true
   show_timing_after_answer: true
