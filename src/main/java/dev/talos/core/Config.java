@@ -119,6 +119,11 @@ public class Config {
         return snapshot;
     }
 
+    /** Typed read-only view over this config's data. */
+    public ConfigView view() {
+        return ConfigView.of(this);
+    }
+
     /**
      * Resolve user config path: ~/.talos/config.yaml (Unix) or %USERPROFILE%\.talos\config.yaml (Windows)
      */
