@@ -28,37 +28,65 @@ public final class EmbeddingsFactory {
      * Reads {@code embed.model} first (new canonical key), falling back to
      * {@code ollama.embed} (legacy key), then to the bge-m3 built-in default.
      * Provider is read from {@code embed.provider}, defaulting to {@code "ollama"}.
+     * <p>
+     * When the resolved model name matches a known built-in profile, the
+     * built-in is used as <em>defaults</em> — not as an unconditional
+     * replacement. Any config overrides for provider, dimensions,
+     * query_instruction, document_instruction, max_input_tokens, or normalize
+     * take precedence. If the resolved profile matches the built-in exactly,
+     * the singleton instance is returned.
      */
     public static EmbeddingProfile profileFrom(Config cfg) {
         Objects.requireNonNull(cfg, "cfg must not be null");
         Map<String, Object> embedCfg = CfgUtil.map(cfg.data.get("embed"));
         Map<String, Object> ollamaCfg = CfgUtil.map(cfg.data.get("ollama"));
+
         // Model: embed.model > ollama.embed > "bge-m3"
         String model = stringOr(embedCfg.get("model"), null);
         if (model == null) {
             model = stringOr(ollamaCfg.get("embed"), "bge-m3");
         }
+
         // Provider: embed.provider > "ollama"
         String provider = stringOr(embedCfg.get("provider"), "ollama");
-        // Check for a known built-in profile match
-        if (EmbeddingProfile.BGE_M3.model().equals(model)
-                && EmbeddingProfile.BGE_M3.provider().equals(provider)) {
-            return EmbeddingProfile.BGE_M3;
-        }
-        if (EmbeddingProfile.QWEN3_EMBED_8B.model().equals(model)) {
-            return EmbeddingProfile.QWEN3_EMBED_8B;
-        }
-        // Construct a custom profile from config values
-        int dims = CfgUtil.intAt(embedCfg, "dimensions", 0);
+
+        // Find built-in defaults for this model (may be null for unknown models)
+        EmbeddingProfile builtIn = findBuiltIn(model);
+
+        // Use built-in values as defaults; config overrides win
+        int defaultDims      = builtIn != null ? builtIn.dimensions()           : 0;
+        String defaultQInstr = builtIn != null ? builtIn.queryInstruction()     : null;
+        String defaultDInstr = builtIn != null ? builtIn.documentInstruction()  : null;
+        int defaultMaxInput  = builtIn != null ? builtIn.maxInputTokens()       : 8192;
+        boolean defaultNorm  = builtIn != null ? builtIn.normalize()            : true;
+
+        int dims         = CfgUtil.intAt(embedCfg, "dimensions", defaultDims);
         // Instruction prefixes may intentionally have trailing whitespace — do NOT trim.
-        String qInstr = rawStringOr(embedCfg.get("query_instruction"), null);
-        String dInstr = rawStringOr(embedCfg.get("document_instruction"), null);
+        String qInstr    = rawStringOr(embedCfg.get("query_instruction"), defaultQInstr);
+        String dInstr    = rawStringOr(embedCfg.get("document_instruction"), defaultDInstr);
         boolean instrAware = qInstr != null || dInstr != null;
-        int maxInput = CfgUtil.intAt(embedCfg, "max_input_tokens", 8192);
-        boolean normalize = CfgUtil.boolAt(embedCfg, "normalize", true);
-        return new EmbeddingProfile(
+        int maxInput     = CfgUtil.intAt(embedCfg, "max_input_tokens", defaultMaxInput);
+        boolean normalize = CfgUtil.boolAt(embedCfg, "normalize", defaultNorm);
+
+        EmbeddingProfile resolved = new EmbeddingProfile(
                 provider, model, dims, instrAware,
                 qInstr, dInstr, maxInput, normalize);
+
+        // Return the singleton if the resolved profile matches a built-in exactly
+        if (builtIn != null && builtIn.equals(resolved)) {
+            return builtIn;
+        }
+        return resolved;
+    }
+
+    /**
+     * Look up a built-in profile by model name. Returns {@code null} if
+     * the model does not match any known built-in.
+     */
+    private static EmbeddingProfile findBuiltIn(String model) {
+        if (EmbeddingProfile.BGE_M3.model().equals(model)) return EmbeddingProfile.BGE_M3;
+        if (EmbeddingProfile.QWEN3_EMBED_8B.model().equals(model)) return EmbeddingProfile.QWEN3_EMBED_8B;
+        return null;
     }
     /**
      * Create an {@link Embeddings} client configured for <em>query</em> embedding.
