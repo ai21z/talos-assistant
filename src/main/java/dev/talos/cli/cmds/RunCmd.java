@@ -1,5 +1,6 @@
 package dev.talos.cli.cmds;
 
+import dev.talos.cli.repl.Limits;
 import dev.talos.cli.repl.ReplRouter;
 import dev.talos.cli.repl.SessionState;
 import dev.talos.cli.repl.SlashCommandCompleter;
@@ -16,8 +17,8 @@ import picocli.CommandLine;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
-import java.util.*;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 @CommandLine.Command(name="run", description="Talos interactive REPL")
@@ -62,9 +63,8 @@ public class RunCmd implements Runnable, SessionState {
         Config cfg = new Config();
 
         // Limits from config
-        Map<String,Object> limitsMap = CfgUtil.map(cfg.data.get("limits"));
-        Limits lim = new Limits(limitsMap == null ? Map.of() : limitsMap);
-        rlTokens = lim.ratePerSec;
+        Limits lim = Limits.fromConfig(cfg);
+        rlTokens = lim.ratePerSec();
 
         // --bm25-only flag: mutate cfg copy
         if (bm25Only) {
@@ -165,48 +165,13 @@ public class RunCmd implements Runnable, SessionState {
         synchronized (rlLock) {
             if (now - rlWindowStartMs >= 1000) {
                 rlWindowStartMs = now;
-                rlTokens = lim.ratePerSec;
+                rlTokens = lim.ratePerSec();
             }
             if (rlTokens > 0) { rlTokens--; return true; }
             return false;
         }
     }
 
-    /* ===== Limits struct ===== */
-    private static final class Limits {
-        final int topKMax;
-        final long responseMaxChars;
-        final int dirDepthMax;
-        final int fileBytesMax;
-        final int fileLinesMax;
-        final int dirEntriesMax;
-        final Duration llmTimeout;
-        final Duration fileTimeout;
-        final int ratePerSec;
-        Limits(Map<String,Object> m) {
-            this.topKMax          = getInt(m,"top_k_max",100);
-            this.responseMaxChars = getLong(m,"response_max_chars",10*1024*1024L);
-            this.dirDepthMax      = getInt(m,"dir_depth_max",10);
-            this.fileBytesMax     = getInt(m,"file_bytes_max",20_000);
-            this.fileLinesMax     = getInt(m,"file_lines_max",500);
-            this.dirEntriesMax    = getInt(m,"dir_entries_max",1000);
-            this.llmTimeout       = Duration.ofMillis(getLong(m,"llm_timeout_ms",300_000));
-            this.fileTimeout      = Duration.ofMillis(getLong(m,"file_timeout_ms",10_000));
-            this.ratePerSec       = getInt(m,"rate_per_sec",10);
-        }
-        private static int getInt(Map<String,Object> m, String k, int d) {
-            if (m == null) return d;
-            Object v = m.get(k);
-            if (v instanceof Number n) return n.intValue();
-            try { return v==null?d:Integer.parseInt(String.valueOf(v)); } catch(Exception e){ return d; }
-        }
-        private static long getLong(Map<String,Object> m, String k, long d) {
-            if (m == null) return d;
-            Object v = m.get(k);
-            if (v instanceof Number n) return n.longValue();
-            try { return v==null?d:Long.parseLong(String.valueOf(v)); } catch(Exception e){ return d; }
-        }
-    }
 
     /* ===== UI ===== */
 

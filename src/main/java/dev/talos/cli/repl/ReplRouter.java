@@ -2,6 +2,8 @@ package dev.talos.cli.repl;
 
 import dev.talos.cli.commands.CommandRegistry;
 import dev.talos.cli.modes.ModeController;
+import dev.talos.cli.modes.PromptRouter;
+import dev.talos.cli.ui.AnsiColor;
 import dev.talos.core.Config;
 import dev.talos.runtime.Session;
 import dev.talos.runtime.TurnProcessor;
@@ -86,6 +88,18 @@ public final class ReplRouter {
     public boolean tryHandlePrompt(String rawLine) {
         LineClassifier.Classified c = classifier.classify(rawLine);
         if (c.type() != LineClassifier.LineType.PROMPT) return false;
+
+        // Show routing indicator in auto mode (dimmed, one line)
+        if ("auto".equals(modes.getActiveName())) {
+            PromptRouter.Route preview = PromptRouter.route(rawLine, modes.lastRoute(),
+                    modes.getSymbolChecker());
+            String label = switch (preview) {
+                case RETRIEVE -> "rag";
+                case COMMAND  -> "dev";
+                case ASSIST   -> "ask";
+            };
+            render.printRouteHint(label);
+        }
 
         render.startSpinner();
 
