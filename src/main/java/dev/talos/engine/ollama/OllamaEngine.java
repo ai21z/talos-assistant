@@ -278,7 +278,8 @@ final class OllamaEngine implements ModelEngine {
      * &lt;/tool_call&gt;
      * </pre>
      */
-    private String convertNativeToolCallsToXml(String textContent, JsonNode toolCallsNode) {
+    // Package-private for testability (OllamaToolCallBridgeTest)
+    String convertNativeToolCallsToXml(String textContent, JsonNode toolCallsNode) {
         StringBuilder sb = new StringBuilder();
 
         // Preserve any text content (e.g. thinking/reasoning) before tool calls
@@ -469,7 +470,8 @@ final class OllamaEngine implements ModelEngine {
      * [{"type": "function", "function": {"name": "...", "description": "...", "parameters": {...}}}]
      * </pre>
      */
-    private List<Map<String, Object>> convertToolSpecs(List<ToolSpec> specs) {
+    // Package-private for testability (OllamaToolCallBridgeTest)
+    List<Map<String, Object>> convertToolSpecs(List<ToolSpec> specs) {
         if (specs == null || specs.isEmpty()) return List.of();
 
         List<Map<String, Object>> tools = new ArrayList<>(specs.size());
