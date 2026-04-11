@@ -10,7 +10,19 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** Local file ops: open/show/view + ls/list/dir, bounded by Limits and Sandbox. */
+/**
+ * Local file ops: open/show/view + ls/list/dir, bounded by Limits and Sandbox.
+ *
+ * <p><strong>Deprecation notice:</strong> The file read ({@code open/show/view})
+ * and directory list ({@code ls/list/dir}) operations in this mode duplicate
+ * the functionality of {@code talos.read_file} and {@code talos.list_dir} tools
+ * in the tool registry. Once tool reliability is validated in production, these
+ * operations should be delegated to the tool registry rather than re-implemented
+ * here. See doc-24 Wave 3 #16.
+ *
+ * @see dev.talos.tools.impl.ReadFileTool
+ * @see dev.talos.tools.impl.ListDirTool
+ */
 public final class DevMode implements Mode {
     @Override public String name() { return "dev"; }
 
