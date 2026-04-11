@@ -17,6 +17,7 @@ import dev.talos.runtime.MemoryUpdateListener;
 import dev.talos.runtime.Session;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnProcessor;
+import dev.talos.tools.FileUndoStack;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
@@ -76,10 +77,11 @@ public final class TalosBootstrap {
         SessionMemory  memory   = new SessionMemory();
 
         // ── Tools ────────────────────────────────────────────────────────
+        FileUndoStack undoStack = new FileUndoStack();
         ToolRegistry toolRegistry = new ToolRegistry();
         toolRegistry.register(new ReadFileTool());
-        toolRegistry.register(new FileWriteTool());
-        toolRegistry.register(new FileEditTool());
+        toolRegistry.register(new FileWriteTool(undoStack));
+        toolRegistry.register(new FileEditTool(undoStack));
         toolRegistry.register(new GrepTool());
         toolRegistry.register(new ListDirTool());
         toolRegistry.register(new RetrieveTool(rag));
@@ -139,7 +141,7 @@ public final class TalosBootstrap {
         // ── Commands ─────────────────────────────────────────────────────
         AtomicBoolean quit = new AtomicBoolean(false);
         CommandRegistry registry = new CommandRegistry();
-        registerCommands(registry, session, cfg, ctx, modes, workspace, quit);
+        registerCommands(registry, session, cfg, ctx, modes, workspace, quit, undoStack);
 
         // ── Assemble router ──────────────────────────────────────────────
         return new ReplRouter(modes, turnProcessor, runtimeSession, ctx, render,
@@ -152,7 +154,8 @@ public final class TalosBootstrap {
      */
     private static void registerCommands(CommandRegistry registry, SessionState session,
                                          Config cfg, Context ctx, ModeController modes,
-                                         Path workspace, AtomicBoolean quit) {
+                                         Path workspace, AtomicBoolean quit,
+                                         FileUndoStack undoStack) {
         CliRuntime rt = new CliRuntime() {
             @Override public int getK()                { return session.getK(); }
             @Override public void setK(int k)          { session.setK(k); }
@@ -185,6 +188,8 @@ public final class TalosBootstrap {
         registry.register(new RouteCommand(modes));
         // Tool introspection
         registry.register(new ToolsCommand());
+        // File undo
+        registry.register(new UndoCommand(undoStack));
     }
 }
 
