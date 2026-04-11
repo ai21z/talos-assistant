@@ -13,8 +13,11 @@ import dev.talos.core.rag.RagService;
 import dev.talos.core.security.Redactor;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.CliApprovalGate;
+import dev.talos.runtime.JsonSessionStore;
 import dev.talos.runtime.MemoryUpdateListener;
 import dev.talos.runtime.Session;
+import dev.talos.runtime.SessionData;
+import dev.talos.runtime.SessionStore;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnProcessor;
 import dev.talos.tools.FileUndoStack;
@@ -97,14 +100,54 @@ public final class TalosBootstrap {
         ConversationManager conversationManager =
                 new ConversationManager(memory, TokenBudget.fromConfig(cfg));
 
+        // ── Session persistence ──────────────────────────────────────────
+        SessionStore sessionStore = new JsonSessionStore();
+        String sessionId = JsonSessionStore.sessionIdFor(workspace);
+
+        // Auto-load previous session if one exists
+        sessionStore.load(sessionId).ifPresent(data -> {
+            // Replay turns into memory
+            if (data.turns() != null) {
+                for (int i = 0; i < data.turns().size() - 1; i += 2) {
+                    SessionData.Turn u = data.turns().get(i);
+                    SessionData.Turn a = data.turns().get(i + 1);
+                    if ("user".equals(u.role()) && "assistant".equals(a.role())) {
+                        memory.update(u.content(), a.content());
+                    }
+                }
+            }
+            // Restore compaction sketch
+            if (data.sketch() != null && !data.sketch().isBlank()) {
+                conversationManager.setSketch(data.sketch());
+            }
+        });
+
         // ── Mode controller ──────────────────────────────────────────────
         ModeController modes = ModeController.defaultController();
         modes.setSymbolChecker(new IndexedWorkspaceSymbolChecker(workspace));
 
         // ── Runtime layer ────────────────────────────────────────────────
-        Session        runtimeSession = new Session(workspace, cfg, memory);
+        Session        runtimeSession = new Session(workspace, cfg, memory, sessionStore);
         TurnProcessor  turnProcessor  = new TurnProcessor(modes, new CliApprovalGate(), toolRegistry);
         ToolCallLoop   toolCallLoop   = new ToolCallLoop(turnProcessor);
+
+        // Auto-save session on close
+        final ConversationManager cmRef = conversationManager;
+        final SessionMemory memRef = memory;
+        final String sidRef = sessionId;
+        final Path wsRef = workspace;
+        runtimeSession.addCloseListener(new dev.talos.runtime.SessionListener() {
+            @Override public void onSessionEnd() {
+                java.util.List<SessionData.Turn> turns = memRef.getTurns().stream()
+                        .map(m -> new SessionData.Turn(m.role(), m.content()))
+                        .toList();
+                String sketch = cmRef.sketch();
+                SessionData data = new SessionData(sidRef, wsRef.toString(),
+                        sketch != null ? sketch : "", cmRef.turnCount(),
+                        runtimeSession.startedAt(), turns);
+                sessionStore.save(data);
+            }
+        });
 
         // ── Rendering ────────────────────────────────────────────────────
         RenderEngine render = new RenderEngine(cfg, redactor, out);
@@ -141,7 +184,7 @@ public final class TalosBootstrap {
         // ── Commands ─────────────────────────────────────────────────────
         AtomicBoolean quit = new AtomicBoolean(false);
         CommandRegistry registry = new CommandRegistry();
-        registerCommands(registry, session, cfg, ctx, modes, workspace, quit, undoStack);
+        registerCommands(registry, session, cfg, ctx, modes, workspace, quit, undoStack, sessionStore);
 
         // ── Assemble router ──────────────────────────────────────────────
         return new ReplRouter(modes, turnProcessor, runtimeSession, ctx, render,
@@ -155,7 +198,7 @@ public final class TalosBootstrap {
     private static void registerCommands(CommandRegistry registry, SessionState session,
                                          Config cfg, Context ctx, ModeController modes,
                                          Path workspace, AtomicBoolean quit,
-                                         FileUndoStack undoStack) {
+                                         FileUndoStack undoStack, SessionStore sessionStore) {
         CliRuntime rt = new CliRuntime() {
             @Override public int getK()                { return session.getK(); }
             @Override public void setK(int k)          { session.setK(k); }
@@ -190,6 +233,8 @@ public final class TalosBootstrap {
         registry.register(new ToolsCommand());
         // File undo
         registry.register(new UndoCommand(undoStack));
+        // Session persistence
+        registry.register(new SessionCommand(workspace, sessionStore));
     }
 }
 
