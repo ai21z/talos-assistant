@@ -5,6 +5,7 @@ import dev.talos.tools.*;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 
 /**
  * Tool that performs a targeted string replacement within a workspace file.
@@ -30,6 +31,11 @@ public final class FileEditTool implements TalosTool {
 
     private static final String NAME = "talos.edit_file";
     private static final long MAX_FILE_SIZE = 2 * 1024 * 1024L; // 2 MiB
+
+    private final FileUndoStack undoStack;
+
+    public FileEditTool() { this(null); }
+    public FileEditTool(FileUndoStack undoStack) { this.undoStack = undoStack; }
 
     @Override public String name() { return NAME; }
     @Override public String description() { return "Replace a unique string in a workspace file."; }
@@ -114,6 +120,13 @@ public final class FileEditTool implements TalosTool {
 
             // Exactly one match — safe to replace
             String updated = content.replace(oldString, newString);
+
+            // Snapshot for undo before mutating
+            if (undoStack != null) {
+                undoStack.push(new FileUndoStack.UndoEntry(
+                        resolved, content, false, NAME, Instant.now()));
+            }
+
             Files.writeString(resolved, updated);
 
             // Report what changed
