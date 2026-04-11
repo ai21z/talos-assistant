@@ -1,5 +1,6 @@
 package dev.talos.core.llm;
 
+import dev.talos.core.util.WorkspaceManifest;
 import dev.talos.tools.ToolDescriptor;
 import dev.talos.tools.ToolRegistry;
 
@@ -107,9 +108,15 @@ public final class SystemPromptBuilder {
         // 1. Identity
         sb.append(identity.strip());
 
-        // 1b. Workspace path (if set)
+        // 1b. Workspace manifest (file tree + README snippet for instant awareness)
         if (workspace != null) {
-            sb.append("\n\nWorkspace: ").append(workspace.toAbsolutePath().toString().replace('\\', '/'));
+            String manifest = WorkspaceManifest.build(workspace);
+            if (!manifest.isEmpty()) {
+                sb.append("\n\n").append(manifest);
+            } else {
+                // Path doesn't exist on disk (yet) — still inject the path for awareness
+                sb.append("\n\nWorkspace: ").append(workspace.toAbsolutePath().toString().replace('\\', '/'));
+            }
         }
 
         // 2. Mode-specific rules
@@ -130,17 +137,22 @@ public final class SystemPromptBuilder {
     /** Append tools and conversation sections to an existing base prompt. */
     private String appendDynamicSections(String base) {
         String dynamic = buildDynamicSections();
-        if (dynamic.isEmpty()) {
-            if (workspace != null) {
-                return base.strip() + "\n\nWorkspace: " + workspace.toAbsolutePath().toString().replace('\\', '/');
-            }
-            return base;
-        }
         String result = base.strip();
+
+        // Workspace manifest
         if (workspace != null) {
-            result += "\n\nWorkspace: " + workspace.toAbsolutePath().toString().replace('\\', '/');
+            String manifest = WorkspaceManifest.build(workspace);
+            if (!manifest.isEmpty()) {
+                result += "\n\n" + manifest;
+            } else {
+                result += "\n\nWorkspace: " + workspace.toAbsolutePath().toString().replace('\\', '/');
+            }
         }
-        return result + "\n\n" + dynamic;
+
+        if (!dynamic.isEmpty()) {
+            result += "\n\n" + dynamic;
+        }
+        return result;
     }
 
     /** Build the dynamic (tool + conversation) sections. */

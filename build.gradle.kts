@@ -171,8 +171,8 @@ tasks.jacocoTestCoverageVerification {
     violationRules {
         rule {
             limit {
-                // Start low — tighten as coverage grows
-                minimum = "0.20".toBigDecimal()
+                // Floor: fail the build if instruction coverage drops below 40%
+                minimum = "0.40".toBigDecimal()
             }
         }
     }

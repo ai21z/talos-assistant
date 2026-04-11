@@ -74,6 +74,18 @@ public final class RenderEngine {
     }
 
     /**
+     * Print a subtle routing indicator for auto-mode.
+     * Shows dimmed text like {@code [auto → rag]} before the spinner.
+     * Suppressed in non-interactive mode.
+     */
+    public void printRouteHint(String routeLabel) {
+        if (!interactive) return;
+        if (routeLabel == null || routeLabel.isBlank()) return;
+        out.println(AnsiColor.DIM + "  [auto → " + routeLabel + "]" + AnsiColor.RESET);
+        out.flush();
+    }
+
+    /**
      * Starts the spinner (non-blocking).
      * Suppressed in non-interactive mode to avoid flooding piped output.
      */
