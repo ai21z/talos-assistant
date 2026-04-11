@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
@@ -54,6 +55,10 @@ public class Indexer {
     }
 
     public void index(Path root, boolean forceFullReindex) {
+        index(root, forceFullReindex, IndexProgressListener.NOOP);
+    }
+
+    public void index(Path root, boolean forceFullReindex, IndexProgressListener listener) {
         final IndexingStats stats = new IndexingStats();
         final long startTime = System.currentTimeMillis();
 
@@ -137,14 +142,15 @@ public class Indexer {
                 int overlap    = CfgUtil.intAt(rag, "chunk_overlap", 150);
 
                 List<Callable<Void>> tasks = new ArrayList<>(files.size());
+                final int totalFiles = files.size();
+                final AtomicInteger filesCompleted = new AtomicInteger();
 
                 for (Path p : files) {
                     tasks.add(() -> {
                         stats.incrementFilesScanned();
+                        String rel = rootPath.relativize(p).toString().replace('\\','/');
 
                         try {
-                            String rel = rootPath.relativize(p).toString().replace('\\','/');
-
                             // Check if file is unchanged (unless forcing full reindex)
                             if (!skipHashing) {
                                 String currentHash = Hash.sha256Hex(Files.readAllBytes(p));
@@ -237,6 +243,8 @@ public class Indexer {
                             }
                         } catch (Exception ex) {
                             LOG.warn("Skip {} : {}", p, ex.toString());
+                        } finally {
+                            listener.onFileComplete(filesCompleted.incrementAndGet(), totalFiles, rel);
                         }
                         return null;
                     });
@@ -307,6 +315,16 @@ public class Indexer {
      */
     public Object reindex(Path root) {
         index(root);
+        return "Reindexed.";
+    }
+
+    /**
+     * Reindex with live progress feedback.
+     *
+     * @see #index(Path, boolean, IndexProgressListener)
+     */
+    public Object reindex(Path root, IndexProgressListener listener) {
+        index(root, false, listener);
         return "Reindexed.";
     }
 
