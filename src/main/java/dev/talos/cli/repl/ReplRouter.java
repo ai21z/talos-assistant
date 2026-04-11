@@ -34,6 +34,7 @@ public final class ReplRouter {
     private final LineClassifier classifier = new LineClassifier();
     private final ExecutionPipeline pipe = new ExecutionPipeline();
     private final AtomicBoolean quit;
+    private volatile TurnResult lastTurnResult;
 
     /**
      * Primary constructor — called by {@link TalosBootstrap}.
@@ -105,13 +106,29 @@ public final class ReplRouter {
 
         Result r = pipe.run(() -> {
                     TurnResult tr = turnProcessor.process(runtimeSession, rawLine, ctx);
-                    return (tr == null) ? null : tr.result();
+                    if (tr == null) return null;
+                    lastTurnResult = tr;
+                    return tr.result();
                 },
                 ctx, "(prompt)"
         );
 
         if (r == null) return false;
         render.render(r);
+
+        // Show turn stats (timing) after the answer
+        if (lastTurnResult != null) {
+            int responseLen = (r instanceof Result.Ok ok) ? ok.text.length()
+                    : (r instanceof Result.Streamed st) ? st.fullText.length()
+                    : 0;
+            render.printTurnStats(
+                    lastTurnResult.turnNumber(),
+                    lastTurnResult.elapsed().toMillis(),
+                    responseLen
+            );
+            lastTurnResult = null;
+        }
+
         return true;
     }
 

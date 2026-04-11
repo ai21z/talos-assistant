@@ -26,6 +26,7 @@ public final class RenderEngine {
     private final PrintStream out;
     private final String statusLabel;
     private final boolean showStatusDuringAnswer;
+    private final boolean showTimingAfterAnswer;
     private final boolean interactive;
 
     // Spinner state
@@ -60,6 +61,7 @@ public final class RenderEngine {
         String rawLabel = ui == null ? "Thinking" : String.valueOf(ui.getOrDefault("status_label", "Thinking"));
         this.statusLabel = AnsiColor.isUnicodeSafe() ? rawLabel : rawLabel.replace("…", "...");
         this.showStatusDuringAnswer = ui == null || !(ui.get("show_status_during_answer") instanceof Boolean b) || b;
+        this.showTimingAfterAnswer = ui == null || !(ui.get("show_timing_after_answer") instanceof Boolean b2) || b2;
         this.spinnerFrames = AnsiColor.isUnicodeSafe() ? SPINNER_UNICODE : SPINNER_ASCII;
     }
 
@@ -82,6 +84,43 @@ public final class RenderEngine {
         if (!interactive) return;
         if (routeLabel == null || routeLabel.isBlank()) return;
         out.println(AnsiColor.DIM + "  [auto → " + routeLabel + "]" + AnsiColor.RESET);
+        out.flush();
+    }
+
+    /**
+     * Print turn statistics after a completed turn.
+     * Shows turn number, elapsed time, and response length estimate.
+     * Gated by {@code ui.show_timing_after_answer} config (default true).
+     *
+     * <p>Format: {@code [Turn 3 | 1.2s | ~312 chars]}
+     * Suppressed in non-interactive mode.
+     *
+     * @param turnNumber   1-based turn number
+     * @param elapsedMs    elapsed time in milliseconds
+     * @param responseLen  approximate response length in characters (0 to omit)
+     */
+    public void printTurnStats(int turnNumber, long elapsedMs, int responseLen) {
+        if (!showTimingAfterAnswer) return;
+        if (!interactive) return;
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("  ").append(AnsiColor.DIM);
+        sb.append("[Turn ").append(turnNumber);
+
+        // Elapsed time
+        if (elapsedMs < 1000) {
+            sb.append(" | ").append(elapsedMs).append("ms");
+        } else {
+            sb.append(String.format(Locale.ROOT, " | %.1fs", elapsedMs / 1000.0));
+        }
+
+        // Response size
+        if (responseLen > 0) {
+            sb.append(" | ~").append(responseLen).append(" chars");
+        }
+
+        sb.append("]").append(AnsiColor.RESET);
+        out.println(sb.toString());
         out.flush();
     }
 
