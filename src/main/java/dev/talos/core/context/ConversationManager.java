@@ -42,6 +42,13 @@ public final class ConversationManager {
     static final int COMPACTION_THRESHOLD_PAIRS = 6;
 
     /**
+     * Higher compaction threshold for assist/unified mode.
+     * Editing tasks produce many short turns; compacting too early
+     * destroys the file-state context the model needs to stay coherent.
+     */
+    static final int ASSIST_COMPACTION_THRESHOLD_PAIRS = 10;
+
+    /**
      * Fraction of context window allocated to history in RAG mode.
      * Used both for buildHistory budget and as the trigger threshold
      * for compaction (when stored history exceeds this budget).
@@ -162,36 +169,67 @@ public final class ConversationManager {
 
     /**
      * Check whether compaction is needed and perform it if so.
+     * Uses the RAG-mode budget (25% of context window).
      *
-     * <p>Compaction triggers when:
-     * <ol>
-     *   <li>There are at least {@value #COMPACTION_THRESHOLD_PAIRS} turn pairs, AND</li>
-     *   <li>The total stored history exceeds the history budget (25% of context window)</li>
-     * </ol>
-     *
-     * <p>When triggered, turns that don't fit in the budget are summarized
-     * into a sketch, and the old turns are pruned from SessionMemory.
+     * <p>For unified/assist mode, use {@link #maybeCompactForAssist(LlmClient)}
+     * which uses a larger budget and higher pair threshold.
      *
      * @param llm the LLM client to use for summarization (must not be null)
      * @return true if compaction was performed
      */
     public boolean maybeCompact(LlmClient llm) {
+        return maybeCompactWithBudget(llm, COMPACTION_THRESHOLD_PAIRS, HISTORY_BUDGET_FRACTION);
+    }
+
+    /**
+     * Check whether compaction is needed for assist/unified mode.
+     * Uses the larger assist budget (55% of context window) and a higher
+     * pair threshold (10 pairs instead of 6) because multi-turn editing
+     * sessions produce many short turns and need more context retained.
+     *
+     * <p>This fixes a critical bug where unified mode used 55% for
+     * building history ({@link #buildHistoryForAssist()}) but only 25%
+     * for the compaction trigger, causing premature compaction that
+     * destroyed file-state context during repair loops.
+     *
+     * @param llm the LLM client to use for summarization (must not be null)
+     * @return true if compaction was performed
+     */
+    public boolean maybeCompactForAssist(LlmClient llm) {
+        return maybeCompactWithBudget(llm, ASSIST_COMPACTION_THRESHOLD_PAIRS, ASSIST_HISTORY_BUDGET_FRACTION);
+    }
+
+    /**
+     * Internal compaction implementation with configurable thresholds.
+     *
+     * <p>Compaction triggers when:
+     * <ol>
+     *   <li>There are at least {@code pairThreshold} turn pairs, AND</li>
+     *   <li>The total stored history exceeds the history budget</li>
+     * </ol>
+     *
+     * @param llm            the LLM client to use for summarization
+     * @param pairThreshold  minimum turn pairs before compaction is considered
+     * @param budgetFraction fraction of context window used as the history budget
+     * @return true if compaction was performed
+     */
+    private boolean maybeCompactWithBudget(LlmClient llm, int pairThreshold, double budgetFraction) {
         if (llm == null) return false;
 
         int pairs = turnCount();
-        if (pairs < COMPACTION_THRESHOLD_PAIRS) {
+        if (pairs < pairThreshold) {
             return false;
         }
 
-        int historyBudget = (int) (budget.contextMaxTokens() * HISTORY_BUDGET_FRACTION);
+        int historyBudget = (int) (budget.contextMaxTokens() * budgetFraction);
         int totalTokens = estimateHistoryTokens();
 
         if (totalTokens <= historyBudget) {
             return false; // everything fits, no need to compact
         }
 
-        LOG.info("Compaction triggered: {} pairs, {} tokens > {} budget",
-                pairs, totalTokens, historyBudget);
+        LOG.info("Compaction triggered: {} pairs, {} tokens > {} budget (fraction={})",
+                pairs, totalTokens, historyBudget, budgetFraction);
 
         // Identify which turns don't fit (the "old" ones)
         List<ChatMessage> allTurns = memory.getTurns();

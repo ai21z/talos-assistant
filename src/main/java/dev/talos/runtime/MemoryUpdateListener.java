@@ -29,6 +29,7 @@ public final class MemoryUpdateListener implements SessionListener {
 
     private final ConversationManager conversationManager;
     private final LlmClient llm;
+    private volatile boolean assistMode;
 
     /**
      * @param conversationManager the conversation manager to record turns into
@@ -44,6 +45,16 @@ public final class MemoryUpdateListener implements SessionListener {
         this(conversationManager, null);
     }
 
+    /**
+     * Enable assist/unified mode compaction.
+     * When true, uses the larger 55% budget and higher pair threshold
+     * ({@link ConversationManager#maybeCompactForAssist}) instead of
+     * the default 25% RAG-mode budget.
+     */
+    public void setAssistMode(boolean assistMode) {
+        this.assistMode = assistMode;
+    }
+
     @Override
     public void onTurnComplete(TurnResult result, String userInput) {
         if (result == null || userInput == null || userInput.isBlank()) return;
@@ -55,7 +66,9 @@ public final class MemoryUpdateListener implements SessionListener {
             // Trigger compaction check (non-blocking — if LLM is null, this is a no-op)
             if (llm != null) {
                 try {
-                    boolean compacted = conversationManager.maybeCompact(llm);
+                    boolean compacted = assistMode
+                            ? conversationManager.maybeCompactForAssist(llm)
+                            : conversationManager.maybeCompact(llm);
                     if (compacted) {
                         LOG.debug("Conversation compacted after turn");
                     }

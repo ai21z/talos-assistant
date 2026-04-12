@@ -154,14 +154,7 @@ public final class TurnProcessor {
             String desc = risk.name().toLowerCase().replace('_', ' ')
                     + " operation: " + call.toolName();
             String path = resolvePathParam(call);
-            String detail;
-            if (path != null && !path.isBlank()) {
-                detail = "target: " + path;
-            } else {
-                // Warn the user that path is missing — they'll get an error anyway,
-                // but this avoids wasting approval on a doomed call
-                detail = "(warning: no target path specified — may fail)";
-            }
+            String detail = buildApprovalDetail(call, path);
             if (!approvalGate.approve(desc, detail)) {
                 return ToolResult.fail(ToolError.denied(
                         "Operation denied by user: " + call.toolName()));
@@ -198,6 +191,56 @@ public final class TurnProcessor {
             if (value != null && !value.isBlank()) return value;
         }
         return null;
+    }
+
+    /**
+     * Build a detailed approval message for write/edit operations.
+     * Shows the target path, content size/line count, and a preview
+     * of the first few lines so the user can make an informed decision.
+     */
+    private static String buildApprovalDetail(ToolCall call, String path) {
+        var sb = new StringBuilder();
+
+        if (path != null && !path.isBlank()) {
+            sb.append("target: ").append(path);
+        } else {
+            sb.append("(warning: no target path specified — may fail)");
+        }
+
+        // For write_file: show content size and preview
+        String content = call.param("content");
+        if (content == null) content = call.param("text");
+        if (content == null) content = call.param("body");
+
+        if (content != null && !content.isEmpty()) {
+            long lines = content.chars().filter(c -> c == '\n').count() + 1;
+            sb.append(" (").append(content.length()).append(" bytes, ").append(lines).append(" lines)");
+
+            // Show first 5 lines as preview
+            String[] contentLines = content.split("\n", 7);
+            int previewCount = Math.min(5, contentLines.length);
+            sb.append("\n    preview:");
+            for (int i = 0; i < previewCount; i++) {
+                String line = contentLines[i];
+                if (line.length() > 80) line = line.substring(0, 77) + "...";
+                sb.append("\n      ").append(line);
+            }
+            if (contentLines.length > 5) {
+                sb.append("\n      ...");
+            }
+        }
+
+        // For edit_file: show old_string → new_string summary
+        String oldStr = call.param("old_string");
+        String newStr = call.param("new_string");
+        if (oldStr != null && newStr != null) {
+            String oldPreview = oldStr.length() > 60 ? oldStr.substring(0, 57) + "..." : oldStr;
+            String newPreview = newStr.length() > 60 ? newStr.substring(0, 57) + "..." : newStr;
+            sb.append("\n    replace: ").append(oldPreview.replace('\n', '↵'));
+            sb.append("\n    with:    ").append(newPreview.replace('\n', '↵'));
+        }
+
+        return sb.toString();
     }
 }
 
