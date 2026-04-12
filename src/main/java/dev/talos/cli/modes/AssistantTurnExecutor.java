@@ -5,6 +5,7 @@ import dev.talos.cli.repl.Result;
 import dev.talos.runtime.CodeBlockToolExtractor;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
+import dev.talos.runtime.ToolCallStreamFilter;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import org.slf4j.Logger;
@@ -90,6 +91,12 @@ final class AssistantTurnExecutor {
             if (ctx.streamSink() != null) {
                 // ── Streaming path ──────────────────────────────────────────
                 String answer = ctx.llm().chatStream(messages, ctx.streamSink());
+
+                // Flush the stream filter so any pending non-tool text is emitted
+                if (ctx.streamSink() instanceof ToolCallStreamFilter filter) {
+                    filter.flush();
+                }
+
                 if (answer != null) {
                     if (ctx.toolCallLoop() != null && hasAnyToolCalls(answer)) {
                         LOG.debug("Tool calls detected in streamed response, entering tool-call loop");

@@ -143,8 +143,16 @@ public final class FileEditTool implements TalosTool {
             // Report what changed
             long oldLines = oldString.chars().filter(c -> c == '\n').count() + 1;
             long newLines = newString.chars().filter(c -> c == '\n').count() + (newString.isEmpty() ? 0 : 1);
-            return ToolResult.ok("Edited " + pathParam + ": replaced " + oldLines + " line(s) with " +
-                    newLines + " line(s) (" + updated.length() + " bytes total)");
+            String base = "Edited " + pathParam + ": replaced " + oldLines + " line(s) with "
+                    + newLines + " line(s) (" + updated.length() + " bytes total)";
+
+            // Post-write verification
+            ContentVerifier.VerifyResult vr = ContentVerifier.verify(resolved, updated);
+            if (vr.ok()) {
+                return ToolResult.ok(base + ". Verified: " + vr.summary() + ".");
+            } else {
+                return ToolResult.ok(base + ". Warning: " + vr.summary() + ".");
+            }
         } catch (IOException e) {
             return ToolResult.fail(ToolError.internal("Failed to edit file: " + e.getMessage()));
         }

@@ -124,7 +124,15 @@ public final class FileWriteTool implements TalosTool {
 
             long lines = content.chars().filter(c -> c == '\n').count() + (content.isEmpty() ? 0 : 1);
             String verb = existed ? "Updated" : "Created";
-            return ToolResult.ok(verb + " " + pathParam + " (" + lines + " lines, " + content.length() + " bytes)");
+            String base = verb + " " + pathParam + " (" + lines + " lines, " + content.length() + " bytes)";
+
+            // Post-write verification
+            ContentVerifier.VerifyResult vr = ContentVerifier.verify(resolved, content);
+            if (vr.ok()) {
+                return ToolResult.ok(base + ". Verified: " + vr.summary() + ".");
+            } else {
+                return ToolResult.ok(base + ". Warning: " + vr.summary() + ".");
+            }
         } catch (IOException e) {
             return ToolResult.fail(ToolError.internal("Failed to write file: " + e.getMessage()));
         }
