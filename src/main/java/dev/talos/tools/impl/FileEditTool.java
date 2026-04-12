@@ -88,6 +88,13 @@ public final class FileEditTool implements TalosTool {
             newString = sanitizedNew;
         }
 
+        // Reject no-op edits (old_string == new_string)
+        if (oldString.equals(newString)) {
+            return ToolResult.fail(ToolError.invalidParams(
+                    "old_string and new_string are identical — no change would be made. "
+                    + "Verify the intended edit and provide different replacement text."));
+        }
+
         // --- Resolve and sandbox-check ---
         Path resolved = ctx.resolve(pathParam);
         if (!ctx.sandbox().allowedPath(resolved)) {

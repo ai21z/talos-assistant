@@ -11,13 +11,9 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Agentic tool-call loop: parses tool calls from LLM responses, executes
@@ -136,9 +132,14 @@ public final class ToolCallLoop {
         }
 
         if (!ToolCallParser.containsToolCalls(initialAnswer)) {
-            // Safety-net: check for implicit file operations in code blocks with filename hints
+            // Safety note: CodeBlockToolExtractor was previously used here as a fallback
+            // to convert code blocks with filename hints into write_file calls.
+            // This was DISABLED because it silently mutates files from what the model
+            // intended as explanatory markdown. The model must use <tool_call> format
+            // to perform file operations. See: transcript analysis 2026-04-12.
             if (CodeBlockToolExtractor.containsExtractableBlocks(initialAnswer)) {
-                return runCodeBlockFallback(initialAnswer, messages, workspace, ctx);
+                LOG.warn("Response contains code blocks with filename hints but no <tool_call> blocks. "
+                        + "File writes were NOT performed. The model should use tool_call format for file operations.");
             }
             return new LoopResult(initialAnswer, 0, 0, List.of(), messages);
         }
@@ -168,8 +169,8 @@ public final class ToolCallLoop {
 
             // 3. Execute each tool call and append results
             for (ToolCall call : calls) {
-                // Repair missing 'path' for write/edit calls (model forgets it with long content)
-                ToolCall effective = repairMissingPath(call, messages);
+                // Check for missing 'path' on write/edit calls — returns as-is (no inference)
+                ToolCall effective = repairMissingPath(call);
                 totalToolsInvoked++;
                 toolNames.add(effective.toolName());
 
@@ -248,38 +249,6 @@ public final class ToolCallLoop {
         LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked", iterations, totalToolsInvoked);
 
         return new LoopResult(finalAnswer, iterations, totalToolsInvoked, List.copyOf(toolNames), messages);
-    }
-
-    /**
-     * Fallback: execute implicit write_file calls extracted from code blocks
-     * with filename hints. Single-pass (no re-prompting) — the LLM already
-     * produced the final answer, it just used code fences instead of
-     * {@code <tool_call>} blocks.
-     */
-    private LoopResult runCodeBlockFallback(String answer, List<ChatMessage> messages,
-                                            Path workspace, Context ctx) {
-        List<ToolCall> calls = CodeBlockToolExtractor.extract(answer);
-        if (calls.isEmpty()) {
-            return new LoopResult(answer, 0, 0, List.of(), messages);
-        }
-
-        Session toolSession = new Session(workspace, ctx.cfg());
-        List<String> toolNames = new ArrayList<>();
-        int executed = 0;
-
-        LOG.info("Detected {} implicit write_file call(s) from code blocks (safety-net extraction)", calls.size());
-
-        for (ToolCall call : calls) {
-            toolNames.add(call.toolName());
-            emitProgress(call.toolName(), "executing", resolvePathHint(call));
-            ToolResult result = turnProcessor.executeTool(toolSession, call, ctx);
-            emitToolResult(call.toolName(), result);
-            executed++;
-            LOG.debug("  Code-block tool {} → {}", call.toolName(),
-                    result.success() ? "success" : "error: " + result.errorMessage());
-        }
-
-        return new LoopResult(answer, 1, executed, List.copyOf(toolNames), messages);
     }
 
     /**
@@ -370,15 +339,7 @@ public final class ToolCallLoop {
         return null;
     }
 
-    /**
-     * Test-only accessor for {@link #repairMissingPath(ToolCall, List)}.
-     * Package-private — used by {@code PathInferenceTest} in the same package.
-     */
-    static ToolCall testRepairMissingPath(ToolCall call, List<ChatMessage> messages) {
-        return repairMissingPath(call, messages);
-    }
-
-    // ---- Path inference for write/edit calls with missing path ----
+    // ---- Path safety for write/edit calls with missing path ----
 
     /** Tool names that require a 'path' parameter and frequently have it omitted by models. */
     private static final Set<String> PATH_REQUIRED_TOOLS = Set.of(
@@ -391,51 +352,19 @@ public final class ToolCallLoop {
     );
 
     /**
-     * Pattern to detect file path references in tool call parameter dumps.
-     * Matches the path parameter from read_file calls in log-style messages.
-     */
-    private static final Pattern READ_FILE_PATH_PARAM = Pattern.compile(
-            "talos\\.read_file\\s*\\(params:\\s*\\{path=([^,}]+)"
-    );
-
-    /** Common file extension pattern for extracting file names from user text. */
-    private static final Pattern FILE_NAME_PATTERN = Pattern.compile(
-            "\\b([\\w./-]+\\.(?:html?|css|js|jsx|ts|tsx|json|ya?ml|xml|md|txt|java|py|rb|go|rs|c|cpp|h|sh|bat|ps1|sql|csv|toml|ini|cfg|conf|properties|gradle|kts))\\b",
-            Pattern.CASE_INSENSITIVE
-    );
-
-    /**
-     * Pattern to match file path headers in RAG context snippets.
-     * Matches both backtick-quoted and plain bracket styles:
-     * <ul>
-     *   <li>{@code [`index.html`]}</li>
-     *   <li>{@code [`src/main.js#0`]}</li>
-     *   <li>{@code [index.html]}</li>
-     * </ul>
-     * Strips optional chunk suffixes ({@code #0}, {@code #1}) from paths.
-     */
-    private static final Pattern RAG_SNIPPET_PATH = Pattern.compile(
-            "\\[`?([\\w./-]+\\.(?:html?|css|js|jsx|ts|tsx|json|ya?ml|xml|md|txt|java|py|rb|go|rs|c|cpp|h|sh|bat|ps1|sql|csv|toml|ini|cfg|conf|properties|gradle|kts))(?:#\\d+)?`?\\]",
-            Pattern.CASE_INSENSITIVE
-    );
-
-    /**
-     * If a write/edit tool call is missing the 'path' parameter, attempt to infer
-     * it from conversation context. Returns the original call unchanged if:
-     * <ul>
-     *   <li>The tool doesn't need path repair</li>
-     *   <li>The path is already present</li>
-     *   <li>No path can be inferred from context</li>
-     * </ul>
+     * Check for missing 'path' on write/edit tool calls.
      *
-     * <p>Inference sources (in priority order):
-     * <ol>
-     *   <li>Previous {@code talos.read_file} tool results in the conversation</li>
-     *   <li>File name references in the user's most recent message</li>
-     * </ol>
+     * <p><strong>For mutating tools (write_file, edit_file):</strong> a missing path
+     * is returned as-is so the tool produces a clear error. Path inference was
+     * previously used here but proved too dangerous — it silently wrote files to
+     * guessed targets (e.g. inferring 'styles.css' when the model intended 'index.html').
+     * The model must provide the path explicitly.
+     *
+     * <p><strong>For read-only tools:</strong> the call is returned unchanged
+     * (those tools already produce safe errors for missing paths).
      */
-    private static ToolCall repairMissingPath(ToolCall call, List<ChatMessage> messages) {
-        // Only repair write/edit tools
+    static ToolCall repairMissingPath(ToolCall call) {
+        // Only check write/edit tools
         if (!PATH_REQUIRED_TOOLS.contains(call.toolName())) {
             return call;
         }
@@ -446,199 +375,12 @@ public final class ToolCallLoop {
             if (v != null && !v.isBlank()) return call; // path is present, no repair needed
         }
 
-        // Path is genuinely missing — try to infer it
-        String inferred = inferPathFromContext(messages);
-        if (inferred == null || inferred.isBlank()) {
-            LOG.warn("write/edit tool call missing 'path' parameter and no path could be inferred from context");
-            return call; // can't fix it, let the tool produce its error
-        }
-
-        // Build a repaired ToolCall with the inferred path injected
-        Map<String, String> repairedParams = new HashMap<>(call.parameters());
-        repairedParams.put("path", inferred);
-
-        LOG.info("Repaired missing 'path' parameter for {}: inferred '{}' from conversation context",
-                call.toolName(), inferred);
-
-        return new ToolCall(call.toolName(), repairedParams);
-    }
-
-    /**
-     * Scan conversation messages to find the most likely target file path.
-     * Returns null if no path can be inferred.
-     *
-     * <p>Strategies (in priority order):
-     * <ol>
-     *   <li>Previous {@code talos.read_file} tool calls in current-turn messages</li>
-     *   <li>File name references in the user's most recent question</li>
-     *   <li>File path references in RAG context snippets ({@code [`path`]} headers)</li>
-     *   <li>File name references in any message (history answers, prior questions)</li>
-     * </ol>
-     */
-    private static String inferPathFromContext(List<ChatMessage> messages) {
-        if (messages == null || messages.isEmpty()) return null;
-
-        // Strategy 1: Find the most recent read_file tool call in assistant messages
-        // (works within the same turn — the tool_call XML is in the current conversation)
-        String fromToolHistory = findLastReadFilePath(messages);
-        if (fromToolHistory != null) return fromToolHistory;
-
-        // Strategy 2: Find file name references in the user's most recent question
-        String fromUserMessage = findFileNameInLastUserMessage(messages);
-        if (fromUserMessage != null) return fromUserMessage;
-
-        // Strategy 3: Find file path from RAG context snippets (e.g., [`index.html`] headers)
-        String fromContext = findFileNameInRagContext(messages);
-        if (fromContext != null) return fromContext;
-
-        // Strategy 4: Broader scan — file name in ANY message (history answers, old questions)
-        return findFileNameInAnyMessage(messages);
-    }
-
-    /**
-     * Scan messages (newest first) for previous read_file tool calls and
-     * extract the path that was read.
-     */
-    private static String findLastReadFilePath(List<ChatMessage> messages) {
-        // Walk backwards — most recent messages first
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            ChatMessage msg = messages.get(i);
-            if (msg == null || msg.content() == null) continue;
-            String text = msg.content();
-
-            // Check for tool_call JSON in assistant messages: {"name":"talos.read_file","parameters":{"path":"..."}}
-            if ("assistant".equals(msg.role()) && text.contains("talos.read_file")) {
-                String path = extractPathFromToolCallJson(text);
-                if (path != null) return path;
-            }
-        }
-
-        // Also try matching path from debug-style parameter dumps
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            ChatMessage msg = messages.get(i);
-            if (msg == null || msg.content() == null) continue;
-            Matcher m = READ_FILE_PATH_PARAM.matcher(msg.content());
-            if (m.find()) return m.group(1).trim();
-        }
-
-        return null;
-    }
-
-    /**
-     * Extract the 'path' value from a tool_call JSON block for talos.read_file.
-     * Handles both XML-wrapped and raw JSON formats.
-     */
-    private static String extractPathFromToolCallJson(String text) {
-        String toolName = "talos.read_file";
-        // Look for JSON pattern: "name":"talos.read_file","parameters":{"path":"<value>"}
-        int nameIdx = text.indexOf("\"name\":\"" + toolName + "\"");
-        if (nameIdx < 0) {
-            // Also try without quotes (some formats)
-            nameIdx = text.indexOf("\"name\": \"" + toolName + "\"");
-        }
-        if (nameIdx < 0) return null;
-
-        // Find "path" value after the name
-        int pathIdx = text.indexOf("\"path\"", nameIdx);
-        if (pathIdx < 0) return null;
-
-        // Extract the value: skip to the colon, then the opening quote
-        int colon = text.indexOf(':', pathIdx + 6);
-        if (colon < 0) return null;
-        int openQuote = text.indexOf('"', colon + 1);
-        if (openQuote < 0) return null;
-        int closeQuote = text.indexOf('"', openQuote + 1);
-        if (closeQuote < 0) return null;
-
-        String path = text.substring(openQuote + 1, closeQuote).trim();
-        return path.isEmpty() ? null : path;
-    }
-
-    /**
-     * Find a file name reference in the user's most recent message.
-     */
-    private static String findFileNameInLastUserMessage(List<ChatMessage> messages) {
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            ChatMessage msg = messages.get(i);
-            if (msg == null || !"user".equals(msg.role())) continue;
-            String text = msg.content();
-            if (text == null || text.startsWith("[tool_result:")) continue; // skip tool results
-
-            Matcher m = FILE_NAME_PATTERN.matcher(text);
-            if (m.find()) return m.group(1);
-
-            break; // only check the most recent actual user message
-        }
-        return null;
-    }
-
-    /**
-     * Strategy 3: Find file path from RAG context snippet headers.
-     *
-     * <p>RAG context is injected as a user-role message with paths in bracket
-     * headers: {@code [`index.html`]}. If the user says "update it", the RAG
-     * context still names the file. We pick the most recent (closest to the
-     * user question) file path found.
-     */
-    private static String findFileNameInRagContext(List<ChatMessage> messages) {
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            ChatMessage msg = messages.get(i);
-            if (msg == null || !"user".equals(msg.role())) continue;
-            String text = msg.content();
-            if (text == null) continue;
-            // Skip tool results
-            if (text.startsWith("[tool_result:")) continue;
-            // Look for RAG context marker
-            if (!text.contains("retrieved context") && !text.contains("snippets")) continue;
-
-            // Scan for snippet path headers (take the first/most prominent one)
-            Matcher m = RAG_SNIPPET_PATH.matcher(text);
-            if (m.find()) return m.group(1);
-        }
-        return null;
-    }
-
-    /**
-     * Strategy 4: Broader scan — find file name references in ANY message.
-     *
-     * <p>Walks backward through all messages (including history) looking for
-     * file name references. This handles cross-turn scenarios where the user
-     * said "read index.html" in Turn 1 and says "update it" in Turn 3 —
-     * the file name appears in the Turn 1 user message in history.
-     *
-     * <p>Skips tool results to avoid false positives from file content.
-     * Prefers user messages over assistant messages.
-     */
-    private static String findFileNameInAnyMessage(List<ChatMessage> messages) {
-        // First pass: user messages only (more reliable)
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            ChatMessage msg = messages.get(i);
-            if (msg == null || !"user".equals(msg.role())) continue;
-            String text = msg.content();
-            if (text == null) continue;
-            // Skip tool results and RAG context blocks (already checked by strategy 3)
-            if (text.startsWith("[tool_result:")) continue;
-            if (text.length() > 500) continue; // skip large blocks (RAG context, file content)
-
-            Matcher m = FILE_NAME_PATTERN.matcher(text);
-            if (m.find()) return m.group(1);
-        }
-        // Second pass: assistant messages (history answers that mention file names)
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            ChatMessage msg = messages.get(i);
-            if (msg == null || !"assistant".equals(msg.role())) continue;
-            String text = msg.content();
-            if (text == null) continue;
-            // Only scan short messages (direct mentions, not full file content)
-            if (text.length() > 1000) continue;
-
-            Matcher m = FILE_NAME_PATTERN.matcher(text);
-            if (m.find()) return m.group(1);
-        }
-        return null;
+        // Path is genuinely missing — do NOT infer for mutating tools.
+        // Let the tool produce its own clear error message so the model can retry.
+        LOG.warn("{} call is missing required 'path' parameter. "
+                + "Returning call as-is so the tool produces an error. "
+                + "The model must provide the target file path explicitly.", call.toolName());
+        return call;
     }
 }
-
-
-
 
