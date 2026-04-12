@@ -153,7 +153,7 @@ public final class TurnProcessor {
         if (risk.requiresApproval()) {
             String desc = risk.name().toLowerCase().replace('_', ' ')
                     + " operation: " + call.toolName();
-            String path = call.param("path");
+            String path = resolvePathParam(call);
             String detail;
             if (path != null && !path.isBlank()) {
                 detail = "target: " + path;
@@ -185,6 +185,19 @@ public final class TurnProcessor {
     /** Access the tool registry for tool discovery and registration. */
     public ToolRegistry toolRegistry() {
         return toolRegistry;
+    }
+
+    /**
+     * Resolve the target path from a tool call, trying common parameter name variants.
+     * Used for the approval gate display — even when the model uses non-canonical
+     * parameter names (e.g. {@code file_path} instead of {@code path}).
+     */
+    private static String resolvePathParam(ToolCall call) {
+        for (String key : List.of("path", "file_path", "filepath", "file", "filename")) {
+            String value = call.param(key);
+            if (value != null && !value.isBlank()) return value;
+        }
+        return null;
     }
 }
 

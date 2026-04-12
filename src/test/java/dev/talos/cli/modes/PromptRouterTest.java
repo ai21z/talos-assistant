@@ -235,10 +235,10 @@ class PromptRouterTest {
 
     @ParameterizedTest
     @ValueSource(strings = {
-        "fix the parser",
-        "refactor the pipeline",
-        "optimize the indexing",
+        "refactor the parser",
+        "optimize the pipeline",
         "configure the endpoint",
+        "analyze the indexing",
     })
     void action_with_anchored_noun_triggers_retrieval(String input) {
         assertEquals(RETRIEVE, PromptRouter.route(input),
@@ -263,7 +263,7 @@ class PromptRouterTest {
     @ParameterizedTest
     @ValueSource(strings = {
         "hey, write a test for RagService",
-        "ok fix the parser",
+        "ok refactor the parser",
         "actually, refactor ModeController",
     })
     void prefixed_action_with_workspace_signal_triggers_retrieval(String input) {
@@ -391,6 +391,91 @@ class PromptRouterTest {
     void strong_signal_overrides_follow_up_context() {
         assertEquals(RETRIEVE, PromptRouter.route("explain RagService.java", ASSIST));
         assertEquals(RETRIEVE, PromptRouter.route("what does this project do", ASSIST));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  MUTATION VERBS: edit/update/fix/change/improve → ASSIST (tool path)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "edit index.html",
+        "update index.html",
+        "fix index.html",
+        "change index.html",
+        "improve index.html",
+        "modify index.html",
+        "overwrite index.html",
+        "rewrite index.html",
+    })
+    void mutation_verb_with_file_ref_routes_to_assist(String input) {
+        assertEquals(ASSIST, PromptRouter.route(input),
+                "Mutation '" + input + "' must route to ASSIST (tools), not RETRIEVE");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "edit the file",
+        "update the file",
+        "fix the file",
+        "improve the file",
+        "change the stylesheet",
+    })
+    void mutation_verb_with_anchored_noun_routes_to_assist(String input) {
+        assertEquals(ASSIST, PromptRouter.route(input),
+                "Mutation '" + input + "' must route to ASSIST (tools), not RETRIEVE");
+    }
+
+    // ── Conversational prefix + mutation → ASSIST ─────────────────────────
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "Can you update the file so the website looks better?",
+        "Can you edit the file please?",
+        "Could you fix index.html?",
+        "please overwrite index.html",
+        "I want you to update the file",
+        "would you edit the stylesheet?",
+    })
+    void polite_mutation_request_routes_to_assist(String input) {
+        assertEquals(ASSIST, PromptRouter.route(input),
+                "Polite mutation request '" + input + "' must route to ASSIST (tools)");
+    }
+
+    // ── Mutation with PascalCase code target → still RETRIEVE ─────────────
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "fix RagService",
+        "edit ModeController",
+        "update ContextPacker",
+    })
+    void mutation_with_pascal_case_target_triggers_retrieval(String input) {
+        assertEquals(RETRIEVE, PromptRouter.route(input),
+                "Mutation+PascalCase '" + input + "' should RETRIEVE (needs code context)");
+    }
+
+    // ── Information questions about files must NOT regress ──────────────────
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "what is index.html?",
+        "explain styles.css",
+        "what does build.gradle.kts do",
+    })
+    void information_questions_about_files_still_retrieve_correctly(String input) {
+        assertEquals(RETRIEVE, PromptRouter.route(input),
+                "Info question '" + input + "' should still RETRIEVE");
+    }
+
+    // ── Deterministic commands must not regress ─────────────────────────────
+
+    @Test
+    void deterministic_commands_unchanged() {
+        assertEquals(COMMAND, PromptRouter.route("show index.html"));
+        assertEquals(COMMAND, PromptRouter.route("ls"));
+        assertEquals(COMMAND, PromptRouter.route("dir"));
+        assertEquals(COMMAND, PromptRouter.route("list"));
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -785,7 +870,7 @@ class PromptRouterTest {
 
     @Test
     void action_after_assist_triggers_retrieval_independently() {
-        assertEquals(RETRIEVE, PromptRouter.route("fix the parser", ASSIST));
+        assertEquals(RETRIEVE, PromptRouter.route("refactor the parser", ASSIST));
         assertEquals(RETRIEVE, PromptRouter.route("refactor ModeController", ASSIST));
     }
 
@@ -797,7 +882,9 @@ class PromptRouterTest {
 
     @Test
     void action_with_file_reference_already_routes() {
-        assertEquals(RETRIEVE, PromptRouter.route("edit build.gradle.kts"));
+        // Mutation verb + file ref (no PascalCase) → ASSIST (tools)
+        assertEquals(ASSIST, PromptRouter.route("edit build.gradle.kts"));
+        // Mutation verb + file ref with PascalCase → RETRIEVE (needs code context)
         assertEquals(RETRIEVE, PromptRouter.route("fix RagService.java"));
     }
 
@@ -1018,6 +1105,14 @@ class PromptRouterTest {
         "list all files",
         "search for TODO",
         "grep for errors",
+        "edit the file",
+        "update the config",
+        "fix the bug",
+        "change the layout",
+        "improve the styling",
+        "modify the header",
+        "overwrite index.html",
+        "rewrite the css",
     })
     void isMutationOrInspection_true(String input) {
         assertTrue(PromptRouter.isMutationOrInspection(input),
@@ -1026,7 +1121,7 @@ class PromptRouterTest {
 
     @ParameterizedTest
     @ValueSource(strings = {
-        "fix the parser",
+        "refactor the parser",
         "explain how it works",
         "what is a binary tree",
     })

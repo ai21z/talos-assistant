@@ -61,18 +61,18 @@ public final class FileEditTool implements TalosTool {
     public ToolResult execute(ToolCall call, ToolContext ctx) {
         if (ctx == null) return execute(call);
 
-        // --- Validate parameters ---
-        String pathParam = call.param("path");
+        // --- Validate parameters (with alias resolution) ---
+        String pathParam = resolveParam(call, "path", "file_path", "filepath", "file", "filename");
         if (pathParam == null || pathParam.isBlank()) {
             return ToolResult.fail(ToolError.invalidParams("Missing required parameter: path"));
         }
 
-        String oldString = call.param("old_string");
+        String oldString = resolveParam(call, "old_string", "oldString", "old_text", "search", "find", "original");
         if (oldString == null || oldString.isEmpty()) {
             return ToolResult.fail(ToolError.invalidParams("Missing required parameter: old_string"));
         }
 
-        String newString = call.param("new_string");
+        String newString = resolveParam(call, "new_string", "newString", "new_text", "replace", "replacement");
         if (newString == null) {
             return ToolResult.fail(ToolError.invalidParams("Missing required parameter: new_string"));
         }
@@ -151,6 +151,21 @@ public final class FileEditTool implements TalosTool {
             idx += needle.length();
         }
         return count;
+    }
+
+    /**
+     * Resolve a parameter by trying the canonical key first, then known aliases.
+     * Models frequently use alternative names (e.g. {@code file_path} instead of
+     * {@code path}, {@code oldString} instead of {@code old_string}).
+     */
+    private static String resolveParam(ToolCall call, String canonical, String... aliases) {
+        String value = call.param(canonical);
+        if (value != null) return value;
+        for (String alias : aliases) {
+            value = call.param(alias);
+            if (value != null) return value;
+        }
+        return null;
     }
 }
 

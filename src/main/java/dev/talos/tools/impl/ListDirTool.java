@@ -54,7 +54,7 @@ public final class ListDirTool implements TalosTool {
     public ToolResult execute(ToolCall call, ToolContext ctx) {
         if (ctx == null) return execute(call);
 
-        String pathParam = call.param("path");
+        String pathParam = resolveParam(call, "path", "dir", "directory", "dir_path", "folder");
         if (pathParam == null || pathParam.isBlank()) {
             pathParam = "."; // default to workspace root
         }
@@ -124,6 +124,17 @@ public final class ListDirTool implements TalosTool {
         } catch (NumberFormatException e) {
             return defaultValue;
         }
+    }
+
+    /** Resolve a parameter by trying the canonical key first, then known aliases. */
+    private static String resolveParam(ToolCall call, String canonical, String... aliases) {
+        String value = call.param(canonical);
+        if (value != null) return value;
+        for (String alias : aliases) {
+            value = call.param(alias);
+            if (value != null) return value;
+        }
+        return null;
     }
 }
 

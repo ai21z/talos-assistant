@@ -9,16 +9,17 @@ import java.util.*;
 /**
  * Router over registered Mode strategies with an active-mode concept.
  *
- * <h3>Auto-mode routing (assistant-first)</h3>
- * <p>Uses {@link PromptRouter} to make a definitive routing decision:
+ * <h3>Auto-mode routing (unified-first)</h3>
+ * <p>Uses {@link PromptRouter} for classification, but only deterministic
+ * commands dispatch to a separate mode:
  * <ul>
- *   <li>{@code COMMAND}  → DevMode (structural file ops)</li>
- *   <li>{@code RETRIEVE} → RagMode (strong workspace evidence)</li>
- *   <li>{@code ASSIST}   → AskMode/ChatMode (default — no retrieval)</li>
+ *   <li>{@code COMMAND}  → DevMode (structural file ops: ls, dir, show, open)</li>
+ *   <li>Everything else → UnifiedAssistantMode (tools + retrieval-as-tool)</li>
  * </ul>
  *
- * <p>There is no UNKNOWN state and no retrieval-biased fallback sweep.
- * If the classified mode fails, the fallback is always ASSIST, never RAG.
+ * <p>RagMode is still available via explicit {@code /mode rag} but is never
+ * selected by auto-mode. The unified assistant handles retrieval by calling
+ * {@code talos.retrieve} as a tool when it needs workspace context.
  *
  * <p>When mode is explicitly set (not "auto"), that mode handles the input
  * directly. Explicit mode selection overrides the router.
@@ -123,30 +124,32 @@ public final class ModeController {
         return Optional.empty();
     }
 
-    /** Auto-mode: classify → try classified mode → fallback to ASSIST (never RAG). */
+    /**
+     * Auto-mode: deterministic commands → DevMode, everything else → UnifiedAssistantMode.
+     *
+     * <p>The PromptRouter still classifies for diagnostics (route hint, lastRoute tracking),
+     * but only COMMAND triggers deterministic dispatch. RETRIEVE and ASSIST both go to
+     * the unified assistant, which decides when to retrieve via tools.
+     */
     private Optional<Result> routeAuto(String rawLine, Path workspace, Context ctx) throws Exception {
 
-        // Classify the prompt with conversation context and workspace awareness
+        // Classify the prompt (used for diagnostics and route hints, not hard dispatch)
         PromptRouter.Route route = PromptRouter.route(rawLine, lastRoute, symbolChecker);
 
-        // Try the classified mode
-        Optional<Result> r = switch (route) {
-            case COMMAND  -> tryMode(byName.get("dev"), rawLine, workspace, ctx);
-            case RETRIEVE -> tryMode(byName.get("rag"), rawLine, workspace, ctx);
-            case ASSIST   -> tryMode(resolveChat(), rawLine, workspace, ctx);
-        };
+        // Deterministic: structural commands (ls, dir, show, open) → DevMode
+        if (route == PromptRouter.Route.COMMAND) {
+            Optional<Result> r = tryMode(byName.get("dev"), rawLine, workspace, ctx);
+            if (r.isPresent()) {
+                updateLastRoute(route);
+                return r;
+            }
+        }
+
+        // Everything else → UnifiedAssistantMode (via "chat" alias → unified)
+        Optional<Result> r = tryMode(resolveChat(), rawLine, workspace, ctx);
         if (r.isPresent()) {
             updateLastRoute(route);
             return r;
-        }
-
-        // Universal fallback: always assistant, never RAG
-        if (route != PromptRouter.Route.ASSIST) {
-            r = tryMode(resolveChat(), rawLine, workspace, ctx);
-            if (r.isPresent()) {
-                updateLastRoute(PromptRouter.Route.ASSIST);
-                return r;
-            }
         }
 
         return Optional.empty();
@@ -186,16 +189,22 @@ public final class ModeController {
 
     /**
      * Creates a default controller with standard modes registered.
-     * "chat" is registered as an alias for AskMode.
+     *
+     * <p>Registration order matters for sweep fallback.
+     * "chat" is registered as an alias for UnifiedAssistantMode (used by auto-mode).
+     * AskMode remains registered for backward compatibility and explicit /mode ask.
      */
     public static ModeController defaultController() {
         AskMode askMode = new AskMode();
+        UnifiedAssistantMode unifiedMode = new UnifiedAssistantMode();
         return new ModeController()
                 .add(new DevMode())
                 .add(new RagMode())
                 .add(askMode)
+                .add(unifiedMode)
                 .add(new WebMode())
                 .add(new AutoMode())
-                .alias("chat", askMode);
+                .alias("chat", unifiedMode)  // auto-mode resolveChat() → unified
+                .alias("ask", askMode);       // explicit /mode ask still works
     }
 }

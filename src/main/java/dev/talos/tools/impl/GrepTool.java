@@ -61,7 +61,7 @@ public final class GrepTool implements TalosTool {
     public ToolResult execute(ToolCall call, ToolContext ctx) {
         if (ctx == null) return execute(call);
 
-        String patternStr = call.param("pattern");
+        String patternStr = resolveParam(call, "pattern", "query", "search", "text", "search_pattern", "search_text");
         if (patternStr == null || patternStr.isBlank()) {
             return ToolResult.fail(ToolError.invalidParams("Missing required parameter: pattern"));
         }
@@ -201,6 +201,17 @@ public final class GrepTool implements TalosTool {
         } catch (NumberFormatException e) {
             return defaultValue;
         }
+    }
+
+    /** Resolve a parameter by trying the canonical key first, then known aliases. */
+    private static String resolveParam(ToolCall call, String canonical, String... aliases) {
+        String value = call.param(canonical);
+        if (value != null) return value;
+        for (String alias : aliases) {
+            value = call.param(alias);
+            if (value != null) return value;
+        }
+        return null;
     }
 }
 

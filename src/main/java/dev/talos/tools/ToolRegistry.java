@@ -25,6 +25,7 @@ public final class ToolRegistry {
      * name. Maps alias → canonical tool name.
      */
     private static final Map<String, String> ALIASES = Map.ofEntries(
+            // snake_case variants
             Map.entry("file_write",    "talos.write_file"),
             Map.entry("write_file",    "talos.write_file"),
             Map.entry("file_read",     "talos.read_file"),
@@ -36,7 +37,14 @@ public final class ToolRegistry {
             Map.entry("dir_list",      "talos.list_dir"),
             Map.entry("grep",          "talos.grep"),
             Map.entry("search",        "talos.grep"),
-            Map.entry("retrieve",      "talos.retrieve")
+            Map.entry("retrieve",      "talos.retrieve"),
+            // camelCase variants (models frequently emit these)
+            Map.entry("writefile",     "talos.write_file"),
+            Map.entry("readfile",      "talos.read_file"),
+            Map.entry("editfile",      "talos.edit_file"),
+            Map.entry("listdir",       "talos.list_dir"),
+            Map.entry("listdirectory", "talos.list_dir"),
+            Map.entry("grepsearch",    "talos.grep")
     );
 
     public void register(TalosTool tool) {
@@ -49,6 +57,7 @@ public final class ToolRegistry {
      *   <li>Adding {@code talos.} prefix</li>
      *   <li>Known alias mapping</li>
      *   <li>Stripping {@code talos.} prefix</li>
+     *   <li>Case-insensitive / camelCase normalization</li>
      * </ol>
      */
     public TalosTool get(String name) {
@@ -85,6 +94,46 @@ public final class ToolRegistry {
                 if (tool != null) {
                     LOG.debug("Alias tool match (stripped prefix): '{}' → '{}'", name, canonical);
                     return tool;
+                }
+            }
+        }
+
+        // 5. Case-insensitive normalization: lowercase the name (handles camelCase
+        //    like writeFile → writefile, ReadFile → readfile) and retry alias lookup
+        String lowered = name.toLowerCase(java.util.Locale.ROOT);
+        if (!lowered.equals(name)) {
+            // Try exact match with lowered name
+            tool = tools.get(lowered);
+            if (tool != null) {
+                LOG.debug("Case-normalized tool match: '{}' → '{}'", name, tool.name());
+                return tool;
+            }
+            // Try talos. prefix with lowered name
+            if (!lowered.startsWith("talos.")) {
+                tool = tools.get("talos." + lowered);
+                if (tool != null) {
+                    LOG.debug("Case-normalized tool match: '{}' → '{}'", name, tool.name());
+                    return tool;
+                }
+            }
+            // Try alias lookup with lowered name
+            canonical = ALIASES.get(lowered);
+            if (canonical != null) {
+                tool = tools.get(canonical);
+                if (tool != null) {
+                    LOG.debug("Case-normalized alias match: '{}' → '{}'", name, canonical);
+                    return tool;
+                }
+            }
+            // Try alias after stripping talos. prefix from lowered name
+            if (lowered.startsWith("talos.")) {
+                canonical = ALIASES.get(lowered.substring(6));
+                if (canonical != null) {
+                    tool = tools.get(canonical);
+                    if (tool != null) {
+                        LOG.debug("Case-normalized alias match (stripped): '{}' → '{}'", name, canonical);
+                        return tool;
+                    }
                 }
             }
         }

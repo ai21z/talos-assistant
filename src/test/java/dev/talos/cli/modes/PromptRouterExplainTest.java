@@ -307,7 +307,7 @@ class PromptRouterExplainTest {
 
     @Test
     void action_with_anchored_noun_trigger() {
-        var r = PromptRouter.explainRoute("fix the parser", null, null);
+        var r = PromptRouter.explainRoute("refactor the parser", null, null);
         assertEquals(RETRIEVE, r.route());
         assertEquals("anchored tech noun in action", r.trigger());
         assertTrue(r.steps().contains("action context + anchored tech noun"));
@@ -332,8 +332,8 @@ class PromptRouterExplainTest {
 
     @Test
     void action_label_takes_priority_when_both_action_and_question() {
-        // "fix the parser?" is both action-like and question-like (ends with ?)
-        var r = PromptRouter.explainRoute("fix the parser?", null, null);
+        // "refactor the parser?" is both action-like and question-like (ends with ?)
+        var r = PromptRouter.explainRoute("refactor the parser?", null, null);
         assertEquals(RETRIEVE, r.route());
         // Action is checked first in the ternary
         assertEquals("anchored tech noun in action", r.trigger());
