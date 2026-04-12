@@ -19,6 +19,7 @@ import dev.talos.runtime.Session;
 import dev.talos.runtime.SessionData;
 import dev.talos.runtime.SessionStore;
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.ToolCallStreamFilter;
 import dev.talos.runtime.TurnProcessor;
 import dev.talos.tools.FileUndoStack;
 import dev.talos.tools.ToolRegistry;
@@ -153,13 +154,15 @@ public final class TalosBootstrap {
         RenderEngine render = new RenderEngine(cfg, redactor, out);
 
         // Stream sink: stops spinner on first chunk and prints directly to stdout.
+        // Wrapped in ToolCallStreamFilter to suppress <tool_call> XML from display.
         final PrintStream stdout = out;
         final RenderEngine renderRef = render;
-        java.util.function.Consumer<String> streamSink = chunk -> {
+        java.util.function.Consumer<String> rawSink = chunk -> {
             renderRef.stopSpinner();
             stdout.print(chunk);
             stdout.flush();
         };
+        java.util.function.Consumer<String> streamSink = new ToolCallStreamFilter(rawSink);
 
         // ── Context (dependency bag for modes and commands) ──────────────
         Context ctx = Context.builder(cfg)
