@@ -1,6 +1,8 @@
 package dev.talos.tools.impl;
 
 import dev.talos.tools.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -29,6 +31,7 @@ import java.time.Instant;
  */
 public final class FileEditTool implements TalosTool {
 
+    private static final Logger LOG = LoggerFactory.getLogger(FileEditTool.class);
     private static final String NAME = "talos.edit_file";
     private static final long MAX_FILE_SIZE = 2 * 1024 * 1024L; // 2 MiB
 
@@ -75,6 +78,14 @@ public final class FileEditTool implements TalosTool {
         String newString = resolveParam(call, "new_string", "newString", "new_text", "replace", "replacement");
         if (newString == null) {
             return ToolResult.fail(ToolError.invalidParams("Missing required parameter: new_string"));
+        }
+
+        // Strip trailing markdown commentary that LLMs accidentally include
+        String sanitizedNew = ContentSanitizer.sanitize(newString, pathParam);
+        if (sanitizedNew.length() < newString.length()) {
+            LOG.debug("Stripped {} chars of trailing markdown commentary from edit_file new_string for {}",
+                    newString.length() - sanitizedNew.length(), pathParam);
+            newString = sanitizedNew;
         }
 
         // --- Resolve and sandbox-check ---

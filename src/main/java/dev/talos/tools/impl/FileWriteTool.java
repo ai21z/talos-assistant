@@ -1,6 +1,8 @@
 package dev.talos.tools.impl;
 
 import dev.talos.tools.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -25,6 +27,7 @@ import java.time.Instant;
  */
 public final class FileWriteTool implements TalosTool {
 
+    private static final Logger LOG = LoggerFactory.getLogger(FileWriteTool.class);
     private static final String NAME = "talos.write_file";
     private static final long MAX_CONTENT_SIZE = 1024 * 1024L; // 1 MiB content cap
 
@@ -67,6 +70,14 @@ public final class FileWriteTool implements TalosTool {
         String content = resolveParam(call, "content", "text", "body", "data", "file_content");
         if (content == null) {
             return ToolResult.fail(ToolError.invalidParams("Missing required parameter: content"));
+        }
+
+        // Strip trailing markdown commentary that LLMs accidentally include
+        String sanitized = ContentSanitizer.sanitize(content, pathParam);
+        if (sanitized.length() < content.length()) {
+            LOG.debug("Stripped {} chars of trailing markdown commentary from write_file content for {}",
+                    content.length() - sanitized.length(), pathParam);
+            content = sanitized;
         }
 
         // Content size guard
