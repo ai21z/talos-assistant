@@ -94,11 +94,8 @@ public final class ReplRouter {
         if ("auto".equals(modes.getActiveName())) {
             PromptRouter.Route preview = PromptRouter.route(rawLine, modes.lastRoute(),
                     modes.getSymbolChecker());
-            String label = switch (preview) {
-                case RETRIEVE -> "rag";
-                case COMMAND  -> "dev";
-                case ASSIST   -> "ask";
-            };
+            // In auto-mode: COMMAND → dev, everything else → unified
+            String label = (preview == PromptRouter.Route.COMMAND) ? "dev" : "unified";
             render.printRouteHint(label);
         }
 

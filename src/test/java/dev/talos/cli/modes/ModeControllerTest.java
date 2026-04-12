@@ -71,7 +71,7 @@ class ModeControllerTest {
     // ── Alias behavior ──────────────────────────────────────────────────
 
     @Test
-    void chat_and_ask_resolve_to_same_mode_instance() {
+    void chat_resolves_to_unified_and_ask_resolves_to_askMode() {
         ModeController mc = ModeController.defaultController();
 
         mc.setActive("ask");
@@ -82,7 +82,17 @@ class ModeControllerTest {
 
         assertNotNull(askMode);
         assertNotNull(chatMode);
-        assertSame(askMode, chatMode, "chat and ask should resolve to the same Mode instance");
+        // In the new architecture: chat → UnifiedAssistantMode, ask → AskMode
+        assertNotSame(askMode, chatMode, "chat (unified) and ask should be different instances");
+        assertTrue(chatMode instanceof UnifiedAssistantMode, "chat should resolve to UnifiedAssistantMode");
+        assertTrue(askMode instanceof AskMode, "ask should resolve to AskMode");
+    }
+
+    @Test
+    void defaultController_can_set_unified_mode() {
+        ModeController mc = ModeController.defaultController();
+        assertTrue(mc.setActive("unified"), "Should accept 'unified' as a valid mode");
+        assertEquals("unified", mc.getActiveName());
     }
 
     // ── Edge cases ──────────────────────────────────────────────────────
@@ -171,7 +181,7 @@ class ModeControllerTest {
     }
 
     @Test
-    void auto_mode_routes_file_ref_to_rag() throws Exception {
+    void auto_mode_routes_file_ref_to_unified() throws Exception {
         var dev = new RecordingStub("dev");
         var rag = new RecordingStub("rag");
         var ask = new RecordingStub("ask");
@@ -180,8 +190,9 @@ class ModeControllerTest {
 
         mc.route("explain RagService.java", WS, ctx);
 
-        assertTrue(rag.invoked, "File ref should route to rag");
-        assertFalse(ask.invoked, "File ref should NOT route to ask");
+        // In unified architecture: all non-COMMAND → unified (chat alias → ask stub)
+        assertTrue(ask.invoked, "File ref should route to unified (chat/ask) in auto-mode");
+        assertFalse(rag.invoked, "File ref should NOT route to rag in auto-mode");
     }
 
     @Test
@@ -255,54 +266,56 @@ class ModeControllerTest {
     }
 
     @Test
-    void follow_up_after_retrieve_routes_to_rag() throws Exception {
+    void follow_up_after_retrieve_routes_to_unified() throws Exception {
         var dev = new RecordingStub("dev");
         var rag = new RecordingStub("rag");
         var ask = new RecordingStub("ask");
         var mc = stubController(dev, rag, ask);
         var ctx = Context.builder(new Config()).build();
 
-        mc.route("explain RagService.java", WS, ctx); // → RETRIEVE
-        rag.reset();
+        mc.route("explain RagService.java", WS, ctx); // → classified RETRIEVE, dispatched to unified
+        ask.reset();
 
-        mc.route("what about the parse method?", WS, ctx); // → follow-up → RETRIEVE
-        assertTrue(rag.invoked, "Follow-up after RETRIEVE should route to rag");
+        mc.route("what about the parse method?", WS, ctx); // → follow-up, dispatched to unified
+        assertTrue(ask.invoked, "Follow-up should route to unified (chat/ask) in auto-mode");
+        assertFalse(rag.invoked, "Follow-up should NOT route to rag in auto-mode");
     }
 
     @Test
-    void social_follow_up_after_retrieve_routes_to_ask() throws Exception {
+    void social_follow_up_after_retrieve_routes_to_unified() throws Exception {
         var dev = new RecordingStub("dev");
         var rag = new RecordingStub("rag");
         var ask = new RecordingStub("ask");
         var mc = stubController(dev, rag, ask);
         var ctx = Context.builder(new Config()).build();
 
-        mc.route("explain RagService.java", WS, ctx); // → RETRIEVE
+        mc.route("explain RagService.java", WS, ctx); // → classified RETRIEVE
         ask.reset();
         rag.reset();
 
-        mc.route("thanks", WS, ctx); // → social → ASSIST
-        assertTrue(ask.invoked, "Social follow-up should route to ask, not rag");
+        mc.route("thanks", WS, ctx); // → social → classified ASSIST → unified
+        assertTrue(ask.invoked, "Social follow-up should route to unified");
         assertFalse(rag.invoked, "Social follow-up must NOT route to rag");
     }
 
     @Test
-    void prefixed_follow_up_after_retrieve_routes_to_rag() throws Exception {
+    void prefixed_follow_up_after_retrieve_routes_to_unified() throws Exception {
         var dev = new RecordingStub("dev");
         var rag = new RecordingStub("rag");
         var ask = new RecordingStub("ask");
         var mc = stubController(dev, rag, ask);
         var ctx = Context.builder(new Config()).build();
 
-        mc.route("explain RagService.java", WS, ctx); // → RETRIEVE
-        rag.reset();
+        mc.route("explain RagService.java", WS, ctx); // → classified RETRIEVE
+        ask.reset();
 
-        mc.route("cool, and the parser?", WS, ctx); // → prefixed follow-up → RETRIEVE
-        assertTrue(rag.invoked, "Prefixed follow-up after RETRIEVE should route to rag");
+        mc.route("cool, and the parser?", WS, ctx); // → prefixed follow-up → unified
+        assertTrue(ask.invoked, "Prefixed follow-up should route to unified in auto-mode");
+        assertFalse(rag.invoked, "Prefixed follow-up should NOT route to rag in auto-mode");
     }
 
     @Test
-    void new_tech_noun_question_routes_to_rag() throws Exception {
+    void new_tech_noun_question_routes_to_unified() throws Exception {
         var dev = new RecordingStub("dev");
         var rag = new RecordingStub("rag");
         var ask = new RecordingStub("ask");
@@ -310,8 +323,8 @@ class ModeControllerTest {
         var ctx = Context.builder(new Config()).build();
 
         mc.route("what does the constructor do", WS, ctx);
-        assertTrue(rag.invoked, "New tech noun + question should route to rag");
-        assertFalse(ask.invoked, "New tech noun + question should NOT route to ask");
+        assertTrue(ask.invoked, "Tech noun + question should route to unified in auto-mode");
+        assertFalse(rag.invoked, "Tech noun + question should NOT route to rag in auto-mode");
     }
 
     @Test
@@ -338,7 +351,7 @@ class ModeControllerTest {
     };
 
     @Test
-    void bare_workspace_symbol_routes_to_rag_with_checker() throws Exception {
+    void bare_workspace_symbol_routes_to_unified_with_checker() throws Exception {
         var dev = new RecordingStub("dev");
         var rag = new RecordingStub("rag");
         var ask = new RecordingStub("ask");
@@ -347,8 +360,8 @@ class ModeControllerTest {
         var ctx = Context.builder(new Config()).build();
 
         mc.route("RagService", WS, ctx);
-        assertTrue(rag.invoked, "Bare workspace symbol should route to rag");
-        assertFalse(ask.invoked, "Bare workspace symbol should NOT route to ask");
+        assertTrue(ask.invoked, "Workspace symbol should route to unified in auto-mode");
+        assertFalse(rag.invoked, "Workspace symbol should NOT route to rag in auto-mode");
     }
 
     @Test
@@ -394,7 +407,7 @@ class ModeControllerTest {
     }
 
     @Test
-    void workspace_symbol_then_follow_up_stays_in_rag() throws Exception {
+    void workspace_symbol_then_follow_up_stays_in_unified() throws Exception {
         var dev = new RecordingStub("dev");
         var rag = new RecordingStub("rag");
         var ask = new RecordingStub("ask");
@@ -402,13 +415,14 @@ class ModeControllerTest {
         mc.setSymbolChecker(TEST_CHECKER);
         var ctx = Context.builder(new Config()).build();
 
-        // Turn 1: bare workspace symbol → RETRIEVE
+        // Turn 1: bare workspace symbol → unified
         mc.route("RagService", WS, ctx);
-        rag.reset();
+        ask.reset();
 
-        // Turn 2: follow-up → stays in RETRIEVE
+        // Turn 2: follow-up → stays in unified
         mc.route("what about the parse method?", WS, ctx);
-        assertTrue(rag.invoked, "Follow-up after workspace symbol should stay in rag");
+        assertTrue(ask.invoked, "Follow-up after workspace symbol should stay in unified");
+        assertFalse(rag.invoked, "Follow-up should NOT route to rag in auto-mode");
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -463,11 +477,11 @@ class ModeControllerTest {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  Action-intent routing through auto-mode
+    //  Action-intent routing through auto-mode (unified architecture)
     // ═══════════════════════════════════════════════════════════════════════
 
     @Test
-    void action_with_pascal_case_routes_to_rag() throws Exception {
+    void action_with_pascal_case_routes_to_unified() throws Exception {
         var dev = new RecordingStub("dev");
         var rag = new RecordingStub("rag");
         var ask = new RecordingStub("ask");
@@ -476,26 +490,26 @@ class ModeControllerTest {
 
         mc.route("write a test for RagService", WS, ctx);
 
-        assertTrue(rag.invoked, "Action+PascalCase should route to rag");
-        assertFalse(ask.invoked, "Action+PascalCase should NOT route to ask");
+        assertTrue(ask.invoked, "Action+PascalCase should route to unified in auto-mode");
+        assertFalse(rag.invoked, "Action+PascalCase should NOT route to rag in auto-mode");
     }
 
     @Test
-    void action_with_anchored_noun_routes_to_rag() throws Exception {
+    void action_with_anchored_noun_routes_to_unified() throws Exception {
         var dev = new RecordingStub("dev");
         var rag = new RecordingStub("rag");
         var ask = new RecordingStub("ask");
         var mc = stubController(dev, rag, ask);
         var ctx = Context.builder(new Config()).build();
 
-        mc.route("fix the parser", WS, ctx);
+        mc.route("refactor the parser", WS, ctx);
 
-        assertTrue(rag.invoked, "Action+tech noun should route to rag");
-        assertFalse(ask.invoked, "Action+tech noun should NOT route to ask");
+        assertTrue(ask.invoked, "Action+tech noun should route to unified in auto-mode");
+        assertFalse(rag.invoked, "Action+tech noun should NOT route to rag in auto-mode");
     }
 
     @Test
-    void action_without_workspace_signal_routes_to_ask() throws Exception {
+    void action_without_workspace_signal_routes_to_unified() throws Exception {
         var dev = new RecordingStub("dev");
         var rag = new RecordingStub("rag");
         var ask = new RecordingStub("ask");
@@ -504,7 +518,7 @@ class ModeControllerTest {
 
         mc.route("write a poem", WS, ctx);
 
-        assertTrue(ask.invoked, "Action without workspace signal should route to ask");
+        assertTrue(ask.invoked, "Action without workspace signal should route to unified");
         assertFalse(rag.invoked, "Action without workspace signal should NOT route to rag");
     }
 
@@ -517,23 +531,42 @@ class ModeControllerTest {
         var ctx = Context.builder(new Config()).build();
 
         mc.route("refactor ModeController", WS, ctx);
+        // lastRoute still tracks PromptRouter classification for diagnostics
         assertEquals(PromptRouter.Route.RETRIEVE, mc.lastRoute(),
                 "Action+PascalCase should update lastRoute to RETRIEVE");
     }
 
     @Test
-    void follow_up_after_action_stays_in_rag() throws Exception {
+    void follow_up_after_action_stays_in_unified() throws Exception {
         var dev = new RecordingStub("dev");
         var rag = new RecordingStub("rag");
         var ask = new RecordingStub("ask");
         var mc = stubController(dev, rag, ask);
         var ctx = Context.builder(new Config()).build();
 
-        mc.route("fix the parser", WS, ctx); // → RETRIEVE
-        rag.reset();
+        mc.route("refactor the parser", WS, ctx); // → classified RETRIEVE, dispatched to unified
+        ask.reset();
 
-        mc.route("what about edge cases?", WS, ctx); // → follow-up → RETRIEVE
-        assertTrue(rag.invoked, "Follow-up after action should stay in rag");
+        mc.route("what about edge cases?", WS, ctx); // → follow-up → unified
+        assertTrue(ask.invoked, "Follow-up after action should stay in unified");
+        assertFalse(rag.invoked, "Follow-up should NOT route to rag in auto-mode");
+    }
+
+    // ── Explicit mode: /mode rag still works ─────────────────────────────
+
+    @Test
+    void explicit_rag_mode_still_routes_to_rag() throws Exception {
+        var dev = new RecordingStub("dev");
+        var rag = new RecordingStub("rag");
+        var ask = new RecordingStub("ask");
+        var mc = stubController(dev, rag, ask);
+        var ctx = Context.builder(new Config()).build();
+
+        mc.setActive("rag");
+        mc.route("explain RagService.java", WS, ctx);
+
+        assertTrue(rag.invoked, "Explicit rag mode should still route to rag");
+        assertFalse(ask.invoked, "Explicit rag mode should NOT route to ask/unified");
     }
 
     // ── Recording stub mode for isolated testing ─────────────────────────

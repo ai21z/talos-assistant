@@ -59,12 +59,12 @@ public final class FileWriteTool implements TalosTool {
     public ToolResult execute(ToolCall call, ToolContext ctx) {
         if (ctx == null) return execute(call);
 
-        String pathParam = call.param("path");
+        String pathParam = resolveParam(call, "path", "file_path", "filepath", "file", "filename");
         if (pathParam == null || pathParam.isBlank()) {
             return ToolResult.fail(ToolError.invalidParams("Missing required parameter: path"));
         }
 
-        String content = call.param("content");
+        String content = resolveParam(call, "content", "text", "body", "data", "file_content");
         if (content == null) {
             return ToolResult.fail(ToolError.invalidParams("Missing required parameter: content"));
         }
@@ -117,6 +117,21 @@ public final class FileWriteTool implements TalosTool {
         } catch (IOException e) {
             return ToolResult.fail(ToolError.internal("Failed to write file: " + e.getMessage()));
         }
+    }
+
+    /**
+     * Resolve a parameter by trying the canonical key first, then known aliases.
+     * Models frequently use alternative names (e.g. {@code file_path} instead of
+     * {@code path}, {@code text} instead of {@code content}).
+     */
+    private static String resolveParam(ToolCall call, String canonical, String... aliases) {
+        String value = call.param(canonical);
+        if (value != null) return value;
+        for (String alias : aliases) {
+            value = call.param(alias);
+            if (value != null) return value;
+        }
+        return null;
     }
 }
 

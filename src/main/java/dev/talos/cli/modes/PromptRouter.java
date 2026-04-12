@@ -152,10 +152,25 @@ public final class PromptRouter {
         ")"
     );
 
-    /** Conversational prefixes stripped before question/follow-up detection ("hey", "ok", "cool", etc.). */
+    /**
+     * Conversational prefixes stripped before question/follow-up/action detection.
+     *
+     * <p>Includes casual interjections ("hey", "ok") AND polite request framing
+     * ("can you", "could you", "please", "i want you to", etc.) so that
+     * "Can you update the file?" normalizes to "update the file?" before
+     * intent classification.
+     */
     private static final Pattern CONVERSATIONAL_PREFIX = Pattern.compile(
-        "(?i)^(?:hey|hi|hello|ok(?:ay)?|so|well|um+|hmm+|oh|ah|yo|alright|" +
-            "sure|right|actually|cool|yeah|yep|yup),?\\s+"
+        "(?i)^(?:" +
+            // casual interjections
+            "(?:hey|hi|hello|ok(?:ay)?|so|well|um+|hmm+|oh|ah|yo|alright|" +
+            "sure|right|actually|cool|yeah|yep|yup),?\\s+" +
+            "|" +
+            // polite request framing (order: longer phrases first to avoid partial matches)
+            "(?:i['\u2018\u2019]?d like you to|i want you to|i need you to|" +
+            "can you(?: please)?|could you(?: please)?|would you(?: please)?|will you(?: please)?|" +
+            "you should|go ahead and|try to|just|please)\\s+" +
+        ")"
     );
 
     // ── Result type ──────────────────────────────────────────────────────
@@ -211,13 +226,15 @@ public final class PromptRouter {
 
         // Layer 1c: action-verb gate — mutation/inspection actions route to
         // ASSIST (tool-calling path) even if they mention files or the workspace.
+        // "edit index.html" is a tool action, not a retrieval query.
         // "create settings.json" is a tool action, not a retrieval query.
         //
         // Exception: when the prompt contains a PascalCase code identifier
-        // (e.g. "write a test for RagService"), it is a code-context action
+        // (e.g. "fix RagService"), it is a code-context action
         // that needs retrieval, so we let it fall through.
         boolean isAction = isActionLike(lower);
-        if (isAction && isMutationOrInspection(lower)) {
+        boolean isMutation = isAction && isMutationOrInspection(lower);
+        if (isMutation) {
             boolean hasCodeTarget = CODE_IDENTIFIER.matcher(trimmed).find();
             if (!hasCodeTarget) {
                 steps.add("mutation/inspection intent, no code entity → tool path");
@@ -378,12 +395,16 @@ public final class PromptRouter {
             || stripped.startsWith("format ")    || stripped.startsWith("document ")
             || stripped.startsWith("list ")      || stripped.startsWith("ls ")
             || stripped.startsWith("grep ")      || stripped.startsWith("save ")
-            || stripped.startsWith("make ")      || stripped.startsWith("put ");
+            || stripped.startsWith("make ")      || stripped.startsWith("put ")
+            || stripped.startsWith("improve ")   || stripped.startsWith("overwrite ");
     }
 
     /**
-     * True for unambiguous tool-execution verbs (create, write, delete, list, grep, etc.).
+     * True for unambiguous tool-execution verbs (create, write, delete, edit, update, fix, etc.).
      * These route to ASSIST (tool-calling) even when file/workspace signals are present.
+     *
+     * <p>Includes both mutation verbs (create, delete, edit, update, fix, change, improve,
+     * modify, rewrite, overwrite) and inspection verbs (list, search, grep, scan).
      */
     static boolean isMutationOrInspection(String lower) {
         String stripped = CONVERSATIONAL_PREFIX.matcher(lower).replaceFirst("");
@@ -392,6 +413,10 @@ public final class PromptRouter {
             || stripped.startsWith("make ")      || stripped.startsWith("put ")
             || stripped.startsWith("delete ")    || stripped.startsWith("remove ")
             || stripped.startsWith("rename ")    || stripped.startsWith("move ")
+            || stripped.startsWith("edit ")      || stripped.startsWith("update ")
+            || stripped.startsWith("fix ")       || stripped.startsWith("change ")
+            || stripped.startsWith("improve ")   || stripped.startsWith("modify ")
+            || stripped.startsWith("rewrite ")   || stripped.startsWith("overwrite ")
             || stripped.startsWith("list ")      || stripped.startsWith("ls ")
             || stripped.startsWith("search ")    || stripped.startsWith("find ")
             || stripped.startsWith("grep ")      || stripped.startsWith("scan ");

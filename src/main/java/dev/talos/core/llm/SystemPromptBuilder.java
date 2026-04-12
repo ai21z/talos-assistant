@@ -36,6 +36,7 @@ public final class SystemPromptBuilder {
     private static final String RES_IDENTITY      = "prompts/sections/identity.txt";
     private static final String RES_ASK_RULES     = "prompts/sections/ask-rules.txt";
     private static final String RES_RAG_RULES     = "prompts/sections/rag-rules.txt";
+    private static final String RES_UNIFIED_RULES = "prompts/sections/unified-rules.txt";
     private static final String RES_TOOLS         = "prompts/sections/tools-preamble.txt";
     private static final String RES_CONVERSATION  = "prompts/sections/conversation.txt";
 
@@ -45,8 +46,8 @@ public final class SystemPromptBuilder {
     private boolean hasHistory;
     private java.nio.file.Path workspace;
 
-    /** The two prompt modes. */
-    public enum Mode { ASK, RAG }
+    /** The prompt modes. */
+    public enum Mode { ASK, RAG, UNIFIED }
 
     private SystemPromptBuilder(Mode mode) {
         this.mode = Objects.requireNonNull(mode);
@@ -60,6 +61,11 @@ public final class SystemPromptBuilder {
     /** Create a builder for RAG/retrieval mode. */
     public static SystemPromptBuilder forRag() {
         return new SystemPromptBuilder(Mode.RAG);
+    }
+
+    /** Create a builder for unified assistant mode (tools + retrieval-as-tool). */
+    public static SystemPromptBuilder forUnified() {
+        return new SystemPromptBuilder(Mode.UNIFIED);
     }
 
     /** Include tool descriptions from the given registry. */
@@ -120,7 +126,12 @@ public final class SystemPromptBuilder {
         }
 
         // 2. Mode-specific rules
-        String modeRules = readResource(mode == Mode.ASK ? RES_ASK_RULES : RES_RAG_RULES);
+        String modeRes = switch (mode) {
+            case ASK     -> RES_ASK_RULES;
+            case RAG     -> RES_RAG_RULES;
+            case UNIFIED -> RES_UNIFIED_RULES;
+        };
+        String modeRules = readResource(modeRes);
         if (modeRules != null) {
             sb.append("\n\n").append(modeRules.strip());
         }
@@ -218,9 +229,11 @@ public final class SystemPromptBuilder {
 
     /** Minimal fallback prompt when no resource files exist. */
     private String defaultPrompt() {
-        return mode == Mode.ASK
-                ? "You are Talos, a local-first knowledge assistant. Answer clearly and concisely.\n"
-                : "You are Talos, a local-first knowledge engine. Answer using the provided context snippets.\n";
+        return switch (mode) {
+            case ASK     -> "You are Talos, a local-first knowledge assistant. Answer clearly and concisely.\n";
+            case RAG     -> "You are Talos, a local-first knowledge engine. Answer using the provided context snippets.\n";
+            case UNIFIED -> "You are Talos, a local-first knowledge assistant with full tool access. Use tools proactively for file operations and project questions.\n";
+        };
     }
 
     /** Read a classpath resource, returning null if not found. */
