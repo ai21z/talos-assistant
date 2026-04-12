@@ -22,6 +22,7 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallStreamFilter;
 import dev.talos.runtime.TurnProcessor;
 import dev.talos.tools.FileUndoStack;
+import dev.talos.tools.ToolProgressSink;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
@@ -127,10 +128,18 @@ public final class TalosBootstrap {
         ModeController modes = ModeController.defaultController();
         modes.setSymbolChecker(new IndexedWorkspaceSymbolChecker(workspace));
 
+        // ── Rendering (created early so progress sink can reference it) ──
+        RenderEngine render = new RenderEngine(cfg, redactor, out);
+
         // ── Runtime layer ────────────────────────────────────────────────
         Session        runtimeSession = new Session(workspace, cfg, memory, sessionStore);
         TurnProcessor  turnProcessor  = new TurnProcessor(modes, new CliApprovalGate(), toolRegistry);
-        ToolCallLoop   toolCallLoop   = new ToolCallLoop(turnProcessor);
+
+        // Tool progress sink: renders lightweight status lines via RenderEngine.
+        // Connected before ToolCallLoop so progress events flow during tool execution.
+        ToolProgressSink progressSink = render::printToolProgress;
+        ToolCallLoop   toolCallLoop   = new ToolCallLoop(turnProcessor,
+                ToolCallLoop.DEFAULT_MAX_ITERATIONS, progressSink);
 
         // Auto-save session on close
         final ConversationManager cmRef = conversationManager;
@@ -150,10 +159,7 @@ public final class TalosBootstrap {
             }
         });
 
-        // ── Rendering ────────────────────────────────────────────────────
-        RenderEngine render = new RenderEngine(cfg, redactor, out);
-
-        // Stream sink: stops spinner on first chunk and prints directly to stdout.
+        // ── Stream sink ───────────────────────────────────────────────────
         // Wrapped in ToolCallStreamFilter to suppress <tool_call> XML from display.
         final PrintStream stdout = out;
         final RenderEngine renderRef = render;

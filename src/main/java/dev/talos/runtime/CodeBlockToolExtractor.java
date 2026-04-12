@@ -26,6 +26,14 @@ import java.util.regex.Pattern;
  *   ``` filename: package.json       →  write_file(path="package.json", content=...)
  * }</pre>
  *
+ * <p>Additionally recognizes heading/prose patterns where the filename appears
+ * in backticks on a preceding line (up to 5 lines before the code block):
+ * <pre>{@code
+ *   ### Updated `index.html`        →  write_file(path="index.html", content=...)
+ *   ### ✅ `styles.css` (Copy This)  →  write_file(path="styles.css", content=...)
+ *   Replace your `app.js`:          →  write_file(path="app.js", content=...)
+ * }</pre>
+ *
  * <p>The extractor is deliberately conservative:
  * <ul>
  *   <li>Only matches code blocks with a recognizable filename (must have an extension)</li>
@@ -83,6 +91,30 @@ public final class CodeBlockToolExtractor {
             Pattern.DOTALL
     );
 
+    /**
+     * Third alternative: the filename appears in backticks on a preceding line
+     * (heading, bold text, or prose paragraph) with up to 4 intervening lines
+     * of text or blank lines before the opening fence.
+     *
+     * <p>Matches real-world LLM patterns like:
+     * <ul>
+     *   <li>{@code ### Updated `index.html`} + blank lines + fence</li>
+     *   <li>{@code ### ✅ `styles.css` (Copy This Entire Block)} + text + fence</li>
+     *   <li>{@code Replace your `app.js` content:} + blank lines + fence</li>
+     * </ul>
+     *
+     * <p>Group 1 = filename, Group 2 = language tag (unused), Group 3 = content.
+     */
+    private static final Pattern HEADING_FILENAME = Pattern.compile(
+            "`([A-Za-z0-9_./\\\\-]+\\.[a-zA-Z0-9]+)`" + // filename in backticks (group 1)
+            "[^`\\n]*\\n" +                                // rest of the line (no more backticks)
+            "(?:[^\\n]*\\n){0,4}" +                        // up to 4 intervening lines
+            "```([a-zA-Z]*)\\s*\\n" +                      // opening fence (group 2)
+            "(.*?)" +                                      // content (group 3, lazy)
+            "\\n?```",                                     // closing fence
+            Pattern.DOTALL
+    );
+
     /** File extensions that are definitely not filenames (e.g., language tags the regex might grab). */
     private static final Set<String> IGNORE_EXTENSIONS = Set.of(
             "com", "org", "net", "io"  // domain-like TLDs
@@ -106,8 +138,11 @@ public final class CodeBlockToolExtractor {
         // Pass 1: inline filename in the fence opening
         extractFromPattern(CODE_BLOCK_WITH_FILENAME, 1, 2, llmResponse, calls, seenPaths);
 
-        // Pass 2: filename in preceding backtick-quoted text
+        // Pass 2: filename in preceding backtick-quoted text (immediately before fence)
         extractFromPattern(PRECEDING_FILENAME, 1, 3, llmResponse, calls, seenPaths);
+
+        // Pass 3: filename in heading/prose up to 5 lines before fence
+        extractFromPattern(HEADING_FILENAME, 1, 3, llmResponse, calls, seenPaths);
 
         if (!calls.isEmpty()) {
             LOG.debug("Extracted {} implicit write_file call(s) from code blocks", calls.size());
@@ -123,7 +158,8 @@ public final class CodeBlockToolExtractor {
     public static boolean containsExtractableBlocks(String llmResponse) {
         if (llmResponse == null || llmResponse.isBlank()) return false;
         return CODE_BLOCK_WITH_FILENAME.matcher(llmResponse).find()
-                || PRECEDING_FILENAME.matcher(llmResponse).find();
+                || PRECEDING_FILENAME.matcher(llmResponse).find()
+                || HEADING_FILENAME.matcher(llmResponse).find();
     }
 
     // ── Internal helpers ───────────────────────────────────────────────

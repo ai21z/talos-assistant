@@ -228,11 +228,52 @@ public final class RenderEngine {
             println("");
             return;
         }
+        if (r instanceof Result.ToolProgress tp) {
+            renderToolProgress(tp);
+            return;
+        }
 
         println(sro(r.toString()));
     }
 
     // ── Response rendering (left-border style) ────────────────────────────
+
+    /**
+     * Print a tool progress status line directly (outside the render pipeline).
+     * Used by {@link dev.talos.tools.ToolProgressSink} implementations.
+     * Suppressed in non-interactive mode.
+     */
+    public void printToolProgress(String toolName, String action, String detail) {
+        if (!interactive) return;
+        String icon = "warning".equals(action) ? AnsiColor.YELLOW + "⚠" + AnsiColor.RESET
+                : AnsiColor.BLUE + "→" + AnsiColor.RESET;
+        String color = "warning".equals(action) ? AnsiColor.YELLOW : AnsiColor.DIM;
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("  ").append(icon).append(" ").append(color);
+        sb.append(formatToolAction(action, toolName));
+        if (detail != null && !detail.isBlank()) {
+            sb.append(": ").append(detail);
+        }
+        sb.append(AnsiColor.RESET);
+        println(sb.toString());
+    }
+
+    private void renderToolProgress(Result.ToolProgress tp) {
+        printToolProgress(tp.toolName, tp.action, tp.detail);
+    }
+
+    /** Format the action + tool name for display. */
+    private static String formatToolAction(String action, String toolName) {
+        // Strip the "talos." prefix for cleaner display
+        String shortName = toolName.startsWith("talos.") ? toolName.substring(6) : toolName;
+        return switch (action) {
+            case "executing" -> "Using " + shortName;
+            case "completed" -> shortName + " done";
+            case "warning"   -> "Verification warning";
+            default          -> action + " " + shortName;
+        };
+    }
 
     private void printResponse(String content) {
         if (content == null || content.isEmpty()) {

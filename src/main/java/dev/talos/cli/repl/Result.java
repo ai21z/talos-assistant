@@ -6,7 +6,8 @@ package dev.talos.cli.repl;
  */
 public sealed interface Result
         permits Result.Ok, Result.Info, Result.Error, Result.Table,
-        Result.StreamStart, Result.StreamChunk, Result.StreamEnd, Result.Streamed, Result.TrustedInfo {
+        Result.StreamStart, Result.StreamChunk, Result.StreamEnd, Result.Streamed, Result.TrustedInfo,
+        Result.ToolProgress {
 
     /* -------- Simple text results -------- */
 
@@ -85,6 +86,32 @@ public sealed interface Result
             this.suffix = suffix == null ? "" : suffix;
         }
         @Override public String toString() { return fullText + suffix; }
+    }
+
+    /* -------- Tool progress -------- */
+
+    /**
+     * Lightweight tool-execution progress event for terminal display.
+     * Rendered as a single dimmed status line (not part of the answer body).
+     *
+     * @see dev.talos.tools.ToolProgressSink
+     */
+    public static final class ToolProgress implements Result {
+        public final String toolName;
+        public final String action;
+        public final String detail;
+
+        public ToolProgress(String toolName, String action, String detail) {
+            this.toolName = toolName == null ? "" : toolName;
+            this.action = action == null ? "" : action;
+            this.detail = detail;
+        }
+
+        @Override public String toString() {
+            return detail != null
+                    ? action + " " + toolName + ": " + detail
+                    : action + " " + toolName;
+        }
     }
 
     /* -------- Convenience factories -------- */

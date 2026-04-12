@@ -1,5 +1,6 @@
 package dev.talos.tools.impl;
 
+import dev.talos.tools.VerificationStatus;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -63,6 +64,7 @@ class ContentVerifierTest {
             assertFalse(vr.ok(), "Should fail for invalid JSON");
             assertTrue(vr.summary().startsWith("JSON parse failed"),
                     "Summary should describe parse failure: " + vr.summary());
+            assertEquals(VerificationStatus.FAIL, vr.status());
         }
 
         @Test
@@ -108,6 +110,7 @@ class ContentVerifierTest {
             var vr = ContentVerifier.verify(file, content);
             assertTrue(vr.ok(), "Well-formed HTML should pass: " + vr.summary());
             assertEquals("HTML structure OK", vr.summary());
+            assertEquals(VerificationStatus.PASS, vr.status());
         }
 
         @Test
@@ -119,6 +122,7 @@ class ContentVerifierTest {
             assertFalse(vr.ok(), "Should detect unclosed <div>");
             assertTrue(vr.summary().contains("unclosed <div>"),
                     "Should mention unclosed div: " + vr.summary());
+            assertEquals(VerificationStatus.WARN, vr.status());
         }
 
         @Test
@@ -254,6 +258,7 @@ class ContentVerifierTest {
             var vr = ContentVerifier.verify(file, content);
             assertTrue(vr.ok());
             assertEquals("read-back OK", vr.summary());
+            assertEquals(VerificationStatus.UNKNOWN, vr.status());
         }
 
         @Test
@@ -304,6 +309,7 @@ class ContentVerifierTest {
             assertFalse(vr.ok(), "Should detect mismatch");
             assertTrue(vr.summary().contains("read-back mismatch"),
                     "Should report mismatch: " + vr.summary());
+            assertEquals(VerificationStatus.FAIL, vr.status());
         }
 
         @Test
