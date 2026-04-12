@@ -4,6 +4,7 @@ import dev.talos.cli.repl.Limits;
 import dev.talos.cli.repl.ReplRouter;
 import dev.talos.cli.repl.SessionState;
 import dev.talos.cli.repl.SlashCommandCompleter;
+import dev.talos.cli.repl.TalosBootstrap;
 import dev.talos.cli.ui.AnsiColor;
 import dev.talos.cli.ui.TalosBanner;
 import dev.talos.core.CfgUtil;
@@ -75,28 +76,39 @@ public class RunCmd implements Runnable, SessionState {
             cfg.data.put("rag", rag);
         }
 
-        // Router: commands + modes (workspace-aware), with *this* as SessionState
-        ReplRouter router = new ReplRouter(this, cfg, System.out, ws);
-
-        // Show banner unless --no-logo
-        String activeMode = router.getModes().getActiveName();
-        if (!noLogo) {
-            TalosBanner.print(ws, cfg, activeMode, System.out);
-        } else {
-            TalosBanner.printCompact(ws, cfg, activeMode, System.out);
-        }
-
+        // Router: commands + modes (workspace-aware), with *this* as SessionState.
+        // JLine LineReader is created first so the approval gate can use it
+        // (same terminal input system as the REPL prompt — no competing Scanner on System.in).
+        ReplRouter router = null;
         try {
             Terminal term = TerminalBuilder.builder().system(true).jna(true).build();
             LineReader reader = LineReaderBuilder.builder()
                     .terminal(term)
+                    .build();
+
+            // Create router with JLine-integrated approval gate
+            router = TalosBootstrap.create(this, cfg, System.out, ws, reader);
+            final ReplRouter routerRef = router;
+
+            // Now that the router (and its command registry) exist, rebuild
+            // the LineReader with tab-completion wired to the command registry
+            reader = LineReaderBuilder.builder()
+                    .terminal(term)
                     .completer(new SlashCommandCompleter(router.getRegistry()))
                     .build();
+
+            // Show banner unless --no-logo
+            String activeMode = router.getModes().getActiveName();
+            if (!noLogo) {
+                TalosBanner.print(ws, cfg, activeMode, System.out);
+            } else {
+                TalosBanner.printCompact(ws, cfg, activeMode, System.out);
+            }
 
             // Set up prompt refresh callback for mode changes
             final AtomicReference<String> currentPrompt = new AtomicReference<>();
             router.getModes().setPromptRefreshCallback(() -> {
-                String newMode = router.getModes().getActiveName();
+                String newMode = routerRef.getModes().getActiveName();
                 currentPrompt.set(buildPrompt(newMode));
             });
 
@@ -154,7 +166,9 @@ public class RunCmd implements Runnable, SessionState {
             if (Boolean.getBoolean("talos.debug")) e.printStackTrace(System.err);
         } finally {
             // Fire session lifecycle callbacks (memory flush, audit, listener cleanup)
-            try { router.getRuntimeSession().close(); } catch (Exception ignored) { }
+            if (router != null) {
+                try { router.getRuntimeSession().close(); } catch (Exception ignored) { }
+            }
         }
     }
 
