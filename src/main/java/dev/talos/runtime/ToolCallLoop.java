@@ -4,6 +4,7 @@ import dev.talos.cli.repl.Context;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolCall;
+import dev.talos.tools.ToolProgressSink;
 import dev.talos.tools.ToolResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,6 +52,20 @@ public final class ToolCallLoop {
 
     private final TurnProcessor turnProcessor;
     private final int maxIterations;
+    private final ToolProgressSink progressSink;
+
+    /**
+     * Create a tool-call loop with a custom iteration limit and progress sink.
+     *
+     * @param turnProcessor provides tool execution with sandbox + approval gate
+     * @param maxIterations maximum number of tool-call round-trips (must be ≥ 1)
+     * @param progressSink  optional progress callback (may be null)
+     */
+    public ToolCallLoop(TurnProcessor turnProcessor, int maxIterations, ToolProgressSink progressSink) {
+        this.turnProcessor = Objects.requireNonNull(turnProcessor, "turnProcessor");
+        this.maxIterations = Math.max(1, maxIterations);
+        this.progressSink = progressSink;
+    }
 
     /**
      * Create a tool-call loop with a custom iteration limit.
@@ -59,13 +74,12 @@ public final class ToolCallLoop {
      * @param maxIterations maximum number of tool-call round-trips (must be ≥ 1)
      */
     public ToolCallLoop(TurnProcessor turnProcessor, int maxIterations) {
-        this.turnProcessor = Objects.requireNonNull(turnProcessor, "turnProcessor");
-        this.maxIterations = Math.max(1, maxIterations);
+        this(turnProcessor, maxIterations, null);
     }
 
     /** Create a tool-call loop with the default iteration limit. */
     public ToolCallLoop(TurnProcessor turnProcessor) {
-        this(turnProcessor, DEFAULT_MAX_ITERATIONS);
+        this(turnProcessor, DEFAULT_MAX_ITERATIONS, null);
     }
 
     /**
@@ -158,9 +172,16 @@ public final class ToolCallLoop {
                 ToolCall effective = repairMissingPath(call, messages);
                 totalToolsInvoked++;
                 toolNames.add(effective.toolName());
+
+                // Emit progress: executing
+                emitProgress(effective.toolName(), "executing", resolvePathHint(effective));
+
                 LOG.debug("  Executing tool: {} (params: {})", effective.toolName(), effective.parameters());
 
                 ToolResult result = turnProcessor.executeTool(toolSession, effective, ctx);
+
+                // Emit progress: completed or warning
+                emitToolResult(effective.toolName(), result);
 
                 // Format the tool result as a message the LLM can use
                 String resultText = formatToolResult(effective, result);
@@ -250,7 +271,9 @@ public final class ToolCallLoop {
 
         for (ToolCall call : calls) {
             toolNames.add(call.toolName());
+            emitProgress(call.toolName(), "executing", resolvePathHint(call));
             ToolResult result = turnProcessor.executeTool(toolSession, call, ctx);
+            emitToolResult(call.toolName(), result);
             executed++;
             LOG.debug("  Code-block tool {} → {}", call.toolName(),
                     result.success() ? "success" : "error: " + result.errorMessage());
@@ -262,6 +285,7 @@ public final class ToolCallLoop {
     /**
      * Format a tool result as a message for the LLM.
      * Uses a structured format that the model can easily parse.
+     * Includes verification status when present.
      */
     static String formatToolResult(ToolCall call, ToolResult result) {
         var sb = new StringBuilder();
@@ -279,6 +303,10 @@ public final class ToolCallLoop {
                     sb.append(output);
                 }
             }
+            // Surface structured verification status for write/edit tools
+            if (result.verification() != null) {
+                sb.append("\n[verification_status: ").append(result.verification().name()).append("]");
+            }
         } else {
             sb.append("[error] ").append(result.errorMessage());
         }
@@ -290,6 +318,56 @@ public final class ToolCallLoop {
     private static String truncateForLog(String s) {
         if (s == null) return "null";
         return s.length() <= 80 ? s : s.substring(0, 77) + "...";
+    }
+
+    // ---- Progress events ----
+
+    /** Safely emit a progress event to the sink (no-op if null). */
+    private void emitProgress(String toolName, String action, String detail) {
+        if (progressSink != null) {
+            try {
+                progressSink.onToolProgress(toolName, action, detail);
+            } catch (Exception e) {
+                LOG.debug("Progress sink error (ignored): {}", e.getMessage());
+            }
+        }
+    }
+
+    /** Emit progress for a completed tool result, surfacing verification warnings. */
+    private void emitToolResult(String toolName, ToolResult result) {
+        if (progressSink == null) return;
+        if (!result.success()) {
+            emitProgress(toolName, "error", result.errorMessage());
+            return;
+        }
+        // Surface verification warnings as distinct progress events
+        if (result.verification() != null && !result.verification().acceptable()) {
+            // Extract summary from output (after "Warning: " if present)
+            String detail = extractVerificationSummary(result.output());
+            emitProgress(toolName, "warning", detail);
+        }
+    }
+
+    /** Extract the verification summary from a tool result output string. */
+    static String extractVerificationSummary(String output) {
+        if (output == null) return null;
+        int warnIdx = output.indexOf("Warning: ");
+        if (warnIdx >= 0) {
+            String after = output.substring(warnIdx + 9);
+            // Trim trailing status tag if present
+            int tagIdx = after.indexOf(". [verification:");
+            return tagIdx >= 0 ? after.substring(0, tagIdx) : after;
+        }
+        return null;
+    }
+
+    /** Extract a path hint from a tool call for display purposes. */
+    private static String resolvePathHint(ToolCall call) {
+        for (String key : List.of("path", "file_path", "filepath", "file", "filename", "dir", "pattern")) {
+            String v = call.param(key);
+            if (v != null && !v.isBlank()) return v;
+        }
+        return null;
     }
 
     /**

@@ -128,10 +128,11 @@ public final class FileWriteTool implements TalosTool {
 
             // Post-write verification
             ContentVerifier.VerifyResult vr = ContentVerifier.verify(resolved, content);
+            String statusTag = "[verification: " + vr.status().name() + "]";
             if (vr.ok()) {
-                return ToolResult.ok(base + ". Verified: " + vr.summary() + ".");
+                return ToolResult.ok(base + ". Verified: " + vr.summary() + ". " + statusTag, vr.status());
             } else {
-                return ToolResult.ok(base + ". Warning: " + vr.summary() + ".");
+                return ToolResult.ok(base + ". Warning: " + vr.summary() + ". " + statusTag, vr.status());
             }
         } catch (IOException e) {
             return ToolResult.fail(ToolError.internal("Failed to write file: " + e.getMessage()));

@@ -93,6 +93,7 @@ public final class MemoryUpdateListener implements SessionListener {
             case Result.StreamStart ignored  -> null;
             case Result.StreamChunk ignored  -> null;
             case Result.StreamEnd ignored    -> null;
+            case Result.ToolProgress ignored -> null;
         };
     }
 }

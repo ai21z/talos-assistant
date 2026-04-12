@@ -65,6 +65,79 @@ class CodeBlockToolExtractorTest {
     }
 
     @Nested
+    @DisplayName("extract — heading/prose filename")
+    class HeadingFilename {
+
+        @Test
+        @DisplayName("heading with backtick filename + blank line + fence")
+        void heading_blankLine_fence() {
+            String r = "### Updated `index.html`\n\n```html\n<p>Hello</p>\n```\n";
+            List<ToolCall> calls = CodeBlockToolExtractor.extract(r);
+            assertEquals(1, calls.size());
+            assertEquals("talos.write_file", calls.get(0).toolName());
+            assertEquals("index.html", calls.get(0).param("path"));
+            assertTrue(calls.get(0).param("content").contains("<p>Hello</p>"));
+        }
+
+        @Test
+        @DisplayName("heading with emoji + extra text around filename")
+        void heading_emoji_extraText() {
+            String r = "### ✅ `styles.css` (Copy This Entire Block)\n\nModern CSS:\n\n```css\nbody { color: red; }\n```\n";
+            List<ToolCall> calls = CodeBlockToolExtractor.extract(r);
+            assertEquals(1, calls.size());
+            assertEquals("styles.css", calls.get(0).param("path"));
+            assertTrue(calls.get(0).param("content").contains("body { color: red; }"));
+        }
+
+        @Test
+        @DisplayName("prose paragraph mentions filename before heading + fence")
+        void prose_then_heading_then_fence() {
+            String r = "Please replace your `index.html` content.\n\n### Updated `index.html`\n\n```html\n<h1>New</h1>\n```\n";
+            List<ToolCall> calls = CodeBlockToolExtractor.extract(r);
+            // Dedup: only one call for index.html even though mentioned twice
+            assertEquals(1, calls.size());
+            assertEquals("index.html", calls.get(0).param("path"));
+        }
+
+        @Test
+        @DisplayName("no match: plain prose without backtick filename")
+        void no_backtick_filename() {
+            String r = "Here is the complete file:\n\n```html\n<p>Hello</p>\n```\n";
+            List<ToolCall> calls = CodeBlockToolExtractor.extract(r);
+            assertTrue(calls.isEmpty(), "No backtick-quoted filename → no extraction");
+        }
+
+        @Test
+        @DisplayName("no match: filename too far from fence (6+ lines)")
+        void filename_too_far() {
+            String r = "### Updated `index.html`\n\nline1\nline2\nline3\nline4\nline5\n```html\n<p>Hello</p>\n```\n";
+            List<ToolCall> calls = CodeBlockToolExtractor.extract(r);
+            assertTrue(calls.isEmpty(), "Filename 6+ lines before fence should not match");
+        }
+
+        @Test
+        @DisplayName("heading with path in subdirectory")
+        void heading_with_path() {
+            String r = "### Updated `src/app.js`\n\n```javascript\nconsole.log('hi');\n```\n";
+            List<ToolCall> calls = CodeBlockToolExtractor.extract(r);
+            assertEquals(1, calls.size());
+            assertEquals("src/app.js", calls.get(0).param("path"));
+        }
+
+        @Test
+        @DisplayName("bold text with filename in prose")
+        void bold_filename_prose() {
+            String r = "Save this as **`config.yaml`**:\n\n```yaml\nkey: value\n```\n";
+            // Note: the backtick filename `config.yaml` is preceded by **
+            // but our regex looks for ` not ** — let's verify the ** case.
+            // The pattern matches `config.yaml` inside **`config.yaml`**
+            List<ToolCall> calls = CodeBlockToolExtractor.extract(r);
+            assertEquals(1, calls.size());
+            assertEquals("config.yaml", calls.get(0).param("path"));
+        }
+    }
+
+    @Nested
     @DisplayName("extract — no match")
     class NoMatch {
 
@@ -119,6 +192,11 @@ class CodeBlockToolExtractorTest {
         @Test void true_preceding() {
             assertTrue(CodeBlockToolExtractor.containsExtractableBlocks(
                     "`t.json`:\n```json\n{}\n```"));
+        }
+
+        @Test void true_heading() {
+            assertTrue(CodeBlockToolExtractor.containsExtractableBlocks(
+                    "### Updated `index.html`\n\n```html\n<p>Hi</p>\n```"));
         }
 
         @Test void false_plain() {
