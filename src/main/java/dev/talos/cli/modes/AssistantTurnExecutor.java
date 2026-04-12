@@ -97,6 +97,16 @@ final class AssistantTurnExecutor {
                     filter.flush();
                 }
 
+                // Stop the spinner unconditionally after streaming completes.
+                // When the response is tool-call-only, the stream filter suppresses
+                // all chunks so the rawSink (which normally stops the spinner) never
+                // fires. Without this explicit stop, the spinner keeps running while
+                // the tool-call loop (and approval gate) execute — making it look
+                // like Talos is still "thinking" when it's actually waiting for input.
+                if (ctx.onStreamComplete() != null) {
+                    try { ctx.onStreamComplete().run(); } catch (Exception ignored) { }
+                }
+
                 if (answer != null) {
                     if (ctx.toolCallLoop() != null && hasAnyToolCalls(answer)) {
                         LOG.debug("Tool calls detected in streamed response, entering tool-call loop");

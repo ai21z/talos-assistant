@@ -34,25 +34,36 @@ public record Context(
         ToolRegistry toolRegistry,
         ConversationManager conversationManager,
         ToolCallLoop toolCallLoop,
-        Consumer<String> streamSink
+        Consumer<String> streamSink,
+        Runnable onStreamComplete
 ) {
-    /** Backward-compatible constructor without streamSink. */
+    /** Backward-compatible constructor without onStreamComplete. */
+    public Context(Config cfg, Limits limits, SessionState session, Audit audit,
+                   Redactor redactor, Sandbox sandbox, RagService rag, LlmClient llm,
+                   NetPolicy netPolicy, SessionMemory memory, ApprovalGate approvalGate,
+                   ToolRegistry toolRegistry, ConversationManager conversationManager,
+                   ToolCallLoop toolCallLoop, Consumer<String> streamSink) {
+        this(cfg, limits, session, audit, redactor, sandbox, rag, llm, netPolicy,
+             memory, approvalGate, toolRegistry, conversationManager, toolCallLoop, streamSink, null);
+    }
+
+    /** Backward-compatible constructor without streamSink or onStreamComplete. */
     public Context(Config cfg, Limits limits, SessionState session, Audit audit,
                    Redactor redactor, Sandbox sandbox, RagService rag, LlmClient llm,
                    NetPolicy netPolicy, SessionMemory memory, ApprovalGate approvalGate,
                    ToolRegistry toolRegistry, ConversationManager conversationManager,
                    ToolCallLoop toolCallLoop) {
         this(cfg, limits, session, audit, redactor, sandbox, rag, llm, netPolicy,
-             memory, approvalGate, toolRegistry, conversationManager, toolCallLoop, null);
+             memory, approvalGate, toolRegistry, conversationManager, toolCallLoop, null, null);
     }
 
-    /** Backward-compatible constructor without toolCallLoop or streamSink. */
+    /** Backward-compatible constructor without toolCallLoop, streamSink, or onStreamComplete. */
     public Context(Config cfg, Limits limits, SessionState session, Audit audit,
                    Redactor redactor, Sandbox sandbox, RagService rag, LlmClient llm,
                    NetPolicy netPolicy, SessionMemory memory, ApprovalGate approvalGate,
                    ToolRegistry toolRegistry, ConversationManager conversationManager) {
         this(cfg, limits, session, audit, redactor, sandbox, rag, llm, netPolicy,
-             memory, approvalGate, toolRegistry, conversationManager, null, null);
+             memory, approvalGate, toolRegistry, conversationManager, null, null, null);
     }
 
     /** Backward-compatible constructor without conversationManager or toolCallLoop. */
@@ -92,6 +103,7 @@ public record Context(
         private ConversationManager conversationManager;
         private ToolCallLoop toolCallLoop;
         private Consumer<String> streamSink;
+        private Runnable onStreamComplete;
 
         public Builder(Config cfg) { this.cfg = (cfg == null ? new Config() : cfg); }
 
@@ -109,6 +121,7 @@ public record Context(
         public Builder conversationManager(ConversationManager cm) { this.conversationManager = cm; return this; }
         public Builder toolCallLoop(ToolCallLoop l)  { this.toolCallLoop = l; return this; }
         public Builder streamSink(Consumer<String> s) { this.streamSink = s; return this; }
+        public Builder onStreamComplete(Runnable r)  { this.onStreamComplete = r; return this; }
 
         /** Convenience for ad-hoc usage; tests should prefer explicit setters for control. */
         public Builder withDefaults(Path workspace, SessionState session) {
@@ -153,7 +166,8 @@ public record Context(
                     new ConversationManager(memory, TokenBudget.fromConfig(cfg));
 
             return new Context(cfg, limits, session, audit, redactor, sandbox, rag, llm, net,
-                    memory, approvalGate, toolRegistry, conversationManager, toolCallLoop, streamSink);
+                    memory, approvalGate, toolRegistry, conversationManager, toolCallLoop, streamSink,
+                    onStreamComplete);
         }
     }
 }
