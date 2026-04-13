@@ -12,8 +12,8 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Tests for {@link ToolCallStreamFilter}.
  *
- * Verifies that internal tool-call protocol XML is suppressed from
- * user-visible stream output while natural text passes through.
+ * Verifies that internal tool-call protocol blocks (XML and JSON code-fence)
+ * are suppressed from user-visible stream output while natural text passes through.
  */
 @DisplayName("ToolCallStreamFilter")
 class ToolCallStreamFilterTest {
@@ -337,6 +337,111 @@ class ToolCallStreamFilterTest {
                 }
             });
             assertEquals("intro  outro", result);
+        }
+    }
+
+    // ── JSON code-fence tool call suppression ──────────────────────────
+
+    @Nested
+    @DisplayName("JSON code-fence tool call suppression")
+    class JsonFenceSuppression {
+
+        @Test
+        @DisplayName("JSON code-fenced tool call is suppressed")
+        void json_fence_tool_call_suppressed() {
+            String input = "Let me check.\n```json\n{\"name\": \"talos.read_file\", \"parameters\": {\"path\": \"foo.txt\"}}\n```\n";
+            String result = joined(f -> f.accept(input));
+            assertFalse(result.contains("talos.read_file"),
+                    "JSON code-fenced tool call should be suppressed");
+            assertTrue(result.contains("Let me check."),
+                    "Prose before tool call should pass through");
+        }
+
+        @Test
+        @DisplayName("bare code fence with tool call is suppressed")
+        void bare_fence_tool_call_suppressed() {
+            String input = "```\n{\"name\": \"talos.list_dir\", \"parameters\": {\"path\": \".\"}}\n```";
+            String result = joined(f -> f.accept(input));
+            assertFalse(result.contains("talos.list_dir"),
+                    "Bare code-fenced tool call should be suppressed");
+        }
+
+        @Test
+        @DisplayName("non-tool-call code fence passes through")
+        void non_tool_code_fence_passes() {
+            String input = "Here is some code:\n```json\n{\"key\": \"value\", \"count\": 42}\n```\nDone.";
+            String result = joined(f -> f.accept(input));
+            assertTrue(result.contains("\"key\": \"value\""),
+                    "Non-tool code fence should pass through");
+            assertTrue(result.contains("Done."),
+                    "Text after non-tool fence should pass through");
+        }
+
+        @Test
+        @DisplayName("multiple JSON tool calls suppressed, prose preserved")
+        void multiple_json_fences_suppressed() {
+            String input = "First.\n```json\n{\"name\": \"talos.read_file\", \"parameters\": {\"path\": \"a.txt\"}}\n```\nThen.\n```json\n{\"name\": \"talos.grep\", \"parameters\": {\"pattern\": \"TODO\"}}\n```\nDone.";
+            String result = joined(f -> f.accept(input));
+            assertFalse(result.contains("talos.read_file"));
+            assertFalse(result.contains("talos.grep"));
+            assertTrue(result.contains("First."));
+            assertTrue(result.contains("Then."));
+            assertTrue(result.contains("Done."));
+        }
+
+        @Test
+        @DisplayName("JSON fence streamed in chunks is suppressed")
+        void json_fence_chunked() {
+            String result = joined(f -> {
+                f.accept("intro ");
+                f.accept("```json\n{\"name\":");
+                f.accept(" \"talos.read_file\", \"parameters\":");
+                f.accept(" {\"path\": \"x.txt\"}}\n```");
+                f.accept(" outro");
+            });
+            assertFalse(result.contains("talos.read_file"),
+                    "Chunked JSON fence tool call should be suppressed");
+            assertTrue(result.contains("intro"),
+                    "Text before chunked fence should pass through");
+            assertTrue(result.contains("outro"),
+                    "Text after chunked fence should pass through");
+        }
+
+        @Test
+        @DisplayName("mixed XML and JSON tool calls both suppressed")
+        void mixed_xml_and_json_suppressed() {
+            String result = joined(f -> {
+                f.accept("A ");
+                f.accept("<tool_call>{\"name\":\"talos.list_dir\"}</tool_call>");
+                f.accept(" B ");
+                f.accept("```json\n{\"name\": \"talos.read_file\", \"parameters\": {\"path\": \"y\"}}\n```");
+                f.accept(" C");
+            });
+            assertFalse(result.contains("talos.list_dir"));
+            assertFalse(result.contains("talos.read_file"));
+            assertTrue(result.contains("A "));
+            assertTrue(result.contains(" B "));
+            assertTrue(result.contains(" C"));
+        }
+    }
+
+    // ── Flush with JSON fences ───────────────────────────────────────────
+
+    @Nested
+    @DisplayName("Flush behavior with JSON fences")
+    class FlushJsonFence {
+
+        @Test
+        @DisplayName("incomplete JSON fence is emitted as regular content on flush")
+        void flush_emits_incomplete_fence() {
+            List<String> chunks = new ArrayList<>();
+            ToolCallStreamFilter filter = new ToolCallStreamFilter(chunks::add);
+            filter.accept("text ```json\n{\"just_data\": true");
+            // No closing ``` — flush should emit as regular content (not a complete tool call)
+            filter.flush();
+            String result = String.join("", chunks);
+            assertTrue(result.contains("text"), "Text should be emitted");
+            assertTrue(result.contains("just_data"), "Incomplete fence content should be emitted");
         }
     }
 }

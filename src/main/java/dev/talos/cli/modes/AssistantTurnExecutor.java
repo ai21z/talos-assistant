@@ -136,14 +136,18 @@ final class AssistantTurnExecutor {
                 }
             } else {
                 // ── Non-streaming fallback (tests, non-interactive) ─────────
-                CompletableFuture<String> fut = CompletableFuture.supplyAsync(
-                        () -> ctx.llm().chat(messages));
-                String answer = fut.get(opts.llmTimeoutMs, TimeUnit.MILLISECONDS);
+                // Use chatFull() so native tool calls are captured too
+                // (chat() returns only String, losing native tool calls).
+                CompletableFuture<LlmClient.StreamResult> fut = CompletableFuture.supplyAsync(
+                        () -> ctx.llm().chatFull(messages));
+                LlmClient.StreamResult streamResult = fut.get(opts.llmTimeoutMs, TimeUnit.MILLISECONDS);
+                String answer = streamResult.text();
                 if (answer != null) {
-                    if (ctx.toolCallLoop() != null && hasAnyTextToolCalls(answer)) {
-                        LOG.debug("Tool calls detected in LLM response, entering tool-call loop");
+                    if (ctx.toolCallLoop() != null && hasAnyToolCalls(streamResult)) {
+                        LOG.debug("Tool calls detected in LLM response (native: {}), entering tool-call loop",
+                                streamResult.hasToolCalls());
                         ToolCallLoop.LoopResult loopResult = ctx.toolCallLoop().run(
-                                answer, messages, workspace, ctx);
+                                answer, streamResult.toolCalls(), messages, workspace, ctx);
                         answer = loopResult.finalAnswer();
                         LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked",
                                 loopResult.iterations(), loopResult.toolsInvoked());
