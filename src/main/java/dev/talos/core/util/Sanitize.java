@@ -20,7 +20,9 @@ public final class Sanitize {
     // Hidden chain-of-thought blocks (e.g., <think>...</think>)
     private static final Pattern THINK = Pattern.compile("(?is)<\\s*think\\s*>.*?<\\s*/\\s*think\\s*>");
 
-    /** Matches &lt;tool_call&gt;...&lt;/tool_call&gt; blocks (and common tag variants). */
+    /** Matches &lt;tool_call&gt;...&lt;/tool_call&gt; blocks (and common tag variants).
+     *  COMPATIBILITY — retained for models that emit XML from training habits.
+     *  JSON code-fenced tool calls are the actively instructed text fallback format. */
     private static final Pattern TOOL_CALL_BLOCK = Pattern.compile(
             "(?s)<(?:tool_call|function_call)>.*?</(?:tool_call|function_call)>"
     );
@@ -133,9 +135,13 @@ public final class Sanitize {
 
     /**
      * Applies {@link #SUS_HTML} stripping only to text <em>outside</em>
-     * tool-call blocks (both XML and JSON code-fence formats).
+     * tool-call blocks (both JSON code-fence format and XML tags).
      *
-     * <p>The algorithm: find all tool_call blocks (XML tags and JSON code fences),
+     * <p>JSON code fences are the actively instructed text fallback.
+     * XML tags are retained as COMPATIBILITY support for models that
+     * emit XML from training habits or cached context.
+     *
+     * <p>The algorithm: find all tool_call blocks (both formats),
      * protect them, strip HTML from the interstitial prose, then reassemble.
      */
     private static String stripSuspiciousHtmlOutsideToolCalls(String s) {

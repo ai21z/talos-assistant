@@ -37,13 +37,17 @@ public final class ToolCallParser {
     private static final Logger LOG = LoggerFactory.getLogger(ToolCallParser.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    /** Canonical XML pattern: {@code <tool_call>…</tool_call>}. */
+    /** Canonical XML pattern: {@code <tool_call>…</tool_call>}.
+     *  COMPATIBILITY — retained for models that emit XML from training habits or cached context.
+     *  Not actively instructed; JSON code fences are the current fallback format. */
     private static final Pattern TOOL_CALL_PATTERN = Pattern.compile(
             "<tool_call>\\s*(.*?)\\s*</tool_call>",
             Pattern.DOTALL
     );
 
-    /** Variant XML tags: tool_call, function_call, tool, function. */
+    /** Variant XML tags: tool_call, function_call, tool, function.
+     *  COMPATIBILITY — retained for models that emit XML variants.
+     *  JSON code fences are the actively instructed text fallback. */
     private static final Pattern VARIANT_TAG_PATTERN = Pattern.compile(
             "<(tool_call|function_call|tool|function)>\\s*(.*?)\\s*</\\1>",
             Pattern.DOTALL
@@ -61,7 +65,8 @@ public final class ToolCallParser {
             Pattern.DOTALL
     );
 
-    /** Combined pattern for stripping all recognized tool-call block formats. */
+    /** Combined pattern for stripping all recognized tool-call block formats.
+     *  Includes XML tags (COMPATIBILITY) and code-fenced/bare JSON. */
     private static final Pattern STRIP_PATTERN = Pattern.compile(
             "<(?:tool_call|function_call|tool|function)>\\s*.*?\\s*</(?:tool_call|function_call|tool|function)>",
             Pattern.DOTALL
@@ -81,10 +86,10 @@ public final class ToolCallParser {
         List<ToolCall> calls = new ArrayList<>();
         Set<String> consumedPayloads = new HashSet<>();
 
-        // Pass 1: XML-tagged blocks (canonical + variants)
+        // Pass 1: XML-tagged blocks — COMPATIBILITY (models may still emit from training)
         extractFromPattern(VARIANT_TAG_PATTERN, 2, llmResponse, calls, consumedPayloads);
 
-        // Pass 2: code-fenced JSON blocks
+        // Pass 2: code-fenced JSON blocks — ACTIVE fallback format
         extractFromPattern(CODE_FENCE_PATTERN, 1, llmResponse, calls, consumedPayloads);
 
         // Pass 3: bare JSON (only if no tagged blocks were found — avoids

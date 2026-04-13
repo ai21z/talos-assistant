@@ -21,16 +21,28 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Agentic tool-call loop: parses tool calls from LLM responses, executes
- * them via {@link TurnProcessor#executeTool}, feeds results back as messages,
- * and re-prompts the LLM until the response contains no more tool calls
- * (or the iteration limit is reached).
+ * Agentic tool-call loop: receives tool calls (native or text-parsed),
+ * executes them via {@link TurnProcessor#executeTool}, feeds results back
+ * as messages, and re-prompts the LLM until the response contains no more
+ * tool calls (or the iteration limit is reached).
+ *
+ * <p><b>Architecture (native-first):</b>
+ * <ul>
+ *   <li><b>Native path (primary):</b> Structured
+ *       {@link dev.talos.spi.types.ChatMessage.NativeToolCall NativeToolCall} objects
+ *       from the engine — no text parsing needed.</li>
+ *   <li><b>Text fallback (secondary):</b> Tool calls extracted from the LLM
+ *       response text by {@link ToolCallParser} — supports JSON code fences
+ *       (active format) and XML tags (compatibility).</li>
+ * </ul>
  *
  * <p>This is the bridge between:
  * <ul>
- *   <li>{@link ToolCallParser} — extracts {@code <tool_call>} blocks from text</li>
+ *   <li>{@link ToolCallParser} — extracts tool-call blocks from text (JSON code fences,
+ *       XML tags, bare JSON)</li>
  *   <li>{@link TurnProcessor#executeTool} — sandbox-enforced, approval-gated execution</li>
- *   <li>The LLM chat endpoint — re-prompted with tool results</li>
+ *   <li>The LLM chat endpoint — re-prompted with tool results via
+ *       {@link dev.talos.core.llm.LlmClient#chatFull}</li>
  * </ul>
  *
  * <p>The loop is stateless and designed to be called from any Mode (Ask, Rag, etc.)
@@ -42,6 +54,7 @@ import java.util.Set;
  *   <li>Max iterations prevent infinite loops (default: 10)</li>
  *   <li>Tool execution never throws — errors become tool-result messages</li>
  *   <li>Non-tool text from the LLM (reasoning/explanation) is preserved</li>
+ *   <li>Missing paths on write/edit are NOT inferred — tool produces clear error</li>
  * </ul>
  */
 public final class ToolCallLoop {
@@ -115,17 +128,18 @@ public final class ToolCallLoop {
     }
 
     /**
-     * Run the tool-call loop on an initial LLM response.
+     * Run the tool-call loop on an initial LLM response (text-only, no native calls).
      *
-     * <p>If the response contains {@code <tool_call>} blocks, they are extracted,
-     * executed, and the results are appended to the message list. The LLM is then
-     * re-prompted with the updated messages. This repeats until:
+     * <p>If the response contains tool-call blocks (JSON code fences, XML tags,
+     * or bare JSON), they are extracted, executed, and the results are appended
+     * to the message list. The LLM is then re-prompted with the updated messages.
+     * This repeats until:
      * <ol>
      *   <li>The LLM responds without any tool calls, or</li>
      *   <li>The maximum iteration count is reached</li>
      * </ol>
      *
-     * @param initialAnswer the first LLM response text (may contain tool_call blocks)
+     * @param initialAnswer the first LLM response text (may contain text-format tool calls)
      * @param messages      the mutable message list (will be extended with assistant + tool messages)
      * @param workspace     the workspace root path (for sandbox-scoped tool execution)
      * @param ctx           runtime context (provides LLM client, sandbox, etc.)

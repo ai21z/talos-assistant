@@ -47,21 +47,25 @@ public final class ToolCallStreamFilter implements Consumer<String> {
     /** Saved opening fence text (e.g. "```json\n") for re-emission of non-tool fences. */
     private String fenceOpening = "";
 
-    /** Current suppression state. */
+    /** Current suppression state.
+     *  SUPPRESSING_XML is COMPATIBILITY-only (for models that emit XML from training). */
     private enum State { PASSTHROUGH, SUPPRESSING_XML, BUFFERING_FENCE, SUPPRESSING_FENCE }
     private State state = State.PASSTHROUGH;
 
-    /** Opening XML tags that start suppression. */
+    /** Opening XML tags that start suppression.
+     *  COMPATIBILITY — retained for models that emit XML from training habits. */
     private static final Pattern OPEN_TAG = Pattern.compile(
             "<(tool_call|function_call|tool|function)>"
     );
 
-    /** Closing XML tags that end suppression. */
+    /** Closing XML tags that end suppression.
+     *  COMPATIBILITY — retained alongside OPEN_TAG. */
     private static final Pattern CLOSE_TAG = Pattern.compile(
             "</(tool_call|function_call|tool|function)>"
     );
 
-    /** All possible opening XML tag strings (for prefix matching at chunk boundaries). */
+    /** All possible opening XML tag strings (for prefix matching at chunk boundaries).
+     *  COMPATIBILITY — retained alongside OPEN_TAG. */
     private static final String[] OPEN_TAG_STRINGS = {
             "<tool_call>", "<function_call>", "<tool>", "<function>"
     };
@@ -145,7 +149,8 @@ public final class ToolCallStreamFilter implements Consumer<String> {
     }
 
     /**
-     * In XML suppressing mode: look for closing tag.
+     * COMPATIBILITY: In XML suppressing mode — look for closing tag.
+     * Retained for models that emit XML tool-call tags from training habits.
      * Returns true if progress was made (should loop again).
      */
     private boolean drainSuppressingXml() {
