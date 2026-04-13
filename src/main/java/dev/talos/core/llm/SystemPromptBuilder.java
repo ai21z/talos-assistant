@@ -80,7 +80,7 @@ public final class SystemPromptBuilder {
      * Indicate whether the engine supports native tool calling.
      * When true, uses a shorter preamble without format instructions
      * (the native API handles format). When false, uses the full
-     * preamble with XML format instructions as fallback.
+     * preamble with JSON code-fenced format instructions as fallback.
      */
     public SystemPromptBuilder withNativeTools(boolean nativeTools) {
         this.nativeTools = nativeTools;
@@ -220,7 +220,7 @@ public final class SystemPromptBuilder {
 
         // Choose preamble based on native tool support:
         // - Native: shorter preamble without format instructions (API handles format)
-        // - Fallback: full preamble with XML format instructions
+        // - Fallback: full preamble with JSON code-fenced format instructions
         if (nativeTools) {
             String nativePreamble = readResource(RES_TOOLS_NATIVE);
             if (nativePreamble != null) {

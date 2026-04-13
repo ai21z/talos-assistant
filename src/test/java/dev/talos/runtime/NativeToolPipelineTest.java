@@ -19,10 +19,22 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * End-to-end assertions for the native-tool-pipeline migration.
  *
+ * <p><b>Architecture:</b>
+ * <ol>
+ *   <li><b>Native tool calls (primary):</b> Structured {@code NativeToolCall}
+ *       objects from the engine — no text parsing needed.</li>
+ *   <li><b>JSON code fences (active text fallback):</b> Instructed in prompts
+ *       when native calling is unavailable.</li>
+ *   <li><b>XML tags (compatibility only):</b> Parsed and suppressed for models
+ *       that emit XML from training habits or cached context, but NOT actively
+ *       instructed in any prompt path.</li>
+ * </ol>
+ *
  * <p>Verifies:
  * <ul>
  *   <li>Native tool calls stay structured through the pipeline (no XML conversion)</li>
- *   <li>JSON is the active text fallback format (no XML instructions)</li>
+ *   <li>JSON is the active text fallback format (no XML in prompt instructions)</li>
+ *   <li>XML is still parsed/suppressed for compatibility but not instructed</li>
  *   <li>Safety features (no path guessing, no code-block writes) are preserved</li>
  *   <li>ToolCallLoop dual-path works correctly for both native and text fallback</li>
  * </ul>
@@ -200,14 +212,14 @@ class NativeToolPipelineTest {
         }
     }
 
-    // ── XML retirement ───────────────────────────────────────────────────
+    // ── XML compatibility (retained, not active) ──────────────────────────
 
     @Nested
-    @DisplayName("XML retirement")
-    class XmlRetirement {
+    @DisplayName("XML compatibility — retained for transition, not actively instructed")
+    class XmlCompatibility {
 
         @Test
-        @DisplayName("XML tool calls are still parsed for compatibility")
+        @DisplayName("XML tool calls are still parsed for compatibility (not actively instructed)")
         void xmlStillParsedForCompat() {
             String response = """
                     <tool_call>
@@ -251,7 +263,7 @@ class NativeToolPipelineTest {
         }
 
         @Test
-        @DisplayName("ToolCallStreamFilter suppresses JSON code fences")
+        @DisplayName("ToolCallStreamFilter suppresses JSON code fences (active fallback)")
         void filterHandlesJsonFences() {
             List<String> chunks = new ArrayList<>();
             var filter = new ToolCallStreamFilter(chunks::add);
@@ -262,6 +274,47 @@ class NativeToolPipelineTest {
                     "JSON code-fenced tool call should be suppressed from display");
             assertTrue(result.contains("text"));
             assertTrue(result.contains("more"));
+        }
+
+        @Test
+        @DisplayName("no prompt path instructs XML — fallback uses JSON, native uses nothing")
+        void noPromptPathInstructsXml() {
+            var registry = new ToolRegistry();
+            registry.register(stubTool("talos.read_file", "Read a file"));
+
+            // Native prompt: no format instructions at all
+            String nativePrompt = SystemPromptBuilder.forAsk()
+                    .withTools(registry).withNativeTools(true).build();
+            assertFalse(nativePrompt.contains("<tool_call>"),
+                    "Native prompt must not contain XML tags");
+            assertFalse(nativePrompt.contains("</tool_call>"),
+                    "Native prompt must not contain XML closing tags");
+
+            // Fallback prompt: JSON code-fenced format only
+            String fallbackPrompt = SystemPromptBuilder.forAsk()
+                    .withTools(registry).withNativeTools(false).build();
+            assertFalse(fallbackPrompt.contains("<tool_call>"),
+                    "Fallback prompt must NOT instruct XML format");
+            assertTrue(fallbackPrompt.contains("```json"),
+                    "Fallback prompt must instruct JSON code-fenced format");
+        }
+
+        @Test
+        @DisplayName("XML compat code is parsing-only — JSON is the instructed format")
+        void xmlIsParsingOnlyNotInstructed() {
+            // Prove XML parsing still works (compatibility)
+            String xmlResponse = "<tool_call>{\"name\":\"talos.grep\",\"parameters\":{\"pattern\":\"x\"}}</tool_call>";
+            List<ToolCall> xmlCalls = ToolCallParser.parse(xmlResponse);
+            assertEquals(1, xmlCalls.size(), "XML should still be parseable (compatibility)");
+
+            // Prove JSON code-fenced parsing works (active fallback)
+            String jsonResponse = "```json\n{\"name\":\"talos.grep\",\"parameters\":{\"pattern\":\"x\"}}\n```";
+            List<ToolCall> jsonCalls = ToolCallParser.parse(jsonResponse);
+            assertEquals(1, jsonCalls.size(), "JSON code fences should be parseable (active fallback)");
+
+            // Both parse to the same result
+            assertEquals(xmlCalls.get(0).toolName(), jsonCalls.get(0).toolName());
+            assertEquals(xmlCalls.get(0).param("pattern"), jsonCalls.get(0).param("pattern"));
         }
     }
 
@@ -386,5 +439,8 @@ class NativeToolPipelineTest {
         };
     }
 }
+
+
+
 
 
