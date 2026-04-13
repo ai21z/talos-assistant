@@ -375,6 +375,127 @@ class OllamaToolCallBridgeTest {
             assertFalse(disabledEngine.convertToolSpecs(specs).isEmpty(),
                     "convertToolSpecs is independent of toggle");
         }
+
+        @Test
+        void capabilities_reportNativeToolCalling() {
+            var enabledEngine = new OllamaEngine("http://localhost:11434", "test-model", true);
+            assertTrue(enabledEngine.caps().nativeTools(),
+                    "Capabilities should report nativeTools=true when enabled");
+
+            var disabledEngine = new OllamaEngine("http://localhost:11434", "test-model", false);
+            assertFalse(disabledEngine.caps().nativeTools(),
+                    "Capabilities should report nativeTools=false when disabled");
+        }
+    }
+
+    // ── parseNativeToolCalls ──────────────────────────────────────────────
+
+    @Nested
+    class ParseNativeToolCalls {
+
+        @Test
+        void singleToolCall_parsedCorrectly() throws Exception {
+            JsonNode toolCalls = MAPPER.readTree("""
+                    [{"function":{"name":"talos.list_dir","arguments":{"path":"."}}}]
+                    """);
+
+            var result = engine.parseNativeToolCalls(toolCalls);
+
+            assertEquals(1, result.size());
+            assertEquals("call_0", result.get(0).id());
+            assertEquals("talos.list_dir", result.get(0).name());
+            assertEquals(".", result.get(0).arguments().get("path"));
+        }
+
+        @Test
+        void multipleToolCalls_allParsed() throws Exception {
+            JsonNode toolCalls = MAPPER.readTree("""
+                    [
+                      {"function":{"name":"talos.list_dir","arguments":{"path":"src"}}},
+                      {"function":{"name":"talos.read_file","arguments":{"path":"README.md"}}}
+                    ]
+                    """);
+
+            var result = engine.parseNativeToolCalls(toolCalls);
+
+            assertEquals(2, result.size());
+            assertEquals("call_0", result.get(0).id());
+            assertEquals("talos.list_dir", result.get(0).name());
+            assertEquals("call_1", result.get(1).id());
+            assertEquals("talos.read_file", result.get(1).name());
+        }
+
+        @Test
+        void emptyArguments_emptyMap() throws Exception {
+            JsonNode toolCalls = MAPPER.readTree("""
+                    [{"function":{"name":"talos.status","arguments":{}}}]
+                    """);
+
+            var result = engine.parseNativeToolCalls(toolCalls);
+
+            assertEquals(1, result.size());
+            assertTrue(result.get(0).arguments().isEmpty());
+        }
+
+        @Test
+        void missingArguments_emptyMap() throws Exception {
+            JsonNode toolCalls = MAPPER.readTree("""
+                    [{"function":{"name":"talos.status"}}]
+                    """);
+
+            var result = engine.parseNativeToolCalls(toolCalls);
+
+            assertEquals(1, result.size());
+            assertTrue(result.get(0).arguments().isEmpty());
+        }
+
+        @Test
+        void missingFunctionNode_skipped() throws Exception {
+            JsonNode toolCalls = MAPPER.readTree("""
+                    [{"not_function":{"name":"bogus"}},
+                     {"function":{"name":"talos.list_dir","arguments":{"path":"."}}}]
+                    """);
+
+            var result = engine.parseNativeToolCalls(toolCalls);
+
+            assertEquals(1, result.size());
+            assertEquals("talos.list_dir", result.get(0).name());
+        }
+
+        @Test
+        void emptyName_skipped() throws Exception {
+            JsonNode toolCalls = MAPPER.readTree("""
+                    [{"function":{"name":"","arguments":{"path":"."}}},
+                     {"function":{"name":"talos.list_dir","arguments":{"path":"."}}}]
+                    """);
+
+            var result = engine.parseNativeToolCalls(toolCalls);
+
+            assertEquals(1, result.size());
+            assertEquals("talos.list_dir", result.get(0).name());
+        }
+
+        @Test
+        void htmlContentInArguments_preserved() throws Exception {
+            // This is the critical regression test: HTML content in arguments
+            // must NOT be stripped. With native tool calls, it never touches
+            // the SUS_HTML sanitization because it's structured, not text.
+            JsonNode toolCalls = MAPPER.readTree("""
+                    [{"function":{"name":"talos.edit_file","arguments":{
+                      "path":"index.html",
+                      "old_string":"</body>",
+                      "new_string":"<script src=\\"script.js\\"></script></body>"
+                    }}}]
+                    """);
+
+            var result = engine.parseNativeToolCalls(toolCalls);
+
+            assertEquals(1, result.size());
+            assertEquals("talos.edit_file", result.get(0).name());
+            assertEquals("<script src=\"script.js\"></script></body>",
+                    result.get(0).arguments().get("new_string"),
+                    "<script> tag in arguments must be preserved — this was the SUS_HTML bug root cause");
+        }
     }
 }
 
