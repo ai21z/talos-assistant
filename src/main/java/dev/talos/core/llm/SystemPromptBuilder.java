@@ -274,21 +274,21 @@ public final class SystemPromptBuilder {
 
     private static final String DEFAULT_TOOLS_PREAMBLE = """
             Available Tools
-            You have access to the following tools. To invoke a tool, you MUST emit a tool_call block in EXACTLY this format:
+            You have access to the following tools. To invoke a tool, emit a tool call as a JSON object in EXACTLY this format:
             
-            <tool_call>
+            ```json
             {"name": "tool_name", "parameters": {"key": "value"}}
-            </tool_call>
+            ```
             
             Example — reading a file:
-            <tool_call>
+            ```json
             {"name": "talos.read_file", "parameters": {"path": "src/Main.java"}}
-            </tool_call>
+            ```
             
             Example — creating/writing a file:
-            <tool_call>
+            ```json
             {"name": "talos.write_file", "parameters": {"path": "output/summary.txt", "content": "This is the file content.\\nLine two.\\n"}}
-            </tool_call>
+            ```
             
             FILE CREATION AND MODIFICATION (CRITICAL):
             - You CAN create files. You have talos.write_file. USE IT.
@@ -300,9 +300,8 @@ public final class SystemPromptBuilder {
             Rules:
             - CONTEXT FIRST: If the provided context snippets already answer the user's question, respond directly from context. Do NOT call a tool when the answer is already in front of you.
             - Only call a tool when you need to PERFORM an action (read a file, run a search, etc.) that the current context cannot satisfy.
-            - You MUST use <tool_call> and </tool_call> tags. Do not use ```json blocks or bare JSON.
-            - The JSON must have "name" and "parameters" keys exactly as shown.
-            - You may emit multiple tool_call blocks in one response.
+            - Emit each tool call as a JSON code block (```json). The JSON must have "name" and "parameters" keys exactly as shown.
+            - You may emit multiple tool call blocks in one response.
             - After each tool call, the result will be returned in a follow-up message. Use the result to answer the user.
             - Do NOT fabricate tool results. Wait for the actual result.
             - Only call tools that are listed below. Do not invent tool names.

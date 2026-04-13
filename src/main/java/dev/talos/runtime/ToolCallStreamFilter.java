@@ -8,9 +8,22 @@ import java.util.regex.Pattern;
  * Stream filter that suppresses tool-call protocol blocks from user-visible output.
  *
  * <p>Wraps a {@code Consumer<String>} display sink. Chunks that contain or partially
- * overlap {@code <tool_call>}, {@code <function_call>}, {@code <tool>}, or
- * {@code <function>} XML blocks are buffered and suppressed. Natural-language text
+ * overlap tool-call blocks are buffered and suppressed. Natural-language text
  * before/after tool-call blocks passes through to the delegate.
+ *
+ * <p>Suppresses two families of tool-call format:
+ * <ol>
+ *   <li><b>XML tags</b> (compatibility): {@code <tool_call>}, {@code <function_call>},
+ *       {@code <tool>}, {@code <function>} — retained for models that may still emit XML.</li>
+ *   <li><b>JSON code fences</b> (active fallback): {@code ```json ... ```} blocks whose
+ *       content matches a tool-call pattern ({@code "name": "talos."}). Non-tool-call
+ *       code fences pass through unchanged.</li>
+ * </ol>
+ *
+ * <p><b>Native tool calls</b> (the primary path) never appear in the text stream —
+ * they are emitted as {@link dev.talos.spi.types.TokenChunk#ofToolCalls} chunks and
+ * captured directly by {@link dev.talos.core.llm.LlmClient#chatStreamFull}, bypassing
+ * this filter entirely.
  *
  * <p>The tool-call loop ({@link ToolCallLoop}) receives the full raw text from
  * {@link dev.talos.core.llm.LlmClient#chatStream}'s return value, so filtering
@@ -31,22 +44,41 @@ public final class ToolCallStreamFilter implements Consumer<String> {
 
     private final Consumer<String> delegate;
     private final StringBuilder buffer = new StringBuilder();
-    private boolean suppressing = false;
+    /** Saved opening fence text (e.g. "```json\n") for re-emission of non-tool fences. */
+    private String fenceOpening = "";
 
-    /** Opening tags that start suppression. */
+    /** Current suppression state. */
+    private enum State { PASSTHROUGH, SUPPRESSING_XML, BUFFERING_FENCE, SUPPRESSING_FENCE }
+    private State state = State.PASSTHROUGH;
+
+    /** Opening XML tags that start suppression. */
     private static final Pattern OPEN_TAG = Pattern.compile(
             "<(tool_call|function_call|tool|function)>"
     );
 
-    /** Closing tags that end suppression. */
+    /** Closing XML tags that end suppression. */
     private static final Pattern CLOSE_TAG = Pattern.compile(
             "</(tool_call|function_call|tool|function)>"
     );
 
-    /** All possible opening tag strings (for prefix matching at chunk boundaries). */
+    /** All possible opening XML tag strings (for prefix matching at chunk boundaries). */
     private static final String[] OPEN_TAG_STRINGS = {
             "<tool_call>", "<function_call>", "<tool>", "<function>"
     };
+
+    /** Opening code fence that could start a tool-call block. */
+    private static final Pattern CODE_FENCE_OPEN = Pattern.compile("```(?:json)?\\s*\\n");
+
+    /** Closing code fence: ``` at start of a line (preceded by newline) or at end of content. */
+    private static final Pattern CODE_FENCE_CLOSE = Pattern.compile("\\n```(?:\\s*\\n|\\s*$)");
+
+    /** Tool-call JSON signature inside a code fence. */
+    private static final Pattern TOOL_CALL_JSON = Pattern.compile(
+            "\"name\"\\s*:\\s*\"talos\\."
+    );
+
+    /** All possible code fence opening prefixes (for chunk boundary detection). */
+    private static final String CODE_FENCE_PREFIX = "```";
 
     public ToolCallStreamFilter(Consumer<String> delegate) {
         this.delegate = (delegate != null) ? delegate : s -> {};
@@ -64,14 +96,28 @@ public final class ToolCallStreamFilter implements Consumer<String> {
      *
      * <p>Call this after the stream completes (e.g., after {@code chatStream()} returns).
      * If currently inside a suppressed block, the partial block is discarded (it was
-     * tool-call content that never closed — safe to drop).
+     * tool-call content that never closed — safe to drop). If buffering a code fence
+     * that never completed, the buffered content is emitted (it was not a tool call).
      */
     public void flush() {
-        if (buffer.length() > 0 && !suppressing) {
-            delegate.accept(buffer.toString());
+        if (buffer.length() > 0 || !fenceOpening.isEmpty()) {
+            switch (state) {
+                case PASSTHROUGH:
+                    delegate.accept(buffer.toString());
+                    break;
+                case BUFFERING_FENCE:
+                    // Never completed — emit opening fence + content as regular text
+                    delegate.accept(fenceOpening + buffer.toString());
+                    break;
+                case SUPPRESSING_XML:
+                case SUPPRESSING_FENCE:
+                    // Incomplete tool-call block — discard
+                    break;
+            }
         }
         buffer.setLength(0);
-        suppressing = false;
+        fenceOpening = "";
+        state = State.PASSTHROUGH;
     }
 
     /**
@@ -79,7 +125,8 @@ public final class ToolCallStreamFilter implements Consumer<String> {
      */
     public void reset() {
         buffer.setLength(0);
-        suppressing = false;
+        fenceOpening = "";
+        state = State.PASSTHROUGH;
     }
 
     // ── Internal drain loop ──────────────────────────────────────────────
@@ -87,26 +134,28 @@ public final class ToolCallStreamFilter implements Consumer<String> {
     private void drain() {
         // Process buffer until no more progress can be made
         while (buffer.length() > 0) {
-            if (suppressing) {
-                if (!drainSuppressing()) break;
-            } else {
-                if (!drainPassthrough()) break;
-            }
+            boolean progress = switch (state) {
+                case SUPPRESSING_XML -> drainSuppressingXml();
+                case SUPPRESSING_FENCE -> drainSuppressingFence();
+                case BUFFERING_FENCE -> drainBufferingFence();
+                case PASSTHROUGH -> drainPassthrough();
+            };
+            if (!progress) break;
         }
     }
 
     /**
-     * In suppressing mode: look for closing tag.
+     * In XML suppressing mode: look for closing tag.
      * Returns true if progress was made (should loop again).
      */
-    private boolean drainSuppressing() {
+    private boolean drainSuppressingXml() {
         Matcher cm = CLOSE_TAG.matcher(buffer);
         if (cm.find()) {
             // Found closing tag — discard everything up to and including it
             String remainder = buffer.substring(cm.end());
             buffer.setLength(0);
             buffer.append(remainder);
-            suppressing = false;
+            state = State.PASSTHROUGH;
             return true; // made progress
         }
         // Still inside block, wait for more chunks
@@ -114,61 +163,151 @@ public final class ToolCallStreamFilter implements Consumer<String> {
     }
 
     /**
-     * In passthrough mode: look for opening tag or hold partial matches.
+     * In fence-suppressing mode: look for closing ```.
+     * Returns true if progress was made.
+     */
+    private boolean drainSuppressingFence() {
+        String text = buffer.toString();
+        Matcher cm = CODE_FENCE_CLOSE.matcher(text);
+        if (cm.find()) {
+            String remainder = text.substring(cm.end());
+            buffer.setLength(0);
+            buffer.append(remainder);
+            state = State.PASSTHROUGH;
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * In fence-buffering mode: we've seen the opening ``` and the buffer
+     * contains only the content AFTER the opening fence. Look for the
+     * closing ``` to decide whether to suppress (tool call) or emit (regular code).
+     */
+    private boolean drainBufferingFence() {
+        String text = buffer.toString();
+        Matcher cm = CODE_FENCE_CLOSE.matcher(text);
+        if (cm.find()) {
+            // We have the full code fence content — check if it's a tool call
+            String fenceContent = text.substring(0, cm.start());
+            if (TOOL_CALL_JSON.matcher(fenceContent).find()) {
+                // It's a tool call — suppress the entire block including closing fence
+                String remainder = text.substring(cm.end());
+                buffer.setLength(0);
+                buffer.append(remainder);
+                fenceOpening = "";
+                state = State.PASSTHROUGH;
+                return true;
+            } else {
+                // Not a tool call — emit the opening fence + content + closing fence
+                String full = fenceOpening + text.substring(0, cm.end());
+                String remainder = text.substring(cm.end());
+                delegate.accept(full);
+                buffer.setLength(0);
+                buffer.append(remainder);
+                fenceOpening = "";
+                state = State.PASSTHROUGH;
+                return true;
+            }
+        }
+        // Still waiting for closing fence
+        return false;
+    }
+
+    /**
+     * In passthrough mode: look for opening XML tag or code fence.
      * Returns true if progress was made (should loop again).
      */
     private boolean drainPassthrough() {
         String text = buffer.toString();
 
+        // Check for XML opening tag
         Matcher om = OPEN_TAG.matcher(text);
-        if (om.find()) {
-            // Found opening tag — emit everything before it, enter suppressing
-            String before = text.substring(0, om.start());
-            if (!before.isEmpty()) {
-                delegate.accept(before);
+        int xmlStart = om.find() ? om.start() : -1;
+
+        // Check for code fence opening
+        Matcher fm = CODE_FENCE_OPEN.matcher(text);
+        int fenceStart = fm.find() ? fm.start() : -1;
+
+        // Neither found — try to emit safe prefix
+        if (xmlStart < 0 && fenceStart < 0) {
+            int safeEnd = findSafeEmitEnd(text);
+            if (safeEnd > 0) {
+                delegate.accept(text.substring(0, safeEnd));
+                String remainder = text.substring(safeEnd);
+                buffer.setLength(0);
+                buffer.append(remainder);
             }
+            return false;
+        }
+
+        // Determine which comes first
+        int firstPos;
+        boolean isXml;
+        if (xmlStart >= 0 && (fenceStart < 0 || xmlStart <= fenceStart)) {
+            firstPos = xmlStart;
+            isXml = true;
+        } else {
+            firstPos = fenceStart;
+            isXml = false;
+        }
+
+        // Emit everything before the first match
+        if (firstPos > 0) {
+            delegate.accept(text.substring(0, firstPos));
+        }
+
+        if (isXml) {
+            // XML tag — enter XML suppression
             String remainder = text.substring(om.end());
             buffer.setLength(0);
             buffer.append(remainder);
-            suppressing = true;
-            return true; // made progress
-        }
-
-        // No complete opening tag. Check if the buffer ends with a partial tag prefix.
-        int safeEnd = findSafeEmitEnd(text);
-        if (safeEnd > 0) {
-            delegate.accept(text.substring(0, safeEnd));
-            String remainder = text.substring(safeEnd);
+            state = State.SUPPRESSING_XML;
+        } else {
+            // Code fence — enter fence buffering.
+            // Store only the content AFTER the opening fence (```json\n)
+            // so the close-fence pattern doesn't match the opening fence.
+            String remainder = text.substring(fm.end());
             buffer.setLength(0);
             buffer.append(remainder);
+            // Remember the opening fence text for re-emission if it turns out
+            // to be a non-tool-call code fence.
+            fenceOpening = text.substring(fenceStart, fm.end());
+            state = State.BUFFERING_FENCE;
         }
-        // No more progress possible until next chunk arrives
-        return false;
+        return true;
     }
 
     /**
      * Find the safe-to-emit boundary: everything before a potential partial
-     * opening tag at the end of the buffer.
+     * opening tag or code fence at the end of the buffer.
      *
      * <p>Scans backward from the end looking for {@code <} that could be
-     * the start of an opening tag prefix. Returns the index up to which
-     * content can safely be emitted, or the full length if no partial match.
+     * the start of an opening tag prefix, or {@code `} that could be the
+     * start of a code fence. Returns the index up to which content can
+     * safely be emitted, or the full length if no partial match.
      */
     private static int findSafeEmitEnd(String text) {
         int len = text.length();
-        // Only need to check the last N chars where N = length of longest tag
-        // Longest: "<function_call>" = 16 chars
+        // Scan from end: longest XML tag "<function_call>" = 16 chars, fence "```json\n" = 8
         int scanFrom = Math.max(0, len - 16);
 
         for (int i = len - 1; i >= scanFrom; i--) {
-            if (text.charAt(i) == '<') {
+            char c = text.charAt(i);
+            if (c == '<') {
                 String tail = text.substring(i);
                 if (couldBeOpenTagPrefix(tail)) {
-                    return i; // hold this partial, emit everything before
+                    return i;
+                }
+            }
+            if (c == '`') {
+                String tail = text.substring(i);
+                if (CODE_FENCE_PREFIX.startsWith(tail) || tail.startsWith(CODE_FENCE_PREFIX)) {
+                    return i;
                 }
             }
         }
-        return len; // safe to emit everything
+        return len;
     }
 
     /**

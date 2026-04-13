@@ -239,22 +239,35 @@ final class OllamaEngine implements ModelEngine {
     }
 
     /**
-     * Extracts the assistant content from an /api/chat JSON response.
-     * If the response contains native tool_calls, they are converted
-     * to {@code <tool_call>} XML format so existing ToolCallParser/ToolCallLoop
-     * can process them without changes.
+     * Extracts the assistant text content from an /api/chat JSON response.
+     *
+     * <p>If the response contains native {@code tool_calls}, they are logged
+     * but <b>not</b> converted to XML. The non-streaming {@code chat()} SPI
+     * returns {@code String} and cannot carry structured tool calls. The
+     * streaming path ({@code chatStreamViaMessages} → {@code TokenChunk.ofToolCalls})
+     * is the correct way to consume native tool calls.
+     *
+     * <p>In practice, {@link dev.talos.core.llm.LlmClient} always routes through
+     * the streaming engine path even for non-streaming API calls, so native tool
+     * calls are captured correctly via {@code chatStreamFull()} / {@code chatFull()}.
      */
-    private String extractChatContentOrToolCalls(String json) {
+    // Package-private for testability (OllamaToolCallBridgeTest)
+    String extractChatContentOrToolCalls(String json) {
         try {
             JsonNode root = mapper.readTree(json);
             JsonNode msg = root.path("message");
             if (msg.isMissingNode()) return json;
 
-            // Check for tool_calls first
+            // Check for tool_calls — log but do NOT convert to XML.
+            // The streaming path (chatStreamViaMessages → TokenChunk.ofToolCalls)
+            // is the proper structured path for native tool calls.
             JsonNode toolCallsNode = msg.path("tool_calls");
-            if (!toolCallsNode.isMissingNode() && toolCallsNode.isArray() && toolCallsNode.size() > 0) {
-                String textContent = msg.path("content").asText("");
-                return convertNativeToolCallsToXml(textContent, toolCallsNode);
+            if (!toolCallsNode.isMissingNode() && toolCallsNode.isArray() && !toolCallsNode.isEmpty()) {
+                LOG.debug("Non-streaming response contains {} native tool_call(s) — "
+                        + "use chatStream()/chatStreamFull() for structured access",
+                        toolCallsNode.size());
+                // Return only the text content; native calls are NOT converted to XML.
+                return msg.path("content").asText("");
             }
 
             // No tool calls — return content as before
@@ -266,73 +279,6 @@ final class OllamaEngine implements ModelEngine {
             if (m.find()) return unesc(m.group(1));
         }
         return json;
-    }
-
-    /**
-     * Convert native Ollama tool_calls JSON to {@code <tool_call>} XML format
-     * so the existing ToolCallParser can parse them.
-     *
-     * <p>Ollama returns:
-     * <pre>
-     * "tool_calls": [{
-     *   "function": {"name": "talos.list_dir", "arguments": {"path": "."}}
-     * }]
-     * </pre>
-     *
-     * <p>This method converts to:
-     * <pre>
-     * &lt;tool_call&gt;
-     * {"name": "talos.list_dir", "parameters": {"path": "."}}
-     * &lt;/tool_call&gt;
-     * </pre>
-     */
-    // Package-private for testability (OllamaToolCallBridgeTest)
-    String convertNativeToolCallsToXml(String textContent, JsonNode toolCallsNode) {
-        StringBuilder sb = new StringBuilder();
-
-        // Preserve any text content (e.g. thinking/reasoning) before tool calls
-        if (textContent != null && !textContent.isBlank()) {
-            sb.append(textContent).append("\n\n");
-        }
-
-        for (JsonNode tc : toolCallsNode) {
-            JsonNode fn = tc.path("function");
-            if (fn.isMissingNode()) continue;
-
-            String name = fn.path("name").asText("");
-            JsonNode argsNode = fn.path("arguments");
-
-            sb.append("<tool_call>\n");
-
-            // Build a JSON object in the format ToolCallParser expects
-            Map<String, Object> callObj = new LinkedHashMap<>();
-            callObj.put("name", name);
-
-            // arguments is already a parsed object from Ollama
-            if (!argsNode.isMissingNode() && argsNode.isObject()) {
-                Map<String, Object> params = new LinkedHashMap<>();
-                var fields = argsNode.fields();
-                while (fields.hasNext()) {
-                    var entry = fields.next();
-                    params.put(entry.getKey(), entry.getValue().asText(""));
-                }
-                callObj.put("parameters", params);
-            } else {
-                callObj.put("parameters", Map.of());
-            }
-
-            try {
-                sb.append(mapper.writeValueAsString(callObj));
-            } catch (Exception e) {
-                sb.append("{\"name\":\"").append(name).append("\",\"parameters\":{}}");
-            }
-
-            sb.append("\n</tool_call>\n");
-        }
-
-        String result = sb.toString().strip();
-        LOG.debug("Converted {} native tool_call(s) to XML format", toolCallsNode.size());
-        return result;
     }
 
     @Override

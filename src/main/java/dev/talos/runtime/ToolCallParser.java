@@ -11,12 +11,26 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Parses tool-call blocks from LLM text responses.
+ * Parses tool-call blocks from LLM text responses (text fallback path).
  *
- * <p>Accepts the canonical {@code <tool_call>} XML format plus common variants:
- * variant XML tags, code-fenced JSON, bare JSON with {@code "talos."} prefix,
- * and key aliases ({@code "function"}, {@code "arguments"}, etc.).
- * Malformed blocks are logged and skipped. Stateless and thread-safe.
+ * <p><b>Architecture note:</b> This parser serves the <em>text fallback</em> path only.
+ * When native tool calling is enabled (the primary path), tool calls are structured
+ * ({@link dev.talos.spi.types.ChatMessage.NativeToolCall}) and bypass this parser entirely.
+ *
+ * <p>The text fallback accepts multiple formats, in priority order:
+ * <ol>
+ *   <li><b>XML tags</b> (compatibility): {@code <tool_call>}, {@code <function_call>},
+ *       {@code <tool>}, {@code <function>} — retained for models that may still emit XML
+ *       from cached context or training habits.</li>
+ *   <li><b>Code-fenced JSON</b> (active fallback): {@code ```json ... ```} blocks
+ *       containing a {@code "name"} key — the instructed text fallback format.</li>
+ *   <li><b>Bare JSON</b>: JSON objects with {@code "talos."} prefix at line boundaries —
+ *       catch-all for models that skip both wrappers.</li>
+ * </ol>
+ *
+ * <p>Key aliases ({@code "function"}, {@code "arguments"}, etc.) and nested wrappers
+ * ({@code {"tool_call": {...}}}) are normalized. Malformed blocks are logged and skipped.
+ * Stateless and thread-safe.
  */
 public final class ToolCallParser {
 

@@ -348,7 +348,7 @@ class SystemPromptBuilderTest {
     }
 
     @Test
-    void fallbackToolsIncludesXmlFormatInstructions() {
+    void fallbackToolsIncludesJsonFormatInstructions() {
         var registry = new ToolRegistry();
         registry.register(stubTool("talos.read_file", "Read a file"));
 
@@ -357,8 +357,13 @@ class SystemPromptBuilderTest {
                 .withNativeTools(false)
                 .build();
 
-        assertTrue(prompt.contains("<tool_call>"),
-                "Fallback mode should contain <tool_call> XML tags");
+        // Fallback should use JSON code-fenced format, not XML
+        assertFalse(prompt.contains("<tool_call>"),
+                "Fallback mode should NOT contain XML <tool_call> tags");
+        assertTrue(prompt.contains("```json"),
+                "Fallback mode should contain ```json code fence examples");
+        assertTrue(prompt.contains("\"name\""),
+                "Fallback mode should contain JSON format instructions");
         assertTrue(prompt.contains("Available Tools"),
                 "Fallback mode should have tools preamble");
     }
@@ -438,7 +443,7 @@ class SystemPromptBuilderTest {
         var registry = new ToolRegistry();
         registry.register(stubTool("talos.read_file", "Read a file"));
 
-        // Default (nativeTools not set → false) should include XML format instructions
+        // Default (nativeTools not set → false) should include JSON format instructions
         String defaultPrompt = SystemPromptBuilder.forAsk()
                 .withTools(registry)
                 .build();
