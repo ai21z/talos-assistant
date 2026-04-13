@@ -358,7 +358,7 @@ public final class LlmClient implements AutoCloseable {
                                                Duration timeout,
                                                Supplier<Boolean> cancelled) {
         List<ChatMessage> sanitized = messages.stream()
-                .map(m -> new ChatMessage(m.role(), Sanitize.sanitizeForPrompt(Objects.toString(m.content(), ""))))
+                .map(m -> new ChatMessage(m.role(), Sanitize.sanitizeMessageContent(Objects.toString(m.content(), ""))))
                 .toList();
 
         EngineException lastTransient = null;
@@ -406,7 +406,7 @@ public final class LlmClient implements AutoCloseable {
             String deltaRaw = Objects.toString(ch.text(), "");
             acc.append(deltaRaw);
             String noThink = Sanitize.stripThinkTags(acc.toString());
-            String cleaned = Sanitize.sanitizeForOutput(noThink);
+            String cleaned = Sanitize.sanitizeForOutputPreservingToolCalls(noThink);
             cleaned = Sanitize.hardTruncate(cleaned, safeCap());
 
             int already = Math.min(alreadyEmittedLen, cleaned.length());

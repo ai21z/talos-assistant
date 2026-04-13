@@ -1,6 +1,7 @@
 package dev.talos.runtime;
 
 import dev.talos.cli.repl.Context;
+import dev.talos.core.util.Sanitize;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolCall;
@@ -243,8 +244,11 @@ public final class ToolCallLoop {
                     + "\n\n[Tool-call limit reached. Some tool calls were not executed.]";
         }
 
-        // Strip any remaining tool_call blocks from the final answer
-        String finalAnswer = ToolCallParser.stripToolCalls(currentAnswer);
+        // Strip any remaining tool_call blocks from the final answer,
+        // then apply SUS_HTML stripping to the prose (safe now that tool_call
+        // blocks with their HTML-valued JSON params have been removed).
+        String finalAnswer = Sanitize.stripSuspiciousHtml(
+                ToolCallParser.stripToolCalls(currentAnswer));
 
         LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked", iterations, totalToolsInvoked);
 

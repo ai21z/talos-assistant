@@ -1,5 +1,6 @@
 package dev.talos.core.util;
 
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -18,6 +19,11 @@ public final class Sanitize {
     );
     // Hidden chain-of-thought blocks (e.g., <think>...</think>)
     private static final Pattern THINK = Pattern.compile("(?is)<\\s*think\\s*>.*?<\\s*/\\s*think\\s*>");
+
+    /** Matches &lt;tool_call&gt;...&lt;/tool_call&gt; blocks (and common tag variants). */
+    private static final Pattern TOOL_CALL_BLOCK = Pattern.compile(
+            "(?s)<(?:tool_call|function_call)>.*?</(?:tool_call|function_call)>"
+    );
 
     /**
      * Strips ANSI escape sequences, control characters, and nulls from the input string.
@@ -62,6 +68,42 @@ public final class Sanitize {
     }
 
     /**
+     * Sanitizes streamed LLM output while preserving {@code <tool_call>} blocks intact.
+     *
+     * <p>Tool-call blocks contain JSON with raw file content (HTML, CSS, JS) as parameter
+     * values. The {@link #SUS_HTML} pattern would strip tags like {@code <script>} or
+     * {@code <style>} from these JSON values, corrupting the tool parameters.
+     *
+     * <p>This method applies full sanitization (control chars, think blocks, SUS_HTML)
+     * to prose text <em>outside</em> tool_call blocks, while preserving the raw content
+     * inside tool_call blocks (only control chars are stripped there).
+     *
+     * <p>Use this instead of {@link #sanitizeForOutput} in streaming assembly where the
+     * response may contain tool_call blocks with HTML-valued parameters.
+     */
+    public static String sanitizeForOutputPreservingToolCalls(String s) {
+        if (s == null || s.isEmpty()) return "";
+        s = stripControl(dropThinkBlocks(s));
+        return stripSuspiciousHtmlOutsideToolCalls(s);
+    }
+
+    /**
+     * Sanitizes message content for multi-turn chat (messages sent to the model).
+     *
+     * <p>Only strips control characters — does NOT strip HTML. Messages in the
+     * tool-call pipeline may contain file content with legitimate HTML/script tags
+     * (e.g., tool results from read_file). Stripping those would give the model an
+     * incorrect view of the file, causing it to generate wrong edits.
+     *
+     * <p>This is safe for a local-first CLI where the user is the only source of
+     * input. The model's output is still sanitized via
+     * {@link #sanitizeForOutputPreservingToolCalls} before display.
+     */
+    public static String sanitizeMessageContent(String s) {
+        return stripControl(s);
+    }
+
+    /**
      * Performs hard truncation to maximum character count (safe for terminal; doesn't split surrogate pairs).
      */
     public static String hardTruncate(String s, int maxChars) {
@@ -83,6 +125,38 @@ public final class Sanitize {
     }
 
     /* Back-compatibility aliases for existing code */
+
+    /**
+     * Applies {@link #SUS_HTML} stripping only to text <em>outside</em>
+     * {@code <tool_call>} / {@code <function_call>} blocks.
+     *
+     * <p>The algorithm: find all tool_call blocks, protect them, strip HTML
+     * from the interstitial prose, then reassemble.
+     */
+    private static String stripSuspiciousHtmlOutsideToolCalls(String s) {
+        Matcher m = TOOL_CALL_BLOCK.matcher(s);
+        if (!m.find()) {
+            // No tool_call blocks — apply SUS_HTML to the entire string
+            return SUS_HTML.matcher(s).replaceAll("");
+        }
+
+        // Walk through the string, sanitizing only the gaps between blocks
+        StringBuilder result = new StringBuilder(s.length());
+        int lastEnd = 0;
+        m.reset();
+        while (m.find()) {
+            // Sanitize prose before this tool_call block
+            String before = s.substring(lastEnd, m.start());
+            result.append(SUS_HTML.matcher(before).replaceAll(""));
+            // Preserve the tool_call block verbatim
+            result.append(m.group());
+            lastEnd = m.end();
+        }
+        // Sanitize prose after the last tool_call block
+        String after = s.substring(lastEnd);
+        result.append(SUS_HTML.matcher(after).replaceAll(""));
+        return result.toString();
+    }
 
     /**
      * Legacy alias: removes ANSI escape sequences only.
