@@ -58,9 +58,11 @@ public final class AskMode implements Mode {
         // System prompt — composed from sections, tool-aware, history-aware
         boolean hasHistory = (ctx.conversationManager() != null && ctx.conversationManager().hasHistory())
                 || (ctx.memory() != null && ctx.memory().hasContent());
+        boolean nativeTools = CfgUtil.boolAt(CfgUtil.map(ctx.cfg().data.get("tools")), "native_calling", true);
         String system = SystemPromptBuilder.forAsk()
                 .withTools(ctx.toolRegistry())
                 .withWorkspace(workspace)
+                .withNativeTools(nativeTools)
                 .withHistory(hasHistory)
                 .build();
 

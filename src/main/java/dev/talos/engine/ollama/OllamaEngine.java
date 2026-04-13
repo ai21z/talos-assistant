@@ -58,7 +58,7 @@ final class OllamaEngine implements ModelEngine {
     public Capabilities caps() {
         // Try to fetch actual model context length
         int contextLength = getModelContextLength();
-        return Capabilities.of(true, true, false, contextLength);
+        return Capabilities.of(true, true, false, contextLength, nativeToolCalling);
     }
 
     /**
@@ -388,8 +388,8 @@ final class OllamaEngine implements ModelEngine {
      * <p>When tools are present and the model invokes them, the stream sends
      * thinking tokens first (with empty content), then ONE chunk with the
      * complete {@code tool_calls} array, then {@code done:true}.
-     * This method detects tool_calls in the stream and converts them to
-     * XML format in a single TokenChunk.
+     * This method detects tool_calls in the stream and emits them as structured
+     * {@link TokenChunk#ofToolCalls} chunks (no XML conversion).
      */
     private Stream<TokenChunk> chatStreamViaMessages(ChatRequest req) throws Exception {
         String model = Objects.toString(req.model, defaultModel);
@@ -452,11 +452,21 @@ final class OllamaEngine implements ModelEngine {
                     JsonNode root = mapper.readTree(line);
                     JsonNode msg = root.path("message");
                     JsonNode toolCallsNode = msg.path("tool_calls");
-                    if (!toolCallsNode.isMissingNode() && toolCallsNode.isArray() && toolCallsNode.size() > 0) {
+                    if (!toolCallsNode.isMissingNode() && toolCallsNode.isArray() && !toolCallsNode.isEmpty()) {
+                        // Emit any text content before the tool calls as a separate text chunk
                         String textContent = msg.path("content").asText("");
-                        String xmlToolCalls = convertNativeToolCallsToXml(textContent, toolCallsNode);
-                        LOG.debug("Stream: received native tool_calls chunk, converted to XML");
-                        return TokenChunk.of(xmlToolCalls);
+                        if (textContent != null && !textContent.isBlank()) {
+                            // Note: we can only return one chunk per line, so prepend text
+                            // to the first tool call's content. In practice Ollama sends
+                            // text tokens in prior chunks, not mixed with tool_calls.
+                            LOG.debug("Stream: tool_calls chunk also had text content: {}",
+                                    textContent.length() > 60 ? textContent.substring(0, 57) + "..." : textContent);
+                        }
+                        List<ChatMessage.NativeToolCall> nativeCalls = parseNativeToolCalls(toolCallsNode);
+                        if (!nativeCalls.isEmpty()) {
+                            LOG.debug("Stream: received {} native tool_call(s)", nativeCalls.size());
+                            return TokenChunk.ofToolCalls(nativeCalls);
+                        }
                     }
                 } catch (Exception e) {
                     LOG.warn("Failed to parse tool_calls from stream chunk: {}", e.getMessage());
@@ -471,6 +481,48 @@ final class OllamaEngine implements ModelEngine {
     }
 
     // ── Tool spec conversion ─────────────────────────────────────────────
+
+    /**
+     * Parse Ollama's native tool_calls JSON array into a list of {@link ChatMessage.NativeToolCall}.
+     *
+     * <p>Ollama returns:
+     * <pre>
+     * "tool_calls": [{
+     *   "function": {"name": "talos.list_dir", "arguments": {"path": "."}}
+     * }]
+     * </pre>
+     */
+    // Package-private for testability
+    List<ChatMessage.NativeToolCall> parseNativeToolCalls(JsonNode toolCallsNode) {
+        List<ChatMessage.NativeToolCall> calls = new ArrayList<>();
+        int index = 0;
+        for (JsonNode tc : toolCallsNode) {
+            JsonNode fn = tc.path("function");
+            if (fn.isMissingNode()) continue;
+
+            String name = fn.path("name").asText("");
+            if (name.isEmpty()) continue;
+
+            // Ollama does not currently return call IDs; generate synthetic ones
+            String id = "call_" + index;
+
+            JsonNode argsNode = fn.path("arguments");
+            Map<String, Object> args = new LinkedHashMap<>();
+            if (!argsNode.isMissingNode() && argsNode.isObject()) {
+                var fields = argsNode.fields();
+                while (fields.hasNext()) {
+                    var entry = fields.next();
+                    // Preserve original value: strings stay strings, others are asText()
+                    JsonNode val = entry.getValue();
+                    args.put(entry.getKey(), val.isTextual() ? val.asText() : val.asText(""));
+                }
+            }
+
+            calls.add(new ChatMessage.NativeToolCall(id, name, args));
+            index++;
+        }
+        return calls;
+    }
 
     /**
      * Convert {@link ToolSpec} list to Ollama's native tool format.
@@ -545,7 +597,9 @@ final class OllamaEngine implements ModelEngine {
         }
 
         // Include tool_call_id for tool-result messages
-        // (Ollama doesn't actually require this yet, but it's correct protocol)
+        if ("tool".equals(m.role()) && m.toolCallId() != null && !m.toolCallId().isBlank()) {
+            msg.put("tool_call_id", m.toolCallId());
+        }
 
         return msg;
     }

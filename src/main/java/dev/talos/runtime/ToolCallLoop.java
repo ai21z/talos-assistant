@@ -1,9 +1,11 @@
 package dev.talos.runtime;
 
 import dev.talos.cli.repl.Context;
+import dev.talos.core.llm.LlmClient;
 import dev.talos.core.util.Sanitize;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ChatMessage.NativeToolCall;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolProgressSink;
 import dev.talos.tools.ToolResult;
@@ -12,7 +14,9 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
@@ -128,18 +132,38 @@ public final class ToolCallLoop {
      * @return loop result with the final answer and execution stats
      */
     public LoopResult run(String initialAnswer, List<ChatMessage> messages, Path workspace, Context ctx) {
-        if (initialAnswer == null) {
-            return new LoopResult("", 0, 0, List.of(), messages);
-        }
+        return run(initialAnswer, List.of(), messages, workspace, ctx);
+    }
 
-        if (!ToolCallParser.containsToolCalls(initialAnswer)) {
-            // Safety note: CodeBlockToolExtractor was previously used here as a fallback
-            // to convert code blocks with filename hints into write_file calls.
-            // This was DISABLED because it silently mutates files from what the model
-            // intended as explanatory markdown. The model must use <tool_call> format
-            // to perform file operations. See: transcript analysis 2026-04-12.
+    /**
+     * Run the tool-call loop with native tool calls from the LLM.
+     *
+     * <p>When {@code nativeToolCalls} is non-empty, the loop uses them directly
+     * (no regex parsing needed). This is the <b>primary path</b> for modern models
+     * that support Ollama's native tool calling API.
+     *
+     * <p>When {@code nativeToolCalls} is empty, falls back to parsing tool calls
+     * from the text response via {@link ToolCallParser} (handles XML tags,
+     * code-fenced JSON, and bare JSON formats).
+     *
+     * @param initialAnswer    the first LLM response text (prose; may contain text-format tool calls as fallback)
+     * @param nativeToolCalls  native tool calls from the model (may be empty)
+     * @param messages         the mutable message list (will be extended with assistant + tool messages)
+     * @param workspace        the workspace root path (for sandbox-scoped tool execution)
+     * @param ctx              runtime context (provides LLM client, sandbox, etc.)
+     * @return loop result with the final answer and execution stats
+     */
+    public LoopResult run(String initialAnswer, List<NativeToolCall> nativeToolCalls,
+                          List<ChatMessage> messages, Path workspace, Context ctx) {
+        if (initialAnswer == null) initialAnswer = "";
+
+        boolean hasNative = nativeToolCalls != null && !nativeToolCalls.isEmpty();
+        boolean hasTextCalls = ToolCallParser.containsToolCalls(initialAnswer);
+
+        if (!hasNative && !hasTextCalls) {
+            // No tool calls of any kind — check for code-block fallback (warning only)
             if (CodeBlockToolExtractor.containsExtractableBlocks(initialAnswer)) {
-                LOG.warn("Response contains code blocks with filename hints but no <tool_call> blocks. "
+                LOG.warn("Response contains code blocks with filename hints but no tool calls. "
                         + "File writes were NOT performed. The model should use tool_call format for file operations.");
             }
             return new LoopResult(initialAnswer, 0, 0, List.of(), messages);
@@ -148,46 +172,61 @@ public final class ToolCallLoop {
         // Lightweight session for tool execution context
         Session toolSession = new Session(workspace, ctx.cfg());
 
-        String currentAnswer = initialAnswer;
+        String currentText = initialAnswer;
+        List<NativeToolCall> currentNativeCalls = hasNative ? new ArrayList<>(nativeToolCalls) : List.of();
         int iterations = 0;
         int totalToolsInvoked = 0;
         List<String> toolNames = new ArrayList<>();
 
-        while (iterations < maxIterations && ToolCallParser.containsToolCalls(currentAnswer)) {
+        while (iterations < maxIterations) {
+            boolean useNativePath = !currentNativeCalls.isEmpty();
+            boolean useTextPath = !useNativePath && ToolCallParser.containsToolCalls(currentText);
+
+            if (!useNativePath && !useTextPath) break;
+
             iterations++;
 
-            // 1. Parse tool calls from the response
-            List<ToolCall> calls = ToolCallParser.parse(currentAnswer);
-            if (calls.isEmpty()) {
-                // Pattern matched but JSON was malformed — stop looping
-                break;
+            // 1. Parse/convert tool calls
+            List<ToolCall> calls;
+            if (useNativePath) {
+                calls = convertNativeToolCalls(currentNativeCalls);
+                LOG.debug("Tool-call loop iteration {}: {} native tool call(s)", iterations, calls.size());
+            } else {
+                calls = ToolCallParser.parse(currentText);
+                LOG.debug("Tool-call loop iteration {}: {} text tool call(s)", iterations, calls.size());
             }
 
-            LOG.debug("Tool-call loop iteration {}: {} tool call(s) detected", iterations, calls.size());
+            if (calls.isEmpty()) break; // malformed — stop
 
-            // 2. Append the assistant message (full response including tool_call blocks)
-            messages.add(ChatMessage.assistant(currentAnswer));
+            // 2. Append the assistant message with proper type
+            if (useNativePath) {
+                messages.add(ChatMessage.assistantWithToolCalls(currentText, currentNativeCalls));
+            } else {
+                messages.add(ChatMessage.assistant(currentText));
+            }
 
             // 3. Execute each tool call and append results
-            for (ToolCall call : calls) {
-                // Check for missing 'path' on write/edit calls — returns as-is (no inference)
+            for (int i = 0; i < calls.size(); i++) {
+                ToolCall call = calls.get(i);
                 ToolCall effective = repairMissingPath(call);
                 totalToolsInvoked++;
                 toolNames.add(effective.toolName());
 
-                // Emit progress: executing
                 emitProgress(effective.toolName(), "executing", resolvePathHint(effective));
-
                 LOG.debug("  Executing tool: {} (params: {})", effective.toolName(), effective.parameters());
 
                 ToolResult result = turnProcessor.executeTool(toolSession, effective, ctx);
-
-                // Emit progress: completed or warning
                 emitToolResult(effective.toolName(), result);
 
-                // Format the tool result as a message the LLM can use
                 String resultText = formatToolResult(effective, result);
-                messages.add(ChatMessage.user(resultText));
+
+                // Use proper message type: native path → role="tool" with callId; fallback → role="user"
+                if (useNativePath && i < currentNativeCalls.size()) {
+                    String callId = currentNativeCalls.get(i).id();
+                    messages.add(ChatMessage.toolResult(callId, resultText));
+                } else {
+                    messages.add(ChatMessage.user(resultText));
+                }
 
                 LOG.debug("  Tool {} → {}", effective.toolName(),
                         result.success() ? "success (" + truncateForLog(result.output()) + ")"
@@ -196,51 +235,66 @@ public final class ToolCallLoop {
 
             // 4. Re-prompt the LLM with the updated conversation
             try {
-                currentAnswer = ctx.llm().chat(messages);
-                if (currentAnswer == null) {
-                    currentAnswer = "(no answer from model after tool execution)";
+                LlmClient.StreamResult repromptResult = ctx.llm().chatFull(messages);
+                currentText = repromptResult.text();
+                currentNativeCalls = repromptResult.hasToolCalls()
+                        ? new ArrayList<>(repromptResult.toolCalls()) : List.of();
+
+                if (currentText == null) currentText = "";
+                if (currentText.isEmpty() && currentNativeCalls.isEmpty()) {
+                    currentText = "(no answer from model after tool execution)";
                     break;
                 }
             } catch (EngineException.ConnectionFailed cf) {
                 LOG.warn("Ollama not reachable during tool-call loop iteration {}: {}", iterations, cf.getMessage());
-                currentAnswer = "[Ollama not reachable — tool loop aborted. " + cf.guidance() + "]";
+                currentText = "[Ollama not reachable — tool loop aborted. " + cf.guidance() + "]";
+                currentNativeCalls = List.of();
                 break;
             } catch (EngineException.ModelNotFound mnf) {
                 LOG.warn("Model not found during tool-call loop iteration {}: {}", iterations, mnf.model());
-                currentAnswer = "[Model '" + mnf.model() + "' not found — tool loop aborted. " + mnf.guidance() + "]";
+                currentText = "[Model '" + mnf.model() + "' not found — tool loop aborted. " + mnf.guidance() + "]";
+                currentNativeCalls = List.of();
                 break;
             } catch (EngineException.Transient tr) {
                 LOG.warn("Transient error during tool-call loop iteration {}: {}", iterations, tr.getMessage());
-                // One retry for transient errors in the tool loop
                 try {
                     Thread.sleep(400);
-                    currentAnswer = ctx.llm().chat(messages);
-                    if (currentAnswer == null) {
-                        currentAnswer = "(no answer from model after retry)";
+                    LlmClient.StreamResult retryResult = ctx.llm().chatFull(messages);
+                    currentText = retryResult.text();
+                    currentNativeCalls = retryResult.hasToolCalls()
+                            ? new ArrayList<>(retryResult.toolCalls()) : List.of();
+                    if (currentText == null) currentText = "";
+                    if (currentText.isEmpty() && currentNativeCalls.isEmpty()) {
+                        currentText = "(no answer from model after retry)";
                         break;
                     }
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
-                    currentAnswer = "[Interrupted during tool-call loop]";
+                    currentText = "[Interrupted during tool-call loop]";
+                    currentNativeCalls = List.of();
                     break;
                 } catch (Exception retryEx) {
-                    currentAnswer = "[" + tr.guidance() + "]";
+                    currentText = "[" + tr.guidance() + "]";
+                    currentNativeCalls = List.of();
                     break;
                 }
             } catch (EngineException ee) {
                 LOG.warn("Engine error during tool-call loop iteration {}: {}", iterations, ee.getMessage());
-                currentAnswer = "[Engine error during tool loop: " + ee.getMessage() + "]";
+                currentText = "[Engine error during tool loop: " + ee.getMessage() + "]";
+                currentNativeCalls = List.of();
                 break;
             } catch (Exception e) {
                 LOG.warn("LLM call failed during tool-call loop iteration {}: {}", iterations, e.getMessage());
-                currentAnswer = "(error during follow-up LLM call: " + e.getMessage() + ")";
+                currentText = "(error during follow-up LLM call: " + e.getMessage() + ")";
+                currentNativeCalls = List.of();
                 break;
             }
         }
 
-        if (iterations >= maxIterations && ToolCallParser.containsToolCalls(currentAnswer)) {
+        if (iterations >= maxIterations
+                && (!currentNativeCalls.isEmpty() || ToolCallParser.containsToolCalls(currentText))) {
             LOG.warn("Tool-call loop reached max iterations ({}). Stopping.", maxIterations);
-            currentAnswer = ToolCallParser.stripToolCalls(currentAnswer)
+            currentText = ToolCallParser.stripToolCalls(currentText)
                     + "\n\n[Tool-call limit reached. Some tool calls were not executed.]";
         }
 
@@ -248,11 +302,31 @@ public final class ToolCallLoop {
         // then apply SUS_HTML stripping to the prose (safe now that tool_call
         // blocks with their HTML-valued JSON params have been removed).
         String finalAnswer = Sanitize.stripSuspiciousHtml(
-                ToolCallParser.stripToolCalls(currentAnswer));
+                ToolCallParser.stripToolCalls(currentText));
 
         LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked", iterations, totalToolsInvoked);
 
         return new LoopResult(finalAnswer, iterations, totalToolsInvoked, List.copyOf(toolNames), messages);
+    }
+
+    // ── NativeToolCall → ToolCall conversion ─────────────────────────────
+
+    /**
+     * Convert native tool calls to the canonical {@link ToolCall} format.
+     * All argument values are stringified (ToolCall uses {@code Map<String, String>}).
+     */
+    static List<ToolCall> convertNativeToolCalls(List<NativeToolCall> nativeCalls) {
+        List<ToolCall> calls = new ArrayList<>(nativeCalls.size());
+        for (NativeToolCall ntc : nativeCalls) {
+            Map<String, String> params = new LinkedHashMap<>();
+            if (ntc.arguments() != null) {
+                for (var entry : ntc.arguments().entrySet()) {
+                    params.put(entry.getKey(), String.valueOf(entry.getValue()));
+                }
+            }
+            calls.add(new ToolCall(ntc.name(), params));
+        }
+        return calls;
     }
 
     /**

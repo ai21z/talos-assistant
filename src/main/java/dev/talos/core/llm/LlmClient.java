@@ -11,6 +11,7 @@ import dev.talos.spi.types.TokenChunk;
 import dev.talos.spi.types.ToolSpec;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -367,6 +368,114 @@ public final class LlmClient implements AutoCloseable {
             try {
                 ChatRequest req = new ChatRequest(backend, model, "", "", List.of(), timeout, sanitized, toolSpecs);
                 return assembleFromStream(registry.engine().chatStream(req), onChunk, cancelled);
+            } catch (EngineException.Transient t) {
+                lastTransient = t;
+            } catch (EngineException ee) {
+                throw ee;
+            } catch (Exception e) {
+                throw new EngineException.ResponseError(0, e.getMessage(), e);
+            }
+        }
+        throw lastTransient;
+    }
+
+    /**
+     * Result of a structured streaming chat, carrying both assembled text
+     * and any native tool calls returned by the model.
+     *
+     * @param text      assembled prose text (sanitized, think-tags stripped)
+     * @param toolCalls native tool calls from the model (empty if none)
+     */
+    public record StreamResult(String text, List<ChatMessage.NativeToolCall> toolCalls) {
+        /** Returns true if the model returned native tool calls. */
+        public boolean hasToolCalls() {
+            return toolCalls != null && !toolCalls.isEmpty();
+        }
+    }
+
+    /**
+     * Streaming chat that returns both text and native tool calls.
+     *
+     * <p>When the engine supports native tool calling and the model returns
+     * structured {@code tool_calls}, they are captured separately from the
+     * text stream. This enables the tool-call loop to process them without
+     * regex parsing.
+     *
+     * @param messages structured conversation messages
+     * @param onChunk  callback for text display chunks (may be null)
+     * @return stream result with text and tool calls
+     */
+    public StreamResult chatStreamFull(List<ChatMessage> messages, Consumer<String> onChunk) {
+        if (mode == TransportMode.PLACEHOLDER) {
+            String full = placeholderFromMessages(messages);
+            if (onChunk != null && !full.isEmpty()) onChunk.accept(full);
+            return new StreamResult(full, List.of());
+        }
+        return engineAssembledWithMessagesFull(messages, onChunk, Duration.ofSeconds(90), () -> false);
+    }
+
+    /**
+     * Non-streaming chat that returns both text and native tool calls.
+     * Used by the tool-call loop for re-prompting after tool execution.
+     */
+    public StreamResult chatFull(List<ChatMessage> messages) {
+        if (mode == TransportMode.PLACEHOLDER) {
+            return new StreamResult(placeholderFromMessages(messages), List.of());
+        }
+        return engineAssembledWithMessagesFull(messages, null, Duration.ofSeconds(90), () -> false);
+    }
+
+    /**
+     * ENGINE mode: assemble from token stream using structured messages via /api/chat.
+     * Returns a {@link StreamResult} carrying both the assembled text and any
+     * native tool calls.
+     */
+    private StreamResult engineAssembledWithMessagesFull(List<ChatMessage> messages,
+                                                         Consumer<String> onChunk,
+                                                         Duration timeout,
+                                                         Supplier<Boolean> cancelled) {
+        List<ChatMessage> sanitized = messages.stream()
+                .map(m -> new ChatMessage(m.role(), Sanitize.sanitizeMessageContent(Objects.toString(m.content(), ""))))
+                .toList();
+
+        EngineException lastTransient = null;
+        for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+            if (attempt > 0) backoff(attempt);
+            try {
+                ChatRequest req = new ChatRequest(backend, model, "", "", List.of(), timeout, sanitized, toolSpecs);
+                java.util.stream.Stream<TokenChunk> stream = registry.engine().chatStream(req);
+                StringBuilder acc = new StringBuilder();
+                List<ChatMessage.NativeToolCall> toolCalls = new ArrayList<>();
+                int alreadyEmittedLen = 0;
+
+                for (TokenChunk ch : (Iterable<TokenChunk>) stream::iterator) {
+                    if (cancelled != null && Boolean.TRUE.equals(cancelled.get())) break;
+                    if (ch == null || Boolean.TRUE.equals(ch.done())) break;
+
+                    // Native tool-call chunk: collect structured calls, skip text processing
+                    if (ch.hasToolCalls()) {
+                        toolCalls.addAll(ch.toolCalls());
+                        continue;
+                    }
+
+                    // Text chunk: sanitize and emit as before
+                    String deltaRaw = Objects.toString(ch.text(), "");
+                    acc.append(deltaRaw);
+                    String noThink = Sanitize.stripThinkTags(acc.toString());
+                    String cleaned = Sanitize.sanitizeForOutputPreservingToolCalls(noThink);
+                    cleaned = Sanitize.hardTruncate(cleaned, safeCap());
+
+                    int already = Math.min(alreadyEmittedLen, cleaned.length());
+                    String emit = cleaned.substring(already);
+
+                    acc.setLength(0);
+                    acc.append(cleaned);
+                    alreadyEmittedLen = cleaned.length();
+
+                    if (onChunk != null && !emit.isEmpty()) onChunk.accept(emit);
+                    if (acc.length() >= safeCap()) break;
+                }
+                return new StreamResult(acc.toString(), toolCalls);
             } catch (EngineException.Transient t) {
                 lastTransient = t;
             } catch (EngineException ee) {
