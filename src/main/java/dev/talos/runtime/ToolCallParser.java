@@ -13,41 +13,42 @@ import java.util.regex.Pattern;
 /**
  * Parses tool-call blocks from LLM text responses (text fallback path).
  *
- * <p><b>Architecture note:</b> This parser serves the <em>text fallback</em> path only.
- * When native tool calling is enabled (the primary path), tool calls are structured
- * ({@link dev.talos.spi.types.ChatMessage.NativeToolCall}) and bypass this parser entirely.
+ * <p><b>Architecture note (native-first pipeline):</b> This parser serves
+ * the <em>text fallback</em> path only. When native tool calling is enabled
+ * (the primary path), tool calls arrive as structured
+ * {@link dev.talos.spi.types.ChatMessage.NativeToolCall} objects and bypass
+ * this parser entirely.
  *
  * <p>The text fallback accepts multiple formats, in priority order:
  * <ol>
- *   <li><b>XML tags</b> (compatibility): {@code <tool_call>}, {@code <function_call>},
- *       {@code <tool>}, {@code <function>} — retained for models that may still emit XML
- *       from cached context or training habits.</li>
- *   <li><b>Code-fenced JSON</b> (active fallback): {@code ```json ... ```} blocks
- *       containing a {@code "name"} key — the instructed text fallback format.</li>
- *   <li><b>Bare JSON</b>: JSON objects with {@code "talos."} prefix at line boundaries —
- *       catch-all for models that skip both wrappers.</li>
+ *   <li><b>Code-fenced JSON</b> (<em>active fallback</em>): {@code ```json ... ```} blocks
+ *       containing a {@code "name"} key — the instructed text fallback format when
+ *       native tool calling is unavailable.</li>
+ *   <li><b>Bare JSON</b> (<em>catch-all</em>): JSON objects with {@code "talos."} prefix
+ *       at line boundaries — for models that skip both wrappers.</li>
+ *   <li><b>XML tags</b> (<em>deprecated compatibility — checked last</em>):
+ *       {@code <tool_call>}, {@code <function_call>}, {@code <tool>}, {@code <function>}
+ *       — retained temporarily for models that may still emit XML from training habits
+ *       or cached context. No prompt path instructs this format. Emits a deprecation
+ *       warning when matched. Scheduled for removal once native tool calling has been
+ *       stable across model versions.</li>
  * </ol>
  *
  * <p>Key aliases ({@code "function"}, {@code "arguments"}, etc.) and nested wrappers
  * ({@code {"tool_call": {...}}}) are normalized. Malformed blocks are logged and skipped.
  * Stateless and thread-safe.
+ *
+ * @see ToolCallLoop
  */
 public final class ToolCallParser {
 
     private static final Logger LOG = LoggerFactory.getLogger(ToolCallParser.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    /** Canonical XML pattern: {@code <tool_call>…</tool_call>}.
-     *  COMPATIBILITY — retained for models that emit XML from training habits or cached context.
-     *  Not actively instructed; JSON code fences are the current fallback format. */
-    private static final Pattern TOOL_CALL_PATTERN = Pattern.compile(
-            "<tool_call>\\s*(.*?)\\s*</tool_call>",
-            Pattern.DOTALL
-    );
-
     /** Variant XML tags: tool_call, function_call, tool, function.
-     *  COMPATIBILITY — retained for models that emit XML variants.
-     *  JSON code fences are the actively instructed text fallback. */
+     *  DEPRECATED COMPATIBILITY ONLY — retained for models that emit XML variants.
+     *  JSON code fences are the actively instructed text fallback.
+     *  Scheduled for removal once native tool calling is stable across model versions. */
     private static final Pattern VARIANT_TAG_PATTERN = Pattern.compile(
             "<(tool_call|function_call|tool|function)>\\s*(.*?)\\s*</\\1>",
             Pattern.DOTALL
@@ -66,7 +67,7 @@ public final class ToolCallParser {
     );
 
     /** Combined pattern for stripping all recognized tool-call block formats.
-     *  Includes XML tags (COMPATIBILITY) and code-fenced/bare JSON. */
+     *  Includes XML tags (DEPRECATED compatibility) and code-fenced/bare JSON. */
     private static final Pattern STRIP_PATTERN = Pattern.compile(
             "<(?:tool_call|function_call|tool|function)>\\s*.*?\\s*</(?:tool_call|function_call|tool|function)>",
             Pattern.DOTALL
@@ -86,16 +87,23 @@ public final class ToolCallParser {
         List<ToolCall> calls = new ArrayList<>();
         Set<String> consumedPayloads = new HashSet<>();
 
-        // Pass 1: XML-tagged blocks — COMPATIBILITY (models may still emit from training)
-        extractFromPattern(VARIANT_TAG_PATTERN, 2, llmResponse, calls, consumedPayloads);
-
-        // Pass 2: code-fenced JSON blocks — ACTIVE fallback format
+        // Pass 1: code-fenced JSON blocks — ACTIVE fallback format (instructed)
         extractFromPattern(CODE_FENCE_PATTERN, 1, llmResponse, calls, consumedPayloads);
 
-        // Pass 3: bare JSON (only if no tagged blocks were found — avoids
+        // Pass 2: bare JSON (only if no code-fenced blocks were found — avoids
         // double-parsing when the model wraps AND bare-emits the same call)
         if (calls.isEmpty()) {
             extractFromPattern(BARE_JSON_PATTERN, 1, llmResponse, calls, consumedPayloads);
+        }
+
+        // Pass 3: XML-tagged blocks — DEPRECATED COMPATIBILITY ONLY (checked last).
+        //         Not actively instructed. Retained only for models that still emit
+        //         XML from training habits. Will be removed once native calling is stable.
+        int preXmlCount = calls.size();
+        extractFromPattern(VARIANT_TAG_PATTERN, 2, llmResponse, calls, consumedPayloads);
+        if (calls.size() > preXmlCount) {
+            LOG.warn("XML tool-call format detected — this is deprecated. "
+                    + "The model should use native tool calling or JSON code-fence format.");
         }
 
         return Collections.unmodifiableList(calls);

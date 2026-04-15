@@ -358,8 +358,13 @@ public final class LlmClient implements AutoCloseable {
                                                Consumer<String> onChunk,
                                                Duration timeout,
                                                Supplier<Boolean> cancelled) {
+        // Sanitize message content while preserving tool-call structure
         List<ChatMessage> sanitized = messages.stream()
-                .map(m -> new ChatMessage(m.role(), Sanitize.sanitizeMessageContent(Objects.toString(m.content(), ""))))
+                .map(m -> new ChatMessage(
+                        m.role(),
+                        Sanitize.sanitizeMessageContent(Objects.toString(m.content(), "")),
+                        m.toolCalls(),
+                        m.toolCallId()))
                 .toList();
 
         EngineException lastTransient = null;
@@ -434,8 +439,15 @@ public final class LlmClient implements AutoCloseable {
                                                          Consumer<String> onChunk,
                                                          Duration timeout,
                                                          Supplier<Boolean> cancelled) {
+        // Sanitize message content while preserving tool-call structure
+        // (toolCalls, toolCallId) — these carry native tool-call context that
+        // OllamaEngine.serializeChatMessage needs for proper /api/chat formatting.
         List<ChatMessage> sanitized = messages.stream()
-                .map(m -> new ChatMessage(m.role(), Sanitize.sanitizeMessageContent(Objects.toString(m.content(), ""))))
+                .map(m -> new ChatMessage(
+                        m.role(),
+                        Sanitize.sanitizeMessageContent(Objects.toString(m.content(), "")),
+                        m.toolCalls(),
+                        m.toolCallId()))
                 .toList();
 
         EngineException lastTransient = null;

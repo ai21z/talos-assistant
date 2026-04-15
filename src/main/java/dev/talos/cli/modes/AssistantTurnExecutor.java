@@ -1,9 +1,7 @@
 package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
-import dev.talos.cli.repl.Result;
 import dev.talos.core.llm.LlmClient;
-import dev.talos.runtime.CodeBlockToolExtractor;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.ToolCallStreamFilter;
@@ -39,10 +37,17 @@ final class AssistantTurnExecutor {
 
     private AssistantTurnExecutor() {} // utility class
 
-    /** Returns true if the answer text contains canonical tool calls OR code-block file operations. */
+    /**
+     * Returns true if the answer text contains text-format tool calls
+     * (JSON code fences, bare JSON, or XML compatibility tags).
+     *
+     * <p>Code-block file-write detection ({@link dev.talos.runtime.CodeBlockToolExtractor})
+     * is intentionally NOT included here. Code-block writes are disabled — they only
+     * produce a warning inside {@link ToolCallLoop#run}. Routing them through the
+     * tool-loop entry gate would be misleading.
+     */
     private static boolean hasAnyTextToolCalls(String answer) {
-        return ToolCallParser.containsToolCalls(answer)
-                || CodeBlockToolExtractor.containsExtractableBlocks(answer);
+        return ToolCallParser.containsToolCalls(answer);
     }
 
     /** Returns true if native tool calls or text-based tool calls are present. */

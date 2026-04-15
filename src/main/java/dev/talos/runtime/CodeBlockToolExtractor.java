@@ -11,11 +11,16 @@ import java.util.regex.Pattern;
 /**
  * Post-hoc extraction of implicit tool calls from LLM code blocks.
  *
- * <p>When the LLM fails to use the {@code <tool_call>} format and instead
- * produces a fenced code block with a filename header, this extractor
- * detects the pattern and converts it to a {@code talos.write_file}
- * {@link ToolCall}. This is a <strong>safety net</strong>, not a primary path —
- * the canonical tool-call format via {@link ToolCallParser} is always preferred.
+ * <p>When the LLM fails to use the canonical tool-call format (native calls
+ * or JSON code-fenced tool calls) and instead produces a fenced code block
+ * with a filename header, this extractor detects the pattern and converts
+ * it to a {@code talos.write_file} {@link ToolCall}.
+ *
+ * <p><b>This is a detection-only safety net, not an execution path.</b>
+ * Code-block file writes are disabled. The {@link ToolCallLoop} logs a
+ * warning when code blocks with filename hints are detected, but does NOT
+ * auto-execute them. The canonical tool-call format via {@link ToolCallParser}
+ * (or native tool calls) is always required for actual execution.</p>
  *
  * <p>Recognized patterns (case-insensitive):
  * <pre>{@code
