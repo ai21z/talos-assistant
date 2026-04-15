@@ -253,6 +253,118 @@ class ToolCallLoopTest {
         assertSame(messages, result.messages(), "Should return the same message list");
     }
 
+    // ── F1: Structured loop metrics ─────────────────────────────────
+
+    @Test
+    void failedCallsCountedWhenToolFails() {
+        // A tool that always fails
+        var loop = createLoop(alwaysFailTool());
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user("do something")));
+
+        // Response with one tool call to the failing tool
+        String llmResponse = """
+                <tool_call>{"name": "talos.always_fail", "parameters": {"input": "x"}}</tool_call>
+                """;
+
+        var result = loop.run(llmResponse, messages, WS, defaultCtx());
+
+        assertEquals(1, result.toolsInvoked(), "Should invoke 1 tool");
+        assertTrue(result.failedCalls() >= 1, "Failed call count should be >= 1, got: " + result.failedCalls());
+        assertFalse(result.hitIterLimit(), "Should not hit iter limit for a single-call response");
+    }
+
+    @Test
+    void successfulCallNotCountedAsFailed() {
+        var loop = createLoop(echoTool());
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user("echo something")));
+
+        String llmResponse = """
+                <tool_call>{"name": "talos.echo", "parameters": {"input": "hello"}}</tool_call>
+                """;
+
+        var result = loop.run(llmResponse, messages, WS, defaultCtx());
+
+        assertEquals(0, result.failedCalls(), "No failed calls expected for successful echo");
+    }
+
+    @Test
+    void newFieldsDefaultToZeroWhenNoToolCalls() {
+        var loop = createLoop(echoTool());
+        var messages = new ArrayList<>(List.of(ChatMessage.system("sys")));
+        var result = loop.run("just plain text, no tools", messages, WS, defaultCtx());
+
+        assertEquals(0, result.iterations());
+        assertEquals(0, result.toolsInvoked());
+        assertEquals(0, result.failedCalls());
+        assertEquals(0, result.retriedCalls());
+        assertFalse(result.hitIterLimit());
+    }
+
+    // ── F1: summary() includes failure info ─────────────────────────
+
+    @Test
+    void summaryIncludesFailedCount() {
+        var result = new ToolCallLoop.LoopResult(
+                "final", 1, 2,
+                List.of("talos.edit_file", "talos.write_file"),
+                List.of(), 1, 0, false);
+
+        String s = result.summary();
+        assertNotNull(s);
+        assertTrue(s.contains("1 failed"), "Summary should mention 1 failed, got: " + s);
+    }
+
+    @Test
+    void summaryIncludesIterLimitFlag() {
+        var result = new ToolCallLoop.LoopResult(
+                "final", 10, 10,
+                List.of("talos.edit_file"),
+                List.of(), 5, 3, true);
+
+        String s = result.summary();
+        assertNotNull(s);
+        assertTrue(s.contains("iteration limit reached"), "Summary should note limit, got: " + s);
+    }
+
+    // ── B3: call signature helper ────────────────────────────────────
+
+    @Test
+    void buildCallSignatureIncludesToolNameAndPath() {
+        var call = new ToolCall("talos.edit_file",
+                Map.of("path", "src/Foo.java", "old_string", "hello", "new_string", "world"));
+        String sig = ToolCallLoop.buildCallSignature(call);
+        assertTrue(sig.startsWith("talos.edit_file:"), "Signature should start with tool name");
+        assertTrue(sig.contains("src/Foo.java"), "Signature should include path");
+    }
+
+    @Test
+    void buildCallSignatureDifferentOldStringProducesDifferentSig() {
+        var call1 = new ToolCall("talos.edit_file",
+                Map.of("path", "f.txt", "old_string", "aaa", "new_string", "x"));
+        var call2 = new ToolCall("talos.edit_file",
+                Map.of("path", "f.txt", "old_string", "bbb", "new_string", "x"));
+
+        assertNotEquals(ToolCallLoop.buildCallSignature(call1),
+                ToolCallLoop.buildCallSignature(call2),
+                "Different old_string must produce different signatures");
+    }
+
+    @Test
+    void buildCallSignatureSameParamsSameSig() {
+        var call1 = new ToolCall("talos.edit_file",
+                Map.of("path", "f.txt", "old_string", "foo bar", "new_string", "baz"));
+        var call2 = new ToolCall("talos.edit_file",
+                Map.of("path", "f.txt", "old_string", "foo bar", "new_string", "qux"));
+
+        assertEquals(ToolCallLoop.buildCallSignature(call1),
+                ToolCallLoop.buildCallSignature(call2),
+                "Same tool+path+old_string must produce same signature regardless of new_string");
+    }
+
     @Test
     void loopResultStripsToolCallsFromFinalAnswer() {
         var loop = createLoop(echoTool());
@@ -294,6 +406,19 @@ class ToolCallLoopTest {
             }
             @Override public ToolResult execute(ToolCall call) {
                 return ToolResult.ok("echo: " + call.param("input", ""));
+            }
+        };
+    }
+
+    private static TalosTool alwaysFailTool() {
+        return new TalosTool() {
+            @Override public String name() { return "talos.always_fail"; }
+            @Override public String description() { return "Always fails"; }
+            @Override public ToolDescriptor descriptor() {
+                return new ToolDescriptor("talos.always_fail", "Always fails for test purposes");
+            }
+            @Override public ToolResult execute(ToolCall call) {
+                return ToolResult.fail("deliberate test failure");
             }
         };
     }

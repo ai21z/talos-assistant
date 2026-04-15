@@ -11,19 +11,19 @@ import java.util.regex.Pattern;
  * overlap tool-call blocks are buffered and suppressed. Natural-language text
  * before/after tool-call blocks passes through to the delegate.
  *
- * <p>Suppresses two families of tool-call format:
- * <ol>
- *   <li><b>XML tags</b> (compatibility): {@code <tool_call>}, {@code <function_call>},
- *       {@code <tool>}, {@code <function>} — retained for models that may still emit XML.</li>
- *   <li><b>JSON code fences</b> (active fallback): {@code ```json ... ```} blocks whose
- *       content matches a tool-call pattern ({@code "name": "talos."}). Non-tool-call
- *       code fences pass through unchanged.</li>
- * </ol>
- *
- * <p><b>Native tool calls</b> (the primary path) never appear in the text stream —
- * they are emitted as {@link dev.talos.spi.types.TokenChunk#ofToolCalls} chunks and
- * captured directly by {@link dev.talos.core.llm.LlmClient#chatStreamFull}, bypassing
- * this filter entirely.
+ * <p><b>Architecture (native-first pipeline):</b>
+ * <ul>
+ *   <li><b>Native tool calls (primary path)</b> never appear in the text stream —
+ *       they are emitted as {@link dev.talos.spi.types.TokenChunk#ofToolCalls} chunks
+ *       and captured directly by {@link dev.talos.core.llm.LlmClient#chatStreamFull},
+ *       bypassing this filter entirely.</li>
+ *   <li><b>JSON code fences (active text fallback)</b> — suppressed when the content
+ *       matches a tool-call signature ({@code "name": "talos."}).</li>
+ *   <li><b>XML tags (deprecated compatibility)</b> — {@code <tool_call>},
+ *       {@code <function_call>}, {@code <tool>}, {@code <function>} — retained
+ *       temporarily for models that emit XML from training habits. Not actively
+ *       instructed. Scheduled for removal once native calling is stable.</li>
+ * </ul>
  *
  * <p>The tool-call loop ({@link ToolCallLoop}) receives the full raw text from
  * {@link dev.talos.core.llm.LlmClient#chatStream}'s return value, so filtering
@@ -48,24 +48,28 @@ public final class ToolCallStreamFilter implements Consumer<String> {
     private String fenceOpening = "";
 
     /** Current suppression state.
-     *  SUPPRESSING_XML is COMPATIBILITY-only (for models that emit XML from training). */
+     *  SUPPRESSING_XML is DEPRECATED compatibility-only (for models that emit XML from training).
+     *  Scheduled for removal once native tool calling is stable across model versions. */
     private enum State { PASSTHROUGH, SUPPRESSING_XML, BUFFERING_FENCE, SUPPRESSING_FENCE }
     private State state = State.PASSTHROUGH;
 
     /** Opening XML tags that start suppression.
-     *  COMPATIBILITY — retained for models that emit XML from training habits. */
+     *  DEPRECATED COMPATIBILITY ONLY — retained for models that emit XML from training habits.
+     *  Scheduled for removal. */
     private static final Pattern OPEN_TAG = Pattern.compile(
             "<(tool_call|function_call|tool|function)>"
     );
 
     /** Closing XML tags that end suppression.
-     *  COMPATIBILITY — retained alongside OPEN_TAG. */
+     *  DEPRECATED COMPATIBILITY ONLY — retained alongside OPEN_TAG.
+     *  Scheduled for removal. */
     private static final Pattern CLOSE_TAG = Pattern.compile(
             "</(tool_call|function_call|tool|function)>"
     );
 
     /** All possible opening XML tag strings (for prefix matching at chunk boundaries).
-     *  COMPATIBILITY — retained alongside OPEN_TAG. */
+     *  DEPRECATED COMPATIBILITY ONLY — retained alongside OPEN_TAG.
+     *  Scheduled for removal. */
     private static final String[] OPEN_TAG_STRINGS = {
             "<tool_call>", "<function_call>", "<tool>", "<function>"
     };
@@ -149,8 +153,9 @@ public final class ToolCallStreamFilter implements Consumer<String> {
     }
 
     /**
-     * COMPATIBILITY: In XML suppressing mode — look for closing tag.
-     * Retained for models that emit XML tool-call tags from training habits.
+     * DEPRECATED COMPATIBILITY ONLY: In XML suppressing mode — look for closing tag.
+     * Retained temporarily for models that emit XML tool-call tags from training habits.
+     * Not actively instructed. Scheduled for removal.
      * Returns true if progress was made (should loop again).
      */
     private boolean drainSuppressingXml() {

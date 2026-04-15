@@ -21,8 +21,9 @@ public final class Sanitize {
     private static final Pattern THINK = Pattern.compile("(?is)<\\s*think\\s*>.*?<\\s*/\\s*think\\s*>");
 
     /** Matches &lt;tool_call&gt;...&lt;/tool_call&gt; blocks (and common tag variants).
-     *  COMPATIBILITY — retained for models that emit XML from training habits.
-     *  JSON code-fenced tool calls are the actively instructed text fallback format. */
+     *  DEPRECATED COMPATIBILITY ONLY — retained for models that emit XML from training habits.
+     *  JSON code-fenced tool calls are the actively instructed text fallback format.
+     *  Scheduled for removal once native tool calling is stable across model versions. */
     private static final Pattern TOOL_CALL_BLOCK = Pattern.compile(
             "(?s)<(?:tool_call|function_call)>.*?</(?:tool_call|function_call)>"
     );
@@ -138,8 +139,9 @@ public final class Sanitize {
      * tool-call blocks (both JSON code-fence format and XML tags).
      *
      * <p>JSON code fences are the actively instructed text fallback.
-     * XML tags are retained as COMPATIBILITY support for models that
-     * emit XML from training habits or cached context.
+     * XML tags are DEPRECATED COMPATIBILITY support for models that
+     * emit XML from training habits or cached context — not actively
+     * instructed, scheduled for removal.
      *
      * <p>The algorithm: find all tool_call blocks (both formats),
      * protect them, strip HTML from the interstitial prose, then reassemble.

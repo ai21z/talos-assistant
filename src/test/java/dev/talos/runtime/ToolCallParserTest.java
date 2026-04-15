@@ -401,17 +401,31 @@ class ToolCallParserTest {
     }
 
     @Test
-    void bareJsonNotUsedWhenTaggedBlockExists() {
-        // If a tagged block exists, bare JSON should not double-parse
+    void codeFencedJsonSuppressesBareJsonFallback() {
+        // Code-fenced JSON (active format) is found first; bare JSON fallback is skipped
         String response = """
-                <tool_call>
+                ```json
                 {"name": "talos.grep", "parameters": {"pattern": "x"}}
-                </tool_call>
+                ```
                 {"name": "talos.read_file", "parameters": {"path": "y"}}
                 """;
 
         List<ToolCall> calls = ToolCallParser.parse(response);
-        // Should only get the tagged one
+        // Only the code-fenced block — bare JSON should not be double-parsed
+        assertEquals(1, calls.size());
+        assertEquals("talos.grep", calls.get(0).toolName());
+    }
+
+    @Test
+    void xmlTaggedBlockUsedAsLastResortWhenNoJsonFormat() {
+        // XML is deprecated but still works when no JSON-format tool calls are present
+        String response = """
+                <tool_call>
+                {"name": "talos.grep", "parameters": {"pattern": "x"}}
+                </tool_call>
+                """;
+
+        List<ToolCall> calls = ToolCallParser.parse(response);
         assertEquals(1, calls.size());
         assertEquals("talos.grep", calls.get(0).toolName());
     }

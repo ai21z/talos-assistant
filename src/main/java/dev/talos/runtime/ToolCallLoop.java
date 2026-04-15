@@ -7,6 +7,7 @@ import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatMessage.NativeToolCall;
 import dev.talos.tools.ToolCall;
+import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolProgressSink;
 import dev.talos.tools.ToolResult;
 import org.slf4j.Logger;
@@ -14,6 +15,8 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -105,13 +108,19 @@ public final class ToolCallLoop {
      * @param toolsInvoked total number of individual tool calls across all iterations
      * @param toolNames    names of tools invoked (in call order, may contain duplicates)
      * @param messages     the full message list including all tool interactions
+     * @param failedCalls  number of tool calls that returned errors
+     * @param retriedCalls number of tool calls with the same (tool, path, old_string) as a prior failed call
+     * @param hitIterLimit true if the loop was stopped by the max iteration cap
      */
     public record LoopResult(
             String finalAnswer,
             int iterations,
             int toolsInvoked,
             List<String> toolNames,
-            List<ChatMessage> messages
+            List<ChatMessage> messages,
+            int failedCalls,
+            int retriedCalls,
+            boolean hitIterLimit
     ) {
         /**
          * Returns a user-facing summary line, or null if no tools were invoked.
@@ -119,11 +128,16 @@ public final class ToolCallLoop {
          */
         public String summary() {
             if (toolsInvoked <= 0) return null;
-            // Deduplicate tool names preserving first-seen order
             var unique = new java.util.LinkedHashSet<>(toolNames != null ? toolNames : List.of());
             String names = unique.isEmpty() ? "" : ": " + String.join(", ", unique);
-            return "[Used " + toolsInvoked + " tool(s)" + names + " | "
-                    + iterations + " iteration(s)]";
+            String base = "[Used " + toolsInvoked + " tool(s)" + names + " | " + iterations + " iteration(s)]";
+            if (failedCalls > 0) {
+                base += " [" + failedCalls + " failed]";
+            }
+            if (hitIterLimit) {
+                base += " [iteration limit reached]";
+            }
+            return base;
         }
     }
 
@@ -177,10 +191,10 @@ public final class ToolCallLoop {
         if (!hasNative && !hasTextCalls) {
             // No tool calls of any kind — check for code-block fallback (warning only)
             if (CodeBlockToolExtractor.containsExtractableBlocks(initialAnswer)) {
-                LOG.warn("Response contains code blocks with filename hints but no tool calls. "
+                LOG.debug("Response contains code blocks with filename hints but no tool calls. "
                         + "File writes were NOT performed. The model should use tool_call format for file operations.");
             }
-            return new LoopResult(initialAnswer, 0, 0, List.of(), messages);
+            return new LoopResult(initialAnswer, 0, 0, List.of(), messages, 0, 0, false);
         }
 
         // Lightweight session for tool execution context
@@ -190,7 +204,19 @@ public final class ToolCallLoop {
         List<NativeToolCall> currentNativeCalls = hasNative ? new ArrayList<>(nativeToolCalls) : List.of();
         int iterations = 0;
         int totalToolsInvoked = 0;
+        int failedCalls = 0;
+        int retriedCalls = 0;
         List<String> toolNames = new ArrayList<>();
+
+        // B3: track (toolName:path:old_string_hash) tuples that already FAILED in this run.
+        // If the model retries the exact same failing call, short-circuit with a diagnostic.
+        Set<String> failedCallSignatures = new HashSet<>();
+
+        // E1: track edit_file failure count per file path. After 2 failures suggest write_file.
+        Map<String, Integer> editFailuresByPath = new HashMap<>();
+
+        // B2: track paths that were read in this loop execution (read-before-write enforcement).
+        Set<String> pathsReadThisTurn = new HashSet<>();
 
         while (iterations < maxIterations) {
             boolean useNativePath = !currentNativeCalls.isEmpty();
@@ -226,13 +252,67 @@ public final class ToolCallLoop {
                 totalToolsInvoked++;
                 toolNames.add(effective.toolName());
 
-                emitProgress(effective.toolName(), "executing", resolvePathHint(effective));
+                String pathHint = resolvePathHint(effective);
+                emitProgress(effective.toolName(), "executing", pathHint);
                 LOG.debug("  Executing tool: {} (params: {})", effective.toolName(), effective.parameters());
+
+                // B3: compute signature for this call to detect repeated identical failures
+                String callSig = buildCallSignature(effective);
+                boolean isRetry = failedCallSignatures.contains(callSig);
+                if (isRetry) {
+                    retriedCalls++;
+                    failedCalls++;
+                    String diagnostic = "[tool_result: " + effective.toolName() + "]\n"
+                            + "[error] This exact call was already attempted and failed. "
+                            + "Call talos.read_file to see the file's current state, "
+                            + "then provide the exact text from the file in old_string. "
+                            + "Alternatively, use talos.write_file to replace the entire file content."
+                            + "\n[/tool_result]";
+                    if (useNativePath && i < currentNativeCalls.size()) {
+                        messages.add(ChatMessage.toolResult(currentNativeCalls.get(i).id(), diagnostic));
+                    } else {
+                        messages.add(ChatMessage.user(diagnostic));
+                    }
+                    LOG.debug("  Skipped duplicate failing call: {}", callSig);
+                    continue;
+                }
+
+                // B2: track reads; nudge if edit_file is called without prior read
+                String readBeforeWriteNudge = null;
+                if ("talos.read_file".equals(effective.toolName()) && pathHint != null) {
+                    pathsReadThisTurn.add(normalizePath(pathHint));
+                } else if ("talos.edit_file".equals(effective.toolName()) && pathHint != null) {
+                    if (!pathsReadThisTurn.contains(normalizePath(pathHint))) {
+                        readBeforeWriteNudge = "\nHint: You did not read this file before editing. "
+                                + "Call talos.read_file first to see the current content, "
+                                + "then retry the edit with the exact text.";
+                    }
+                }
 
                 ToolResult result = turnProcessor.executeTool(toolSession, effective, ctx);
                 emitToolResult(effective.toolName(), result);
 
+                // Track failures for B3 and E1
+                if (!result.success()) {
+                    failedCalls++;
+                    failedCallSignatures.add(callSig);
+
+                    // E1: track per-path edit_file failures; suggest write_file after 2nd failure
+                    if ("talos.edit_file".equals(effective.toolName()) && pathHint != null) {
+                        int failCount = editFailuresByPath.merge(normalizePath(pathHint), 1, Integer::sum);
+                        if (failCount >= 2) {
+                            result = ToolResult.fail(ToolError.invalidParams(
+                                    result.errorMessage()
+                                    + "\nSuggestion: edit_file has failed on this file multiple times. "
+                                    + "Consider using talos.write_file with the complete updated file content instead."));
+                        }
+                    }
+                }
+
                 String resultText = formatToolResult(effective, result);
+                if (readBeforeWriteNudge != null) {
+                    resultText = resultText + readBeforeWriteNudge;
+                }
 
                 // Use proper message type: native path → role="tool" with callId; fallback → role="user"
                 if (useNativePath && i < currentNativeCalls.size()) {
@@ -305,8 +385,10 @@ public final class ToolCallLoop {
             }
         }
 
-        if (iterations >= maxIterations
-                && (!currentNativeCalls.isEmpty() || ToolCallParser.containsToolCalls(currentText))) {
+        boolean hitIterLimit = iterations >= maxIterations
+                && (!currentNativeCalls.isEmpty() || ToolCallParser.containsToolCalls(currentText));
+
+        if (hitIterLimit) {
             LOG.warn("Tool-call loop reached max iterations ({}). Stopping.", maxIterations);
             currentText = ToolCallParser.stripToolCalls(currentText)
                     + "\n\n[Tool-call limit reached. Some tool calls were not executed.]";
@@ -318,9 +400,11 @@ public final class ToolCallLoop {
         String finalAnswer = Sanitize.stripSuspiciousHtml(
                 ToolCallParser.stripToolCalls(currentText));
 
-        LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked", iterations, totalToolsInvoked);
+        LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked, {} failed",
+                iterations, totalToolsInvoked, failedCalls);
 
-        return new LoopResult(finalAnswer, iterations, totalToolsInvoked, List.copyOf(toolNames), messages);
+        return new LoopResult(finalAnswer, iterations, totalToolsInvoked, List.copyOf(toolNames),
+                messages, failedCalls, retriedCalls, hitIterLimit);
     }
 
     // ── NativeToolCall → ToolCall conversion ─────────────────────────────
@@ -429,6 +513,27 @@ public final class ToolCallLoop {
             if (v != null && !v.isBlank()) return v;
         }
         return null;
+    }
+
+    // ---- Call-signature helpers (B3 repeated-failure detection) ----
+
+    /**
+     * Build a stable signature string for a tool call to detect repeated identical failures.
+     * Format: "toolName:path:hashOf(old_string)". For non-edit tools, old_string is empty.
+     */
+    static String buildCallSignature(ToolCall call) {
+        String path = resolvePathHint(call);
+        String oldStr = call.param("old_string");
+        if (oldStr == null) oldStr = call.param("oldString");
+        int oldHash = oldStr != null ? oldStr.hashCode() : 0;
+        return call.toolName() + ":" + (path != null ? path : "") + ":" + oldHash;
+    }
+
+    /**
+     * Normalize a file path for tracking purposes (forward slashes, lower-cased on Windows).
+     */
+    private static String normalizePath(String path) {
+        return path == null ? "" : path.replace('\\', '/');
     }
 
     // ---- Path safety for write/edit calls with missing path ----
