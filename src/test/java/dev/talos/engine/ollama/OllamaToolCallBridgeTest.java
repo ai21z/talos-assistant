@@ -15,8 +15,9 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Tests for OllamaEngine's native tool-calling bridge methods:
  * <ul>
- *   <li>{@code convertNativeToolCallsToXml} — Ollama tool_calls JSON → &lt;tool_call&gt; XML</li>
+ *   <li>{@code extractChatContentOrToolCalls} — /api/chat JSON response → text (no XML conversion)</li>
  *   <li>{@code convertToolSpecs} — ToolSpec list → Ollama native tool format</li>
+ *   <li>{@code parseNativeToolCalls} — Ollama tool_calls JSON → NativeToolCall list</li>
  * </ul>
  *
  * <p>Both methods are package-private for testability.
@@ -32,160 +33,88 @@ class OllamaToolCallBridgeTest {
         engine = new OllamaEngine("http://localhost:11434", "test-model");
     }
 
-    // ── convertNativeToolCallsToXml ──────────────────────────────────────
+    // ── extractChatContentOrToolCalls ─────────────────────────────────────
 
     @Nested
-    class ConvertNativeToolCallsToXml {
+    class ExtractChatContentOrToolCalls {
 
         @Test
-        void singleToolCall_producesValidXml() throws Exception {
-            JsonNode toolCalls = MAPPER.readTree("""
-                    [{"function":{"name":"talos.list_dir","arguments":{"path":"."}}}]
-                    """);
-
-            String result = engine.convertNativeToolCallsToXml("", toolCalls);
-
-            assertTrue(result.contains("<tool_call>"), "Should contain <tool_call> tag");
-            assertTrue(result.contains("</tool_call>"), "Should contain </tool_call> tag");
-            assertTrue(result.contains("\"name\":\"talos.list_dir\""), "Should contain tool name");
-            assertTrue(result.contains("\"parameters\""), "Should contain parameters key");
-            assertTrue(result.contains("\"path\":\".\""), "Should contain path argument");
+        void textOnly_returnsContent() {
+            String json = """
+                    {"message":{"role":"assistant","content":"Hello, how can I help?"},"done":true}
+                    """;
+            String result = engine.extractChatContentOrToolCalls(json);
+            assertEquals("Hello, how can I help?", result);
         }
 
         @Test
-        void multipleToolCalls_producesMultipleXmlBlocks() throws Exception {
-            JsonNode toolCalls = MAPPER.readTree("""
-                    [
+        void nativeToolCalls_returnsTextOnly_noXml() {
+            String json = """
+                    {"message":{"role":"assistant","content":"Let me check.",
+                    "tool_calls":[{"function":{"name":"talos.list_dir","arguments":{"path":"."}}}]},
+                    "done":true}
+                    """;
+            String result = engine.extractChatContentOrToolCalls(json);
+
+            // Must return only the text content
+            assertEquals("Let me check.", result);
+
+            // Must NOT contain any XML tags
+            assertFalse(result.contains("<tool_call>"), "No XML tags should be present");
+            assertFalse(result.contains("</tool_call>"), "No XML tags should be present");
+        }
+
+        @Test
+        void nativeToolCalls_emptyText_returnsEmptyString() {
+            String json = """
+                    {"message":{"role":"assistant","content":"",
+                    "tool_calls":[{"function":{"name":"talos.read_file","arguments":{"path":"x.txt"}}}]},
+                    "done":true}
+                    """;
+            String result = engine.extractChatContentOrToolCalls(json);
+            assertEquals("", result);
+            assertFalse(result.contains("<tool_call>"));
+        }
+
+        @Test
+        void multipleToolCalls_returnsTextOnly() {
+            String json = """
+                    {"message":{"role":"assistant","content":"I'll check both.",
+                    "tool_calls":[
                       {"function":{"name":"talos.list_dir","arguments":{"path":"src"}}},
-                      {"function":{"name":"talos.read_file","arguments":{"path":"README.md"}}},
-                      {"function":{"name":"talos.grep","arguments":{"pattern":"TODO","path":"."}}}
-                    ]
-                    """);
-
-            String result = engine.convertNativeToolCallsToXml("", toolCalls);
-
-            // Count <tool_call> occurrences
-            int count = result.split("<tool_call>").length - 1;
-            assertEquals(3, count, "Should produce 3 tool_call blocks");
-
-            assertTrue(result.contains("talos.list_dir"), "Should contain list_dir");
-            assertTrue(result.contains("talos.read_file"), "Should contain read_file");
-            assertTrue(result.contains("talos.grep"), "Should contain grep");
+                      {"function":{"name":"talos.read_file","arguments":{"path":"README.md"}}}
+                    ]},"done":true}
+                    """;
+            String result = engine.extractChatContentOrToolCalls(json);
+            assertEquals("I'll check both.", result);
+            assertFalse(result.contains("<tool_call>"));
+            assertFalse(result.contains("talos.list_dir"));  // tool call details not in text
         }
 
         @Test
-        void emptyArguments_producesEmptyParametersObject() throws Exception {
-            JsonNode toolCalls = MAPPER.readTree("""
-                    [{"function":{"name":"talos.status","arguments":{}}}]
-                    """);
-
-            String result = engine.convertNativeToolCallsToXml("", toolCalls);
-
-            assertTrue(result.contains("\"parameters\":{}"), "Empty args should map to empty parameters");
+        void emptyToolCallsArray_returnsContent() {
+            String json = """
+                    {"message":{"role":"assistant","content":"No tools needed.","tool_calls":[]},"done":true}
+                    """;
+            String result = engine.extractChatContentOrToolCalls(json);
+            assertEquals("No tools needed.", result);
         }
 
         @Test
-        void missingArguments_producesEmptyParametersObject() throws Exception {
-            JsonNode toolCalls = MAPPER.readTree("""
-                    [{"function":{"name":"talos.status"}}]
-                    """);
-
-            String result = engine.convertNativeToolCallsToXml("", toolCalls);
-
-            assertTrue(result.contains("\"parameters\":{}"),
-                    "Missing arguments node should produce empty parameters");
+        void missingMessageNode_returnsRawJson() {
+            String json = """
+                    {"some_other_format":"value"}
+                    """;
+            String result = engine.extractChatContentOrToolCalls(json);
+            assertEquals(json.strip(), result.strip());
         }
 
         @Test
-        void textContentPreservedBeforeToolCalls() throws Exception {
-            JsonNode toolCalls = MAPPER.readTree("""
-                    [{"function":{"name":"talos.list_dir","arguments":{"path":"."}}}]
-                    """);
-
-            String result = engine.convertNativeToolCallsToXml(
-                    "Let me check the directory structure.", toolCalls);
-
-            assertTrue(result.startsWith("Let me check the directory structure."),
-                    "Text content should appear before tool calls");
-            assertTrue(result.contains("<tool_call>"),
-                    "Tool call should still be present after text");
-        }
-
-        @Test
-        void blankTextContent_notIncluded() throws Exception {
-            JsonNode toolCalls = MAPPER.readTree("""
-                    [{"function":{"name":"talos.list_dir","arguments":{"path":"."}}}]
-                    """);
-
-            String result = engine.convertNativeToolCallsToXml("   ", toolCalls);
-
-            // Should not start with whitespace — blank text is omitted
-            assertTrue(result.startsWith("<tool_call>"),
-                    "Blank text should be omitted: got '" + result.substring(0, Math.min(30, result.length())) + "'");
-        }
-
-        @Test
-        void nullTextContent_notIncluded() throws Exception {
-            JsonNode toolCalls = MAPPER.readTree("""
-                    [{"function":{"name":"talos.list_dir","arguments":{"path":"."}}}]
-                    """);
-
-            String result = engine.convertNativeToolCallsToXml(null, toolCalls);
-
-            assertTrue(result.startsWith("<tool_call>"),
-                    "Null text should be omitted");
-        }
-
-        @Test
-        void nestedArgumentValues_flattenedToString() throws Exception {
-            // Ollama may return complex argument values; the bridge flattens to string via asText()
-            JsonNode toolCalls = MAPPER.readTree("""
-                    [{"function":{"name":"talos.write_file","arguments":{
-                      "path":"test.txt",
-                      "content":"line1\\nline2"
-                    }}}]
-                    """);
-
-            String result = engine.convertNativeToolCallsToXml("", toolCalls);
-
-            assertTrue(result.contains("\"path\":\"test.txt\""), "Should contain path");
-            assertTrue(result.contains("\"content\":"), "Should contain content key");
-        }
-
-        @Test
-        void missingFunctionNode_skipped() throws Exception {
-            // Malformed tool_call entry without "function" key — should be silently skipped
-            JsonNode toolCalls = MAPPER.readTree("""
-                    [{"not_function":{"name":"bogus"}},
-                     {"function":{"name":"talos.list_dir","arguments":{"path":"."}}}]
-                    """);
-
-            String result = engine.convertNativeToolCallsToXml("", toolCalls);
-
-            // Should only have 1 tool_call block (the valid one)
-            int count = result.split("<tool_call>").length - 1;
-            assertEquals(1, count, "Malformed entry should be skipped, only 1 valid tool_call");
-            assertTrue(result.contains("talos.list_dir"), "Valid tool_call should be present");
-        }
-
-        @Test
-        void resultIsParseable_asToolCallXml() throws Exception {
-            // End-to-end: the output should be parseable by ToolCallParser pattern
-            JsonNode toolCalls = MAPPER.readTree("""
-                    [{"function":{"name":"talos.read_file","arguments":{"path":"build.gradle.kts"}}}]
-                    """);
-
-            String result = engine.convertNativeToolCallsToXml("", toolCalls);
-
-            // Extract the JSON between <tool_call> and </tool_call>
-            int start = result.indexOf("<tool_call>\n") + "<tool_call>\n".length();
-            int end = result.indexOf("\n</tool_call>");
-            String jsonStr = result.substring(start, end);
-
-            // Should be valid JSON with name + parameters
-            JsonNode parsed = MAPPER.readTree(jsonStr);
-            assertEquals("talos.read_file", parsed.path("name").asText());
-            assertEquals("build.gradle.kts", parsed.path("parameters").path("path").asText());
+        void malformedJson_fallsBackToRegex() {
+            // Invalid JSON but contains "content":"..." pattern
+            String json = "not-json {\"content\":\"fallback text\"} end";
+            String result = engine.extractChatContentOrToolCalls(json);
+            assertEquals("fallback text", result);
         }
     }
 
@@ -374,6 +303,127 @@ class OllamaToolCallBridgeTest {
             var specs = List.of(new ToolSpec("talos.list_dir", "List dir", "{}"));
             assertFalse(disabledEngine.convertToolSpecs(specs).isEmpty(),
                     "convertToolSpecs is independent of toggle");
+        }
+
+        @Test
+        void capabilities_reportNativeToolCalling() {
+            var enabledEngine = new OllamaEngine("http://localhost:11434", "test-model", true);
+            assertTrue(enabledEngine.caps().nativeTools(),
+                    "Capabilities should report nativeTools=true when enabled");
+
+            var disabledEngine = new OllamaEngine("http://localhost:11434", "test-model", false);
+            assertFalse(disabledEngine.caps().nativeTools(),
+                    "Capabilities should report nativeTools=false when disabled");
+        }
+    }
+
+    // ── parseNativeToolCalls ──────────────────────────────────────────────
+
+    @Nested
+    class ParseNativeToolCalls {
+
+        @Test
+        void singleToolCall_parsedCorrectly() throws Exception {
+            JsonNode toolCalls = MAPPER.readTree("""
+                    [{"function":{"name":"talos.list_dir","arguments":{"path":"."}}}]
+                    """);
+
+            var result = engine.parseNativeToolCalls(toolCalls);
+
+            assertEquals(1, result.size());
+            assertEquals("call_0", result.get(0).id());
+            assertEquals("talos.list_dir", result.get(0).name());
+            assertEquals(".", result.get(0).arguments().get("path"));
+        }
+
+        @Test
+        void multipleToolCalls_allParsed() throws Exception {
+            JsonNode toolCalls = MAPPER.readTree("""
+                    [
+                      {"function":{"name":"talos.list_dir","arguments":{"path":"src"}}},
+                      {"function":{"name":"talos.read_file","arguments":{"path":"README.md"}}}
+                    ]
+                    """);
+
+            var result = engine.parseNativeToolCalls(toolCalls);
+
+            assertEquals(2, result.size());
+            assertEquals("call_0", result.get(0).id());
+            assertEquals("talos.list_dir", result.get(0).name());
+            assertEquals("call_1", result.get(1).id());
+            assertEquals("talos.read_file", result.get(1).name());
+        }
+
+        @Test
+        void emptyArguments_emptyMap() throws Exception {
+            JsonNode toolCalls = MAPPER.readTree("""
+                    [{"function":{"name":"talos.status","arguments":{}}}]
+                    """);
+
+            var result = engine.parseNativeToolCalls(toolCalls);
+
+            assertEquals(1, result.size());
+            assertTrue(result.get(0).arguments().isEmpty());
+        }
+
+        @Test
+        void missingArguments_emptyMap() throws Exception {
+            JsonNode toolCalls = MAPPER.readTree("""
+                    [{"function":{"name":"talos.status"}}]
+                    """);
+
+            var result = engine.parseNativeToolCalls(toolCalls);
+
+            assertEquals(1, result.size());
+            assertTrue(result.get(0).arguments().isEmpty());
+        }
+
+        @Test
+        void missingFunctionNode_skipped() throws Exception {
+            JsonNode toolCalls = MAPPER.readTree("""
+                    [{"not_function":{"name":"bogus"}},
+                     {"function":{"name":"talos.list_dir","arguments":{"path":"."}}}]
+                    """);
+
+            var result = engine.parseNativeToolCalls(toolCalls);
+
+            assertEquals(1, result.size());
+            assertEquals("talos.list_dir", result.get(0).name());
+        }
+
+        @Test
+        void emptyName_skipped() throws Exception {
+            JsonNode toolCalls = MAPPER.readTree("""
+                    [{"function":{"name":"","arguments":{"path":"."}}},
+                     {"function":{"name":"talos.list_dir","arguments":{"path":"."}}}]
+                    """);
+
+            var result = engine.parseNativeToolCalls(toolCalls);
+
+            assertEquals(1, result.size());
+            assertEquals("talos.list_dir", result.get(0).name());
+        }
+
+        @Test
+        void htmlContentInArguments_preserved() throws Exception {
+            // This is the critical regression test: HTML content in arguments
+            // must NOT be stripped. With native tool calls, it never touches
+            // the SUS_HTML sanitization because it's structured, not text.
+            JsonNode toolCalls = MAPPER.readTree("""
+                    [{"function":{"name":"talos.edit_file","arguments":{
+                      "path":"index.html",
+                      "old_string":"</body>",
+                      "new_string":"<script src=\\"script.js\\"></script></body>"
+                    }}}]
+                    """);
+
+            var result = engine.parseNativeToolCalls(toolCalls);
+
+            assertEquals(1, result.size());
+            assertEquals("talos.edit_file", result.get(0).name());
+            assertEquals("<script src=\"script.js\"></script></body>",
+                    result.get(0).arguments().get("new_string"),
+                    "<script> tag in arguments must be preserved — this was the SUS_HTML bug root cause");
         }
     }
 }

@@ -41,7 +41,11 @@ public final class FileEditTool implements TalosTool {
     public FileEditTool(FileUndoStack undoStack) { this.undoStack = undoStack; }
 
     @Override public String name() { return NAME; }
-    @Override public String description() { return "Replace a unique string in a workspace file."; }
+    @Override public String description() {
+        return "Replace a unique string in a workspace file. "
+                + "TIP: call talos.read_file first to see the exact content, "
+                + "then copy the target text into old_string.";
+    }
 
     @Override
     public ToolDescriptor descriptor() {
@@ -49,8 +53,8 @@ public final class FileEditTool implements TalosTool {
                 """
                 {"type":"object","properties":{
                   "path":{"type":"string","description":"Relative path to the file in the workspace"},
-                  "old_string":{"type":"string","description":"Exact text to find (must appear exactly once)"},
-                  "new_string":{"type":"string","description":"Replacement text (may be empty to delete)"}
+                  "old_string":{"type":"string","description":"Exact text to find and replace. MUST match the file content character-for-character including whitespace and newlines. Copy the text from talos.read_file output. Must appear exactly once in the file."},
+                  "new_string":{"type":"string","description":"Replacement text (may be empty to delete the matched text)"}
                 },"required":["path","old_string","new_string"]}""",
                 ToolRiskLevel.WRITE);
     }
@@ -127,8 +131,12 @@ public final class FileEditTool implements TalosTool {
 
             int count = countOccurrences(content, oldString);
             if (count == 0) {
+                String snippet = buildFileSnippet(content, 20);
                 return ToolResult.fail(ToolError.invalidParams(
-                        "old_string not found in " + pathParam + ". Verify the exact text exists in the file."));
+                        "old_string not found in " + pathParam + ". "
+                        + "The exact text was not found in the file. "
+                        + "Call talos.read_file to see the current content, then copy the exact text into old_string.\n"
+                        + "File begins with:\n" + snippet));
             }
             if (count > 1) {
                 return ToolResult.fail(ToolError.invalidParams(
@@ -164,6 +172,24 @@ public final class FileEditTool implements TalosTool {
         } catch (IOException e) {
             return ToolResult.fail(ToolError.internal("Failed to edit file: " + e.getMessage()));
         }
+    }
+
+    /**
+     * Build a snippet of the first {@code maxLines} lines of a file for error feedback.
+     * Gives the model ground truth to retry from when old_string is not found.
+     */
+    static String buildFileSnippet(String content, int maxLines) {
+        if (content == null || content.isEmpty()) return "(empty file)";
+        String[] lines = content.split("\n", -1);
+        int limit = Math.min(lines.length, maxLines);
+        var sb = new StringBuilder();
+        for (int i = 0; i < limit; i++) {
+            sb.append(i + 1).append(" | ").append(lines[i]).append('\n');
+        }
+        if (lines.length > maxLines) {
+            sb.append("... (").append(lines.length - maxLines).append(" more lines — call talos.read_file to see all)");
+        }
+        return sb.toString();
     }
 
     /**

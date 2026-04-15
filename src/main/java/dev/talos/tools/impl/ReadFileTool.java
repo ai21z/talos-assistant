@@ -24,6 +24,8 @@ public final class ReadFileTool implements TalosTool {
     private static final String NAME = "talos.read_file";
     private static final int DEFAULT_MAX_LINES = 500;
     private static final long MAX_FILE_SIZE = 2 * 1024 * 1024L; // 2 MiB safety cap
+    /** Character-based output cap. Large reads crowd out context for subsequent calls. */
+    static final int MAX_OUTPUT_CHARS = 16_000;
 
     @Override public String name() { return NAME; }
     @Override public String description() { return "Read a file from the workspace by path."; }
@@ -100,7 +102,14 @@ public final class ReadFileTool implements TalosTool {
                 sb.append("... (").append(allLines.size() - endIdx).append(" more lines)\n");
             }
 
-            return ToolResult.ok(sb.toString());
+            String output = sb.toString();
+            if (output.length() > MAX_OUTPUT_CHARS) {
+                output = output.substring(0, MAX_OUTPUT_CHARS)
+                        + "\n... [output truncated at 16K chars — use talos.grep to search for specific content, "
+                        + "or request a specific range with offset + max_lines]";
+            }
+
+            return ToolResult.ok(output);
         } catch (IOException e) {
             return ToolResult.fail(ToolError.internal("Failed to read file: " + e.getMessage()));
         }

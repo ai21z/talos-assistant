@@ -1,8 +1,7 @@
 package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
-import dev.talos.cli.repl.Result;
-import dev.talos.runtime.CodeBlockToolExtractor;
+import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.ToolCallStreamFilter;
@@ -38,10 +37,22 @@ final class AssistantTurnExecutor {
 
     private AssistantTurnExecutor() {} // utility class
 
-    /** Returns true if the answer contains canonical tool calls OR code-block file operations. */
-    private static boolean hasAnyToolCalls(String answer) {
-        return ToolCallParser.containsToolCalls(answer)
-                || CodeBlockToolExtractor.containsExtractableBlocks(answer);
+    /**
+     * Returns true if the answer text contains text-format tool calls
+     * (JSON code fences, bare JSON, or XML compatibility tags).
+     *
+     * <p>Code-block file-write detection ({@link dev.talos.runtime.CodeBlockToolExtractor})
+     * is intentionally NOT included here. Code-block writes are disabled — they only
+     * produce a warning inside {@link ToolCallLoop#run}. Routing them through the
+     * tool-loop entry gate would be misleading.
+     */
+    private static boolean hasAnyTextToolCalls(String answer) {
+        return ToolCallParser.containsToolCalls(answer);
+    }
+
+    /** Returns true if native tool calls or text-based tool calls are present. */
+    private static boolean hasAnyToolCalls(LlmClient.StreamResult result) {
+        return result.hasToolCalls() || hasAnyTextToolCalls(result.text());
     }
 
     /**
@@ -90,7 +101,8 @@ final class AssistantTurnExecutor {
         try {
             if (ctx.streamSink() != null) {
                 // ── Streaming path ──────────────────────────────────────────
-                String answer = ctx.llm().chatStream(messages, ctx.streamSink());
+                LlmClient.StreamResult streamResult = ctx.llm().chatStreamFull(messages, ctx.streamSink());
+                String answer = streamResult.text();
 
                 // Flush the stream filter so any pending non-tool text is emitted
                 if (ctx.streamSink() instanceof ToolCallStreamFilter filter) {
@@ -108,10 +120,11 @@ final class AssistantTurnExecutor {
                 }
 
                 if (answer != null) {
-                    if (ctx.toolCallLoop() != null && hasAnyToolCalls(answer)) {
-                        LOG.debug("Tool calls detected in streamed response, entering tool-call loop");
+                    if (ctx.toolCallLoop() != null && hasAnyToolCalls(streamResult)) {
+                        LOG.debug("Tool calls detected in streamed response (native: {}), entering tool-call loop",
+                                streamResult.hasToolCalls());
                         ToolCallLoop.LoopResult loopResult = ctx.toolCallLoop().run(
-                                answer, messages, workspace, ctx);
+                                answer, streamResult.toolCalls(), messages, workspace, ctx);
                         answer = loopResult.finalAnswer();
                         LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked",
                                 loopResult.iterations(), loopResult.toolsInvoked());
@@ -128,14 +141,18 @@ final class AssistantTurnExecutor {
                 }
             } else {
                 // ── Non-streaming fallback (tests, non-interactive) ─────────
-                CompletableFuture<String> fut = CompletableFuture.supplyAsync(
-                        () -> ctx.llm().chat(messages));
-                String answer = fut.get(opts.llmTimeoutMs, TimeUnit.MILLISECONDS);
+                // Use chatFull() so native tool calls are captured too
+                // (chat() returns only String, losing native tool calls).
+                CompletableFuture<LlmClient.StreamResult> fut = CompletableFuture.supplyAsync(
+                        () -> ctx.llm().chatFull(messages));
+                LlmClient.StreamResult streamResult = fut.get(opts.llmTimeoutMs, TimeUnit.MILLISECONDS);
+                String answer = streamResult.text();
                 if (answer != null) {
-                    if (ctx.toolCallLoop() != null && hasAnyToolCalls(answer)) {
-                        LOG.debug("Tool calls detected in LLM response, entering tool-call loop");
+                    if (ctx.toolCallLoop() != null && hasAnyToolCalls(streamResult)) {
+                        LOG.debug("Tool calls detected in LLM response (native: {}), entering tool-call loop",
+                                streamResult.hasToolCalls());
                         ToolCallLoop.LoopResult loopResult = ctx.toolCallLoop().run(
-                                answer, messages, workspace, ctx);
+                                answer, streamResult.toolCalls(), messages, workspace, ctx);
                         answer = loopResult.finalAnswer();
                         LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked",
                                 loopResult.iterations(), loopResult.toolsInvoked());
