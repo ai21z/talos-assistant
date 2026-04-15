@@ -20,9 +20,17 @@ public final class Sanitize {
     // Hidden chain-of-thought blocks (e.g., <think>...</think>)
     private static final Pattern THINK = Pattern.compile("(?is)<\\s*think\\s*>.*?<\\s*/\\s*think\\s*>");
 
-    /** Matches &lt;tool_call&gt;...&lt;/tool_call&gt; blocks (and common tag variants). */
+    /** Matches &lt;tool_call&gt;...&lt;/tool_call&gt; blocks (and common tag variants).
+     *  DEPRECATED COMPATIBILITY ONLY — retained for models that emit XML from training habits.
+     *  JSON code-fenced tool calls are the actively instructed text fallback format.
+     *  Scheduled for removal once native tool calling is stable across model versions. */
     private static final Pattern TOOL_CALL_BLOCK = Pattern.compile(
             "(?s)<(?:tool_call|function_call)>.*?</(?:tool_call|function_call)>"
+    );
+
+    /** Matches JSON code-fenced tool calls: ```json {"name":"talos...} ```. */
+    private static final Pattern JSON_TOOL_CALL_FENCE = Pattern.compile(
+            "(?s)```(?:json)?\\s*\\n(\\{[^`]*\"name\"\\s*:\\s*\"talos\\.[^`]*\\})\\s*\\n?```"
     );
 
     /**
@@ -128,34 +136,56 @@ public final class Sanitize {
 
     /**
      * Applies {@link #SUS_HTML} stripping only to text <em>outside</em>
-     * {@code <tool_call>} / {@code <function_call>} blocks.
+     * tool-call blocks (both JSON code-fence format and XML tags).
      *
-     * <p>The algorithm: find all tool_call blocks, protect them, strip HTML
-     * from the interstitial prose, then reassemble.
+     * <p>JSON code fences are the actively instructed text fallback.
+     * XML tags are DEPRECATED COMPATIBILITY support for models that
+     * emit XML from training habits or cached context — not actively
+     * instructed, scheduled for removal.
+     *
+     * <p>The algorithm: find all tool_call blocks (both formats),
+     * protect them, strip HTML from the interstitial prose, then reassemble.
      */
     private static String stripSuspiciousHtmlOutsideToolCalls(String s) {
-        Matcher m = TOOL_CALL_BLOCK.matcher(s);
-        if (!m.find()) {
+        // Collect all protected regions (tool-call blocks in any format)
+        java.util.List<int[]> protectedRegions = new java.util.ArrayList<>();
+        collectRegions(TOOL_CALL_BLOCK, s, protectedRegions);
+        collectRegions(JSON_TOOL_CALL_FENCE, s, protectedRegions);
+
+        if (protectedRegions.isEmpty()) {
             // No tool_call blocks — apply SUS_HTML to the entire string
             return SUS_HTML.matcher(s).replaceAll("");
         }
 
+        // Sort by start position
+        protectedRegions.sort(java.util.Comparator.comparingInt(a -> a[0]));
+
         // Walk through the string, sanitizing only the gaps between blocks
         StringBuilder result = new StringBuilder(s.length());
         int lastEnd = 0;
-        m.reset();
-        while (m.find()) {
-            // Sanitize prose before this tool_call block
-            String before = s.substring(lastEnd, m.start());
+        for (int[] region : protectedRegions) {
+            int start = region[0];
+            int end = region[1];
+            if (start < lastEnd) continue; // overlapping region — skip
+            // Sanitize prose before this block
+            String before = s.substring(lastEnd, start);
             result.append(SUS_HTML.matcher(before).replaceAll(""));
             // Preserve the tool_call block verbatim
-            result.append(m.group());
-            lastEnd = m.end();
+            result.append(s, start, end);
+            lastEnd = end;
         }
-        // Sanitize prose after the last tool_call block
+        // Sanitize prose after the last block
         String after = s.substring(lastEnd);
         result.append(SUS_HTML.matcher(after).replaceAll(""));
         return result.toString();
+    }
+
+    /** Collect all match regions from a pattern into the list. */
+    private static void collectRegions(Pattern pattern, String s, java.util.List<int[]> regions) {
+        java.util.regex.Matcher m = pattern.matcher(s);
+        while (m.find()) {
+            regions.add(new int[] { m.start(), m.end() });
+        }
     }
 
     /**

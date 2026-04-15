@@ -144,6 +144,48 @@ class FileEditToolTest {
     }
 
     @Test
+    void notFoundErrorIncludesFileSnippet() {
+        // B1: error message must include a snippet of the file so the model can self-correct
+        ToolCall call = new ToolCall("talos.edit_file", Map.of(
+                "path", "hello.java",
+                "old_string", "this does not exist anywhere",
+                "new_string", "replacement"));
+        ToolResult r = tool.execute(call, ctx);
+
+        assertFalse(r.success());
+        // Should include line numbers and file content
+        assertTrue(r.errorMessage().contains("File begins with:"), "Expected snippet header, got: " + r.errorMessage());
+        assertTrue(r.errorMessage().contains("1 | "), "Expected line-numbered content, got: " + r.errorMessage());
+        assertTrue(r.errorMessage().contains("talos.read_file"), "Should tell model to use read_file");
+    }
+
+    // ── buildFileSnippet helper ─────────────────────────────────────
+
+    @Test
+    void buildFileSnippet_emptyContent() {
+        assertEquals("(empty file)", FileEditTool.buildFileSnippet("", 20));
+    }
+
+    @Test
+    void buildFileSnippet_shortFile() {
+        String snippet = FileEditTool.buildFileSnippet("line one\nline two\n", 20);
+        assertTrue(snippet.contains("1 | line one"));
+        assertTrue(snippet.contains("2 | line two"));
+        assertFalse(snippet.contains("more lines"));
+    }
+
+    @Test
+    void buildFileSnippet_truncatesAtMaxLines() {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 1; i <= 25; i++) sb.append("line ").append(i).append("\n");
+        String snippet = FileEditTool.buildFileSnippet(sb.toString(), 20);
+        assertTrue(snippet.contains("1 | line 1"));
+        assertTrue(snippet.contains("20 | line 20"));
+        assertFalse(snippet.contains("21 | "));
+        assertTrue(snippet.contains("more lines"));
+    }
+
+    @Test
     void rejectsWhenStringFoundMultipleTimes() throws IOException {
         // Create a file with a repeated string
         Files.writeString(workspace.resolve("dupes.txt"),

@@ -325,6 +325,153 @@ class SystemPromptBuilderTest {
                 "Workspace should appear before tools section");
     }
 
+    // ── Native tools (PR-5) ─────────────────────────────────────────
+
+    @Test
+    void nativeToolsOmitsXmlFormatInstructions() {
+        var registry = new ToolRegistry();
+        registry.register(stubTool("talos.read_file", "Read a file"));
+
+        String prompt = SystemPromptBuilder.forAsk()
+                .withTools(registry)
+                .withNativeTools(true)
+                .build();
+
+        assertFalse(prompt.contains("<tool_call>"),
+                "Native mode should NOT contain <tool_call> XML tags");
+        assertFalse(prompt.contains("</tool_call>"),
+                "Native mode should NOT contain </tool_call> closing tag");
+        assertFalse(prompt.contains("You MUST use <tool_call>"),
+                "Native mode should NOT require XML format");
+        assertTrue(prompt.contains("Available Tools"),
+                "Native mode should still have tools preamble");
+    }
+
+    @Test
+    void fallbackToolsIncludesJsonFormatInstructions() {
+        var registry = new ToolRegistry();
+        registry.register(stubTool("talos.read_file", "Read a file"));
+
+        String prompt = SystemPromptBuilder.forAsk()
+                .withTools(registry)
+                .withNativeTools(false)
+                .build();
+
+        // Fallback should use JSON code-fenced format, not XML
+        assertFalse(prompt.contains("<tool_call>"),
+                "Fallback mode should NOT contain XML <tool_call> tags");
+        assertTrue(prompt.contains("```json"),
+                "Fallback mode should contain ```json code fence examples");
+        assertTrue(prompt.contains("\"name\""),
+                "Fallback mode should contain JSON format instructions");
+        assertTrue(prompt.contains("Available Tools"),
+                "Fallback mode should have tools preamble");
+    }
+
+    @Test
+    void nativeToolsStillIncludesFileCreationRules() {
+        var registry = new ToolRegistry();
+        registry.register(stubTool("talos.write_file", "Create or overwrite a file"));
+
+        String prompt = SystemPromptBuilder.forAsk()
+                .withTools(registry)
+                .withNativeTools(true)
+                .build();
+
+        assertTrue(prompt.contains("FILE CREATION AND MODIFICATION"),
+                "Native mode should still include critical file creation rules");
+        assertTrue(prompt.contains("talos.write_file"),
+                "Native mode should still mention write_file");
+        assertTrue(prompt.contains("NEVER say \"I cannot create files\"")
+                        || prompt.contains("You CAN create files"),
+                "Native mode should reinforce file creation capability");
+    }
+
+    @Test
+    void nativeToolsReducesTokenEstimate() {
+        var registry = new ToolRegistry();
+        registry.register(stubTool("talos.read_file", "Read a file"));
+        registry.register(stubTool("talos.grep", "Search workspace files"));
+
+        int fallbackTokens = SystemPromptBuilder.forAsk()
+                .withTools(registry)
+                .withNativeTools(false)
+                .estimateTokens();
+
+        int nativeTokens = SystemPromptBuilder.forAsk()
+                .withTools(registry)
+                .withNativeTools(true)
+                .estimateTokens();
+
+        assertTrue(nativeTokens < fallbackTokens,
+                "Native prompt (" + nativeTokens + " tokens) should be smaller than fallback ("
+                        + fallbackTokens + " tokens)");
+    }
+
+    @Test
+    void toStringReflectsNativeToolsFlag() {
+        var registry = new ToolRegistry();
+        registry.register(stubTool("test", "test"));
+
+        String strTrue = SystemPromptBuilder.forAsk()
+                .withTools(registry)
+                .withNativeTools(true)
+                .toString();
+        assertTrue(strTrue.contains("nativeTools=true"),
+                "toString should reflect nativeTools=true");
+
+        String strFalse = SystemPromptBuilder.forAsk()
+                .withTools(registry)
+                .withNativeTools(false)
+                .toString();
+        assertTrue(strFalse.contains("nativeTools=false"),
+                "toString should reflect nativeTools=false");
+    }
+
+    @Test
+    void nativeToolsPreambleResourceExists() {
+        String content = SystemPromptBuilder.readResource("prompts/sections/tools-preamble-native.txt");
+        assertNotNull(content, "tools-preamble-native.txt should exist on classpath");
+        assertTrue(content.contains("runtime handles tool invocation"),
+                "Native preamble should mention automatic format handling");
+        assertFalse(content.contains("<tool_call>"),
+                "Native preamble should not contain XML format examples");
+    }
+
+    @Test
+    void defaultNativeToolsFalseMatchesFallbackBehavior() {
+        var registry = new ToolRegistry();
+        registry.register(stubTool("talos.read_file", "Read a file"));
+
+        // Default (nativeTools not set → false) should include JSON format instructions
+        String defaultPrompt = SystemPromptBuilder.forAsk()
+                .withTools(registry)
+                .build();
+
+        String explicitFallback = SystemPromptBuilder.forAsk()
+                .withTools(registry)
+                .withNativeTools(false)
+                .build();
+
+        assertEquals(defaultPrompt, explicitFallback,
+                "Default behavior should match explicit withNativeTools(false)");
+    }
+
+    @Test
+    void nativeToolsWorksWithAllModes() {
+        var registry = new ToolRegistry();
+        registry.register(stubTool("talos.read_file", "Read a file"));
+
+        for (var builder : new SystemPromptBuilder[]{
+                SystemPromptBuilder.forAsk(), SystemPromptBuilder.forRag(), SystemPromptBuilder.forUnified()}) {
+            String prompt = builder.withTools(registry).withNativeTools(true).build();
+            assertFalse(prompt.contains("<tool_call>"),
+                    "Native mode should omit XML tags in all modes");
+            assertTrue(prompt.contains("Available Tools"),
+                    "All modes should include tools preamble with native tools");
+        }
+    }
+
     // ── Helper ──────────────────────────────────────────────────────
 
     private static TalosTool stubTool(String name, String description) {

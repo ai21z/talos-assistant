@@ -63,9 +63,11 @@ public final class UnifiedAssistantMode implements Mode {
         // System prompt — unified mode: tools + workspace + retrieval guidance
         boolean hasHistory = (ctx.conversationManager() != null && ctx.conversationManager().hasHistory())
                 || (ctx.memory() != null && ctx.memory().hasContent());
+        boolean nativeTools = CfgUtil.boolAt(CfgUtil.map(ctx.cfg().data.get("tools")), "native_calling", true);
         String system = SystemPromptBuilder.forUnified()
                 .withTools(ctx.toolRegistry())
                 .withWorkspace(workspace)
+                .withNativeTools(nativeTools)
                 .withHistory(hasHistory)
                 .build();
 

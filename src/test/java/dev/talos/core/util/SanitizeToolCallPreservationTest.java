@@ -156,7 +156,7 @@ class SanitizeToolCallPreservationTest {
          */
         @Test
         void edit_file_script_tag_not_corrupted_by_sanitization() {
-            // This is what convertNativeToolCallsToXml produces
+            // XML-format tool_call block (deprecated compatibility — native path is primary)
             String toolCallXml =
                     "<tool_call>\n" +
                     "{\"name\":\"talos.edit_file\",\"parameters\":{" +

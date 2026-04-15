@@ -139,5 +139,36 @@ class ReadFileToolTest {
         assertTrue(r.output().contains("1 | line 1"));
         assertTrue(r.output().contains("5 | line 5"));
     }
+
+    // ── E2: char-based output truncation ────────────────────────────
+
+    @Test
+    void smallFileIsNotTruncated() {
+        ToolCall call = new ToolCall("talos.read_file", Map.of("path", "hello.txt"));
+        ToolResult r = tool.execute(call, ctx);
+
+        assertTrue(r.success());
+        assertFalse(r.output().contains("truncated"), "Small file should not be truncated");
+    }
+
+    @Test
+    void largeFileIsTruncatedAtCharLimit() throws IOException {
+        // Build a file large enough to exceed MAX_OUTPUT_CHARS (16K)
+        StringBuilder sb = new StringBuilder();
+        for (int i = 1; i <= 500; i++) {
+            sb.append("This is a reasonably long line of content number ").append(i)
+              .append(" used to build a file that exceeds the character cap.\n");
+        }
+        Files.writeString(workspace.resolve("large.txt"), sb.toString());
+
+        ToolCall call = new ToolCall("talos.read_file", Map.of("path", "large.txt"));
+        ToolResult r = tool.execute(call, ctx);
+
+        assertTrue(r.success());
+        assertTrue(r.output().contains("truncated at 16K"), "Should truncate with message, got: " + r.output().substring(0, 100));
+        assertTrue(r.output().contains("talos.grep"), "Truncation message should suggest talos.grep");
+        assertTrue(r.output().length() <= ReadFileTool.MAX_OUTPUT_CHARS + 200,
+                "Output should not greatly exceed the cap");
+    }
 }
 
