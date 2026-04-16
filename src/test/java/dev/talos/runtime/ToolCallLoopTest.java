@@ -551,5 +551,42 @@ class ToolCallLoopTest {
             }
         };
     }
+
+    // ── Redundancy suppression helper tests ──────────────────────────
+
+    @Test
+    void isReadOnlyTool_recognizesReadTools() {
+        assertTrue(ToolCallLoop.isReadOnlyTool("talos.read_file"));
+        assertTrue(ToolCallLoop.isReadOnlyTool("talos.list_dir"));
+        assertTrue(ToolCallLoop.isReadOnlyTool("talos.grep"));
+        assertFalse(ToolCallLoop.isReadOnlyTool("talos.write_file"));
+        assertFalse(ToolCallLoop.isReadOnlyTool("talos.edit_file"));
+    }
+
+    @Test
+    void isMutatingTool_recognizesWriteTools() {
+        assertTrue(ToolCallLoop.isMutatingTool("talos.write_file"));
+        assertTrue(ToolCallLoop.isMutatingTool("talos.edit_file"));
+        assertFalse(ToolCallLoop.isMutatingTool("talos.read_file"));
+        assertFalse(ToolCallLoop.isMutatingTool("talos.list_dir"));
+    }
+
+    @Test
+    void buildReadCallSignature_stableForSameParams() {
+        var call1 = new ToolCall("talos.read_file", Map.of("path", "index.html"));
+        var call2 = new ToolCall("talos.read_file", Map.of("path", "index.html"));
+        assertEquals(
+                ToolCallLoop.buildReadCallSignature(call1),
+                ToolCallLoop.buildReadCallSignature(call2));
+    }
+
+    @Test
+    void buildReadCallSignature_differentForDifferentParams() {
+        var call1 = new ToolCall("talos.read_file", Map.of("path", "a.txt"));
+        var call2 = new ToolCall("talos.read_file", Map.of("path", "b.txt"));
+        assertNotEquals(
+                ToolCallLoop.buildReadCallSignature(call1),
+                ToolCallLoop.buildReadCallSignature(call2));
+    }
 }
 

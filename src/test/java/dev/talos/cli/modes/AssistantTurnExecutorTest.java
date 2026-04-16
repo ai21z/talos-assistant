@@ -258,6 +258,40 @@ class AssistantTurnExecutorTest {
         msgs.add(ChatMessage.user("What is 2+2?"));
         return msgs;
     }
+
+    // ── Deflection detection tests ───────────────────────────────────
+
+    @Nested
+    @DisplayName("isDeflection")
+    class DeflectionTests {
+
+        @Test
+        void nullOrBlankIsDeflection() {
+            assertTrue(AssistantTurnExecutor.isDeflection(null));
+            assertTrue(AssistantTurnExecutor.isDeflection(""));
+            assertTrue(AssistantTurnExecutor.isDeflection("   "));
+        }
+
+        @Test
+        void genericAssistantBoilerplateIsDeflection() {
+            assertTrue(AssistantTurnExecutor.isDeflection("How can I help you with these files?"));
+            assertTrue(AssistantTurnExecutor.isDeflection("What would you like me to do next?"));
+            assertTrue(AssistantTurnExecutor.isDeflection("Is there anything else you need?"));
+            assertTrue(AssistantTurnExecutor.isDeflection("Feel free to ask if you have questions."));
+        }
+
+        @Test
+        void substantiveShortAnswerIsNotDeflection() {
+            assertFalse(AssistantTurnExecutor.isDeflection(
+                    "The main HTML file is index.html. It loads style.css and script.js."));
+        }
+
+        @Test
+        void longAnswerWithDeflectionPhraseIsNotDeflection() {
+            String longAnswer = "x".repeat(501) + " How can I help you?";
+            assertFalse(AssistantTurnExecutor.isDeflection(longAnswer));
+        }
+    }
 }
 
 
