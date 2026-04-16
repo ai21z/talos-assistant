@@ -249,39 +249,45 @@ public final class ToolCallLoop {
             for (int i = 0; i < calls.size(); i++) {
                 ToolCall call = calls.get(i);
                 ToolCall effective = repairMissingPath(call);
-                totalToolsInvoked++;
-                toolNames.add(effective.toolName());
 
                 String pathHint = resolvePathHint(effective);
                 emitProgress(effective.toolName(), "executing", pathHint);
                 LOG.debug("  Executing tool: {} (params: {})", effective.toolName(), effective.parameters());
 
-                // B3: compute signature for this call to detect repeated identical failures
-                String callSig = buildCallSignature(effective);
-                boolean isRetry = failedCallSignatures.contains(callSig);
-                if (isRetry) {
-                    retriedCalls++;
-                    failedCalls++;
-                    String diagnostic = "[tool_result: " + effective.toolName() + "]\n"
-                            + "[error] This exact call was already attempted and failed. "
-                            + "Call talos.read_file to see the file's current state, "
-                            + "then provide the exact text from the file in old_string. "
-                            + "Alternatively, use talos.write_file to replace the entire file content."
-                            + "\n[/tool_result]";
-                    if (useNativePath && i < currentNativeCalls.size()) {
-                        messages.add(ChatMessage.toolResult(currentNativeCalls.get(i).id(), diagnostic));
-                    } else {
-                        messages.add(ChatMessage.user(diagnostic));
+                // Fix 2: B3 duplicate-failure detection is scoped to edit_file only.
+                // For other tools, distinct calls to the same path (e.g., two write_file
+                // attempts with different content) must not be conflated.
+                boolean isEditFile = "talos.edit_file".equals(effective.toolName());
+                if (isEditFile) {
+                    String callSig = buildCallSignature(effective);
+                    if (failedCallSignatures.contains(callSig)) {
+                        // Fix 3: short-circuited calls are NOT counted in toolsInvoked.
+                        retriedCalls++;
+                        failedCalls++;
+                        String diagnostic = "[tool_result: " + effective.toolName() + "]\n"
+                                + "[error] This exact edit was already attempted and failed. "
+                                + "Call talos.read_file to see the file's current state, "
+                                + "then provide the exact raw content (without line-number prefixes) in old_string. "
+                                + "Alternatively, use talos.write_file to replace the entire file content."
+                                + "\n[/tool_result]";
+                        if (useNativePath && i < currentNativeCalls.size()) {
+                            messages.add(ChatMessage.toolResult(currentNativeCalls.get(i).id(), diagnostic));
+                        } else {
+                            messages.add(ChatMessage.user(diagnostic));
+                        }
+                        LOG.debug("  Skipped duplicate failing edit_file call for path: {}", pathHint);
+                        continue;
                     }
-                    LOG.debug("  Skipped duplicate failing call: {}", callSig);
-                    continue;
                 }
 
-                // B2: track reads; nudge if edit_file is called without prior read
+                // Fix 3: count only actually-executed calls.
+                totalToolsInvoked++;
+                toolNames.add(effective.toolName());
+
+                // Fix 4: B2 read-before-write nudge — computed pre-execution, applied after.
+                // Path is NOT marked as read until we confirm the read succeeded (below).
                 String readBeforeWriteNudge = null;
-                if ("talos.read_file".equals(effective.toolName()) && pathHint != null) {
-                    pathsReadThisTurn.add(normalizePath(pathHint));
-                } else if ("talos.edit_file".equals(effective.toolName()) && pathHint != null) {
+                if ("talos.edit_file".equals(effective.toolName()) && pathHint != null) {
                     if (!pathsReadThisTurn.contains(normalizePath(pathHint))) {
                         readBeforeWriteNudge = "\nHint: You did not read this file before editing. "
                                 + "Call talos.read_file first to see the current content, "
@@ -292,19 +298,28 @@ public final class ToolCallLoop {
                 ToolResult result = turnProcessor.executeTool(toolSession, effective, ctx);
                 emitToolResult(effective.toolName(), result);
 
-                // Track failures for B3 and E1
+                // Fix 4: mark path as read only after a successful read_file.
+                if ("talos.read_file".equals(effective.toolName()) && pathHint != null && result.success()) {
+                    pathsReadThisTurn.add(normalizePath(pathHint));
+                }
+
+                // Track failures for B3 (edit_file only) and E1.
                 if (!result.success()) {
                     failedCalls++;
-                    failedCallSignatures.add(callSig);
 
-                    // E1: track per-path edit_file failures; suggest write_file after 2nd failure
-                    if ("talos.edit_file".equals(effective.toolName()) && pathHint != null) {
-                        int failCount = editFailuresByPath.merge(normalizePath(pathHint), 1, Integer::sum);
-                        if (failCount >= 2) {
-                            result = ToolResult.fail(ToolError.invalidParams(
-                                    result.errorMessage()
-                                    + "\nSuggestion: edit_file has failed on this file multiple times. "
-                                    + "Consider using talos.write_file with the complete updated file content instead."));
+                    if (isEditFile) {
+                        String callSig = buildCallSignature(effective);
+                        failedCallSignatures.add(callSig);
+
+                        // E1: track per-path edit_file failures; suggest write_file after 2nd failure
+                        if (pathHint != null) {
+                            int failCount = editFailuresByPath.merge(normalizePath(pathHint), 1, Integer::sum);
+                            if (failCount >= 2) {
+                                result = ToolResult.fail(ToolError.invalidParams(
+                                        result.errorMessage()
+                                        + "\nSuggestion: edit_file has failed on this file multiple times. "
+                                        + "Consider using talos.write_file with the complete updated file content instead."));
+                            }
                         }
                     }
                 }

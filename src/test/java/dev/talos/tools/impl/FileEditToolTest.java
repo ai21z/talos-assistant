@@ -153,10 +153,25 @@ class FileEditToolTest {
         ToolResult r = tool.execute(call, ctx);
 
         assertFalse(r.success());
-        // Should include line numbers and file content
-        assertTrue(r.errorMessage().contains("File begins with:"), "Expected snippet header, got: " + r.errorMessage());
-        assertTrue(r.errorMessage().contains("1 | "), "Expected line-numbered content, got: " + r.errorMessage());
-        assertTrue(r.errorMessage().contains("talos.read_file"), "Should tell model to use read_file");
+        assertTrue(r.errorMessage().contains("File begins with:"), "Expected snippet header");
+        assertTrue(r.errorMessage().contains("1 | "), "Expected line-numbered content");
+        assertTrue(r.errorMessage().contains("talos.read_file"), "Should mention read_file");
+        // Issue 1 fix: snippet must warn model not to copy line-number prefixes
+        assertTrue(r.errorMessage().contains("display-only"),
+                "Snippet must warn that line-number prefixes are display-only, got: " + r.errorMessage());
+        assertFalse(r.errorMessage().contains("Copy the text from talos.read_file"),
+                "Must not encourage copying line-numbered output directly");
+    }
+
+    @Test
+    void schemaDescriptionDoesNotImplyLineNumberedOutputIsCopySafe() {
+        // Issue 1 fix: schema must not say 'Copy the text from talos.read_file output'
+        // since that output includes '1 | ' prefixes that would break old_string matching
+        String schema = tool.descriptor().parametersSchema();
+        assertFalse(schema.contains("Copy the text from talos.read_file"),
+                "Schema must not imply line-numbered read_file output can be copied directly");
+        assertTrue(schema.contains("line-number") || schema.contains("1 |") || schema.contains("prefixes"),
+                "Schema should warn about line-number prefixes");
     }
 
     // ── buildFileSnippet helper ─────────────────────────────────────
@@ -172,6 +187,8 @@ class FileEditToolTest {
         assertTrue(snippet.contains("1 | line one"));
         assertTrue(snippet.contains("2 | line two"));
         assertFalse(snippet.contains("more lines"));
+        // Issue 1 fix: snippet must include the display-only disclaimer
+        assertTrue(snippet.contains("display-only"), "Snippet should warn about display-only line numbers");
     }
 
     @Test

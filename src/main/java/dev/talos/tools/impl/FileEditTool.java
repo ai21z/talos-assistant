@@ -43,8 +43,8 @@ public final class FileEditTool implements TalosTool {
     @Override public String name() { return NAME; }
     @Override public String description() {
         return "Replace a unique string in a workspace file. "
-                + "TIP: call talos.read_file first to see the exact content, "
-                + "then copy the target text into old_string.";
+                + "TIP: call talos.read_file first to see the exact content. "
+                + "old_string must match the file exactly — strip any line-number prefixes from read_file output before using.";
     }
 
     @Override
@@ -53,7 +53,7 @@ public final class FileEditTool implements TalosTool {
                 """
                 {"type":"object","properties":{
                   "path":{"type":"string","description":"Relative path to the file in the workspace"},
-                  "old_string":{"type":"string","description":"Exact text to find and replace. MUST match the file content character-for-character including whitespace and newlines. Copy the text from talos.read_file output. Must appear exactly once in the file."},
+                  "old_string":{"type":"string","description":"Exact file content to find and replace, character-for-character including whitespace and newlines. NOTE: talos.read_file output includes line-number prefixes like '1 | ' — do NOT include those prefixes in old_string. Copy only the actual file content, not the display formatting. Must appear exactly once in the file."},
                   "new_string":{"type":"string","description":"Replacement text (may be empty to delete the matched text)"}
                 },"required":["path","old_string","new_string"]}""",
                 ToolRiskLevel.WRITE);
@@ -182,7 +182,8 @@ public final class FileEditTool implements TalosTool {
         if (content == null || content.isEmpty()) return "(empty file)";
         String[] lines = content.split("\n", -1);
         int limit = Math.min(lines.length, maxLines);
-        var sb = new StringBuilder();
+        // NOTE in the snippet header: line-number prefixes are display-only.
+        var sb = new StringBuilder("(line numbers below are display-only — do NOT include '1 | ' prefixes in old_string)\n");
         for (int i = 0; i < limit; i++) {
             sb.append(i + 1).append(" | ").append(lines[i]).append('\n');
         }
