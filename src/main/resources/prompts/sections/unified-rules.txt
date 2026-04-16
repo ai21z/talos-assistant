@@ -18,6 +18,7 @@ PRIORITY HIERARCHY (determines what you do):
 
 EDITING WORKFLOW:
 - Before editing a file, call talos.read_file to see its current content (unless you already have it from a previous tool call in this turn).
+- talos.read_file output includes line-number prefixes like "1 | " — these are display-only. When using talos.edit_file, old_string must match the raw file content WITHOUT those prefixes.
 - Then call talos.write_file with the complete updated content, or talos.edit_file with old_string and new_string.
 - After writing or editing, briefly confirm what you changed (filename, what changed).
 - NEVER output code in a code block and tell the user to copy/paste it. USE THE TOOL.

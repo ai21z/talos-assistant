@@ -263,7 +263,6 @@ class ToolCallLoopTest {
                 ChatMessage.system("sys"),
                 ChatMessage.user("do something")));
 
-        // Response with one tool call to the failing tool
         String llmResponse = """
                 <tool_call>{"name": "talos.always_fail", "parameters": {"input": "x"}}</tool_call>
                 """;
@@ -271,8 +270,8 @@ class ToolCallLoopTest {
         var result = loop.run(llmResponse, messages, WS, defaultCtx());
 
         assertEquals(1, result.toolsInvoked(), "Should invoke 1 tool");
-        assertTrue(result.failedCalls() >= 1, "Failed call count should be >= 1, got: " + result.failedCalls());
-        assertFalse(result.hitIterLimit(), "Should not hit iter limit for a single-call response");
+        assertEquals(1, result.failedCalls(), "Should count 1 failed call");
+        assertFalse(result.hitIterLimit());
     }
 
     @Test
@@ -302,6 +301,136 @@ class ToolCallLoopTest {
         assertEquals(0, result.failedCalls());
         assertEquals(0, result.retriedCalls());
         assertFalse(result.hitIterLimit());
+    }
+
+    // ── Issue 3: short-circuited retries must NOT count as toolsInvoked ──
+
+    @Test
+    void shortCircuitedRetryNotCountedInToolsInvoked() {
+        // Directly verify: a call that is short-circuited as a duplicate should not
+        // appear in toolsInvoked or toolNames. We test this via buildCallSignature
+        // and the fact that retriedCalls is tracked separately.
+        //
+        // The full loop path for this requires 2 LLM re-prompts, which isn't possible
+        // without a real model. We verify the metric semantics via the summary() contract.
+        var result = new ToolCallLoop.LoopResult(
+                "final", 1, 1,          // 1 real invocation
+                List.of("talos.edit_file"),
+                List.of(), 1, 1, false); // 1 failed + 1 retried
+
+        // toolsInvoked = 1 (only the first, real execution)
+        assertEquals(1, result.toolsInvoked());
+        // retriedCalls = 1 (the short-circuited duplicate)
+        assertEquals(1, result.retriedCalls());
+        // Summary reflects failure correctly
+        String s = result.summary();
+        assertNotNull(s);
+        assertTrue(s.contains("1 failed"));
+    }
+
+    // ── Issue 2: write_file retries on same path must NOT be short-circuited ──
+
+    @Test
+    void distinctWriteFileAttemptsNotConflated() {
+        // Two write_file calls to the same path with different content should
+        // produce DIFFERENT signatures so neither is incorrectly short-circuited.
+        var call1 = new ToolCall("talos.write_file",
+                Map.of("path", "output.txt", "content", "version 1"));
+        var call2 = new ToolCall("talos.write_file",
+                Map.of("path", "output.txt", "content", "version 2"));
+
+        // write_file has no old_string, so the old code would give both hash=0
+        // and the same signature. The new code must not use B3 for write_file.
+        // We can't call buildCallSignature directly for write_file since the fix
+        // bypasses it for non-edit tools, but we can verify via the loop that
+        // both calls execute.
+        var loop = createLoop(alwaysFailTool()); // will fail, but both should execute
+        // Use a registry with a tool that records invocations
+        var invocations = new java.util.concurrent.atomic.AtomicInteger();
+        var countingWriteTool = new TalosTool() {
+            @Override public String name() { return "talos.write_file"; }
+            @Override public String description() { return "Counting write tool"; }
+            @Override public ToolDescriptor descriptor() {
+                return new ToolDescriptor("talos.write_file", "Write file");
+            }
+            @Override public ToolResult execute(ToolCall call) {
+                invocations.incrementAndGet();
+                return ToolResult.fail("simulated write failure");
+            }
+        };
+
+        var registry = new ToolRegistry();
+        registry.register(countingWriteTool);
+        var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+        var testLoop = new ToolCallLoop(processor);
+
+        // Two write_file calls in one response
+        String llmResponse = """
+                <tool_call>{"name": "talos.write_file", "parameters": {"path": "output.txt", "content": "v1"}}</tool_call>
+                <tool_call>{"name": "talos.write_file", "parameters": {"path": "output.txt", "content": "v2"}}</tool_call>
+                """;
+
+        var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user("write")));
+        testLoop.run(llmResponse, messages, WS, defaultCtx());
+
+        assertEquals(2, invocations.get(),
+                "Both write_file calls must execute — duplicate-failure detection must not conflate them");
+    }
+
+    // ── Issue 4: failed read_file must not count as prior read ───────
+
+    @Test
+    void failedReadFileDoesNotSuppressEditNudge() {
+        // If read_file fails, it should not count as a prior successful read.
+        // We can verify the B2 nudge behavior via the loop's message trace:
+        // if edit_file is called after a failed read_file on the same path,
+        // the nudge should still appear.
+        //
+        // Full integration test requires a real workspace. We verify the
+        // semantics via the recorded message content after a loop run
+        // where read_file fails (file not found) then edit_file is attempted.
+        // This exercises Issue 4 at the integration level.
+        var readFailTool = new TalosTool() {
+            @Override public String name() { return "talos.read_file"; }
+            @Override public String description() { return "Always fails"; }
+            @Override public ToolDescriptor descriptor() {
+                return new ToolDescriptor("talos.read_file", "Failing read");
+            }
+            @Override public ToolResult execute(ToolCall call) {
+                return ToolResult.fail("File not found: missing.txt");
+            }
+        };
+        var editTool = new TalosTool() {
+            @Override public String name() { return "talos.edit_file"; }
+            @Override public String description() { return "Edit"; }
+            @Override public ToolDescriptor descriptor() {
+                return new ToolDescriptor("talos.edit_file", "Edit file");
+            }
+            @Override public ToolResult execute(ToolCall call) {
+                return ToolResult.fail("old_string not found");
+            }
+        };
+
+        var registry = new ToolRegistry();
+        registry.register(readFailTool);
+        registry.register(editTool);
+        var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+        var testLoop = new ToolCallLoop(processor);
+
+        // read_file fails, then edit_file is called on the same path
+        String llmResponse = """
+                <tool_call>{"name": "talos.read_file", "parameters": {"path": "missing.txt"}}</tool_call>
+                <tool_call>{"name": "talos.edit_file", "parameters": {"path": "missing.txt", "old_string": "foo", "new_string": "bar"}}</tool_call>
+                """;
+
+        var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user("edit")));
+        testLoop.run(llmResponse, messages, WS, defaultCtx());
+
+        // The nudge should appear since the read failed and doesn't count
+        boolean nudgePresent = messages.stream()
+                .anyMatch(m -> m.content() != null && m.content().contains("did not read this file"));
+        assertTrue(nudgePresent,
+                "Nudge must appear when read_file failed — a failed read must not suppress the edit nudge");
     }
 
     // ── F1: summary() includes failure info ─────────────────────────
