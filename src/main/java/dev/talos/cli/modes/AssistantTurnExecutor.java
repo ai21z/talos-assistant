@@ -12,6 +12,7 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.UnaryOperator;
@@ -129,6 +130,8 @@ final class AssistantTurnExecutor {
                         LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked",
                                 loopResult.iterations(), loopResult.toolsInvoked());
                         appendSummary(out, loopResult);
+                        // Post-tool answer acceptance gate: retry synthesis if deflected
+                        answer = synthesisRetryIfNeeded(answer, loopResult.toolsInvoked(), messages, ctx);
                         answer = sanitizeAndTruncate(answer, opts);
                         out.append(answer);
                     } else {
@@ -157,6 +160,8 @@ final class AssistantTurnExecutor {
                         LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked",
                                 loopResult.iterations(), loopResult.toolsInvoked());
                         appendSummary(out, loopResult);
+                        // Post-tool answer acceptance gate: retry synthesis if deflected
+                        answer = synthesisRetryIfNeeded(answer, loopResult.toolsInvoked(), messages, ctx);
                     }
                     answer = sanitizeAndTruncate(answer, opts);
                     out.append(answer);
@@ -205,6 +210,72 @@ final class AssistantTurnExecutor {
         if (summary != null) {
             out.append(summary).append("\n\n");
         }
+    }
+
+    // ── Post-tool answer acceptance gate ─────────────────────────────────
+
+    /** Phrases that indicate the model deflected instead of answering. */
+    private static final Set<String> DEFLECTION_MARKERS = Set.of(
+            "how can i help",
+            "what would you like",
+            "what do you want me to",
+            "let me know if you",
+            "is there anything",
+            "would you like me to",
+            "what can i do for you",
+            "feel free to ask"
+    );
+
+    /**
+     * Detect if the model's answer is a deflection (generic assistant boilerplate)
+     * instead of a substantive response to the user's question.
+     *
+     * <p>Heuristic: the answer is short (under 500 chars) and contains
+     * at least one deflection marker phrase. Longer answers that happen to
+     * include a polite closing are not flagged.
+     */
+    static boolean isDeflection(String answer) {
+        if (answer == null || answer.isBlank()) return true;
+        if (answer.length() > 500) return false; // substantive answers get a pass
+        String lower = answer.toLowerCase();
+        for (String marker : DEFLECTION_MARKERS) {
+            if (lower.contains(marker)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Post-tool synthesis retry: if tools were used and the answer is a deflection,
+     * re-prompt the LLM exactly once with an instruction to answer using the evidence.
+     *
+     * @return the improved answer, or the original if retry was not needed or failed
+     */
+    private static String synthesisRetryIfNeeded(String answer, int toolsInvoked,
+                                                  List<ChatMessage> messages, Context ctx) {
+        if (toolsInvoked <= 0) return answer;
+        if (!isDeflection(answer)) return answer;
+
+        LOG.info("Post-tool deflection detected ({} tools used). Attempting synthesis retry.", toolsInvoked);
+
+        messages.add(ChatMessage.assistant(answer));
+        messages.add(ChatMessage.user(
+                "You already gathered the needed evidence using tools. "
+                + "Now answer the original question directly and concretely, "
+                + "using the tool results you received. "
+                + "Do not ask what I want — answer the question."));
+
+        try {
+            LlmClient.StreamResult retry = ctx.llm().chatFull(messages);
+            String retryText = retry.text();
+            if (retryText != null && !retryText.isBlank() && !isDeflection(retryText)) {
+                LOG.info("Synthesis retry produced substantive answer ({} chars)", retryText.length());
+                return retryText;
+            }
+            LOG.warn("Synthesis retry still deflected. Returning original answer.");
+        } catch (Exception e) {
+            LOG.warn("Synthesis retry failed: {}", e.getMessage());
+        }
+        return answer;
     }
 }
 

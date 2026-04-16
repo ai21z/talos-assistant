@@ -218,6 +218,11 @@ public final class ToolCallLoop {
         // B2: track paths that were read in this loop execution (read-before-write enforcement).
         Set<String> pathsReadThisTurn = new HashSet<>();
 
+        // Redundant info-gathering suppression: track successful read-only calls.
+        // Key = "toolName:normalizedParams". Only suppressed when no mutation has happened since.
+        Map<String, String> successfulReadCalls = new HashMap<>();
+        boolean mutationSinceStart = false;
+
         while (iterations < maxIterations) {
             boolean useNativePath = !currentNativeCalls.isEmpty();
             boolean useTextPath = !useNativePath && ToolCallParser.containsToolCalls(currentText);
@@ -280,6 +285,27 @@ public final class ToolCallLoop {
                     }
                 }
 
+                // Redundant info-gathering suppression: if this is a read-only tool
+                // with identical params and no mutation has happened since, inject a
+                // diagnostic instead of re-executing.
+                if (!mutationSinceStart && isReadOnlyTool(effective.toolName())) {
+                    String readSig = buildReadCallSignature(effective);
+                    String priorResult = successfulReadCalls.get(readSig);
+                    if (priorResult != null) {
+                        String diagnostic = "[tool_result: " + effective.toolName() + "]\n"
+                                + "You already gathered this information and the workspace has not changed since then. "
+                                + "Answer the user's question now using the evidence you already have."
+                                + "\n[/tool_result]";
+                        if (useNativePath && i < currentNativeCalls.size()) {
+                            messages.add(ChatMessage.toolResult(currentNativeCalls.get(i).id(), diagnostic));
+                        } else {
+                            messages.add(ChatMessage.user(diagnostic));
+                        }
+                        LOG.debug("  Suppressed redundant {} call (sig: {})", effective.toolName(), readSig);
+                        continue;
+                    }
+                }
+
                 // Fix 3: count only actually-executed calls.
                 totalToolsInvoked++;
                 toolNames.add(effective.toolName());
@@ -301,6 +327,18 @@ public final class ToolCallLoop {
                 // Fix 4: mark path as read only after a successful read_file.
                 if ("talos.read_file".equals(effective.toolName()) && pathHint != null && result.success()) {
                     pathsReadThisTurn.add(normalizePath(pathHint));
+                }
+
+                // Track successful read-only calls for redundancy suppression.
+                if (result.success() && isReadOnlyTool(effective.toolName())) {
+                    successfulReadCalls.put(buildReadCallSignature(effective), truncateForLog(result.output()));
+                }
+
+                // Track mutations so redundancy suppression is invalidated.
+                if (isMutatingTool(effective.toolName()) && result.success()) {
+                    mutationSinceStart = true;
+                    // Clear the read cache — workspace state changed.
+                    successfulReadCalls.clear();
                 }
 
                 // Track failures for B3 (edit_file only) and E1.
@@ -549,6 +587,41 @@ public final class ToolCallLoop {
      */
     private static String normalizePath(String path) {
         return path == null ? "" : path.replace('\\', '/');
+    }
+
+    // ---- Redundant info-gathering suppression helpers ────────────────────
+
+    /** Read-only tools eligible for redundancy suppression. */
+    private static final Set<String> READ_ONLY_TOOLS = Set.of(
+            "talos.read_file", "talos.list_dir", "talos.grep"
+    );
+
+    /** Mutating tools that invalidate the read cache. */
+    private static final Set<String> MUTATING_TOOLS = Set.of(
+            "talos.write_file", "talos.edit_file"
+    );
+
+    static boolean isReadOnlyTool(String toolName) {
+        return READ_ONLY_TOOLS.contains(toolName);
+    }
+
+    static boolean isMutatingTool(String toolName) {
+        return MUTATING_TOOLS.contains(toolName);
+    }
+
+    /**
+     * Build a signature for a read-only tool call: "toolName:sortedParams".
+     * Normalizes path separators for consistent matching.
+     */
+    static String buildReadCallSignature(ToolCall call) {
+        var sb = new StringBuilder(call.toolName()).append(":");
+        if (call.parameters() != null) {
+            call.parameters().entrySet().stream()
+                    .sorted(Map.Entry.comparingByKey())
+                    .forEach(e -> sb.append(e.getKey()).append("=")
+                            .append(normalizePath(e.getValue())).append(";"));
+        }
+        return sb.toString();
     }
 
     // ---- Path safety for write/edit calls with missing path ----
