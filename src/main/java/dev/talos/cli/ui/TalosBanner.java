@@ -4,6 +4,7 @@ import dev.talos.cli.CliUtil;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
 import dev.talos.core.IndexPathResolver;
+import dev.talos.core.util.BuildInfo;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.store.FSDirectory;
 
@@ -18,7 +19,14 @@ import java.util.Map;
  */
 public final class TalosBanner {
 
-    private static final String VERSION = "0.9.0-beta";
+    /**
+     * R7 — single source of truth for the displayed version is the jar
+     * manifest via {@link BuildInfo}. Falls back to {@code "unknown"} when
+     * running from exploded classes (e.g. during tests).
+     */
+    private static String version() {
+        return BuildInfo.version();
+    }
 
     private TalosBanner() {}
 
@@ -62,7 +70,7 @@ public final class TalosBanner {
     public static void printCompact(Path workspace, Config cfg, String activeMode, PrintStream out) {
         String model = resolveModel(cfg);
         String ws = CliUtil.shortenPath(workspace);
-        out.println("  " + AnsiColor.brand("Talos") + " " + AnsiColor.dim("v" + VERSION)
+        out.println("  " + AnsiColor.brand("Talos") + " " + AnsiColor.dim("v" + version())
                 + AnsiColor.grey(" · ") + model
                 + AnsiColor.grey(" · ") + ws
                 + AnsiColor.grey(" [") + AnsiColor.blue(activeMode) + AnsiColor.grey("]"));
@@ -91,7 +99,30 @@ public final class TalosBanner {
         out.println();
         out.println("  " + AnsiColor.brand("Talos")
                 + AnsiColor.grey(" · Local Knowledge Engine · ")
-                + AnsiColor.dim("v" + VERSION));
+                + AnsiColor.dim("v" + version()));
+        // R7 — surface commit/build provenance when available so transcripts
+        // can be tied to a specific build. Rendered dim + indented so it does
+        // not crowd the hero line; omitted entirely when nothing is known.
+        String provenance = buildProvenanceLine();
+        if (!provenance.isEmpty()) {
+            out.println("  " + AnsiColor.dim(provenance));
+        }
+    }
+
+    /** Build the "commit &lt;sha&gt; · built &lt;ts&gt;" suffix; empty if nothing is known. */
+    static String buildProvenanceLine() {
+        String sha = BuildInfo.commitSha();
+        String ts  = BuildInfo.buildTimestamp();
+        boolean hasSha = !BuildInfo.UNKNOWN.equals(sha);
+        boolean hasTs  = !BuildInfo.UNKNOWN.equals(ts);
+        if (!hasSha && !hasTs) return "";
+        StringBuilder sb = new StringBuilder();
+        if (hasSha) sb.append("commit ").append(sha);
+        if (hasTs) {
+            if (!sb.isEmpty()) sb.append(" · ");
+            sb.append("built ").append(ts);
+        }
+        return sb.toString();
     }
 
     private static void printSeparator(PrintStream out) {
