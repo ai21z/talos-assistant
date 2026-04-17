@@ -316,7 +316,8 @@ class ToolCallLoopTest {
         var result = new ToolCallLoop.LoopResult(
                 "final", 1, 1,          // 1 real invocation
                 List.of("talos.edit_file"),
-                List.of(), 1, 1, false, 0); // 1 failed + 1 retried, 0 mutation successes
+                List.of(), 1, 1, false, 0,
+                0, 0, 0, 0); // 1 failed + 1 retried, 0 mutation successes; N5 counters irrelevant here
 
         // toolsInvoked = 1 (only the first, real execution)
         assertEquals(1, result.toolsInvoked());
@@ -440,7 +441,8 @@ class ToolCallLoopTest {
         var result = new ToolCallLoop.LoopResult(
                 "final", 1, 2,
                 List.of("talos.edit_file", "talos.write_file"),
-                List.of(), 1, 0, false, 1);
+                List.of(), 1, 0, false, 1,
+                0, 0, 0, 0);
 
         String s = result.summary();
         assertNotNull(s);
@@ -452,7 +454,8 @@ class ToolCallLoopTest {
         var result = new ToolCallLoop.LoopResult(
                 "final", 10, 10,
                 List.of("talos.edit_file"),
-                List.of(), 5, 3, true, 0);
+                List.of(), 5, 3, true, 0,
+                0, 0, 0, 0);
 
         String s = result.summary();
         assertNotNull(s);

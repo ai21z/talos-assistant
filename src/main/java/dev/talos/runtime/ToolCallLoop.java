@@ -155,6 +155,20 @@ public final class ToolCallLoop {
      * @param mutatingToolSuccesses number of successful mutating tool calls (write_file, edit_file)
      *                              executed in this turn. Used by the post-turn claim-vs-action
      *                              audit in {@code AssistantTurnExecutor}.
+     * @param cushionFiresRedundantRead number of times the redundant read-only call suppression
+     *                                  cushion fired (incremented per suppressed duplicate read).
+     *                                  Always 0 in strict mode.
+     * @param cushionFiresAliasRescue   number of times {@link dev.talos.tools.ToolRegistry} rescued
+     *                                  a non-canonical tool name via prefix/alias/case normalization
+     *                                  during this loop run. Always 0 in strict mode.
+     * @param cushionFiresB3EditShortCircuit number of times the B3 duplicate-failing-edit
+     *                                       short-circuit fired. Always 0 in strict mode.
+     * @param cushionFiresE1Suggestion  number of times the E1 edit-failure error-message rewrite
+     *                                  (suggests {@code write_file} after ≥2 failures on the same
+     *                                  path) fired. Always 0 in strict mode.
+     *
+     * <p>N5: the four {@code cushionFires*} counters make strict-vs-normal deltas observable
+     * from the harness without grepping logs. They count gate-site fires per loop run.
      */
     public record LoopResult(
             String finalAnswer,
@@ -165,7 +179,11 @@ public final class ToolCallLoop {
             int failedCalls,
             int retriedCalls,
             boolean hitIterLimit,
-            int mutatingToolSuccesses
+            int mutatingToolSuccesses,
+            int cushionFiresRedundantRead,
+            int cushionFiresAliasRescue,
+            int cushionFiresB3EditShortCircuit,
+            int cushionFiresE1Suggestion
     ) {
         /**
          * Returns a user-facing summary line, or null if no tools were invoked.
@@ -239,7 +257,8 @@ public final class ToolCallLoop {
                 LOG.debug("Response contains code blocks with filename hints but no tool calls. "
                         + "File writes were NOT performed. The model should use tool_call format for file operations.");
             }
-            return new LoopResult(initialAnswer, 0, 0, List.of(), messages, 0, 0, false, 0);
+            return new LoopResult(initialAnswer, 0, 0, List.of(), messages, 0, 0, false, 0,
+                    0, 0, 0, 0);
         }
 
         // Lightweight session for tool execution context
@@ -252,6 +271,14 @@ public final class ToolCallLoop {
         int failedCalls = 0;
         int retriedCalls = 0;
         int mutatingToolSuccesses = 0;
+        // N5: cushion-fire counters (strict-mode runs keep these at 0 because
+        // each gate site is already strict-gated — see comments at each site).
+        int cushionFiresRedundantRead = 0;
+        int cushionFiresB3EditShortCircuit = 0;
+        int cushionFiresE1Suggestion = 0;
+        // Snapshot alias-rescue counter on the registry so the post-loop delta
+        // reflects only rescues that happened during this run.
+        int aliasRescueBaseline = turnProcessor.toolRegistry().aliasRescueCount();
         List<String> toolNames = new ArrayList<>();
 
         // B3: track (toolName:path:old_string_hash) tuples that already FAILED in this run.
@@ -315,6 +342,7 @@ public final class ToolCallLoop {
                         // Fix 3: short-circuited calls are NOT counted in toolsInvoked.
                         retriedCalls++;
                         failedCalls++;
+                        cushionFiresB3EditShortCircuit++;
                         String diagnostic = "[tool_result: " + effective.toolName() + "]\n"
                                 + "[error] This exact edit was already attempted and failed. "
                                 + "Call talos.read_file to see the file's current state, "
@@ -339,6 +367,7 @@ public final class ToolCallLoop {
                     String readSig = buildReadCallSignature(effective);
                     String priorResult = successfulReadCalls.get(readSig);
                     if (priorResult != null) {
+                        cushionFiresRedundantRead++;
                         String diagnostic = "[tool_result: " + effective.toolName() + "]\n"
                                 + "You already gathered this information and the workspace has not changed since then. "
                                 + "Answer the user's question now using the evidence you already have."
@@ -404,6 +433,7 @@ public final class ToolCallLoop {
                         if (!strict && pathHint != null) {
                             int failCount = editFailuresByPath.merge(normalizePath(pathHint), 1, Integer::sum);
                             if (failCount >= 2) {
+                                cushionFiresE1Suggestion++;
                                 result = ToolResult.fail(ToolError.invalidParams(
                                         result.errorMessage()
                                         + "\nSuggestion: edit_file has failed on this file multiple times. "
@@ -507,8 +537,16 @@ public final class ToolCallLoop {
         LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked, {} failed",
                 iterations, totalToolsInvoked, failedCalls);
 
+        // N5: compute alias-rescue delta for this run. In strict mode the
+        // registry's get() short-circuits before any rescue branch, so this
+        // delta is guaranteed to be 0.
+        int cushionFiresAliasRescue =
+                turnProcessor.toolRegistry().aliasRescueCount() - aliasRescueBaseline;
+
         return new LoopResult(finalAnswer, iterations, totalToolsInvoked, List.copyOf(toolNames),
-                messages, failedCalls, retriedCalls, hitIterLimit, mutatingToolSuccesses);
+                messages, failedCalls, retriedCalls, hitIterLimit, mutatingToolSuccesses,
+                cushionFiresRedundantRead, cushionFiresAliasRescue,
+                cushionFiresB3EditShortCircuit, cushionFiresE1Suggestion);
     }
 
     // ── NativeToolCall → ToolCall conversion ─────────────────────────────
