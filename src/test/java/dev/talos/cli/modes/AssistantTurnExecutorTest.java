@@ -937,6 +937,197 @@ class AssistantTurnExecutorTest {
                     + "text=<" + textWithoutAnnotation + ">");
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  N1 — Transcript regression anchors
+    //
+    //  One test per transcript turn from test-output.txt (the playground run
+    //  that exposed the trust layer gaps). Each test pins an exact user-prompt
+    //  shape + an answer shape that today's trust gates MUST catch, so a
+    //  future regression that weakens a gate (tightens a threshold, narrows
+    //  a marker set, loosens a claim detector) fails with a clear turn
+    //  reference.
+    //
+    //  Scope note: these are executor-seam (static-gate) tests, not harness
+    //  scenarios. The harness seam (ToolCallLoop) bypasses AssistantTurnExecutor,
+    //  so R2/R6/N2 cannot fire there. LlmClient is final with no scripted-mode
+    //  seam, so driving execute() end-to-end with scripted LLM responses would
+    //  require extracting an interface — a speculative abstraction the branch
+    //  rules discourage. The static-gate pattern (already used by
+    //  ClaimVsActionTests, GroundingRetryTests, StreamingGroundingTests) is
+    //  the correct and lowest-risk anchor for transcript-level assertions.
+    //
+    //  Turn mapping:
+    //    T1 (under-inspection)      → NO TEST YET. P4 gate does not exist.
+    //    T2 (wiring fabrication)    → t2_wiringFabrication_triggersR6
+    //    T3 (code fabrication)      → t3_codeFabrication_triggersR6
+    //    T4 (selector fabrication)  → see GroundingRetryTests#firesOnTranscriptTurn4Shape
+    //    T5 (false mutation claim)  → t5_falseMutationClaim_triggersR2
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @Nested
+    @DisplayName("N1 — Transcript regressions (test-output.txt anchors)")
+    class TranscriptRegressions {
+
+        /** Turn 2 prompt, verbatim from test-output.txt. */
+        private static final String TURN2_USER_PROMPT =
+                "tell me how this site is wired together: which HTML file "
+              + "loads which CSS and JS files, and whether there are any "
+              + "broken or suspicious references.";
+
+        /** Turn 3 prompt, verbatim from test-output.txt. */
+        private static final String TURN3_USER_PROMPT =
+                "Read the main HTML, CSS, and JS files and tell me 3 "
+              + "concrete improvement opportunities. Use evidence from "
+              + "the actual files, not generic website advice.";
+
+        /**
+         * Turn 2 fabrication shape: confident wiring narrative asserting
+         * external link/script references that the workspace did not contain.
+         * Must exceed UNGROUNDED_MIN_CHARS (600) so the R6 length gate passes
+         * and the evidence-marker gate determines firing.
+         */
+        private String turn2WiringFabrication() {
+            return "The site is wired together as three coordinated files loaded "
+                 + "by index.html. The <head> section contains a <link rel=\"stylesheet\" "
+                 + "href=\"style.css\"> element that pulls in the visual presentation, "
+                 + "and the <body> closes with a <script src=\"script.js\"></script> "
+                 + "reference that wires up the interactive behavior. The CSS selectors "
+                 + "target the form's input ids and the result container, while the "
+                 + "JavaScript listens for the submit event on the form element and "
+                 + "writes the computed BMI back into the result div via "
+                 + "document.getElementById. There are no obvious broken references — "
+                 + "the href and src attributes match the sibling file names, and the "
+                 + "class/id naming is consistent across all three files. As long as "
+                 + "the files remain in the same directory the load order will resolve "
+                 + "correctly and the calculator will function end to end. This is the "
+                 + "conventional multi-file layout you would expect for a small "
+                 + "single-page utility like this one.";
+        }
+
+        /**
+         * Turn 3 fabrication shape: "three concrete improvements" that reference
+         * code patterns the files do not actually contain. Again must exceed
+         * UNGROUNDED_MIN_CHARS so only the evidence-marker gate determines firing.
+         */
+        private String turn3CodeFabrication() {
+            return "Here are three concrete improvement opportunities based on "
+                 + "the files. First, the form submission handler in script.js "
+                 + "uses an inline onsubmit attribute which mixes behavior into "
+                 + "markup; moving to addEventListener('submit', ...) would "
+                 + "separate concerns and make the event chain easier to test. "
+                 + "Second, the CSS in style.css relies on element selectors like "
+                 + "'input' and 'div' that match too broadly — switching to "
+                 + "scoped class selectors (e.g. .bmi-input, .bmi-result) would "
+                 + "reduce the risk of style leakage if the page ever grows. "
+                 + "Third, the BMI formula in the JavaScript assumes metric "
+                 + "input without validating the number range, so extremely "
+                 + "large or negative weights produce nonsensical results; "
+                 + "adding a simple min/max guard before the division would "
+                 + "harden the calculator against bad input. Together these "
+                 + "changes keep the single-file simplicity while tightening "
+                 + "structure, style scope, and input validation.";
+        }
+
+        // ── T2 ────────────────────────────────────────────────────────
+
+        @Test
+        @DisplayName("T2 — Turn-2 wiring fabrication shape triggers R6 retry")
+        void t2_wiringFabrication_triggersR6() {
+            var ctx = Context.builder(new Config()).build();
+            List<ChatMessage> messages = new ArrayList<>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(TURN2_USER_PROMPT));
+
+            String fabrication = turn2WiringFabrication();
+            assertTrue(fabrication.length() >= AssistantTurnExecutor.UNGROUNDED_MIN_CHARS,
+                    "fixture precondition: Turn-2 fabrication must be long enough "
+                  + "to pass the R6 length gate (got " + fabrication.length() + ")");
+
+            int before = messages.size();
+            String out = AssistantTurnExecutor.groundingRetryIfNeeded(
+                    fabrication, messages, ctx);
+
+            assertEquals(before + 2, messages.size(),
+                    "T2 regression: R6 must fire for the Turn-2 wiring prompt + "
+                  + "fabrication shape (expect assistant + corrective user message "
+                  + "appended)");
+            assertNotEquals(fabrication, out,
+                    "T2 regression: result must differ from the original fabrication");
+        }
+
+        // ── T3 ────────────────────────────────────────────────────────
+
+        @Test
+        @DisplayName("T3 — Turn-3 code-fabrication shape triggers R6 retry")
+        void t3_codeFabrication_triggersR6() {
+            var ctx = Context.builder(new Config()).build();
+            List<ChatMessage> messages = new ArrayList<>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(TURN3_USER_PROMPT));
+
+            String fabrication = turn3CodeFabrication();
+            assertTrue(fabrication.length() >= AssistantTurnExecutor.UNGROUNDED_MIN_CHARS,
+                    "fixture precondition: Turn-3 fabrication must be long enough "
+                  + "to pass the R6 length gate (got " + fabrication.length() + ")");
+
+            int before = messages.size();
+            String out = AssistantTurnExecutor.groundingRetryIfNeeded(
+                    fabrication, messages, ctx);
+
+            assertEquals(before + 2, messages.size(),
+                    "T3 regression: R6 must fire for the Turn-3 'evidence from the "
+                  + "actual files' prompt + code-fabrication shape");
+            assertNotEquals(fabrication, out,
+                    "T3 regression: result must differ from the original fabrication");
+        }
+
+        // ── T4 ────────────────────────────────────────────────────────
+        //
+        // Turn 4 (selector-mismatch audit fabrication) is already pinned by
+        // GroundingRetryTests#firesOnTranscriptTurn4Shape. No duplicate here —
+        // see that test's transcript-anchored prompt for the T4 regression.
+
+        // ── T5 ────────────────────────────────────────────────────────
+
+        @Test
+        @DisplayName("T5 — Turn-5 false mutation claim (verbatim) is annotated")
+        void t5_falseMutationClaim_triggersR2() {
+            // Verbatim Turn-5 final narration from test-output.txt: Talos
+            // invoked only read_file, then claimed the edit was applied.
+            String answer =
+                    "I've updated the CTA button text to 'Let's Get Healthy'. "
+                  + "The changes have been applied to the `index.html` file.";
+
+            // Loop shape that matches the transcript: 1 tool call (read_file),
+            // zero mutating successes (no write_file / edit_file).
+            var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                    "unused", 1, 1,
+                    List.of("talos.read_file"),
+                    List.of(), 0, 0, false, /*mutatingSuccesses*/ 0);
+
+            String out = AssistantTurnExecutor.annotateIfFalseMutationClaim(
+                    answer, loopResult);
+
+            assertNotEquals(answer, out,
+                    "T5 regression: verbatim Turn-5 phrasing must be annotated "
+                  + "when no mutating tool succeeded");
+            assertTrue(out.startsWith(AssistantTurnExecutor.FALSE_MUTATION_ANNOTATION),
+                    "T5 regression: FALSE_MUTATION_ANNOTATION must be prepended so "
+                  + "the user sees the correction before the fabricated claim");
+            assertTrue(out.contains(answer),
+                    "T5 regression: original answer text must be preserved verbatim "
+                  + "inside the annotated output");
+        }
+
+        // ── T1 (deferred) ─────────────────────────────────────────────
+        //
+        // Turn 1 under-inspection ("read these three files first, then answer"
+        // followed by a one-read answer) has no gate to anchor against yet.
+        // The P4 inspection-completeness check is not implemented. When P4
+        // lands, add t1_underInspection_triggersP4 here with the Turn-1
+        // prompt and an assertion that the gate refuses the premature answer.
+    }
 }
 
 
