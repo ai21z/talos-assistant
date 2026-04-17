@@ -384,6 +384,73 @@ class AssistantTurnExecutorTest {
             assertTrue(hasRetryInstruction,
                     "Retry should inject a synthesis instruction message");
         }
+
+        // ── Part A regression: post-tool task-anchor loss (real transcript) ───
+
+        /**
+         * Regression A: the real manual transcript (test-output.txt, Turn 2 / 6)
+         * ended with "the original question is not visible in our current
+         * conversation history" because the old retry prompt was generic. The
+         * new retry must pin the user's verbatim request into the retry message
+         * so the model cannot claim the question is missing.
+         */
+        @Test
+        void retryPromptAnchorsToVerbatimUserRequest() {
+            var ctx = Context.builder(new Config()).build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("You are a helpful assistant."));
+            String originalRequest =
+                    "I dont like this site's look and feel... I want to completely change it and "
+                    + "make it look like a garden in the spring where almonds starting blooming";
+            messages.add(ChatMessage.user(originalRequest));
+            // Simulate post-tool assistant + tool-result messages that push the
+            // user request back in the context (matches native tool-call path).
+            messages.add(ChatMessage.assistant("I'll inspect the files."));
+            messages.add(ChatMessage.toolResult("call-1", "[tool_result] index.html contents…"));
+            messages.add(ChatMessage.toolResult("call-2", "[tool_result] index.html, settings.json"));
+
+            // A short deflection that the gate reliably catches (real Turn 2
+            // ended with this family of phrasing once the retry didn't anchor).
+            String deflection = "How can I help you with these files?";
+
+            AssistantTurnExecutor.synthesisRetryIfNeeded(deflection, 2, messages, ctx);
+
+            // Find the retry-instruction user message (most recently appended).
+            String retryContent = null;
+            for (int i = messages.size() - 1; i >= 0; i--) {
+                ChatMessage m = messages.get(i);
+                if ("user".equals(m.role()) && m.content() != null
+                        && m.content().contains("already gathered the needed evidence")) {
+                    retryContent = m.content();
+                    break;
+                }
+            }
+            assertNotNull(retryContent, "Retry prompt must be appended as a user-role message");
+            assertTrue(retryContent.contains("almonds starting blooming"),
+                    "Retry prompt must include the verbatim original user request so the model "
+                    + "cannot claim the question is missing. Actual: " + retryContent);
+            assertTrue(retryContent.contains("Do not say the question is missing"),
+                    "Retry prompt must explicitly forbid the 'question not visible' failure mode.");
+        }
+
+        /**
+         * Regression A (helper-level): {@link AssistantTurnExecutor#latestUserRequest}
+         * must return the ORIGINAL user request, not an intermediate tool_result,
+         * on the native tool-call path where tool results have role="tool".
+         */
+        @Test
+        void latestUserRequestReturnsOriginalOnNativeToolPath() {
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("redesign index.html as a spring garden"));
+            messages.add(ChatMessage.assistant("reading…"));
+            messages.add(ChatMessage.toolResult("c1", "file contents"));
+            messages.add(ChatMessage.toolResult("c2", "dir listing"));
+
+            String req = AssistantTurnExecutor.latestUserRequest(messages);
+            assertEquals("redesign index.html as a spring garden", req,
+                    "latestUserRequest must skip role=tool messages and return the user turn");
+        }
     }
 
     // ── Regression: inspect-only failure class ───────────────────────

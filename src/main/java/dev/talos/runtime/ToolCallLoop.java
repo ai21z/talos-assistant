@@ -657,6 +657,25 @@ public final class ToolCallLoop {
         return null;
     }
 
+    /**
+     * Walks backwards through {@code messages} for the most recent user-role
+     * message. On the native tool-call path, tool results use role="tool",
+     * so this reliably returns the original user request. Package-private
+     * copy — the loop deliberately does not depend on
+     * {@code AssistantTurnExecutor} to avoid a reverse package edge.
+     */
+    static String latestUserRequestIn(List<ChatMessage> messages) {
+        if (messages == null || messages.isEmpty()) return null;
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            ChatMessage m = messages.get(i);
+            if ("user".equals(m.role())) {
+                String c = m.content();
+                return (c == null || c.isBlank()) ? null : c;
+            }
+        }
+        return null;
+    }
+
     // ---- Call-signature helpers (B3 repeated-failure detection) ----
 
     /**
