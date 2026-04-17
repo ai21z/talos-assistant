@@ -588,5 +588,48 @@ class ToolCallLoopTest {
                 ToolCallLoop.buildReadCallSignature(call1),
                 ToolCallLoop.buildReadCallSignature(call2));
     }
+
+    // ── Path canonicalization for read-only redundancy ────────────────
+
+    @Test
+    void canonicalizeReadPath_dotAndDotSlashAreEquivalent() {
+        assertEquals(ToolCallLoop.canonicalizeReadPath("."),
+                     ToolCallLoop.canonicalizeReadPath("./"));
+    }
+
+    @Test
+    void canonicalizeReadPath_emptyAndDotAreEquivalent() {
+        assertEquals(ToolCallLoop.canonicalizeReadPath(""),
+                     ToolCallLoop.canonicalizeReadPath("."));
+    }
+
+    @Test
+    void canonicalizeReadPath_trailingSlashStripped() {
+        assertEquals(ToolCallLoop.canonicalizeReadPath("src"),
+                     ToolCallLoop.canonicalizeReadPath("src/"));
+    }
+
+    @Test
+    void canonicalizeReadPath_backslashNormalized() {
+        assertEquals(ToolCallLoop.canonicalizeReadPath("src/main"),
+                     ToolCallLoop.canonicalizeReadPath("src\\main"));
+    }
+
+    @Test
+    void canonicalizeReadPath_dotSlashPrefixStripped() {
+        assertEquals(ToolCallLoop.canonicalizeReadPath("index.html"),
+                     ToolCallLoop.canonicalizeReadPath("./index.html"));
+    }
+
+    @Test
+    void buildReadCallSignature_listDirDotAndDotSlashAreEquivalent() {
+        // This is the exact transcript failure: list_dir with "." vs "./"
+        var callDot = new ToolCall("talos.list_dir", Map.of("path", "."));
+        var callDotSlash = new ToolCall("talos.list_dir", Map.of("path", "./"));
+        assertEquals(
+                ToolCallLoop.buildReadCallSignature(callDot),
+                ToolCallLoop.buildReadCallSignature(callDotSlash),
+                "list_dir '.' and './' must produce identical signatures");
+    }
 }
 
