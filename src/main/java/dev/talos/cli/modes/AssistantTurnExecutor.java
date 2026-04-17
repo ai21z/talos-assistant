@@ -168,6 +168,12 @@ final class AssistantTurnExecutor {
                         // Claim-vs-action truth layer: annotate if the answer claims a mutation
                         // that no mutating tool actually performed this turn.
                         answer = annotateIfFalseMutationClaim(answer, loopResult);
+                    } else {
+                        // No-tool-call path. Zero tools were invoked this turn.
+                        // Grounding retry gate: if the user explicitly asked for evidence
+                        // / reading / inspection and the answer is long-and-confident,
+                        // re-prompt once asking the model to answer from workspace evidence.
+                        answer = groundingRetryIfNeeded(answer, messages, ctx);
                     }
                     answer = sanitizeAndTruncate(answer, opts);
                     out.append(answer);
@@ -420,6 +426,153 @@ final class AssistantTurnExecutor {
         LOG.warn("False mutation claim detected: answer asserts a file change, "
                 + "but no mutating tool succeeded this turn. Annotating.");
         return FALSE_MUTATION_ANNOTATION + answer;
+    }
+
+    // ── No-tool grounding retry (R6, scoped) ─────────────────────────────
+
+    /**
+     * Minimum answer length at which the grounding retry becomes eligible.
+     *
+     * <p>Chosen so that short simple answers are never second-guessed, while
+     * the transcript's long-fabrication shapes (1600+ chars in Turns 2–4) are
+     * comfortably inside the window. Values below 600 risk fighting the
+     * short-deflection tier (≤ 500 chars) already handled elsewhere.
+     */
+    static final int UNGROUNDED_MIN_CHARS = 600;
+
+    /**
+     * Phrases in the <em>user request</em> that indicate the user wants the
+     * answer grounded in inspected workspace contents. Kept conservative and
+     * anchored to real transcript prompt wording — we explicitly do not want
+     * a bag-of-words net that sweeps up generic conversation.
+     *
+     * <p>Matched case-insensitively against the latest user message only.
+     */
+    private static final Set<String> EVIDENCE_REQUEST_MARKERS = Set.of(
+            "read the",
+            "read first",
+            "inspect",
+            "check whether",
+            "check if",
+            "check that",
+            "verify",
+            "evidence",
+            "actual file",
+            "based on the file",
+            "from the file",
+            "wired together",
+            "wiring",
+            "mismatch",
+            "suspicious reference",
+            "broken reference",
+            "identify the"
+    );
+
+    /**
+     * Annotation prepended to the original answer if the grounding retry
+     * fires but the retry itself does not produce a better result. Keeps the
+     * user informed without silently rewriting.
+     */
+    static final String UNGROUNDED_ANNOTATION =
+            "⚠ [Grounding check: the user asked for an answer based on workspace "
+            + "contents, but no files were read this turn. The response below was "
+            + "produced without reading any files.]\n\n";
+
+    /**
+     * Returns the content of the latest user-role message in {@code messages},
+     * or {@code null} if none. Package-private for testability.
+     */
+    static String latestUserRequest(List<ChatMessage> messages) {
+        if (messages == null || messages.isEmpty()) return null;
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            ChatMessage m = messages.get(i);
+            if ("user".equals(m.role())) {
+                String content = m.content();
+                return (content == null || content.isBlank()) ? null : content;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * True iff the given user request contains at least one evidence-request
+     * phrase. Conservative: matches the latest user message only; never
+     * inspects the assistant's own prior output. Package-private for testing.
+     */
+    static boolean looksLikeEvidenceRequest(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return false;
+        String lower = userRequest.toLowerCase();
+        for (String marker : EVIDENCE_REQUEST_MARKERS) {
+            if (lower.contains(marker)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * No-tool grounding retry (R6, scoped).
+     *
+     * <p>Fires when <b>all</b> of the following are true:
+     * <ol>
+     *   <li>The turn invoked zero tool calls (the caller only invokes this
+     *       helper on the no-tool-call branch, so this is a structural
+     *       invariant of the call site, not a runtime re-check).</li>
+     *   <li>The answer is at least {@link #UNGROUNDED_MIN_CHARS} characters
+     *       long — substantive enough that the existing deflection gate is
+     *       not going to catch it.</li>
+     *   <li>The latest user request in {@code messages} contains an
+     *       evidence-request marker (see {@link #EVIDENCE_REQUEST_MARKERS}).</li>
+     * </ol>
+     *
+     * <p>On fire, performs <b>exactly one</b> retry via
+     * {@code ctx.llm().chatFull(...)} with a short corrective instruction
+     * telling the model to answer from inspected workspace contents. If the
+     * retry produces a non-blank, non-identical, longer-or-similar answer,
+     * that answer is returned. Otherwise the original is annotated with
+     * {@link #UNGROUNDED_ANNOTATION} and returned so the user at least sees a
+     * visible grounding signal. Annotate-on-failure mirrors the R2
+     * claim-vs-action posture.
+     *
+     * <p><b>Scope note:</b> this helper is currently wired only into the
+     * non-streaming branch of {@link #execute}. The streaming branch emits
+     * prose to the terminal during the LLM call itself, so a silent retry
+     * there would double-render. Extending this gate to streaming is a
+     * separate UX-layer decision left to a follow-up pass.
+     *
+     * <p>Package-private for direct testing.
+     */
+    static String groundingRetryIfNeeded(String answer, List<ChatMessage> messages, Context ctx) {
+        if (answer == null || answer.isBlank()) return answer;
+        if (answer.length() < UNGROUNDED_MIN_CHARS) return answer;
+        if (ctx == null || ctx.llm() == null) return answer;
+
+        String userRequest = latestUserRequest(messages);
+        if (!looksLikeEvidenceRequest(userRequest)) return answer;
+
+        LOG.info("No-tool grounding retry fired: answer={} chars, zero tools, "
+                + "user asked for evidence. Re-prompting once.", answer.length());
+
+        messages.add(ChatMessage.assistant(answer));
+        messages.add(ChatMessage.user(
+                "Your previous answer was produced without reading any files. "
+                + "The user asked for an answer grounded in the actual workspace. "
+                + "Use the available file tools to read the relevant files, then "
+                + "answer concretely from what you read. Do not guess about file "
+                + "contents. Do not describe files you have not read."));
+
+        try {
+            LlmClient.StreamResult retry = ctx.llm().chatFull(messages);
+            String retryText = retry.text();
+            if (retryText != null && !retryText.isBlank() && !retryText.equals(answer)) {
+                LOG.info("Grounding retry produced a different answer ({} → {} chars)",
+                        answer.length(), retryText.length());
+                return retryText;
+            }
+            LOG.warn("Grounding retry did not produce a substantive new answer. "
+                    + "Annotating original.");
+        } catch (Exception e) {
+            LOG.warn("Grounding retry failed: {}. Annotating original.", e.getMessage());
+        }
+        return UNGROUNDED_ANNOTATION + answer;
     }
 }
 

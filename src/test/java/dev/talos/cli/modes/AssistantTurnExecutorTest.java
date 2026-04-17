@@ -555,6 +555,225 @@ class AssistantTurnExecutorTest {
                     AssistantTurnExecutor.annotateIfFalseMutationClaim(answer, null));
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  R6 — No-tool grounding retry (evidence-required prompts)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @Nested
+    @DisplayName("groundingRetryIfNeeded (R6, scoped to non-streaming no-tool branch)")
+    class GroundingRetryTests {
+
+        /** A clearly-above-threshold ungrounded-shape answer (no tools were used). */
+        private String longUngroundedAnswer() {
+            // 900+ chars of confident-sounding but zero-evidence prose. Shaped
+            // like the real Turn 2/3/4 transcript fabrications — substantive
+            // enough to slip past any deflection tier, short of sanitation.
+            return "Based on the typical structure of this kind of project, the site "
+                 + "is organized as a single HTML file with separate stylesheet and "
+                 + "script references linked from the head and body. The CSS file "
+                 + "controls visual presentation — colors, spacing, typography — "
+                 + "while the JavaScript file handles the interactive behavior, "
+                 + "especially the BMI calculation on form submission. The HTML "
+                 + "provides the structural skeleton for both. In practice this "
+                 + "means the three components are tightly coupled through the id "
+                 + "and class attributes on the HTML elements, which the CSS "
+                 + "selectors and the JavaScript document.getElementById calls rely "
+                 + "on. As long as those identifiers remain stable the site will "
+                 + "work as expected. No obvious cross-linking errors are likely "
+                 + "given the conventional nature of the implementation. The "
+                 + "general advice would be to keep the class names consistent and "
+                 + "to make sure the script tag's src attribute and the link tag's "
+                 + "href attribute both resolve correctly at load time.";
+        }
+
+        private Context newCtx() { return Context.builder(new Config()).build(); }
+
+        // ── Helper detection tests ────────────────────────────────────
+
+        @Test
+        @DisplayName("latestUserRequest returns the last user-role message content")
+        void latestUserRequestWalksFromTail() {
+            List<ChatMessage> messages = new ArrayList<>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("first question"));
+            messages.add(ChatMessage.assistant("first answer"));
+            messages.add(ChatMessage.user("second question"));
+            messages.add(ChatMessage.assistant("second answer"));
+
+            assertEquals("second question", AssistantTurnExecutor.latestUserRequest(messages));
+        }
+
+        @Test
+        @DisplayName("latestUserRequest returns null when no user message present")
+        void latestUserRequestNullWhenAbsent() {
+            List<ChatMessage> messages = List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.assistant("answer"));
+            assertNull(AssistantTurnExecutor.latestUserRequest(messages));
+            assertNull(AssistantTurnExecutor.latestUserRequest(List.of()));
+            assertNull(AssistantTurnExecutor.latestUserRequest(null));
+        }
+
+        @Test
+        @DisplayName("looksLikeEvidenceRequest matches real transcript prompts")
+        void evidenceRequestMatchesTranscriptPrompts() {
+            // Exact phrases from test-output.txt user turns that failed
+            // ungrounded. These are the shapes the gate must catch.
+            assertTrue(AssistantTurnExecutor.looksLikeEvidenceRequest(
+                    "tell me how this site is wired together: which HTML file "
+                    + "loads which CSS and JS files, and whether there are any "
+                    + "broken or suspicious references."));
+            assertTrue(AssistantTurnExecutor.looksLikeEvidenceRequest(
+                    "Read the main HTML, CSS, and JS files and tell me 3 "
+                    + "concrete improvement opportunities. Use evidence from "
+                    + "the actual files, not generic website advice."));
+            assertTrue(AssistantTurnExecutor.looksLikeEvidenceRequest(
+                    "Check whether this website has mismatches between HTML "
+                    + "classes/IDs and the selectors used in CSS or JavaScript."));
+        }
+
+        @Test
+        @DisplayName("looksLikeEvidenceRequest does not match casual conversation")
+        void evidenceRequestDoesNotMatchCasualPrompts() {
+            assertFalse(AssistantTurnExecutor.looksLikeEvidenceRequest(
+                    "explain how BMI is calculated"));
+            assertFalse(AssistantTurnExecutor.looksLikeEvidenceRequest(
+                    "what's the difference between metric and imperial BMI?"));
+            assertFalse(AssistantTurnExecutor.looksLikeEvidenceRequest(
+                    "can you rewrite this headline to sound more professional?"));
+            assertFalse(AssistantTurnExecutor.looksLikeEvidenceRequest(""));
+            assertFalse(AssistantTurnExecutor.looksLikeEvidenceRequest(null));
+        }
+
+        // ── Gate firing behavior ──────────────────────────────────────
+
+        @Test
+        @DisplayName("FIRES: long answer + zero tools + evidence-request prompt")
+        void firesOnTranscriptTurn4Shape() {
+            var ctx = newCtx();
+            List<ChatMessage> messages = new ArrayList<>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Check whether this website has mismatches between HTML "
+                    + "classes/IDs and the selectors used in CSS or JavaScript. "
+                    + "Do not change anything yet."));
+
+            String ungrounded = longUngroundedAnswer();
+            int beforeCount = messages.size();
+
+            String out = AssistantTurnExecutor.groundingRetryIfNeeded(
+                    ungrounded, messages, ctx);
+
+            // Retry must have fired: assistant + corrective user message appended.
+            assertEquals(beforeCount + 2, messages.size(),
+                    "Grounding retry must append assistant + corrective user message");
+            assertEquals("assistant", messages.get(beforeCount).role());
+            assertEquals("user", messages.get(beforeCount + 1).role());
+            assertTrue(messages.get(beforeCount + 1).content().toLowerCase()
+                            .contains("without reading any files"),
+                    "Corrective prompt must mention the lack of file reads");
+
+            // Result must not be the original. It is either the retry text
+            // (when PLACEHOLDER returned something substantive) or the
+            // annotated original — both acceptable. Distinguish:
+            assertNotEquals(ungrounded, out, "Result must differ from the original");
+            if (out.startsWith(AssistantTurnExecutor.UNGROUNDED_ANNOTATION)) {
+                // Retry was blank/identical — original was annotated.
+                assertTrue(out.contains(ungrounded),
+                        "Annotated result must preserve the original answer");
+            }
+        }
+
+        // ── Non-firing cases ──────────────────────────────────────────
+
+        @Test
+        @DisplayName("DOES NOT FIRE: user did not ask for evidence (casual prompt)")
+        void doesNotFireOnCasualPrompt() {
+            var ctx = newCtx();
+            List<ChatMessage> messages = new ArrayList<>();
+            messages.add(ChatMessage.user("explain how BMI is calculated"));
+
+            String answer = longUngroundedAnswer();
+            int beforeCount = messages.size();
+
+            String out = AssistantTurnExecutor.groundingRetryIfNeeded(answer, messages, ctx);
+
+            assertSame(answer, out,
+                    "Must not fire when the user did not ask for evidence/inspection");
+            assertEquals(beforeCount, messages.size(),
+                    "Messages must be unchanged when the gate does not fire");
+        }
+
+        @Test
+        @DisplayName("DOES NOT FIRE: answer is short (below UNGROUNDED_MIN_CHARS)")
+        void doesNotFireOnShortAnswer() {
+            var ctx = newCtx();
+            List<ChatMessage> messages = new ArrayList<>();
+            messages.add(ChatMessage.user(
+                    "Read the main files and identify the entry points."));
+
+            String shortAnswer = "I'm not sure. Can you rephrase?";
+            int beforeCount = messages.size();
+
+            String out = AssistantTurnExecutor.groundingRetryIfNeeded(
+                    shortAnswer, messages, ctx);
+
+            assertSame(shortAnswer, out,
+                    "Must not fire for answers below UNGROUNDED_MIN_CHARS");
+            assertEquals(beforeCount, messages.size());
+        }
+
+        @Test
+        @DisplayName("DOES NOT FIRE: null / blank answer passes through")
+        void doesNotFireOnNullOrBlank() {
+            var ctx = newCtx();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.user("Read the workspace and evidence from actual files."));
+
+            assertNull(AssistantTurnExecutor.groundingRetryIfNeeded(null, messages, ctx));
+            assertEquals("", AssistantTurnExecutor.groundingRetryIfNeeded("", messages, ctx));
+            assertEquals("   ", AssistantTurnExecutor.groundingRetryIfNeeded("   ", messages, ctx));
+        }
+
+        @Test
+        @DisplayName("NO OVERREACH: legitimate long explanation without evidence keywords is untouched")
+        void doesNotFireOnLegitimateLongExplanation() {
+            var ctx = newCtx();
+            List<ChatMessage> messages = new ArrayList<>();
+            // User asks a general knowledge question. A long, substantive
+            // explanation answering it is legitimate — must not be second-guessed.
+            messages.add(ChatMessage.user(
+                    "explain the difference between BMI and body fat percentage"));
+
+            String longExplanation = longUngroundedAnswer();
+            int beforeCount = messages.size();
+
+            String out = AssistantTurnExecutor.groundingRetryIfNeeded(
+                    longExplanation, messages, ctx);
+
+            assertSame(longExplanation, out,
+                    "Long explanatory answers without an evidence-request prompt "
+                    + "must pass through untouched");
+            assertEquals(beforeCount, messages.size());
+        }
+
+        @Test
+        @DisplayName("UNGROUNDED_MIN_CHARS is a boundary: one char below does not fire")
+        void boundaryBelowThresholdDoesNotFire() {
+            var ctx = newCtx();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.user("Read the main files and verify the wiring."));
+
+            // Exactly UNGROUNDED_MIN_CHARS - 1 characters.
+            String justBelow = "a".repeat(AssistantTurnExecutor.UNGROUNDED_MIN_CHARS - 1);
+
+            String out = AssistantTurnExecutor.groundingRetryIfNeeded(
+                    justBelow, messages, ctx);
+
+            assertSame(justBelow, out, "Answer one char below threshold must not fire");
+        }
+    }
 }
 
 
