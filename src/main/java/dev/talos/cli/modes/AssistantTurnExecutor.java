@@ -138,9 +138,25 @@ final class AssistantTurnExecutor {
                         answer = sanitizeAndTruncate(answer, opts);
                         out.append(answer);
                     } else {
-                        // No tool calls — content was streamed; record full text for memory
+                        // No tool calls — content was streamed; record full text for memory.
+                        //
+                        // N2 (streaming-path R6): we cannot silently retry here — the
+                        // prose is already on the terminal. If the R6 shape matches
+                        // (long answer, zero tools, evidence-request prompt), append
+                        // a trailing grounding notice. The notice is written to the
+                        // stream sink so the user actually sees it, and appended to
+                        // {@code out} so it enters the turn record / history.
                         streamed = true;
                         out.append(answer);
+                        if (shouldAppendStreamingGroundingAnnotation(answer, messages)) {
+                            LOG.info("Streaming grounding annotation appended: answer={} chars, "
+                                    + "zero tools, user asked for evidence.", answer.length());
+                            String notice = "\n\n" + UNGROUNDED_ANNOTATION.stripTrailing() + "\n";
+                            if (ctx.streamSink() != null) {
+                                try { ctx.streamSink().accept(notice); } catch (Exception ignored) { }
+                            }
+                            out.append(notice);
+                        }
                     }
                 } else {
                     out.append("(no answer)");
@@ -509,6 +525,37 @@ final class AssistantTurnExecutor {
     }
 
     /**
+     * N2 — streaming-path grounding annotation predicate.
+     *
+     * <p>Pure detection helper, no side effects. Returns {@code true} iff the
+     * streamed turn exhibits the R6 failure shape:
+     * <ol>
+     *   <li>the answer is non-blank and at least {@link #UNGROUNDED_MIN_CHARS}
+     *       characters long;</li>
+     *   <li>the latest user request contains an evidence-request marker;</li>
+     *   <li>the caller invoked this helper on the no-tool-call streaming
+     *       branch — zero-tools is a structural invariant of the call site,
+     *       not re-checked here.</li>
+     * </ol>
+     *
+     * <p>Streaming mode deliberately does <b>not</b> retry silently: the prose
+     * is already on the terminal, and a retry would either double-render or
+     * require ambitious buffering. Instead, callers append a trailing
+     * grounding notice ({@link #UNGROUNDED_ANNOTATION}) to both the stream
+     * sink (so the user sees it) and the turn output (so history records
+     * it). This mirrors the R2 annotate-first posture: transparent
+     * transcripts over invisible rewriting.
+     *
+     * <p>Package-private for direct testing.
+     */
+    static boolean shouldAppendStreamingGroundingAnnotation(
+            String answer, List<ChatMessage> messages) {
+        if (answer == null || answer.isBlank()) return false;
+        if (answer.length() < UNGROUNDED_MIN_CHARS) return false;
+        return looksLikeEvidenceRequest(latestUserRequest(messages));
+    }
+
+    /**
      * No-tool grounding retry (R6, scoped).
      *
      * <p>Fires when <b>all</b> of the following are true:
@@ -532,16 +579,16 @@ final class AssistantTurnExecutor {
      * visible grounding signal. Annotate-on-failure mirrors the R2
      * claim-vs-action posture.
      *
-     * <p><b>Scope note:</b> this helper is currently wired only into the
-     * non-streaming branch of {@link #execute}. The streaming branch emits
-     * prose to the terminal during the LLM call itself, so a silent retry
-     * there would double-render. Extending this gate to streaming is a
-     * separate UX-layer decision left to a follow-up pass.
+     * <p><b>Scope note (N1 — non-streaming only):</b> this helper performs a
+     * silent retry, which is only safe on the non-streaming branch — the
+     * streaming branch has already emitted prose to the terminal by the time
+     * this helper could fire, so a retry would double-render. The streaming
+     * counterpart is {@link #shouldAppendStreamingGroundingAnnotation}, which
+     * is detect-only and never retries.
      *
      * <p>Package-private for direct testing.
      */
-    static String groundingRetryIfNeeded(String answer, List<ChatMessage> messages, Context ctx) {
-        if (answer == null || answer.isBlank()) return answer;
+    static String groundingRetryIfNeeded(String answer, List<ChatMessage> messages, Context ctx) {        if (answer == null || answer.isBlank()) return answer;
         if (answer.length() < UNGROUNDED_MIN_CHARS) return answer;
         if (ctx == null || ctx.llm() == null) return answer;
 
