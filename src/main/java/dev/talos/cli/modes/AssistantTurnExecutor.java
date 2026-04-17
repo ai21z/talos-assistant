@@ -135,6 +135,10 @@ final class AssistantTurnExecutor {
                         // Claim-vs-action truth layer: annotate if the answer claims a mutation
                         // that no mutating tool actually performed this turn.
                         answer = annotateIfFalseMutationClaim(answer, loopResult);
+                        // N3 — inspect under-completion truth layer: annotate if the user
+                        // asked for multi-file inspection but the turn made ≤ 1 read-only
+                        // tool call and emitted a substantive answer.
+                        answer = annotateIfInspectUnderCompletion(answer, messages, loopResult);
                         answer = sanitizeAndTruncate(answer, opts);
                         out.append(answer);
                     } else {
@@ -184,6 +188,10 @@ final class AssistantTurnExecutor {
                         // Claim-vs-action truth layer: annotate if the answer claims a mutation
                         // that no mutating tool actually performed this turn.
                         answer = annotateIfFalseMutationClaim(answer, loopResult);
+                        // N3 — inspect under-completion truth layer: annotate if the user
+                        // asked for multi-file inspection but the turn made ≤ 1 read-only
+                        // tool call and emitted a substantive answer.
+                        answer = annotateIfInspectUnderCompletion(answer, messages, loopResult);
                     } else {
                         // No-tool-call path. Zero tools were invoked this turn.
                         // Grounding retry gate: if the user explicitly asked for evidence
@@ -442,6 +450,176 @@ final class AssistantTurnExecutor {
         LOG.warn("False mutation claim detected: answer asserts a file change, "
                 + "but no mutating tool succeeded this turn. Annotating.");
         return FALSE_MUTATION_ANNOTATION + answer;
+    }
+
+    // ── Inspect under-completion truth layer (N3 / P4) ───────────────────
+
+    /**
+     * Minimum answer length at which the inspect under-completion gate
+     * becomes eligible.
+     *
+     * <p>Lower than {@link #UNGROUNDED_MIN_CHARS} because N3 fires on the
+     * with-tools branch, where the answer has already passed through the
+     * deflection / synthesis-retry tiers. A substantive answer after ≤ 1
+     * read is the exact Turn-1 failure shape regardless of length above
+     * this threshold.
+     */
+    static final int INSPECT_MIN_CHARS = 500;
+
+    /**
+     * Phrases in the <em>user request</em> that strongly imply the user
+     * asked for multi-file inspection before answering — i.e., explicitly
+     * more than one file should be read. Deliberately narrower than
+     * {@link #EVIDENCE_REQUEST_MARKERS}: an evidence request is a
+     * superset; an inspect-first request is the subset that names or
+     * implies plurality.
+     *
+     * <p>Matched case-insensitively against the latest user message only.
+     * Anchored to real transcript Turn-1 wording ("Read the relevant
+     * files first", "identify the main HTML entry file, the main
+     * stylesheet file, and the main JavaScript file").
+     */
+    private static final Set<String> INSPECT_REQUEST_MARKERS = Set.of(
+            "entry file",
+            "entry files",
+            "read the relevant",
+            "read the main",
+            "read the files",
+            "read all the",
+            "read all ",
+            "read each",
+            "read them all",
+            "read both",
+            "read these",
+            "all three",
+            "look at each",
+            "look at all",
+            "inspect each",
+            "inspect all",
+            "open each",
+            "start by reading",
+            "first read",
+            "first, read"
+    );
+
+    /**
+     * Annotation prepended to the answer when the turn completed with
+     * a substantive answer but only one read-only tool call, despite the
+     * user asking for multi-file inspection.
+     */
+    static final String UNDER_INSPECTION_ANNOTATION =
+            "⚠ [Inspect check: the user asked for multiple files to be read "
+            + "before answering, but only one read-only tool call was made "
+            + "this turn. The response below may not reflect the full "
+            + "workspace contents.]\n\n";
+
+    /**
+     * True iff the latest user request contains an inspect-first marker
+     * indicating plural-file inspection (see
+     * {@link #INSPECT_REQUEST_MARKERS}). Package-private for direct
+     * testing.
+     */
+    static boolean looksLikeInspectFirstRequest(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return false;
+        String lower = userRequest.toLowerCase();
+        for (String marker : INSPECT_REQUEST_MARKERS) {
+            if (lower.contains(marker)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Counts successful-or-attempted read-only tool invocations in
+     * {@code loopResult.toolNames()}. Read-only tools are {@code read_file},
+     * {@code list_dir}, and {@code grep}; the {@code talos.} namespace
+     * prefix is stripped before comparison. Package-private for direct
+     * testing.
+     *
+     * <p>Using {@code toolNames()} (the total invocation list) rather
+     * than filtering for success is intentional: the gate fires on
+     * <em>under-inspection intent</em>, and even a failed read is a
+     * sign the model did try to inspect. The residual false-positive
+     * risk (counting a failed read as "one read done") is acceptable
+     * because the gate is annotate-only.
+     */
+    static int readOnlyToolCount(ToolCallLoop.LoopResult loopResult) {
+        if (loopResult == null || loopResult.toolNames() == null) return 0;
+        int n = 0;
+        for (String t : loopResult.toolNames()) {
+            if (t == null) continue;
+            String name = t.toLowerCase();
+            if (name.startsWith("talos.")) name = name.substring("talos.".length());
+            if (name.equals("read_file") || name.equals("list_dir") || name.equals("grep")) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    /**
+     * Inspect under-completion truth layer (annotate-first).
+     *
+     * <p>Fires when <b>all</b> of the following hold:
+     * <ol>
+     *   <li>The tool loop ran and invoked at least one tool — if the turn
+     *       invoked zero tools, {@link #groundingRetryIfNeeded} /
+     *       {@link #shouldAppendStreamingGroundingAnnotation} (R6 / N2)
+     *       is the correct gate, not this one.</li>
+     *   <li>Zero mutating tool successes — a successful mutation means the
+     *       model did substantive work and the under-inspection signal is
+     *       noise.</li>
+     *   <li>The answer is at least {@link #INSPECT_MIN_CHARS} characters —
+     *       substantive enough to carry fabricated claims.</li>
+     *   <li>{@link #readOnlyToolCount(ToolCallLoop.LoopResult)} ≤ 1 —
+     *       the Turn-1 failure shape: one read, then a confident
+     *       multi-file summary.</li>
+     *   <li>The latest user request contains an inspect-first marker
+     *       (see {@link #INSPECT_REQUEST_MARKERS}).</li>
+     * </ol>
+     *
+     * <p><b>Posture: annotate, do not retry.</b> A retry here would
+     * require re-running the tool loop (another LLM + tool cycle) which
+     * is substantially more invasive than R6's single no-tool retry.
+     * Annotation preserves the user-visible work the turn already did
+     * (the successful read, the loop summary) and adds a visible truth
+     * signal without rewriting the model's prose. This mirrors R2's
+     * claim-vs-action annotate-first decision.
+     *
+     * <p><b>Streaming visibility limitation (inherited from R2):</b> on
+     * the streaming-with-tools branch the final answer may already be
+     * on the terminal by the time this gate runs, so the prepended
+     * annotation enters {@code out} (history / memory) but may not
+     * appear on the user's terminal. This matches the pre-existing
+     * behavior of {@link #annotateIfFalseMutationClaim} and is a
+     * deliberate single-shape decision — when real transcript evidence
+     * justifies a separate streaming-visible variant, it can be added
+     * symmetrically (mirroring the R6 → N2 split).
+     *
+     * <p>Package-private for direct testing.
+     *
+     * @param answer     the answer text after any synthesis retry / R2 annotation
+     * @param messages   the full turn messages (latest user message inspected)
+     * @param loopResult the tool-loop result for the current turn
+     * @return the (possibly annotated) answer
+     */
+    static String annotateIfInspectUnderCompletion(
+            String answer,
+            List<ChatMessage> messages,
+            ToolCallLoop.LoopResult loopResult) {
+        if (answer == null || answer.isBlank()) return answer;
+        if (loopResult == null) return answer;
+        if (loopResult.toolsInvoked() == 0) return answer;
+        if (loopResult.mutatingToolSuccesses() > 0) return answer;
+        if (answer.length() < INSPECT_MIN_CHARS) return answer;
+        if (readOnlyToolCount(loopResult) > 1) return answer;
+        if (!looksLikeInspectFirstRequest(latestUserRequest(messages))) return answer;
+
+        LOG.warn("Inspect under-completion detected: answer={} chars, "
+                + "read-only tool calls={}, tools invoked={}, "
+                + "user asked for multi-file inspection. Annotating.",
+                answer.length(), readOnlyToolCount(loopResult),
+                loopResult.toolsInvoked());
+        return UNDER_INSPECTION_ANNOTATION + answer;
     }
 
     // ── No-tool grounding retry (R6, scoped) ─────────────────────────────
