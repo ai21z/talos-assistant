@@ -1,8 +1,10 @@
 package dev.talos.harness;
 
+import dev.talos.cli.modes.AssistantTurnExecutor;
 import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
+import dev.talos.core.llm.LlmClient;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.*;
 import dev.talos.spi.types.ChatMessage;
@@ -149,6 +151,96 @@ public final class ScenarioRunner {
 
     private static boolean isToolResultContent(String content) {
         return content != null && content.contains("[tool_result:");
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    //  N4 — harness drives AssistantTurnExecutor end-to-end
+    //
+    //  runThroughExecutor exercises the full executor path (streaming /
+    //  non-streaming dispatch, tool-call loop, R2/R6/N2/N3 gates,
+    //  synthesis retry, sanitization) against a scripted LlmClient.
+    //  Use this when a scenario needs to assert on the ANSWER text
+    //  produced by those gates — in particular the T5-shape end-to-end
+    //  regression (scripted false-mutation claim → FALSE_MUTATION_
+    //  ANNOTATION prepended to the final answer).
+    //
+    //  Scenarios that only need ToolCallLoop behavior should keep using
+    //  run() / runStrict() — those do NOT invoke the executor gates.
+    //  See docs/new-architecture/talos-harness-main-plan.md §8 N4.
+    // ══════════════════════════════════════════════════════════════════
+
+    /**
+     * Drive a scenario end-to-end through {@link AssistantTurnExecutor#execute}
+     * using a scripted {@link LlmClient} (one response per LLM turn,
+     * clamps to the last after exhaustion).
+     *
+     * <p>The {@code scriptedResponses} are emitted by the scripted
+     * client in order: response 0 is the initial turn; subsequent
+     * entries satisfy re-prompts inside the tool-call loop and any
+     * gate retries (R6 / synthesis retry).
+     *
+     * <p>The {@code scenario}'s own {@link ScenarioDefinition#scriptedResponse()}
+     * field is intentionally ignored on this path — the executor
+     * needs multiple turns, which the single-string field cannot
+     * express. Initial files, name, and approval policy are honored
+     * as for {@link #run(ScenarioDefinition)}.
+     *
+     * <p>Runs non-streaming (no {@code streamSink}) for deterministic
+     * assertions. When a future scenario requires the streaming
+     * branch, add a sibling {@code runThroughExecutorStreaming}.
+     *
+     * @param scenario         scenario definition (files, name, policy)
+     * @param userPrompt       the verbatim user message for the turn
+     *                         (drives R6 / N3 marker matching)
+     * @param scriptedResponses ordered model outputs, one per LLM turn
+     */
+    public static ExecutorScenarioResult runThroughExecutor(
+            ScenarioDefinition scenario,
+            String userPrompt,
+            List<String> scriptedResponses) {
+
+        // 1. Workspace fixture (same as run()).
+        var workspace = ScenarioWorkspaceFixture.withFiles(scenario.initialFiles());
+
+        // 2. Tool registry against the fixture workspace.
+        var undoStack = new FileUndoStack();
+        var registry  = new ToolRegistry(false);
+        registry.register(new ReadFileTool());
+        registry.register(new FileWriteTool(undoStack));
+        registry.register(new FileEditTool(undoStack));
+        registry.register(new GrepTool());
+        registry.register(new ListDirTool());
+
+        // 3. Approval gate per scenario policy.
+        ApprovalGate gate = policyGate(scenario.approvalPolicy());
+
+        // 4. Turn processor + tool-call loop (normal mode; N4 scope).
+        var processor = new TurnProcessor(
+                ModeController.defaultController(), gate, registry);
+        var loop = new ToolCallLoop(
+                processor, ToolCallLoop.DEFAULT_MAX_ITERATIONS, null, false);
+
+        // 5. Structured messages: system + verbatim user prompt.
+        var messages = new ArrayList<ChatMessage>(List.of(
+                ChatMessage.system("harness (executor path)"),
+                ChatMessage.user(userPrompt)));
+
+        // 6. Scripted LlmClient + Context wired with llm override,
+        //    sandbox rooted at workspace, and the tool-call loop.
+        //    No streamSink → non-streaming path, deterministic.
+        var scriptedLlm = LlmClient.scripted(scriptedResponses);
+        var ctx = Context.builder(new Config())
+                .sandbox(new Sandbox(workspace.path(), Map.of()))
+                .toolCallLoop(loop)
+                .llm(scriptedLlm)
+                .build();
+
+        // 7. Drive the executor end-to-end.
+        var opts = new AssistantTurnExecutor.Options();
+        AssistantTurnExecutor.TurnOutput turnOut =
+                AssistantTurnExecutor.execute(messages, workspace.path(), ctx, opts);
+
+        return new ExecutorScenarioResult(scenario, turnOut, workspace);
     }
 }
 
