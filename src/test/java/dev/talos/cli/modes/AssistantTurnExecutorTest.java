@@ -1120,13 +1120,238 @@ class AssistantTurnExecutorTest {
                   + "inside the annotated output");
         }
 
-        // ── T1 (deferred) ─────────────────────────────────────────────
-        //
-        // Turn 1 under-inspection ("read these three files first, then answer"
-        // followed by a one-read answer) has no gate to anchor against yet.
-        // The P4 inspection-completeness check is not implemented. When P4
-        // lands, add t1_underInspection_triggersP4 here with the Turn-1
-        // prompt and an assertion that the gate refuses the premature answer.
+        // ── T1 ────────────────────────────────────────────────────────
+
+        /** Turn 1 prompt, verbatim from test-output.txt (line 22). */
+        private static final String TURN1_USER_PROMPT =
+                "Explore this workspace and identify the main HTML entry file, "
+              + "the main stylesheet file, and the main JavaScript file. "
+              + "Read the relevant files first, then summarize the site "
+              + "structure with exact file names.";
+
+        /**
+         * Turn 1 under-inspection shape: the verbatim transcript turn read
+         * only {@code index.html} (1 read) and then produced a confident
+         * three-file summary. The fabricated answer is ≥ 500 chars to pass
+         * {@code INSPECT_MIN_CHARS}.
+         */
+        private String turn1UnderInspectionAnswer() {
+            return "The site is built from three coordinated files. "
+                 + "index.html is the main entry point and references the "
+                 + "stylesheet style.css in its <head> plus the JavaScript "
+                 + "file script.js at the bottom of <body>. The CSS file "
+                 + "defines the visual presentation for the BMI calculator "
+                 + "form and result panel, while the JavaScript file wires "
+                 + "up the form submit handler and computes the BMI from "
+                 + "the input values before writing the result back into "
+                 + "the DOM. The three files live side-by-side in the same "
+                 + "directory and together produce a single-page BMI "
+                 + "calculator that works end to end when index.html is "
+                 + "opened in a browser.";
+        }
+
+        @Test
+        @DisplayName("T1 — Turn-1 under-inspection (1 read, multi-file prompt) is annotated")
+        void t1_underInspection_triggersN3() {
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(TURN1_USER_PROMPT));
+
+            String answer = turn1UnderInspectionAnswer();
+            assertTrue(answer.length() >= AssistantTurnExecutor.INSPECT_MIN_CHARS,
+                    "fixture precondition: Turn-1 answer must be long enough "
+                  + "to pass the N3 length gate (got " + answer.length() + ")");
+
+            // Loop shape that matches the transcript: 1 read_file call,
+            // zero mutating successes (no write_file / edit_file).
+            var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                    "unused", 1, 1,
+                    List.of("talos.read_file"),
+                    List.of(), 0, 0, false, /*mutatingSuccesses*/ 0);
+
+            String out = AssistantTurnExecutor.annotateIfInspectUnderCompletion(
+                    answer, messages, loopResult);
+
+            assertNotEquals(answer, out,
+                    "T1 regression: verbatim Turn-1 prompt + 1-read "
+                  + "loopResult must trigger N3 annotation");
+            assertTrue(out.startsWith(AssistantTurnExecutor.UNDER_INSPECTION_ANNOTATION),
+                    "T1 regression: UNDER_INSPECTION_ANNOTATION must be "
+                  + "prepended so the user sees the correction before the "
+                  + "under-inspected answer");
+            assertTrue(out.contains(answer),
+                    "T1 regression: original answer text must be preserved "
+                  + "verbatim inside the annotated output");
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  N3 — Inspect under-completion truth layer
+    //
+    //  Covers the annotate-first gate that fires when the user asked for
+    //  multi-file inspection ("read the entry files", "all three", …) but
+    //  the turn made ≤ 1 read-only tool call and emitted a substantive
+    //  answer. Annotate-only by design (a retry would require re-running
+    //  the tool loop). Sibling to ClaimVsActionTests / GroundingRetryTests.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @Nested
+    @DisplayName("N3 — Inspect under-completion")
+    class InspectUnderCompletionTests {
+
+        /** Long enough to pass {@link AssistantTurnExecutor#INSPECT_MIN_CHARS}. */
+        private String longAnswer() {
+            return "a".repeat(AssistantTurnExecutor.INSPECT_MIN_CHARS + 50);
+        }
+
+        private static List<ChatMessage> msgsWith(String userText) {
+            var m = new ArrayList<ChatMessage>();
+            m.add(ChatMessage.system("sys"));
+            m.add(ChatMessage.user(userText));
+            return m;
+        }
+
+        /** Loop result with {@code reads} read_file calls, zero mutating successes. */
+        private static dev.talos.runtime.ToolCallLoop.LoopResult loopWithReads(int reads) {
+            var names = new ArrayList<String>();
+            for (int i = 0; i < reads; i++) names.add("talos.read_file");
+            return new dev.talos.runtime.ToolCallLoop.LoopResult(
+                    "unused", reads, reads, names, List.of(),
+                    0, 0, false, /*mutatingSuccesses*/ 0);
+        }
+
+        // ── Positive cases ────────────────────────────────────────────
+
+        @Test
+        @DisplayName("fires: long answer + one read + multi-file prompt marker")
+        void fires_on_canonical_shape() {
+            var messages = msgsWith("Read the relevant files first, then summarize.");
+            String answer = longAnswer();
+            String out = AssistantTurnExecutor.annotateIfInspectUnderCompletion(
+                    answer, messages, loopWithReads(1));
+            assertTrue(out.startsWith(AssistantTurnExecutor.UNDER_INSPECTION_ANNOTATION));
+            assertTrue(out.contains(answer));
+        }
+
+        @Test
+        @DisplayName("fires: zero reads but tools were invoked (e.g. only list_dir-less path)")
+        void fires_when_tools_invoked_but_no_reads() {
+            // A turn that used a non-read tool (hypothetical) — still under-inspected.
+            var messages = msgsWith("Read all the entry files and summarize.");
+            String answer = longAnswer();
+            var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                    "unused", 1, 1, List.of("talos.some_non_read_tool"),
+                    List.of(), 0, 0, false, 0);
+            String out = AssistantTurnExecutor.annotateIfInspectUnderCompletion(
+                    answer, messages, loopResult);
+            assertTrue(out.startsWith(AssistantTurnExecutor.UNDER_INSPECTION_ANNOTATION));
+        }
+
+        // ── Negative cases ────────────────────────────────────────────
+
+        @Test
+        @DisplayName("does NOT fire: two reads (inspection complete)")
+        void does_not_fire_with_two_reads() {
+            var messages = msgsWith("Read the relevant files first.");
+            String out = AssistantTurnExecutor.annotateIfInspectUnderCompletion(
+                    longAnswer(), messages, loopWithReads(2));
+            assertEquals(longAnswer(), out);
+        }
+
+        @Test
+        @DisplayName("does NOT fire: zero tools invoked (R6 / N2 territory)")
+        void does_not_fire_when_zero_tools() {
+            var messages = msgsWith("Read the entry files first.");
+            var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                    "unused", 0, 0, List.of(), List.of(), 0, 0, false, 0);
+            String out = AssistantTurnExecutor.annotateIfInspectUnderCompletion(
+                    longAnswer(), messages, loopResult);
+            assertEquals(longAnswer(), out);
+        }
+
+        @Test
+        @DisplayName("does NOT fire: mutating tool succeeded (did the work)")
+        void does_not_fire_when_mutating_success() {
+            var messages = msgsWith("Read the entry files then fix style.css.");
+            var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                    "unused", 2, 2,
+                    List.of("talos.read_file", "talos.edit_file"),
+                    List.of(), 0, 0, false, /*mutatingSuccesses*/ 1);
+            String out = AssistantTurnExecutor.annotateIfInspectUnderCompletion(
+                    longAnswer(), messages, loopResult);
+            assertEquals(longAnswer(), out,
+                    "mutating success means the turn did real work — signal is noise");
+        }
+
+        @Test
+        @DisplayName("does NOT fire: answer below INSPECT_MIN_CHARS")
+        void does_not_fire_when_answer_short() {
+            var messages = msgsWith("Read the relevant files first.");
+            String shortAnswer = "a".repeat(AssistantTurnExecutor.INSPECT_MIN_CHARS - 1);
+            String out = AssistantTurnExecutor.annotateIfInspectUnderCompletion(
+                    shortAnswer, messages, loopWithReads(1));
+            assertEquals(shortAnswer, out);
+        }
+
+        @Test
+        @DisplayName("does NOT fire: prompt has no inspect-first marker")
+        void does_not_fire_without_inspect_marker() {
+            var messages = msgsWith("What is the BMI formula?");
+            String out = AssistantTurnExecutor.annotateIfInspectUnderCompletion(
+                    longAnswer(), messages, loopWithReads(1));
+            assertEquals(longAnswer(), out);
+        }
+
+        @Test
+        @DisplayName("does NOT fire: null or blank answer")
+        void does_not_fire_on_null_or_blank_answer() {
+            var messages = msgsWith("Read the entry files first.");
+            assertNull(AssistantTurnExecutor.annotateIfInspectUnderCompletion(
+                    null, messages, loopWithReads(1)));
+            assertEquals("   ", AssistantTurnExecutor.annotateIfInspectUnderCompletion(
+                    "   ", messages, loopWithReads(1)));
+        }
+
+        @Test
+        @DisplayName("does NOT fire: null loopResult")
+        void does_not_fire_on_null_loop_result() {
+            var messages = msgsWith("Read the entry files first.");
+            String out = AssistantTurnExecutor.annotateIfInspectUnderCompletion(
+                    longAnswer(), messages, null);
+            assertEquals(longAnswer(), out);
+        }
+
+        // ── Predicate and helper invariants ───────────────────────────
+
+        @Test
+        @DisplayName("looksLikeInspectFirstRequest: transcript markers hit, generic prompts miss")
+        void inspect_marker_set_discriminates() {
+            assertTrue(AssistantTurnExecutor.looksLikeInspectFirstRequest(
+                    "Read the relevant files first, then answer."));
+            assertTrue(AssistantTurnExecutor.looksLikeInspectFirstRequest(
+                    "Identify the main HTML entry file."));
+            assertTrue(AssistantTurnExecutor.looksLikeInspectFirstRequest(
+                    "All three components should be inspected."));
+            assertTrue(AssistantTurnExecutor.looksLikeInspectFirstRequest(
+                    "Start by reading the main files."));
+            assertFalse(AssistantTurnExecutor.looksLikeInspectFirstRequest(
+                    "What is the capital of France?"));
+            assertFalse(AssistantTurnExecutor.looksLikeInspectFirstRequest(null));
+            assertFalse(AssistantTurnExecutor.looksLikeInspectFirstRequest(""));
+        }
+
+        @Test
+        @DisplayName("readOnlyToolCount: counts read_file / list_dir / grep, ignores others, strips talos.")
+        void read_only_tool_count_is_correct() {
+            var mixed = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                    "unused", 4, 4,
+                    List.of("talos.read_file", "talos.edit_file",
+                            "list_dir", "talos.grep", "talos.write_file"),
+                    List.of(), 0, 0, false, 1);
+            assertEquals(3, AssistantTurnExecutor.readOnlyToolCount(mixed),
+                    "should count read_file + list_dir + grep, not edit_file / write_file");
+            assertEquals(0, AssistantTurnExecutor.readOnlyToolCount(null));
+        }
     }
 }
 
