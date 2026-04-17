@@ -96,6 +96,55 @@ public final class ScenarioResult implements AutoCloseable {
         return this;
     }
 
+    // ── Answer-content assertions ───────────────────────────────────
+    //
+    // These assert on the *final answer text* returned by ToolCallLoop. They
+    // operate at the harness seam only — i.e. on text ToolCallLoop itself
+    // produces. They do NOT exercise AssistantTurnExecutor's post-loop
+    // answer gates (deflection retry, claim-vs-action annotation); those
+    // remain covered at the executor seam in AssistantTurnExecutorTest.
+    //
+    // Determinism note: when a scripted response contains no tool calls,
+    // ToolCallLoop returns it verbatim and these assertions are fully
+    // deterministic. When tool calls do fire, the PLACEHOLDER LLM re-prompt
+    // makes post-tool text non-deterministic — in that case prefer
+    // file/tool assertions over answer-text assertions.
+
+    /**
+     * Assert that the final answer text contains the given substring.
+     * Uses plain {@link String#contains} — no regex.
+     */
+    public ScenarioResult assertAnswerContains(String expected) {
+        String answer = finalAnswer();
+        if (answer == null || !answer.contains(expected)) {
+            throw new AssertionError("Scenario '" + definition.name()
+                    + "': expected answer to contain: " + quote(expected)
+                    + "\nActual answer: " + quote(answer));
+        }
+        return this;
+    }
+
+    /**
+     * Assert that the final answer text does NOT contain the given substring.
+     * Useful for "the answer must not claim something the workspace disproves."
+     */
+    public ScenarioResult assertAnswerNotContains(String forbidden) {
+        String answer = finalAnswer();
+        if (answer != null && answer.contains(forbidden)) {
+            throw new AssertionError("Scenario '" + definition.name()
+                    + "': expected answer NOT to contain: " + quote(forbidden)
+                    + "\nActual answer: " + quote(answer));
+        }
+        return this;
+    }
+
+    private static String quote(String s) {
+        if (s == null) return "<null>";
+        // Trim very long answers in failure messages so assertion errors stay readable.
+        String trimmed = s.length() > 500 ? s.substring(0, 500) + "…[truncated]" : s;
+        return "\"" + trimmed + "\"";
+    }
+
     /** Close and delete the workspace fixture. Call after all assertions are done. */
     public void closeWorkspace() {
         workspace.close();
