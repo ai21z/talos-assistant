@@ -774,6 +774,169 @@ class AssistantTurnExecutorTest {
             assertSame(justBelow, out, "Answer one char below threshold must not fire");
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  N2 — Streaming-path grounding annotation
+    //
+    //  These tests lock in the streaming counterpart to R6. The helper is a
+    //  pure predicate — we test it directly so the decision boundary is
+    //  deterministic (independent of the PLACEHOLDER LLM's output length).
+    //  One integration-level test confirms wiring by asserting absence of
+    //  the annotation on a non-evidence prompt regardless of answer length.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @Nested
+    @DisplayName("N2 — Streaming grounding annotation")
+    class StreamingGroundingTests {
+
+        /** Long enough to pass {@link AssistantTurnExecutor#UNGROUNDED_MIN_CHARS}. */
+        private String longAnswer() {
+            return "a".repeat(AssistantTurnExecutor.UNGROUNDED_MIN_CHARS + 50);
+        }
+
+        @Test
+        @DisplayName("predicate fires: long answer + evidence-request prompt")
+        void fires_on_long_answer_plus_evidence_request() {
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.user("Please read the source files and verify the wiring."));
+
+            assertTrue(AssistantTurnExecutor.shouldAppendStreamingGroundingAnnotation(
+                    longAnswer(), messages),
+                    "long answer + evidence marker must fire");
+        }
+
+        @Test
+        @DisplayName("predicate does NOT fire: answer below UNGROUNDED_MIN_CHARS")
+        void does_not_fire_when_answer_too_short() {
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.user("Please read the source files and verify the wiring."));
+
+            // Exactly one char below the threshold.
+            String justBelow = "a".repeat(AssistantTurnExecutor.UNGROUNDED_MIN_CHARS - 1);
+            assertFalse(AssistantTurnExecutor.shouldAppendStreamingGroundingAnnotation(
+                    justBelow, messages),
+                    "just-below-threshold answer must not fire");
+        }
+
+        @Test
+        @DisplayName("predicate does NOT fire: no evidence-request marker in prompt")
+        void does_not_fire_without_evidence_marker() {
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.user("Tell me a joke about fish."));
+
+            assertFalse(AssistantTurnExecutor.shouldAppendStreamingGroundingAnnotation(
+                    longAnswer(), messages),
+                    "plain conversational prompt must not fire the grounding gate");
+        }
+
+        @Test
+        @DisplayName("predicate does NOT fire: null or blank answer")
+        void does_not_fire_on_null_or_blank_answer() {
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.user("Read the files and check the wiring."));
+
+            assertFalse(AssistantTurnExecutor.shouldAppendStreamingGroundingAnnotation(
+                    null, messages));
+            assertFalse(AssistantTurnExecutor.shouldAppendStreamingGroundingAnnotation(
+                    "", messages));
+            assertFalse(AssistantTurnExecutor.shouldAppendStreamingGroundingAnnotation(
+                    "   \n\t   ", messages));
+        }
+
+        @Test
+        @DisplayName("predicate inspects ONLY the latest user message")
+        void inspects_only_latest_user_message() {
+            var messages = new ArrayList<ChatMessage>();
+            // Earlier turn had evidence markers; latest turn does not.
+            messages.add(ChatMessage.user("Please read the files and verify."));
+            messages.add(ChatMessage.assistant("Sure, here is my analysis."));
+            messages.add(ChatMessage.user("Now tell me a joke."));
+
+            assertFalse(AssistantTurnExecutor.shouldAppendStreamingGroundingAnnotation(
+                    longAnswer(), messages),
+                    "earlier evidence-request must not leak into a later conversational turn");
+        }
+
+        @Test
+        @DisplayName("predicate mirrors non-streaming decision shape on same inputs")
+        void predicate_mirrors_non_streaming_decision() {
+            // Same gating logic (length + latest user marker) should yield
+            // the same yes/no answer on both helpers. We assert this
+            // invariant directly so future edits to one without the other
+            // are caught.
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.user("Read the main file and identify the mismatch."));
+            String longAns = longAnswer();
+
+            boolean streamingFires = AssistantTurnExecutor
+                    .shouldAppendStreamingGroundingAnnotation(longAns, messages);
+
+            // The non-streaming helper has extra retry logic, but its own
+            // firing precondition is structurally the same: >= MIN_CHARS
+            // and looksLikeEvidenceRequest(latestUserRequest(messages)).
+            boolean nonStreamingGatingMatches =
+                    longAns.length() >= AssistantTurnExecutor.UNGROUNDED_MIN_CHARS
+                    && AssistantTurnExecutor.looksLikeEvidenceRequest(
+                            AssistantTurnExecutor.latestUserRequest(messages));
+
+            assertEquals(nonStreamingGatingMatches, streamingFires,
+                    "streaming predicate must agree with non-streaming gate on gating inputs");
+            assertTrue(streamingFires, "sanity: this shape must fire");
+        }
+
+        @Test
+        @DisplayName("streaming execute() does NOT inject annotation on non-evidence prompt")
+        void streaming_execute_no_annotation_without_evidence_marker() {
+            // Integration-level: regardless of what the PLACEHOLDER LLM
+            // happens to return, a conversational prompt with no evidence
+            // markers MUST NOT cause the annotation to be appended.
+            var chunks = new ArrayList<String>();
+            var ctx = Context.builder(new Config()).streamSink(chunks::add).build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.user("Tell me a short joke, please."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, WS, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.streamed(), "streaming path must be marked streamed");
+            assertFalse(out.text().contains("Grounding check"),
+                    "no annotation must appear on non-evidence prompts. Got: " + out.text());
+            String joined = String.join("", chunks);
+            assertFalse(joined.contains("Grounding check"),
+                    "no annotation must be pushed to the stream sink on non-evidence prompts");
+        }
+
+        @Test
+        @DisplayName("streaming execute() does not rewrite the streamed prose (annotation is additive)")
+        void streaming_execute_does_not_rewrite_streamed_content() {
+            // Whatever the PLACEHOLDER returned, it must appear verbatim in
+            // out.text() — the annotation may or may not be appended, but
+            // the original streamed content is never replaced or shortened.
+            var chunks = new ArrayList<String>();
+            var ctx = Context.builder(new Config()).streamSink(chunks::add).build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.user("Read the files and check the wiring."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, WS, ctx, new AssistantTurnExecutor.Options());
+
+            String streamedText = String.join("", chunks);
+            // Remove any annotation the gate may have pushed into the sink.
+            String streamedWithoutAnnotation = streamedText
+                    .replace(AssistantTurnExecutor.UNGROUNDED_ANNOTATION.stripTrailing(), "")
+                    .replaceAll("\\s+$", "");
+            String textWithoutAnnotation = out.text()
+                    .replace(AssistantTurnExecutor.UNGROUNDED_ANNOTATION.stripTrailing(), "")
+                    .replaceAll("\\s+$", "");
+
+            // The pre-annotation text content must match in both surfaces
+            // (modulo the surrounding newline padding the annotation uses).
+            assertTrue(textWithoutAnnotation.startsWith(streamedWithoutAnnotation.stripTrailing()),
+                    "streamed content must appear at the start of out.text() — annotation must be additive, not a rewrite.\n"
+                    + "streamed=<" + streamedWithoutAnnotation + ">\n"
+                    + "text=<" + textWithoutAnnotation + ">");
+        }
+    }
 }
 
 
