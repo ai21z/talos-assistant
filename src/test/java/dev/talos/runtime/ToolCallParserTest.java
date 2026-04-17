@@ -564,5 +564,99 @@ class ToolCallParserTest {
     void parseJsonReturnsNullForNoNameVariants() throws Exception {
         assertNull(ToolCallParser.parseJson("{\"unknown_key\": \"value\"}"));
     }
+
+    // ── R1: fenced-JSON detection gate matches extractor alias set ───
+
+    @Test
+    void parseCodeFencedJsonWithToolNameKey() {
+        // Turn 6 from the real transcript: model emitted a fenced JSON block using
+        // "tool_name" + "params". The downstream extractor has always accepted these
+        // aliases, but the detection gate previously required the literal "name" key
+        // and silently dropped this block before extraction. Regression test for R1.
+        String response = """
+                ```json
+                {"tool_name": "talos.write_file", "params": {"path": "index.html", "content": "x"}}
+                ```
+                """;
+
+        List<ToolCall> calls = ToolCallParser.parse(response);
+        assertEquals(1, calls.size(), "Fenced JSON with tool_name alias must reach the extractor");
+        assertEquals("talos.write_file", calls.get(0).toolName());
+        assertEquals("index.html", calls.get(0).param("path"));
+        assertEquals("x", calls.get(0).param("content"));
+    }
+
+    @Test
+    void containsToolCallsDetectsCodeFencedToolNameAlias() {
+        // The detection predicate used by AssistantTurnExecutor must also
+        // recognize alias-keyed fenced blocks, or the tool-call loop is never entered.
+        String response = """
+                ```json
+                {"tool_name": "talos.read_file", "params": {"path": "a.txt"}}
+                ```
+                """;
+        assertTrue(ToolCallParser.containsToolCalls(response),
+                "containsToolCalls must admit fenced JSON using any extractor-supported alias");
+    }
+
+    @Test
+    void parseCodeFencedJsonWithFunctionKey() {
+        String response = """
+                ```json
+                {"function": "talos.grep", "arguments": {"pattern": "TODO"}}
+                ```
+                """;
+
+        List<ToolCall> calls = ToolCallParser.parse(response);
+        assertEquals(1, calls.size());
+        assertEquals("talos.grep", calls.get(0).toolName());
+        assertEquals("TODO", calls.get(0).param("pattern"));
+    }
+
+    @Test
+    void parseCodeFencedJsonWithToolKey() {
+        String response = """
+                ```json
+                {"tool": "talos.list_dir", "parameters": {"path": "."}}
+                ```
+                """;
+
+        List<ToolCall> calls = ToolCallParser.parse(response);
+        assertEquals(1, calls.size());
+        assertEquals("talos.list_dir", calls.get(0).toolName());
+    }
+
+    @Test
+    void parseCodeFencedJsonWithStandardNameKeyStillWorks() {
+        // Regression guard: the existing happy path must not break.
+        String response = """
+                ```json
+                {"name": "talos.read_file", "parameters": {"path": "README.md"}}
+                ```
+                """;
+
+        List<ToolCall> calls = ToolCallParser.parse(response);
+        assertEquals(1, calls.size());
+        assertEquals("talos.read_file", calls.get(0).toolName());
+        assertEquals("README.md", calls.get(0).param("path"));
+    }
+
+    @Test
+    void plainFencedCodeWithoutAliasKeyIsNotMisdetectedAsToolCall() {
+        // Guard against the gate over-matching: a fenced code block that is not
+        // a tool-call must still be treated as prose. None of the alias keys
+        // appear as top-level JSON keys here, only as values / other strings.
+        String response = """
+                Here is example JSON output:
+                ```json
+                {"result": "ok", "count": 3}
+                ```
+                That's the sample.
+                """;
+
+        assertTrue(ToolCallParser.parse(response).isEmpty(),
+                "Fenced JSON without any alias name-key must not be parsed as a tool call");
+        assertFalse(ToolCallParser.containsToolCalls(response));
+    }
 }
 
