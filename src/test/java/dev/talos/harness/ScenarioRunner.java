@@ -61,12 +61,43 @@ public final class ScenarioRunner {
      * Call {@link ScenarioResult#closeWorkspace()} or use try-with-resources on it.
      */
     public static ScenarioResult run(ScenarioDefinition scenario) {
+        return runInternal(scenario, false);
+    }
+
+    /**
+     * Run a scenario in <b>strict measurement mode</b>.
+     *
+     * <p>Strict mode disables harness-path <em>measurement cushions</em> so
+     * scenario runs reflect more of the raw model/runtime behavior:
+     * <ul>
+     *   <li>{@link dev.talos.tools.ToolRegistry} fuzzy/alias/case-insensitive
+     *       tool-name rescue is disabled — only exact tool names resolve.</li>
+     *   <li>{@link dev.talos.runtime.ToolCallLoop} measurement cushions are
+     *       disabled: redundant read-only call suppression, B3
+     *       duplicate-failing-edit short-circuit, B2 read-before-write hint
+     *       appended to tool results, and E1 error-message rewriting after
+     *       repeated edit_file failure.</li>
+     * </ul>
+     *
+     * <p>Strict mode does <b>not</b> disable safety-critical protections:
+     * the sandbox, approval gate, iteration cap, missing-path refusal,
+     * engine-exception handling, output truncation, and tool-call stripping
+     * all remain active.
+     *
+     * <p>Default harness behavior ({@link #run}) is unchanged.
+     */
+    public static ScenarioResult runStrict(ScenarioDefinition scenario) {
+        return runInternal(scenario, true);
+    }
+
+    private static ScenarioResult runInternal(ScenarioDefinition scenario, boolean strict) {
         // 1. Set up workspace
         var workspace = ScenarioWorkspaceFixture.withFiles(scenario.initialFiles());
 
-        // 2. Wire tool registry against the workspace
+        // 2. Wire tool registry against the workspace.
+        //    Strict mode disables fuzzy/alias tool-name rescue.
         var undoStack = new FileUndoStack();
-        var registry  = new ToolRegistry();
+        var registry  = new ToolRegistry(strict);
         registry.register(new ReadFileTool());
         registry.register(new FileWriteTool(undoStack));
         registry.register(new FileEditTool(undoStack));
@@ -77,10 +108,11 @@ public final class ScenarioRunner {
         // 3. Approval gate driven by policy
         ApprovalGate gate = policyGate(scenario.approvalPolicy());
 
-        // 4. Wire processor + loop
+        // 4. Wire processor + loop (strict flag threaded through to the loop)
         var processor = new TurnProcessor(
                 ModeController.defaultController(), gate, registry);
-        var loop = new ToolCallLoop(processor);
+        var loop = new ToolCallLoop(
+                processor, ToolCallLoop.DEFAULT_MAX_ITERATIONS, null, strict);
 
         // 5. Build minimal message list (system + user placeholders)
         var messages = new ArrayList<ChatMessage>(List.of(
