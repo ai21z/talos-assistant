@@ -31,8 +31,14 @@ import java.util.function.UnaryOperator;
  * <p>Mode-specific concerns (RAG answer sanitization, citation suffixes,
  * system prompt composition) remain in the modes themselves. This class
  * only owns the LLM-call → tool-loop → error-handling lifecycle.
+ *
+ * <p><b>Public API scope (since N4):</b> the class, {@link TurnOutput},
+ * {@link Options}, and {@link #execute} are public so the harness
+ * ({@code ExecutorScenarioRunner}) can drive a full turn end-to-end with
+ * a scripted {@link dev.talos.core.llm.LlmClient}. The package-private
+ * helpers (gate predicates, annotators) remain test-only.
  */
-final class AssistantTurnExecutor {
+public final class AssistantTurnExecutor {
 
     private static final Logger LOG = LoggerFactory.getLogger(AssistantTurnExecutor.class);
 
@@ -62,24 +68,24 @@ final class AssistantTurnExecutor {
      * @param text     the full response text (may include tool summaries)
      * @param streamed true if content was streamed to the terminal during execution
      */
-    record TurnOutput(String text, boolean streamed) {}
+    public record TurnOutput(String text, boolean streamed) {}
 
     /**
      * Execution options that vary between modes.
      */
-    static final class Options {
+    public static final class Options {
         private long llmTimeoutMs = 300_000L;
         private long responseMaxChars = 10 * 1024 * 1024L;
         private UnaryOperator<String> answerSanitizer = UnaryOperator.identity();
 
-        Options llmTimeoutMs(long ms)         { this.llmTimeoutMs = ms; return this; }
-        Options responseMaxChars(long chars)   { this.responseMaxChars = chars; return this; }
+        public Options llmTimeoutMs(long ms)         { this.llmTimeoutMs = ms; return this; }
+        public Options responseMaxChars(long chars)   { this.responseMaxChars = chars; return this; }
 
         /**
          * Optional post-processing for the raw LLM answer (e.g., RAG preamble stripping).
          * Applied before truncation. AskMode passes identity; RagMode passes sanitizers.
          */
-        Options answerSanitizer(UnaryOperator<String> fn) {
+        public Options answerSanitizer(UnaryOperator<String> fn) {
             this.answerSanitizer = (fn != null) ? fn : UnaryOperator.identity();
             return this;
         }
@@ -94,7 +100,7 @@ final class AssistantTurnExecutor {
      * @param opts      mode-specific execution options
      * @return the turn output (text + streamed flag)
      */
-    static TurnOutput execute(List<ChatMessage> messages, Path workspace,
+    public static TurnOutput execute(List<ChatMessage> messages, Path workspace,
                               Context ctx, Options opts) {
         StringBuilder out = new StringBuilder();
         boolean streamed = false;
@@ -400,7 +406,7 @@ final class AssistantTurnExecutor {
      * tool succeeded in the turn. Kept short, unambiguous, and separable
      * from the model's own prose so the annotation is visually obvious.
      */
-    static final String FALSE_MUTATION_ANNOTATION =
+    public static final String FALSE_MUTATION_ANNOTATION =
             "⚠ [Truth check: the response below claims a file was changed, "
             + "but no file-mutating tool succeeded in this turn. "
             + "No file on disk was actually modified.]\n\n";
@@ -507,7 +513,7 @@ final class AssistantTurnExecutor {
      * a substantive answer but only one read-only tool call, despite the
      * user asking for multi-file inspection.
      */
-    static final String UNDER_INSPECTION_ANNOTATION =
+    public static final String UNDER_INSPECTION_ANNOTATION =
             "⚠ [Inspect check: the user asked for multiple files to be read "
             + "before answering, but only one read-only tool call was made "
             + "this turn. The response below may not reflect the full "
@@ -667,7 +673,7 @@ final class AssistantTurnExecutor {
      * fires but the retry itself does not produce a better result. Keeps the
      * user informed without silently rewriting.
      */
-    static final String UNGROUNDED_ANNOTATION =
+    public static final String UNGROUNDED_ANNOTATION =
             "⚠ [Grounding check: the user asked for an answer based on workspace "
             + "contents, but no files were read this turn. The response below was "
             + "produced without reading any files.]\n\n";

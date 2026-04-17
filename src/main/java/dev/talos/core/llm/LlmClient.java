@@ -44,6 +44,24 @@ public final class LlmClient implements AutoCloseable {
     // Telemetry: track truncation events
     private volatile int truncationCount = 0;
 
+    // ── N4 scripted-LLM test seam ────────────────────────────────────
+    //
+    // When set, chatFull / chatStreamFull bypass the real transport and
+    // emit these responses in order. The cursor advances per call and
+    // clamps to the final response after exhaustion. Null means normal
+    // transport behavior is preserved (tests that don't use the
+    // scripted path are unaffected).
+    //
+    // Rationale: the harness (ExecutorScenarioRunner) needs to drive
+    // AssistantTurnExecutor.execute() deterministically with a known
+    // model-output sequence, without an interface extraction or a
+    // speculative abstraction. See docs/new-architecture/
+    // talos-harness-main-plan.md §8 N4 and §10 discussion item 2 for
+    // the design decision (option (a): minimal factory).
+    private volatile java.util.List<String> scriptedResponses = null;
+    private final java.util.concurrent.atomic.AtomicInteger scriptedCursor =
+            new java.util.concurrent.atomic.AtomicInteger(0);
+
     public LlmClient(Config cfg) {
         this.cfg = (cfg == null ? new Config() : cfg);
 
@@ -98,6 +116,46 @@ public final class LlmClient implements AutoCloseable {
     /** Reset telemetry counters. */
     public void resetTelemetry() {
         truncationCount = 0;
+    }
+
+    // ── N4 scripted-LLM test seam (factories + helper) ────────────────
+
+    /**
+     * Test-only factory: returns an LlmClient whose
+     * {@link #chatFull(List)} and {@link #chatStreamFull(List, Consumer)}
+     * emit {@code responses} in order, one per call. After the list is
+     * exhausted the last response is repeated (so a scripted run cannot
+     * accidentally fall through to a real backend).
+     *
+     * <p>Ignores engine / Ollama configuration entirely — no backend
+     * connection is attempted.
+     *
+     * @param responses ordered list of model outputs, one per turn
+     *                  (initial response + follow-ups after tool calls)
+     */
+    public static LlmClient scripted(java.util.List<String> responses) {
+        java.util.List<String> safe = (responses == null || responses.isEmpty())
+                ? java.util.List.of("") : java.util.List.copyOf(responses);
+        LlmClient c = new LlmClient(new Config());
+        c.scriptedResponses = safe;
+        return c;
+    }
+
+    /** Single-response variant of {@link #scripted(java.util.List)}. */
+    public static LlmClient scripted(String response) {
+        return scripted(java.util.List.of(response == null ? "" : response));
+    }
+
+    /**
+     * Advance the scripted cursor and return the next scripted response.
+     * Clamps to the last entry after exhaustion. Called from
+     * {@link #chatFull} / {@link #chatStreamFull} when
+     * {@link #scriptedResponses} is set.
+     */
+    private String nextScriptedResponse() {
+        int next = scriptedCursor.getAndIncrement();
+        int idx = Math.min(next, scriptedResponses.size() - 1);
+        return scriptedResponses.get(idx);
     }
 
     public String getModel() {
@@ -411,6 +469,11 @@ public final class LlmClient implements AutoCloseable {
      * @return stream result with text and tool calls
      */
     public StreamResult chatStreamFull(List<ChatMessage> messages, Consumer<String> onChunk) {
+        if (scriptedResponses != null) {
+            String r = nextScriptedResponse();
+            if (onChunk != null && !r.isEmpty()) onChunk.accept(r);
+            return new StreamResult(r, List.of());
+        }
         if (mode == TransportMode.PLACEHOLDER) {
             String full = placeholderFromMessages(messages);
             if (onChunk != null && !full.isEmpty()) onChunk.accept(full);
@@ -424,6 +487,9 @@ public final class LlmClient implements AutoCloseable {
      * Used by the tool-call loop for re-prompting after tool execution.
      */
     public StreamResult chatFull(List<ChatMessage> messages) {
+        if (scriptedResponses != null) {
+            return new StreamResult(nextScriptedResponse(), List.of());
+        }
         if (mode == TransportMode.PLACEHOLDER) {
             return new StreamResult(placeholderFromMessages(messages), List.of());
         }
