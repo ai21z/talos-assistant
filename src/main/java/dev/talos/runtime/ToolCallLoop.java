@@ -103,14 +103,17 @@ public final class ToolCallLoop {
      * Result of the tool-call loop: the final LLM answer after all tool calls
      * have been resolved, plus metadata about the loop execution.
      *
-     * @param finalAnswer  the LLM's final text (with tool_call blocks stripped)
-     * @param iterations   number of tool-call round-trips executed (0 if no tools called)
-     * @param toolsInvoked total number of individual tool calls across all iterations
-     * @param toolNames    names of tools invoked (in call order, may contain duplicates)
-     * @param messages     the full message list including all tool interactions
-     * @param failedCalls  number of tool calls that returned errors
-     * @param retriedCalls number of tool calls with the same (tool, path, old_string) as a prior failed call
-     * @param hitIterLimit true if the loop was stopped by the max iteration cap
+     * @param finalAnswer           the LLM's final text (with tool_call blocks stripped)
+     * @param iterations            number of tool-call round-trips executed (0 if no tools called)
+     * @param toolsInvoked          total number of individual tool calls across all iterations
+     * @param toolNames             names of tools invoked (in call order, may contain duplicates)
+     * @param messages              the full message list including all tool interactions
+     * @param failedCalls           number of tool calls that returned errors
+     * @param retriedCalls          number of tool calls with the same (tool, path, old_string) as a prior failed call
+     * @param hitIterLimit          true if the loop was stopped by the max iteration cap
+     * @param mutatingToolSuccesses number of successful mutating tool calls (write_file, edit_file)
+     *                              executed in this turn. Used by the post-turn claim-vs-action
+     *                              audit in {@code AssistantTurnExecutor}.
      */
     public record LoopResult(
             String finalAnswer,
@@ -120,7 +123,8 @@ public final class ToolCallLoop {
             List<ChatMessage> messages,
             int failedCalls,
             int retriedCalls,
-            boolean hitIterLimit
+            boolean hitIterLimit,
+            int mutatingToolSuccesses
     ) {
         /**
          * Returns a user-facing summary line, or null if no tools were invoked.
@@ -194,7 +198,7 @@ public final class ToolCallLoop {
                 LOG.debug("Response contains code blocks with filename hints but no tool calls. "
                         + "File writes were NOT performed. The model should use tool_call format for file operations.");
             }
-            return new LoopResult(initialAnswer, 0, 0, List.of(), messages, 0, 0, false);
+            return new LoopResult(initialAnswer, 0, 0, List.of(), messages, 0, 0, false, 0);
         }
 
         // Lightweight session for tool execution context
@@ -206,6 +210,7 @@ public final class ToolCallLoop {
         int totalToolsInvoked = 0;
         int failedCalls = 0;
         int retriedCalls = 0;
+        int mutatingToolSuccesses = 0;
         List<String> toolNames = new ArrayList<>();
 
         // B3: track (toolName:path:old_string_hash) tuples that already FAILED in this run.
@@ -337,6 +342,7 @@ public final class ToolCallLoop {
                 // Track mutations so redundancy suppression is invalidated.
                 if (isMutatingTool(effective.toolName()) && result.success()) {
                     mutationSinceStart = true;
+                    mutatingToolSuccesses++;
                     // Clear the read cache — workspace state changed.
                     successfulReadCalls.clear();
                 }
@@ -457,7 +463,7 @@ public final class ToolCallLoop {
                 iterations, totalToolsInvoked, failedCalls);
 
         return new LoopResult(finalAnswer, iterations, totalToolsInvoked, List.copyOf(toolNames),
-                messages, failedCalls, retriedCalls, hitIterLimit);
+                messages, failedCalls, retriedCalls, hitIterLimit, mutatingToolSuccesses);
     }
 
     // ── NativeToolCall → ToolCall conversion ─────────────────────────────

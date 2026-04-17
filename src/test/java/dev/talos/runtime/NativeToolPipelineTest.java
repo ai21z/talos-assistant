@@ -585,7 +585,7 @@ class NativeToolPipelineTest {
             var result = new ToolCallLoop.LoopResult(
                     "final answer", 2, 4,
                     List.of("talos.read_file", "talos.grep", "talos.read_file", "talos.write_file"),
-                    List.of(), 0, 0, false);
+                    List.of(), 0, 0, false, 1);
 
             String summary = result.summary();
             assertNotNull(summary);

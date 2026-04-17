@@ -450,6 +450,111 @@ class AssistantTurnExecutorTest {
                     "Retry should produce a different answer");
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  R2 — Claim-vs-action truth layer (annotate-first)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @Nested
+    @DisplayName("annotateIfFalseMutationClaim")
+    class ClaimVsActionTests {
+
+        /** Build a LoopResult with the given number of successful mutating tool calls. */
+        private dev.talos.runtime.ToolCallLoop.LoopResult loopResult(int mutatingSuccesses) {
+            return new dev.talos.runtime.ToolCallLoop.LoopResult(
+                    "unused", 1, 1,
+                    List.of("talos.read_file"),
+                    List.of(), 0, 0, false, mutatingSuccesses);
+        }
+
+        @Test
+        @DisplayName("mutation claim + zero mutating successes → annotated")
+        void falseMutationClaimGetsAnnotated() {
+            // Real Turn 5 pattern: answer confidently asserts an applied edit,
+            // but only read_file was invoked — no write_file / edit_file success.
+            String answer = "The changes have been applied to `index.html`.\n\n"
+                    + "I updated the headline and the introductory description to sound more "
+                    + "professional and authoritative, while keeping the core functionality intact.";
+
+            String out = AssistantTurnExecutor.annotateIfFalseMutationClaim(answer, loopResult(0));
+
+            assertNotEquals(answer, out, "Answer must be modified (annotated)");
+            assertTrue(out.startsWith(AssistantTurnExecutor.FALSE_MUTATION_ANNOTATION),
+                    "Annotation must be prepended so users see it first");
+            assertTrue(out.contains(answer), "Original answer text must be preserved verbatim");
+        }
+
+        @Test
+        @DisplayName("mutation claim + successful mutating tool → NOT annotated")
+        void realMutationBackingClaimIsNotAnnotated() {
+            String answer = "I updated the headline in index.html as requested.";
+
+            String out = AssistantTurnExecutor.annotateIfFalseMutationClaim(answer, loopResult(1));
+
+            assertEquals(answer, out,
+                    "Answer backed by a real mutating tool success must not be annotated");
+            assertFalse(out.startsWith(AssistantTurnExecutor.FALSE_MUTATION_ANNOTATION));
+        }
+
+        @Test
+        @DisplayName("no mutation claim → never annotated regardless of tool successes")
+        void nonMutationAnswerIsNeverAnnotated() {
+            String answer = "Based on the file contents, this is a BMI calculator written "
+                    + "in a single HTML file with inline style and script blocks.";
+
+            // Both zero mutations and some mutations — neither should annotate a
+            // read-only / descriptive answer.
+            assertEquals(answer,
+                    AssistantTurnExecutor.annotateIfFalseMutationClaim(answer, loopResult(0)));
+            assertEquals(answer,
+                    AssistantTurnExecutor.annotateIfFalseMutationClaim(answer, loopResult(2)));
+        }
+
+        @Test
+        @DisplayName("containsMutationClaim detects real Turn 5 phrases")
+        void detectsTranscriptPhrases() {
+            assertTrue(AssistantTurnExecutor.containsMutationClaim(
+                    "The changes have been applied to `index.html`."));
+            assertTrue(AssistantTurnExecutor.containsMutationClaim(
+                    "I updated the headline to be more professional."));
+            assertTrue(AssistantTurnExecutor.containsMutationClaim(
+                    "I've edited the CTA button text."));
+            assertTrue(AssistantTurnExecutor.containsMutationClaim(
+                    "I wrote the new file."));
+            assertTrue(AssistantTurnExecutor.containsMutationClaim(
+                    "The file has been updated with the new content."));
+        }
+
+        @Test
+        @DisplayName("containsMutationClaim does not flag benign descriptive language")
+        void descriptiveLanguageIsNotFlagged() {
+            // Grounded discussion of file contents must not trip the detector.
+            assertFalse(AssistantTurnExecutor.containsMutationClaim(
+                    "The label reads 'Weight (kg)' and the input accepts numbers."));
+            assertFalse(AssistantTurnExecutor.containsMutationClaim(
+                    "If you want to update the headline, you can edit line 12."));
+            assertFalse(AssistantTurnExecutor.containsMutationClaim(
+                    "You could change the CSS class, though it is not strictly required."));
+            assertFalse(AssistantTurnExecutor.containsMutationClaim(
+                    "The site uses inline styles and an inline script."));
+        }
+
+        @Test
+        @DisplayName("null / blank answer → unchanged (no annotation)")
+        void nullOrBlankPassThrough() {
+            assertNull(AssistantTurnExecutor.annotateIfFalseMutationClaim(null, loopResult(0)));
+            assertEquals("", AssistantTurnExecutor.annotateIfFalseMutationClaim("", loopResult(0)));
+            assertEquals("   ", AssistantTurnExecutor.annotateIfFalseMutationClaim("   ", loopResult(0)));
+        }
+
+        @Test
+        @DisplayName("null LoopResult → answer returned unchanged (defensive)")
+        void nullLoopResultPassThrough() {
+            String answer = "I updated the file.";
+            assertEquals(answer,
+                    AssistantTurnExecutor.annotateIfFalseMutationClaim(answer, null));
+        }
+    }
 }
 
 

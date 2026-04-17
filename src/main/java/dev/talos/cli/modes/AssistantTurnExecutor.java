@@ -132,6 +132,9 @@ final class AssistantTurnExecutor {
                         appendSummary(out, loopResult);
                         // Post-tool answer acceptance gate: retry synthesis if deflected
                         answer = synthesisRetryIfNeeded(answer, loopResult.toolsInvoked(), messages, ctx);
+                        // Claim-vs-action truth layer: annotate if the answer claims a mutation
+                        // that no mutating tool actually performed this turn.
+                        answer = annotateIfFalseMutationClaim(answer, loopResult);
                         answer = sanitizeAndTruncate(answer, opts);
                         out.append(answer);
                     } else {
@@ -162,6 +165,9 @@ final class AssistantTurnExecutor {
                         appendSummary(out, loopResult);
                         // Post-tool answer acceptance gate: retry synthesis if deflected
                         answer = synthesisRetryIfNeeded(answer, loopResult.toolsInvoked(), messages, ctx);
+                        // Claim-vs-action truth layer: annotate if the answer claims a mutation
+                        // that no mutating tool actually performed this turn.
+                        answer = annotateIfFalseMutationClaim(answer, loopResult);
                     }
                     answer = sanitizeAndTruncate(answer, opts);
                     out.append(answer);
@@ -322,6 +328,98 @@ final class AssistantTurnExecutor {
             LOG.warn("Synthesis retry failed: {}", e.getMessage());
         }
         return answer;
+    }
+
+    // ── Claim-vs-action truth layer ──────────────────────────────────────
+
+    /**
+     * Phrases that strongly indicate the answer is claiming a file mutation
+     * was performed. Kept narrow on purpose: match confident past-tense /
+     * perfect-tense claims, not future-tense intent or questions.
+     *
+     * <p>Design: each phrase is unambiguous about an applied change having
+     * happened. We avoid bare verbs (e.g. "updated") because they routinely
+     * appear in grounded discussions of file contents ("the label is
+     * updated to…"). We only flag phrasings a model uses when asserting
+     * <em>it just did something</em>.
+     */
+    private static final Set<String> MUTATION_CLAIM_MARKERS = Set.of(
+            "i have updated",   "i've updated",   "i updated",
+            "i have edited",    "i've edited",    "i edited",
+            "i have changed",   "i've changed",   "i changed",
+            "i have applied",   "i've applied",   "i applied",
+            "i have written",   "i've written",   "i wrote",
+            "i have created",   "i've created",   "i created",
+            "i have modified",  "i've modified",  "i modified",
+            "i have saved",     "i've saved",     "i saved",
+            "i have replaced",  "i've replaced",  "i replaced",
+            "changes have been applied",
+            "changes were applied",
+            "the file has been updated",
+            "the file has been modified",
+            "the file has been edited",
+            "the file has been saved",
+            "the file has been written",
+            "the changes have been saved",
+            "has been updated to",
+            "has been modified to"
+    );
+
+    /**
+     * Prefix prepended to answers that claim a mutation when no mutating
+     * tool succeeded in the turn. Kept short, unambiguous, and separable
+     * from the model's own prose so the annotation is visually obvious.
+     */
+    static final String FALSE_MUTATION_ANNOTATION =
+            "⚠ [Truth check: the response below claims a file was changed, "
+            + "but no file-mutating tool succeeded in this turn. "
+            + "No file on disk was actually modified.]\n\n";
+
+    /**
+     * Returns {@code true} if the answer contains language that strongly
+     * asserts a file mutation was performed (applied, edited, written,
+     * created, etc.).
+     *
+     * <p>Package-private for direct testing.
+     */
+    static boolean containsMutationClaim(String answer) {
+        if (answer == null || answer.isBlank()) return false;
+        String lower = answer.toLowerCase();
+        for (String marker : MUTATION_CLAIM_MARKERS) {
+            if (lower.contains(marker)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Claim-vs-action audit (annotate-first). If the answer asserts that a
+     * file change was performed but no mutating tool call (write_file /
+     * edit_file) succeeded this turn, prepend a short truth-check notice.
+     *
+     * <p>The invariant this enforces: <em>a mutation claim in the answer
+     * must correspond to at least one successful mutating tool call in
+     * the same turn.</em>
+     *
+     * <p>Annotate-first posture (see §9 R2 of the main harness plan):
+     * we do not rewrite or strip the model's text. We only add a visible
+     * signal so the user can see the mismatch. Preserves transparent
+     * transcripts and avoids silent rewrites.
+     *
+     * <p>Package-private for direct testing.
+     *
+     * @param answer     the answer text after any synthesis retry
+     * @param loopResult the tool-loop result for the current turn
+     * @return the (possibly annotated) answer
+     */
+    static String annotateIfFalseMutationClaim(String answer, ToolCallLoop.LoopResult loopResult) {
+        if (answer == null || answer.isBlank()) return answer;
+        if (loopResult == null) return answer;
+        if (loopResult.mutatingToolSuccesses() > 0) return answer; // a real mutation backs the claim
+        if (!containsMutationClaim(answer)) return answer;
+
+        LOG.warn("False mutation claim detected: answer asserts a file change, "
+                + "but no mutating tool succeeded this turn. Annotating.");
+        return FALSE_MUTATION_ANNOTATION + answer;
     }
 }
 

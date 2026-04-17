@@ -54,9 +54,13 @@ public final class ToolCallParser {
             Pattern.DOTALL
     );
 
-    /** Code-fenced JSON blocks containing a "name" key. */
+    /** Code-fenced JSON blocks containing any of the recognized name-key aliases.
+     *  The alias set ({@code name | function | tool_name | tool}) is kept in sync with
+     *  {@link #extractName(JsonNode)} so the detection gate is not narrower than the
+     *  alias-aware extractor. Without this, a model emitting {@code ```json { "tool_name": ... }```}
+     *  has its fallback tool call silently dropped before extraction. */
     private static final Pattern CODE_FENCE_PATTERN = Pattern.compile(
-            "```(?:json)?\\s*\\n(\\{[^`]*\"name\"[^`]*\\})\\s*\\n?```",
+            "```(?:json)?\\s*\\n(\\{[^`]*\"(?:name|function|tool_name|tool)\"[^`]*\\})\\s*\\n?```",
             Pattern.DOTALL
     );
 
