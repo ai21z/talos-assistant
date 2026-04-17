@@ -2,6 +2,7 @@ package dev.talos.tools;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
@@ -31,6 +32,24 @@ public final class ToolRegistry {
      * on. Default is {@code false} (cushioned, production-equivalent).
      */
     private final boolean strict;
+
+    /**
+     * N5: total number of successful fuzzy/alias/case-normalization rescues
+     * performed by {@link #get(String)} across the lifetime of this registry
+     * instance. {@link dev.talos.runtime.ToolCallLoop} snapshots this value at
+     * the start of each turn and reports the per-turn delta on
+     * {@code LoopResult.cushionFiresAliasRescue()}.
+     *
+     * <p>In strict mode, {@link #get(String)} short-circuits before any rescue
+     * branch, so this counter is never incremented and per-turn deltas remain
+     * zero — which is exactly the contract strict measurement mode promises.
+     */
+    private final AtomicInteger aliasRescueCount = new AtomicInteger();
+
+    /** @return total alias/fuzzy rescue fires since this registry was created. */
+    public int aliasRescueCount() {
+        return aliasRescueCount.get();
+    }
 
     /** Default (non-strict) registry — preserves all existing behavior. */
     public ToolRegistry() {
@@ -108,6 +127,7 @@ public final class ToolRegistry {
         if (!name.startsWith("talos.")) {
             tool = tools.get("talos." + name);
             if (tool != null) {
+                aliasRescueCount.incrementAndGet();
                 LOG.debug("Fuzzy tool match: '{}' → '{}'", name, tool.name());
                 return tool;
             }
@@ -118,6 +138,7 @@ public final class ToolRegistry {
         if (canonical != null) {
             tool = tools.get(canonical);
             if (tool != null) {
+                aliasRescueCount.incrementAndGet();
                 LOG.debug("Alias tool match: '{}' → '{}'", name, canonical);
                 return tool;
             }
@@ -129,6 +150,7 @@ public final class ToolRegistry {
             if (canonical != null) {
                 tool = tools.get(canonical);
                 if (tool != null) {
+                    aliasRescueCount.incrementAndGet();
                     LOG.debug("Alias tool match (stripped prefix): '{}' → '{}'", name, canonical);
                     return tool;
                 }
@@ -142,6 +164,7 @@ public final class ToolRegistry {
             // Try exact match with lowered name
             tool = tools.get(lowered);
             if (tool != null) {
+                aliasRescueCount.incrementAndGet();
                 LOG.debug("Case-normalized tool match: '{}' → '{}'", name, tool.name());
                 return tool;
             }
@@ -149,6 +172,7 @@ public final class ToolRegistry {
             if (!lowered.startsWith("talos.")) {
                 tool = tools.get("talos." + lowered);
                 if (tool != null) {
+                    aliasRescueCount.incrementAndGet();
                     LOG.debug("Case-normalized tool match: '{}' → '{}'", name, tool.name());
                     return tool;
                 }
@@ -158,6 +182,7 @@ public final class ToolRegistry {
             if (canonical != null) {
                 tool = tools.get(canonical);
                 if (tool != null) {
+                    aliasRescueCount.incrementAndGet();
                     LOG.debug("Case-normalized alias match: '{}' → '{}'", name, canonical);
                     return tool;
                 }
@@ -168,6 +193,7 @@ public final class ToolRegistry {
                 if (canonical != null) {
                     tool = tools.get(canonical);
                     if (tool != null) {
+                        aliasRescueCount.incrementAndGet();
                         LOG.debug("Case-normalized alias match (stripped): '{}' → '{}'", name, canonical);
                         return tool;
                     }
