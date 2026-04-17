@@ -72,6 +72,25 @@ public final class ToolCallLoop {
     private final ToolProgressSink progressSink;
 
     /**
+     * Strict-measurement flag. When true, the loop disables the following
+     * helpful-but-model-flattering cushions (harness-seam measurement only):
+     * <ul>
+     *   <li>B3 duplicate-failing-edit short-circuit + canned diagnostic</li>
+     *   <li>Redundant read-only call suppression + "already gathered" nudge</li>
+     *   <li>B2 read-before-write hint appended to tool results</li>
+     *   <li>E1 error-message rewriting after repeated edit_file failure</li>
+     * </ul>
+     *
+     * <p>Strict mode does <b>not</b> disable safety-critical behavior:
+     * iteration cap, sandbox, approval gate, missing-path refusal, engine
+     * exception handling, output truncation, and tool-call stripping all
+     * remain active.
+     *
+     * <p>Default is {@code false} (cushioned, production-equivalent).
+     */
+    private final boolean strict;
+
+    /**
      * Create a tool-call loop with a custom iteration limit and progress sink.
      *
      * @param turnProcessor provides tool execution with sandbox + approval gate
@@ -82,6 +101,28 @@ public final class ToolCallLoop {
         this.turnProcessor = Objects.requireNonNull(turnProcessor, "turnProcessor");
         this.maxIterations = Math.max(1, maxIterations);
         this.progressSink = progressSink;
+        this.strict = false;
+    }
+
+    /**
+     * Create a tool-call loop with an explicit strict-mode flag (harness use).
+     *
+     * @param turnProcessor provides tool execution with sandbox + approval gate
+     * @param maxIterations maximum number of tool-call round-trips (must be ≥ 1)
+     * @param progressSink  optional progress callback (may be null)
+     * @param strict        if true, disable measurement cushions (see {@link #strict})
+     */
+    public ToolCallLoop(TurnProcessor turnProcessor, int maxIterations,
+                        ToolProgressSink progressSink, boolean strict) {
+        this.turnProcessor = Objects.requireNonNull(turnProcessor, "turnProcessor");
+        this.maxIterations = Math.max(1, maxIterations);
+        this.progressSink = progressSink;
+        this.strict = strict;
+    }
+
+    /** @return true if this loop is running in strict-measurement mode. */
+    public boolean isStrict() {
+        return strict;
     }
 
     /**
@@ -268,7 +309,7 @@ public final class ToolCallLoop {
                 // For other tools, distinct calls to the same path (e.g., two write_file
                 // attempts with different content) must not be conflated.
                 boolean isEditFile = "talos.edit_file".equals(effective.toolName());
-                if (isEditFile) {
+                if (isEditFile && !strict) {
                     String callSig = buildCallSignature(effective);
                     if (failedCallSignatures.contains(callSig)) {
                         // Fix 3: short-circuited calls are NOT counted in toolsInvoked.
@@ -293,7 +334,8 @@ public final class ToolCallLoop {
                 // Redundant info-gathering suppression: if this is a read-only tool
                 // with identical params and no mutation has happened since, inject a
                 // diagnostic instead of re-executing.
-                if (!mutationSinceStart && isReadOnlyTool(effective.toolName())) {
+                // Gated off in strict mode (measurement cushion).
+                if (!strict && !mutationSinceStart && isReadOnlyTool(effective.toolName())) {
                     String readSig = buildReadCallSignature(effective);
                     String priorResult = successfulReadCalls.get(readSig);
                     if (priorResult != null) {
@@ -317,8 +359,9 @@ public final class ToolCallLoop {
 
                 // Fix 4: B2 read-before-write nudge — computed pre-execution, applied after.
                 // Path is NOT marked as read until we confirm the read succeeded (below).
+                // Gated off in strict mode (measurement cushion).
                 String readBeforeWriteNudge = null;
-                if ("talos.edit_file".equals(effective.toolName()) && pathHint != null) {
+                if (!strict && "talos.edit_file".equals(effective.toolName()) && pathHint != null) {
                     if (!pathsReadThisTurn.contains(normalizePath(pathHint))) {
                         readBeforeWriteNudge = "\nHint: You did not read this file before editing. "
                                 + "Call talos.read_file first to see the current content, "
@@ -356,7 +399,9 @@ public final class ToolCallLoop {
                         failedCallSignatures.add(callSig);
 
                         // E1: track per-path edit_file failures; suggest write_file after 2nd failure
-                        if (pathHint != null) {
+                        // Gated off in strict mode (measurement cushion — rewrites the raw
+                        // tool error with extra guidance the model did not earn).
+                        if (!strict && pathHint != null) {
                             int failCount = editFailuresByPath.merge(normalizePath(pathHint), 1, Integer::sum);
                             if (failCount >= 2) {
                                 result = ToolResult.fail(ToolError.invalidParams(

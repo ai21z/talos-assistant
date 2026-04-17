@@ -21,6 +21,36 @@ public final class ToolRegistry {
     private final Map<String, TalosTool> tools = new ConcurrentHashMap<>();
 
     /**
+     * Strict-mode flag. When true, {@link #get(String)} performs exact-match
+     * lookup only — no {@code talos.} prefix insertion, no alias mapping, no
+     * case-insensitive normalization.
+     *
+     * <p>This is a <b>measurement</b> knob, not a safety knob. It exists so
+     * the scenario harness can observe raw model tool-name behavior instead
+     * of the cushioned fuzzy-resolution behavior that production runs rely
+     * on. Default is {@code false} (cushioned, production-equivalent).
+     */
+    private final boolean strict;
+
+    /** Default (non-strict) registry — preserves all existing behavior. */
+    public ToolRegistry() {
+        this(false);
+    }
+
+    /**
+     * Create a registry with an explicit strict-mode flag.
+     * @param strict if true, disable fuzzy/alias/case-normalization rescue in {@link #get(String)}
+     */
+    public ToolRegistry(boolean strict) {
+        this.strict = strict;
+    }
+
+    /** @return true if this registry is running in strict-measurement mode. */
+    public boolean isStrict() {
+        return strict;
+    }
+
+    /**
      * Common aliases that models emit instead of the canonical {@code talos.}
      * name. Maps alias → canonical tool name.
      */
@@ -66,6 +96,13 @@ public final class ToolRegistry {
         // 1. Exact match
         TalosTool tool = tools.get(name);
         if (tool != null) return tool;
+
+        // Strict measurement mode: no fuzzy rescue. Return null so the
+        // caller produces a clean "Unknown tool" error that reflects the
+        // raw model output.
+        if (strict) {
+            return null;
+        }
 
         // 2. Try adding talos. prefix
         if (!name.startsWith("talos.")) {
