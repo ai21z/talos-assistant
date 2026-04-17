@@ -345,12 +345,43 @@ public final class AssistantTurnExecutor {
 
         LOG.info("Post-tool deflection detected ({} tools used). Attempting synthesis retry.", toolsInvoked);
 
+        // Anchor the retry to the verbatim original user request.
+        //
+        // Rationale (real transcript, Turn 2 / Turn 6 failure shape): the
+        // previous generic retry prompt ("answer the original question
+        // directly") caused the local 8B model to respond "the original
+        // question is not visible in our current conversation history"
+        // because, after tool_call + tool_result messages are appended,
+        // the user's request is several turns back and the model fails
+        // to re-anchor on it. On the native tool-call path, tool results
+        // are role="tool" so {@link #latestUserRequest} correctly returns
+        // the original request, not a tool-result message.
+        String originalRequest = latestUserRequest(messages);
+
+        String retryPrompt;
+        if (originalRequest != null && !originalRequest.isBlank()) {
+            // Trim if very long so the retry prompt itself doesn't balloon context.
+            String pinned = originalRequest.length() <= 2000
+                    ? originalRequest
+                    : originalRequest.substring(0, 2000) + "…";
+            retryPrompt = "The user's original request was:\n\n«" + pinned + "»\n\n"
+                    + "You already gathered the needed evidence using tools. "
+                    + "Now answer that exact request directly and concretely, "
+                    + "using the tool results you received. "
+                    + "Do not say the question is missing. "
+                    + "Do not ask what I want — answer the question above.";
+        } else {
+            // Fallback (should be rare): no user-role message found. Keep the
+            // previous wording so pre-anchor tests and callers still hit the
+            // "already gathered the needed evidence" sentinel phrase.
+            retryPrompt = "You already gathered the needed evidence using tools. "
+                    + "Now answer the original question directly and concretely, "
+                    + "using the tool results you received. "
+                    + "Do not ask what I want — answer the question.";
+        }
+
         messages.add(ChatMessage.assistant(answer));
-        messages.add(ChatMessage.user(
-                "You already gathered the needed evidence using tools. "
-                + "Now answer the original question directly and concretely, "
-                + "using the tool results you received. "
-                + "Do not ask what I want — answer the question."));
+        messages.add(ChatMessage.user(retryPrompt));
 
         try {
             LlmClient.StreamResult retry = ctx.llm().chatFull(messages);
