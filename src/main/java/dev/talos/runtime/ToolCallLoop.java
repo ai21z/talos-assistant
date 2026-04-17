@@ -589,6 +589,35 @@ public final class ToolCallLoop {
         return path == null ? "" : path.replace('\\', '/');
     }
 
+    /**
+     * Canonicalize a path value for read-only redundancy signatures.
+     *
+     * <p>Collapses trivial path variants that produce identical results
+     * for read-only tools: {@code "."}, {@code "./"}, {@code ""}, and
+     * trailing-separator variants all map to the same canonical form.
+     *
+     * <p>This is intentionally narrow — only safe for read-only suppression,
+     * not for write paths.
+     */
+    static String canonicalizeReadPath(String path) {
+        if (path == null) return "";
+        // Normalize separators first
+        String p = path.replace('\\', '/');
+        // Strip trailing slashes (but don't reduce "/" to "")
+        while (p.length() > 1 && p.endsWith("/")) {
+            p = p.substring(0, p.length() - 1);
+        }
+        // Collapse empty and "." to the same canonical form
+        if (p.isEmpty() || ".".equals(p)) {
+            return ".";
+        }
+        // Strip leading "./" prefix for relative paths
+        if (p.startsWith("./") && p.length() > 2) {
+            p = p.substring(2);
+        }
+        return p;
+    }
+
     // ---- Redundant info-gathering suppression helpers ────────────────────
 
     /** Read-only tools eligible for redundancy suppression. */
@@ -611,7 +640,8 @@ public final class ToolCallLoop {
 
     /**
      * Build a signature for a read-only tool call: "toolName:sortedParams".
-     * Normalizes path separators for consistent matching.
+     * Uses {@link #canonicalizeReadPath} so trivial path variants like
+     * {@code "."} and {@code "./"} produce the same signature.
      */
     static String buildReadCallSignature(ToolCall call) {
         var sb = new StringBuilder(call.toolName()).append(":");
@@ -619,7 +649,7 @@ public final class ToolCallLoop {
             call.parameters().entrySet().stream()
                     .sorted(Map.Entry.comparingByKey())
                     .forEach(e -> sb.append(e.getKey()).append("=")
-                            .append(normalizePath(e.getValue())).append(";"));
+                            .append(canonicalizeReadPath(e.getValue())).append(";"));
         }
         return sb.toString();
     }

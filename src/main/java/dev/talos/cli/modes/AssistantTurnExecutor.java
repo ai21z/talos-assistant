@@ -214,9 +214,10 @@ final class AssistantTurnExecutor {
 
     // ── Post-tool answer acceptance gate ─────────────────────────────────
 
-    /** Phrases that indicate the model deflected instead of answering. */
+    /** Short phrases that indicate the model deflected instead of answering. */
     private static final Set<String> DEFLECTION_MARKERS = Set.of(
             "how can i help",
+            "how can i assist",
             "what would you like",
             "what do you want me to",
             "let me know if you",
@@ -227,30 +228,75 @@ final class AssistantTurnExecutor {
     );
 
     /**
+     * Phrases that indicate a capability-recitation non-answer (generic assistant
+     * meta-talk about what the assistant can do, instead of answering the question).
+     */
+    private static final Set<String> CAPABILITY_MARKERS = Set.of(
+            "here is what i can do",
+            "here's what i can do",
+            "i can help you with",
+            "i am able to",
+            "i'm able to",
+            "my capabilities include",
+            "i have the following capabilities",
+            "i can perform the following",
+            "i can do the following"
+    );
+
+    /**
      * Detect if the model's answer is a deflection (generic assistant boilerplate)
      * instead of a substantive response to the user's question.
      *
-     * <p>Heuristic: the answer is short (under 500 chars) and contains
-     * at least one deflection marker phrase. Longer answers that happen to
-     * include a polite closing are not flagged.
+     * <p>Two-tier heuristic:
+     * <ol>
+     *   <li><b>Short deflection</b> (≤ 500 chars): any {@link #DEFLECTION_MARKERS} match.</li>
+     *   <li><b>Capability-recitation</b> (≤ 1500 chars): answer contains a
+     *       {@link #CAPABILITY_MARKERS} phrase AND ends with a deflection marker.
+     *       This catches the longer "here's what I can do… How can I help?" pattern
+     *       without flagging genuinely substantive answers that happen to mention a capability.</li>
+     * </ol>
+     *
+     * <p>Answers over 1500 chars always pass — they are long enough to be substantive.
      */
     static boolean isDeflection(String answer) {
         if (answer == null || answer.isBlank()) return true;
-        if (answer.length() > 500) return false; // substantive answers get a pass
         String lower = answer.toLowerCase();
-        for (String marker : DEFLECTION_MARKERS) {
-            if (lower.contains(marker)) return true;
+
+        // Tier 1: short boilerplate deflection
+        if (answer.length() <= 500) {
+            for (String marker : DEFLECTION_MARKERS) {
+                if (lower.contains(marker)) return true;
+            }
+            return false;
         }
-        return false;
+
+        // Tier 2: medium-length capability-recitation non-answer
+        if (answer.length() <= 1500) {
+            boolean hasCapability = false;
+            for (String cm : CAPABILITY_MARKERS) {
+                if (lower.contains(cm)) { hasCapability = true; break; }
+            }
+            if (hasCapability) {
+                // Must also end with a deflection marker (last 200 chars)
+                String tail = lower.substring(Math.max(0, lower.length() - 200));
+                for (String dm : DEFLECTION_MARKERS) {
+                    if (tail.contains(dm)) return true;
+                }
+            }
+        }
+
+        return false; // long enough or no pattern match — substantive
     }
 
     /**
      * Post-tool synthesis retry: if tools were used and the answer is a deflection,
      * re-prompt the LLM exactly once with an instruction to answer using the evidence.
      *
+     * <p>Package-private for testability.
+     *
      * @return the improved answer, or the original if retry was not needed or failed
      */
-    private static String synthesisRetryIfNeeded(String answer, int toolsInvoked,
+    static String synthesisRetryIfNeeded(String answer, int toolsInvoked,
                                                   List<ChatMessage> messages, Context ctx) {
         if (toolsInvoked <= 0) return answer;
         if (!isDeflection(answer)) return answer;
