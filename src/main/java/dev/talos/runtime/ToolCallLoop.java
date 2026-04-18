@@ -296,6 +296,12 @@ public final class ToolCallLoop {
         Map<String, String> successfulReadCalls = new HashMap<>();
         boolean mutationSinceStart = false;
 
+        // P0 — action-is-the-answer: collect one-line summaries of successful
+        // mutating tool calls. When the model takes a visible action the user
+        // asked for, the tool output IS the answer; we do not need to pay for
+        // the model to narrate "I created the file" on a local 31B Q4 model.
+        List<String> pendingMutationSummaries = new ArrayList<>();
+
         while (iterations < maxIterations) {
             boolean useNativePath = !currentNativeCalls.isEmpty();
             boolean useTextPath = !useNativePath && ToolCallParser.containsToolCalls(currentText);
@@ -315,6 +321,10 @@ public final class ToolCallLoop {
             }
 
             if (calls.isEmpty()) break; // malformed — stop
+
+            // Per-iteration counters (reset each iteration; used by P0 skip below).
+            int mutationsThisIter = 0;
+            List<String> mutationSummariesThisIter = new ArrayList<>();
 
             // 2. Append the assistant message with proper type
             if (useNativePath) {
@@ -415,6 +425,16 @@ public final class ToolCallLoop {
                 if (isMutatingTool(effective.toolName()) && result.success()) {
                     mutationSinceStart = true;
                     mutatingToolSuccesses++;
+                    mutationsThisIter++;
+                    // P0: capture a one-line action summary. write_file / edit_file
+                    // return strings like "Created index.html (79 lines, 2847 bytes).
+                    // Verified: HTML structure OK. [verified...]" — take the first
+                    // sentence and prepend a check mark so it reads as a status.
+                    String summary = firstSentenceSummary(result.output());
+                    if (!summary.isBlank()) {
+                        mutationSummariesThisIter.add("✓ " + summary);
+                        pendingMutationSummaries.add("✓ " + summary);
+                    }
                     // Clear the read cache — workspace state changed.
                     successfulReadCalls.clear();
                 }
@@ -461,16 +481,87 @@ public final class ToolCallLoop {
                                 : "error: " + result.errorMessage());
             }
 
-            // 4. Re-prompt the LLM with the updated conversation
+            // 4. Re-prompt the LLM with the updated conversation.
+            //
+            // P0 — action-is-the-answer short-circuit: if the model just
+            // executed at least one successful mutating tool this iteration,
+            // do NOT re-prompt. The tool output IS the answer. On local
+            // 31B Q4 models the follow-up "okay, I created the file" can
+            // cost 10–15 minutes of wall clock (observed: 14m32s in the
+            // real transcript, producing empty text). We emit a
+            // deterministic status line and exit the loop. If the user
+            // wanted a longer explanation alongside the action, they can
+            // ask a follow-up question; correctness doesn't depend on
+            // model chatter here.
+            //
+            // Rationale is one-directional: we skip only after MUTATIONS.
+            // Pure read-only batches (list_dir, read_file, grep) still
+            // re-prompt because the user's question isn't answered by the
+            // raw tool output — the model needs to synthesize the answer
+            // from what it just read.
+            if (mutationsThisIter > 0) {
+                currentText = String.join("\n", mutationSummariesThisIter);
+                currentNativeCalls = List.of();
+                emitProgress("loop", "skip re-prompt after successful mutation", null);
+                LOG.debug("P0: skipping re-prompt after {} successful mutation(s) this iteration",
+                        mutationsThisIter);
+                break;
+            }
+
+            // Point 2 — task anchor: inject a transient system-role reminder
+            // of the user's current request right before the re-prompt. On
+            // the native tool-call path the user message gets pushed several
+            // turns back by tool_call + tool_result pairs; without this
+            // anchor, local 8B models drift into generic "How can I help?"
+            // deflections despite holding all the evidence. The anchor is
+            // removed immediately after the call so it doesn't accumulate
+            // or bloat future iterations.
+            //
+            // Point 4 — in-flight compaction: on iterations ≥ 3, replace
+            // the bodies of older tool_result messages with one-line
+            // summaries. The most recent 2 tool results stay verbatim so
+            // the model still has the evidence it just gathered; older
+            // ones become "[compacted: read_file(index.html) 22781 chars]".
+            // This keeps long multi-read turns (Turns 6-8 in the real
+            // transcript) from drowning the user's task in stale content.
+            if (iterations >= 3) {
+                compactOlderToolResultsInPlace(messages);
+            }
+            int anchorIndex = -1;
+            String userTask = latestUserRequestIn(messages);
+            if (userTask != null && !userTask.isBlank()) {
+                String pinned = userTask.length() <= 500
+                        ? userTask
+                        : userTask.substring(0, 500) + "…";
+                messages.add(ChatMessage.system(
+                        "[Current task — stay focused on this] " + pinned));
+                anchorIndex = messages.size() - 1;
+            }
             try {
-                LlmClient.StreamResult repromptResult = ctx.llm().chatFull(messages);
+                // P1 — stream the re-prompt to the user. Previously this used
+                // chatFull(messages) with no onChunk, which meant the user saw
+                // an idle spinner while the model generated tokens silently for
+                // multiple minutes. When a streamSink is available, route through
+                // chatStreamFull so every token appears live in the TUI.
+                java.util.function.Consumer<String> sink = ctx.streamSink();
+                LlmClient.StreamResult repromptResult = sink != null
+                        ? ctx.llm().chatStreamFull(messages, sink)
+                        : ctx.llm().chatFull(messages);
                 currentText = repromptResult.text();
                 currentNativeCalls = repromptResult.hasToolCalls()
                         ? new ArrayList<>(repromptResult.toolCalls()) : List.of();
 
                 if (currentText == null) currentText = "";
                 if (currentText.isEmpty() && currentNativeCalls.isEmpty()) {
-                    currentText = "(no answer from model after tool execution)";
+                    // No text, no more tools. If this turn already produced one
+                    // or more successful mutations, the tool output stands as
+                    // the answer — emit a deterministic summary instead of the
+                    // misleading "(no answer from model after tool execution)".
+                    if (!pendingMutationSummaries.isEmpty()) {
+                        currentText = String.join("\n", pendingMutationSummaries);
+                    } else {
+                        currentText = "(no answer from model after tool execution)";
+                    }
                     break;
                 }
             } catch (EngineException.ConnectionFailed cf) {
@@ -487,13 +578,20 @@ public final class ToolCallLoop {
                 LOG.warn("Transient error during tool-call loop iteration {}: {}", iterations, tr.getMessage());
                 try {
                     Thread.sleep(400);
-                    LlmClient.StreamResult retryResult = ctx.llm().chatFull(messages);
+                    java.util.function.Consumer<String> sink = ctx.streamSink();
+                    LlmClient.StreamResult retryResult = sink != null
+                            ? ctx.llm().chatStreamFull(messages, sink)
+                            : ctx.llm().chatFull(messages);
                     currentText = retryResult.text();
                     currentNativeCalls = retryResult.hasToolCalls()
                             ? new ArrayList<>(retryResult.toolCalls()) : List.of();
                     if (currentText == null) currentText = "";
                     if (currentText.isEmpty() && currentNativeCalls.isEmpty()) {
-                        currentText = "(no answer from model after retry)";
+                        if (!pendingMutationSummaries.isEmpty()) {
+                            currentText = String.join("\n", pendingMutationSummaries);
+                        } else {
+                            currentText = "(no answer from model after retry)";
+                        }
                         break;
                     }
                 } catch (InterruptedException ie) {
@@ -516,6 +614,17 @@ public final class ToolCallLoop {
                 currentText = "(error during follow-up LLM call: " + e.getMessage() + ")";
                 currentNativeCalls = List.of();
                 break;
+            } finally {
+                // Point 2: remove the transient task anchor so it doesn't
+                // persist into the next iteration or the caller's history.
+                if (anchorIndex >= 0 && anchorIndex < messages.size()) {
+                    ChatMessage m = messages.get(anchorIndex);
+                    if ("system".equals(m.role())
+                            && m.content() != null
+                            && m.content().startsWith("[Current task")) {
+                        messages.remove(anchorIndex);
+                    }
+                }
             }
         }
 
@@ -674,6 +783,124 @@ public final class ToolCallLoop {
             }
         }
         return null;
+    }
+
+    /**
+     * Point 4 — in-flight tool-result compaction.
+     *
+     * <p>Replace the bodies of older {@code role="tool"} messages with a
+     * one-line summary so a long multi-iteration turn does not push the
+     * user's task off the model's attention window. The most recent
+     * {@link #KEEP_RECENT_TOOL_RESULTS} tool results are left verbatim so
+     * the model retains the evidence it just gathered. Already-compacted
+     * messages (detected by the {@code "[compacted:"} prefix) are left
+     * untouched so this operation is idempotent across iterations.
+     *
+     * <p>Only runs on iteration 3 and later, so small turns incur zero
+     * cost. Mutates {@code messages} in place.
+     */
+    static void compactOlderToolResultsInPlace(List<ChatMessage> messages) {
+        if (messages == null || messages.size() < 4) return;
+        // Find indices of every role="tool" message.
+        List<Integer> toolResultIndices = new ArrayList<>();
+        for (int i = 0; i < messages.size(); i++) {
+            if ("tool".equals(messages.get(i).role())) {
+                toolResultIndices.add(i);
+            }
+        }
+        int keepFrom = toolResultIndices.size() - KEEP_RECENT_TOOL_RESULTS;
+        if (keepFrom <= 0) return; // not enough tool results to bother
+        for (int k = 0; k < keepFrom; k++) {
+            int idx = toolResultIndices.get(k);
+            ChatMessage m = messages.get(idx);
+            String content = m.content();
+            if (content == null || content.isBlank()) continue;
+            if (content.startsWith("[compacted:")) continue; // already done
+            String summary = summarizeToolResult(content);
+            messages.set(idx, ChatMessage.toolResult(m.toolCallId(), summary));
+        }
+    }
+
+    /** Number of most-recent tool_result messages kept verbatim during compaction. */
+    static final int KEEP_RECENT_TOOL_RESULTS = 2;
+
+    /**
+     * Summarize a tool_result body into a one-line marker. Preserves the
+     * tool name from the {@code [tool_result: NAME]} header when present,
+     * plus the original length, so the model can still see what it did
+     * without the full content reappearing in every re-prompt.
+     */
+    static String summarizeToolResult(String body) {
+        String tool = "unknown";
+        // Parse the leading "[tool_result: talos.X]" header if present.
+        if (body.startsWith("[tool_result:")) {
+            int close = body.indexOf(']');
+            if (close > "[tool_result:".length()) {
+                tool = body.substring("[tool_result:".length(), close).trim();
+            }
+        }
+        boolean isError = body.contains("[error]");
+        int len = body.length();
+        return "[compacted: " + tool + (isError ? " error" : " result")
+                + ", " + len + " chars — full output elided to keep context focused]";
+    }
+
+    /**
+     * Extract the first sentence from a tool output for the P0 "action-is-
+     * the-answer" summary. Returns something like {@code "Created index.html
+     * (79 lines, 2847 bytes)"} from a longer verified-write success message.
+     *
+     * <p>Rules:
+     * <ul>
+     *   <li>Trim leading/trailing whitespace.</li>
+     *   <li>Cut at the first sentence terminator ({@code .}, {@code !}, {@code ?})
+     *       followed by a space or end of line — so "Created index.html (79 lines,
+     *       2847 bytes). Verified: …" becomes "Created index.html (79 lines, 2847 bytes)".</li>
+     *   <li>If no terminator is found, take up to the first newline or 160 chars.</li>
+     *   <li>Never return a trailing bracket fragment from verification markers
+     *       (e.g., drop a trailing "[verified…" tail if present).</li>
+     * </ul>
+     */
+    static String firstSentenceSummary(String output) {
+        if (output == null) return "";
+        String s = output.strip();
+        if (s.isEmpty()) return "";
+        // Drop leading "[tool_result: X]\n" header if the caller passed a pre-formatted body.
+        if (s.startsWith("[tool_result:")) {
+            int close = s.indexOf(']');
+            if (close > 0 && close < s.length() - 1) {
+                s = s.substring(close + 1).stripLeading();
+            }
+        }
+        // Find first terminator followed by whitespace or newline.
+        int cut = -1;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '.' || c == '!' || c == '?') {
+                if (i + 1 >= s.length() || Character.isWhitespace(s.charAt(i + 1))) {
+                    cut = i + 1;
+                    break;
+                }
+            } else if (c == '\n') {
+                cut = i;
+                break;
+            }
+        }
+        String head = cut > 0 ? s.substring(0, cut).strip() : s;
+        // Drop trailing "[verified…" or similar bracket annotations.
+        int bracket = head.indexOf(" [");
+        if (bracket > 0) head = head.substring(0, bracket).strip();
+        // Drop the trailing sentence terminator so it reads as a label,
+        // not a full sentence, when appended to a check-mark prefix.
+        while (!head.isEmpty()) {
+            char last = head.charAt(head.length() - 1);
+            if (last == '.' || last == '!' || last == '?') {
+                head = head.substring(0, head.length() - 1).stripTrailing();
+            } else break;
+        }
+        // Hard cap for pathological inputs.
+        if (head.length() > 160) head = head.substring(0, 157) + "…";
+        return head;
     }
 
     // ---- Call-signature helpers (B3 repeated-failure detection) ----

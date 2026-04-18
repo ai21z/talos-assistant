@@ -185,16 +185,20 @@ final class OllamaEngine implements ModelEngine {
     private String chatViaMessages(ChatRequest req) throws Exception {
         String model = Objects.toString(req.model, defaultModel);
 
-        // Separate system message from conversation turns
-        String systemPrompt = null;
+        // Separate system messages from conversation turns.
+        // See mergeSystemMessages() for rationale — multiple system-role
+        // messages must be concatenated, not overwritten, or ToolCallLoop's
+        // transient task anchor silently clobbers the main system prompt.
+        StringBuilder systemBuf = new StringBuilder();
         List<Map<String, Object>> conversationMsgs = new ArrayList<>();
         for (var m : req.messages) {
             if ("system".equals(m.role())) {
-                systemPrompt = m.content();
+                appendSystem(systemBuf, m.content());
             } else {
                 conversationMsgs.add(serializeChatMessage(m));
             }
         }
+        String systemPrompt = systemBuf.length() == 0 ? null : systemBuf.toString();
 
         LOG.debug("chat: {} conversation messages (system prompt: {} chars)",
                 conversationMsgs.size(), systemPrompt == null ? 0 : systemPrompt.length());
@@ -340,16 +344,19 @@ final class OllamaEngine implements ModelEngine {
     private Stream<TokenChunk> chatStreamViaMessages(ChatRequest req) throws Exception {
         String model = Objects.toString(req.model, defaultModel);
 
-        // Separate system message from conversation turns
-        String systemPrompt = null;
+        // Separate system messages from conversation turns (see chatViaMessages
+        // for rationale — concatenate rather than overwrite so a transient
+        // task anchor from ToolCallLoop does not clobber the main system prompt).
+        StringBuilder systemBuf = new StringBuilder();
         List<Map<String, Object>> conversationMsgs = new ArrayList<>();
         for (var m : req.messages) {
             if ("system".equals(m.role())) {
-                systemPrompt = m.content();
+                appendSystem(systemBuf, m.content());
             } else {
                 conversationMsgs.add(serializeChatMessage(m));
             }
         }
+        String systemPrompt = systemBuf.length() == 0 ? null : systemBuf.toString();
 
         LOG.debug("chatStream: {} conversation messages (system prompt: {} chars)",
                 conversationMsgs.size(), systemPrompt == null ? 0 : systemPrompt.length());
@@ -548,6 +555,34 @@ final class OllamaEngine implements ModelEngine {
         }
 
         return msg;
+    }
+
+    /**
+     * Append a system-role message content to an accumulating buffer, using a
+     * blank-line separator. Null/blank inputs are ignored. Package-private so
+     * the merge behavior can be regression-tested without standing up an HTTP
+     * mock.
+     *
+     * <p>Rationale: Ollama's {@code /api/chat} endpoint takes a single
+     * {@code system} string. When callers layer multiple system messages
+     * (main prompt + a transient task anchor from
+     * {@link dev.talos.runtime.ToolCallLoop}), we must concatenate — the
+     * previous "last one wins" behavior silently dropped the main system
+     * prompt on tool-loop re-prompts, causing the model to continue without
+     * tool rules or behavior rules.
+     */
+    static void appendSystem(StringBuilder buf, String content) {
+        if (content == null || content.isBlank()) return;
+        if (buf.length() > 0) buf.append("\n\n");
+        buf.append(content);
+    }
+
+    /** Test seam: merge a list of system-message contents the same way
+     *  chatViaMessages / chatStreamViaMessages do. */
+    static String mergeSystemMessages(List<String> contents) {
+        StringBuilder b = new StringBuilder();
+        for (String c : contents) appendSystem(b, c);
+        return b.length() == 0 ? null : b.toString();
     }
 
     @Override

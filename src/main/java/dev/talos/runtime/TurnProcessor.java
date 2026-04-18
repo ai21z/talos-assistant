@@ -156,8 +156,16 @@ public final class TurnProcessor {
             String path = resolvePathParam(call);
             String detail = buildApprovalDetail(call, path);
             if (!approvalGate.approve(desc, detail)) {
+                // Phrasing matters: previously "Operation denied by user" caused
+                // qwen2.5-coder to hallucinate a "permissions" excuse and tell
+                // the user to "ensure you have the necessary permissions" — the
+                // word "denied" anchored the wrong narrative. Reshape the error
+                // so the model interprets it as user intent, not auth failure.
                 return ToolResult.fail(ToolError.denied(
-                        "Operation denied by user: " + call.toolName()));
+                        "User did not approve the " + call.toolName()
+                                + " call. The user is in control of the workspace; "
+                                + "ask what they want to do differently before retrying, "
+                                + "or take a different action that does not need approval."));
             }
         }
 
