@@ -1,7 +1,9 @@
 package dev.talos.runtime;
 
+import com.fasterxml.jackson.core.json.JsonReadFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.json.JsonMapper;
 import dev.talos.tools.ToolCall;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,7 +45,35 @@ import java.util.regex.Pattern;
 public final class ToolCallParser {
 
     private static final Logger LOG = LoggerFactory.getLogger(ToolCallParser.class);
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    /**
+     * Lenient JSON reader for the text-fallback path.
+     *
+     * <p>Why not vanilla {@code new ObjectMapper()}: local code-tuned models
+     * (qwen2.5-coder, deepseek-coder, etc.) routinely emit JSON tool_call
+     * payloads with literal newlines and tabs inside string values. RFC-8259
+     * forbids unescaped control chars in strings; Jackson rejects them by
+     * default with {@code "Unrecognized character escape (CTRL-CHAR, code 10)"}.
+     * That rejection silently drops valid tool calls — we observed three
+     * consecutive turns in a real transcript where qwen called
+     * {@code talos.edit_file} but the parser ate every payload.
+     *
+     * <p>The two enabled features are scoped to JSON reading only and do not
+     * affect serialization. They mirror what every mainstream LLM-with-tools
+     * framework (LangChain, OpenClaw, llama.cpp server) does for the same reason.
+     *
+     * <ul>
+     *   <li>{@code ALLOW_UNESCAPED_CONTROL_CHARS} — accept literal LF/CR/TAB
+     *       inside string values (the actual cause of the dropped tool calls).</li>
+     *   <li>{@code ALLOW_BACKSLASH_ESCAPING_ANY_CHARACTER} — tolerate
+     *       over-escaping like {@code \\'} or {@code \\$} that some models
+     *       produce when generating code-bearing arguments.</li>
+     * </ul>
+     */
+    private static final ObjectMapper MAPPER = JsonMapper.builder()
+            .enable(JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS)
+            .enable(JsonReadFeature.ALLOW_BACKSLASH_ESCAPING_ANY_CHARACTER)
+            .build();
 
     /** Variant XML tags: tool_call, function_call, tool, function.
      *  DEPRECATED COMPATIBILITY ONLY — retained for models that emit XML variants.

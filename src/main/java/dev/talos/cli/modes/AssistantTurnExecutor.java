@@ -138,9 +138,16 @@ public final class AssistantTurnExecutor {
                         appendSummary(out, loopResult);
                         // Post-tool answer acceptance gate: retry synthesis if deflected
                         answer = synthesisRetryIfNeeded(answer, loopResult.toolsInvoked(), messages, ctx);
+                        // Point 3 — missing-mutation retry: user asked for a write
+                        // but nothing was mutated. Re-prompt once with an explicit
+                        // instruction to call write_file / edit_file.
+                        MutationRetryResult mrr = mutationRequestRetryIfNeeded(
+                                answer, messages, loopResult, workspace, ctx);
+                        answer = mrr.answer();
+                        if (mrr.extraSummary() != null) out.append(mrr.extraSummary()).append("\n\n");
                         // Claim-vs-action truth layer: annotate if the answer claims a mutation
                         // that no mutating tool actually performed this turn.
-                        answer = annotateIfFalseMutationClaim(answer, loopResult);
+                        answer = annotateIfFalseMutationClaim(answer, loopResult, mrr.mutationsInRetry());
                         // N3 — inspect under-completion truth layer: annotate if the user
                         // asked for multi-file inspection but the turn made ≤ 1 read-only
                         // tool call and emitted a substantive answer.
@@ -191,9 +198,14 @@ public final class AssistantTurnExecutor {
                         appendSummary(out, loopResult);
                         // Post-tool answer acceptance gate: retry synthesis if deflected
                         answer = synthesisRetryIfNeeded(answer, loopResult.toolsInvoked(), messages, ctx);
+                        // Point 3 — missing-mutation retry
+                        MutationRetryResult mrr = mutationRequestRetryIfNeeded(
+                                answer, messages, loopResult, workspace, ctx);
+                        answer = mrr.answer();
+                        if (mrr.extraSummary() != null) out.append(mrr.extraSummary()).append("\n\n");
                         // Claim-vs-action truth layer: annotate if the answer claims a mutation
                         // that no mutating tool actually performed this turn.
-                        answer = annotateIfFalseMutationClaim(answer, loopResult);
+                        answer = annotateIfFalseMutationClaim(answer, loopResult, mrr.mutationsInRetry());
                         // N3 — inspect under-completion truth layer: annotate if the user
                         // asked for multi-file inspection but the turn made ≤ 1 read-only
                         // tool call and emitted a substantive answer.
@@ -479,14 +491,156 @@ public final class AssistantTurnExecutor {
      * @return the (possibly annotated) answer
      */
     static String annotateIfFalseMutationClaim(String answer, ToolCallLoop.LoopResult loopResult) {
+        return annotateIfFalseMutationClaim(answer, loopResult, 0);
+    }
+
+    /**
+     * Variant that also accounts for mutations performed during a Point-3
+     * missing-mutation retry (which executes its own tool loop).
+     */
+    static String annotateIfFalseMutationClaim(String answer,
+                                               ToolCallLoop.LoopResult loopResult,
+                                               int extraMutationSuccesses) {
         if (answer == null || answer.isBlank()) return answer;
         if (loopResult == null) return answer;
-        if (loopResult.mutatingToolSuccesses() > 0) return answer; // a real mutation backs the claim
+        int totalMutations = loopResult.mutatingToolSuccesses() + Math.max(0, extraMutationSuccesses);
+        if (totalMutations > 0) return answer; // a real mutation backs the claim
         if (!containsMutationClaim(answer)) return answer;
 
         LOG.warn("False mutation claim detected: answer asserts a file change, "
                 + "but no mutating tool succeeded this turn. Annotating.");
         return FALSE_MUTATION_ANNOTATION + answer;
+    }
+
+    // ── Point 3 — Missing-mutation retry ─────────────────────────────────
+
+    /**
+     * Phrases in the <em>user request</em> that indicate an explicit file
+     * mutation intent. Matched case-insensitively against the latest user
+     * message. Deliberately narrow: we only want to fire this retry when
+     * the user's language is unambiguous about wanting a change applied.
+     */
+    private static final Set<String> MUTATION_REQUEST_MARKERS = Set.of(
+            "edit it", "edit the", "edit this", "edit that",
+            "modify it", "modify the", "modify this", "modify that",
+            "change it", "change the", "change this", "change that",
+            "change everything", "change all",
+            "update it", "update the", "update this", "update that",
+            "fix it", "fix the", "fix this", "fix that",
+            "rewrite it", "rewrite the", "rewrite this",
+            "replace it", "replace the", "replace this",
+            "redesign", "restyle", "re-style", "re-design",
+            "make it ", "make the ", "make this ", "make that ",
+            "write a ", "write the ", "create a ", "create the ",
+            "save it", "save the",
+            "apply the", "apply these", "apply those",
+            "add a ", "add the ", "remove the ", "delete the ",
+            "refactor ",
+            "darker and more minimal"
+    );
+
+    /** Result of the missing-mutation retry gate. */
+    record MutationRetryResult(String answer, int mutationsInRetry, String extraSummary) {}
+
+    /**
+     * True iff the latest user request contains an unambiguous mutation
+     * verb. Package-private for direct testing.
+     */
+    static boolean looksLikeMutationRequest(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return false;
+        String lower = userRequest.toLowerCase();
+        for (String marker : MUTATION_REQUEST_MARKERS) {
+            if (lower.contains(marker)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Missing-mutation retry (Point 3).
+     *
+     * <p>Fires when <b>all</b> hold:
+     * <ol>
+     *   <li>The tool loop already ran and performed zero mutating tool
+     *       successes this turn.</li>
+     *   <li>The latest user request contains a mutation verb (see
+     *       {@link #MUTATION_REQUEST_MARKERS}).</li>
+     *   <li>A tool loop is configured (so the retry's follow-up tool
+     *       calls can actually execute).</li>
+     * </ol>
+     *
+     * <p>On fire, appends a short, unambiguous instruction to the
+     * messages telling the model to call {@code talos.write_file} or
+     * {@code talos.edit_file} now, or explicitly state why it cannot.
+     * If the retry response carries tool calls, the tool loop is
+     * re-invoked so those calls actually run. Any mutations performed
+     * during the retry are surfaced to the caller via
+     * {@link MutationRetryResult#mutationsInRetry()}.
+     *
+     * <p>This is the symmetric counterpart to
+     * {@link #annotateIfFalseMutationClaim}: that gate catches "claimed
+     * but didn't do it"; this gate catches "was told to do it, never
+     * tried". Together they enforce the invariant that mutation intent
+     * and mutation action stay in sync.
+     */
+    static MutationRetryResult mutationRequestRetryIfNeeded(
+            String answer, List<ChatMessage> messages,
+            ToolCallLoop.LoopResult loopResult,
+            Path workspace, Context ctx) {
+        if (answer == null) answer = "";
+        if (loopResult == null) return new MutationRetryResult(answer, 0, null);
+        if (loopResult.mutatingToolSuccesses() > 0) return new MutationRetryResult(answer, 0, null);
+        if (ctx == null || ctx.llm() == null) return new MutationRetryResult(answer, 0, null);
+        if (ctx.toolCallLoop() == null) return new MutationRetryResult(answer, 0, null);
+
+        String userRequest = latestUserRequest(messages);
+        if (!looksLikeMutationRequest(userRequest)) return new MutationRetryResult(answer, 0, null);
+
+        LOG.info("Missing-mutation retry fired: user asked for a change but 0 mutating "
+                + "tool calls succeeded. Re-prompting with an explicit write nudge.");
+
+        messages.add(ChatMessage.assistant(answer.isBlank() ? "(no answer)" : answer));
+        messages.add(ChatMessage.user(
+                "You were asked to modify a file but you did not call talos.write_file "
+                + "or talos.edit_file in this turn. The user's request was:\n\n«"
+                + (userRequest == null ? "" :
+                        (userRequest.length() <= 1000 ? userRequest
+                                : userRequest.substring(0, 1000) + "…"))
+                + "»\n\n"
+                + "Call the appropriate write/edit tool NOW to perform the change. "
+                + "If you truly cannot (e.g., you do not know which file, or the "
+                + "content is impossible to produce), state exactly which file and why "
+                + "in one sentence. Do not ask further questions — act."));
+
+        try {
+            LlmClient.StreamResult retry = ctx.llm().chatFull(messages);
+            String retryText = retry.text() == null ? "" : retry.text();
+
+            if (retry.hasToolCalls()) {
+                // Re-enter the tool loop so the mutating call actually executes.
+                ToolCallLoop.LoopResult retryLoop = ctx.toolCallLoop().run(
+                        retryText, retry.toolCalls(), messages, workspace, ctx);
+                String mergedAnswer = retryLoop.finalAnswer();
+                String summary = retryLoop.summary();
+                if (retryLoop.mutatingToolSuccesses() > 0) {
+                    LOG.info("Missing-mutation retry succeeded: {} mutation(s) performed.",
+                            retryLoop.mutatingToolSuccesses());
+                }
+                return new MutationRetryResult(
+                        mergedAnswer == null || mergedAnswer.isBlank() ? answer : mergedAnswer,
+                        retryLoop.mutatingToolSuccesses(),
+                        summary);
+            }
+
+            // No tool calls on the retry — the model declined. Keep the retry
+            // text if it's non-blank (model explained why it can't), otherwise
+            // fall back to the original answer.
+            if (!retryText.isBlank() && !retryText.equals(answer)) {
+                return new MutationRetryResult(retryText, 0, null);
+            }
+        } catch (Exception e) {
+            LOG.warn("Missing-mutation retry failed: {}", e.getMessage());
+        }
+        return new MutationRetryResult(answer, 0, null);
     }
 
     // ── Inspect under-completion truth layer (N3 / P4) ───────────────────

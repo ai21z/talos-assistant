@@ -15,7 +15,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -37,6 +43,81 @@ public final class LlmClient implements AutoCloseable {
     private volatile String backend;          // ENGINE mode: current backend id (e.g., "ollama")
     private volatile String model;            // model name (or backend-qualified accepted via setModel)
     private final long responseMaxChars;
+
+    /**
+     * P2 — wall-clock budget for a single LLM call (one full
+     * {@link #chatStreamFull} or {@link #chatFull} invocation, including all
+     * internal retries).
+     *
+     * <p><b>Why this exists:</b> the JDK {@code HttpRequest.timeout(...)} only
+     * fires while waiting for the <em>next</em> chunk; once chunks trickle in
+     * slowly the request never times out, so a wedged or runaway local model
+     * can hang the UI for tens of minutes (observed: 23 minutes in a real
+     * transcript before the loop hit max-iterations). The non-streaming
+     * legacy path in {@code AssistantTurnExecutor} already wraps its call in
+     * a {@code CompletableFuture.get(timeout)}, but the streaming path and
+     * the tool-call-loop re-prompts had no equivalent. This field, plus
+     * {@link #withWallClockBudget}, closes that gap.
+     *
+     * <p>Default 300_000 ms (5 min), overridable via
+     * {@code limits.llm_timeout_ms} in config or per-call via the
+     * {@code wallClockMs} parameter on the new public overloads.
+     */
+    private final long defaultWallClockBudgetMs;
+
+    /**
+     * P2 — idle-stream timeout (ms). If no chunk (text or tool-call) arrives
+     * from the engine within this window, the worker is interrupted and the
+     * call returns a synthesized abort marker (same shape as the wall-clock
+     * trip).
+     *
+     * <p><b>Why this exists in addition to the wall-clock budget:</b> a short
+     * prompt that wedges the model produces a long stretch of zero tokens
+     * well before the 5-min wall-clock fires. The user-visible UX is "Talos
+     * is frozen". An idle watchdog catches that case in tens of seconds, not
+     * minutes, while the wall-clock still backstops genuinely-slow-but-alive
+     * generations on big local models.
+     *
+     * <p>Configurable via {@code limits.llm_idle_ms}; default 60_000 ms.
+     * Set ≤0 to disable.
+     */
+    private final long defaultIdleMs;
+
+    /**
+     * P2 — externally-settable cancel hook. The REPL (or future Ctrl-C
+     * handler) calls {@link #setCancelSupplier} once at bootstrap to install
+     * a {@link Supplier} that flips to {@code true} when the user requests
+     * abort. The streaming loop polls it on every chunk; the watchdog polls
+     * it once per tick. Default no-op preserves test behavior.
+     */
+    private volatile Supplier<Boolean> externalCancel = () -> false;
+
+    /**
+     * Single-thread executor used solely to host the worker that executes
+     * {@code engineAssembledWithMessagesFull} when wrapped by
+     * {@link #withWallClockBudget}. We use a dedicated executor (rather than
+     * the common pool) so we can issue {@code cancel(true)} on timeout
+     * without disturbing other CompletableFutures in the JVM.
+     */
+    private final ExecutorService llmCallExecutor =
+            Executors.newCachedThreadPool(r -> {
+                Thread t = new Thread(r, "talos-llm-call");
+                t.setDaemon(true);
+                return t;
+            });
+
+    /**
+     * Single-thread scheduler for the idle-stream watchdog. Daemon so it
+     * never holds the JVM open. One scheduler is shared across all calls;
+     * each call schedules its own {@code ScheduledFuture} and cancels it on
+     * normal completion.
+     */
+    private final java.util.concurrent.ScheduledExecutorService watchdogExecutor =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "talos-llm-watchdog");
+                t.setDaemon(true);
+                return t;
+            });
 
     /** Tool definitions to include in engine chat requests (native tool calling). */
     private volatile List<ToolSpec> toolSpecs = List.of();
@@ -94,6 +175,25 @@ public final class LlmClient implements AutoCloseable {
             else if (v != null) try {       cfgMax = Long.parseLong(String.valueOf(v)); } catch (Exception ignore) {}
         }
         this.responseMaxChars = Math.max(1, cfgMax);
+
+        // ---- limits.llm_timeout_ms (P2 wall-clock budget; min=1000) ----
+        long cfgBudget = 300_000L; // fallback: 5 minutes
+        if (limits != null) {
+            Object v = limits.get("llm_timeout_ms");
+            if (v instanceof Number n)      cfgBudget = n.longValue();
+            else if (v != null) try {       cfgBudget = Long.parseLong(String.valueOf(v)); } catch (Exception ignore) {}
+        }
+        this.defaultWallClockBudgetMs = Math.max(1000L, cfgBudget);
+
+        // ---- limits.llm_idle_ms (P2 idle-stream watchdog; min=1000, ≤0 disables) ----
+        long cfgIdle = 60_000L; // fallback: 60s between chunks
+        if (limits != null) {
+            Object v = limits.get("llm_idle_ms");
+            if (v instanceof Number n)      cfgIdle = n.longValue();
+            else if (v != null) try {       cfgIdle = Long.parseLong(String.valueOf(v)); } catch (Exception ignore) {}
+        }
+        // 0 or negative ⇒ disabled (preserved verbatim); otherwise floor at 1s.
+        this.defaultIdleMs = cfgIdle <= 0 ? cfgIdle : Math.max(1000L, cfgIdle);
 
         // Lazy init registry only when ENGINE mode is actually used.
         if (this.mode == TransportMode.ENGINE) {
@@ -189,6 +289,16 @@ public final class LlmClient implements AutoCloseable {
     /** Get the current tool specifications (for testing). */
     public List<ToolSpec> getToolSpecs() {
         return toolSpecs;
+    }
+
+    /**
+     * P2 — install an external cancel supplier (e.g., a Ctrl-C handler that
+     * flips an {@link java.util.concurrent.atomic.AtomicBoolean}). Polled on
+     * every stream chunk and once per watchdog tick. Pass {@code null} or a
+     * {@code () -> false} supplier to disable.
+     */
+    public void setCancelSupplier(Supplier<Boolean> cancel) {
+        this.externalCancel = (cancel == null) ? () -> false : cancel;
     }
 
     /** Non-streaming chat: sanitized, capped; in ENGINE mode uses the same streaming path for parity. */
@@ -469,6 +579,27 @@ public final class LlmClient implements AutoCloseable {
      * @return stream result with text and tool calls
      */
     public StreamResult chatStreamFull(List<ChatMessage> messages, Consumer<String> onChunk) {
+        return chatStreamFull(messages, onChunk, defaultWallClockBudgetMs);
+    }
+
+    /**
+     * Streaming chat with an explicit wall-clock budget for the whole call.
+     *
+     * <p>If the engine does not produce a complete response within
+     * {@code wallClockMs}, the worker thread is interrupted and a
+     * {@link StreamResult} carrying a partial-text + budget-exceeded marker
+     * is returned. Any chunks already delivered to {@code onChunk} are
+     * preserved (the user has already seen them).
+     *
+     * <p>Set {@code wallClockMs <= 0} to disable the budget (legacy behavior).
+     *
+     * @param messages    structured conversation messages
+     * @param onChunk     callback for text display chunks (may be null)
+     * @param wallClockMs hard deadline in ms; ≤0 disables
+     */
+    public StreamResult chatStreamFull(List<ChatMessage> messages,
+                                       Consumer<String> onChunk,
+                                       long wallClockMs) {
         if (scriptedResponses != null) {
             String r = nextScriptedResponse();
             if (onChunk != null && !r.isEmpty()) onChunk.accept(r);
@@ -479,7 +610,23 @@ public final class LlmClient implements AutoCloseable {
             if (onChunk != null && !full.isEmpty()) onChunk.accept(full);
             return new StreamResult(full, List.of());
         }
-        return engineAssembledWithMessagesFull(messages, onChunk, Duration.ofSeconds(90), () -> false);
+        // P2 — track the time of the last visible chunk; the watchdog (set up
+        // inside withWallClockBudget) abort()s the worker if no chunk arrives
+        // for {@link #defaultIdleMs} ms. The cancel supplier OR-combines the
+        // engine-level cancel and the externally-set cancel hook so a Ctrl-C
+        // future patch can plug in without touching this method.
+        AtomicLong lastChunkAt = new AtomicLong(System.currentTimeMillis());
+        Consumer<String> trackingSink = chunk -> {
+            lastChunkAt.set(System.currentTimeMillis());
+            if (onChunk != null) onChunk.accept(chunk);
+        };
+        Supplier<Boolean> cancel = this.externalCancel;
+        return withWallClockBudget(
+                () -> engineAssembledWithMessagesFullTracked(
+                        messages, trackingSink, Duration.ofSeconds(90), cancel, lastChunkAt),
+                wallClockMs,
+                lastChunkAt,
+                "streaming chat");
     }
 
     /**
@@ -487,13 +634,141 @@ public final class LlmClient implements AutoCloseable {
      * Used by the tool-call loop for re-prompting after tool execution.
      */
     public StreamResult chatFull(List<ChatMessage> messages) {
+        return chatFull(messages, defaultWallClockBudgetMs);
+    }
+
+    /**
+     * Non-streaming chat with an explicit wall-clock budget.
+     * See {@link #chatStreamFull(List, Consumer, long)}.
+     */
+    public StreamResult chatFull(List<ChatMessage> messages, long wallClockMs) {
         if (scriptedResponses != null) {
             return new StreamResult(nextScriptedResponse(), List.of());
         }
         if (mode == TransportMode.PLACEHOLDER) {
             return new StreamResult(placeholderFromMessages(messages), List.of());
         }
-        return engineAssembledWithMessagesFull(messages, null, Duration.ofSeconds(90), () -> false);
+        // P2 — same idle-watchdog + cancel-hook plumbing as chatStreamFull.
+        // The non-streaming path still uses an internal stream loop, so
+        // chunk arrivals are observable; idle detection is meaningful.
+        AtomicLong lastChunkAt = new AtomicLong(System.currentTimeMillis());
+        Consumer<String> trackingSink = chunk -> lastChunkAt.set(System.currentTimeMillis());
+        Supplier<Boolean> cancel = this.externalCancel;
+        return withWallClockBudget(
+                () -> engineAssembledWithMessagesFullTracked(
+                        messages, trackingSink, Duration.ofSeconds(90), cancel, lastChunkAt),
+                wallClockMs,
+                lastChunkAt,
+                "non-streaming chat");
+    }
+
+    /**
+     * Wrap an engine call in a wall-clock budget. On timeout, the worker is
+     * interrupted (best-effort: JDK HttpClient body reads typically wake on
+     * interrupt + close) and we synthesize a {@link StreamResult} containing
+     * a single user-visible error line. We deliberately return rather than
+     * throw: the calling tool-call loop is structured around StreamResults,
+     * and an exception there causes the whole REPL turn to abort with an
+     * unhelpful stack-trace flash. This keeps the UX coherent.
+     */
+    private StreamResult withWallClockBudget(java.util.concurrent.Callable<StreamResult> work,
+                                             long wallClockMs,
+                                             AtomicLong lastChunkAt,
+                                             String label) {
+        // Per-call idle watchdog: if no chunk arrives within defaultIdleMs,
+        // cancel the worker. The watchdog tick interval is min(idle/4, 5s)
+        // to keep the abort latency bounded without busy-spinning.
+        java.util.concurrent.ScheduledFuture<?> watchdog = null;
+        CompletableFuture<StreamResult> fut;
+        if (wallClockMs <= 0) {
+            try { return work.call(); }
+            catch (RuntimeException re) { throw re; }
+            catch (Exception e) { throw new RuntimeException(e); }
+        }
+        fut = CompletableFuture.supplyAsync(() -> {
+            try { return work.call(); }
+            catch (RuntimeException re) { throw re; }
+            catch (Exception e) { throw new RuntimeException(e); }
+        }, llmCallExecutor);
+
+        final long idleMs = defaultIdleMs;
+        if (idleMs > 0 && lastChunkAt != null) {
+            long tickMs = Math.max(500L, Math.min(idleMs / 4L, 5_000L));
+            final CompletableFuture<StreamResult> futRef = fut;
+            watchdog = watchdogExecutor.scheduleAtFixedRate(() -> {
+                if (futRef.isDone()) return;
+                long since = System.currentTimeMillis() - lastChunkAt.get();
+                if (since > idleMs) {
+                    futRef.completeExceptionally(new IdleStreamException(idleMs));
+                }
+            }, tickMs, tickMs, TimeUnit.MILLISECONDS);
+        }
+
+        try {
+            return fut.get(wallClockMs, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException te) {
+            fut.cancel(true);
+            String msg = "[turn aborted: " + label + " exceeded "
+                    + (wallClockMs / 1000) + "s wall-clock budget — model is hung "
+                    + "or producing tokens too slowly. Try a smaller model, a shorter prompt, "
+                    + "or raise limits.llm_timeout_ms in config.]";
+            return new StreamResult(msg, List.of());
+        } catch (ExecutionException ee) {
+            Throwable cause = ee.getCause();
+            if (cause instanceof IdleStreamException ise) {
+                fut.cancel(true);
+                String msg = "[turn aborted: " + label + " produced no tokens for "
+                        + (ise.idleMs / 1000) + "s — model appears wedged. "
+                        + "Try a smaller model or raise limits.llm_idle_ms in config.]";
+                return new StreamResult(msg, List.of());
+            }
+            if (cause instanceof RuntimeException re) throw re;
+            if (cause instanceof Error err) throw err;
+            throw new RuntimeException(cause);
+        } catch (InterruptedException ie) {
+            fut.cancel(true);
+            Thread.currentThread().interrupt();
+            return new StreamResult("[turn aborted: interrupted]", List.of());
+        } finally {
+            if (watchdog != null) watchdog.cancel(false);
+        }
+    }
+
+    /**
+     * P2 — internal sentinel used by the idle watchdog to abort a hung
+     * stream. Carries the configured idle threshold so the user-visible
+     * abort message can quote the actual number.
+     */
+    private static final class IdleStreamException extends RuntimeException {
+        final long idleMs;
+        IdleStreamException(long idleMs) {
+            super("idle stream > " + idleMs + " ms");
+            this.idleMs = idleMs;
+        }
+    }
+
+    /**
+     * P2 — variant of {@link #engineAssembledWithMessagesFull} that calls
+     * the tracking sink on every text chunk (so the idle watchdog sees
+     * activity). Behavior is otherwise identical.
+     */
+    private StreamResult engineAssembledWithMessagesFullTracked(List<ChatMessage> messages,
+                                                                Consumer<String> trackingSink,
+                                                                Duration timeout,
+                                                                Supplier<Boolean> cancelled,
+                                                                AtomicLong lastChunkAt) {
+        // Wrap the cancel supplier so the engine loop also bails when the
+        // watchdog completes the future exceptionally (the worker thread
+        // is then on borrowed time; we want it to drop out quickly).
+        Supplier<Boolean> wrapped = () -> {
+            if (cancelled != null && Boolean.TRUE.equals(cancelled.get())) return true;
+            return Thread.currentThread().isInterrupted();
+        };
+        // Bump the heartbeat once before we start blocking on the engine —
+        // protects against an engine that takes >idleMs to produce its
+        // first chunk on a cold model.
+        if (lastChunkAt != null) lastChunkAt.set(System.currentTimeMillis());
+        return engineAssembledWithMessagesFull(messages, trackingSink, timeout, wrapped);
     }
 
     /**
@@ -637,5 +912,7 @@ public final class LlmClient implements AutoCloseable {
 
     @Override public void close() {
         if (registry != null) try { registry.close(); } catch (Exception ignored) {}
+        try { llmCallExecutor.shutdownNow(); } catch (Exception ignored) {}
+        try { watchdogExecutor.shutdownNow(); } catch (Exception ignored) {}
     }
 }
