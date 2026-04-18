@@ -80,6 +80,18 @@ public final class CliApprovalGate implements ApprovalGate {
 
     @Override
     public boolean approve(String description, String detail) {
+        return approveFull(description, detail).isApproved();
+    }
+
+    /**
+     * Tri-state approval prompt.
+     *
+     * <p>Accepts "y" / "yes" for one-time approval, "a" / "all" / "always"
+     * for approval with a "remember for this session" flag, and anything
+     * else (including EOF) as denial.
+     */
+    @Override
+    public ApprovalResponse approveFull(String description, String detail) {
         // Stop spinner / prepare terminal before showing approval UI
         if (prePromptHook != null) {
             try { prePromptHook.run(); } catch (Exception ignored) { }
@@ -94,18 +106,23 @@ public final class CliApprovalGate implements ApprovalGate {
 
         String response;
         try {
-            response = lineReader.apply("  Allow? [y/N] ");
+            response = lineReader.apply("  Allow? [y=yes, a=yes for session, N=no] ");
         } catch (Exception e) {
             // JLine EndOfFileException, IOError, etc. → deny
-            return false;
+            return ApprovalResponse.DENIED;
         }
 
         if (response == null) {
-            return false; // EOF = deny
+            return ApprovalResponse.DENIED; // EOF = deny
         }
 
         response = response.trim().toLowerCase();
-        return "y".equals(response) || "yes".equals(response);
+        if ("a".equals(response) || "all".equals(response) || "always".equals(response)) {
+            return ApprovalResponse.APPROVED_REMEMBER;
+        }
+        if ("y".equals(response) || "yes".equals(response)) {
+            return ApprovalResponse.APPROVED;
+        }
+        return ApprovalResponse.DENIED;
     }
 }
-

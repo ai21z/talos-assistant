@@ -33,21 +33,28 @@ public final class TurnProcessor {
 
     private final ModeController modes;
     private final ApprovalGate approvalGate;
+    private final ApprovalPolicy approvalPolicy;
     private final ToolRegistry toolRegistry;
     private final List<SessionListener> listeners = new CopyOnWriteArrayList<>();
 
-    public TurnProcessor(ModeController modes, ApprovalGate approvalGate, ToolRegistry toolRegistry) {
+    public TurnProcessor(ModeController modes, ApprovalGate approvalGate,
+                         ToolRegistry toolRegistry, ApprovalPolicy approvalPolicy) {
         this.modes = modes;
         this.approvalGate = (approvalGate != null) ? approvalGate : new NoOpApprovalGate();
         this.toolRegistry = (toolRegistry != null) ? toolRegistry : new ToolRegistry();
+        this.approvalPolicy = (approvalPolicy != null) ? approvalPolicy : ApprovalPolicy.ALWAYS_ASK;
+    }
+
+    public TurnProcessor(ModeController modes, ApprovalGate approvalGate, ToolRegistry toolRegistry) {
+        this(modes, approvalGate, toolRegistry, ApprovalPolicy.ALWAYS_ASK);
     }
 
     public TurnProcessor(ModeController modes, ApprovalGate approvalGate) {
-        this(modes, approvalGate, new ToolRegistry());
+        this(modes, approvalGate, new ToolRegistry(), ApprovalPolicy.ALWAYS_ASK);
     }
 
     public TurnProcessor(ModeController modes) {
-        this(modes, new NoOpApprovalGate(), new ToolRegistry());
+        this(modes, new NoOpApprovalGate(), new ToolRegistry(), ApprovalPolicy.ALWAYS_ASK);
     }
 
     /** Register a session lifecycle listener for post-turn hooks. */
@@ -90,25 +97,42 @@ public final class TurnProcessor {
         int turn = session.nextTurn();
         long startNanos = System.nanoTime();
 
-        Path ws = session.workspace();
-        Optional<Result> result = modes.route(userInput, ws, ctx);
+        // Publish the current turn's user request + start the per-turn audit
+        // bag so executeTool(...) (called many times during tool-loop runs)
+        // can consult the request for scope guarding and record its tool
+        // activity without threading extra arguments through every call.
+        TurnUserRequestCapture.set(userInput);
+        TurnAuditCapture.begin();
+        TurnResult turnResult;
+        try {
+            Path ws = session.workspace();
+            Optional<Result> result = modes.route(userInput, ws, ctx);
 
-        if (result.isEmpty()) {
-            return null;
+            if (result.isEmpty()) {
+                return null;
+            }
+
+            long elapsedNanos = System.nanoTime() - startNanos;
+
+            // Consume any retrieval trace captured during mode dispatch (e.g. by RagMode).
+            // For non-RAG turns (AskMode, DevMode), this returns null — expected and correct.
+            RetrievalTrace trace = TurnTraceCapture.consume();
+
+            turnResult = new TurnResult(
+                    result.get(),
+                    trace,
+                    turn,
+                    Duration.ofNanos(elapsedNanos),
+                    TurnAuditCapture.end()
+            );
+        } finally {
+            TurnUserRequestCapture.clear();
+            // Defensive: if we hit a return/throw above before end() fired,
+            // ensure the thread-local bag is cleaned up.
+            if (TurnAuditCapture.isActive()) {
+                TurnAuditCapture.end();
+            }
         }
-
-        long elapsedNanos = System.nanoTime() - startNanos;
-
-        // Consume any retrieval trace captured during mode dispatch (e.g. by RagMode).
-        // For non-RAG turns (AskMode, DevMode), this returns null — expected and correct.
-        RetrievalTrace trace = TurnTraceCapture.consume();
-
-        TurnResult turnResult = new TurnResult(
-                result.get(),
-                trace,
-                turn,
-                Duration.ofNanos(elapsedNanos)
-        );
 
         // Fire post-turn hooks on all listeners
         for (SessionListener listener : listeners) {
@@ -123,19 +147,27 @@ public final class TurnProcessor {
     }
 
     /**
-     * Execute a tool call with full sandbox enforcement and approval gating.
+     * Execute a tool call with full sandbox enforcement, scope guarding,
+     * policy classification, and approval gating.
      *
-     * <p>If the tool's risk level requires approval ({@code WRITE} or {@code DESTRUCTIVE}),
-     * the {@link ApprovalGate} is consulted first. Denied operations return a
-     * failed {@link ToolResult} without executing the tool.
+     * <p>Decision order for mutating tools:
+     * <ol>
+     *   <li>Resolve target path (for scope warning + policy classification).</li>
+     *   <li>{@link ScopeGuard} — if the request is web-scoped and the target
+     *       looks obviously off-scope, a warning is prepended to the approval
+     *       detail so the user sees it at decision time. Posture is warn,
+     *       not block.</li>
+     *   <li>{@link ApprovalPolicy#decide} — may auto-approve in-workspace
+     *       edits (if the user opted in for this session) or deny without
+     *       prompting.</li>
+     *   <li>{@link ApprovalGate#approveFull} — tri-state gate that can emit
+     *       {@link ApprovalResponse#APPROVED_REMEMBER} to record the user's
+     *       "yes for this session" preference.</li>
+     * </ol>
      *
-     * <p>Builds a {@link ToolContext} from the session and delegates
-     * to the registry. Returns a {@link ToolResult} — never throws.
-     *
-     * @param session the active session (provides workspace + config)
-     * @param call    the tool call to execute
-     * @param ctx     runtime context (provides sandbox)
-     * @return tool execution result
+     * <p>Scope guarding, policy decisions, and approval outcomes are also
+     * recorded into the active {@link TurnAuditCapture} bag if one is
+     * running on this thread.
      */
     public ToolResult executeTool(Session session, ToolCall call, Context ctx) {
         if (call == null) {
@@ -148,24 +180,65 @@ public final class TurnProcessor {
             return ToolResult.fail(ToolError.notFound("Unknown tool: " + call.toolName()));
         }
 
-        // Check risk level and gate approval
         ToolRiskLevel risk = tool.descriptor().riskLevel();
+        String path = resolvePathParam(call);
+        String userRequest = TurnUserRequestCapture.get();
+
+        // Scope guard — narrow, lexical, warn-first. Fires only for mutating
+        // calls where the request looks web-scoped and the target extension
+        // is obviously off-scope. If it fires, the warning is surfaced to
+        // the user through the approval detail (see buildApprovalDetail).
+        String scopeWarning = null;
+        if (risk.requiresApproval()
+                && path != null
+                && ScopeGuard.looksLikeOffScopeMutationTarget(userRequest, path)) {
+            scopeWarning = ScopeGuard.warningMessage(userRequest, path);
+        }
+
         if (risk.requiresApproval()) {
-            String desc = risk.name().toLowerCase().replace('_', ' ')
-                    + " operation: " + call.toolName();
-            String path = resolvePathParam(call);
-            String detail = buildApprovalDetail(call, path);
-            if (!approvalGate.approve(desc, detail)) {
-                // Phrasing matters: previously "Operation denied by user" caused
-                // qwen2.5-coder to hallucinate a "permissions" excuse and tell
-                // the user to "ensure you have the necessary permissions" — the
-                // word "denied" anchored the wrong narrative. Reshape the error
-                // so the model interprets it as user intent, not auth failure.
+            TurnAuditCapture.recordApprovalRequired();
+
+            // Policy classification. AUTO_APPROVE skips the gate; DENY refuses
+            // without prompting; ASK falls through to the gate as before.
+            Path workspace = session != null ? session.workspace() : null;
+            ApprovalPolicy.Decision decision = approvalPolicy.decide(workspace, call, risk);
+
+            if (decision == ApprovalPolicy.Decision.DENY) {
+                TurnAuditCapture.recordApprovalDenied();
                 return ToolResult.fail(ToolError.denied(
-                        "User did not approve the " + call.toolName()
-                                + " call. The user is in control of the workspace; "
-                                + "ask what they want to do differently before retrying, "
-                                + "or take a different action that does not need approval."));
+                        "Policy denied the " + call.toolName()
+                                + " call. The session's approval policy prohibits this operation; "
+                                + "choose a different action or ask the user to relax policy."));
+            }
+
+            if (decision == ApprovalPolicy.Decision.ASK) {
+                String desc = risk.name().toLowerCase().replace('_', ' ')
+                        + " operation: " + call.toolName();
+                String detail = buildApprovalDetail(call, path, scopeWarning);
+                ApprovalResponse response = approvalGate.approveFull(desc, detail);
+
+                if (response == ApprovalResponse.DENIED) {
+                    TurnAuditCapture.recordApprovalDenied();
+                    // Phrasing matters: previously "Operation denied by user" caused
+                    // qwen2.5-coder to hallucinate a "permissions" excuse and tell
+                    // the user to "ensure you have the necessary permissions" — the
+                    // word "denied" anchored the wrong narrative. Reshape the error
+                    // so the model interprets it as user intent, not auth failure.
+                    return ToolResult.fail(ToolError.denied(
+                            "User did not approve the " + call.toolName()
+                                    + " call. The user is in control of the workspace; "
+                                    + "ask what they want to do differently before retrying, "
+                                    + "or take a different action that does not need approval."));
+                }
+
+                // Approved — record and optionally propagate the remember choice.
+                TurnAuditCapture.recordApprovalGranted();
+                if (response == ApprovalResponse.APPROVED_REMEMBER) {
+                    approvalPolicy.rememberApproval(workspace, call, risk);
+                }
+            } else {
+                // AUTO_APPROVE by policy
+                TurnAuditCapture.recordApprovalGranted();
             }
         }
 
@@ -175,12 +248,19 @@ public final class TurnProcessor {
                 session.config()
         );
 
-        return toolRegistry.execute(call, toolCtx);
+        ToolResult result = toolRegistry.execute(call, toolCtx);
+        TurnAuditCapture.recordToolCall(call.toolName(), path == null ? "" : path, result.success());
+        return result;
     }
 
     /** Access the approval gate (for future use by modes/capabilities). */
     public ApprovalGate approvalGate() {
         return approvalGate;
+    }
+
+    /** Access the approval policy layer (test + introspection hook). */
+    public ApprovalPolicy approvalPolicy() {
+        return approvalPolicy;
     }
 
     /** Access the tool registry for tool discovery and registration. */
@@ -205,9 +285,17 @@ public final class TurnProcessor {
      * Build a detailed approval message for write/edit operations.
      * Shows the target path, content size/line count, and a preview
      * of the first few lines so the user can make an informed decision.
+     *
+     * <p>If a {@code scopeWarning} is present, it is prepended on its own
+     * line so the user sees the scope concern before the approval choice.
      */
-    private static String buildApprovalDetail(ToolCall call, String path) {
+    private static String buildApprovalDetail(ToolCall call, String path, String scopeWarning) {
         var sb = new StringBuilder();
+
+        if (scopeWarning != null && !scopeWarning.isBlank()) {
+            sb.append("⚠ ").append(scopeWarning).append('\n');
+            sb.append("    ");
+        }
 
         if (path != null && !path.isBlank()) {
             sb.append("target: ").append(path);

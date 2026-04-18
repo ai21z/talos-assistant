@@ -109,11 +109,98 @@ public final class JsonSessionStore implements SessionStore {
     public boolean delete(String sessionId) {
         if (sessionId == null || sessionId.isBlank()) return false;
         try {
-            return Files.deleteIfExists(fileFor(sessionId));
+            boolean snap = Files.deleteIfExists(fileFor(sessionId));
+            // Also remove the companion per-turn log, if any.
+            Files.deleteIfExists(turnsFileFor(sessionId));
+            return snap;
         } catch (IOException e) {
             LOG.warn("Failed to delete session {}: {}", sessionId, e.getMessage());
             return false;
         }
+    }
+
+    // ── Per-turn structured durability (JSONL append-only) ───────────────
+
+    @Override
+    public void appendTurn(String sessionId, TurnRecord record) {
+        if (sessionId == null || sessionId.isBlank() || record == null) return;
+        try {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("turnNumber", record.turnNumber());
+            row.put("timestamp", record.timestamp().toString());
+            row.put("durationMs", record.durationMs());
+            row.put("userInput", record.userInput());
+            row.put("assistantText", record.assistantText());
+            row.put("approvalsRequired", record.approvalsRequired());
+            row.put("approvalsGranted", record.approvalsGranted());
+            row.put("approvalsDenied", record.approvalsDenied());
+            row.put("retrievalTraceSummary", record.retrievalTraceSummary());
+            List<Map<String, Object>> calls = new java.util.ArrayList<>();
+            for (TurnRecord.ToolCallSummary s : record.toolCalls()) {
+                Map<String, Object> c = new LinkedHashMap<>();
+                c.put("name", s.name());
+                c.put("pathHint", s.pathHint());
+                c.put("success", s.success());
+                calls.add(c);
+            }
+            row.put("toolCalls", calls);
+
+            // JSONL: one compact JSON object per line.
+            String line = MAPPER.writeValueAsString(row) + System.lineSeparator();
+            Path file = turnsFileFor(sessionId);
+            Files.writeString(file, line,
+                    java.nio.file.StandardOpenOption.CREATE,
+                    java.nio.file.StandardOpenOption.APPEND);
+        } catch (Exception e) {
+            LOG.warn("Failed to append turn record for {}: {}", sessionId, e.getMessage());
+        }
+    }
+
+    @Override
+    public List<TurnRecord> loadTurns(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) return List.of();
+        Path file = turnsFileFor(sessionId);
+        if (!Files.exists(file)) return List.of();
+        List<TurnRecord> out = new java.util.ArrayList<>();
+        try {
+            for (String line : Files.readAllLines(file)) {
+                if (line == null || line.isBlank()) continue;
+                try {
+                    Map<String, Object> row = MAPPER.readValue(line, new TypeReference<>() {});
+                    out.add(rowToRecord(row));
+                } catch (Exception lineErr) {
+                    LOG.warn("Skipping malformed turn line in {}: {}", file.getFileName(), lineErr.getMessage());
+                }
+            }
+        } catch (IOException e) {
+            LOG.warn("Failed to read turn log {}: {}", file, e.getMessage());
+        }
+        return out;
+    }
+
+    private static TurnRecord rowToRecord(Map<String, Object> row) {
+        int turnNumber = intVal(row, "turnNumber");
+        Instant ts = parseInstant(row.get("timestamp"));
+        long durationMs = row.get("durationMs") instanceof Number n ? n.longValue() : 0L;
+        String userInput = str(row, "userInput");
+        String assistantText = str(row, "assistantText");
+        int reqd = intVal(row, "approvalsRequired");
+        int grnt = intVal(row, "approvalsGranted");
+        int deny = intVal(row, "approvalsDenied");
+        String traceSummary = str(row, "retrievalTraceSummary");
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> rawCalls =
+                (List<Map<String, Object>>) row.getOrDefault("toolCalls", List.of());
+        List<TurnRecord.ToolCallSummary> calls = new java.util.ArrayList<>();
+        for (Map<String, Object> c : rawCalls) {
+            String name = c.get("name") == null ? "" : String.valueOf(c.get("name"));
+            String pathHint = c.get("pathHint") == null ? "" : String.valueOf(c.get("pathHint"));
+            boolean success = c.get("success") instanceof Boolean b && b;
+            calls.add(new TurnRecord.ToolCallSummary(name, pathHint, success));
+        }
+        return new TurnRecord(turnNumber, ts, durationMs, userInput, assistantText,
+                calls, reqd, grnt, deny, traceSummary);
     }
 
     // ── Utility ───────────────────────────────────────────────────────
@@ -135,6 +222,11 @@ public final class JsonSessionStore implements SessionStore {
 
     private Path fileFor(String sessionId) {
         return sessionsDir.resolve(sessionId + ".json");
+    }
+
+    /** Companion JSONL file for per-turn append-only durability. */
+    private Path turnsFileFor(String sessionId) {
+        return sessionsDir.resolve(sessionId + ".turns.jsonl");
     }
 
     private static String str(Map<String, Object> map, String key) {
