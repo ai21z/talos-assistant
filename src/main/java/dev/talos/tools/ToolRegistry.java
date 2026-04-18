@@ -112,6 +112,21 @@ public final class ToolRegistry {
     public TalosTool get(String name) {
         if (name == null) return null;
 
+        // Separator normalization: local models frequently emit "talos:X",
+        // "talos/X", "talos-X", "talos_X" instead of the canonical "talos.X"
+        // (observed: gemma4:26b mixed colon and dot in the same turn,
+        // wasting two tool-loop iterations on "Unknown tool" errors). Rewrite
+        // any non-dot separator immediately after the "talos" prefix once
+        // before the cache lookup. Bounded to the prefix so unrelated tokens
+        // containing these characters (e.g., an embedded path) are untouched.
+        if (name.length() > 5) {
+            char c = name.charAt(5);
+            if ((c == ':' || c == '/' || c == '-' || c == '_')
+                    && name.regionMatches(true, 0, "talos", 0, 5)) {
+                name = "talos." + name.substring(6);
+            }
+        }
+
         // 1. Exact match
         TalosTool tool = tools.get(name);
         if (tool != null) return tool;

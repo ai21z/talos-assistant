@@ -61,7 +61,17 @@ public final class MemoryUpdateListener implements SessionListener {
 
         String answer = extractText(result.result());
         if (answer != null && !answer.isBlank()) {
-            conversationManager.addTurn(userInput, answer.strip());
+            // BUG #1 fix — strip Talos's UI status chrome before persisting
+            // to history. Otherwise the model sees its own previous turn
+            // decorated with "[Used N tool(s)…]" and "✓ Edited X…" status
+            // lines, learns to imitate the format, and starts emitting them
+            // as PROSE on later turns without actually calling any tool —
+            // a confidence-trick failure mode (4 fabricated turns observed
+            // in a real qwen2.5-coder transcript). Render-side chrome must
+            // never be part of the model's training surface.
+            String forHistory = stripUiChromeForHistory(answer);
+            if (forHistory.isBlank()) return;
+            conversationManager.addTurn(userInput, forHistory);
 
             // Trigger compaction check (non-blocking — if LLM is null, this is a no-op)
             if (llm != null) {
@@ -77,6 +87,46 @@ public final class MemoryUpdateListener implements SessionListener {
                 }
             }
         }
+    }
+
+    /**
+     * BUG #1 fix — strip Talos's own UI status chrome from assistant text
+     * before persisting to conversation history.
+     *
+     * <p><b>Why:</b> {@code AssistantTurnExecutor.appendSummary} appends
+     * {@code "[Used N tool(s): … | M iteration(s)]"} and the tool-call
+     * loop prepends {@code "✓ Edited X: replaced N line(s)…"} lines into
+     * the streamed text that becomes {@code Result.Streamed.fullText}.
+     * Without this filter, that decorated string lands verbatim in the
+     * conversation history and the next-turn model sees it as if the
+     * assistant had spoken those words. Code-tuned local models (observed:
+     * qwen2.5-coder:14b, real transcript Apr 2026) memorize the format
+     * after one exposure and start emitting fake {@code [Used 2 tool(s)…]}
+     * / {@code ✓ Edited X…} blocks as plain prose on subsequent turns
+     * without calling any tool — a confidence-trick failure mode where
+     * the assistant convincingly claims work it never did. Render-side
+     * chrome must never be part of the model's training surface.
+     *
+     * <p>The stripped patterns are intentionally narrow — only whole-line
+     * matches against known Talos-emitted prefixes are removed; actual
+     * model prose containing brackets is preserved.
+     */
+    static String stripUiChromeForHistory(String text) {
+        if (text == null || text.isBlank()) return "";
+        StringBuilder out = new StringBuilder(text.length());
+        for (String line : text.split("\\R", -1)) {
+            String t = line.trim();
+            if (t.startsWith("[Used ") && t.contains("tool(s)")) continue;
+            if (t.startsWith("[Tool-call limit reached")) continue;
+            if (t.startsWith("[turn aborted")) continue;
+            if (t.startsWith("[iteration limit")) continue;
+            if (t.startsWith("✓ Edited ")) continue;
+            if (t.startsWith("✓ Wrote ")) continue;
+            if (t.startsWith("✓ Created ")) continue;
+            if (t.startsWith("Suggestion: edit_file has failed")) continue;
+            out.append(line).append('\n');
+        }
+        return out.toString().replaceAll("\\n{3,}", "\n\n").strip();
     }
 
     /**
@@ -110,4 +160,3 @@ public final class MemoryUpdateListener implements SessionListener {
         };
     }
 }
-

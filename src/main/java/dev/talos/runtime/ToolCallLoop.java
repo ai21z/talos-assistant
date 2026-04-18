@@ -443,6 +443,23 @@ public final class ToolCallLoop {
                 if (!result.success()) {
                     failedCalls++;
 
+                    // BUG C fix: a failed mutation must invalidate the
+                    // read-dedup cushion. The failure itself is new
+                    // information (wrong path, missing param, not-found),
+                    // and the model typically needs to re-read the target
+                    // to self-correct. Observed in a real transcript:
+                    // edit_file on a hallucinated path "horror_site/..."
+                    // failed; the model's next two iterations tried to
+                    // re-read the correct path — every one was suppressed
+                    // as "redundant", starving the recovery path and
+                    // burning the iteration budget. Clear the read cache
+                    // so the next read_file actually runs. We deliberately
+                    // do NOT set mutationSinceStart (it implies successful
+                    // state change); we only nullify the dedup signal.
+                    if (isMutatingTool(effective.toolName())) {
+                        successfulReadCalls.clear();
+                    }
+
                     if (isEditFile) {
                         String callSig = buildCallSignature(effective);
                         failedCallSignatures.add(callSig);

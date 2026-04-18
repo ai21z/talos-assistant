@@ -100,6 +100,50 @@ class MemoryUpdateListenerTest {
     @Test void extractTextFromStreamed() {
         assertEquals("body", MemoryUpdateListener.extractText(new Result.Streamed("body", "[S]")));
     }
+
+    // ---- BUG #1: UI chrome must not leak into conversation history ----
+
+    @Test void stripUiChromeRemovesUsedToolsLine() {
+        String in = "Here is your answer.\n[Used 2 tool(s): talos.read_file | 2 iteration(s)]";
+        assertEquals("Here is your answer.",
+                MemoryUpdateListener.stripUiChromeForHistory(in));
+    }
+
+    @Test void stripUiChromeRemovesEditedAndWroteMarkers() {
+        String in = "Done.\n✓ Edited foo.txt: replaced 1 line(s)\n✓ Wrote bar.txt\n✓ Created baz/";
+        assertEquals("Done.", MemoryUpdateListener.stripUiChromeForHistory(in));
+    }
+
+    @Test void stripUiChromeRemovesIterationAndAbortMarkers() {
+        String in = "Result.\n[Tool-call limit reached after 8]\n[turn aborted]\n[iteration limit hit]";
+        assertEquals("Result.", MemoryUpdateListener.stripUiChromeForHistory(in));
+    }
+
+    @Test void stripUiChromePreservesProseWithBrackets() {
+        String in = "The config uses [brackets] in its DSL — that is fine.";
+        assertEquals(in, MemoryUpdateListener.stripUiChromeForHistory(in));
+    }
+
+    @Test void stripUiChromeReturnsEmptyOnNullOrBlank() {
+        assertEquals("", MemoryUpdateListener.stripUiChromeForHistory(null));
+        assertEquals("", MemoryUpdateListener.stripUiChromeForHistory("   \n\n  "));
+    }
+
+    @Test void chromeOnlyAnswerIsNotRecordedInHistory() {
+        // Real transcript pattern: model emits ONLY UI chrome (fabricated).
+        // After stripping it would be blank — must not pollute history.
+        String chromeOnly = "[Used 2 tool(s): talos.edit_file | 4 iteration(s)]\n✓ Edited index.html: replaced 1 line(s)";
+        listener.onTurnComplete(tr(new Result.Streamed(chromeOnly, ""), 1), "edit it");
+        assertEquals(0, cm.turnCount(), "chrome-only answer must not be recorded");
+    }
+
+    @Test void prosePlusChromeKeepsOnlyProseInHistory() {
+        String mixed = "I updated the title.\n[Used 1 tool(s): talos.edit_file | 1 iteration(s)]\n✓ Edited horror-synth-site/index.html: replaced 1 line(s)";
+        listener.onTurnComplete(tr(new Result.Streamed(mixed, ""), 1), "rename title");
+        assertEquals(1, cm.turnCount());
+        assertEquals("I updated the title.", cm.buildHistory().get(1).content());
+    }
+
     private static TurnResult tr(Result r, int turn) {
         return new TurnResult(r, null, turn, Duration.ofMillis(50));
     }
