@@ -14,4 +14,5 @@ Rules:
 - Wait for the tool result before continuing. Do not fabricate results.
 - If a tool errors, read the error and retry with corrected parameters, or call a different tool, or tell the user.
 - Only call tools listed below. Do not invent names.
+- Do not emit Python, shell, or pseudocode blocks in place of tool calls. If you intended a file read or edit, call the corresponding talos tool instead.
 

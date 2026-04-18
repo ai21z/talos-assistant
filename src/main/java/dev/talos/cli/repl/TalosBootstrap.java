@@ -86,6 +86,30 @@ public final class TalosBootstrap {
         Limits         limits   = Limits.fromConfig(cfg);
         SessionMemory  memory   = new SessionMemory();
 
+        // ── P2 Ctrl-C wiring ─────────────────────────────────────────────
+        // JLine saves & restores the INT handler around its own readLine(),
+        // so a handler we install here only fires when the terminal is NOT
+        // actively reading a prompt — which is exactly the window during
+        // which an LLM call can be in flight. Pressing Ctrl-C at the prompt
+        // still raises UserInterruptException (handled elsewhere); pressing
+        // it mid-generation flips this flag, which LlmClient's watchdog and
+        // stream loop poll. Flag is cleared at the top of each LLM call by
+        // the reset hook so stale Ctrl-Cs can't leak into the next turn.
+        java.util.concurrent.atomic.AtomicBoolean cancelFlag =
+                new java.util.concurrent.atomic.AtomicBoolean(false);
+        if (lineReader != null) {
+            try {
+                lineReader.getTerminal().handle(
+                        org.jline.terminal.Terminal.Signal.INT,
+                        sig -> cancelFlag.set(true));
+            } catch (Exception ignored) {
+                // Some test terminals reject signal installation; fall back
+                // silently — the LLM still has the wall-clock + idle watchdog.
+            }
+        }
+        llm.setCancelSupplier(cancelFlag::get);
+        llm.setCancelResetHook(() -> cancelFlag.set(false));
+
         // ── Tools ────────────────────────────────────────────────────────
         FileUndoStack undoStack = new FileUndoStack();
         ToolRegistry toolRegistry = new ToolRegistry();

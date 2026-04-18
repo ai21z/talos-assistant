@@ -107,7 +107,8 @@ public final class FileEditTool implements TalosTool {
         }
 
         if (!Files.exists(resolved)) {
-            return ToolResult.fail(ToolError.notFound("File not found: " + pathParam));
+            return ToolResult.fail(ToolError.notFound(
+                    NotFoundHint.build(pathParam, resolved, ctx.workspace())));
         }
         if (Files.isDirectory(resolved)) {
             return ToolResult.fail(ToolError.invalidParams(

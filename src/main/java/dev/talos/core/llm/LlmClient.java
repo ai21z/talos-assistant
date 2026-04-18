@@ -93,6 +93,14 @@ public final class LlmClient implements AutoCloseable {
     private volatile Supplier<Boolean> externalCancel = () -> false;
 
     /**
+     * P2 — companion reset callback for {@link #externalCancel}. Invoked at
+     * the top of each public streaming/non-streaming call so a Ctrl-C
+     * pressed during turn N cannot leak into turn N+1. Default no-op
+     * preserves test behavior (tests never set a cancel supplier).
+     */
+    private volatile Runnable externalCancelReset = () -> {};
+
+    /**
      * Single-thread executor used solely to host the worker that executes
      * {@code engineAssembledWithMessagesFull} when wrapped by
      * {@link #withWallClockBudget}. We use a dedicated executor (rather than
@@ -299,6 +307,17 @@ public final class LlmClient implements AutoCloseable {
      */
     public void setCancelSupplier(Supplier<Boolean> cancel) {
         this.externalCancel = (cancel == null) ? () -> false : cancel;
+    }
+
+    /**
+     * P2 — install an external "reset the cancel flag" callback. Invoked
+     * automatically at the top of {@link #chatStreamFull} and
+     * {@link #chatFull} so a Ctrl-C pressed during turn N cannot leak into
+     * turn N+1. The REPL owns the {@link java.util.concurrent.atomic.AtomicBoolean}
+     * and supplies {@code flag::set} bound to {@code false} here.
+     */
+    public void setCancelResetHook(Runnable reset) {
+        this.externalCancelReset = (reset == null) ? () -> {} : reset;
     }
 
     /** Non-streaming chat: sanitized, capped; in ENGINE mode uses the same streaming path for parity. */
@@ -600,6 +619,9 @@ public final class LlmClient implements AutoCloseable {
     public StreamResult chatStreamFull(List<ChatMessage> messages,
                                        Consumer<String> onChunk,
                                        long wallClockMs) {
+        // P2 — clear any Ctrl-C from the previous turn so stale cancels
+        // don't immediately short-circuit this call.
+        externalCancelReset.run();
         if (scriptedResponses != null) {
             String r = nextScriptedResponse();
             if (onChunk != null && !r.isEmpty()) onChunk.accept(r);
@@ -642,6 +664,8 @@ public final class LlmClient implements AutoCloseable {
      * See {@link #chatStreamFull(List, Consumer, long)}.
      */
     public StreamResult chatFull(List<ChatMessage> messages, long wallClockMs) {
+        // P2 — see chatStreamFull: clear stale cancel flag per call.
+        externalCancelReset.run();
         if (scriptedResponses != null) {
             return new StreamResult(nextScriptedResponse(), List.of());
         }
