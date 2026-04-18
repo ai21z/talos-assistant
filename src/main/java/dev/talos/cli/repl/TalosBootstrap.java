@@ -250,6 +250,12 @@ public final class TalosBootstrap {
         memoryListener.setAssistMode(true);
         turnProcessor.addListener(memoryListener);
 
+        // Per-turn structured durability (Step 2): appends one JSON line per
+        // completed turn to ~/.talos/sessions/<sid>.turns.jsonl. Complements
+        // the close-only snapshot and enables crash recovery.
+        turnProcessor.addListener(
+                new dev.talos.runtime.JsonTurnLogAppender(sessionStore, sessionId));
+
         // ── Commands ─────────────────────────────────────────────────────
         AtomicBoolean quit = new AtomicBoolean(false);
         CommandRegistry registry = new CommandRegistry();

@@ -21,5 +21,22 @@ public interface ApprovalGate {
      * @return true if approved, false if denied/cancelled
      */
     boolean approve(String description, String detail);
-}
 
+    /**
+     * Tri-state approval — lets a gate distinguish "yes, once" from
+     * "yes, and remember for the session" from "no".
+     *
+     * <p>Default implementation delegates to {@link #approve(String, String)}
+     * and maps the boolean to {@link ApprovalResponse#APPROVED} /
+     * {@link ApprovalResponse#DENIED} — so existing gates keep working.
+     * Gates that want to surface a "remember" option (see
+     * {@link CliApprovalGate}) should override this method.
+     *
+     * @param description short human-readable description of the operation
+     * @param detail      optional longer detail (may be null)
+     * @return the approval response
+     */
+    default ApprovalResponse approveFull(String description, String detail) {
+        return approve(description, detail) ? ApprovalResponse.APPROVED : ApprovalResponse.DENIED;
+    }
+}

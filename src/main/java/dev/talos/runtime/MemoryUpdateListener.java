@@ -111,7 +111,7 @@ public final class MemoryUpdateListener implements SessionListener {
      * matches against known Talos-emitted prefixes are removed; actual
      * model prose containing brackets is preserved.
      */
-    static String stripUiChromeForHistory(String text) {
+    public static String stripUiChromeForHistory(String text) {
         if (text == null || text.isBlank()) return "";
         StringBuilder out = new StringBuilder(text.length());
         for (String line : text.split("\\R", -1)) {
