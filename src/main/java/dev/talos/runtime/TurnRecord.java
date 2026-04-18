@@ -25,6 +25,11 @@ import java.util.List;
  * @param approvalsGranted        number of approvals granted (including remembered)
  * @param approvalsDenied         number of approvals denied
  * @param retrievalTraceSummary   short human-readable retrieval trace summary (may be blank)
+ * @param status                  compact outcome tag derived from the turn's {@code Result}:
+ *                                {@code "ok"} (Ok / Streamed), {@code "error"} (Error),
+ *                                {@code "info"} (Info / TrustedInfo / Table), or {@code ""}
+ *                                (unknown / not-applicable). Makes errored turns
+ *                                distinguishable from silent turns on audit.
  */
 public record TurnRecord(
         int turnNumber,
@@ -36,7 +41,8 @@ public record TurnRecord(
         int approvalsRequired,
         int approvalsGranted,
         int approvalsDenied,
-        String retrievalTraceSummary
+        String retrievalTraceSummary,
+        String status
 ) {
 
     /** Defensive copy + null normalization. */
@@ -46,6 +52,27 @@ public record TurnRecord(
         assistantText         = (assistantText == null) ? "" : assistantText;
         toolCalls             = (toolCalls == null) ? List.of() : List.copyOf(toolCalls);
         retrievalTraceSummary = (retrievalTraceSummary == null) ? "" : retrievalTraceSummary;
+        status                = (status == null) ? "" : status;
+    }
+
+    /**
+     * Back-compat delegating constructor for call sites that don't yet
+     * supply a status. Older records (pre-status JSONL lines) also flow
+     * through this on read with status = "".
+     */
+    public TurnRecord(int turnNumber,
+                      Instant timestamp,
+                      long durationMs,
+                      String userInput,
+                      String assistantText,
+                      List<ToolCallSummary> toolCalls,
+                      int approvalsRequired,
+                      int approvalsGranted,
+                      int approvalsDenied,
+                      String retrievalTraceSummary) {
+        this(turnNumber, timestamp, durationMs, userInput, assistantText,
+                toolCalls, approvalsRequired, approvalsGranted, approvalsDenied,
+                retrievalTraceSummary, "");
     }
 
     /**

@@ -53,6 +53,16 @@ public final class ReplRouter {
     }
 
     /**
+     * Test-only accessor for the wired {@link TurnProcessor}. Package-private
+     * so that {@code dev.talos.cli.repl} tests can assert bootstrap wiring
+     * (approval policy class, registered listeners) without broadening the
+     * public API surface.
+     */
+    TurnProcessor turnProcessor() {
+        return turnProcessor;
+    }
+
+    /**
      * Backward-compatible factory — delegates to {@link TalosBootstrap}.
      * Existing callers (RunCmd) continue to work without changes.
      */

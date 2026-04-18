@@ -135,23 +135,25 @@ public final class TalosBootstrap {
         SessionStore sessionStore = new JsonSessionStore();
         String sessionId = JsonSessionStore.sessionIdFor(workspace);
 
-        // Auto-load previous session if one exists
-        sessionStore.load(sessionId).ifPresent(data -> {
-            // Replay turns into memory
-            if (data.turns() != null) {
-                for (int i = 0; i < data.turns().size() - 1; i += 2) {
-                    SessionData.Turn u = data.turns().get(i);
-                    SessionData.Turn a = data.turns().get(i + 1);
-                    if ("user".equals(u.role()) && "assistant".equals(a.role())) {
-                        memory.update(u.content(), a.content());
-                    }
-                }
-            }
-            // Restore compaction sketch
-            if (data.sketch() != null && !data.sketch().isBlank()) {
-                conversationManager.setSketch(data.sketch());
-            }
-        });
+        // Auto-load previous session if one exists.
+        //
+        // Snapshot-first, JSONL-fallback reconciliation:
+        //   1. If snapshot exists AND replays ≥1 turn → snapshot wins.
+        //      The JSONL is left on disk; the next graceful close will
+        //      overwrite it via the snapshot path (close-only save), so
+        //      we don't need to truncate it here.
+        //   2. Otherwise (snapshot missing, or snapshot has zero turns —
+        //      the real crash-recovery case: process killed before
+        //      onSessionEnd fired the snapshot save) → replay turns from
+        //      the per-turn JSONL companion file into memory.
+        //
+        // This is NOT a merge engine. Snapshot wins when it has content;
+        // JSONL is strictly a fallback for the crash path the snapshot
+        // model cannot cover on its own.
+        int snapshotTurnsReplayed = replaySnapshot(sessionStore, sessionId, memory, conversationManager);
+        if (snapshotTurnsReplayed == 0) {
+            replayTurnLog(sessionStore, sessionId, memory);
+        }
 
         // ── Mode controller ──────────────────────────────────────────────
         ModeController modes = ModeController.defaultController();
@@ -182,7 +184,15 @@ public final class TalosBootstrap {
 
         // ── Runtime layer ────────────────────────────────────────────────
         Session        runtimeSession = new Session(workspace, cfg, memory, sessionStore);
-        TurnProcessor  turnProcessor  = new TurnProcessor(modes, approvalGate, toolRegistry);
+        // Session-scoped approval policy sits above the gate. Without this,
+        // the REPL falls back to ALWAYS_ASK and the user's "a = yes for
+        // session" choice has no effect — the tri-state gate still reports
+        // APPROVED_REMEMBER but the policy never flips the flag, because
+        // ApprovalPolicy.ALWAYS_ASK.rememberApproval is a no-op.
+        dev.talos.runtime.SessionApprovalPolicy approvalPolicy =
+                new dev.talos.runtime.SessionApprovalPolicy();
+        TurnProcessor  turnProcessor  = new TurnProcessor(
+                modes, approvalGate, toolRegistry, approvalPolicy);
 
         // Tool progress sink: renders lightweight status lines via RenderEngine.
         // Connected before ToolCallLoop so progress events flow during tool execution.
@@ -318,6 +328,59 @@ public final class TalosBootstrap {
         registry.register(new UndoCommand(undoStack));
         // Session persistence
         registry.register(new SessionCommand(workspace, sessionStore));
+    }
+
+    // ── Session reconciliation helpers ──────────────────────────────────
+
+    /**
+     * Replay the JSON snapshot into memory and conversation state.
+     *
+     * @return number of user/assistant pairs actually replayed (0 if no snapshot,
+     *         or snapshot present but turns list empty / unpaired)
+     */
+    static int replaySnapshot(SessionStore store, String sessionId,
+                              SessionMemory memory, ConversationManager cm) {
+        var loaded = store.load(sessionId);
+        if (loaded.isEmpty()) return 0;
+        SessionData data = loaded.get();
+        int pairs = 0;
+        if (data.turns() != null) {
+            for (int i = 0; i < data.turns().size() - 1; i += 2) {
+                SessionData.Turn u = data.turns().get(i);
+                SessionData.Turn a = data.turns().get(i + 1);
+                if ("user".equals(u.role()) && "assistant".equals(a.role())) {
+                    memory.update(u.content(), a.content());
+                    pairs++;
+                }
+            }
+        }
+        if (data.sketch() != null && !data.sketch().isBlank()) {
+            cm.setSketch(data.sketch());
+        }
+        return pairs;
+    }
+
+    /**
+     * Fallback: replay the per-turn JSONL log into memory. Invoked only
+     * when the snapshot yielded zero turns (missing file or empty turns
+     * list) — i.e., the crash-recovery path.
+     *
+     * @return number of turn records replayed
+     */
+    static int replayTurnLog(SessionStore store, String sessionId, SessionMemory memory) {
+        var records = store.loadTurns(sessionId);
+        if (records == null || records.isEmpty()) return 0;
+        int replayed = 0;
+        for (var rec : records) {
+            if (rec == null) continue;
+            String u = rec.userInput();
+            String a = rec.assistantText();
+            if (u != null && !u.isBlank() && a != null && !a.isBlank()) {
+                memory.update(u, a);
+                replayed++;
+            }
+        }
+        return replayed;
     }
 }
 
