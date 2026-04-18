@@ -126,6 +126,85 @@ class TurnProcessorScopeGuardTest {
                 "read-only tools must not invoke approval at all");
     }
 
+    /**
+     * Prompt 4 — scope-guard override for remembered AUTO_APPROVE policy.
+     *
+     * <p>When the user has answered "a" earlier this session to remember
+     * approvals for in-workspace writes, a subsequent drift to an off-scope
+     * target (e.g. {@code math_operations.py} during a web redesign) must
+     * NOT silently auto-approve. The guard's warning must reach the user's
+     * eyes, so the policy's AUTO_APPROVE is downgraded to ASK whenever the
+     * scope warning fires.
+     */
+    @Test
+    void scopeWarningForcesAskEvenWhenPolicyWouldAutoApprove() {
+        CapturingGate gate = new CapturingGate();
+        ToolRegistry reg = new ToolRegistry();
+        reg.register(new NopWriteTool());
+
+        // Policy has already been asked to remember in-workspace writes.
+        SessionApprovalPolicy policy = new SessionApprovalPolicy();
+        ToolCall prime = new ToolCall("test.write", Map.of(
+                "path", WS.resolve("index.html").toString(),
+                "content", "<html></html>"));
+        policy.rememberApproval(WS, prime, ToolRiskLevel.WRITE);
+        assertTrue(policy.rememberInWorkspaceWritesEnabled());
+
+        TurnProcessor tp = new TurnProcessor(
+                ModeController.defaultController(), gate, reg, policy);
+        Session s = new Session(WS, new Config());
+        Context ctx = Context.builder(new Config()).build();
+
+        // Simulate a turn where the user's request is web-scoped, but the
+        // model drifted to a Python file inside the workspace.
+        TurnUserRequestCapture.set("please redesign this site — tweak the homepage");
+        ToolCall drift = new ToolCall("test.write", Map.of(
+                "path", WS.resolve("math_operations.py").toString(),
+                "content", "print('hi')"));
+        tp.executeTool(s, drift, ctx);
+
+        // The policy would have AUTO_APPROVED (in-workspace, non-sensitive,
+        // remembered), but the scope warning forces ASK. The gate must have
+        // been shown the warning.
+        String detail = gate.lastDetail.get();
+        assertNotNull(detail,
+                "scope warning must force the gate open even when policy auto-approves");
+        assertTrue(detail.toLowerCase().contains("scope:"),
+                "scope warning must appear in the approval detail: " + detail);
+    }
+
+    /**
+     * Sanity regression: a remembered in-workspace WRITE to a non-sensitive,
+     * on-scope target must still AUTO_APPROVE (the scope override must not
+     * accidentally disable the remembered-approval path).
+     */
+    @Test
+    void rememberedApprovalStillBypassesGateForOnScopeWrites() {
+        CapturingGate gate = new CapturingGate();
+        ToolRegistry reg = new ToolRegistry();
+        reg.register(new NopWriteTool());
+
+        SessionApprovalPolicy policy = new SessionApprovalPolicy();
+        ToolCall prime = new ToolCall("test.write", Map.of(
+                "path", WS.resolve("index.html").toString(),
+                "content", "<html></html>"));
+        policy.rememberApproval(WS, prime, ToolRiskLevel.WRITE);
+
+        TurnProcessor tp = new TurnProcessor(
+                ModeController.defaultController(), gate, reg, policy);
+        Session s = new Session(WS, new Config());
+        Context ctx = Context.builder(new Config()).build();
+
+        TurnUserRequestCapture.set("redesign this site — tweak the homepage");
+        ToolCall onScope = new ToolCall("test.write", Map.of(
+                "path", WS.resolve("style.css").toString(),
+                "content", "body{}"));
+        tp.executeTool(s, onScope, ctx);
+
+        assertNull(gate.lastDetail.get(),
+                "on-scope in-workspace write under remembered approval must bypass the gate");
+    }
+
     // ---- Minimal tools (local to this test) ----
 
     private static final class NopWriteTool implements TalosTool {

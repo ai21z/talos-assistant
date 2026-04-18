@@ -106,6 +106,113 @@ class SessionApprovalPolicyTest {
                 p.decide(ws, write, ToolRiskLevel.WRITE));
     }
 
+    // ---- Sensitive in-workspace paths (Prompt 3 refinement) ----
+
+    /**
+     * Prime the session by remember-approving a plain in-workspace write.
+     * After this, only sensitive paths should still prompt.
+     */
+    private static SessionApprovalPolicy primedPolicy(Path ws) {
+        SessionApprovalPolicy p = new SessionApprovalPolicy();
+        ToolCall plain = new ToolCall("t.write", Map.of(
+                "path", ws.resolve("src/plain.txt").toString(),
+                "content", "ok"));
+        p.rememberApproval(ws, plain, ToolRiskLevel.WRITE);
+        assertTrue(p.rememberInWorkspaceWritesEnabled(),
+                "precondition: remember flag must be on");
+        return p;
+    }
+
+    @Test
+    void sensitiveDirWritesStillAskEvenAfterRemember(@TempDir Path ws) {
+        SessionApprovalPolicy p = primedPolicy(ws);
+
+        for (String sub : new String[] {
+                ".git/config",
+                ".git/hooks/pre-commit",
+                ".github/workflows/ci.yml",
+                ".ssh/authorized_keys",
+                ".gnupg/trustdb.gpg"}) {
+            ToolCall call = new ToolCall("t.write", Map.of(
+                    "path", ws.resolve(sub).toString(),
+                    "content", "payload"));
+            assertEquals(ApprovalPolicy.Decision.ASK,
+                    p.decide(ws, call, ToolRiskLevel.WRITE),
+                    "sensitive write must still ask: " + sub);
+        }
+
+        // Sanity: a normal file in the same session auto-approves, proving
+        // the flag is still on and only sensitive paths are carved out.
+        ToolCall normal = new ToolCall("t.write", Map.of(
+                "path", ws.resolve("src/app.java").toString(),
+                "content", "ok"));
+        assertEquals(ApprovalPolicy.Decision.AUTO_APPROVE,
+                p.decide(ws, normal, ToolRiskLevel.WRITE));
+    }
+
+    @Test
+    void dotEnvFilesStillAskEvenAfterRemember(@TempDir Path ws) {
+        SessionApprovalPolicy p = primedPolicy(ws);
+
+        for (String name : new String[] {".env", ".env.local", ".env.production"}) {
+            ToolCall call = new ToolCall("t.write", Map.of(
+                    "path", ws.resolve(name).toString(),
+                    "content", "SECRET=1"));
+            assertEquals(ApprovalPolicy.Decision.ASK,
+                    p.decide(ws, call, ToolRiskLevel.WRITE),
+                    name + " must still prompt");
+        }
+
+        // Guard against over-triggering: files that merely contain "env"
+        // must not be treated as sensitive.
+        ToolCall envLike = new ToolCall("t.write", Map.of(
+                "path", ws.resolve("docs/environment.md").toString(),
+                "content", "notes"));
+        assertEquals(ApprovalPolicy.Decision.AUTO_APPROVE,
+                p.decide(ws, envLike, ToolRiskLevel.WRITE),
+                "regular files containing 'env' must NOT be flagged sensitive");
+    }
+
+    @Test
+    void rememberApprovalOnSensitiveTargetDoesNotFlipFlag(@TempDir Path ws) {
+        // User's first approved write happens to target .git/config.
+        // The policy must NOT silently "remember" that choice — otherwise
+        // every subsequent .git write would still be blocked (good) but a
+        // malicious prompt could then rely on the user having said "a"
+        // to slip normal-file writes through. Symmetry: remember only flips
+        // when the triggering target is itself safe.
+        SessionApprovalPolicy p = new SessionApprovalPolicy();
+        ToolCall gitConfig = new ToolCall("t.write", Map.of(
+                "path", ws.resolve(".git/config").toString(),
+                "content", "[core]\n"));
+        p.rememberApproval(ws, gitConfig, ToolRiskLevel.WRITE);
+        assertFalse(p.rememberInWorkspaceWritesEnabled(),
+                "remember must not flip when the triggering call is sensitive");
+    }
+
+    @Test
+    void isSensitiveTargetClassifier_basicCases(@TempDir Path ws) {
+        var call = (java.util.function.Function<String, ToolCall>) p ->
+                new ToolCall("t.w", Map.of("path", p, "content", "x"));
+
+        assertTrue(SessionApprovalPolicy.isSensitiveTarget(ws,
+                call.apply(ws.resolve(".git/config").toString())));
+        assertTrue(SessionApprovalPolicy.isSensitiveTarget(ws,
+                call.apply(ws.resolve(".github/workflows/build.yml").toString())));
+        assertTrue(SessionApprovalPolicy.isSensitiveTarget(ws,
+                call.apply(ws.resolve(".env").toString())));
+        assertTrue(SessionApprovalPolicy.isSensitiveTarget(ws,
+                call.apply(ws.resolve(".env.prod").toString())));
+
+        assertFalse(SessionApprovalPolicy.isSensitiveTarget(ws,
+                call.apply(ws.resolve("src/main.java").toString())));
+        assertFalse(SessionApprovalPolicy.isSensitiveTarget(ws,
+                call.apply(ws.resolve(".gitignore").toString())),
+                ".gitignore is a normal tracked file, not VCS internals");
+        assertFalse(SessionApprovalPolicy.isSensitiveTarget(ws,
+                call.apply(ws.resolve("environment.md").toString())));
+    }
+
     // ---- End-to-end: TurnProcessor wiring ----
 
     @Test

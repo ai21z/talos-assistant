@@ -72,6 +72,19 @@ public final class TurnProcessor {
     }
 
     /**
+     * Test-only introspection: true if at least one registered listener is
+     * an instance of the given class. Used by the bootstrap wiring test to
+     * assert post-turn hooks (memory update, JSONL turn log) are registered.
+     */
+    public boolean hasListenerOfType(Class<? extends SessionListener> type) {
+        if (type == null) return false;
+        for (SessionListener l : listeners) {
+            if (type.isInstance(l)) return true;
+        }
+        return false;
+    }
+
+    /**
      * Process a single user prompt through the mode system.
      *
      * <p>After a successful turn, all registered {@link SessionListener}s
@@ -202,6 +215,18 @@ public final class TurnProcessor {
             // without prompting; ASK falls through to the gate as before.
             Path workspace = session != null ? session.workspace() : null;
             ApprovalPolicy.Decision decision = approvalPolicy.decide(workspace, call, risk);
+
+            // Scope-guard override: if the target looks off-scope, the user
+            // MUST see the warning before the call runs. A remembered
+            // AUTO_APPROVE would otherwise silently bypass the warning —
+            // exactly the failure class the guard exists to catch (the
+            // transcript-observed drift from `index.html` to
+            // `math_operations.py` mid-session). Forcing ASK here preserves
+            // the guard's "warn, do not block" posture while ensuring the
+            // warning never reaches a silent-bypass path.
+            if (scopeWarning != null && decision == ApprovalPolicy.Decision.AUTO_APPROVE) {
+                decision = ApprovalPolicy.Decision.ASK;
+            }
 
             if (decision == ApprovalPolicy.Decision.DENY) {
                 TurnAuditCapture.recordApprovalDenied();

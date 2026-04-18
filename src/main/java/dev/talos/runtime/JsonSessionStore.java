@@ -135,6 +135,7 @@ public final class JsonSessionStore implements SessionStore {
             row.put("approvalsGranted", record.approvalsGranted());
             row.put("approvalsDenied", record.approvalsDenied());
             row.put("retrievalTraceSummary", record.retrievalTraceSummary());
+            row.put("status", record.status());
             List<Map<String, Object>> calls = new java.util.ArrayList<>();
             for (TurnRecord.ToolCallSummary s : record.toolCalls()) {
                 Map<String, Object> c = new LinkedHashMap<>();
@@ -162,9 +163,22 @@ public final class JsonSessionStore implements SessionStore {
         Path file = turnsFileFor(sessionId);
         if (!Files.exists(file)) return List.of();
         List<TurnRecord> out = new java.util.ArrayList<>();
-        try {
-            for (String line : Files.readAllLines(file)) {
-                if (line == null || line.isBlank()) continue;
+        // Lenient UTF-8 decoding: a single malformed byte (e.g. a partial
+        // multi-byte character from a power-loss mid-write) must only affect
+        // the line it lands in, not abort the whole load. Files.readAllLines
+        // uses a strict decoder and would raise MalformedInputException,
+        // losing the entire session transcript. With REPLACE, the corrupt
+        // region becomes U+FFFD inside the affected line; Jackson then fails
+        // to parse that line and skips it, while every surrounding line
+        // loads intact.
+        java.nio.charset.CharsetDecoder decoder = java.nio.charset.StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(java.nio.charset.CodingErrorAction.REPLACE)
+                .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPLACE);
+        try (var in = Files.newInputStream(file);
+             var reader = new java.io.BufferedReader(new java.io.InputStreamReader(in, decoder))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.isBlank()) continue;
                 try {
                     Map<String, Object> row = MAPPER.readValue(line, new TypeReference<>() {});
                     out.add(rowToRecord(row));
@@ -188,6 +202,7 @@ public final class JsonSessionStore implements SessionStore {
         int grnt = intVal(row, "approvalsGranted");
         int deny = intVal(row, "approvalsDenied");
         String traceSummary = str(row, "retrievalTraceSummary");
+        String status = str(row, "status");
 
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> rawCalls =
@@ -200,7 +215,7 @@ public final class JsonSessionStore implements SessionStore {
             calls.add(new TurnRecord.ToolCallSummary(name, pathHint, success));
         }
         return new TurnRecord(turnNumber, ts, durationMs, userInput, assistantText,
-                calls, reqd, grnt, deny, traceSummary);
+                calls, reqd, grnt, deny, traceSummary, status);
     }
 
     // ── Utility ───────────────────────────────────────────────────────

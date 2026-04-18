@@ -58,7 +58,8 @@ public final class JsonTurnLogAppender implements SessionListener {
                 audit.approvalsRequired(),
                 audit.approvalsGranted(),
                 audit.approvalsDenied(),
-                summarize(result.trace())
+                summarize(result.trace()),
+                statusOf(result.result())
         );
 
         try {
@@ -79,6 +80,32 @@ public final class JsonTurnLogAppender implements SessionListener {
         int finalCount = entries.get(entries.size() - 1).candidatesAfter();
         sb.append(", final=").append(finalCount);
         return sb.toString();
+    }
+
+    /**
+     * Project a {@link Result} into a compact status tag for the turn log.
+     *
+     * <p>Distinguishes errored turns from silent turns — before this field,
+     * a {@code Result.Error} landed on disk with blank assistantText and
+     * was audibly indistinguishable from a turn that produced no committed
+     * prose (Info, TrustedInfo, Table). One field, one string, no enum
+     * gymnastics — forward-compatible as new {@code Result} types are
+     * added.
+     */
+    static String statusOf(Result r) {
+        if (r == null) return "";
+        return switch (r) {
+            case Result.Ok ignored           -> "ok";
+            case Result.Streamed ignored     -> "ok";
+            case Result.Error ignored        -> "error";
+            case Result.Info ignored         -> "info";
+            case Result.TrustedInfo ignored  -> "info";
+            case Result.Table ignored        -> "info";
+            case Result.StreamStart ignored    -> "stream";
+            case Result.StreamChunk ignored    -> "stream";
+            case Result.StreamEnd ignored      -> "stream";
+            case Result.ToolProgress ignored   -> "stream";
+        };
     }
 }
 

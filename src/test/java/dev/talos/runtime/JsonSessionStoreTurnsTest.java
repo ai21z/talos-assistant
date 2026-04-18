@@ -131,5 +131,48 @@ class JsonSessionStoreTurnsTest {
         List<TurnRecord> loaded = store.loadTurns(sid);
         assertEquals(2, loaded.size(), "valid lines survive a corrupt middle line");
     }
+
+    /**
+     * Prompt 5 — lenient UTF-8 decoding on load.
+     *
+     * <p>A partial multi-byte-char write during a crash / power loss can leave
+     * the file with an invalid UTF-8 sequence in exactly one line. Previously
+     * this aborted the entire load (the strict decoder in {@code readAllLines}
+     * raised {@code MalformedInputException}) and the user lost the whole
+     * session transcript. The hardened loader must contain the damage to the
+     * corrupt line only.
+     */
+    @Test
+    void malformedUtf8ByteOnlyLosesAffectedLine(@TempDir Path dir) throws Exception {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "utf8-partial";
+        Path f = dir.resolve(sid + ".turns.jsonl");
+
+        // Build a file: [good line]\n[line with malformed UTF-8]\n[good line]\n
+        store.appendTurn(sid, new TurnRecord(
+                1, Instant.parse("2026-04-18T10:00:00Z"), 10,
+                "before", "ok", List.of(), 0, 0, 0, ""));
+
+        byte[] corrupt = new byte[] {
+                // Three illegal UTF-8 lead bytes — the REPLACE decoder turns
+                // them into U+FFFD each, producing a line that is not remotely
+                // valid JSON and Jackson must reject.
+                (byte) 0xFF, (byte) 0xFE, (byte) 0xFD,
+                ' ', 'g', 'a', 'r', 'b', 'a', 'g', 'e',
+                '\n'
+        };
+        java.nio.file.Files.write(f, corrupt,
+                java.nio.file.StandardOpenOption.APPEND);
+
+        store.appendTurn(sid, new TurnRecord(
+                2, Instant.parse("2026-04-18T10:00:05Z"), 20,
+                "after", "ok", List.of(), 0, 0, 0, ""));
+
+        List<TurnRecord> loaded = store.loadTurns(sid);
+        assertEquals(2, loaded.size(),
+                "corrupt UTF-8 must only lose its own line; surrounding lines survive");
+        assertEquals("before", loaded.get(0).userInput());
+        assertEquals("after", loaded.get(1).userInput());
+    }
 }
 
