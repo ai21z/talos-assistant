@@ -56,7 +56,7 @@ These tickets are ordered by safety and dependency.
 7. `CCR-007` split `ModelEngine` into chat/embed interfaces `[done]`
 8. `CCR-008` SPI package consolidation `[done]`
 9. `CCR-009` split `OllamaEngine` `[done]`
-10. `CCR-010` extract `ToolCallLoop` stages
+10. `CCR-010` extract `ToolCallLoop` stages `[done]`
 11. `CCR-011` decompose `LlmClient`
 12. `CCR-012.1` instrument and observe XML compatibility fallback usage
 13. `CCR-012.2` retire XML compatibility path if parity evidence justifies it
@@ -555,6 +555,11 @@ internal extraction after the async-close changes settle.
 ---
 
 ### CCR-010 — Extract `ToolCallLoop` stages into a dedicated runtime subpackage
+
+**Status**
+
+- Done on `ticket/CCR-010-toolcallloop-stages`
+- Merged into `chore/codebase-cleanup-refactor`
 
 **Why this exists**
 
