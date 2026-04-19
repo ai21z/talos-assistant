@@ -3,7 +3,9 @@ package dev.talos.core.llm;
 import dev.talos.core.Config;
 import org.junit.jupiter.api.Test;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -11,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Tests for {@link LlmClient} error-resilience additions.
  *
- * <p>These run in PLACEHOLDER mode (default) — they verify that:
+ * <p>These run in explicit PLACEHOLDER mode — they verify that:
  * <ul>
  *   <li>Retry constants are sensible</li>
  *   <li>PLACEHOLDER mode is unaffected by the retry/propagation changes</li>
@@ -19,6 +21,15 @@ import static org.junit.jupiter.api.Assertions.*;
  * </ul>
  */
 class LlmClientRetryTest {
+
+    private static Config placeholderConfig() {
+        Config cfg = new Config();
+        Map<String, Object> llm = new LinkedHashMap<>();
+        llm.put("transport", "placeholder");
+        llm.put("default_backend", "ollama");
+        cfg.data.put("llm", llm);
+        return cfg;
+    }
 
     @Test
     void max_retries_is_positive() {
@@ -28,7 +39,7 @@ class LlmClientRetryTest {
 
     @Test
     void placeholder_chat_unaffected_by_retry_changes() {
-        LlmClient client = new LlmClient(new Config());
+        LlmClient client = new LlmClient(placeholderConfig());
         String result = client.chat("system", "hello", List.of());
         assertNotNull(result);
         assertFalse(result.isBlank());
@@ -36,7 +47,7 @@ class LlmClientRetryTest {
 
     @Test
     void placeholder_chatStream_unaffected_by_retry_changes() {
-        LlmClient client = new LlmClient(new Config());
+        LlmClient client = new LlmClient(placeholderConfig());
         AtomicReference<String> chunk = new AtomicReference<>();
         String result = client.chatStream("system", "hello", List.of(), chunk::set);
         assertNotNull(result);
@@ -48,7 +59,7 @@ class LlmClientRetryTest {
 
     @Test
     void placeholder_messages_chat_unaffected() {
-        LlmClient client = new LlmClient(new Config());
+        LlmClient client = new LlmClient(placeholderConfig());
         var msgs = List.of(
                 new dev.talos.spi.types.ChatMessage("system", "be helpful"),
                 new dev.talos.spi.types.ChatMessage("user", "hello")
@@ -60,7 +71,7 @@ class LlmClientRetryTest {
 
     @Test
     void placeholder_messages_chatStream_unaffected() {
-        LlmClient client = new LlmClient(new Config());
+        LlmClient client = new LlmClient(placeholderConfig());
         var msgs = List.of(
                 new dev.talos.spi.types.ChatMessage("system", "be helpful"),
                 new dev.talos.spi.types.ChatMessage("user", "hello")
@@ -74,7 +85,7 @@ class LlmClientRetryTest {
 
     @Test
     void placeholder_chatPlain_still_works() {
-        LlmClient client = new LlmClient(new Config());
+        LlmClient client = new LlmClient(placeholderConfig());
         String result = client.chatPlain("test prompt");
         assertNotNull(result);
         assertFalse(result.isBlank(), "chatPlain should return non-blank text");
@@ -82,7 +93,7 @@ class LlmClientRetryTest {
 
     @Test
     void close_is_safe_on_placeholder() {
-        LlmClient client = new LlmClient(new Config());
+        LlmClient client = new LlmClient(placeholderConfig());
         assertDoesNotThrow(client::close);
         assertDoesNotThrow(client::close);
     }
