@@ -58,7 +58,7 @@ public final class JsonTurnLogAppender implements SessionListener {
                 audit.approvalsRequired(),
                 audit.approvalsGranted(),
                 audit.approvalsDenied(),
-                summarize(result.trace()),
+                 summarize(result.trace()),
                 statusOf(result.result())
         );
 
@@ -96,7 +96,18 @@ public final class JsonTurnLogAppender implements SessionListener {
         if (r == null) return "";
         return switch (r) {
             case Result.Ok ignored           -> "ok";
-            case Result.Streamed ignored     -> "ok";
+            // A streamed turn whose fullText is (or starts with) the bracketed
+            // "[turn aborted" marker is NOT conversational content — it is the
+            // sentinel LlmClient.withWallClockBudget emits on wall-clock
+            // expiry, idle-watchdog abort, or interrupt. Tagging it "aborted"
+            // here is what lets the reconcile path in TalosBootstrap.replayTurnLog
+            // refuse to re-inject a timed-out turn's confabulated body into the
+            // next session's SessionMemory. Without this discriminator, a model
+            // that fell into a repetition-loop attractor (observed: gemma4:26b,
+            // test-output.txt Apr 2026) had its 200+ line garbage body
+            // resurrected on the next REPL start as if it were authoritative
+            // conversational history.
+            case Result.Streamed s           -> isAbortMarker(s.fullText) ? "aborted" : "ok";
             case Result.Error ignored        -> "error";
             case Result.Info ignored         -> "info";
             case Result.TrustedInfo ignored  -> "info";
@@ -106,6 +117,19 @@ public final class JsonTurnLogAppender implements SessionListener {
             case Result.StreamEnd ignored      -> "stream";
             case Result.ToolProgress ignored   -> "stream";
         };
+    }
+
+    /**
+     * True when {@code text} is the bracketed "[turn aborted" sentinel produced
+     * by {@link dev.talos.core.llm.LlmClient} when a call exceeds its
+     * wall-clock budget, hits the idle watchdog, or is interrupted. Kept
+     * lexical (prefix match after trimming) so it never over-fires on real
+     * model prose that happens to contain the word "aborted" mid-sentence.
+     */
+    static boolean isAbortMarker(String text) {
+        if (text == null) return false;
+        String t = text.stripLeading();
+        return t.startsWith("[turn aborted");
     }
 }
 

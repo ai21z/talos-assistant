@@ -322,11 +322,22 @@ final class OllamaEngine implements ModelEngine {
 
         checkStatus(resp.statusCode(), model, null);
 
+        // Stream-close plumbing: the returned Stream wraps BufferedReader →
+        // InputStreamReader → HttpResponse body. Without an onClose hook, a
+        // caller that break-s out of iteration (cancel, cap reached, done
+        // sentinel) or throws leaves the reader + HTTP body open — the
+        // socket stays up and Ollama keeps generating until its own EOS
+        // even though nothing is consuming the stream. Attaching onClose
+        // here, combined with try-with-resources in the LlmClient iteration
+        // sites, closes the reader on every synchronous exit path, which
+        // in turn closes the underlying socket (JDK HttpClient contract).
         BufferedReader br = new BufferedReader(new InputStreamReader(resp.body(), StandardCharsets.UTF_8));
         return br.lines().map(line -> {
             Matcher m = RESPONSE.matcher(line);
             if (line.contains("\"done\":true")) return TokenChunk.eos();
             return m.find() ? TokenChunk.of(unesc(m.group(1))) : TokenChunk.of("");
+        }).onClose(() -> {
+            try { br.close(); } catch (Exception ignored) {}
         });
     }
 
@@ -397,6 +408,10 @@ final class OllamaEngine implements ModelEngine {
 
         checkStatus(resp.statusCode(), model, null);
 
+        // See chatStream() for rationale — same onClose plumbing. Without
+        // this, cancelled/aborted streaming chat requests leak the
+        // connection and Ollama continues generating tokens into a closed
+        // consumer until its own EOS.
         BufferedReader br = new BufferedReader(new InputStreamReader(resp.body(), StandardCharsets.UTF_8));
         return br.lines().map(line -> {
             // Check for tool_calls in the streaming chunk (arrives as ONE single chunk)
@@ -430,6 +445,8 @@ final class OllamaEngine implements ModelEngine {
             if (line.contains("\"done\":true")) return TokenChunk.eos();
             Matcher m = CHAT_CONTENT.matcher(line);
             return m.find() ? TokenChunk.of(unesc(m.group(1))) : TokenChunk.of("");
+        }).onClose(() -> {
+            try { br.close(); } catch (Exception ignored) {}
         });
     }
 

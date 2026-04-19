@@ -127,5 +127,82 @@ class TalosBootstrapReconcileTest {
         assertEquals(1, replayed, "blank-pair records are skipped");
         assertTrue(mem.get().contains("real-u"));
     }
+
+    /**
+     * Cross-session hallucination guard: an "aborted" turn (wall-clock
+     * timeout, idle watchdog, or interrupt) must not re-enter SessionMemory
+     * on the next session. Real incident: gemma4:26b fell into a repetition
+     * attractor, the turn timed out at 300s, and on the next REPL start the
+     * 200-line confabulated body was replayed as authoritative history.
+     */
+    @Test
+    void abortedTurnIsSkippedOnReplay(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "ws-6";
+
+        // A turn that timed out — persisted by JsonTurnLogAppender with
+        // status="aborted" (the abortedText below mirrors what LlmClient
+        // emits on wall-clock expiry). The garbage prose that streamed
+        // before the timeout is captured in assistantText.
+        store.appendTurn(sid, new TurnRecord(1, Instant.now(), 387_800L,
+                "user turn 1",
+                "The user's prompt is 'The user's prompt is 'The user's prompt is",
+                List.of(), 0, 0, 0, "", "aborted"));
+        // A legitimate turn afterwards — must still replay.
+        store.appendTurn(sid, new TurnRecord(2, Instant.now(), 0L,
+                "user turn 2", "clean reply", List.of(), 0, 0, 0, "", "ok"));
+
+        SessionMemory mem = new SessionMemory();
+        int replayed = TalosBootstrap.replayTurnLog(store, sid, mem);
+        assertEquals(1, replayed, "only the ok turn is replayed");
+        String buf = mem.get();
+        assertTrue(buf.contains("user turn 2") && buf.contains("clean reply"));
+        assertFalse(buf.contains("The user's prompt is"),
+                "aborted turn's confabulated body must not enter memory");
+    }
+
+    /**
+     * Non-ok statuses other than "aborted" are also non-conversational
+     * (error, info, stream-lifecycle) and must be filtered out on replay.
+     */
+    @Test
+    void errorAndInfoTurnsAreSkippedOnReplay(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "ws-7";
+
+        store.appendTurn(sid, new TurnRecord(1, Instant.now(), 0L,
+                "u-err", "tool crashed", List.of(), 0, 0, 0, "", "error"));
+        store.appendTurn(sid, new TurnRecord(2, Instant.now(), 0L,
+                "u-info", "some info line", List.of(), 0, 0, 0, "", "info"));
+        store.appendTurn(sid, new TurnRecord(3, Instant.now(), 0L,
+                "u-ok", "real answer", List.of(), 0, 0, 0, "", "ok"));
+
+        SessionMemory mem = new SessionMemory();
+        int replayed = TalosBootstrap.replayTurnLog(store, sid, mem);
+        assertEquals(1, replayed);
+        String buf = mem.get();
+        assertTrue(buf.contains("u-ok") && buf.contains("real answer"));
+        assertFalse(buf.contains("tool crashed"));
+        assertFalse(buf.contains("some info line"));
+    }
+
+    /**
+     * Back-compat: legacy JSONL records written before the status field
+     * existed serialize status="" on read. These must still replay, or we
+     * break session restoration for anyone upgrading from a pre-status
+     * build.
+     */
+    @Test
+    void legacyBlankStatusRecordsStillReplay(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "ws-8";
+        store.appendTurn(sid, new TurnRecord(1, Instant.now(), 0L,
+                "legacy-u", "legacy-a", List.of(), 0, 0, 0, "", ""));
+
+        SessionMemory mem = new SessionMemory();
+        int replayed = TalosBootstrap.replayTurnLog(store, sid, mem);
+        assertEquals(1, replayed);
+        assertTrue(mem.get().contains("legacy-u"));
+    }
 }
 
