@@ -42,12 +42,6 @@ public final class RetrieveTool implements TalosTool {
                 },"required":["query"]}""");
     }
 
-    /** Legacy no-context execute — uses workspace from RagService config defaults. */
-    @Override
-    public ToolResult execute(ToolCall call) {
-        return doRetrieve(call, null);
-    }
-
     @Override
     public ToolResult execute(ToolCall call, ToolContext ctx) {
         return doRetrieve(call, ctx != null ? ctx.workspace() : null);

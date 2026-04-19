@@ -153,9 +153,9 @@ class ListDirToolTest {
     }
 
     @Test
-    void legacyExecuteWithoutContextFails() {
+    void nullContextFails() {
         ToolCall call = new ToolCall("talos.list_dir", Map.of("path", "."));
-        ToolResult r = tool.execute(call);
+        ToolResult r = tool.execute(call, null);
 
         assertFalse(r.success());
         assertEquals(ToolError.INTERNAL_ERROR, r.error().code());

@@ -41,15 +41,11 @@ public final class ReadFileTool implements TalosTool {
                 },"required":["path"]}""");
     }
 
-    /** Legacy no-context execute — returns error asking for context. */
-    @Override
-    public ToolResult execute(ToolCall call) {
-        return ToolResult.fail(ToolError.internal("ReadFileTool requires a ToolContext"));
-    }
-
     @Override
     public ToolResult execute(ToolCall call, ToolContext ctx) {
-        if (ctx == null) return execute(call);
+        if (ctx == null) {
+            return ToolResult.fail(ToolError.internal("ReadFileTool requires a ToolContext"));
+        }
 
         String pathParam = resolveParam(call, "path", "file_path", "filepath", "file", "filename");
         if (pathParam == null || pathParam.isBlank()) {

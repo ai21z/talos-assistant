@@ -164,7 +164,6 @@ class TurnProcessorTest {
             @Override public String name() { return "test.ws"; }
             @Override public String description() { return "test"; }
             @Override public ToolDescriptor descriptor() { return new ToolDescriptor("test.ws", "test"); }
-            @Override public ToolResult execute(ToolCall call) { return ToolResult.fail("no context"); }
             @Override public ToolResult execute(ToolCall call, ToolContext ctx) {
                 return ToolResult.ok(ctx.workspace().toString());
             }
@@ -185,7 +184,7 @@ class TurnProcessorTest {
         @Override public String name() { return "test.echo"; }
         @Override public String description() { return "Echoes input"; }
         @Override public ToolDescriptor descriptor() { return new ToolDescriptor("test.echo", "Echoes input"); }
-        @Override public ToolResult execute(ToolCall call) {
+        @Override public ToolResult execute(ToolCall call, ToolContext ctx) {
             return ToolResult.ok("Echo: " + call.param("input", "(empty)"));
         }
     }
