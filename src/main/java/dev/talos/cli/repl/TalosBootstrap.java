@@ -225,12 +225,38 @@ public final class TalosBootstrap {
 
         // ── Stream sink ───────────────────────────────────────────────────
         // Wrapped in ToolCallStreamFilter to suppress <tool_call> XML from display.
+        //
+        // JLine-safe output: when a LineReader is available, route streaming
+        // chunks through its Terminal's writer instead of raw System.out.
+        // JLine tracks the terminal's cursor/column/virtual-line state
+        // internally; writes that bypass it (direct stdout.print) diverge
+        // that model from reality, and on Windows (jna=true) the next
+        // readLine() call's redraw sequence then corrupts the display.
+        //
+        // Observed: test-output.txt Apr 2026 line 306 — after a 300s
+        // wall-clock-aborted repetition loop, the next prompt redraw spliced
+        // leaked token content onto the same visible line as the prompt
+        // ("talos [auto] >  user's prompt is 'The user's prompt is '...").
+        // The tokens were never typed; JLine's cursor model just didn't
+        // know the terminal had moved, so the redraw's CUP/CR/EL sequences
+        // ended up reprinting scrollback as if it were the input buffer.
+        //
+        // Using terminal.writer() keeps JLine authoritative over every
+        // character that reaches the terminal. Falls back to stdout when
+        // no LineReader is supplied (headless tests, programmatic API).
         final PrintStream stdout = out;
         final RenderEngine renderRef = render;
+        final java.io.PrintWriter termWriter =
+                (lineReader != null) ? lineReader.getTerminal().writer() : null;
         java.util.function.Consumer<String> rawSink = chunk -> {
             renderRef.stopSpinner();
-            stdout.print(chunk);
-            stdout.flush();
+            if (termWriter != null) {
+                termWriter.print(chunk);
+                termWriter.flush();
+            } else {
+                stdout.print(chunk);
+                stdout.flush();
+            }
         };
         java.util.function.Consumer<String> streamSink = new ToolCallStreamFilter(rawSink);
 
@@ -365,6 +391,25 @@ public final class TalosBootstrap {
      * when the snapshot yielded zero turns (missing file or empty turns
      * list) — i.e., the crash-recovery path.
      *
+     * <p><b>Status-gated replay.</b> Only records whose {@code status} is
+     * {@code "ok"} — or blank, for legacy pre-status JSONL lines written
+     * before the status field existed — are re-injected into
+     * {@link SessionMemory}. Records tagged {@code "error"},
+     * {@code "aborted"}, {@code "info"}, or {@code "stream"} are skipped.
+     *
+     * <p><b>Why:</b> without this filter the reconcile path blindly
+     * resurrected whatever assistantText the JSONL held — including
+     * wall-clock-timed-out repetition-loop bodies and error-turn residue.
+     * In one real incident (gemma4:26b, test-output.txt Apr 2026) a model
+     * entered a repetition attractor, the turn was aborted at the 300s
+     * wall-clock budget, and on the next REPL start the confabulated body
+     * was replayed as if it were authoritative history, producing
+     * cross-session hallucinated memory (the model "remembered"
+     * destructive edits it had made in a prior session). The in-session
+     * path is already protected by
+     * {@link dev.talos.runtime.MemoryUpdateListener#stripUiChromeForHistory};
+     * this closes the parallel cross-session gap.
+     *
      * @return number of turn records replayed
      */
     static int replayTurnLog(SessionStore store, String sessionId, SessionMemory memory) {
@@ -373,6 +418,12 @@ public final class TalosBootstrap {
         int replayed = 0;
         for (var rec : records) {
             if (rec == null) continue;
+            String status = rec.status();
+            // Accept "ok" and "" (legacy records written before the status
+            // field existed). Anything else — "error", "aborted", "info",
+            // "stream", or a future tag — is non-conversational and must
+            // not re-enter SessionMemory.
+            if (status != null && !status.isEmpty() && !"ok".equals(status)) continue;
             String u = rec.userInput();
             String a = rec.assistantText();
             if (u != null && !u.isBlank() && a != null && !a.isBlank()) {

@@ -81,6 +81,54 @@ class JsonTurnLogAppenderTest {
         assertEquals("done", recs.get(2).assistantText());
     }
 
+    /**
+     * Wall-clock / idle / interrupt abort path: LlmClient returns a
+     * {@code Result.Streamed} whose {@code fullText} is the bracketed
+     * "[turn aborted ...]" marker. The appender must tag this as
+     * {@code "aborted"} (NOT "ok") so the cross-session replay filter in
+     * {@code TalosBootstrap.replayTurnLog} refuses to re-inject it on the
+     * next REPL start.
+     */
+    @Test
+    void streamedTurnWithAbortMarkerIsTaggedAborted(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "sid-aborted";
+        JsonTurnLogAppender appender = new JsonTurnLogAppender(store, sid);
+
+        appender.onTurnComplete(
+                new TurnResult(new Result.Streamed(
+                        "[turn aborted: streaming chat exceeded 300s wall-clock budget — "
+                                + "model is hung or producing tokens too slowly.]", ""),
+                        3),
+                "describe the repo");
+
+        List<TurnRecord> recs = store.loadTurns(sid);
+        assertEquals(1, recs.size());
+        assertEquals("aborted", recs.get(0).status());
+    }
+
+    /**
+     * Lexical-prefix anchoring of the abort marker must not over-fire on
+     * real model prose that happens to contain the word "aborted" in the
+     * middle of a sentence.
+     */
+    @Test
+    void streamedTurnWithOrganicAbortedWordStaysOk(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "sid-organic";
+        JsonTurnLogAppender appender = new JsonTurnLogAppender(store, sid);
+
+        appender.onTurnComplete(
+                new TurnResult(new Result.Streamed(
+                        "The operation was aborted by the user earlier this week.", ""),
+                        1),
+                "what happened?");
+
+        List<TurnRecord> recs = store.loadTurns(sid);
+        assertEquals(1, recs.size());
+        assertEquals("ok", recs.get(0).status());
+    }
+
     @Test
     void legacyRecordsWithoutStatusRoundTripAsEmptyString(@TempDir Path dir) {
         // Simulate a JSONL line written by an older appender (no "status" field).

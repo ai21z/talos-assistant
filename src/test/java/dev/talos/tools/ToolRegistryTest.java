@@ -269,4 +269,25 @@ class ToolRegistryTest {
         assertTrue(result.success());
         assertEquals("Echo: fuzzy", result.output());
     }
+
+    /**
+     * Unix muscle-memory alias: bare {@code ls} and {@code talos:ls} (via
+     * separator rewrite to {@code talos.ls}, then stripped-prefix alias
+     * lookup) must both resolve to {@code talos.list_dir}. Observed real
+     * failure: gemma4:26b emitted both forms and got "Unknown tool"
+     * responses, wasting tool-loop iterations.
+     */
+    @Test
+    void ls_and_talos_colon_ls_both_resolve_to_list_dir() {
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new dev.talos.tools.impl.ListDirTool());
+
+        assertNotNull(registry.get("ls"), "bare `ls` must resolve");
+        assertEquals("talos.list_dir", registry.get("ls").name());
+
+        // talos:ls → separator rewrite → talos.ls → exact miss →
+        // strip-prefix alias lookup of "ls" → talos.list_dir
+        assertNotNull(registry.get("talos:ls"), "`talos:ls` must resolve via separator rewrite + alias");
+        assertEquals("talos.list_dir", registry.get("talos:ls").name());
+    }
 }

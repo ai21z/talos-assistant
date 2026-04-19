@@ -84,6 +84,13 @@ public final class ToolRegistry {
             Map.entry("list_dir",      "talos.list_dir"),
             Map.entry("list_directory","talos.list_dir"),
             Map.entry("dir_list",      "talos.list_dir"),
+            // Unix muscle-memory: models trained on shell transcripts frequently
+            // emit bare `ls` (and, via the separator-rewrite above, `talos:ls`
+            // → `talos.ls` → alias lookup of "ls"). Observed: gemma4:26b,
+            // test-output.txt Apr 2026 — two wasted tool-loop iterations on
+            // "Unknown tool: ls" / "Unknown tool: talos:ls" before abandoning
+            // the listing attempt. One entry closes both.
+            Map.entry("ls",            "talos.list_dir"),
             Map.entry("grep",          "talos.grep"),
             Map.entry("search",        "talos.grep"),
             Map.entry("retrieve",      "talos.retrieve"),

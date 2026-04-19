@@ -82,5 +82,76 @@ class TalosBootstrapWiringTest {
                         + "the per-turn JSONL durability is silently inactive "
                         + "and crash recovery degrades to the close-only snapshot.");
     }
+
+    /**
+     * JLine-safe stream sink wiring: when a {@link org.jline.reader.LineReader}
+     * is supplied, streaming chunks must be routed through its
+     * {@code Terminal.writer()} so JLine's cursor/column model stays in sync
+     * with what actually reaches the terminal. Writes that bypass JLine
+     * (raw {@code System.out.print}) leave JLine's internal state diverged
+     * from reality; on Windows (jna=true) the next prompt redraw then
+     * overwrites the live input line with scrollback content — the
+     * "hallucinated text bled into next input" symptom observed in
+     * test-output.txt Apr 2026 line 306.
+     *
+     * <p>This test proves the routing contract, not the redraw semantics:
+     * we construct a DumbTerminal wired to a byte-sink, invoke the wired
+     * stream sink directly with a known chunk, and assert the chunk
+     * emerged from the terminal's writer and NOT from the
+     * {@link java.io.PrintStream} passed as {@code out}.
+     */
+    @Test
+    void bootstrapRoutesStreamThroughLineReaderTerminalWhenAvailable() throws Exception {
+        java.io.ByteArrayOutputStream terminalSink = new java.io.ByteArrayOutputStream();
+        java.io.ByteArrayOutputStream stdoutSink   = new java.io.ByteArrayOutputStream();
+
+        org.jline.terminal.Terminal term = org.jline.terminal.TerminalBuilder.builder()
+                .dumb(true)
+                .streams(new java.io.ByteArrayInputStream(new byte[0]), terminalSink)
+                .build();
+        org.jline.reader.LineReader reader = org.jline.reader.LineReaderBuilder.builder()
+                .terminal(term)
+                .build();
+
+        ReplRouter router = TalosBootstrap.create(
+                stubSession(), new Config(),
+                new java.io.PrintStream(stdoutSink),
+                WS, reader);
+
+        // Drive one chunk directly through the wired stream sink — same
+        // path a live streaming turn would exercise, but without depending
+        // on mode/placeholder/turn-executor internals.
+        router.context().streamSink().accept("CHUNK-PROBE");
+        term.flush();
+
+        String termOut = terminalSink.toString(java.nio.charset.StandardCharsets.UTF_8);
+        String stdOut  = stdoutSink.toString(java.nio.charset.StandardCharsets.UTF_8);
+
+        assertTrue(termOut.contains("CHUNK-PROBE"),
+                "terminal writer must receive streamed chunks when LineReader is supplied");
+        assertFalse(stdOut.contains("CHUNK-PROBE"),
+                "streamed chunks must not leak to raw stdout when terminal-backed sink is available");
+    }
+
+    /**
+     * Back-compat path: when no {@link org.jline.reader.LineReader} is
+     * supplied (headless tests, programmatic API callers), the sink must
+     * fall back to the provided {@link java.io.PrintStream}. Prevents a
+     * silent regression where tightening the JLine path accidentally
+     * drops output for non-interactive invocations.
+     */
+    @Test
+    void bootstrapFallsBackToStdoutWhenLineReaderAbsent() {
+        java.io.ByteArrayOutputStream stdoutSink = new java.io.ByteArrayOutputStream();
+        ReplRouter router = TalosBootstrap.create(
+                stubSession(), new Config(),
+                new java.io.PrintStream(stdoutSink),
+                WS); // no LineReader
+
+        router.context().streamSink().accept("CHUNK-PROBE");
+        String stdOut = stdoutSink.toString(java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(stdOut.contains("CHUNK-PROBE"),
+                "with no LineReader, sink must fall back to the passed PrintStream");
+    }
 }
 

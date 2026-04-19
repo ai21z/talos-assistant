@@ -63,6 +63,15 @@ public final class ReplRouter {
     }
 
     /**
+     * Test-only accessor for the wired {@link Context}. Package-private so
+     * that {@code dev.talos.cli.repl} tests can assert stream-sink routing
+     * (e.g. JLine-safe output path) without reaching through reflection.
+     */
+    Context context() {
+        return ctx;
+    }
+
+    /**
      * Backward-compatible factory — delegates to {@link TalosBootstrap}.
      * Existing callers (RunCmd) continue to work without changes.
      */
