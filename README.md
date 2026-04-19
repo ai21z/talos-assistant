@@ -197,11 +197,12 @@ talos rag-ask --root C:\other\project "What are the main components?"
 | `ask` | General Q&A (no indexing) | General questions, no project context needed |
 | `rag` | Project-aware retrieval | Questions about your indexed codebase |
 | `dev` | Local file operations | View files and list directories (`ls`, `open`, `show`) |
+| `web` | Reserved stub | Not implemented; returns a reserved-mode message only |
 | `auto` | Smart mode selection | Let Talos choose the best mode for your question |
 
 **Notes on modes:**
 - `rag+memory` mode exists in code but is **deprecated and non-functional** (just redirects to `rag`)
-- `web` mode is **not implemented** (placeholder only, returns "reserved" message)
+- `web` mode is a **reserved stub** only. It is intentionally exposed, but it does not perform browser or external web actions in this build.
 - For actual functionality, use `ask`, `rag`, `dev`, or `auto`
 
 ---
