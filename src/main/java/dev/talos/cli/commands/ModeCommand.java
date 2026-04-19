@@ -12,7 +12,9 @@ public final class ModeCommand implements Command {
     public ModeCommand(ModeController modes) { this.modes = modes; }
 
     @Override public CommandSpec spec() {
-        return new CommandSpec("mode", List.of(), "/mode <mode>", "Switch active mode.", CommandGroup.MODELS);
+        return new CommandSpec("mode", List.of(), "/mode <mode>",
+                "Switch active mode. Available: auto, rag, chat, dev, ask, web (reserved).",
+                CommandGroup.MODELS);
     }
 
     @Override public Result execute(String args, Context ctx) {
@@ -22,7 +24,7 @@ public final class ModeCommand implements Command {
         }
         boolean ok = modes.setActive(a);
         if (!ok) {
-            return new Result.Error("Unknown mode. Available: auto, rag, chat, dev, ask, web", 200);
+            return new Result.Error("Unknown mode. Available: auto, rag, chat, dev, ask, web (reserved)", 200);
         }
         return new Result.Info("Mode: " + AnsiColor.blue(modes.getActiveName()));
     }
