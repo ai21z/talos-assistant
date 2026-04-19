@@ -1,0 +1,236 @@
+package dev.talos.runtime.toolcall;
+
+import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ChatMessage.NativeToolCall;
+import dev.talos.tools.ToolCall;
+import dev.talos.tools.ToolResult;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+public final class ToolCallSupport {
+    private static final Logger LOG = LoggerFactory.getLogger(ToolCallSupport.class);
+    public static final int KEEP_RECENT_TOOL_RESULTS = 2;
+
+    private static final Set<String> READ_ONLY_TOOLS = Set.of(
+            "talos.read_file", "talos.list_dir", "talos.grep"
+    );
+    private static final Set<String> MUTATING_TOOLS = Set.of(
+            "talos.write_file", "talos.edit_file"
+    );
+    private static final Set<String> PATH_REQUIRED_TOOLS = Set.of(
+            "talos.write_file", "talos.edit_file"
+    );
+    private static final List<String> PATH_PARAM_KEYS = List.of(
+            "path", "file_path", "filepath", "file", "filename"
+    );
+
+    private ToolCallSupport() {}
+
+    public static List<ToolCall> convertNativeToolCalls(List<NativeToolCall> nativeCalls) {
+        List<ToolCall> calls = new ArrayList<>(nativeCalls.size());
+        for (NativeToolCall ntc : nativeCalls) {
+            Map<String, String> params = new LinkedHashMap<>();
+            if (ntc.arguments() != null) {
+                for (var entry : ntc.arguments().entrySet()) {
+                    params.put(entry.getKey(), String.valueOf(entry.getValue()));
+                }
+            }
+            calls.add(new ToolCall(ntc.name(), params));
+        }
+        return calls;
+    }
+
+    public static String formatToolResult(ToolCall call, ToolResult result) {
+        var sb = new StringBuilder();
+        sb.append("[tool_result: ").append(call.toolName()).append("]\n");
+        if (result.success()) {
+            String output = result.output();
+            if (output == null || output.isBlank()) {
+                sb.append("(empty result)");
+            } else if (output.length() > 32_000) {
+                sb.append(output, 0, 32_000);
+                sb.append("\n... (output truncated at 32K chars)");
+            } else {
+                sb.append(output);
+            }
+            if (result.verification() != null) {
+                sb.append("\n[verification_status: ").append(result.verification().name()).append("]");
+            }
+        } else {
+            sb.append("[error] ").append(result.errorMessage());
+        }
+        sb.append("\n[/tool_result]");
+        return sb.toString();
+    }
+
+    public static String extractVerificationSummary(String output) {
+        if (output == null) return null;
+        int warnIdx = output.indexOf("Warning: ");
+        if (warnIdx >= 0) {
+            String after = output.substring(warnIdx + 9);
+            int tagIdx = after.indexOf(". [verification:");
+            return tagIdx >= 0 ? after.substring(0, tagIdx) : after;
+        }
+        return null;
+    }
+
+    public static String latestUserRequestIn(List<ChatMessage> messages) {
+        if (messages == null || messages.isEmpty()) return null;
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            ChatMessage m = messages.get(i);
+            if ("user".equals(m.role())) {
+                String c = m.content();
+                return (c == null || c.isBlank()) ? null : c;
+            }
+        }
+        return null;
+    }
+
+    public static String summarizeToolResult(String body) {
+        String tool = "unknown";
+        if (body.startsWith("[tool_result:")) {
+            int close = body.indexOf(']');
+            if (close > "[tool_result:".length()) {
+                tool = body.substring("[tool_result:".length(), close).trim();
+            }
+        }
+        boolean isError = body.contains("[error]");
+        int len = body.length();
+        return "[compacted: " + tool + (isError ? " error" : " result")
+                + ", " + len + " chars — full output elided to keep context focused]";
+    }
+
+    public static String firstSentenceSummary(String output) {
+        if (output == null) return "";
+        String s = output.strip();
+        if (s.isEmpty()) return "";
+        if (s.startsWith("[tool_result:")) {
+            int close = s.indexOf(']');
+            if (close > 0 && close < s.length() - 1) {
+                s = s.substring(close + 1).stripLeading();
+            }
+        }
+        int cut = -1;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '.' || c == '!' || c == '?') {
+                if (i + 1 >= s.length() || Character.isWhitespace(s.charAt(i + 1))) {
+                    cut = i + 1;
+                    break;
+                }
+            } else if (c == '\n') {
+                cut = i;
+                break;
+            }
+        }
+        String head = cut > 0 ? s.substring(0, cut).strip() : s;
+        int bracket = head.indexOf(" [");
+        if (bracket > 0) head = head.substring(0, bracket).strip();
+        while (!head.isEmpty()) {
+            char last = head.charAt(head.length() - 1);
+            if (last == '.' || last == '!' || last == '?') {
+                head = head.substring(0, head.length() - 1).stripTrailing();
+            } else break;
+        }
+        if (head.length() > 160) head = head.substring(0, 157) + "…";
+        return head;
+    }
+
+    public static String buildCallSignature(ToolCall call) {
+        String path = resolvePathHint(call);
+        String oldStr = call.param("old_string");
+        if (oldStr == null) oldStr = call.param("oldString");
+        int oldHash = oldStr != null ? oldStr.hashCode() : 0;
+        return call.toolName() + ":" + (path != null ? path : "") + ":" + oldHash;
+    }
+
+    public static String canonicalizeReadPath(String path) {
+        if (path == null) return "";
+        String p = path.replace('\\', '/');
+        while (p.length() > 1 && p.endsWith("/")) {
+            p = p.substring(0, p.length() - 1);
+        }
+        if (p.isEmpty() || ".".equals(p)) return ".";
+        if (p.startsWith("./") && p.length() > 2) {
+            p = p.substring(2);
+        }
+        return p;
+    }
+
+    public static boolean isReadOnlyTool(String toolName) {
+        return READ_ONLY_TOOLS.contains(toolName);
+    }
+
+    public static boolean isMutatingTool(String toolName) {
+        return MUTATING_TOOLS.contains(toolName);
+    }
+
+    public static String buildReadCallSignature(ToolCall call) {
+        var sb = new StringBuilder(call.toolName()).append(":");
+        if (call.parameters() != null) {
+            call.parameters().entrySet().stream()
+                    .sorted(Map.Entry.comparingByKey())
+                    .forEach(e -> sb.append(e.getKey()).append("=")
+                            .append(canonicalizeReadPath(e.getValue())).append(";"));
+        }
+        return sb.toString();
+    }
+
+    public static ToolCall repairMissingPath(ToolCall call) {
+        if (!PATH_REQUIRED_TOOLS.contains(call.toolName())) {
+            return call;
+        }
+        for (String key : PATH_PARAM_KEYS) {
+            String v = call.param(key);
+            if (v != null && !v.isBlank()) return call;
+        }
+        LOG.warn("{} call is missing required 'path' parameter. "
+                + "Returning call as-is so the tool produces an error. "
+                + "The model must provide the target file path explicitly.", call.toolName());
+        return call;
+    }
+
+    public static void compactOlderToolResultsInPlace(List<ChatMessage> messages) {
+        if (messages == null || messages.size() < 4) return;
+        List<Integer> toolResultIndices = new ArrayList<>();
+        for (int i = 0; i < messages.size(); i++) {
+            if ("tool".equals(messages.get(i).role())) {
+                toolResultIndices.add(i);
+            }
+        }
+        int keepFrom = toolResultIndices.size() - KEEP_RECENT_TOOL_RESULTS;
+        if (keepFrom <= 0) return;
+        for (int k = 0; k < keepFrom; k++) {
+            int idx = toolResultIndices.get(k);
+            ChatMessage m = messages.get(idx);
+            String content = m.content();
+            if (content == null || content.isBlank()) continue;
+            if (content.startsWith("[compacted:")) continue;
+            String summary = summarizeToolResult(content);
+            messages.set(idx, ChatMessage.toolResult(m.toolCallId(), summary));
+        }
+    }
+
+    public static String resolvePathHint(ToolCall call) {
+        for (String key : List.of("path", "file_path", "filepath", "file", "filename", "dir", "pattern")) {
+            String v = call.param(key);
+            if (v != null && !v.isBlank()) return v;
+        }
+        return null;
+    }
+
+    public static String truncateForLog(String s) {
+        if (s == null) return "null";
+        return s.length() <= 80 ? s : s.substring(0, 77) + "...";
+    }
+
+    public static String normalizePath(String path) {
+        return path == null ? "" : path.replace('\\', '/');
+    }
+}
