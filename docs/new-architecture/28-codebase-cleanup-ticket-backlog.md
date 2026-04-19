@@ -53,7 +53,7 @@ These tickets are ordered by safety and dependency.
 4. `CCR-004` delete `FirstRunWizard` class only `[done]`
 5. `CCR-005` decide `WebMode`: keep reserved or retire intentionally `[done]`
 6. `CCR-006` migrate `TalosTool` from legacy no-context execution to context-aware execution `[done]`
-7. `CCR-007` split `ModelEngine` into chat/embed interfaces
+7. `CCR-007` split `ModelEngine` into chat/embed interfaces `[done]`
 8. `CCR-008` SPI package consolidation
 9. `CCR-009` split `OllamaEngine`
 10. `CCR-010` extract `ToolCallLoop` stages
@@ -402,6 +402,11 @@ shape should be reversed only after parity is proven.
 ---
 
 ### CCR-007 — Split `ModelEngine` into chat and embedding interfaces
+
+**Status**
+
+- Done on `ticket/CCR-007-split-modelengine-chat-embed`
+- Merged into `chore/codebase-cleanup-refactor`
 
 **Why this exists**
 
