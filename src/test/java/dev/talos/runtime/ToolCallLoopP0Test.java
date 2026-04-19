@@ -190,7 +190,7 @@ class ToolCallLoopP0Test {
             @Override public ToolDescriptor descriptor() {
                 return new ToolDescriptor("talos.write_file", "write a file");
             }
-            @Override public ToolResult execute(ToolCall call) {
+            @Override public ToolResult execute(ToolCall call, ToolContext ctx) {
                 String path = call.param("path", "unknown");
                 String content = call.param("content", "");
                 return ToolResult.ok("Created " + path + " ("
@@ -207,7 +207,7 @@ class ToolCallLoopP0Test {
             @Override public ToolDescriptor descriptor() {
                 return new ToolDescriptor("talos.echo", "Echo");
             }
-            @Override public ToolResult execute(ToolCall call) {
+            @Override public ToolResult execute(ToolCall call, ToolContext ctx) {
                 return ToolResult.ok("echo: " + call.param("input", ""));
             }
         };

@@ -51,15 +51,11 @@ public final class GrepTool implements TalosTool {
                 },"required":["pattern"]}""");
     }
 
-    /** Legacy no-context execute — returns error. */
-    @Override
-    public ToolResult execute(ToolCall call) {
-        return ToolResult.fail(ToolError.internal("GrepTool requires a ToolContext"));
-    }
-
     @Override
     public ToolResult execute(ToolCall call, ToolContext ctx) {
-        if (ctx == null) return execute(call);
+        if (ctx == null) {
+            return ToolResult.fail(ToolError.internal("GrepTool requires a ToolContext"));
+        }
 
         String patternStr = resolveParam(call, "pattern", "query", "search", "text", "search_pattern", "search_text");
         if (patternStr == null || patternStr.isBlank()) {

@@ -133,7 +133,7 @@ class TurnProcessorPlaceholderGuardTest {
         @Override public ToolDescriptor descriptor() {
             return new ToolDescriptor("test.write", "write", null, ToolRiskLevel.WRITE);
         }
-        @Override public ToolResult execute(ToolCall call) { return ToolResult.ok("wrote"); }
+        @Override public ToolResult execute(ToolCall call, ToolContext ctx) { return ToolResult.ok("wrote"); }
     }
 
     private static final class NopReadTool implements TalosTool {
@@ -142,7 +142,7 @@ class TurnProcessorPlaceholderGuardTest {
         @Override public ToolDescriptor descriptor() {
             return new ToolDescriptor("test.read", "read", null, ToolRiskLevel.READ_ONLY);
         }
-        @Override public ToolResult execute(ToolCall call) { return ToolResult.ok("read"); }
+        @Override public ToolResult execute(ToolCall call, ToolContext ctx) { return ToolResult.ok("read"); }
     }
 }
 

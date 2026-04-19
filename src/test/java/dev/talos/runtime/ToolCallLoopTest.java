@@ -131,7 +131,7 @@ class ToolCallLoopTest {
             @Override public ToolDescriptor descriptor() {
                 return new ToolDescriptor("talos.loop", "Loop tool");
             }
-            @Override public ToolResult execute(ToolCall call) {
+            @Override public ToolResult execute(ToolCall call, ToolContext ctx) {
                 return ToolResult.ok("looping");
             }
         });
@@ -178,7 +178,7 @@ class ToolCallLoopTest {
             @Override public ToolDescriptor descriptor() {
                 return new ToolDescriptor("talos.greet", "Greeting tool");
             }
-            @Override public ToolResult execute(ToolCall call) {
+            @Override public ToolResult execute(ToolCall call, ToolContext ctx) {
                 return ToolResult.ok("Hello, " + call.param("name", "world") + "!");
             }
         });
@@ -354,7 +354,7 @@ class ToolCallLoopTest {
             @Override public ToolDescriptor descriptor() {
                 return new ToolDescriptor("talos.write_file", "Write file");
             }
-            @Override public ToolResult execute(ToolCall call) {
+            @Override public ToolResult execute(ToolCall call, ToolContext ctx) {
                 invocations.incrementAndGet();
                 return ToolResult.fail("simulated write failure");
             }
@@ -397,7 +397,7 @@ class ToolCallLoopTest {
             @Override public ToolDescriptor descriptor() {
                 return new ToolDescriptor("talos.read_file", "Failing read");
             }
-            @Override public ToolResult execute(ToolCall call) {
+            @Override public ToolResult execute(ToolCall call, ToolContext ctx) {
                 return ToolResult.fail("File not found: missing.txt");
             }
         };
@@ -407,7 +407,7 @@ class ToolCallLoopTest {
             @Override public ToolDescriptor descriptor() {
                 return new ToolDescriptor("talos.edit_file", "Edit file");
             }
-            @Override public ToolResult execute(ToolCall call) {
+            @Override public ToolResult execute(ToolCall call, ToolContext ctx) {
                 return ToolResult.fail("old_string not found");
             }
         };
@@ -536,7 +536,7 @@ class ToolCallLoopTest {
             @Override public ToolDescriptor descriptor() {
                 return new ToolDescriptor("talos.echo", "Echo back the input");
             }
-            @Override public ToolResult execute(ToolCall call) {
+            @Override public ToolResult execute(ToolCall call, ToolContext ctx) {
                 return ToolResult.ok("echo: " + call.param("input", ""));
             }
         };
@@ -549,7 +549,7 @@ class ToolCallLoopTest {
             @Override public ToolDescriptor descriptor() {
                 return new ToolDescriptor("talos.always_fail", "Always fails for test purposes");
             }
-            @Override public ToolResult execute(ToolCall call) {
+            @Override public ToolResult execute(ToolCall call, ToolContext ctx) {
                 return ToolResult.fail("deliberate test failure");
             }
         };
