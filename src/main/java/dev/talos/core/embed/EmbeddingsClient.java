@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
 import dev.talos.core.cache.CacheDb;
-import dev.talos.core.spi.Embeddings;
+import dev.talos.spi.Embeddings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

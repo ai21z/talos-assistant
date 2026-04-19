@@ -2,9 +2,9 @@ package dev.talos.core.llm;
 
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
-import dev.talos.core.engine.EngineRegistry;
 import dev.talos.core.util.Sanitize;
 import dev.talos.spi.EngineException;
+import dev.talos.spi.EngineRegistry;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.TokenChunk;

@@ -11,7 +11,7 @@ import dev.talos.core.ingest.Chunker;
 import dev.talos.core.ingest.FileWalker;
 import dev.talos.core.ingest.ParsedChunk;
 import dev.talos.core.ingest.ParserUtil;
-import dev.talos.core.spi.Embeddings;
+import dev.talos.spi.Embeddings;
 import dev.talos.core.util.Hash;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
