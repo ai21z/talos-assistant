@@ -16,8 +16,8 @@ import dev.talos.core.context.TokenBudget;
 import dev.talos.core.rerank.ScoreThresholdReranker;
 import dev.talos.core.retrieval.*;
 import dev.talos.core.retrieval.stages.*;
-import dev.talos.core.spi.CorpusStore;
 import dev.talos.runtime.ToolCallParser;
+import dev.talos.spi.CorpusStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

@@ -3,7 +3,7 @@ package dev.talos.core.retrieval.stages;
 import dev.talos.core.retrieval.RetrievalCandidate;
 import dev.talos.core.retrieval.RetrievalRequest;
 import dev.talos.core.retrieval.StageOutput;
-import dev.talos.core.spi.CorpusStore;
+import dev.talos.spi.CorpusStore;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
