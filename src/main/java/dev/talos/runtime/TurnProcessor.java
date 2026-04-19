@@ -197,6 +197,49 @@ public final class TurnProcessor {
         String path = resolvePathParam(call);
         String userRequest = TurnUserRequestCapture.get();
 
+        // Template-placeholder guard — reject BEFORE the approval gate.
+        // Transcript-observed failure (qwen2.5-coder:14b, April 2026): the
+        // model emits a pedagogical "step-by-step" answer using Python-style
+        // variable names, then issues write_file / edit_file tool calls whose
+        // content argument IS the variable name (e.g.
+        // `<updated_index_html_content>`). The approval preview just mirrors
+        // the placeholder back at the user; a reflex "y" overwrites real
+        // files with 28 bytes of garbage. Warning-in-approval-detail would
+        // not have saved the user — this class of payload is definitionally
+        // garbage, so we refuse it at tool-call time and feed a directed
+        // error back so the model retries with real content.
+        if (risk.requiresApproval()) {
+            String placeholderParam = null;
+            String placeholderValue = null;
+            // write_file-family: content / text / body / file_content
+            for (String k : List.of("content", "text", "body", "file_content", "data")) {
+                String v = call.param(k);
+                if (v != null && TemplatePlaceholderGuard.looksLikeTemplatePlaceholder(v)) {
+                    placeholderParam = k;
+                    placeholderValue = v;
+                    break;
+                }
+            }
+            // edit_file: new_string
+            if (placeholderParam == null) {
+                String v = call.param("new_string");
+                if (v != null && TemplatePlaceholderGuard.looksLikeTemplatePlaceholder(v)) {
+                    placeholderParam = "new_string";
+                    placeholderValue = v;
+                }
+            }
+            if (placeholderParam != null) {
+                String msg = TemplatePlaceholderGuard.rejectionMessage(
+                        call.toolName(), placeholderParam, placeholderValue);
+                // Recorded as a rejected (denied) approval for audit purposes
+                // — the call never reached the gate because the payload was
+                // definitionally bad, but from a trust-accounting perspective
+                // it is a denied mutation, not a success.
+                TurnAuditCapture.recordToolCall(call.toolName(), path == null ? "" : path, false);
+                return ToolResult.fail(ToolError.invalidParams(msg));
+            }
+        }
+
         // Scope guard — narrow, lexical, warn-first. Fires only for mutating
         // calls where the request looks web-scoped and the target extension
         // is obviously off-scope. If it fires, the warning is surfaced to
