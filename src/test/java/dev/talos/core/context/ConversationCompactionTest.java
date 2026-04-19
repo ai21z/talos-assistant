@@ -1,12 +1,15 @@
 package dev.talos.core.context;
 
 import dev.talos.cli.repl.SessionMemory;
+import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.spi.types.ChatMessage;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -17,6 +20,15 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class ConversationCompactionTest {
 
+    private static Config placeholderConfig() {
+        Config cfg = new Config();
+        Map<String, Object> llm = new LinkedHashMap<>();
+        llm.put("transport", "placeholder");
+        llm.put("default_backend", "ollama");
+        cfg.data.put("llm", llm);
+        return cfg;
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     //  ConversationCompactor
     // ═══════════════════════════════════════════════════════════════════════
@@ -26,22 +38,22 @@ class ConversationCompactionTest {
 
         @Test
         void compact_nullTurns_returnsExistingSketch() {
-            LlmClient llm = new LlmClient(null);
+            LlmClient llm = new LlmClient(placeholderConfig());
             String result = ConversationCompactor.compact("old sketch", null, llm);
             assertEquals("old sketch", result);
         }
 
         @Test
         void compact_emptyTurns_returnsExistingSketch() {
-            LlmClient llm = new LlmClient(null);
+            LlmClient llm = new LlmClient(placeholderConfig());
             String result = ConversationCompactor.compact("old sketch", List.of(), llm);
             assertEquals("old sketch", result);
         }
 
         @Test
         void compact_withTurns_returnsNewSketch() {
-            // LlmClient in PLACEHOLDER mode returns a deterministic response
-            LlmClient llm = new LlmClient(null);
+            // Explicit placeholder transport keeps this compaction test deterministic.
+            LlmClient llm = new LlmClient(placeholderConfig());
             List<ChatMessage> turns = List.of(
                     ChatMessage.user("What is Talos?"),
                     ChatMessage.assistant("Talos is a local-first knowledge engine.")
