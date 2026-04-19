@@ -50,9 +50,9 @@ These tickets are ordered by safety and dependency.
 1. `CCR-001` doc drift fix in `.github/assistant-instructions.md`
 2. `CCR-002` decouple failing tests from real engine resolution with the correct seam per test layer `[done]`
 3. `CCR-003` `BuildInfo` exploded-classes version source `[done]`
-4. `CCR-004` delete `FirstRunWizard` class only
-5. `CCR-005` decide `WebMode`: keep reserved or retire intentionally
-6. `CCR-006` migrate `TalosTool` from legacy no-context execution to context-aware execution
+4. `CCR-004` delete `FirstRunWizard` class only `[done]`
+5. `CCR-005` decide `WebMode`: keep reserved or retire intentionally `[done]`
+6. `CCR-006` migrate `TalosTool` from legacy no-context execution to context-aware execution `[done]`
 7. `CCR-007` split `ModelEngine` into chat/embed interfaces
 8. `CCR-008` SPI package consolidation
 9. `CCR-009` split `OllamaEngine`
@@ -245,6 +245,11 @@ production, but it breaks banner tests that assert a concrete version string.
 
 ### CCR-004 — Delete deprecated `FirstRunWizard` class only
 
+**Status**
+
+- Done on `ticket/CCR-004-remove-first-run-wizard`
+- Merged into `chore/codebase-cleanup-refactor`
+
 **Why this exists**
 
 `FirstRunWizard` is deprecated for removal and has no live runtime callers.
@@ -287,6 +292,11 @@ This is a low-risk cleanup if kept strictly to class deletion.
 ---
 
 ### CCR-005 — Make an explicit `WebMode` product decision
+
+**Status**
+
+- Done on `ticket/CCR-005-webmode-decision`
+- Merged into `chore/codebase-cleanup-refactor`
 
 **Why this exists**
 
@@ -334,6 +344,11 @@ Choose one of two outcomes:
 ---
 
 ### CCR-006 — Migrate `TalosTool` contract from legacy no-context execution to context-aware execution
+
+**Status**
+
+- Done on `ticket/CCR-006-context-aware-talos-tool`
+- Merged into `chore/codebase-cleanup-refactor`
 
 **Why this exists**
 
