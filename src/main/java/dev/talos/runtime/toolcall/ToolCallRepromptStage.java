@@ -1,0 +1,122 @@
+package dev.talos.runtime.toolcall;
+
+import dev.talos.core.llm.LlmClient;
+import dev.talos.runtime.ToolCallParser;
+import dev.talos.spi.EngineException;
+import dev.talos.spi.types.ChatMessage;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.ArrayList;
+import java.util.List;
+
+public final class ToolCallRepromptStage {
+    private static final Logger LOG = LoggerFactory.getLogger(ToolCallRepromptStage.class);
+
+    public boolean reprompt(LoopState state, ToolCallExecutionStage.IterationOutcome outcome) {
+        if (outcome.mutationsThisIteration() > 0) {
+            state.currentText = String.join("\n", outcome.mutationSummaries());
+            state.currentNativeCalls = List.of();
+            LOG.debug("P0: skipping re-prompt after {} successful mutation(s) this iteration",
+                    outcome.mutationsThisIteration());
+            return false;
+        }
+
+        if (state.iterations >= 3) {
+            ToolCallSupport.compactOlderToolResultsInPlace(state.messages);
+        }
+
+        int anchorIndex = -1;
+        String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
+        if (userTask != null && !userTask.isBlank()) {
+            String pinned = userTask.length() <= 500 ? userTask : userTask.substring(0, 500) + "…";
+            state.messages.add(ChatMessage.system("[Current task — stay focused on this] " + pinned));
+            anchorIndex = state.messages.size() - 1;
+        }
+
+        try {
+            java.util.function.Consumer<String> sink = state.ctx.streamSink();
+            LlmClient.StreamResult repromptResult = sink != null
+                    ? state.ctx.llm().chatStreamFull(state.messages, sink)
+                    : state.ctx.llm().chatFull(state.messages);
+            state.currentText = repromptResult.text();
+            state.currentNativeCalls = repromptResult.hasToolCalls()
+                    ? new ArrayList<>(repromptResult.toolCalls()) : List.of();
+            if (state.currentText == null) state.currentText = "";
+            if (state.currentText.isEmpty() && state.currentNativeCalls.isEmpty()) {
+                if (!state.pendingMutationSummaries.isEmpty()) {
+                    state.currentText = String.join("\n", state.pendingMutationSummaries);
+                } else {
+                    state.currentText = "(no answer from model after tool execution)";
+                }
+                return false;
+            }
+            return true;
+        } catch (EngineException.ConnectionFailed cf) {
+            LOG.warn("Ollama not reachable during tool-call loop iteration {}: {}", state.iterations, cf.getMessage());
+            state.currentText = "[Ollama not reachable — tool loop aborted. " + cf.guidance() + "]";
+            state.currentNativeCalls = List.of();
+            return false;
+        } catch (EngineException.ModelNotFound mnf) {
+            LOG.warn("Model not found during tool-call loop iteration {}: {}", state.iterations, mnf.model());
+            state.currentText = "[Model '" + mnf.model() + "' not found — tool loop aborted. " + mnf.guidance() + "]";
+            state.currentNativeCalls = List.of();
+            return false;
+        } catch (EngineException.Transient tr) {
+            LOG.warn("Transient error during tool-call loop iteration {}: {}", state.iterations, tr.getMessage());
+            try {
+                Thread.sleep(400);
+                java.util.function.Consumer<String> sink = state.ctx.streamSink();
+                LlmClient.StreamResult retryResult = sink != null
+                        ? state.ctx.llm().chatStreamFull(state.messages, sink)
+                        : state.ctx.llm().chatFull(state.messages);
+                state.currentText = retryResult.text();
+                state.currentNativeCalls = retryResult.hasToolCalls()
+                        ? new ArrayList<>(retryResult.toolCalls()) : List.of();
+                if (state.currentText == null) state.currentText = "";
+                if (state.currentText.isEmpty() && state.currentNativeCalls.isEmpty()) {
+                    if (!state.pendingMutationSummaries.isEmpty()) {
+                        state.currentText = String.join("\n", state.pendingMutationSummaries);
+                    } else {
+                        state.currentText = "(no answer from model after retry)";
+                    }
+                    return false;
+                }
+                return true;
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                state.currentText = "[Interrupted during tool-call loop]";
+                state.currentNativeCalls = List.of();
+                return false;
+            } catch (Exception retryEx) {
+                state.currentText = "[" + tr.guidance() + "]";
+                state.currentNativeCalls = List.of();
+                return false;
+            }
+        } catch (EngineException ee) {
+            LOG.warn("Engine error during tool-call loop iteration {}: {}", state.iterations, ee.getMessage());
+            state.currentText = "[Engine error during tool loop: " + ee.getMessage() + "]";
+            state.currentNativeCalls = List.of();
+            return false;
+        } catch (Exception e) {
+            LOG.warn("LLM call failed during tool-call loop iteration {}: {}", state.iterations, e.getMessage());
+            state.currentText = "(error during follow-up LLM call: " + e.getMessage() + ")";
+            state.currentNativeCalls = List.of();
+            return false;
+        } finally {
+            if (anchorIndex >= 0 && anchorIndex < state.messages.size()) {
+                ChatMessage m = state.messages.get(anchorIndex);
+                if ("system".equals(m.role())
+                        && m.content() != null
+                        && m.content().startsWith("[Current task")) {
+                    state.messages.remove(anchorIndex);
+                }
+            }
+        }
+    }
+
+    public boolean hitIterationLimit(LoopState state) {
+        return state.iterations >= state.maxIterations
+                && (!state.currentNativeCalls.isEmpty() || ToolCallParser.containsToolCalls(state.currentText));
+    }
+}
