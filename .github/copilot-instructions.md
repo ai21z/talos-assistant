@@ -85,17 +85,17 @@ Do not introduce agent-platform concerns into LOQ-J core.
 
 ### Key packages
 
-- `dev.loqj.core.retrieval` — retrieval pipeline, stages, traces
-- `dev.loqj.core.rerank` — reranker interface and implementations
-- `dev.loqj.core.context` — context packing, token budgets
-- `dev.loqj.core.ingest` — parsing, chunking
-- `dev.loqj.core.index` — Lucene indexing
-- `dev.loqj.core.embed` — embeddings client
-- `dev.loqj.core.cache` — SQLite caching
-- `dev.loqj.core.llm` — LLM client abstraction
-- `dev.loqj.tools` — future tool/MCP seam
-- `dev.loqj.api` — programmatic API seam (`LoqjKnowledgeEngine`)
-- `dev.loqj.cli` — CLI commands and REPL
+- `dev.talos.core.retrieval` — retrieval pipeline, stages, traces
+- `dev.talos.core.rerank` — reranker interface and implementations
+- `dev.talos.core.context` — context packing, token budgets
+- `dev.talos.core.ingest` — parsing, chunking
+- `dev.talos.core.index` — Lucene indexing
+- `dev.talos.core.embed` — embeddings client
+- `dev.talos.core.cache` — SQLite caching
+- `dev.talos.core.llm` — LLM client abstraction
+- `dev.talos.tools` — future tool/MCP seam
+- `dev.talos.api` — programmatic API seam (`TalosKnowledgeEngine`)
+- `dev.talos.cli` — CLI commands and REPL
 
 ### Retrieval pipeline
 
@@ -114,4 +114,3 @@ Stages are stateless (`StageOutput` record). Traces are captured per-stage.
 - Do not perform broad package reshuffles without a concrete reason
 - Do not delete legacy code before proving parity with new code
 - Do not push CI/quality tooling changes into dev or main without review
-
