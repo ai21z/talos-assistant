@@ -8,7 +8,7 @@ import dev.talos.core.embed.CachingEmbeddings;
 import dev.talos.core.embed.EmbeddingsClient;
 import dev.talos.core.index.LuceneStore;
 import dev.talos.core.ingest.FileWalker;
-import dev.talos.core.spi.Embeddings;
+import dev.talos.spi.Embeddings;
 
 import java.nio.file.Files;
 import java.nio.file.Path;

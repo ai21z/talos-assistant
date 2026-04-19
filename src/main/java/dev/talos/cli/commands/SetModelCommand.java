@@ -2,7 +2,7 @@ package dev.talos.cli.commands;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
-import dev.talos.core.engine.EngineRegistry;
+import dev.talos.spi.EngineRegistry;
 
 import java.util.List;
 

@@ -1,7 +1,7 @@
 package dev.talos.core.embed;
 
 import dev.talos.core.cache.CacheDb;
-import dev.talos.core.spi.Embeddings;
+import dev.talos.spi.Embeddings;
 import dev.talos.core.util.Hash;
 
 import java.util.ArrayList;
