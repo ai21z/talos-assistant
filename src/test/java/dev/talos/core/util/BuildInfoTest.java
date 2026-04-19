@@ -12,9 +12,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>Tests run from exploded class files in the Gradle test classpath, so the
  * jar-manifest attributes that {@link BuildInfo#version()} etc. read through
- * {@link Package} metadata are typically <em>absent</em>. That's the
- * interesting case to pin down: the helper must gracefully fall back to
- * {@code "unknown"} rather than NPE or fabricate a value.
+ * {@link Package} metadata are typically <em>absent</em>. That is still the
+ * interesting case to pin down: version should fall back to generated build
+ * metadata, while other fields must still gracefully fall back to
+ * {@code "unknown"} rather than NPE or fabrication.
  *
  * <p>These tests do <b>not</b> require git to be available — the optional
  * {@code META-INF/talos-build.properties} resource is not shipped on the
@@ -25,14 +26,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class BuildInfoTest {
 
     @Test
-    @DisplayName("version() never returns null and defaults to 'unknown' in test classpath")
+    @DisplayName("version() never returns null and resolves from generated metadata in test classpath")
     void versionFallsBackGracefully() {
         String v = BuildInfo.version();
         assertNotNull(v, "version() must not return null");
         assertTrue(!v.isBlank(), "version() must not return blank");
-        // In test runs the jar manifest is not materialized; fallback expected.
-        // We don't hard-assert "unknown" — if someone later adds a manifest
-        // producer for tests, a real version string is also acceptable.
+        assertEquals("0.9.0-beta", v,
+                "Exploded-class test runs should resolve version from generated build metadata.");
     }
 
     @Test
