@@ -54,7 +54,7 @@ These tickets are ordered by safety and dependency.
 5. `CCR-005` decide `WebMode`: keep reserved or retire intentionally `[done]`
 6. `CCR-006` migrate `TalosTool` from legacy no-context execution to context-aware execution `[done]`
 7. `CCR-007` split `ModelEngine` into chat/embed interfaces `[done]`
-8. `CCR-008` SPI package consolidation
+8. `CCR-008` SPI package consolidation `[done]`
 9. `CCR-009` split `OllamaEngine`
 10. `CCR-010` extract `ToolCallLoop` stages
 11. `CCR-011` decompose `LlmClient`
@@ -454,6 +454,11 @@ acceptable with one implementation, but it is a future ISP problem.
 ---
 
 ### CCR-008 — Consolidate `core.spi` / `core.engine` into clearer SPI packages
+
+**Status**
+
+- Done on `ticket/CCR-008-spi-package-consolidation`
+- Merged into `chore/codebase-cleanup-refactor`
 
 **Why this exists**
 
