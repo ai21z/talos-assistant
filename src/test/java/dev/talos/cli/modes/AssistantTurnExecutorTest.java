@@ -2,6 +2,7 @@ package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
+import dev.talos.core.llm.LlmClient;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import org.junit.jupiter.api.DisplayName;
@@ -26,6 +27,12 @@ class AssistantTurnExecutorTest {
 
     private static final Path WS = Path.of(".").toAbsolutePath().normalize();
 
+    private static Context scriptedContext(String... responses) {
+        return Context.builder(new Config())
+                .llm(LlmClient.scripted(List.of(responses)))
+                .build();
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     //  Non-streaming path (no streamSink)
     // ═══════════════════════════════════════════════════════════════════════
@@ -36,7 +43,7 @@ class AssistantTurnExecutorTest {
 
         @Test
         void returns_non_empty_answer() {
-            var ctx = Context.builder(new Config()).build();
+            var ctx = scriptedContext("non-streamed answer");
             var messages = basicMessages();
             var opts = new AssistantTurnExecutor.Options();
 
@@ -48,7 +55,7 @@ class AssistantTurnExecutorTest {
 
         @Test
         void respects_timeout_option() {
-            var ctx = Context.builder(new Config()).build();
+            var ctx = scriptedContext("timeout-safe answer");
             var messages = basicMessages();
             // Very long timeout — should still work normally
             var opts = new AssistantTurnExecutor.Options().llmTimeoutMs(60_000L);
@@ -70,7 +77,10 @@ class AssistantTurnExecutorTest {
         @Test
         void returns_answer_and_marks_streamed() {
             var chunks = new ArrayList<String>();
-            var ctx = Context.builder(new Config()).streamSink(chunks::add).build();
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted("streamed answer"))
+                    .streamSink(chunks::add)
+                    .build();
             var messages = basicMessages();
             var opts = new AssistantTurnExecutor.Options();
 
@@ -84,7 +94,10 @@ class AssistantTurnExecutorTest {
         @Test
         void streamed_text_matches_returned_text() {
             var chunks = new ArrayList<String>();
-            var ctx = Context.builder(new Config()).streamSink(chunks::add).build();
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted("streamed parity"))
+                    .streamSink(chunks::add)
+                    .build();
             var messages = basicMessages();
             var opts = new AssistantTurnExecutor.Options();
 
@@ -106,7 +119,7 @@ class AssistantTurnExecutorTest {
 
         @Test
         void answer_sanitizer_is_applied() {
-            var ctx = Context.builder(new Config()).build();
+            var ctx = scriptedContext("raw answer");
             var messages = basicMessages();
             var opts = new AssistantTurnExecutor.Options()
                     .answerSanitizer(s -> "SANITIZED:" + s);
@@ -119,7 +132,7 @@ class AssistantTurnExecutorTest {
 
         @Test
         void response_truncated_when_over_max_chars() {
-            var ctx = Context.builder(new Config()).build();
+            var ctx = scriptedContext("long answer");
             // Use a question that generates a longer PLACEHOLDER response
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("You are a helpful assistant."));
@@ -135,7 +148,7 @@ class AssistantTurnExecutorTest {
 
         @Test
         void null_sanitizer_treated_as_identity() {
-            var ctx = Context.builder(new Config()).build();
+            var ctx = scriptedContext("identity answer");
             var messages = basicMessages();
             var opts = new AssistantTurnExecutor.Options().answerSanitizer(null);
 
@@ -161,7 +174,7 @@ class AssistantTurnExecutorTest {
          */
         @Test
         void extremely_short_timeout_triggers_timeout_handling() {
-            var ctx = Context.builder(new Config()).build();
+            var ctx = scriptedContext("fast answer");
             var messages = basicMessages();
             // 1ms timeout — PLACEHOLDER is fast enough that this might not trigger,
             // but verifies the timeout wiring exists without errors
@@ -175,7 +188,7 @@ class AssistantTurnExecutorTest {
         @Test
         void execute_never_throws_to_caller() {
             // Even with a minimal context, execute should never propagate exceptions
-            var ctx = Context.builder(new Config()).build();
+            var ctx = scriptedContext("no throw");
             var messages = basicMessages();
             var opts = new AssistantTurnExecutor.Options();
 
@@ -237,7 +250,7 @@ class AssistantTurnExecutorTest {
 
         @Test
         void default_options_work() {
-            var ctx = Context.builder(new Config()).build();
+            var ctx = scriptedContext("default options answer");
             var messages = basicMessages();
             // Default options — should work without any configuration
             var opts = new AssistantTurnExecutor.Options();
@@ -353,9 +366,7 @@ class AssistantTurnExecutorTest {
 
         @Test
         void retryTriggeredForDeflectionAfterToolUse() {
-            // PLACEHOLDER LLM always returns a non-blank, non-deflection answer,
-            // so the retry should succeed and return something different from the original.
-            var ctx = Context.builder(new Config()).build();
+            var ctx = scriptedContext("Scripted retry answer.");
             var messages = new ArrayList<>(basicMessages());
             String deflection = "How can I help you with these files?";
             String result = AssistantTurnExecutor.synthesisRetryIfNeeded(
@@ -364,15 +375,13 @@ class AssistantTurnExecutorTest {
             // The retry should have appended messages and called the LLM
             assertTrue(messages.size() > 2,
                     "Retry should have appended assistant + user messages");
-            // PLACEHOLDER LLM returns a fixed response which is not a deflection,
-            // so result should differ from original
             assertNotEquals(deflection, result,
                     "Retry should produce a different answer from the deflection");
         }
 
         @Test
         void retryAddsCorrectPromptMessages() {
-            var ctx = Context.builder(new Config()).build();
+            var ctx = scriptedContext("retry message");
             var messages = new ArrayList<>(basicMessages());
             String deflection = "What would you like me to do?";
             AssistantTurnExecutor.synthesisRetryIfNeeded(deflection, 1, messages, ctx);
@@ -396,7 +405,7 @@ class AssistantTurnExecutorTest {
          */
         @Test
         void retryPromptAnchorsToVerbatimUserRequest() {
-            var ctx = Context.builder(new Config()).build();
+            var ctx = scriptedContext("anchored retry answer");
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("You are a helpful assistant."));
             String originalRequest =
@@ -493,7 +502,7 @@ class AssistantTurnExecutorTest {
 
         @Test
         void synthesisRetryFiresForRealTranscriptDeflection() {
-            var ctx = Context.builder(new Config()).build();
+            var ctx = scriptedContext("Grounded follow-up based on inspected files.");
 
             // Simulate the message state after tool execution: system + user + tool results
             var messages = new ArrayList<ChatMessage>();
@@ -512,7 +521,6 @@ class AssistantTurnExecutorTest {
             // The retry must have fired (message count increased)
             assertTrue(messages.size() > 2,
                     "Synthesis retry must fire for the real transcript deflection");
-            // Result should differ from original deflection (PLACEHOLDER LLM returns something else)
             assertNotEquals(deflection, result,
                     "Retry should produce a different answer");
         }
@@ -655,7 +663,7 @@ class AssistantTurnExecutorTest {
                  + "href attribute both resolve correctly at load time.";
         }
 
-        private Context newCtx() { return Context.builder(new Config()).build(); }
+        private Context newCtx() { return scriptedContext("grounded retry answer"); }
 
         // ── Helper detection tests ────────────────────────────────────
 
@@ -959,7 +967,10 @@ class AssistantTurnExecutorTest {
             // happens to return, a conversational prompt with no evidence
             // markers MUST NOT cause the annotation to be appended.
             var chunks = new ArrayList<String>();
-            var ctx = Context.builder(new Config()).streamSink(chunks::add).build();
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted("This is a short scripted answer."))
+                    .streamSink(chunks::add)
+                    .build();
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.user("Tell me a short joke, please."));
 
@@ -981,7 +992,10 @@ class AssistantTurnExecutorTest {
             // out.text() — the annotation may or may not be appended, but
             // the original streamed content is never replaced or shortened.
             var chunks = new ArrayList<String>();
-            var ctx = Context.builder(new Config()).streamSink(chunks::add).build();
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted("Streamed content for evidence request."))
+                    .streamSink(chunks::add)
+                    .build();
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.user("Read the files and check the wiring."));
 
@@ -1102,7 +1116,7 @@ class AssistantTurnExecutorTest {
         @Test
         @DisplayName("T2 — Turn-2 wiring fabrication shape triggers R6 retry")
         void t2_wiringFabrication_triggersR6() {
-            var ctx = Context.builder(new Config()).build();
+            var ctx = scriptedContext("grounded T2 retry answer");
             List<ChatMessage> messages = new ArrayList<>();
             messages.add(ChatMessage.system("sys"));
             messages.add(ChatMessage.user(TURN2_USER_PROMPT));
@@ -1129,7 +1143,7 @@ class AssistantTurnExecutorTest {
         @Test
         @DisplayName("T3 — Turn-3 code-fabrication shape triggers R6 retry")
         void t3_codeFabrication_triggersR6() {
-            var ctx = Context.builder(new Config()).build();
+            var ctx = scriptedContext("grounded T3 retry answer");
             List<ChatMessage> messages = new ArrayList<>();
             messages.add(ChatMessage.system("sys"));
             messages.add(ChatMessage.user(TURN3_USER_PROMPT));
