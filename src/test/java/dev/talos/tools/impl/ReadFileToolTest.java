@@ -121,9 +121,9 @@ class ReadFileToolTest {
     }
 
     @Test
-    void legacyExecuteWithoutContextFails() {
+    void nullContextFails() {
         ToolCall call = new ToolCall("talos.read_file", Map.of("path", "hello.txt"));
-        ToolResult r = tool.execute(call);
+        ToolResult r = tool.execute(call, null);
 
         assertFalse(r.success());
         assertEquals(ToolError.INTERNAL_ERROR, r.error().code());

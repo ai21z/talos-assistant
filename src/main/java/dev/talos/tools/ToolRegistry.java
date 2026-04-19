@@ -239,14 +239,6 @@ public final class ToolRegistry {
                 .map(TalosTool::descriptor)
                 .collect(Collectors.toUnmodifiableList());
     }
-    /** Execute a tool call by name (legacy, no context). */
-    public ToolResult execute(ToolCall call) {
-        TalosTool tool = get(call.toolName());
-        if (tool == null) {
-            return ToolResult.fail(ToolError.notFound("Unknown tool: " + call.toolName()));
-        }
-        return tool.execute(call);
-    }
     /** Execute a tool call by name with workspace context (preferred). */
     public ToolResult execute(ToolCall call, ToolContext ctx) {
         TalosTool tool = get(call.toolName());

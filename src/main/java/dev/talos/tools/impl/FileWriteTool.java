@@ -54,13 +54,10 @@ public final class FileWriteTool implements TalosTool {
     }
 
     @Override
-    public ToolResult execute(ToolCall call) {
-        return ToolResult.fail(ToolError.internal("FileWriteTool requires a ToolContext"));
-    }
-
-    @Override
     public ToolResult execute(ToolCall call, ToolContext ctx) {
-        if (ctx == null) return execute(call);
+        if (ctx == null) {
+            return ToolResult.fail(ToolError.internal("FileWriteTool requires a ToolContext"));
+        }
 
         String pathParam = resolveParam(call, "path", "file_path", "filepath", "file", "filename");
         if (pathParam == null || pathParam.isBlank()) {

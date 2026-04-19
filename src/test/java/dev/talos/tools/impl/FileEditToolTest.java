@@ -295,10 +295,10 @@ class FileEditToolTest {
     // ── Legacy / edge cases ─────────────────────────────────────────
 
     @Test
-    void legacyExecuteWithoutContextFails() {
+    void nullContextFails() {
         ToolCall call = new ToolCall("talos.edit_file", Map.of(
                 "path", "x", "old_string", "a", "new_string", "b"));
-        ToolResult r = tool.execute(call);
+        ToolResult r = tool.execute(call, null);
 
         assertFalse(r.success());
         assertEquals(ToolError.INTERNAL_ERROR, r.error().code());
