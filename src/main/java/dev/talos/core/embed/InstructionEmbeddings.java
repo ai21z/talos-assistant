@@ -1,5 +1,5 @@
 package dev.talos.core.embed;
-import dev.talos.core.spi.Embeddings;
+import dev.talos.spi.Embeddings;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
