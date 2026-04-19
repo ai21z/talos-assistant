@@ -190,7 +190,7 @@ class ApprovalGatedToolTest {
             @Override public ToolDescriptor descriptor() {
                 return new ToolDescriptor("talos.test_read", "Read-only test", null, ToolRiskLevel.READ_ONLY);
             }
-            @Override public ToolResult execute(ToolCall call) { return ToolResult.ok("read-ok"); }
+            @Override public ToolResult execute(ToolCall call, ToolContext ctx) { return ToolResult.ok("read-ok"); }
         };
     }
 
@@ -201,7 +201,7 @@ class ApprovalGatedToolTest {
             @Override public ToolDescriptor descriptor() {
                 return new ToolDescriptor("talos.test_write", "Write test", null, ToolRiskLevel.WRITE);
             }
-            @Override public ToolResult execute(ToolCall call) { return ToolResult.ok("write-ok"); }
+            @Override public ToolResult execute(ToolCall call, ToolContext ctx) { return ToolResult.ok("write-ok"); }
         };
     }
 
@@ -212,7 +212,7 @@ class ApprovalGatedToolTest {
             @Override public ToolDescriptor descriptor() {
                 return new ToolDescriptor("talos.test_destroy", "Destructive test", null, ToolRiskLevel.DESTRUCTIVE);
             }
-            @Override public ToolResult execute(ToolCall call) { return ToolResult.ok("destroy-ok"); }
+            @Override public ToolResult execute(ToolCall call, ToolContext ctx) { return ToolResult.ok("destroy-ok"); }
         };
     }
 }
