@@ -10,7 +10,7 @@ import java.util.*;
  * Router over registered Mode strategies with an active-mode concept.
  *
  * <h3>Auto-mode routing (unified-first)</h3>
- * <p>Uses {@link PromptRouter} for classification, but only deterministic
+ * <p>Uses {@link PromptClassifier} for classification, but only deterministic
  * commands dispatch to a separate mode:
  * <ul>
  *   <li>{@code COMMAND}  → DevMode (structural file ops: ls, dir, show, open)</li>
@@ -30,8 +30,8 @@ public final class ModeController {
     private String activeName = "auto";
     private Runnable promptRefreshCallback;
 
-    /** Last dispatched route — used by PromptRouter for sticky retrieval. COMMAND is neutral. */
-    private PromptRouter.Route lastRoute;
+    /** Last dispatched route — used by PromptClassifier for sticky retrieval. COMMAND is neutral. */
+    private PromptClassifier.Route lastRoute;
 
     /** Optional workspace symbol checker for PascalCase → index resolution in auto-mode. */
     private WorkspaceSymbolChecker symbolChecker;
@@ -127,17 +127,17 @@ public final class ModeController {
     /**
      * Auto-mode: deterministic commands → DevMode, everything else → UnifiedAssistantMode.
      *
-     * <p>The PromptRouter still classifies for diagnostics (route hint, lastRoute tracking),
+     * <p>The PromptClassifier still classifies for diagnostics (route hint, lastRoute tracking),
      * but only COMMAND triggers deterministic dispatch. RETRIEVE and ASSIST both go to
      * the unified assistant, which decides when to retrieve via tools.
      */
     private Optional<Result> routeAuto(String rawLine, Path workspace, Context ctx) throws Exception {
 
         // Classify the prompt (used for diagnostics and route hints, not hard dispatch)
-        PromptRouter.Route route = PromptRouter.route(rawLine, lastRoute, symbolChecker);
+        PromptClassifier.Route route = PromptClassifier.route(rawLine, lastRoute, symbolChecker);
 
         // Deterministic: structural commands (ls, dir, show, open) → DevMode
-        if (route == PromptRouter.Route.COMMAND) {
+        if (route == PromptClassifier.Route.COMMAND) {
             Optional<Result> r = tryMode(byName.get("dev"), rawLine, workspace, ctx);
             if (r.isPresent()) {
                 updateLastRoute(route);
@@ -160,14 +160,14 @@ public final class ModeController {
      * the retrieval context, so "explain X" → "ls src/" → "what about Y?"
      * correctly stays in retrieval mode.
      */
-    private void updateLastRoute(PromptRouter.Route route) {
-        if (route != PromptRouter.Route.COMMAND) {
+    private void updateLastRoute(PromptClassifier.Route route) {
+        if (route != PromptClassifier.Route.COMMAND) {
             this.lastRoute = route;
         }
     }
 
     /** Returns the last route for conversation context (visible for :route command and testing). */
-    public PromptRouter.Route lastRoute() { return lastRoute; }
+    public PromptClassifier.Route lastRoute() { return lastRoute; }
 
     /**
      * Attempts to execute a mode. Returns empty if mode is null,
