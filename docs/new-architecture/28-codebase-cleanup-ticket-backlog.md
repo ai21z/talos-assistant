@@ -58,7 +58,7 @@ These tickets are ordered by safety and dependency.
 9. `CCR-009` split `OllamaEngine` `[done]`
 10. `CCR-010` extract `ToolCallLoop` stages `[done]`
 11. `CCR-011` decompose `LlmClient` `[done]`
-12. `CCR-012.1` instrument and observe XML compatibility fallback usage
+12. `CCR-012.1` instrument and observe XML compatibility fallback usage `[done]`
 13. `CCR-012.2` retire XML compatibility path if parity evidence justifies it
 14. `CCR-013` naming cleanup pass (`cmds` / `commands` / `PromptRouter`)
 
@@ -656,6 +656,11 @@ in place.
 ---
 
 ### CCR-012.1 — Instrument and observe XML compatibility fallback usage
+
+**Status**
+
+- Done on `ticket/CCR-012-1-xml-fallback-observability`
+- Merged into `chore/codebase-cleanup-refactor`
 
 **Why this exists**
 
