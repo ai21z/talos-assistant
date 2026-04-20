@@ -1042,3 +1042,122 @@ If you need tracker-ready titles only:
 - `CCR-013 Run final naming cleanup pass for CLI packages and PromptClassifier`
 - `CCR-014 Resolve ignored architecture-doc ownership after cleanup renames`
 - `CCR-015 Final terminology and stale-reference alignment after XML/naming cleanup`
+
+---
+
+## 7. Post-Cleanup Verification (after `CCR-015`)
+
+This section records the current state of the cleanup stream after the
+completed tickets `CCR-001` through `CCR-015`. It is intentionally limited to
+claims that are verifiable from the current tree, git history, harness docs,
+and generated coverage/test artifacts.
+
+### 7.1 Structural verification
+
+- Zero leftover references remain in `src/main/java` for:
+  `core.spi`, `core.engine.EngineRegistry`, `cli.cmds`, `cli.commands`,
+  and `PromptRouter`
+- `cli.launcher` contains 9 files (picocli entry/launcher commands)
+- `cli.repl.slash` contains 29 files (REPL slash commands)
+- `dev.talos.spi` now carries:
+  `ChatModelEngine`, `EmbeddingEngine`, `ModelEngine`,
+  `CorpusStore`, `Embeddings`, `EngineRegistry`, `ModelCatalog`,
+  `ModelEngineProvider`, `EngineException`, and `types/*`
+- `src/main/java/dev/talos/core/spi` and
+  `src/main/java/dev/talos/core/engine` are gone
+- `FirstRunWizard` is deleted; `TerminalFirstRun` now owns first-run behavior
+- JavaFX dependencies remain in Gradle and were correctly not bundled into
+  `CCR-004`
+- `WebMode` remains a reserved stub and is aligned across:
+  `WebMode.java`, `ModeController`, `/mode` help, and `README.md`
+- XML compatibility is instrumented through `runtime/XmlCompatTelemetry.java`
+  and remains correctly deferred to `CCR-012.2`
+
+### 7.2 Harness seam status against source-of-truth
+
+`docs/new-architecture/talos-harness-source-of-truth.md` identifies the
+critical runtime seams for harness work as:
+
+- `AssistantTurnExecutor`
+- `ToolCallLoop`
+- `TurnProcessor`
+- `ConversationManager`
+- `ToolRegistry` + `ToolDescriptor`
+- `ContentVerifier`
+- bootstrap wiring
+
+Current status of those seams after cleanup:
+
+| Seam | Current state | Verification |
+|---|---|---|
+| `AssistantTurnExecutor` | Preserved as a static utility | 923 LOC; unchanged in shape |
+| `ToolCallLoop` | Decomposed into stage helpers | 180 LOC main class; `runtime/toolcall/` extracted |
+| `TurnProcessor` | Preserved | 363 LOC |
+| `ConversationManager` | Preserved | 295 LOC |
+| `ToolRegistry` + `TalosTool` | Context-aware execution is primary | legacy no-context path removed |
+| `ContentVerifier` | Preserved | 200 LOC |
+| `TalosBootstrap` | Preserved as composition root | 406 LOC |
+
+Evidence-backed conclusion:
+
+- the cleanup preserved every seam named by the harness source-of-truth
+- no named harness seam was deleted or made structurally unusable
+- `ToolCallLoop` and `ToolRegistry` / `TalosTool` are in materially cleaner
+  shape than before
+- the cleanup did not attempt to start the harness stream itself; it only
+  prepared or preserved the relevant seams
+
+### 7.3 What cleanup intentionally did not do
+
+These items remain outside the cleanup scope by design:
+
+- `AssistantTurnExecutor` is still the largest file in the tree at 923 LOC;
+  it was intentionally not reshaped in this stream
+- `LlmClient` remains 778 LOC; collaborators were extracted, but the remaining
+  bulk is still central runtime logic rather than a correctness defect
+- `NoOpApprovalGate` and `NoOpSessionStore` remain silent defaults in:
+  `TurnProcessor`, `Context`, and `Session`
+- `CCR-012.2` remains explicitly gated by XML telemetry evidence
+- the harness docs still point at branch `feature/native-tool-pipeline` and
+  will need branch/ownership realignment before harness work resumes
+- Gradle 8.14 deprecation warnings remain an infra/build concern, not a cleanup
+  ticket concern
+
+### 7.4 Coverage and test baseline
+
+Current generated artifacts show:
+
+- instruction coverage overall: `71.55%`
+- instruction coverage for `dev.talos.core.llm`: `64.60%`
+- instruction coverage for `dev.talos.engine.ollama`: `54.33%`
+- current test result baseline:
+  `2346 tests`, `0 failures`, `0 errors`, `2 skipped`
+
+Interpretation:
+
+- the cleanup did not introduce a test regression
+- `core.llm` and `engine.ollama` remain the thinner coverage areas most likely
+  to benefit from additional unit tests as harness work begins
+
+### 7.5 Standards verdict
+
+The cleanup stream meets the intended standard for this branch:
+
+- parity-before-deletion gates were respected
+- completed work landed as 15 ticket branches with 15 merge commits into the
+  father branch
+- no CI / workflow / quality-tooling reconfiguration was introduced on this stream
+- no framework rewrite or DI framework was introduced
+- no MCP server implementation was added
+- source-of-truth harness seams remain available and usable
+
+### 7.6 Recommended ordered follow-ups
+
+Before starting the harness stream, the strongest next candidates are:
+
+1. Resolve the approval-default policy question around `NoOpApprovalGate`
+   and `NoOpSessionStore`
+2. Add unit coverage for the extracted `core.llm` collaborators
+   (`LlmEngineResolver`, `LlmCallBudget`, `LlmRetryExecutor`)
+3. Review `CCR-012.2` after the next XML telemetry observation window and
+   either retire the compatibility path or record the next review gate
