@@ -18,6 +18,11 @@ import static org.junit.jupiter.api.Assertions.*;
 @DisplayName("ToolCallStreamFilter")
 class ToolCallStreamFilterTest {
 
+    @org.junit.jupiter.api.BeforeEach
+    void resetXmlCompatTelemetry() {
+        XmlCompatTelemetry.resetForTests();
+    }
+
     /** Collect all emitted chunks into a list for assertion. */
     private static List<String> collect(java.util.function.Consumer<ToolCallStreamFilter> scenario) {
         List<String> chunks = new ArrayList<>();
@@ -88,6 +93,7 @@ class ToolCallStreamFilterTest {
             String input = "<tool_call>\n{\"name\":\"talos.read_file\",\"parameters\":{\"path\":\"foo.txt\"}}\n</tool_call>";
             String result = joined(f -> f.accept(input));
             assertEquals("", result);
+            assertEquals(1, XmlCompatTelemetry.snapshot().streamSuppressedBlocks());
         }
 
         @Test
