@@ -3,6 +3,7 @@ package dev.talos.cli.modes;
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
 import dev.talos.core.Config;
+import dev.talos.core.llm.LlmClient;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
@@ -29,6 +30,19 @@ class StreamingModeTest {
 
     private static final Path WS = Path.of(".").toAbsolutePath().normalize();
 
+    private static Context scriptedStreamingContext(List<String> chunks) {
+        return Context.builder(new Config())
+                .llm(LlmClient.scripted("hello streaming"))
+                .streamSink(chunks::add)
+                .build();
+    }
+
+    private static Context scriptedContext(String response) {
+        return Context.builder(new Config())
+                .llm(LlmClient.scripted(response))
+                .build();
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     //  AskMode streaming
     // ═══════════════════════════════════════════════════════════════════════
@@ -36,9 +50,7 @@ class StreamingModeTest {
     @Test
     void askMode_with_streamSink_returns_streamed_result() throws Exception {
         List<String> chunks = new ArrayList<>();
-        var ctx = Context.builder(new Config())
-                .streamSink(chunks::add)
-                .build();
+        var ctx = scriptedStreamingContext(chunks);
         var mode = new AskMode();
 
         Optional<Result> result = mode.handle("hello streaming", WS, ctx);
@@ -55,9 +67,7 @@ class StreamingModeTest {
     @Test
     void askMode_with_streamSink_delivers_chunks() throws Exception {
         List<String> chunks = new ArrayList<>();
-        var ctx = Context.builder(new Config())
-                .streamSink(chunks::add)
-                .build();
+        var ctx = scriptedStreamingContext(chunks);
         var mode = new AskMode();
 
         mode.handle("hello streaming", WS, ctx);
@@ -68,7 +78,7 @@ class StreamingModeTest {
 
     @Test
     void askMode_without_streamSink_returns_ok_result() throws Exception {
-        var ctx = Context.builder(new Config()).build();
+        var ctx = scriptedContext("hello no streaming");
         var mode = new AskMode();
 
         Optional<Result> result = mode.handle("hello no streaming", WS, ctx);

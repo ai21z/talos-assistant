@@ -60,13 +60,10 @@ public final class FileEditTool implements TalosTool {
     }
 
     @Override
-    public ToolResult execute(ToolCall call) {
-        return ToolResult.fail(ToolError.internal("FileEditTool requires a ToolContext"));
-    }
-
-    @Override
     public ToolResult execute(ToolCall call, ToolContext ctx) {
-        if (ctx == null) return execute(call);
+        if (ctx == null) {
+            return ToolResult.fail(ToolError.internal("FileEditTool requires a ToolContext"));
+        }
 
         // --- Validate parameters (with alias resolution) ---
         String pathParam = resolveParam(call, "path", "file_path", "filepath", "file", "filename");

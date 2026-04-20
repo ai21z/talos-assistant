@@ -7,7 +7,7 @@ import dev.talos.core.net.NetPolicy;
 import java.nio.file.Path;
 import java.util.Optional;
 
-/** Gated web mode; honors NetPolicy (no network calls in this phase). */
+/** Reserved web mode stub; honors NetPolicy but performs no external network calls in this build. */
 public final class WebMode implements Mode {
     @Override public String name() { return "web"; }
 
@@ -17,8 +17,10 @@ public final class WebMode implements Mode {
     public Optional<Result> handle(String rawLine, Path workspace, Context ctx) {
         NetPolicy np = new NetPolicy(ctx.cfg()); // create from current config
         if (!np.enabled) {
-            return Optional.of(new Result.Info("Web mode denied: net.enabled=false (enable in config and restart).\n"));
+            return Optional.of(new Result.Info("Web mode is reserved and currently disabled: net.enabled=false.\n"
+                    + "Enable network and restart only when a real web implementation exists.\n"));
         }
-        return Optional.of(new Result.Info("Web mode is reserved. No external network calls are performed in this build.\n"));
+        return Optional.of(new Result.Info("Web mode is reserved in this build.\n"
+                + "No external network calls are performed, and no browser/web capability is implemented yet.\n"));
     }
 }

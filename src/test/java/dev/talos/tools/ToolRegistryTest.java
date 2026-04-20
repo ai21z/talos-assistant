@@ -19,10 +19,18 @@ class ToolRegistryTest {
         @Override public ToolDescriptor descriptor() {
             return new ToolDescriptor("talos.echo", "Echoes input back.", "{\"input\": \"string\"}");
         }
-        @Override public ToolResult execute(ToolCall call) {
+        @Override public ToolResult execute(ToolCall call, ToolContext ctx) {
             String input = call.param("input", "(empty)");
             return ToolResult.ok("Echo: " + input);
         }
+    }
+
+    private static ToolContext testContext() {
+        return new ToolContext(
+                java.nio.file.Path.of(".").toAbsolutePath().normalize(),
+                new dev.talos.core.security.Sandbox(java.nio.file.Path.of("."), Map.of()),
+                new dev.talos.core.Config()
+        );
     }
 
     @Test
@@ -61,7 +69,7 @@ class ToolRegistryTest {
         registry.register(new EchoTool());
 
         ToolCall call = new ToolCall("talos.echo", Map.of("input", "hello"));
-        ToolResult result = registry.execute(call);
+        ToolResult result = registry.execute(call, testContext());
 
         assertTrue(result.success());
         assertEquals("Echo: hello", result.output());
@@ -73,7 +81,7 @@ class ToolRegistryTest {
         ToolRegistry registry = new ToolRegistry();
 
         ToolCall call = new ToolCall("nonexistent", Map.of());
-        ToolResult result = registry.execute(call);
+        ToolResult result = registry.execute(call, testContext());
 
         assertFalse(result.success());
         assertNotNull(result.error());
@@ -158,13 +166,7 @@ class ToolRegistryTest {
         registry.register(new ContextAwareTool());
 
         ToolCall call = new ToolCall("talos.ctx", Map.of());
-        // Context-aware execute
-        var ctx = new ToolContext(
-                java.nio.file.Path.of(".").toAbsolutePath().normalize(),
-                new dev.talos.core.security.Sandbox(java.nio.file.Path.of("."), Map.of()),
-                new dev.talos.core.Config()
-        );
-        ToolResult result = registry.execute(call, ctx);
+        ToolResult result = registry.execute(call, testContext());
         assertTrue(result.success());
         assertEquals("has-context", result.output());
     }
@@ -172,12 +174,7 @@ class ToolRegistryTest {
     @Test
     void execute_with_context_unknown_tool() {
         ToolRegistry registry = new ToolRegistry();
-        var ctx = new ToolContext(
-                java.nio.file.Path.of(".").toAbsolutePath().normalize(),
-                new dev.talos.core.security.Sandbox(java.nio.file.Path.of("."), Map.of()),
-                new dev.talos.core.Config()
-        );
-        ToolResult result = registry.execute(new ToolCall("missing", Map.of()), ctx);
+        ToolResult result = registry.execute(new ToolCall("missing", Map.of()), testContext());
         assertFalse(result.success());
         assertEquals(ToolError.NOT_FOUND, result.error().code());
     }
@@ -191,20 +188,13 @@ class ToolRegistryTest {
     }
 
     @Test
-    void default_execute_with_context_delegates_to_no_context() {
-        // EchoTool only overrides execute(ToolCall), not execute(ToolCall, ToolContext)
-        // The default method should delegate to the no-context version
+    void context_aware_contract_is_primary() {
         ToolRegistry registry = new ToolRegistry();
-        registry.register(new EchoTool());
+        registry.register(new ContextAwareTool());
 
-        var ctx = new ToolContext(
-                java.nio.file.Path.of(".").toAbsolutePath().normalize(),
-                new dev.talos.core.security.Sandbox(java.nio.file.Path.of("."), Map.of()),
-                new dev.talos.core.Config()
-        );
-        ToolResult result = registry.execute(new ToolCall("talos.echo", Map.of("input", "ctx")), ctx);
+        ToolResult result = registry.execute(new ToolCall("talos.ctx", Map.of()), testContext());
         assertTrue(result.success());
-        assertEquals("Echo: ctx", result.output());
+        assertEquals("has-context", result.output());
     }
 
     /** Tool that differentiates between context and no-context execution. */
@@ -212,7 +202,6 @@ class ToolRegistryTest {
         @Override public String name() { return "talos.ctx"; }
         @Override public String description() { return "Context-aware test tool"; }
         @Override public ToolDescriptor descriptor() { return new ToolDescriptor("talos.ctx", "test"); }
-        @Override public ToolResult execute(ToolCall call) { return ToolResult.ok("no-context"); }
         @Override public ToolResult execute(ToolCall call, ToolContext ctx) {
             return ToolResult.ok(ctx != null ? "has-context" : "null-context");
         }
@@ -265,7 +254,7 @@ class ToolRegistryTest {
         registry.register(new EchoTool());
 
         // Execute via alias "echo" (without talos. prefix)
-        ToolResult result = registry.execute(new ToolCall("echo", Map.of("input", "fuzzy")));
+        ToolResult result = registry.execute(new ToolCall("echo", Map.of("input", "fuzzy")), testContext());
         assertTrue(result.success());
         assertEquals("Echo: fuzzy", result.output());
     }

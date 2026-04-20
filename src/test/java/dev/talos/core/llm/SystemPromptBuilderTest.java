@@ -101,7 +101,7 @@ class SystemPromptBuilderTest {
                 return new ToolDescriptor("talos.read_file", "Read a file",
                         "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}}}");
             }
-            @Override public ToolResult execute(ToolCall call) { return ToolResult.ok(""); }
+            @Override public ToolResult execute(ToolCall call, ToolContext ctx) { return ToolResult.ok(""); }
         });
 
         String prompt = SystemPromptBuilder.forAsk()
@@ -479,7 +479,7 @@ class SystemPromptBuilderTest {
             @Override public String name() { return name; }
             @Override public String description() { return description; }
             @Override public ToolDescriptor descriptor() { return new ToolDescriptor(name, description); }
-            @Override public ToolResult execute(ToolCall call) { return ToolResult.ok("stub"); }
+            @Override public ToolResult execute(ToolCall call, ToolContext ctx) { return ToolResult.ok("stub"); }
         };
     }
 

@@ -95,6 +95,27 @@ tasks.withType<Jar>().configureEach {
     }
 }
 
+/* ---------- Generated build metadata for exploded-class runs ---------- */
+
+val generateBuildVersionResource by tasks.registering {
+    val outputDir = layout.buildDirectory.dir("generated/resources/buildVersion")
+    outputs.dir(outputDir)
+
+    doLast {
+        val metaInfDir = outputDir.get().file("META-INF").asFile
+        metaInfDir.mkdirs()
+        val propsFile = metaInfDir.resolve("talos-version.properties")
+        propsFile.writeText(
+            "version=${project.version}\n",
+            Charsets.UTF_8
+        )
+    }
+}
+
+tasks.processResources {
+    from(generateBuildVersionResource)
+}
+
 /* ---------- Jar naming ---------- */
 
 tasks.jar {

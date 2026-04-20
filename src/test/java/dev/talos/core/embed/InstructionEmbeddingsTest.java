@@ -1,6 +1,6 @@
 package dev.talos.core.embed;
 
-import dev.talos.core.spi.Embeddings;
+import dev.talos.spi.Embeddings;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;

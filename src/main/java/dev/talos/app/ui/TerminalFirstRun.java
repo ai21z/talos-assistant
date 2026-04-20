@@ -11,7 +11,7 @@ import java.nio.file.Paths;
 /**
  * Terminal-based first-run setup flow.
  *
- * <p>Replaces {@link FirstRunWizard} (JavaFX) with a lightweight terminal
+ * <p>Lightweight terminal
  * flow that works on all platforms including headless (WSL, SSH, Docker).
  *
  * <p>Steps:
