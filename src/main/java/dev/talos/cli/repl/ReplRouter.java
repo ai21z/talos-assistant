@@ -1,8 +1,8 @@
 package dev.talos.cli.repl;
 
-import dev.talos.cli.commands.CommandRegistry;
+import dev.talos.cli.repl.slash.CommandRegistry;
 import dev.talos.cli.modes.ModeController;
-import dev.talos.cli.modes.PromptRouter;
+import dev.talos.cli.modes.PromptClassifier;
 import dev.talos.cli.ui.AnsiColor;
 import dev.talos.core.Config;
 import dev.talos.runtime.Session;
@@ -111,10 +111,10 @@ public final class ReplRouter {
 
         // Show routing indicator in auto mode (dimmed, one line)
         if ("auto".equals(modes.getActiveName())) {
-            PromptRouter.Route preview = PromptRouter.route(rawLine, modes.lastRoute(),
+            PromptClassifier.Route preview = PromptClassifier.route(rawLine, modes.lastRoute(),
                     modes.getSymbolChecker());
             // In auto-mode: COMMAND → dev, everything else → unified
-            String label = (preview == PromptRouter.Route.COMMAND) ? "dev" : "unified";
+            String label = (preview == PromptClassifier.Route.COMMAND) ? "dev" : "unified";
             render.printRouteHint(label);
         }
 

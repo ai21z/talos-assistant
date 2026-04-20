@@ -1,7 +1,7 @@
 package dev.talos.app;
  
 import dev.talos.app.ui.TerminalFirstRun;
-import dev.talos.cli.cmds.RootCmd;
+import dev.talos.cli.launcher.RootCmd;
 import dev.talos.core.util.BuildInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
