@@ -9,6 +9,7 @@ import dev.talos.tools.*;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -37,12 +38,29 @@ public final class TurnProcessor {
     private final ToolRegistry toolRegistry;
     private final List<SessionListener> listeners = new CopyOnWriteArrayList<>();
 
+    /**
+     * Primary constructor. All policy parameters are required — the caller
+     * must pass an explicit {@link ApprovalGate}, {@link ToolRegistry}, and
+     * {@link ApprovalPolicy}. Pass {@link NoOpApprovalGate} /
+     * {@link ApprovalPolicy#ALWAYS_ASK} explicitly if you want the default
+     * no-op policy; silent null-to-NoOp substitution is no longer supported
+     * at this seam (CCR-016).
+     *
+     * <p>The convenience constructors below still provide explicit
+     * {@code NoOpApprovalGate} / {@link ApprovalPolicy#ALWAYS_ASK} defaults
+     * for tests and ad-hoc call sites — those are explicit wiring, not
+     * policy-by-null.
+     */
     public TurnProcessor(ModeController modes, ApprovalGate approvalGate,
                          ToolRegistry toolRegistry, ApprovalPolicy approvalPolicy) {
         this.modes = modes;
-        this.approvalGate = (approvalGate != null) ? approvalGate : new NoOpApprovalGate();
-        this.toolRegistry = (toolRegistry != null) ? toolRegistry : new ToolRegistry();
-        this.approvalPolicy = (approvalPolicy != null) ? approvalPolicy : ApprovalPolicy.ALWAYS_ASK;
+        this.approvalGate = Objects.requireNonNull(approvalGate,
+                "approvalGate must not be null — pass NoOpApprovalGate() explicitly "
+                        + "to keep the no-op policy (CCR-016)");
+        this.toolRegistry = Objects.requireNonNull(toolRegistry,
+                "toolRegistry must not be null — pass a new ToolRegistry() explicitly");
+        this.approvalPolicy = Objects.requireNonNull(approvalPolicy,
+                "approvalPolicy must not be null — pass ApprovalPolicy.ALWAYS_ASK explicitly");
     }
 
     public TurnProcessor(ModeController modes, ApprovalGate approvalGate, ToolRegistry toolRegistry) {

@@ -49,10 +49,18 @@ class SessionTest {
                 () -> new Session(WS, null));
     }
 
-    @Test void nullMemoryFallsBackToDefault() {
-        var session = new Session(WS, new Config(), null);
-        assertNotNull(session.memory());
-        assertFalse(session.memory().hasContent());
+    @Test void nullMemoryThrows() {
+        // CCR-016: primary/3-arg constructors no longer silently substitute a
+        // default SessionMemory on null. Callers must pass one explicitly.
+        assertThrows(NullPointerException.class,
+                () -> new Session(WS, new Config(), null));
+    }
+
+    @Test void nullStoreThrows() {
+        // CCR-016: primary constructor rejects null store — callers must pass
+        // NoOpSessionStore() explicitly to opt into the ephemeral default.
+        assertThrows(NullPointerException.class,
+                () -> new Session(WS, new Config(), new SessionMemory(), null));
     }
 }
 
