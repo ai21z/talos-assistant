@@ -87,21 +87,21 @@ class SessionStoreTest {
             var session = new Session(
                     java.nio.file.Path.of(".").toAbsolutePath().normalize(),
                     new dev.talos.core.Config(),
-                    null, // default memory
+                    new dev.talos.cli.repl.SessionMemory(),
                     custom
             );
             assertSame(custom, session.store());
         }
 
-        @Test void nullStoreFallsBackToNoOp() {
-            var session = new Session(
+        @Test void nullStoreThrows() {
+            // CCR-016: primary constructor no longer falls back to NoOp on
+            // null store — callers must pass NoOpSessionStore() explicitly.
+            assertThrows(NullPointerException.class, () -> new Session(
                     java.nio.file.Path.of(".").toAbsolutePath().normalize(),
                     new dev.talos.core.Config(),
-                    null,
+                    new dev.talos.cli.repl.SessionMemory(),
                     null
-            );
-            assertNotNull(session.store());
-            assertInstanceOf(NoOpSessionStore.class, session.store());
+            ));
         }
     }
 }

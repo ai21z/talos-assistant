@@ -4,8 +4,14 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Persistence seam for session state. V1 uses {@link NoOpSessionStore} (ephemeral).
- * Save is fire-and-forget (never throws), load returns empty if absent.
+ * Persistence seam for session state. The shipped REPL wires
+ * {@link JsonSessionStore} explicitly at the composition root
+ * ({@code TalosBootstrap}); {@link NoOpSessionStore} is an explicit,
+ * intentionally-named ephemeral default for tests and ad-hoc call sites,
+ * not a silent fallback (CCR-016). Constructors that accept a
+ * {@code SessionStore} require a non-null value.
+ *
+ * <p>Save is fire-and-forget (never throws), load returns empty if absent.
  *
  * <p>Alongside the full-session snapshot ({@link #save}/{@link #load}), stores
  * may implement per-turn append-only durability via {@link #appendTurn} and

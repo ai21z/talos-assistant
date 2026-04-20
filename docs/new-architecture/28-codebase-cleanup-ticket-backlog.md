@@ -992,6 +992,25 @@ This should remain a narrow terminology/alignment pass only.
 
 ### CCR-016 — Decide explicit approval and session default policy before harness work
 
+**Status**
+
+- In progress on `ticket/CCR-016-explicit-policy-defaults`
+- Decision: keep `NoOpApprovalGate` / `NoOpSessionStore` as the named
+  test/ad-hoc defaults, but remove silent null-to-NoOp substitution from
+  the primary `Session` and `TurnProcessor` constructors. The shipped REPL
+  wires `CliApprovalGate` and `JsonSessionStore` explicitly at the
+  composition root (`TalosBootstrap`), so production does not rely on
+  policy-by-null.
+- Convenience constructors (2-/3-arg `Session`, 1-/2-/3-arg
+  `TurnProcessor`) continue to pass explicit `NoOp*` values for tests and
+  ad-hoc call sites — explicit wiring, not policy-by-null.
+- `Context.Builder` now receives an explicit `.approvalGate(approvalGate)`
+  from `TalosBootstrap`; its `build()` fallback to `NoOpApprovalGate` is
+  retained as a documented, test-only default and no longer a production
+  surface.
+- Runtime tests updated to assert the strict-null contract
+  (`SessionTest`, `SessionStoreTest`).
+
 **Why this exists**
 
 The cleanup stream intentionally left `NoOpApprovalGate` and

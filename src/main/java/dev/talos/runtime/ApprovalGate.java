@@ -4,8 +4,12 @@ package dev.talos.runtime;
  * Gate for sensitive operations that require user approval before proceeding.
  *
  * <p>This is a first-class architectural concept in Talos (see AD-08).
- * V1 uses {@link NoOpApprovalGate} which always approves. Future implementations
- * will prompt the user via CLI or enforce policy rules.
+ * The shipped REPL uses {@link CliApprovalGate} wired explicitly at the
+ * composition root ({@code TalosBootstrap}). {@link NoOpApprovalGate} is
+ * an explicit, intentionally-named default for tests and ad-hoc call
+ * sites that want approve-everything behavior; it is not a silent
+ * fallback (CCR-016). Constructors that accept an {@code ApprovalGate}
+ * require a non-null value.
  *
  * <p>Examples of operations that should eventually require approval:
  * sending email, uploading files, submitting forms, deleting content,
