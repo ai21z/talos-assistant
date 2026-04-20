@@ -111,7 +111,7 @@ public final class ToolCallParser {
 
     /**
      * Parse all tool-call blocks from an LLM response.
-     * Tries XML tags first, then code-fenced JSON, then bare JSON.
+     * Tries code-fenced JSON first, then bare JSON, then deprecated XML tags.
      */
     public static List<ToolCall> parse(String llmResponse) {
         if (llmResponse == null || llmResponse.isBlank()) {
