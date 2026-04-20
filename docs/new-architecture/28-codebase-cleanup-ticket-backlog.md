@@ -1005,24 +1005,30 @@ persist-nothing defaults in important seams:
 - `Context.Builder` defaults to `NoOpApprovalGate`
 - `Session` defaults to `NoOpSessionStore`
 
+At the same time, the main REPL composition root now wires a persistent
+`JsonSessionStore` explicitly. That means the remaining ambiguity is not
+"what the shipped REPL does today", but whether constructor- and builder-level
+null fallbacks should remain an implicit policy surface before harness work.
+
 That may be acceptable as a deliberate product policy, but it should not
 remain an implicit behavior if the next stream is going to strengthen harness,
 approval, or trust semantics.
 
 **Scope**
 
-- Decide whether silent fallback defaults remain the intended product policy
-- If they remain:
-  document that choice explicitly in code/docs and ensure the behavior is
-  internally consistent
-- If they should change:
-  make the smallest runtime/bootstrap changes needed so approval/session
-  defaults become explicit rather than silent
-- Keep the ticket focused on default policy semantics, not on broader approval UX
+- Make an explicit product decision about approval/session default policy
+- Remove policy-by-null from the affected constructor/builder seams where that
+  can be done without changing shipped behavior
+- Wire the current intended defaults explicitly at the composition root where
+  needed, and document that choice in code/docs
+- Keep the ticket focused on decision + explicit wiring, not on broader
+  approval/session UX
 
 **Out of scope**
 
 - Full approval UX redesign
+- Any user-visible approval or persistence behavior change
+- Swapping the composition-root defaults to a non-`NoOp*` implementation
 - Harness phase model work
 - Session persistence feature expansion
 
@@ -1042,6 +1048,7 @@ approval, or trust semantics.
 
 - The approval/session default behavior is an explicit product decision
 - The code no longer relies on ambiguous policy-by-null for these seams
+- Shipped behavior remains unchanged after the ticket lands
 - Relevant runtime tests still pass
 - The result is easier to reason about before harness work begins
 
@@ -1131,11 +1138,12 @@ remaining in a permanent "we will decide later" state.
 - Decide one of two outcomes:
   advance to `CCR-012.2` retirement work, or record the next review gate/date
 - Update the relevant retirement docs/backlog state to reflect that decision
-- Keep this ticket as a review-and-decision step unless the evidence is already
-  strong enough to justify immediately opening the retirement PR
+- Keep this ticket strictly review-only; if retirement is justified, the output
+  is "proceed with `CCR-012.2`", not the retirement implementation itself
 
 **Out of scope**
 
+- Implementing `CCR-012.2`
 - Unconditional XML compatibility deletion
 - Tool-call protocol redesign
 - Broad prompt/runtime changes unrelated to the telemetry decision
