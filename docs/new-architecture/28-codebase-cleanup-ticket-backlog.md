@@ -88,6 +88,13 @@ Use this shape for each tracker ticket:
 
 ### CCR-001 — Fix stale `dev.loqj.*` package references in project instructions
 
+**Status**
+
+- Done on `ticket/CCR-001-doc-drift-fix`
+- Implementation commit: `53d5d61`
+- Merge commit: `a46c49f`
+- Merged into `chore/codebase-cleanup-refactor`
+
 **Why this exists**
 
 `.github/assistant-instructions.md` still describes package paths under
@@ -134,6 +141,8 @@ confusion for humans and AI assistants.
 **Status**
 
 - Done on `ticket/CCR-002-test-engine-decoupling`
+- Implementation commit: `f5bd080`
+- Merge commit: `4b4887f`
 - Merged into `chore/codebase-cleanup-refactor`
 
 **Why this exists**
@@ -196,6 +205,8 @@ deterministic without changing production behavior.
 **Status**
 
 - Done on `ticket/CCR-003-buildinfo-exploded-version`
+- Implementation commit: `c4fe974`
+- Merge commit: `bc1d138`
 - Merged into `chore/codebase-cleanup-refactor`
 
 **Why this exists**
@@ -250,6 +261,8 @@ production, but it breaks banner tests that assert a concrete version string.
 **Status**
 
 - Done on `ticket/CCR-004-remove-first-run-wizard`
+- Implementation commit: `6c0766b`
+- Merge commit: `f666d4f`
 - Merged into `chore/codebase-cleanup-refactor`
 
 **Why this exists**
@@ -298,6 +311,8 @@ This is a low-risk cleanup if kept strictly to class deletion.
 **Status**
 
 - Done on `ticket/CCR-005-webmode-decision`
+- Implementation commit: `2a72217`
+- Merge commit: `6a87823`
 - Merged into `chore/codebase-cleanup-refactor`
 
 **Why this exists**
@@ -350,6 +365,8 @@ Choose one of two outcomes:
 **Status**
 
 - Done on `ticket/CCR-006-context-aware-talos-tool`
+- Implementation commit: `4a82635`
+- Merge commit: `1004aa0`
 - Merged into `chore/codebase-cleanup-refactor`
 
 **Why this exists**
@@ -408,6 +425,8 @@ shape should be reversed only after parity is proven.
 **Status**
 
 - Done on `ticket/CCR-007-split-modelengine-chat-embed`
+- Implementation commit: `07b8e97`
+- Merge commit: `46bafe3`
 - Merged into `chore/codebase-cleanup-refactor`
 
 **Why this exists**
@@ -460,6 +479,8 @@ acceptable with one implementation, but it is a future ISP problem.
 **Status**
 
 - Done on `ticket/CCR-008-spi-package-consolidation`
+- Implementation commit: `cda83cb`
+- Merge commit: `3c08a3b`
 - Merged into `chore/codebase-cleanup-refactor`
 
 **Why this exists**
@@ -511,6 +532,8 @@ The current SPI boundary is split awkwardly between `dev.talos.spi`,
 **Status**
 
 - Done on `ticket/CCR-009-split-ollama-engine`
+- Implementation commit: `62efbc0`
+- Merge commit: `69ee985`
 - Merged into `chore/codebase-cleanup-refactor`
 
 **Why this exists**
@@ -561,6 +584,8 @@ internal extraction after the async-close changes settle.
 **Status**
 
 - Done on `ticket/CCR-010-toolcallloop-stages`
+- Implementation commit: `7559b63`
+- Merge commit: `b4d3563`
 - Merged into `chore/codebase-cleanup-refactor`
 
 **Why this exists**
@@ -611,6 +636,8 @@ retrieval pipeline.
 **Status**
 
 - Done on `ticket/CCR-011-decompose-llmclient`
+- Implementation commit: `3aadb89`
+- Merge commit: `328c6f0`
 - Merged into `chore/codebase-cleanup-refactor`
 
 **Why this exists**
@@ -662,6 +689,8 @@ in place.
 **Status**
 
 - Done on `ticket/CCR-012-1-xml-fallback-observability`
+- Implementation commit: `2869ed3`
+- Merge commit: `6e8b8fd`
 - Merged into `chore/codebase-cleanup-refactor`
 
 **Why this exists**
@@ -760,6 +789,8 @@ longer needed.
 **Status**
 
 - Done on `ticket/CCR-013-naming-cleanup`
+- Implementation commit: `cda605b`
+- Merge commit: `dffc0db`
 - Merged into `chore/codebase-cleanup-refactor`
 
 **Why this exists**
@@ -812,6 +843,8 @@ review and onboarding cost.
 **Status**
 
 - Done on `ticket/CCR-014-doc-ownership-policy`
+- Implementation commit: `1fcdc05`
+- Merge commit: `dd904bb`
 - Merged into `chore/codebase-cleanup-refactor`
 
 **Why this exists**
@@ -877,6 +910,8 @@ accidental side effect of a mechanical rename ticket.
 **Status**
 
 - Done on `ticket/CCR-015-stale-reference-alignment`
+- Implementation commit: `38f4488`
+- Merge commit: `b12c70f`
 - Merged into `chore/codebase-cleanup-refactor`
 
 **Why this exists**
