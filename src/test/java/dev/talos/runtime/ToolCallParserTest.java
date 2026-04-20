@@ -13,6 +13,11 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class ToolCallParserTest {
 
+    @org.junit.jupiter.api.BeforeEach
+    void resetXmlCompatTelemetry() {
+        XmlCompatTelemetry.resetForTests();
+    }
+
     // ── parse() ─────────────────────────────────────────────────────
 
     @Test
@@ -418,16 +423,18 @@ class ToolCallParserTest {
 
     @Test
     void xmlTaggedBlockUsedAsLastResortWhenNoJsonFormat() {
-        // XML is deprecated but still works when no JSON-format tool calls are present
-        String response = """
-                <tool_call>
-                {"name": "talos.grep", "parameters": {"pattern": "x"}}
-                </tool_call>
-                """;
+        // Inline XML is a true XML-only activation here: the bare-JSON path
+        // cannot match because the payload is not at a line boundary.
+        String response = "<tool_call>{\"name\":\"talos.grep\",\"parameters\":{\"pattern\":\"x\"}}</tool_call>";
 
         List<ToolCall> calls = ToolCallParser.parse(response);
         assertEquals(1, calls.size());
         assertEquals("talos.grep", calls.get(0).toolName());
+
+        var telemetry = XmlCompatTelemetry.snapshot();
+        assertEquals(1, telemetry.parserFallbackActivations());
+        assertEquals(1, telemetry.parserFallbackCalls());
+        assertEquals("talos.grep", telemetry.lastParserToolNames());
     }
 
     @Test

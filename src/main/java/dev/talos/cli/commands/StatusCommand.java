@@ -6,6 +6,7 @@ import dev.talos.cli.repl.Result;
 import dev.talos.cli.ui.AnsiColor;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.IndexPathResolver;
+import dev.talos.runtime.XmlCompatTelemetry;
 
 import java.nio.file.Path;
 import java.time.Duration;
@@ -121,6 +122,24 @@ public final class StatusCommand implements Command {
 
             if (!cfg.getReport().defaultedKeys.isEmpty()) {
                 sb.append(AnsiColor.dim("  Defaulted: " + String.join(", ", cfg.getReport().defaultedKeys))).append("\n");
+            }
+
+            var xmlCompat = XmlCompatTelemetry.snapshot();
+            sb.append("\n").append(AnsiColor.grey("  XML Compat")).append("\n");
+            sb.append(AnsiColor.dim("    parser_activations=" + xmlCompat.parserFallbackActivations()
+                    + "  parser_calls=" + xmlCompat.parserFallbackCalls()
+                    + "  stream_suppressed=" + xmlCompat.streamSuppressedBlocks())).append("\n");
+            if (xmlCompat.lastParserFallbackAt() != null) {
+                sb.append(AnsiColor.dim("    last_parser_at=" + xmlCompat.lastParserFallbackAt())).append("\n");
+            }
+            if (xmlCompat.lastStreamSuppressedAt() != null) {
+                sb.append(AnsiColor.dim("    last_stream_at=" + xmlCompat.lastStreamSuppressedAt())).append("\n");
+            }
+            if (xmlCompat.lastParserToolNames() != null && !xmlCompat.lastParserToolNames().isBlank()) {
+                sb.append(AnsiColor.dim("    last_tools=" + xmlCompat.lastParserToolNames())).append("\n");
+            }
+            if (!xmlCompat.hasAnySignal()) {
+                sb.append(AnsiColor.dim("    no XML compatibility usage observed in this process")).append("\n");
             }
         }
 

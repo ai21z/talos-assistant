@@ -136,6 +136,7 @@ public final class ToolCallParser {
         int preXmlCount = calls.size();
         extractFromPattern(VARIANT_TAG_PATTERN, 2, llmResponse, calls, consumedPayloads);
         if (calls.size() > preXmlCount) {
+            XmlCompatTelemetry.recordParserFallback(calls.subList(preXmlCount, calls.size()));
             LOG.warn("XML tool-call format detected — this is deprecated. "
                     + "The model should use native tool calling or JSON code-fence format.");
         }
