@@ -65,6 +65,9 @@ These tickets are ordered by safety and dependency.
 14. `CCR-013` naming cleanup pass (`cmds` / `commands` / `PromptClassifier`) `[done]`
 15. `CCR-014` resolve ignored-architecture-doc ownership after cleanup renames `[done]`
 16. `CCR-015` final terminology and stale-reference alignment after XML/naming cleanup `[done]`
+17. `CCR-016` decide explicit approval and session default policy before harness work
+18. `CCR-017` add focused unit coverage for extracted `core.llm` collaborators
+19. `CCR-018` review XML telemetry gate and decide the next `CCR-012.2` action
 
 Do not start `CCR-009` onward until the in-flight async-close work is stable.
 
@@ -987,6 +990,185 @@ This should remain a narrow terminology/alignment pass only.
 
 ---
 
+### CCR-016 — Decide explicit approval and session default policy before harness work
+
+**Why this exists**
+
+The cleanup stream intentionally left `NoOpApprovalGate` and
+`NoOpSessionStore` policy untouched, but the current defaults are still a
+meaningful architectural question before harness work starts.
+
+Today the runtime silently falls back to approve-everything or
+persist-nothing defaults in important seams:
+
+- `TurnProcessor` defaults to `NoOpApprovalGate`
+- `Context.Builder` defaults to `NoOpApprovalGate`
+- `Session` defaults to `NoOpSessionStore`
+
+That may be acceptable as a deliberate product policy, but it should not
+remain an implicit behavior if the next stream is going to strengthen harness,
+approval, or trust semantics.
+
+**Scope**
+
+- Decide whether silent fallback defaults remain the intended product policy
+- If they remain:
+  document that choice explicitly in code/docs and ensure the behavior is
+  internally consistent
+- If they should change:
+  make the smallest runtime/bootstrap changes needed so approval/session
+  defaults become explicit rather than silent
+- Keep the ticket focused on default policy semantics, not on broader approval UX
+
+**Out of scope**
+
+- Full approval UX redesign
+- Harness phase model work
+- Session persistence feature expansion
+
+**Main files**
+
+- `src/main/java/dev/talos/runtime/TurnProcessor.java`
+- `src/main/java/dev/talos/cli/repl/Context.java`
+- `src/main/java/dev/talos/runtime/Session.java`
+- adjacent approval/session docs if the chosen policy needs documenting
+
+**Risks**
+
+- Medium: changing defaults can alter user-visible behavior if the decision is
+  not made carefully
+
+**Acceptance criteria**
+
+- The approval/session default behavior is an explicit product decision
+- The code no longer relies on ambiguous policy-by-null for these seams
+- Relevant runtime tests still pass
+- The result is easier to reason about before harness work begins
+
+**Rollback plan**
+
+- Revert the policy/defaults ticket
+
+**Dependencies**
+
+- After the cleanup stream merge
+
+---
+
+### CCR-017 — Add focused unit coverage for extracted `core.llm` collaborators
+
+**Why this exists**
+
+The cleanup stream extracted `LlmEngineResolver`, `RegistryLlmEngineResolver`,
+`LlmCallBudget`, and `LlmRetryExecutor`, which improved structure but left the
+new collaboration seams with thinner direct unit coverage than the rest of the
+runtime.
+
+That is not a correctness defect by itself, but these helpers sit in one of
+the most central runtime packages and are likely to be exercised heavily by the
+next harness stream.
+
+**Scope**
+
+- Add direct unit tests for:
+  `LlmEngineResolver`, `RegistryLlmEngineResolver`, `LlmCallBudget`,
+  and `LlmRetryExecutor`
+- Keep the pass narrowly focused on collaborator behavior and edge cases
+- Avoid changing `LlmClient` behavior unless a testability seam is strictly required
+
+**Out of scope**
+
+- Another `LlmClient` refactor
+- Coverage-chasing outside the extracted collaborators
+- Broad test-harness work
+
+**Main files**
+
+- `src/main/java/dev/talos/core/llm/LlmEngineResolver.java`
+- `src/main/java/dev/talos/core/llm/RegistryLlmEngineResolver.java`
+- `src/main/java/dev/talos/core/llm/LlmCallBudget.java`
+- `src/main/java/dev/talos/core/llm/LlmRetryExecutor.java`
+- new or updated tests under `src/test/java/dev/talos/core/llm/`
+
+**Risks**
+
+- Low: the main risk is adding shallow tests that restate the implementation
+  without meaningfully protecting behavior
+
+**Acceptance criteria**
+
+- Each extracted collaborator has direct unit coverage for its main behavior
+- Edge cases that matter for harness/runtime correctness are covered
+- No production behavior changes are introduced by the test pass
+- `core.llm` package coverage improves from the current cleanup baseline
+
+**Rollback plan**
+
+- Revert the test-only ticket
+
+**Dependencies**
+
+- After the cleanup stream merge
+
+---
+
+### CCR-018 — Review XML telemetry gate and decide the next `CCR-012.2` action
+
+**Why this exists**
+
+`CCR-012.1` added the XML compatibility telemetry and documented an
+observation-window gate. `CCR-012.2` is still intentionally open, so the next
+step should be an explicit review ticket rather than an assumption that XML can
+or cannot be retired.
+
+This keeps the decision evidence-based and prevents the compatibility path from
+remaining in a permanent "we will decide later" state.
+
+**Scope**
+
+- Review the available XML compatibility telemetry after the next agreed
+  observation window
+- Decide one of two outcomes:
+  advance to `CCR-012.2` retirement work, or record the next review gate/date
+- Update the relevant retirement docs/backlog state to reflect that decision
+- Keep this ticket as a review-and-decision step unless the evidence is already
+  strong enough to justify immediately opening the retirement PR
+
+**Out of scope**
+
+- Unconditional XML compatibility deletion
+- Tool-call protocol redesign
+- Broad prompt/runtime changes unrelated to the telemetry decision
+
+**Main files**
+
+- `docs/new-architecture/25-xml-retirement-review.md`
+- `docs/new-architecture/28-codebase-cleanup-ticket-backlog.md`
+- telemetry review surfaces such as `/status --verbose` output or other agreed
+  local observation notes
+
+**Risks**
+
+- Medium: the main risk is making a deletion/no-deletion decision from
+  insufficient observation evidence
+
+**Acceptance criteria**
+
+- The XML retirement gate is reviewed against the agreed observation criteria
+- The repo records an explicit next action:
+  either proceed to `CCR-012.2` or document the next review gate
+- No unsupported assumption is made about XML retirement readiness
+
+**Rollback plan**
+
+- Revert the review-doc update if the decision was recorded incorrectly
+
+**Dependencies**
+
+- After the next XML telemetry observation window defined by `CCR-012.1`
+
+---
+
 ## 5. Suggested Milestones
 
 ### Milestone A — Safe prep
@@ -1020,6 +1202,12 @@ This should remain a narrow terminology/alignment pass only.
 - `CCR-014`
 - `CCR-015`
 
+### Milestone F — Pre-Harness Follow-Ups
+
+- `CCR-016`
+- `CCR-017`
+- `CCR-018`
+
 ---
 
 ## 6. Copy-Paste Short Titles
@@ -1042,6 +1230,9 @@ If you need tracker-ready titles only:
 - `CCR-013 Run final naming cleanup pass for CLI packages and PromptClassifier`
 - `CCR-014 Resolve ignored architecture-doc ownership after cleanup renames`
 - `CCR-015 Final terminology and stale-reference alignment after XML/naming cleanup`
+- `CCR-016 Decide explicit approval and session default policy before harness work`
+- `CCR-017 Add focused unit coverage for extracted core.llm collaborators`
+- `CCR-018 Review XML telemetry gate and decide the next CCR-012.2 action`
 
 ---
 
