@@ -57,7 +57,7 @@ These tickets are ordered by safety and dependency.
 8. `CCR-008` SPI package consolidation `[done]`
 9. `CCR-009` split `OllamaEngine` `[done]`
 10. `CCR-010` extract `ToolCallLoop` stages `[done]`
-11. `CCR-011` decompose `LlmClient`
+11. `CCR-011` decompose `LlmClient` `[done]`
 12. `CCR-012.1` instrument and observe XML compatibility fallback usage
 13. `CCR-012.2` retire XML compatibility path if parity evidence justifies it
 14. `CCR-013` naming cleanup pass (`cmds` / `commands` / `PromptRouter`)
@@ -605,6 +605,11 @@ retrieval pipeline.
 ---
 
 ### CCR-011 — Decompose `LlmClient` into smaller collaborators
+
+**Status**
+
+- Done on `ticket/CCR-011-decompose-llmclient`
+- Merged into `chore/codebase-cleanup-refactor`
 
 **Why this exists**
 
