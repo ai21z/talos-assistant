@@ -4,6 +4,8 @@ import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
 import dev.talos.core.Config;
+import dev.talos.runtime.ToolCallParser;
+import dev.talos.runtime.XmlCompatTelemetry;
 import dev.talos.core.index.LuceneStore;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
@@ -37,6 +39,11 @@ class InfraCommandsTest {
     @Nested
     @DisplayName("StatusCommand")
     class Status {
+
+        @org.junit.jupiter.api.BeforeEach
+        void resetXmlCompatTelemetry() {
+            XmlCompatTelemetry.resetForTests();
+        }
 
         @Test void returns_trusted_info() {
             var cmd = new StatusCommand(ModeController.defaultController(), ws);
@@ -92,6 +99,15 @@ class InfraCommandsTest {
         @Test void spec_name() {
             var cmd = new StatusCommand(ModeController.defaultController(), ws);
             assertEquals("status", cmd.spec().name());
+        }
+
+        @Test void verbose_contains_xml_compat_section() {
+            ToolCallParser.parse("<tool_call>{\"name\":\"talos.read_file\",\"parameters\":{\"path\":\"a.txt\"}}</tool_call>");
+            var cmd = new StatusCommand(ModeController.defaultController(), ws);
+            String text = cmd.execute("--verbose", ctx).toString();
+            assertTrue(text.contains("XML Compat"), "Should contain XML compatibility telemetry section");
+            assertTrue(text.contains("parser_activations=1"), "Should surface XML parser fallback counter");
+            assertTrue(text.contains("last_tools=talos.read_file"), "Should show last XML-derived tool names");
         }
     }
 
