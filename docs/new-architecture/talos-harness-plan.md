@@ -1,6 +1,6 @@
 # Talos Harness Architecture and Rollout Plan
 
-**Branch:** `feature/native-tool-pipeline`  
+**Branch:** `chore/codebase-cleanup-refactor`  
 **Status:** starting-point architecture document for Talos + independent review  
 **Scope:** Talos as a **local operator** for PC workspaces and general development.  
 **Non-goals for this plan:** multi-agent orchestration, remote planners, background “dream” systems, browser swarms, or “fancy” agent ecosystems.
@@ -52,6 +52,11 @@ It is **execution harness quality**.
 
 ## 3. Source-of-truth current state (latest branch)
 
+This plan should now be read against the cleanup father branch
+`chore/codebase-cleanup-refactor`, which includes the codebase-cleanup stream
+through `CCR-015`. Older references to `feature/native-tool-pipeline` should be
+treated as historical context rather than the current implementation baseline.
+
 ### 3.1 What Talos already has
 
 Talos already has strong architectural seams for harnessing:
@@ -68,6 +73,8 @@ Talos already has strong architectural seams for harnessing:
    - loop iteration cap
    - re-prompting after tools
    - central place where tool-use success/failure is visible
+   - cleanup note: the class is now decomposed, with stage helpers under
+     `runtime/toolcall/`
 
 3. **TurnProcessor**
    - central tool execution gateway
@@ -85,6 +92,8 @@ Talos already has strong architectural seams for harnessing:
    - tool schemas
    - risk metadata
    - alias recovery for common model mistakes
+   - cleanup note: `TalosTool` is now context-aware only; the legacy no-context
+     execution path has been removed
 
 6. **Per-file write/edit verification**
    - read-back verification
