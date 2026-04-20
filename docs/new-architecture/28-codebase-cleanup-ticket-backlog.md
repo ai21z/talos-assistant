@@ -16,11 +16,13 @@ The intent is not to do a large-batch refactor. The intent is to create
 
 - Source branch: `v0.9.0-beta-dev`
 - Umbrella branch: `chore/codebase-cleanup-refactor`
-- Rule: use the umbrella branch only as a planning/integration branch if needed
+- Rule: use the umbrella branch as the father integration branch for this cleanup stream
 - Rule: each ticket should land as its own PR from a dedicated ticket branch back
-  into `v0.9.0-beta-dev`
+  into `chore/codebase-cleanup-refactor`
 - Rule: ticket branches may be cut directly from `v0.9.0-beta-dev` or from the
   umbrella branch, but each PR must contain only one ticket's changes
+- Rule: the father branch is merged back into `v0.9.0-beta-dev` only after the
+  intended cleanup ticket set is complete
 - Rule: do not combine unrelated cleanup items into one PR
 - Rule: no CI / Qodana / JaCoCo / Sonar / workflow changes on this branch
 - Rule: parity before deletion
@@ -47,7 +49,7 @@ git checkout -b ticket/CCR-001-doc-drift-fix
 
 These tickets are ordered by safety and dependency.
 
-1. `CCR-001` doc drift fix in `.github/assistant-instructions.md`
+1. `CCR-001` doc drift fix in `.github/assistant-instructions.md` `[done]`
 2. `CCR-002` decouple failing tests from real engine resolution with the correct seam per test layer `[done]`
 3. `CCR-003` `BuildInfo` exploded-classes version source `[done]`
 4. `CCR-004` delete `FirstRunWizard` class only `[done]`
@@ -479,7 +481,7 @@ acceptable with one implementation, but it is a future ISP problem.
 **Status**
 
 - Done on `ticket/CCR-008-spi-package-consolidation`
-- Implementation commit: `cda83cb`
+- Implementation commits: `cda83cb`, `44b5a06`
 - Merge commit: `3c08a3b`
 - Merged into `chore/codebase-cleanup-refactor`
 
@@ -921,14 +923,16 @@ javadocs, and high-signal instruction docs still describe the pre-cleanup
 behavior. Those stale descriptions are small, but they undermine the value of
 the refactor by teaching the wrong model to future readers.
 
-Two concrete examples already identified:
+Two concrete tracked-code examples were already identified, plus one ignored
+local-only maintainer doc surface:
 
 - `ToolCallParser.parse(...)` javadoc still says XML is checked first, while the
   implementation now checks JSON first and XML last
 - `TalosBootstrap` still comments on suppressing `<tool_call>` XML only, even
   though the stream filter now also handles JSON-fence fallback semantics
-- `.github/CARRY_OVER_PROMPT.md` still describes `cli.cmds`, `cli.commands`,
-  `PromptRouter`, `FirstRunWizard`, and XML-first tool-call flow
+- `.github/CARRY_OVER_PROMPT.md` still described `cli.cmds`, `cli.commands`,
+  `PromptRouter`, `FirstRunWizard`, and XML-first tool-call flow, but that file
+  is ignored/local-only and was reviewed separately rather than force-tracked
 
 This should remain a narrow terminology/alignment pass only.
 
@@ -941,8 +945,9 @@ This should remain a narrow terminology/alignment pass only.
 - Align in-code descriptions with the current XML compatibility posture
 - Align in-code descriptions with the `PromptClassifier` / `cli.launcher` /
   `cli.repl.slash` naming that now exists
-- Align high-signal maintainer instructions with the same post-cleanup naming
-  and XML-compatibility posture
+- Review high-signal maintainer instructions for the same post-cleanup naming
+  and XML-compatibility posture without changing ignored local-only files'
+  tracking state
 - Keep behavior unchanged
 
 **Out of scope**
@@ -956,7 +961,7 @@ This should remain a narrow terminology/alignment pass only.
 - `src/main/java/dev/talos/runtime/ToolCallParser.java`
 - `src/main/java/dev/talos/runtime/ToolCallStreamFilter.java`
 - `src/main/java/dev/talos/cli/repl/TalosBootstrap.java`
-- `.github/CARRY_OVER_PROMPT.md`
+- local-only `.github/CARRY_OVER_PROMPT.md` review surface (not force-tracked)
 - Any nearby file whose comments still mention removed names or pre-cleanup behavior
 
 **Risks**
@@ -969,6 +974,8 @@ This should remain a narrow terminology/alignment pass only.
 - Javadocs/comments/instruction docs describe the current implementation accurately
 - No production behavior changes
 - Focused affected tests still pass
+- Ignored local-only maintainer docs are not force-tracked as a side effect of
+  this ticket
 
 **Rollback plan**
 
