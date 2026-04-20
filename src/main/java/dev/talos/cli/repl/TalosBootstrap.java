@@ -224,7 +224,8 @@ public final class TalosBootstrap {
         });
 
         // ── Stream sink ───────────────────────────────────────────────────
-        // Wrapped in ToolCallStreamFilter to suppress <tool_call> XML from display.
+        // Wrapped in ToolCallStreamFilter to suppress text-form tool-call protocol
+        // blocks from display, including JSON fallback fences and deprecated XML.
         //
         // JLine-safe output: when a LineReader is available, route streaming
         // chunks through its Terminal's writer instead of raw System.out.
