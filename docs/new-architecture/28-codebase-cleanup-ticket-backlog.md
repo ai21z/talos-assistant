@@ -61,8 +61,8 @@ These tickets are ordered by safety and dependency.
 12. `CCR-012.1` instrument and observe XML compatibility fallback usage `[done]`
 13. `CCR-012.2` retire XML compatibility path if parity evidence justifies it
 14. `CCR-013` naming cleanup pass (`cmds` / `commands` / `PromptClassifier`) `[done]`
-15. `CCR-014` resolve ignored-architecture-doc ownership after cleanup renames
-16. `CCR-015` final terminology and stale-reference alignment after XML/naming cleanup
+15. `CCR-014` resolve ignored-architecture-doc ownership after cleanup renames `[done]`
+16. `CCR-015` final terminology and stale-reference alignment after XML/naming cleanup `[done]`
 
 Do not start `CCR-009` onward until the in-flight async-close work is stable.
 
@@ -809,6 +809,11 @@ review and onboarding cost.
 
 ### CCR-014 — Resolve ignored architecture-doc ownership after cleanup renames
 
+**Status**
+
+- Done on `ticket/CCR-014-doc-ownership-policy`
+- Merged into `chore/codebase-cleanup-refactor`
+
 **Why this exists**
 
 `CCR-013` correctly renamed package/class references, but it also force-added
@@ -868,6 +873,11 @@ accidental side effect of a mechanical rename ticket.
 ---
 
 ### CCR-015 — Final terminology and stale-reference alignment after XML/naming cleanup
+
+**Status**
+
+- Done on `ticket/CCR-015-stale-reference-alignment`
+- Merged into `chore/codebase-cleanup-refactor`
 
 **Why this exists**
 
