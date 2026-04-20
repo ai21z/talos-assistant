@@ -147,6 +147,11 @@ public record Context(
         }
 
         public Context build() {
+            // Policy defaults below (approvalGate = NoOpApprovalGate) are
+            // intentional, explicitly-named test/ad-hoc defaults and not
+            // silent policy-by-null (CCR-016). The shipped REPL wires an
+            // explicit CliApprovalGate from TalosBootstrap, so production
+            // never relies on this fallback.
             if (limits == null)   limits   = Limits.fromConfig(cfg);
             if (session == null)  session  = new SessionState() {
                 private int k = 8; private boolean dbg;

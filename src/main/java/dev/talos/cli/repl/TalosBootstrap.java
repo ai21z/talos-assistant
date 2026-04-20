@@ -272,6 +272,7 @@ public final class TalosBootstrap {
                 .llm(llm)
                 .netPolicy(net)
                 .memory(memory)
+                .approvalGate(approvalGate)
                 .toolRegistry(toolRegistry)
                 .conversationManager(conversationManager)
                 .toolCallLoop(toolCallLoop)
