@@ -5,7 +5,7 @@ import dev.talos.core.ingest.MediaType;
 import dev.talos.core.ingest.SourceFormat;
 import dev.talos.core.ingest.SourceIdentity;
 import dev.talos.core.ingest.SourceType;
-import dev.talos.core.spi.CorpusStore;
+import dev.talos.spi.CorpusStore;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.*;

@@ -2,9 +2,7 @@ package dev.talos.core.llm;
 
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
-import dev.talos.core.engine.EngineRegistry;
 import dev.talos.core.util.Sanitize;
-import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.TokenChunk;
@@ -15,16 +13,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -41,7 +33,8 @@ public final class LlmClient implements AutoCloseable {
 
     private final Config cfg;
     private final TransportMode mode;
-    private EngineRegistry registry;          // lazy; only if ENGINE
+    private final LlmEngineResolver engineResolver;
+    private final LlmCallBudget callBudget;
     private volatile String backend;          // ENGINE mode: current backend id (e.g., "ollama")
     private volatile String model;            // model name (or backend-qualified accepted via setModel)
     private final long responseMaxChars;
@@ -102,33 +95,6 @@ public final class LlmClient implements AutoCloseable {
      */
     private volatile Runnable externalCancelReset = () -> {};
 
-    /**
-     * Single-thread executor used solely to host the worker that executes
-     * {@code engineAssembledWithMessagesFull} when wrapped by
-     * {@link #withWallClockBudget}. We use a dedicated executor (rather than
-     * the common pool) so we can issue {@code cancel(true)} on timeout
-     * without disturbing other CompletableFutures in the JVM.
-     */
-    private final ExecutorService llmCallExecutor =
-            Executors.newCachedThreadPool(r -> {
-                Thread t = new Thread(r, "talos-llm-call");
-                t.setDaemon(true);
-                return t;
-            });
-
-    /**
-     * Single-thread scheduler for the idle-stream watchdog. Daemon so it
-     * never holds the JVM open. One scheduler is shared across all calls;
-     * each call schedules its own {@code ScheduledFuture} and cancels it on
-     * normal completion.
-     */
-    private final java.util.concurrent.ScheduledExecutorService watchdogExecutor =
-            Executors.newSingleThreadScheduledExecutor(r -> {
-                Thread t = new Thread(r, "talos-llm-watchdog");
-                t.setDaemon(true);
-                return t;
-            });
-
     /** Tool definitions to include in engine chat requests (native tool calling). */
     private volatile List<ToolSpec> toolSpecs = List.of();
 
@@ -154,6 +120,10 @@ public final class LlmClient implements AutoCloseable {
             new java.util.concurrent.atomic.AtomicInteger(0);
 
     public LlmClient(Config cfg) {
+        this(cfg, null);
+    }
+
+    LlmClient(Config cfg, LlmEngineResolver engineResolver) {
         this.cfg = (cfg == null ? new Config() : cfg);
 
         // ---- transport mode (default: PLACEHOLDER for tests/local safety) ----
@@ -204,17 +174,22 @@ public final class LlmClient implements AutoCloseable {
         }
         // 0 or negative ⇒ disabled (preserved verbatim); otherwise floor at 1s.
         this.defaultIdleMs = cfgIdle <= 0 ? cfgIdle : Math.max(1000L, cfgIdle);
+        this.callBudget = new LlmCallBudget(defaultIdleMs);
 
-        // Lazy init registry only when ENGINE mode is actually used.
+        // Create the engine seam only when ENGINE mode is actually used.
         if (this.mode == TransportMode.ENGINE) {
-            this.registry = new EngineRegistry(this.cfg);
+            this.engineResolver = engineResolver == null
+                    ? new RegistryLlmEngineResolver(this.cfg)
+                    : engineResolver;
             // if config already contains a qualified model, keep it
             if (this.model.contains("/")) {
                 String[] parts = this.model.split("/", 2);
                 this.backend = parts[0];
                 this.model = parts[1];
             }
-            try { this.registry.select(this.backend, this.model); } catch (Exception ignore) {}
+            try { this.engineResolver.select(this.backend, this.model); } catch (Exception ignore) {}
+        } else {
+            this.engineResolver = null;
         }
     }
 
@@ -281,10 +256,10 @@ public final class LlmClient implements AutoCloseable {
             String[] parts = sanitized.split("/", 2);
             this.backend = parts[0];
             this.model = parts[1];
-            if (registry != null) try { registry.select(this.backend, this.model); } catch (Exception ignore) {}
+            if (engineResolver != null) try { engineResolver.select(this.backend, this.model); } catch (Exception ignore) {}
         } else {
             this.model = sanitized;
-            if (mode == TransportMode.ENGINE && registry != null) try { registry.select(this.backend, this.model); } catch (Exception ignore) {}
+            if (mode == TransportMode.ENGINE && engineResolver != null) try { engineResolver.select(this.backend, this.model); } catch (Exception ignore) {}
         }
     }
 
@@ -485,22 +460,10 @@ public final class LlmClient implements AutoCloseable {
         final String usr = Sanitize.sanitizeForPrompt(Objects.toString(user, ""));
         List<Map<String,String>> sn = sanitizeSnippets(snippets);
 
-        EngineException lastTransient = null;
-        for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-            if (attempt > 0) backoff(attempt);
-            try {
-                ChatRequest req = new ChatRequest(backend, model, sys, usr, sn, timeout, List.of(), toolSpecs);
-                return assembleFromStream(registry.engine().chatStream(req), onChunk, cancelled);
-            } catch (EngineException.Transient t) {
-                lastTransient = t;
-                // retry on next iteration
-            } catch (EngineException ee) {
-                throw ee; // connection, model-not-found, response error — no retry
-            } catch (Exception e) {
-                throw new EngineException.ResponseError(0, e.getMessage(), e);
-            }
-        }
-        throw lastTransient; // retries exhausted
+        return LlmRetryExecutor.execute(MAX_RETRIES, () -> {
+            ChatRequest req = new ChatRequest(backend, model, sys, usr, sn, timeout, List.of(), toolSpecs);
+            return assembleFromStream(engineResolver.chatStream(req), onChunk, cancelled);
+        });
     }
 
     private static List<Map<String,String>> sanitizeSnippets(List<Map<String,String>> xs) {
@@ -556,21 +519,10 @@ public final class LlmClient implements AutoCloseable {
                         m.toolCallId()))
                 .toList();
 
-        EngineException lastTransient = null;
-        for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-            if (attempt > 0) backoff(attempt);
-            try {
-                ChatRequest req = new ChatRequest(backend, model, "", "", List.of(), timeout, sanitized, toolSpecs);
-                return assembleFromStream(registry.engine().chatStream(req), onChunk, cancelled);
-            } catch (EngineException.Transient t) {
-                lastTransient = t;
-            } catch (EngineException ee) {
-                throw ee;
-            } catch (Exception e) {
-                throw new EngineException.ResponseError(0, e.getMessage(), e);
-            }
-        }
-        throw lastTransient;
+        return LlmRetryExecutor.execute(MAX_RETRIES, () -> {
+            ChatRequest req = new ChatRequest(backend, model, "", "", List.of(), timeout, sanitized, toolSpecs);
+            return assembleFromStream(engineResolver.chatStream(req), onChunk, cancelled);
+        });
     }
 
     /**
@@ -653,7 +605,7 @@ public final class LlmClient implements AutoCloseable {
             if (onChunk != null) onChunk.accept(chunk);
         };
         Supplier<Boolean> cancel = this.externalCancel;
-        return withWallClockBudget(
+        return callBudget.run(
                 activeStream -> engineAssembledWithMessagesFullTracked(
                         messages, trackingSink, Duration.ofSeconds(90), cancel, lastChunkAt, activeStream),
                 wallClockMs,
@@ -696,159 +648,13 @@ public final class LlmClient implements AutoCloseable {
             breaker.onChunk(chunk);
         };
         Supplier<Boolean> cancel = this.externalCancel;
-        return withWallClockBudget(
+        return callBudget.run(
                 activeStream -> engineAssembledWithMessagesFullTracked(
                         messages, trackingSink, Duration.ofSeconds(90), cancel, lastChunkAt, activeStream),
                 wallClockMs,
                 lastChunkAt,
                 "non-streaming chat",
                 breaker);
-    }
-
-    /**
-     * Wrap an engine call in a wall-clock budget. On timeout, the worker is
-     * interrupted (best-effort: JDK HttpClient body reads typically wake on
-     * interrupt + close) and we synthesize a {@link StreamResult} containing
-     * a single user-visible error line. We deliberately return rather than
-     * throw: the calling tool-call loop is structured around StreamResults,
-     * and an exception there causes the whole REPL turn to abort with an
-     * unhelpful stack-trace flash. This keeps the UX coherent.
-     */
-    private StreamResult withWallClockBudget(Function<AtomicReference<AutoCloseable>, StreamResult> work,
-                                             long wallClockMs,
-                                             AtomicLong lastChunkAt,
-                                             String label) {
-        return withWallClockBudget(work, wallClockMs, lastChunkAt, label, null);
-    }
-
-    /**
-     * Overload that adds a {@link RepetitionBreaker} probe to the watchdog.
-     * When the breaker trips (pathological repetition in the streamed
-     * output), the worker is aborted with a dedicated {@link RepetitionException}
-     * so the user-visible message can explain exactly why the turn was
-     * killed — distinct from the wall-clock and idle exits.
-     *
-     * <p>Passing {@code null} for {@code breaker} is equivalent to the
-     * 4-arg overload. Kept separate so test calls that only exercise
-     * timeout/idle paths don't need to fabricate a breaker.
-     *
-     * <p><b>Async stream close:</b> the engine-side token stream handle
-     * (whatever {@code ModelEngine.chatStream} returns, an {@link AutoCloseable}
-     * via {@link java.util.stream.Stream}) is registered in the shared
-     * {@code activeStream} ref by the worker as soon as it opens. On every
-     * abort path (wall-clock, idle, repetition, interrupt), the watchdog /
-     * catch block calls {@link #closeActiveStream} <em>before</em>
-     * {@code fut.cancel(true)}. Closing the stream from a different thread
-     * fires its {@code onClose} hook, which for the Ollama transport closes
-     * the {@code BufferedReader} → HTTP body → socket, causing the worker's
-     * blocked {@code readLine()} to throw {@code IOException("Stream closed")}
-     * and unblock immediately. Without this, the interrupt alone cannot wake
-     * a thread blocked in a synchronous socket read, and the worker — plus
-     * the upstream Ollama generation — stays alive until EOS.
-     */
-    private StreamResult withWallClockBudget(Function<AtomicReference<AutoCloseable>, StreamResult> work,
-                                             long wallClockMs,
-                                             AtomicLong lastChunkAt,
-                                             String label,
-                                             RepetitionBreaker breaker) {
-        // Shared handle to the engine-side stream. The worker populates this
-        // inside engineAssembledWithMessagesFull as soon as chatStream()
-        // returns; the watchdog / abort blocks below close it from another
-        // thread to unblock socket-reads that no interrupt can wake.
-        final AtomicReference<AutoCloseable> activeStream = new AtomicReference<>();
-
-        // Per-call idle watchdog: if no chunk arrives within defaultIdleMs,
-        // cancel the worker. The watchdog tick interval is min(idle/4, 5s)
-        // to keep the abort latency bounded without busy-spinning.
-        java.util.concurrent.ScheduledFuture<?> watchdog = null;
-        CompletableFuture<StreamResult> fut;
-        if (wallClockMs <= 0) {
-            try { return work.apply(activeStream); }
-            catch (RuntimeException re) { throw re; }
-        }
-        fut = CompletableFuture.supplyAsync(() -> {
-            try { return work.apply(activeStream); }
-            catch (RuntimeException re) { throw re; }
-        }, llmCallExecutor);
-
-        final long idleMs = defaultIdleMs;
-        // Watchdog fires on either (a) idle-chunk timeout or (b) repetition
-        // breaker trip. Both share the same tick cadence — no point running
-        // two schedulers when one poll covers both conditions.
-        boolean wantIdleWatchdog = idleMs > 0 && lastChunkAt != null;
-        boolean wantRepetitionWatchdog = breaker != null;
-        if (wantIdleWatchdog || wantRepetitionWatchdog) {
-            long tickMs = wantIdleWatchdog
-                    ? Math.max(500L, Math.min(idleMs / 4L, 5_000L))
-                    : 500L;
-            final CompletableFuture<StreamResult> futRef = fut;
-            watchdog = watchdogExecutor.scheduleAtFixedRate(() -> {
-                if (futRef.isDone()) return;
-                if (wantRepetitionWatchdog && breaker.tripped()) {
-                    // Close the socket first so the worker's readLine() wakes
-                    // immediately; otherwise it can keep consuming tokens for
-                    // many seconds after the future is already completed.
-                    closeActiveStream(activeStream);
-                    futRef.completeExceptionally(new RepetitionException(
-                            breaker.substringLen(), breaker.maxRepeats()));
-                    return;
-                }
-                if (wantIdleWatchdog) {
-                    long since = System.currentTimeMillis() - lastChunkAt.get();
-                    if (since > idleMs) {
-                        closeActiveStream(activeStream);
-                        futRef.completeExceptionally(new IdleStreamException(idleMs));
-                    }
-                }
-            }, tickMs, tickMs, TimeUnit.MILLISECONDS);
-        }
-
-        try {
-            return fut.get(wallClockMs, TimeUnit.MILLISECONDS);
-        } catch (TimeoutException te) {
-            // Wall-clock trip: close the stream first, then cancel. The
-            // cancel(true) sets the interrupt flag but cannot wake a blocked
-            // socket read on its own.
-            closeActiveStream(activeStream);
-            fut.cancel(true);
-            String msg = "[turn aborted: " + label + " exceeded "
-                    + (wallClockMs / 1000) + "s wall-clock budget — model is hung "
-                    + "or producing tokens too slowly. Try a smaller model, a shorter prompt, "
-                    + "or raise limits.llm_timeout_ms in config.]";
-            return new StreamResult(msg, List.of());
-        } catch (ExecutionException ee) {
-            Throwable cause = ee.getCause();
-            if (cause instanceof IdleStreamException ise) {
-                // Stream was already closed by the watchdog before it
-                // completed the future; this is a belt-and-braces call in
-                // case the worker re-opened on retry after the watchdog tick.
-                closeActiveStream(activeStream);
-                fut.cancel(true);
-                String msg = "[turn aborted: " + label + " produced no tokens for "
-                        + (ise.idleMs / 1000) + "s — model appears wedged. "
-                        + "Try a smaller model or raise limits.llm_idle_ms in config.]";
-                return new StreamResult(msg, List.of());
-            }
-            if (cause instanceof RepetitionException re) {
-                closeActiveStream(activeStream);
-                fut.cancel(true);
-                String msg = "[turn aborted: " + label + " entered a repetition loop — "
-                        + "the same " + re.substringLen + "-character pattern repeated "
-                        + re.maxRepeats + "+ times in the streamed output. "
-                        + "Try a smaller model, rephrase the prompt, or clear session memory with /clear.]";
-                return new StreamResult(msg, List.of());
-            }
-            if (cause instanceof RuntimeException rex) throw rex;
-            if (cause instanceof Error err) throw err;
-            throw new RuntimeException(cause);
-        } catch (InterruptedException ie) {
-            closeActiveStream(activeStream);
-            fut.cancel(true);
-            Thread.currentThread().interrupt();
-            return new StreamResult("[turn aborted: interrupted]", List.of());
-        } finally {
-            if (watchdog != null) watchdog.cancel(false);
-        }
     }
 
     /**
@@ -866,38 +672,7 @@ public final class LlmClient implements AutoCloseable {
      * <p>Package-private for unit testing (see {@code LlmClientAsyncCloseTest}).
      */
     static void closeActiveStream(AtomicReference<AutoCloseable> ref) {
-        if (ref == null) return;
-        AutoCloseable c = ref.getAndSet(null);
-        if (c == null) return;
-        try { c.close(); } catch (Exception ignored) { /* best-effort */ }
-    }
-
-    /**
-     * P2 — internal sentinel used by the idle watchdog to abort a hung
-     * stream. Carries the configured idle threshold so the user-visible
-     * abort message can quote the actual number.
-     */
-    private static final class IdleStreamException extends RuntimeException {
-        final long idleMs;
-        IdleStreamException(long idleMs) {
-            super("idle stream > " + idleMs + " ms");
-            this.idleMs = idleMs;
-        }
-    }
-
-    /**
-     * Internal sentinel used by the repetition watchdog to abort a stream
-     * that has fallen into a degenerate-output attractor. Carries the
-     * probe parameters so the user-visible abort message can quote them.
-     */
-    private static final class RepetitionException extends RuntimeException {
-        final int substringLen;
-        final int maxRepeats;
-        RepetitionException(int substringLen, int maxRepeats) {
-            super("repetition detected: " + substringLen + "-char probe × " + maxRepeats);
-            this.substringLen = substringLen;
-            this.maxRepeats = maxRepeats;
-        }
+        LlmCallBudget.closeActiveStream(ref);
     }
 
     /**
@@ -946,91 +721,68 @@ public final class LlmClient implements AutoCloseable {
                         m.toolCallId()))
                 .toList();
 
-        EngineException lastTransient = null;
-        for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-            if (attempt > 0) backoff(attempt);
-            try {
-                ChatRequest req = new ChatRequest(backend, model, "", "", List.of(), timeout, sanitized, toolSpecs);
-                // Try-with-resources ensures the token stream's onClose hook
-                // fires on every exit path (break, exception, normal return).
-                // For the Ollama transport that onClose closes the underlying
-                // BufferedReader → HTTP body → socket, so a cancelled or
-                // cap-truncated turn doesn't leave Ollama generating into a
-                // dead consumer.
-                //
-                // Async-close seam: as soon as the stream is open, register
-                // it in the shared activeStream ref so the watchdog thread
-                // (or the outer timeout/interrupt handler in
-                // withWallClockBudget) can close it from another thread. This
-                // is the only way to wake a worker blocked in a synchronous
-                // socket read — Thread.interrupt() alone cannot unblock the
-                // JDK HttpClient body-read on every platform. Cleared in the
-                // inner finally so a normal exit does not leave a stale
-                // reference that a subsequent watchdog tick could close.
-                try (java.util.stream.Stream<TokenChunk> stream = registry.engine().chatStream(req)) {
-                    if (activeStream != null) activeStream.set(stream);
-                    try {
-                        StringBuilder acc = new StringBuilder();
-                        List<ChatMessage.NativeToolCall> toolCalls = new ArrayList<>();
-                        int alreadyEmittedLen = 0;
+        return LlmRetryExecutor.execute(MAX_RETRIES, () -> {
+            ChatRequest req = new ChatRequest(backend, model, "", "", List.of(), timeout, sanitized, toolSpecs);
+            // Try-with-resources ensures the token stream's onClose hook
+            // fires on every exit path (break, exception, normal return).
+            // For the Ollama transport that onClose closes the underlying
+            // BufferedReader → HTTP body → socket, so a cancelled or
+            // cap-truncated turn doesn't leave Ollama generating into a
+            // dead consumer.
+            //
+            // Async-close seam: as soon as the stream is open, register
+            // it in the shared activeStream ref so the watchdog thread
+            // (or the outer timeout/interrupt handler in the call budget)
+            // can close it from another thread. This is the only way to
+            // wake a worker blocked in a synchronous socket read —
+            // Thread.interrupt() alone cannot unblock the JDK HttpClient
+            // body-read on every platform. Cleared in the inner finally so
+            // a normal exit does not leave a stale reference that a
+            // subsequent watchdog tick could close.
+            try (java.util.stream.Stream<TokenChunk> stream = engineResolver.chatStream(req)) {
+                if (activeStream != null) activeStream.set(stream);
+                try {
+                    StringBuilder acc = new StringBuilder();
+                    List<ChatMessage.NativeToolCall> toolCalls = new ArrayList<>();
+                    int alreadyEmittedLen = 0;
 
-                        for (TokenChunk ch : (Iterable<TokenChunk>) stream::iterator) {
-                            if (cancelled != null && Boolean.TRUE.equals(cancelled.get())) break;
-                            if (ch == null || Boolean.TRUE.equals(ch.done())) break;
+                    for (TokenChunk ch : (Iterable<TokenChunk>) stream::iterator) {
+                        if (cancelled != null && Boolean.TRUE.equals(cancelled.get())) break;
+                        if (ch == null || Boolean.TRUE.equals(ch.done())) break;
 
-                            // Native tool-call chunk: collect structured calls, skip text processing
-                            if (ch.hasToolCalls()) {
-                                toolCalls.addAll(ch.toolCalls());
-                                continue;
-                            }
-
-                            // Text chunk: sanitize and emit as before
-                            String deltaRaw = Objects.toString(ch.text(), "");
-                            acc.append(deltaRaw);
-                            String noThink = Sanitize.stripThinkTags(acc.toString());
-                            String cleaned = Sanitize.sanitizeForOutputPreservingToolCalls(noThink);
-                            cleaned = Sanitize.hardTruncate(cleaned, safeCap());
-
-                            int already = Math.min(alreadyEmittedLen, cleaned.length());
-                            String emit = cleaned.substring(already);
-
-                            acc.setLength(0);
-                            acc.append(cleaned);
-                            alreadyEmittedLen = cleaned.length();
-
-                            if (onChunk != null && !emit.isEmpty()) onChunk.accept(emit);
-                            if (acc.length() >= safeCap()) break;
+                        if (ch.hasToolCalls()) {
+                            toolCalls.addAll(ch.toolCalls());
+                            continue;
                         }
-                        return new StreamResult(acc.toString(), toolCalls);
-                    } finally {
-                        // Only clear if still pointing at *this* stream — a
-                        // retry in the next loop iteration opens a fresh
-                        // stream and registers it, and a concurrent async
-                        // close must not race with that registration.
-                        if (activeStream != null) activeStream.compareAndSet(stream, null);
+
+                        String deltaRaw = Objects.toString(ch.text(), "");
+                        acc.append(deltaRaw);
+                        String noThink = Sanitize.stripThinkTags(acc.toString());
+                        String cleaned = Sanitize.sanitizeForOutputPreservingToolCalls(noThink);
+                        cleaned = Sanitize.hardTruncate(cleaned, safeCap());
+
+                        int already = Math.min(alreadyEmittedLen, cleaned.length());
+                        String emit = cleaned.substring(already);
+
+                        acc.setLength(0);
+                        acc.append(cleaned);
+                        alreadyEmittedLen = cleaned.length();
+
+                        if (onChunk != null && !emit.isEmpty()) onChunk.accept(emit);
+                        if (acc.length() >= safeCap()) break;
                     }
+                    return new StreamResult(acc.toString(), toolCalls);
+                } finally {
+                    if (activeStream != null) activeStream.compareAndSet(stream, null);
                 }
-            } catch (EngineException.Transient t) {
-                lastTransient = t;
-            } catch (EngineException ee) {
-                throw ee;
-            } catch (Exception e) {
-                throw new EngineException.ResponseError(0, e.getMessage(), e);
             }
-        }
-        throw lastTransient;
+        });
     }
 
     // ── Retry / back-off constants ────────────────────────────────────────
 
     /** Max retries for transient engine errors (per call, not per session). */
     static final int MAX_RETRIES = 2;
-
-    private static void backoff(int attempt) {
-        try { Thread.sleep(attempt * 400L); } catch (InterruptedException ie) {
-            Thread.currentThread().interrupt();
-        }
-    }
 
     /**
      * Shared streaming assembly loop used by both engine methods.
@@ -1100,8 +852,7 @@ public final class LlmClient implements AutoCloseable {
     }
 
     @Override public void close() {
-        if (registry != null) try { registry.close(); } catch (Exception ignored) {}
-        try { llmCallExecutor.shutdownNow(); } catch (Exception ignored) {}
-        try { watchdogExecutor.shutdownNow(); } catch (Exception ignored) {}
+        if (engineResolver != null) try { engineResolver.close(); } catch (Exception ignored) {}
+        try { callBudget.close(); } catch (Exception ignored) {}
     }
 }

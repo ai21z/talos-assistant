@@ -699,7 +699,7 @@ class NativeToolPipelineTest {
             @Override public String name() { return name; }
             @Override public String description() { return description; }
             @Override public ToolDescriptor descriptor() { return new ToolDescriptor(name, description); }
-            @Override public ToolResult execute(ToolCall call) { return ToolResult.ok("stub"); }
+            @Override public ToolResult execute(ToolCall call, ToolContext ctx) { return ToolResult.ok("stub"); }
         };
     }
 }

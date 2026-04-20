@@ -161,9 +161,9 @@ class FileWriteToolTest {
     }
 
     @Test
-    void legacyExecuteWithoutContextFails() {
+    void nullContextFails() {
         ToolCall call = new ToolCall("talos.write_file", Map.of("path", "x", "content", "y"));
-        ToolResult r = tool.execute(call);
+        ToolResult r = tool.execute(call, null);
 
         assertFalse(r.success());
         assertEquals(ToolError.INTERNAL_ERROR, r.error().code());

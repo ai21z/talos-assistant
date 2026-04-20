@@ -1,6 +1,6 @@
 # Talos Harness Source of Truth for Opus
 
-**Branch:** `feature/native-tool-pipeline`  
+**Branch:** `chore/codebase-cleanup-refactor`  
 **Purpose:** give Opus one clear, aligned document that separates **hard evidence**, **useful source material**, and **Talos-specific architectural judgment**.  
 **Audience:** human reviewer + Opus  
 **Status:** working source-of-truth companion to `docs/new-architecture/talos-harness-plan.md`
@@ -81,6 +81,12 @@ The problem is missing harness layers.
 Primary local reference:
 - `docs/new-architecture/talos-harness-plan.md`
 
+Current working baseline for harness preparation:
+- `chore/codebase-cleanup-refactor`
+- This branch includes the codebase-cleanup stream through `CCR-015`, so
+  harness work should use it rather than the older `feature/native-tool-pipeline`
+  snapshot as the local structural baseline
+
 This document should be treated as the main internal architecture plan.
 The current document you are reading is the **source-evaluation companion**.
 
@@ -136,7 +142,7 @@ These are mandatory.
    - current internal harness architecture plan
    - best source for Talos-specific goals, runtime seams, pain points, and rollout order
 
-2. current code from branch `feature/native-tool-pipeline`
+2. current code from branch `chore/codebase-cleanup-refactor`
    - especially runtime orchestration and tool pipeline classes
    - Opus should inspect these files directly:
      - `AssistantTurnExecutor`
@@ -425,7 +431,7 @@ If giving Opus a compact, high-value pack, use this order:
 ### Mandatory pack
 1. `docs/new-architecture/talos-harness-plan.md`
 2. `docs/new-architecture/talos-harness-source-of-truth.md`
-3. relevant runtime classes from `feature/native-tool-pipeline`
+3. relevant runtime classes from `chore/codebase-cleanup-refactor`
 4. `alex000kim-article.txt`
 
 ### Strong external pack

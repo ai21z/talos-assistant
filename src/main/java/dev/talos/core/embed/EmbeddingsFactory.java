@@ -1,7 +1,7 @@
 package dev.talos.core.embed;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
-import dev.talos.core.spi.Embeddings;
+import dev.talos.spi.Embeddings;
 import java.util.Map;
 import java.util.Objects;
 /**

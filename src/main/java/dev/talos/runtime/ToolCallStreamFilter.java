@@ -162,6 +162,7 @@ public final class ToolCallStreamFilter implements Consumer<String> {
         Matcher cm = CLOSE_TAG.matcher(buffer);
         if (cm.find()) {
             // Found closing tag — discard everything up to and including it
+            XmlCompatTelemetry.recordStreamSuppressedXmlBlock();
             String remainder = buffer.substring(cm.end());
             buffer.setLength(0);
             buffer.append(remainder);

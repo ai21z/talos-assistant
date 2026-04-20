@@ -9,7 +9,8 @@ import java.util.Properties;
  * <p>Sources (in priority order, with graceful {@code "unknown"} fallback):
  * <ul>
  *   <li>{@code version} — {@link Package#getImplementationVersion()} (from JAR manifest
- *       {@code Implementation-Version}); fallback {@code "unknown"}.</li>
+ *       {@code Implementation-Version}); fallback generated classpath resource
+ *       {@code META-INF/talos-version.properties}; final fallback {@code "unknown"}.</li>
  *   <li>{@code buildTimestamp} — {@link Package#getImplementationVendor()}, which the
  *       Gradle build stores as a build-time millis string in {@code Implementation-Vendor}.
  *       Fallback {@code "unknown"}.</li>
@@ -33,6 +34,8 @@ public final class BuildInfo {
 
     /** Classpath path for optional git-identity properties produced at build time. */
     static final String BUILD_PROPS_RESOURCE = "META-INF/talos-build.properties";
+    /** Classpath path for generated version metadata used in exploded-class runs. */
+    static final String VERSION_PROPS_RESOURCE = "META-INF/talos-version.properties";
 
     private BuildInfo() {}
 
@@ -40,7 +43,9 @@ public final class BuildInfo {
 
     /** @return the jar-manifest {@code Implementation-Version}, or {@value #UNKNOWN}. */
     public static String version() {
-        return manifestAttr(Package::getImplementationVersion);
+        String manifest = manifestAttr(Package::getImplementationVersion);
+        if (!UNKNOWN.equals(manifest)) return manifest;
+        return resourceProp(VERSION_PROPS_RESOURCE, "version");
     }
 
     /** @return the jar-manifest {@code Implementation-Vendor} (build timestamp), or {@value #UNKNOWN}. */
@@ -99,8 +104,12 @@ public final class BuildInfo {
      * does not contain the key.
      */
     static String buildProp(String key) {
+        return resourceProp(BUILD_PROPS_RESOURCE, key);
+    }
+
+    static String resourceProp(String resourcePath, String key) {
         try (InputStream in = BuildInfo.class.getClassLoader()
-                .getResourceAsStream(BUILD_PROPS_RESOURCE)) {
+                .getResourceAsStream(resourcePath)) {
             if (in == null) return UNKNOWN;
             Properties props = new Properties();
             props.load(in);

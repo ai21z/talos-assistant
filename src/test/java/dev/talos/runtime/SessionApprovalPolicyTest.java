@@ -320,7 +320,7 @@ class SessionApprovalPolicyTest {
         @Override public ToolDescriptor descriptor() {
             return new ToolDescriptor("test.w", "write", null, ToolRiskLevel.WRITE);
         }
-        @Override public ToolResult execute(ToolCall call) { return ToolResult.ok("wrote"); }
+        @Override public ToolResult execute(ToolCall call, ToolContext ctx) { return ToolResult.ok("wrote"); }
     }
 }
 

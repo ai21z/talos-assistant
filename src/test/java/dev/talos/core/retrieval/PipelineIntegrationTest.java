@@ -3,7 +3,7 @@ package dev.talos.core.retrieval;
 import dev.talos.core.index.LuceneStore;
 import dev.talos.core.rerank.NoOpReranker;
 import dev.talos.core.retrieval.stages.*;
-import dev.talos.core.spi.CorpusStore;
+import dev.talos.spi.CorpusStore;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 

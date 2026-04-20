@@ -111,7 +111,7 @@ public final class ToolCallParser {
 
     /**
      * Parse all tool-call blocks from an LLM response.
-     * Tries XML tags first, then code-fenced JSON, then bare JSON.
+     * Tries code-fenced JSON first, then bare JSON, then deprecated XML tags.
      */
     public static List<ToolCall> parse(String llmResponse) {
         if (llmResponse == null || llmResponse.isBlank()) {
@@ -136,6 +136,7 @@ public final class ToolCallParser {
         int preXmlCount = calls.size();
         extractFromPattern(VARIANT_TAG_PATTERN, 2, llmResponse, calls, consumedPayloads);
         if (calls.size() > preXmlCount) {
+            XmlCompatTelemetry.recordParserFallback(calls.subList(preXmlCount, calls.size()));
             LOG.warn("XML tool-call format detected — this is deprecated. "
                     + "The model should use native tool calling or JSON code-fence format.");
         }

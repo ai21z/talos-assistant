@@ -1,9 +1,9 @@
 package dev.talos.cli.repl;
 
-import dev.talos.cli.commands.Command;
-import dev.talos.cli.commands.CommandRegistry;
-import dev.talos.cli.commands.CommandSpec;
-import dev.talos.cli.commands.CommandGroup;
+import dev.talos.cli.repl.slash.Command;
+import dev.talos.cli.repl.slash.CommandRegistry;
+import dev.talos.cli.repl.slash.CommandSpec;
+import dev.talos.cli.repl.slash.CommandGroup;
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
 import org.jline.reader.Candidate;

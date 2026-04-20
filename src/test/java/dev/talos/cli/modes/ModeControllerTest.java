@@ -234,7 +234,7 @@ class ModeControllerTest {
         var ctx = Context.builder(new Config()).build();
 
         mc.route("explain RagService.java", WS, ctx);
-        assertEquals(PromptRouter.Route.RETRIEVE, mc.lastRoute());
+        assertEquals(PromptClassifier.Route.RETRIEVE, mc.lastRoute());
     }
 
     @Test
@@ -246,7 +246,7 @@ class ModeControllerTest {
         var ctx = Context.builder(new Config()).build();
 
         mc.route("hey", WS, ctx);
-        assertEquals(PromptRouter.Route.ASSIST, mc.lastRoute());
+        assertEquals(PromptClassifier.Route.ASSIST, mc.lastRoute());
     }
 
     @Test
@@ -261,7 +261,7 @@ class ModeControllerTest {
         mc.route("ls src/", WS, ctx);                   // → COMMAND (neutral)
 
         // COMMAND should not reset retrieval context
-        assertEquals(PromptRouter.Route.RETRIEVE, mc.lastRoute(),
+        assertEquals(PromptClassifier.Route.RETRIEVE, mc.lastRoute(),
                 "COMMAND should not reset the retrieval context");
     }
 
@@ -402,7 +402,7 @@ class ModeControllerTest {
         var ctx = Context.builder(new Config()).build();
 
         mc.route("RagService", WS, ctx);
-        assertEquals(PromptRouter.Route.RETRIEVE, mc.lastRoute(),
+        assertEquals(PromptClassifier.Route.RETRIEVE, mc.lastRoute(),
                 "Workspace symbol should update lastRoute to RETRIEVE");
     }
 
@@ -531,8 +531,8 @@ class ModeControllerTest {
         var ctx = Context.builder(new Config()).build();
 
         mc.route("refactor ModeController", WS, ctx);
-        // lastRoute still tracks PromptRouter classification for diagnostics
-        assertEquals(PromptRouter.Route.RETRIEVE, mc.lastRoute(),
+        // lastRoute still tracks PromptClassifier classification for diagnostics
+        assertEquals(PromptClassifier.Route.RETRIEVE, mc.lastRoute(),
                 "Action+PascalCase should update lastRoute to RETRIEVE");
     }
 

@@ -3,7 +3,7 @@ import dev.talos.core.retrieval.RetrievalCandidate;
 import dev.talos.core.retrieval.RetrievalRequest;
 import dev.talos.core.retrieval.RetrievalStage;
 import dev.talos.core.retrieval.StageOutput;
-import dev.talos.core.spi.CorpusStore;
+import dev.talos.spi.CorpusStore;
 import java.util.ArrayList;
 import java.util.List;
 /**

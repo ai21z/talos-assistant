@@ -20,21 +20,21 @@ class AutoModeIntentRoutingTest {
 
     @Test
     void listFilesQueriesRouteToAssistForToolHandling() {
-        // "list files" queries route through PromptRouter normally.
+        // "list files" queries route through PromptClassifier normally.
         // "what files are here?" now routes to RETRIEVE because "here" is
         // a workspace proximity signal — the user is asking about THIS workspace.
-        assertEquals(PromptRouter.Route.RETRIEVE,
-                PromptRouter.route("what files are here?"));
-        assertEquals(PromptRouter.Route.ASSIST,
-                PromptRouter.route("list all files"));
-        assertEquals(PromptRouter.Route.ASSIST,
-                PromptRouter.route("which files are indexed"));
-        assertEquals(PromptRouter.Route.ASSIST,
-                PromptRouter.route("what docs are available"));
+        assertEquals(PromptClassifier.Route.RETRIEVE,
+                PromptClassifier.route("what files are here?"));
+        assertEquals(PromptClassifier.Route.ASSIST,
+                PromptClassifier.route("list all files"));
+        assertEquals(PromptClassifier.Route.ASSIST,
+                PromptClassifier.route("which files are indexed"));
+        assertEquals(PromptClassifier.Route.ASSIST,
+                PromptClassifier.route("what docs are available"));
 
         // "show files" routes to COMMAND (DEV_COMMAND pattern matches "show <non-excluded>")
-        assertEquals(PromptRouter.Route.COMMAND,
-                PromptRouter.route("show files"));
+        assertEquals(PromptClassifier.Route.COMMAND,
+                PromptClassifier.route("show files"));
     }
 
     @Test
