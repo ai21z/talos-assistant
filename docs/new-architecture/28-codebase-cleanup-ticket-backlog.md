@@ -61,6 +61,8 @@ These tickets are ordered by safety and dependency.
 12. `CCR-012.1` instrument and observe XML compatibility fallback usage `[done]`
 13. `CCR-012.2` retire XML compatibility path if parity evidence justifies it
 14. `CCR-013` naming cleanup pass (`cmds` / `commands` / `PromptClassifier`) `[done]`
+15. `CCR-014` resolve ignored-architecture-doc ownership after cleanup renames
+16. `CCR-015` final terminology and stale-reference alignment after XML/naming cleanup
 
 Do not start `CCR-009` onward until the in-flight async-close work is stable.
 
@@ -805,6 +807,134 @@ review and onboarding cost.
 
 ---
 
+### CCR-014 — Resolve ignored architecture-doc ownership after cleanup renames
+
+**Why this exists**
+
+`CCR-013` correctly renamed package/class references, but it also force-added
+architecture docs that the repo currently ignores via `/docs` rules in both
+`.gitignore` and `.git/info/exclude`. That creates an ownership/policy mismatch:
+either these docs are intentionally part of the tracked cleanup backlog surface,
+or they should remain ignored and be removed from the index again.
+
+This should be handled as an explicit repo-hygiene decision, not left as an
+accidental side effect of a mechanical rename ticket.
+
+**Scope**
+
+- Decide whether the tracked `docs/new-architecture/` architecture/planning
+  set should be treated as intentional repo content or as local-only ignored docs
+- If they should remain ignored:
+  untrack the tracked `docs/new-architecture/` files from git while preserving
+  local files, and define whether any exception (such as the active cleanup
+  backlog) should remain tracked
+- If they should become tracked:
+  update repo-level ignore policy explicitly and document the new ownership
+  expectation for architecture/planning docs
+- Ensure the resulting state is internally consistent between git tracking and
+  ignore rules
+
+**Out of scope**
+
+- Rewriting the architecture docs themselves
+- Broad documentation restructuring
+- Any production code changes
+
+**Main files**
+
+- `.gitignore`
+- tracked `docs/new-architecture/*` files that are part of the ownership decision
+
+**Risks**
+
+- Medium: easy to produce a confusing half-state where docs are both tracked
+  and ignored, or to accidentally drop a doc that the cleanup process now relies on
+
+**Acceptance criteria**
+
+- The ownership of the tracked `docs/new-architecture/` docs is explicit and consistent
+- The repo no longer contains a repo-level mismatch between ignore policy and tracked architecture/planning docs
+- No production code files change
+- The cleanup branch’s documentation surface is easier to reason about than before
+
+**Rollback plan**
+
+- Revert the repo-hygiene decision commit
+
+**Dependencies**
+
+- After `CCR-013`
+
+---
+
+### CCR-015 — Final terminology and stale-reference alignment after XML/naming cleanup
+
+**Why this exists**
+
+The cleanup branch is structurally in much better shape, but a few comments,
+javadocs, and high-signal instruction docs still describe the pre-cleanup
+behavior. Those stale descriptions are small, but they undermine the value of
+the refactor by teaching the wrong model to future readers.
+
+Two concrete examples already identified:
+
+- `ToolCallParser.parse(...)` javadoc still says XML is checked first, while the
+  implementation now checks JSON first and XML last
+- `TalosBootstrap` still comments on suppressing `<tool_call>` XML only, even
+  though the stream filter now also handles JSON-fence fallback semantics
+- `.github/CARRY_OVER_PROMPT.md` still describes `cli.cmds`, `cli.commands`,
+  `PromptRouter`, `FirstRunWizard`, and XML-first tool-call flow
+
+This should remain a narrow terminology/alignment pass only.
+
+**Scope**
+
+- Fix stale comments, javadocs, and high-signal instruction-doc references
+  introduced or exposed by the cleanup work
+- Restrict the pass to already-identified cleanup-touched files and directly
+  adjacent stale references
+- Align in-code descriptions with the current XML compatibility posture
+- Align in-code descriptions with the `PromptClassifier` / `cli.launcher` /
+  `cli.repl.slash` naming that now exists
+- Align high-signal maintainer instructions with the same post-cleanup naming
+  and XML-compatibility posture
+- Keep behavior unchanged
+
+**Out of scope**
+
+- XML compatibility deletion
+- Runtime logic changes
+- Additional refactors hidden behind comment edits
+
+**Main files**
+
+- `src/main/java/dev/talos/runtime/ToolCallParser.java`
+- `src/main/java/dev/talos/runtime/ToolCallStreamFilter.java`
+- `src/main/java/dev/talos/cli/repl/TalosBootstrap.java`
+- `.github/CARRY_OVER_PROMPT.md`
+- Any nearby file whose comments still mention removed names or pre-cleanup behavior
+
+**Risks**
+
+- Low: the main risk is missing a stale comment and thinking the pass is complete
+
+**Acceptance criteria**
+
+- No identified stale references remain in the touched cleanup surfaces
+- Javadocs/comments/instruction docs describe the current implementation accurately
+- No production behavior changes
+- Focused affected tests still pass
+
+**Rollback plan**
+
+- Revert the terminology/alignment commit
+
+**Dependencies**
+
+- After `CCR-013`
+
+---
+
 ## 5. Suggested Milestones
 
 ### Milestone A — Safe prep
@@ -833,6 +963,11 @@ review and onboarding cost.
 - `CCR-012.2`
 - `CCR-013`
 
+### Milestone E — Post-Cleanup Alignment
+
+- `CCR-014`
+- `CCR-015`
+
 ---
 
 ## 6. Copy-Paste Short Titles
@@ -853,3 +988,5 @@ If you need tracker-ready titles only:
 - `CCR-012.1 Instrument and observe XML compatibility fallback usage`
 - `CCR-012.2 Retire XML compatibility path if parity evidence justifies it`
 - `CCR-013 Run final naming cleanup pass for CLI packages and PromptClassifier`
+- `CCR-014 Resolve ignored architecture-doc ownership after cleanup renames`
+- `CCR-015 Final terminology and stale-reference alignment after XML/naming cleanup`
