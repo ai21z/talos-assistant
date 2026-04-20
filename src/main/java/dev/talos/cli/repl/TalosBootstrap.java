@@ -1,6 +1,6 @@
 package dev.talos.cli.repl;
 
-import dev.talos.cli.commands.*;
+import dev.talos.cli.repl.slash.*;
 import dev.talos.cli.modes.ModeController;
 import dev.talos.core.Audit;
 import dev.talos.core.Config;
