@@ -48,8 +48,8 @@ class TalosBootstrapReconcileTest {
                 "from-jsonl-u", "from-jsonl-a", List.of(), 0, 0, 0, ""));
 
         SessionMemory mem = new SessionMemory();
-        int snap = TalosBootstrap.replaySnapshot(store, sid, mem, cm(mem));
-        assertEquals(1, snap, "snapshot replay count");
+        var snap = TalosBootstrap.replaySnapshot(store, sid, mem, cm(mem));
+        assertEquals(1, snap.pairsReplayed(), "snapshot replay count");
         // Fallback must NOT run because snap > 0.
         String buf = mem.get();
         assertNotNull(buf);
@@ -71,8 +71,8 @@ class TalosBootstrapReconcileTest {
                 "q2", "a2", List.of(), 0, 0, 0, ""));
 
         SessionMemory mem = new SessionMemory();
-        int snap = TalosBootstrap.replaySnapshot(store, sid, mem, cm(mem));
-        assertEquals(0, snap, "no snapshot, no pairs");
+        var snap = TalosBootstrap.replaySnapshot(store, sid, mem, cm(mem));
+        assertEquals(0, snap.pairsReplayed(), "no snapshot, no pairs");
 
         int replayed = TalosBootstrap.replayTurnLog(store, sid, mem);
         assertEquals(2, replayed);
@@ -93,8 +93,8 @@ class TalosBootstrapReconcileTest {
                 "only-in-jsonl-u", "only-in-jsonl-a", List.of(), 0, 0, 0, ""));
 
         SessionMemory mem = new SessionMemory();
-        int snap = TalosBootstrap.replaySnapshot(store, sid, mem, cm(mem));
-        assertEquals(0, snap);
+        var snap = TalosBootstrap.replaySnapshot(store, sid, mem, cm(mem));
+        assertEquals(0, snap.pairsReplayed());
 
         int replayed = TalosBootstrap.replayTurnLog(store, sid, mem);
         assertEquals(1, replayed);
@@ -106,11 +106,33 @@ class TalosBootstrapReconcileTest {
     void nothingToReplayWhenBothAbsent(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         SessionMemory mem = new SessionMemory();
-        int snap = TalosBootstrap.replaySnapshot(store, "ws-4", mem, cm(mem));
+        var snap = TalosBootstrap.replaySnapshot(store, "ws-4", mem, cm(mem));
         int tlog = TalosBootstrap.replayTurnLog(store, "ws-4", mem);
-        assertEquals(0, snap);
+        assertEquals(0, snap.pairsReplayed());
         assertEquals(0, tlog);
         assertFalse(mem.hasContent());
+    }
+
+    @Test
+    void snapshotSkipsNonOkAssistantTurns(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "ws-9";
+
+        store.save(new SessionData(sid, "/ws", "", 2, Instant.now(),
+                List.of(
+                        new SessionData.Turn("user", "u1", ""),
+                        new SessionData.Turn("assistant", "poison", "error"),
+                        new SessionData.Turn("user", "u2", ""),
+                        new SessionData.Turn("assistant", "clean", "ok")
+                ),
+                "ollama/qwen2.5-coder:14b"));
+
+        SessionMemory mem = new SessionMemory();
+        var snap = TalosBootstrap.replaySnapshot(store, sid, mem, cm(mem));
+        assertEquals(1, snap.pairsReplayed());
+        assertEquals("ollama/qwen2.5-coder:14b", snap.model());
+        assertTrue(mem.get().contains("u2"));
+        assertFalse(mem.get().contains("poison"));
     }
 
     @Test

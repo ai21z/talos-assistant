@@ -18,11 +18,11 @@ class JsonSessionStoreTest {
     }
     private SessionData sample(String id, int turns) {
         List<SessionData.Turn> turnList = List.of(
-                new SessionData.Turn("user", "hello"),
-                new SessionData.Turn("assistant", "hi there")
+                new SessionData.Turn("user", "hello", ""),
+                new SessionData.Turn("assistant", "hi there", "ok")
         );
         return new SessionData(id, "/tmp/ws", "goal sketch", turns,
-                Instant.parse("2026-01-15T10:30:00Z"), turnList);
+                Instant.parse("2026-01-15T10:30:00Z"), turnList, "ollama/qwen2.5-coder:14b");
     }
     // -- Basic CRUD --
     @Nested class SaveAndLoad {
@@ -38,11 +38,13 @@ class JsonSessionStoreTest {
             assertEquals("goal sketch", d.sketch());
             assertEquals(5, d.turnCount());
             assertEquals(Instant.parse("2026-01-15T10:30:00Z"), d.createdAt());
+            assertEquals("ollama/qwen2.5-coder:14b", d.model());
             assertEquals(2, d.turns().size());
             assertEquals("user", d.turns().get(0).role());
             assertEquals("hello", d.turns().get(0).content());
             assertEquals("assistant", d.turns().get(1).role());
             assertEquals("hi there", d.turns().get(1).content());
+            assertEquals("ok", d.turns().get(1).status());
         }
         @Test void load_nonExistent_returnsEmpty() {
             var store = store();
