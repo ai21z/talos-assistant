@@ -70,6 +70,7 @@ public final class MemoryUpdateListener implements SessionListener {
             // in a real qwen2.5-coder transcript). Render-side chrome must
             // never be part of the model's training surface.
             String forHistory = stripUiChromeForHistory(answer);
+            if (!isMemorizableAssistantReply(result.result(), forHistory)) return;
             if (forHistory.isBlank()) return;
             conversationManager.addTurn(userInput, forHistory);
 
@@ -120,6 +121,8 @@ public final class MemoryUpdateListener implements SessionListener {
             if (t.startsWith("[Tool-call limit reached")) continue;
             if (t.startsWith("[turn aborted")) continue;
             if (t.startsWith("[iteration limit")) continue;
+            if (t.startsWith("[Engine error")) continue;
+            if (t.startsWith("[Model '") && t.contains("' not found")) continue;
             if (t.startsWith("✓ Edited ")) continue;
             if (t.startsWith("✓ Wrote ")) continue;
             if (t.startsWith("✓ Created ")) continue;
@@ -127,6 +130,34 @@ public final class MemoryUpdateListener implements SessionListener {
             out.append(line).append('\n');
         }
         return out.toString().replaceAll("\\n{3,}", "\n\n").strip();
+    }
+
+    /**
+     * Keep only genuinely conversational assistant replies in memory.
+     * Streamed answers that are just error wrappers or generic capability
+     * refusals are not useful context for later turns.
+     */
+    static boolean isMemorizableAssistantReply(Result result, String stripped) {
+        if (!(result instanceof Result.Ok || result instanceof Result.Streamed)) return false;
+        if (stripped == null || stripped.isBlank()) return false;
+        String lower = stripped.stripLeading().toLowerCase();
+        if (lower.startsWith("[engine error")) return false;
+        if (lower.startsWith("[model '") && lower.contains("' not found")) return false;
+        if (looksLikeToolRefusal(lower)) return false;
+        return true;
+    }
+
+    private static boolean looksLikeToolRefusal(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        boolean aiTextAssistant = lower.contains("i am an ai text-based assistant")
+                || lower.contains("i'm an ai text-based assistant")
+                || lower.contains("as an ai text-based assistant");
+        boolean cannotDirectly = lower.contains("cannot directly edit files on your system")
+                || lower.contains("can't directly edit files on your system")
+                || lower.contains("unable to directly edit files on your system")
+                || lower.contains("cannot directly read files from your system")
+                || lower.contains("don't have the capability to directly read files from your system");
+        return aiTextAssistant || cannotDirectly;
     }
 
     /**

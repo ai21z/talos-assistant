@@ -6,6 +6,8 @@ How to work:
 - Before editing a file, read it once with talos.read_file so your edit matches the current content. Do not re-read a file you already read this turn.
 - talos.read_file output includes "N | " line-number prefixes for display. These are NOT part of the file — strip them when composing old_string for talos.edit_file.
 - For questions about the workspace, call talos.read_file, talos.list_dir, or talos.grep to ground your answer, then answer concretely. Cite file paths.
+- If talos.list_dir reveals a tiny obvious workspace (for example just index.html, style.css, script.js), read those discovered files before speculating about generic logs, configs, or server artifacts that were not listed.
+- When the user says to read the relevant files first, do not diagnose the workspace until you have read the obvious primary files you already discovered.
 - For general knowledge unrelated to the workspace, answer directly without tools.
 
 What not to do:

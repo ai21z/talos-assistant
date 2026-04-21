@@ -119,6 +119,11 @@ class MemoryUpdateListenerTest {
         assertEquals("Result.", MemoryUpdateListener.stripUiChromeForHistory(in));
     }
 
+    @Test void stripUiChromeRemovesEngineAndModelErrors() {
+        String in = "[Engine error during tool loop: boom]\n[Model 'qwen3:8b' not found. Run: ollama pull qwen3:8b]";
+        assertEquals("", MemoryUpdateListener.stripUiChromeForHistory(in));
+    }
+
     @Test void stripUiChromePreservesProseWithBrackets() {
         String in = "The config uses [brackets] in its DSL — that is fine.";
         assertEquals(in, MemoryUpdateListener.stripUiChromeForHistory(in));
@@ -142,6 +147,12 @@ class MemoryUpdateListenerTest {
         listener.onTurnComplete(tr(new Result.Streamed(mixed, ""), 1), "rename title");
         assertEquals(1, cm.turnCount());
         assertEquals("I updated the title.", cm.buildHistory().get(1).content());
+    }
+
+    @Test void refusalStyleReplyIsNotRecordedInHistory() {
+        String refusal = "I apologize for the confusion earlier. I am an AI text-based assistant and cannot directly edit files on your system.";
+        listener.onTurnComplete(tr(new Result.Streamed(refusal, ""), 1), "please edit it");
+        assertEquals(0, cm.turnCount());
     }
 
     private static TurnResult tr(Result r, int turn) {

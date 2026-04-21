@@ -14,12 +14,31 @@ public final class ToolCallRepromptStage {
     private static final Logger LOG = LoggerFactory.getLogger(ToolCallRepromptStage.class);
 
     public boolean reprompt(LoopState state, ToolCallExecutionStage.IterationOutcome outcome) {
-        if (outcome.mutationsThisIteration() > 0) {
+        // CCR-020: skip the post-mutation re-prompt only when every call in
+        // this iteration succeeded. A partial-success iteration (at least
+        // one mutation succeeded AND at least one call failed) MUST re-prompt
+        // so the model can see the failure messages that were appended to
+        // state.messages and retry the failed edits (or switch to write_file
+        // as the error suggestion recommends). Skipping on partial success
+        // is a workspace-integrity bug: one file gets edited while another
+        // silently stays stale, and the loop terminates without retrying.
+        //
+        // The original P0 skip (see ToolCallLoopP0Test) is preserved intact
+        // for all-success iterations — that path still avoids the 5-15
+        // minute post-mutation bloviation observed on local 31B Q4 models.
+        if (outcome.mutationsThisIteration() > 0 && outcome.failuresThisIteration() == 0) {
             state.currentText = String.join("\n", outcome.mutationSummaries());
             state.currentNativeCalls = List.of();
             LOG.debug("P0: skipping re-prompt after {} successful mutation(s) this iteration",
                     outcome.mutationsThisIteration());
             return false;
+        }
+
+        if (outcome.mutationsThisIteration() > 0 && outcome.failuresThisIteration() > 0) {
+            LOG.debug("CCR-020: re-prompting after partial success ({} mutation(s), {} failure(s) "
+                    + "this iteration) so the model can retry the failed call(s)",
+                    outcome.mutationsThisIteration(), outcome.failuresThisIteration());
+            // fall through to the re-prompt path below
         }
 
         if (state.iterations >= 3) {

@@ -120,6 +120,76 @@ class ToolCallLoopP0Test {
         }
     }
 
+    // ── CCR-020 — partial-success iterations must re-prompt ────────────
+
+    @Nested
+    class PartialSuccessRepromptTests {
+
+        @Test
+        void repromptsAfterPartialSuccessMixedMutationBatch() {
+            // Mixed batch in ONE iteration: one mutating tool succeeds, a
+            // second mutating tool fails. Pre-CCR-020 this short-circuited
+            // and left the workspace half-edited; CCR-020 requires the
+            // loop to re-prompt so the model can retry the failed edit.
+            //
+            // With a stub Context (LLM unavailable for real use), the
+            // re-prompt path captures the exception and converts it to an
+            // error string. We assert:
+            //   (a) the loop did NOT emit a "✓ …" mutation summary as the
+            //       final answer (that would indicate the P0 skip fired),
+            //   (b) the final answer reflects the re-prompt branch.
+            var loop = createLoop(fakeWriteFileTool(), alwaysFailingEditTool());
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("system"),
+                    ChatMessage.user("update index.html and style.css")));
+
+            String llmResponse = """
+                    <tool_call>
+                    {"name": "talos.write_file", "parameters": {"path": "index.html", "content": "<html/>"}}
+                    </tool_call>
+                    <tool_call>
+                    {"name": "talos.edit_file", "parameters": {"path": "style.css", "old_string": "a", "new_string": "b"}}
+                    </tool_call>""";
+
+            var result = loop.run(llmResponse, messages, WS, ctxWithoutLlm());
+
+            assertEquals(1, result.mutatingToolSuccesses(),
+                    "write_file should have succeeded");
+            assertTrue(result.failedCalls() >= 1,
+                    "edit_file should have failed");
+            assertFalse(result.finalAnswer().startsWith("✓ "),
+                    "partial-success iteration MUST NOT short-circuit to a "
+                            + "plain mutation summary (CCR-020); got: "
+                            + result.finalAnswer());
+        }
+
+        @Test
+        void stillSkipsWhenEveryCallInIterationSucceeds() {
+            // Regression guard: the original P0 behavior must still hold
+            // when there are zero failures in the iteration. A null-llm
+            // stub proves re-prompt was not attempted (any attempt would
+            // NPE or error-stub the answer).
+            var loop = createLoop(fakeWriteFileTool());
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("system"),
+                    ChatMessage.user("create index.html")));
+
+            String llmResponse = """
+                    <tool_call>
+                    {"name": "talos.write_file", "parameters": {"path": "index.html", "content": "<html/>"}}
+                    </tool_call>""";
+
+            var result = loop.run(llmResponse, messages, WS, ctxWithoutLlm());
+
+            assertEquals(1, result.mutatingToolSuccesses());
+            assertEquals(0, result.failedCalls(),
+                    "no failures in the iteration");
+            assertTrue(result.finalAnswer().startsWith("✓ "),
+                    "all-success iteration must still skip re-prompt and "
+                            + "emit the deterministic action summary");
+        }
+    }
+
     @Nested
     class FirstSentenceSummary {
 
@@ -209,6 +279,26 @@ class ToolCallLoopP0Test {
             }
             @Override public ToolResult execute(ToolCall call, ToolContext ctx) {
                 return ToolResult.ok("echo: " + call.param("input", ""));
+            }
+        };
+    }
+
+    /**
+     * A fake {@code talos.edit_file} that always fails with an
+     * old-string-not-found error. Used to drive the CCR-020 partial-success
+     * branch (one mutation succeeds, this one fails in the same iteration).
+     */
+    private static TalosTool alwaysFailingEditTool() {
+        return new TalosTool() {
+            @Override public String name() { return "talos.edit_file"; }
+            @Override public String description() { return "Fake edit_file that always fails"; }
+            @Override public ToolDescriptor descriptor() {
+                return new ToolDescriptor("talos.edit_file", "edit a file");
+            }
+            @Override public ToolResult execute(ToolCall call, ToolContext ctx) {
+                return ToolResult.fail(dev.talos.tools.ToolError.invalidParams(
+                        "old_string not found in " + call.param("path", "file")
+                                + ". The exact text was not found in the file."));
             }
         };
     }

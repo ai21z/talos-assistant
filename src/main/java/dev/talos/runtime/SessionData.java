@@ -23,14 +23,21 @@ public record SessionData(
         String sketch,
         int turnCount,
         Instant createdAt,
-        List<Turn> turns
+        List<Turn> turns,
+        String model
 ) {
 
-    /** A single conversation turn (role + content), safe for JSON serialization. */
-    public record Turn(String role, String content) {
+    /** A single conversation turn (role + content + status), safe for JSON serialization. */
+    public record Turn(String role, String content, String status) {
         public Turn {
             role    = (role == null ? "" : role);
             content = (content == null ? "" : content);
+            status  = (status == null ? "" : status);
+        }
+
+        /** Backward-compatible constructor without status. */
+        public Turn(String role, String content) {
+            this(role, content, "");
         }
     }
 
@@ -41,12 +48,19 @@ public record SessionData(
         sketch    = (sketch == null ? "" : sketch);
         createdAt = (createdAt == null ? Instant.now() : createdAt);
         turns     = (turns == null ? List.of() : List.copyOf(turns));
+        model     = (model == null ? "" : model);
     }
 
-    /** Backward-compatible constructor without turns. */
+    /** Backward-compatible constructor without turns or model. */
     public SessionData(String sessionId, String workspace, String sketch,
                        int turnCount, Instant createdAt) {
-        this(sessionId, workspace, sketch, turnCount, createdAt, List.of());
+        this(sessionId, workspace, sketch, turnCount, createdAt, List.of(), "");
+    }
+
+    /** Backward-compatible constructor without model. */
+    public SessionData(String sessionId, String workspace, String sketch,
+                       int turnCount, Instant createdAt, List<Turn> turns) {
+        this(sessionId, workspace, sketch, turnCount, createdAt, turns, "");
     }
 }
 
