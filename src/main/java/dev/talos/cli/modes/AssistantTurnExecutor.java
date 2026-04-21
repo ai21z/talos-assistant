@@ -10,7 +10,10 @@ import dev.talos.spi.types.ChatMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -145,6 +148,10 @@ public final class AssistantTurnExecutor {
                                 answer, messages, loopResult, workspace, ctx);
                         answer = mrr.answer();
                         if (mrr.extraSummary() != null) out.append(mrr.extraSummary()).append("\n\n");
+                        InspectRetryResult irr = inspectCompletenessRetryIfNeeded(
+                                answer, messages, loopResult, workspace, ctx);
+                        answer = irr.answer();
+                        if (irr.extraSummary() != null) out.append(irr.extraSummary()).append("\n\n");
                         // Claim-vs-action truth layer: annotate if the answer claims a mutation
                         // that no mutating tool actually performed this turn.
                         answer = annotateIfFalseMutationClaim(answer, loopResult, mrr.mutationsInRetry());
@@ -203,6 +210,10 @@ public final class AssistantTurnExecutor {
                                 answer, messages, loopResult, workspace, ctx);
                         answer = mrr.answer();
                         if (mrr.extraSummary() != null) out.append(mrr.extraSummary()).append("\n\n");
+                        InspectRetryResult irr = inspectCompletenessRetryIfNeeded(
+                                answer, messages, loopResult, workspace, ctx);
+                        answer = irr.answer();
+                        if (irr.extraSummary() != null) out.append(irr.extraSummary()).append("\n\n");
                         // Claim-vs-action truth layer: annotate if the answer claims a mutation
                         // that no mutating tool actually performed this turn.
                         answer = annotateIfFalseMutationClaim(answer, loopResult, mrr.mutationsInRetry());
@@ -643,6 +654,8 @@ public final class AssistantTurnExecutor {
         return new MutationRetryResult(answer, 0, null);
     }
 
+    record InspectRetryResult(String answer, String extraSummary) {}
+
     // ── Inspect under-completion truth layer (N3 / P4) ───────────────────
 
     /**
@@ -745,6 +758,99 @@ public final class AssistantTurnExecutor {
             }
         }
         return n;
+    }
+
+    private static final Set<String> SMALL_WORKSPACE_WEB_EXTS = Set.of(
+            ".html", ".htm", ".css", ".js", ".ts", ".jsx", ".tsx"
+    );
+
+    static List<String> obviousPrimaryFiles(Path workspace) {
+        if (workspace == null || !Files.isDirectory(workspace)) return List.of();
+        try {
+            List<Path> files = new ArrayList<>();
+            try (var stream = Files.list(workspace)) {
+                stream.filter(Files::isRegularFile).forEach(files::add);
+            }
+            if (files.isEmpty() || files.size() > 5) return List.of();
+            List<String> out = new ArrayList<>();
+            for (Path file : files) {
+                String name = file.getFileName() == null ? "" : file.getFileName().toString();
+                if (name.isBlank() || name.startsWith(".")) continue;
+                String lower = name.toLowerCase();
+                int dot = lower.lastIndexOf('.');
+                String ext = dot >= 0 ? lower.substring(dot) : "";
+                if (!SMALL_WORKSPACE_WEB_EXTS.contains(ext)) return List.of();
+                out.add(name.replace('\\', '/'));
+            }
+            return out.size() >= 2 ? List.copyOf(out) : List.of();
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    static List<String> missingPrimaryReads(Path workspace, ToolCallLoop.LoopResult loopResult) {
+        List<String> primary = obviousPrimaryFiles(workspace);
+        if (primary.isEmpty() || loopResult == null) return List.of();
+        Set<String> read = new LinkedHashSet<>();
+        if (loopResult.readPaths() != null) {
+            for (String p : loopResult.readPaths()) {
+                if (p == null || p.isBlank()) continue;
+                String normalized = p.replace('\\', '/');
+                int slash = normalized.lastIndexOf('/');
+                read.add(slash >= 0 ? normalized.substring(slash + 1) : normalized);
+            }
+        }
+        List<String> missing = new ArrayList<>();
+        for (String file : primary) {
+            if (!read.contains(file)) missing.add(file);
+        }
+        return List.copyOf(missing);
+    }
+
+    static InspectRetryResult inspectCompletenessRetryIfNeeded(
+            String answer, List<ChatMessage> messages,
+            ToolCallLoop.LoopResult loopResult,
+            Path workspace, Context ctx) {
+        if (answer == null) answer = "";
+        if (loopResult == null || ctx == null || ctx.llm() == null || ctx.toolCallLoop() == null) {
+            return new InspectRetryResult(answer, null);
+        }
+        if (!looksLikeInspectFirstRequest(latestUserRequest(messages))) {
+            return new InspectRetryResult(answer, null);
+        }
+        List<String> missing = missingPrimaryReads(workspace, loopResult);
+        if (missing.isEmpty()) return new InspectRetryResult(answer, null);
+        if (loopResult.mutatingToolSuccesses() > 0) return new InspectRetryResult(answer, null);
+        if (answer.isBlank()) return new InspectRetryResult(answer, null);
+
+        LOG.info("Inspect-completeness retry fired: tiny workspace, inspect-first request, "
+                + "missing reads for {}", missing);
+
+        messages.add(ChatMessage.assistant(answer));
+        messages.add(ChatMessage.user(
+                "You started diagnosing the workspace before reading all of the obvious primary files. "
+                        + "Read these files now before answering: "
+                        + String.join(", ", missing)
+                        + ". After reading them, answer concretely from the file contents. "
+                        + "Do not speculate about files that do not exist."));
+        try {
+            LlmClient.StreamResult retry = ctx.llm().chatFull(messages);
+            String retryText = retry.text() == null ? "" : retry.text();
+            if (retry.hasToolCalls()) {
+                ToolCallLoop.LoopResult retryLoop = ctx.toolCallLoop().run(
+                        retryText, retry.toolCalls(), messages, workspace, ctx);
+                String mergedAnswer = retryLoop.finalAnswer();
+                return new InspectRetryResult(
+                        mergedAnswer == null || mergedAnswer.isBlank() ? answer : mergedAnswer,
+                        retryLoop.summary());
+            }
+            if (!retryText.isBlank() && !retryText.equals(answer)) {
+                return new InspectRetryResult(retryText, null);
+            }
+        } catch (Exception e) {
+            LOG.warn("Inspect-completeness retry failed: {}", e.getMessage());
+        }
+        return new InspectRetryResult(answer, null);
     }
 
     /**

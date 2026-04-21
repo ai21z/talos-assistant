@@ -72,6 +72,7 @@ public final class ToolCallLoop {
             int retriedCalls,
             boolean hitIterLimit,
             int mutatingToolSuccesses,
+            List<String> readPaths,
             int cushionFiresRedundantRead,
             int cushionFiresAliasRescue,
             int cushionFiresB3EditShortCircuit,
@@ -108,7 +109,7 @@ public final class ToolCallLoop {
                         + "File writes were NOT performed. The model should use tool_call format for file operations.");
             }
             return new LoopResult(initialAnswer, 0, 0, List.of(), messages, 0, 0, false, 0,
-                    0, 0, 0, 0);
+                    List.of(), 0, 0, 0, 0);
         }
 
         Session toolSession = new Session(workspace, ctx.cfg());
@@ -157,7 +158,8 @@ public final class ToolCallLoop {
 
         return new LoopResult(finalAnswer, state.iterations, state.totalToolsInvoked,
                 List.copyOf(state.toolNames), messages, state.failedCalls, state.retriedCalls,
-                hitIterLimit, state.mutatingToolSuccesses, state.cushionFiresRedundantRead,
+                hitIterLimit, state.mutatingToolSuccesses, List.copyOf(state.pathsReadThisTurn),
+                state.cushionFiresRedundantRead,
                 cushionFiresAliasRescue, state.cushionFiresB3EditShortCircuit,
                 state.cushionFiresE1Suggestion);
     }

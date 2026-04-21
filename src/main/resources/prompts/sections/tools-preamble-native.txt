@@ -8,6 +8,7 @@ When to call:
 - File operations (create/write/edit/modify) → talos.write_file or talos.edit_file. Do not describe the change in prose instead.
 - Workspace questions → talos.read_file (known file), talos.list_dir (explore), talos.grep (search text), talos.retrieve (cross-file semantic search on a large indexed workspace only).
 - Never call talos.retrieve on a small or unindexed workspace — use list_dir and read_file.
+- After talos.list_dir shows you the actual files in a small workspace, prefer reading those files before inventing generic logs or config files that were not listed.
 - Never call a tool with the same parameters twice in one turn.
 
 Rules:

@@ -59,8 +59,9 @@ public final class JsonSessionStore implements SessionStore {
             root.put("sketch", data.sketch());
             root.put("turnCount", data.turnCount());
             root.put("createdAt", data.createdAt().toString());
+            root.put("model", data.model());
             root.put("turns", data.turns().stream()
-                    .map(t -> Map.of("role", t.role(), "content", t.content()))
+                    .map(t -> Map.of("role", t.role(), "content", t.content(), "status", t.status()))
                     .toList());
 
             String json = MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(root);
@@ -87,6 +88,7 @@ public final class JsonSessionStore implements SessionStore {
             String sketch    = str(root, "sketch");
             int turnCount    = intVal(root, "turnCount");
             Instant created  = parseInstant(root.get("createdAt"));
+            String model     = str(root, "model");
 
             @SuppressWarnings("unchecked")
             List<Map<String, String>> rawTurns =
@@ -95,10 +97,11 @@ public final class JsonSessionStore implements SessionStore {
             List<SessionData.Turn> turns = rawTurns.stream()
                     .map(m -> new SessionData.Turn(
                             m.getOrDefault("role", ""),
-                            m.getOrDefault("content", "")))
+                            m.getOrDefault("content", ""),
+                            m.getOrDefault("status", "")))
                     .toList();
 
-            return Optional.of(new SessionData(sid, workspace, sketch, turnCount, created, turns));
+            return Optional.of(new SessionData(sid, workspace, sketch, turnCount, created, turns, model));
         } catch (Exception e) {
             LOG.warn("Failed to load session {}: {}", sessionId, e.getMessage());
             return Optional.empty();

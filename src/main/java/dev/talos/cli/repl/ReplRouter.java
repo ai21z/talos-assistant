@@ -34,6 +34,7 @@ public final class ReplRouter {
     private final LineClassifier classifier = new LineClassifier();
     private final ExecutionPipeline pipe = new ExecutionPipeline();
     private final AtomicBoolean quit;
+    private final String startupNotice;
     private volatile TurnResult lastTurnResult;
 
     /**
@@ -42,7 +43,7 @@ public final class ReplRouter {
      */
     ReplRouter(ModeController modes, TurnProcessor turnProcessor, Session runtimeSession,
                Context ctx, RenderEngine render, CommandRegistry registry,
-               Path workspace, AtomicBoolean quit) {
+               Path workspace, AtomicBoolean quit, String startupNotice) {
         this.modes          = modes;
         this.turnProcessor  = turnProcessor;
         this.runtimeSession = runtimeSession;
@@ -50,6 +51,7 @@ public final class ReplRouter {
         this.render         = render;
         this.registry       = registry;
         this.quit           = quit;
+        this.startupNotice  = startupNotice == null ? "" : startupNotice;
     }
 
     /**
@@ -84,6 +86,7 @@ public final class ReplRouter {
         this.render         = wired.render;
         this.registry       = wired.registry;
         this.quit           = wired.quit;
+        this.startupNotice  = wired.startupNotice;
     }
 
     // ── Dispatch ─────────────────────────────────────────────────────────
@@ -154,4 +157,5 @@ public final class ReplRouter {
     public ModeController getModes()     { return modes; }
     public Session getRuntimeSession()   { return runtimeSession; }
     public CommandRegistry getRegistry() { return registry; }
+    public String getStartupNotice()     { return startupNotice; }
 }
