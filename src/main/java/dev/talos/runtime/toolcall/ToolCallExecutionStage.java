@@ -14,7 +14,23 @@ import java.util.List;
 public final class ToolCallExecutionStage {
     private static final Logger LOG = LoggerFactory.getLogger(ToolCallExecutionStage.class);
 
-    public record IterationOutcome(int mutationsThisIteration, List<String> mutationSummaries) {}
+    /**
+     * Outcome of one tool-call iteration.
+     *
+     * @param mutationsThisIteration count of successful mutating tool calls
+     * @param mutationSummaries      short human-readable summaries of the
+     *                               successful mutations
+     * @param failuresThisIteration  count of failed tool calls in this
+     *                               iteration, including short-circuited
+     *                               duplicate-edit rejections. Gated by
+     *                               {@link ToolCallRepromptStage} to decide
+     *                               whether to skip the post-mutation
+     *                               re-prompt (CCR-020 — skip only when
+     *                               every call in the iteration succeeded).
+     */
+    public record IterationOutcome(int mutationsThisIteration,
+                                   List<String> mutationSummaries,
+                                   int failuresThisIteration) {}
 
     private final TurnProcessor turnProcessor;
     private final ToolProgressSink progressSink;
@@ -34,6 +50,7 @@ public final class ToolCallExecutionStage {
         }
 
         int mutationsThisIter = 0;
+        int failuresThisIter = 0;
         List<String> mutationSummariesThisIter = new ArrayList<>();
 
         for (int i = 0; i < parsed.calls().size(); i++) {
@@ -51,6 +68,7 @@ public final class ToolCallExecutionStage {
                     state.retriedCalls++;
                     state.failedCalls++;
                     state.cushionFiresB3EditShortCircuit++;
+                    failuresThisIter++;
                     String diagnostic = "[tool_result: " + effective.toolName() + "]\n"
                             + "[error] This exact edit was already attempted and failed. "
                             + "Call talos.read_file to see the file's current state, "
@@ -115,6 +133,7 @@ public final class ToolCallExecutionStage {
 
             if (!result.success()) {
                 state.failedCalls++;
+                failuresThisIter++;
                 if (ToolCallSupport.isMutatingTool(effective.toolName())) {
                     state.successfulReadCalls.clear();
                 }
@@ -146,7 +165,7 @@ public final class ToolCallExecutionStage {
                             : "error: " + result.errorMessage());
         }
 
-        return new IterationOutcome(mutationsThisIter, mutationSummariesThisIter);
+        return new IterationOutcome(mutationsThisIter, mutationSummariesThisIter, failuresThisIter);
     }
 
     private void appendResultMessage(LoopState state, boolean nativePath, int callIndex, String content) {

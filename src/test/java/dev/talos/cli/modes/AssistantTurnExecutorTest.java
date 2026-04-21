@@ -539,7 +539,7 @@ class AssistantTurnExecutorTest {
             return new dev.talos.runtime.ToolCallLoop.LoopResult(
                     "unused", 1, 1,
                     List.of("talos.read_file"),
-                    List.of(), 0, 0, false, mutatingSuccesses,
+                    List.of(), 0, 0, false, mutatingSuccesses, List.of(),
                     0, 0, 0, 0);
         }
 
@@ -1186,7 +1186,7 @@ class AssistantTurnExecutorTest {
             var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
                     "unused", 1, 1,
                     List.of("talos.read_file"),
-                    List.of(), 0, 0, false, /*mutatingSuccesses*/ 0,
+                    List.of(), 0, 0, false, /*mutatingSuccesses*/ 0, List.of(),
                     0, 0, 0, 0);
 
             String out = AssistantTurnExecutor.annotateIfFalseMutationClaim(
@@ -1250,7 +1250,7 @@ class AssistantTurnExecutorTest {
             var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
                     "unused", 1, 1,
                     List.of("talos.read_file"),
-                    List.of(), 0, 0, false, /*mutatingSuccesses*/ 0,
+                    List.of(), 0, 0, false, /*mutatingSuccesses*/ 0, List.of(),
                     0, 0, 0, 0);
 
             String out = AssistantTurnExecutor.annotateIfInspectUnderCompletion(
@@ -1301,7 +1301,7 @@ class AssistantTurnExecutorTest {
             for (int i = 0; i < reads; i++) names.add("talos.read_file");
             return new dev.talos.runtime.ToolCallLoop.LoopResult(
                     "unused", reads, reads, names, List.of(),
-                    0, 0, false, /*mutatingSuccesses*/ 0,
+                    0, 0, false, /*mutatingSuccesses*/ 0, List.of(),
                     0, 0, 0, 0);
         }
 
@@ -1326,7 +1326,7 @@ class AssistantTurnExecutorTest {
             String answer = longAnswer();
             var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
                     "unused", 1, 1, List.of("talos.some_non_read_tool"),
-                    List.of(), 0, 0, false, 0,
+                    List.of(), 0, 0, false, 0, List.of(),
                     0, 0, 0, 0);
             String out = AssistantTurnExecutor.annotateIfInspectUnderCompletion(
                     answer, messages, loopResult);
@@ -1349,7 +1349,7 @@ class AssistantTurnExecutorTest {
         void does_not_fire_when_zero_tools() {
             var messages = msgsWith("Read the entry files first.");
             var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
-                    "unused", 0, 0, List.of(), List.of(), 0, 0, false, 0,
+                    "unused", 0, 0, List.of(), List.of(), 0, 0, false, 0, List.of(),
                     0, 0, 0, 0);
             String out = AssistantTurnExecutor.annotateIfInspectUnderCompletion(
                     longAnswer(), messages, loopResult);
@@ -1363,7 +1363,7 @@ class AssistantTurnExecutorTest {
             var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
                     "unused", 2, 2,
                     List.of("talos.read_file", "talos.edit_file"),
-                    List.of(), 0, 0, false, /*mutatingSuccesses*/ 1,
+                    List.of(), 0, 0, false, /*mutatingSuccesses*/ 1, List.of(),
                     0, 0, 0, 0);
             String out = AssistantTurnExecutor.annotateIfInspectUnderCompletion(
                     longAnswer(), messages, loopResult);
@@ -1435,7 +1435,7 @@ class AssistantTurnExecutorTest {
                     "unused", 4, 4,
                     List.of("talos.read_file", "talos.edit_file",
                             "list_dir", "talos.grep", "talos.write_file"),
-                    List.of(), 0, 0, false, 1,
+                    List.of(), 0, 0, false, 1, List.of(),
                     0, 0, 0, 0);
             assertEquals(3, AssistantTurnExecutor.readOnlyToolCount(mixed),
                     "should count read_file + list_dir + grep, not edit_file / write_file");

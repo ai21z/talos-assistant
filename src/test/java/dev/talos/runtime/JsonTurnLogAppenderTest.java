@@ -130,6 +130,42 @@ class JsonTurnLogAppenderTest {
     }
 
     @Test
+    void streamedEngineAndModelErrorsAreNotTaggedOk(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "sid-errors";
+        JsonTurnLogAppender appender = new JsonTurnLogAppender(store, sid);
+
+        appender.onTurnComplete(
+                new TurnResult(new Result.Streamed("[Engine error during tool loop: boom]", ""), 1),
+                "why failed?");
+        appender.onTurnComplete(
+                new TurnResult(new Result.Streamed("[Model 'qwen3:8b' not found. Run: ollama pull qwen3:8b]", ""), 2),
+                "try again");
+
+        List<TurnRecord> recs = store.loadTurns(sid);
+        assertEquals(2, recs.size());
+        assertEquals("error", recs.get(0).status());
+        assertEquals("error", recs.get(1).status());
+    }
+
+    @Test
+    void refusalStyleStreamedReplyIsTaggedInfo(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "sid-refusal";
+        JsonTurnLogAppender appender = new JsonTurnLogAppender(store, sid);
+
+        appender.onTurnComplete(
+                new TurnResult(new Result.Streamed(
+                        "I am an AI text-based assistant and cannot directly edit files on your system.", ""),
+                        1),
+                "please edit it");
+
+        List<TurnRecord> recs = store.loadTurns(sid);
+        assertEquals(1, recs.size());
+        assertEquals("info", recs.get(0).status());
+    }
+
+    @Test
     void legacyRecordsWithoutStatusRoundTripAsEmptyString(@TempDir Path dir) {
         // Simulate a JSONL line written by an older appender (no "status" field).
         // The reader must default to "" rather than fail, so existing logs

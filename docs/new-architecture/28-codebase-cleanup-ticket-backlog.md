@@ -68,6 +68,8 @@ These tickets are ordered by safety and dependency.
 17. `CCR-016` decide explicit approval and session default policy before harness work
 18. `CCR-017` add focused unit coverage for extracted `core.llm` collaborators
 19. `CCR-018` review XML telemetry gate and decide the next `CCR-012.2` action
+20. `CCR-019` gate conversation-history prune on compaction success (data-loss fix)
+21. `CCR-020` re-prompt on partial mutation failures (workspace-integrity fix)
 
 Do not start `CCR-009` onward until the in-flight async-close work is stable.
 
@@ -1196,6 +1198,83 @@ remaining in a permanent "we will decide later" state.
 
 ---
 
+### CCR-019 — Gate conversation-history prune on compaction success (data-loss fix)
+
+**Status**
+
+- Done on `ticket/CCR-019-compaction-failure-preserves-history`
+- High-confidence bug confirmed from the manual-testing transcript
+  (`manual-testing/test-output:53–55`): compaction LLM call failed but
+  history was still pruned, losing turns.
+
+**Why this exists**
+
+`ConversationCompactor.compact(...)` returned the existing sketch on
+failure — indistinguishable from a successful no-op. Callers could not
+tell success from failure from the return value alone, so
+`ConversationManager.maybeCompactWithBudget(...)` unconditionally called
+`memory.pruneOldest(...)` after every compaction attempt. A failed
+compaction therefore destroyed verbatim history without producing any
+replacement summary.
+
+This was observed during a manual test pass: `Model not found:
+qwen3:8b` triggered an engine failure that immediately cascaded into a
+compaction attempt which also failed, yet history was pruned anyway.
+
+**Scope**
+
+- Introduce an explicit success/failure signal in the compactor API
+  (`CompactionResult { sketch, succeeded }`).
+- Gate `memory.pruneOldest(...)` in `ConversationManager` on
+  `succeeded == true` so failed compactions preserve all verbatim turns
+  and the prior sketch.
+- Keep the legacy `compact(...)` String-returning method as a thin
+  wrapper so existing call sites and tests don't break, but forbid its
+  use for gating destructive actions.
+- Add a package-private functional seam
+  (`ConversationManager.maybeCompactWith(BiFunction, int, double)`) so
+  the failure-preservation contract can be unit-tested deterministically
+  without mocking `LlmClient`.
+
+**Out of scope**
+
+- Compaction prompt tuning
+- Compaction trigger thresholds or budget fractions
+- Cross-turn memory persistence
+
+**Main files**
+
+- `src/main/java/dev/talos/core/context/ConversationCompactor.java`
+- `src/main/java/dev/talos/core/context/ConversationManager.java`
+- `src/test/java/dev/talos/core/context/ConversationCompactionTest.java`
+
+**Risks**
+
+- Low. The fix only adds a success gate; it does not change the happy
+  path. On failure, behavior strictly improves (no silent data loss).
+
+**Acceptance criteria**
+
+- Failed compaction LLM call (thrown or blank output) returns
+  `succeeded=false` from `tryCompact(...)`.
+- `ConversationManager` does not call `memory.pruneOldest(...)` when
+  `succeeded=false`.
+- Sketch is preserved unchanged on failure.
+- Unit tests cover: thrown LLM, blank output, empty turns, and
+  successful compaction prune path.
+- Full test suite still green.
+
+**Rollback plan**
+
+- Revert the `tryCompact` seam and restore the previous unconditional
+  prune. Not recommended — the previous behavior is the bug.
+
+**Dependencies**
+
+- None (post-`CCR-015`, independent of the other pre-harness follow-ups)
+
+---
+
 ## 5. Suggested Milestones
 
 ### Milestone A — Safe prep
@@ -1234,6 +1313,7 @@ remaining in a permanent "we will decide later" state.
 - `CCR-016`
 - `CCR-017`
 - `CCR-018`
+- `CCR-019`
 
 ---
 
@@ -1260,6 +1340,7 @@ If you need tracker-ready titles only:
 - `CCR-016 Decide explicit approval and session default policy before harness work`
 - `CCR-017 Add focused unit coverage for extracted core.llm collaborators`
 - `CCR-018 Review XML telemetry gate and decide the next CCR-012.2 action`
+- `CCR-019 Gate conversation-history prune on compaction success (data-loss fix)`
 
 ---
 

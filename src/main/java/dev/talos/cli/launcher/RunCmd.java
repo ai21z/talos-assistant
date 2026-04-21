@@ -104,6 +104,10 @@ public class RunCmd implements Runnable, SessionState {
             } else {
                 TalosBanner.printCompact(ws, cfg, activeMode, System.out);
             }
+            if (!router.getStartupNotice().isBlank()) {
+                System.out.println(router.getStartupNotice());
+                System.out.println();
+            }
 
             // Set up prompt refresh callback for mode changes
             final AtomicReference<String> currentPrompt = new AtomicReference<>();

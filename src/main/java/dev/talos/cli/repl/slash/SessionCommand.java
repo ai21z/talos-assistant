@@ -100,13 +100,13 @@ public final class SessionCommand implements Command {
         List<SessionData.Turn> turns;
         if (mem != null) {
             turns = mem.getTurns().stream()
-                    .map(m -> new SessionData.Turn(m.role(), m.content()))
+                    .map(m -> new SessionData.Turn(m.role(), m.content(), "assistant".equals(m.role()) ? "ok" : ""))
                     .toList();
         } else {
             turns = List.of();
         }
         return new SessionData(sessionId, workspace.toString(), sketch != null ? sketch : "",
-                turnCount, Instant.now(), turns);
+                turnCount, Instant.now(), turns, ctx.llm() != null ? ctx.llm().getModel() : "");
     }
     /** Restore conversation state from a SessionData record. */
     void restore(SessionData data, Context ctx) {
@@ -121,7 +121,9 @@ public final class SessionCommand implements Command {
             for (int i = 0; i < turns.size() - 1; i += 2) {
                 SessionData.Turn user = turns.get(i);
                 SessionData.Turn asst = turns.get(i + 1);
-                if ("user".equals(user.role()) && "assistant".equals(asst.role())) {
+                String status = asst.status();
+                boolean replayable = status == null || status.isBlank() || "ok".equals(status);
+                if ("user".equals(user.role()) && "assistant".equals(asst.role()) && replayable) {
                     mem.update(user.content(), asst.content());
                 }
             }
@@ -129,6 +131,9 @@ public final class SessionCommand implements Command {
         // Restore sketch
         if (cm != null && data.sketch() != null && !data.sketch().isBlank()) {
             cm.setSketch(data.sketch());
+        }
+        if (ctx.llm() != null && data.model() != null && !data.model().isBlank()) {
+            ctx.llm().setModel(data.model());
         }
     }
     /** The session ID for this workspace (for external use, e.g. auto-save). */

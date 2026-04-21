@@ -107,7 +107,7 @@ public final class JsonTurnLogAppender implements SessionListener {
             // test-output.txt Apr 2026) had its 200+ line garbage body
             // resurrected on the next REPL start as if it were authoritative
             // conversational history.
-            case Result.Streamed s           -> isAbortMarker(s.fullText) ? "aborted" : "ok";
+            case Result.Streamed s           -> statusOfStreamed(s.fullText);
             case Result.Error ignored        -> "error";
             case Result.Info ignored         -> "info";
             case Result.TrustedInfo ignored  -> "info";
@@ -130,6 +130,20 @@ public final class JsonTurnLogAppender implements SessionListener {
         if (text == null) return false;
         String t = text.stripLeading();
         return t.startsWith("[turn aborted");
+    }
+
+    static String statusOfStreamed(String text) {
+        if (text == null || text.isBlank()) return "ok";
+        String rawLower = text.stripLeading().toLowerCase();
+        if (rawLower.startsWith("[engine error")) return "error";
+        if (rawLower.startsWith("[model '") && rawLower.contains("' not found")) return "error";
+        String stripped = MemoryUpdateListener.stripUiChromeForHistory(text);
+        if (isAbortMarker(text)) return "aborted";
+        String lower = stripped.stripLeading().toLowerCase();
+        if (!MemoryUpdateListener.isMemorizableAssistantReply(new Result.Streamed(text, ""), stripped)) {
+            return "info";
+        }
+        return "ok";
     }
 }
 

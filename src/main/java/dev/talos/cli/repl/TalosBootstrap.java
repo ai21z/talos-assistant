@@ -3,6 +3,7 @@ package dev.talos.cli.repl;
 import dev.talos.cli.repl.slash.*;
 import dev.talos.cli.modes.ModeController;
 import dev.talos.core.Audit;
+import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
 import dev.talos.core.context.ConversationManager;
 import dev.talos.core.context.TokenBudget;
@@ -56,6 +57,10 @@ import java.util.stream.Collectors;
  * </ul>
  */
 public final class TalosBootstrap {
+
+    record RestoreSummary(int pairsReplayed, java.time.Instant createdAt, String model) {
+        boolean hasReplay() { return pairsReplayed > 0; }
+    }
 
     private TalosBootstrap() {} // static factory only
 
@@ -150,9 +155,16 @@ public final class TalosBootstrap {
         // This is NOT a merge engine. Snapshot wins when it has content;
         // JSONL is strictly a fallback for the crash path the snapshot
         // model cannot cover on its own.
-        int snapshotTurnsReplayed = replaySnapshot(sessionStore, sessionId, memory, conversationManager);
-        if (snapshotTurnsReplayed == 0) {
-            replayTurnLog(sessionStore, sessionId, memory);
+        RestoreSummary restoreSummary = replaySnapshot(sessionStore, sessionId, memory, conversationManager);
+        if (!restoreSummary.hasReplay()) {
+            int turnLogTurnsReplayed = replayTurnLog(sessionStore, sessionId, memory);
+            if (turnLogTurnsReplayed > 0) {
+                restoreSummary = new RestoreSummary(turnLogTurnsReplayed, null, "");
+            }
+        }
+        if (restoreSummary.model() != null && !restoreSummary.model().isBlank()) {
+            llm.setModel(restoreSummary.model());
+            syncActiveModelIntoConfig(cfg, llm.getModel());
         }
 
         // ── Mode controller ──────────────────────────────────────────────
@@ -213,12 +225,12 @@ public final class TalosBootstrap {
         runtimeSession.addCloseListener(new dev.talos.runtime.SessionListener() {
             @Override public void onSessionEnd() {
                 java.util.List<SessionData.Turn> turns = memRef.getTurns().stream()
-                        .map(m -> new SessionData.Turn(m.role(), m.content()))
+                        .map(m -> new SessionData.Turn(m.role(), m.content(), "assistant".equals(m.role()) ? "ok" : ""))
                         .toList();
                 String sketch = cmRef.sketch();
                 SessionData data = new SessionData(sidRef, wsRef.toString(),
                         sketch != null ? sketch : "", cmRef.turnCount(),
-                        runtimeSession.startedAt(), turns);
+                        runtimeSession.startedAt(), turns, llm.getModel());
                 sessionStore.save(data);
             }
         });
@@ -300,8 +312,11 @@ public final class TalosBootstrap {
         registerCommands(registry, session, cfg, ctx, modes, workspace, quit, undoStack, sessionStore);
 
         // ── Assemble router ──────────────────────────────────────────────
+        String startupNotice = restoreSummary.hasReplay()
+                ? buildRestoreNotice(restoreSummary)
+                : "";
         return new ReplRouter(modes, turnProcessor, runtimeSession, ctx, render,
-                              registry, workspace, quit);
+                              registry, workspace, quit, startupNotice);
     }
 
     /**
@@ -366,17 +381,19 @@ public final class TalosBootstrap {
      * @return number of user/assistant pairs actually replayed (0 if no snapshot,
      *         or snapshot present but turns list empty / unpaired)
      */
-    static int replaySnapshot(SessionStore store, String sessionId,
+    static RestoreSummary replaySnapshot(SessionStore store, String sessionId,
                               SessionMemory memory, ConversationManager cm) {
         var loaded = store.load(sessionId);
-        if (loaded.isEmpty()) return 0;
+        if (loaded.isEmpty()) return new RestoreSummary(0, null, "");
         SessionData data = loaded.get();
         int pairs = 0;
         if (data.turns() != null) {
             for (int i = 0; i < data.turns().size() - 1; i += 2) {
                 SessionData.Turn u = data.turns().get(i);
                 SessionData.Turn a = data.turns().get(i + 1);
-                if ("user".equals(u.role()) && "assistant".equals(a.role())) {
+                String status = a.status();
+                boolean replayable = status == null || status.isBlank() || "ok".equals(status);
+                if ("user".equals(u.role()) && "assistant".equals(a.role()) && replayable) {
                     memory.update(u.content(), a.content());
                     pairs++;
                 }
@@ -385,7 +402,7 @@ public final class TalosBootstrap {
         if (data.sketch() != null && !data.sketch().isBlank()) {
             cm.setSketch(data.sketch());
         }
-        return pairs;
+        return new RestoreSummary(pairs, data.createdAt(), data.model());
     }
 
     /**
@@ -434,6 +451,34 @@ public final class TalosBootstrap {
             }
         }
         return replayed;
+    }
+
+    static String buildRestoreNotice(RestoreSummary summary) {
+        if (summary == null || !summary.hasReplay()) return "";
+        String age = "";
+        if (summary.createdAt() != null) {
+            java.time.Duration d = java.time.Duration.between(summary.createdAt(), java.time.Instant.now());
+            if (d.toDays() > 0) age = d.toDays() + "d ago";
+            else if (d.toHours() > 0) age = d.toHours() + "h ago";
+            else if (d.toMinutes() > 0) age = d.toMinutes() + "m ago";
+            else age = d.toSeconds() + "s ago";
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("  restored ").append(summary.pairsReplayed()).append(" prior exchange")
+                .append(summary.pairsReplayed() == 1 ? "" : "s");
+        if (!age.isBlank()) sb.append(" from ").append(age);
+        if (summary.model() != null && !summary.model().isBlank()) {
+            sb.append(" · model ").append(summary.model());
+        }
+        return sb.toString();
+    }
+
+    private static void syncActiveModelIntoConfig(Config cfg, String activeModel) {
+        if (cfg == null || activeModel == null || activeModel.isBlank()) return;
+        String modelName = activeModel.contains("/") ? activeModel.substring(activeModel.indexOf('/') + 1) : activeModel;
+        Map<String, Object> ollama = new java.util.LinkedHashMap<>(CfgUtil.map(cfg.data.get("ollama")));
+        ollama.put("model", modelName);
+        cfg.data.put("ollama", ollama);
     }
 }
 
