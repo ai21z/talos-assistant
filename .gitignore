@@ -94,7 +94,7 @@ V1_IMPLEMENTATION_BRIDGE.md
 /playground/
 /.github/
 .external assistant/
-/test-output.txt
+/manual-testing/auto-mode-output.txt
 
 # ---- Security: common secret patterns (use explicit names; avoid *.yaml wildcards)
 *.env
