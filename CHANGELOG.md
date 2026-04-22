@@ -1,0 +1,18 @@
+# Changelog
+
+All notable Talos distribution changes should be recorded in this file.
+
+The format is intentionally simple:
+- one section per released public version
+- public versions are numeric only: `major.minor.patch`
+- patch increments (`0.9.1`, `0.9.2`, ...) mark intentional distribution builds
+
+## [0.9.0] - 2026-04-22
+
+Initial numeric-version baseline for the current public line.
+
+### Changed
+- moved the canonical Talos public version source of truth into Gradle properties
+- removed hardcoded public version values from build and CLI fallback paths
+- aligned CLI version output with runtime build metadata resolution
+- added this root changelog and a patch bump script for future release discipline
