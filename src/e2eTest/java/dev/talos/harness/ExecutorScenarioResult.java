@@ -30,14 +30,17 @@ public final class ExecutorScenarioResult implements AutoCloseable {
     private final ScenarioDefinition definition;
     private final AssistantTurnExecutor.TurnOutput turnOutput;
     private final ScenarioWorkspaceFixture workspace;
+    private final AutoCloseable resourceToClose;
 
     ExecutorScenarioResult(
             ScenarioDefinition definition,
             AssistantTurnExecutor.TurnOutput turnOutput,
-            ScenarioWorkspaceFixture workspace) {
+            ScenarioWorkspaceFixture workspace,
+            AutoCloseable resourceToClose) {
         this.definition = definition;
         this.turnOutput = turnOutput;
         this.workspace = workspace;
+        this.resourceToClose = resourceToClose;
     }
 
     public ScenarioDefinition definition() { return definition; }
@@ -111,7 +114,13 @@ public final class ExecutorScenarioResult implements AutoCloseable {
 
     // ── Lifecycle ────────────────────────────────────────────────────
 
-    public void closeWorkspace() { workspace.close(); }
+    public void closeWorkspace() {
+        workspace.close();
+        if (resourceToClose != null) {
+            try { resourceToClose.close(); }
+            catch (Exception ignored) { }
+        }
+    }
 
     @Override public void close() { closeWorkspace(); }
 }

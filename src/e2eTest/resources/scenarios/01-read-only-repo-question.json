@@ -1,0 +1,11 @@
+{
+  "name": "read-only repo question",
+  "fixture": "doc-repo",
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "What files are in this repo? Read the relevant files first.",
+  "scriptedResponses": [
+    "```json\n{\"name\":\"talos.list_dir\",\"parameters\":{\"path\":\".\"}}\n```\n```json\n{\"name\":\"talos.read_file\",\"parameters\":{\"path\":\"README.md\"}}\n```",
+    "The repo contains README.md and src/Main.java. README.md says Talos is a local-first knowledge engine."
+  ]
+}

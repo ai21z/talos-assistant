@@ -1,0 +1,10 @@
+{
+  "name": "replay from turn-log fallback",
+  "fixture": "mini-site",
+  "runner": "replay",
+  "userPrompt": "Recover the previous session.",
+  "okUserInput": "What is this site?",
+  "okAssistantText": "This is a synthwave landing page.",
+  "errorUserInput": "Try again",
+  "errorAssistantText": "[Engine error during tool loop: Stream closed]"
+}

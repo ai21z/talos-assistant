@@ -12,6 +12,9 @@ public enum ScenarioApprovalPolicy {
     /** All tool calls are silently approved — fastest, lowest friction. */
     APPROVE_ALL,
 
+    /** First write approval is remembered for the session, later writes auto-approve. */
+    APPROVE_REMEMBER_WRITES,
+
     /** All write/edit calls are silently denied — useful for read-only scenarios. */
     DENY_WRITES,
 

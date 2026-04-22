@@ -1,0 +1,12 @@
+{
+  "name": "not-found recovery",
+  "fixture": "doc-repo",
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Read README.md and tell me the product name.",
+  "scriptedResponses": [
+    "```json\n{\"name\":\"talos.read_file\",\"parameters\":{\"path\":\"READMEE.md\"}}\n```",
+    "```json\n{\"name\":\"talos.read_file\",\"parameters\":{\"path\":\"README.md\"}}\n```",
+    "The product name is Talos."
+  ]
+}

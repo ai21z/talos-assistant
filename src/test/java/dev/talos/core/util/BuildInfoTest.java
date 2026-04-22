@@ -31,7 +31,7 @@ class BuildInfoTest {
         String v = BuildInfo.version();
         assertNotNull(v, "version() must not return null");
         assertTrue(!v.isBlank(), "version() must not return blank");
-        assertEquals("0.9.0-beta", v,
+        assertEquals("0.9.0", v,
                 "Exploded-class test runs should resolve version from generated build metadata.");
     }
 

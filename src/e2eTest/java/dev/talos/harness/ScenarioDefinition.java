@@ -24,13 +24,19 @@ import java.util.Map;
 public record ScenarioDefinition(
         String name,
         Map<String, String> initialFiles,
+        String userPrompt,
         String scriptedResponse,
         ScenarioApprovalPolicy approvalPolicy
 ) {
 
     /** Construct with a default {@link ScenarioApprovalPolicy#APPROVE_ALL} policy. */
     public ScenarioDefinition(String name, Map<String, String> initialFiles, String scriptedResponse) {
-        this(name, initialFiles, scriptedResponse, ScenarioApprovalPolicy.APPROVE_ALL);
+        this(name, initialFiles, "", scriptedResponse, ScenarioApprovalPolicy.APPROVE_ALL);
+    }
+
+    /** Back-compat constructor with user prompt and default approval policy. */
+    public ScenarioDefinition(String name, Map<String, String> initialFiles, String userPrompt, String scriptedResponse) {
+        this(name, initialFiles, userPrompt, scriptedResponse, ScenarioApprovalPolicy.APPROVE_ALL);
     }
 
     // ── Builder ──────────────────────────────────────────────────────
@@ -43,6 +49,7 @@ public record ScenarioDefinition(
 
         private final String name;
         private final Map<String, String> files = new LinkedHashMap<>();
+        private String userPrompt = "";
         private String scriptedResponse = "";
         private ScenarioApprovalPolicy policy = ScenarioApprovalPolicy.APPROVE_ALL;
 
@@ -53,6 +60,12 @@ public record ScenarioDefinition(
         /** Pre-populate a file in the workspace. */
         public Builder withFile(String relativePath, String content) {
             files.put(relativePath, content);
+            return this;
+        }
+
+        /** Set the user prompt associated with the scenario. */
+        public Builder withUserPrompt(String prompt) {
+            this.userPrompt = prompt == null ? "" : prompt;
             return this;
         }
 
@@ -72,7 +85,7 @@ public record ScenarioDefinition(
         }
 
         public ScenarioDefinition build() {
-            return new ScenarioDefinition(name, Map.copyOf(files), scriptedResponse, policy);
+            return new ScenarioDefinition(name, Map.copyOf(files), userPrompt, scriptedResponse, policy);
         }
     }
 }

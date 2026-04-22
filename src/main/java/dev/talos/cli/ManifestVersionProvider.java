@@ -1,5 +1,6 @@
 package dev.talos.cli;
 
+import dev.talos.core.util.BuildInfo;
 import picocli.CommandLine;
 import java.nio.charset.Charset;
 
@@ -35,11 +36,10 @@ public class ManifestVersionProvider implements CommandLine.IVersionProvider {
     public String[] getVersion() throws Exception {
         Package pkg = getClass().getPackage();
         String title = pkg.getImplementationTitle();
-        String version = pkg.getImplementationVersion();
+        String version = BuildInfo.version();
 
-        // Fallback to manifest version (single source of truth)
         if (title == null) title = "talos";
-        if (version == null) version = "0.9.0-beta";
+        if (BuildInfo.UNKNOWN.equals(version)) version = "unknown";
 
         // Java runtime info
         String javaVersion = System.getProperty("java.runtime.version", "unknown");
@@ -53,8 +53,8 @@ public class ManifestVersionProvider implements CommandLine.IVersionProvider {
         info.append(" ").append(bullet).append(" ").append(osName).append(" ").append(osArch);
 
         // Optional build info from manifest
-        String buildInfo = pkg.getImplementationVendor(); // We'll store build info here
-        if (buildInfo != null && !buildInfo.isEmpty()) {
+        String buildInfo = BuildInfo.buildTimestamp();
+        if (!BuildInfo.UNKNOWN.equals(buildInfo)) {
             info.append(" ").append(bullet).append(" build ").append(buildInfo);
         }
 
