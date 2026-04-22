@@ -1,6 +1,7 @@
 package dev.talos.cli.launcher;
 
 import dev.talos.cli.ManifestVersionProvider;
+import dev.talos.core.util.BuildInfo;
 import picocli.CommandLine;
 
 @CommandLine.Command(name = "version", description = "Show version information")
@@ -17,7 +18,7 @@ public class VersionCmd implements Runnable {
         } catch (Exception e) {
             // Use same ASCII fallback logic as ManifestVersionProvider
             String bullet = getAsciiSafeBullet();
-            System.out.println("Talos 0.9.0-beta " + bullet + " Java " +
+            System.out.println("Talos " + BuildInfo.version() + " " + bullet + " Java " +
                 System.getProperty("java.runtime.version", "unknown") +
                 " " + bullet + " " + System.getProperty("os.name", "unknown") +
                 " " + System.getProperty("os.arch", "unknown"));

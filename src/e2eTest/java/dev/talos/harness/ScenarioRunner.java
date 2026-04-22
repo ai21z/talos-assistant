@@ -1,9 +1,12 @@
 package dev.talos.harness;
 
 import dev.talos.cli.modes.AssistantTurnExecutor;
+import dev.talos.cli.repl.Result;
+import dev.talos.cli.repl.SessionMemory;
 import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
+import dev.talos.core.context.ConversationManager;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.*;
@@ -11,7 +14,10 @@ import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.*;
 import dev.talos.tools.impl.*;
 
+import java.lang.reflect.Method;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -92,9 +98,23 @@ public final class ScenarioRunner {
         return runInternal(scenario, true);
     }
 
+    /**
+     * Harness-path follow-up client for tool-loop re-prompts.
+     *
+     * <p>{@link ToolCallLoop#run} receives the scenario's first scripted model
+     * response directly as an argument, so the LLM seam is consulted only for
+     * post-tool follow-ups. The default deterministic behavior is therefore a
+     * single empty follow-up, which cleanly terminates the loop after the
+     * scripted calls execute instead of consulting a real backend.
+     */
+    private static LlmClient scriptedHarnessFollowUps() {
+        return LlmClient.scripted(List.of(""));
+    }
+
     private static ScenarioResult runInternal(ScenarioDefinition scenario, boolean strict) {
         // 1. Set up workspace
         var workspace = ScenarioWorkspaceFixture.withFiles(scenario.initialFiles());
+        var llm = scriptedHarnessFollowUps();
 
         // 2. Wire tool registry against the workspace.
         //    Strict mode disables fuzzy/alias tool-name rescue.
@@ -108,26 +128,37 @@ public final class ScenarioRunner {
         // RetrieveTool intentionally omitted — requires full RAG stack
 
         // 3. Approval gate driven by policy
-        ApprovalGate gate = policyGate(scenario.approvalPolicy());
+        GateRecorder gate = new GateRecorder(scenario.approvalPolicy());
 
         // 4. Wire processor + loop (strict flag threaded through to the loop)
+        SessionApprovalPolicy approvalPolicy = new SessionApprovalPolicy();
         var processor = new TurnProcessor(
-                ModeController.defaultController(), gate, registry);
+                ModeController.defaultController(), gate, registry, approvalPolicy);
         var loop = new ToolCallLoop(
                 processor, ToolCallLoop.DEFAULT_MAX_ITERATIONS, null, strict);
 
         // 5. Build minimal message list (system + user placeholders)
+        String userPrompt = scenario.userPrompt().isBlank()
+                ? "scenario: " + scenario.name()
+                : scenario.userPrompt();
         var messages = new ArrayList<ChatMessage>(List.of(
                 ChatMessage.system("harness"),
-                ChatMessage.user("scenario: " + scenario.name())));
+                ChatMessage.user(userPrompt)));
 
         // 6. Run the scripted response through the tool loop.
         // Sandbox MUST be rooted at the temp workspace so relative paths resolve correctly.
         var ctx = Context.builder(new Config())
                 .sandbox(new Sandbox(workspace.path(), Map.of()))
+                .llm(llm)
                 .build();
-        var loopResult = loop.run(scenario.scriptedResponse(), messages,
-                workspace.path(), ctx);
+        ToolCallLoop.LoopResult loopResult;
+        TurnUserRequestCapture.set(userPrompt);
+        try {
+            loopResult = loop.run(scenario.scriptedResponse(), messages,
+                    workspace.path(), ctx);
+        } finally {
+            TurnUserRequestCapture.clear();
+        }
 
         // 7. Collect tool result texts from the conversation for assertions
         List<String> toolResultTexts = messages.stream()
@@ -136,21 +167,144 @@ public final class ScenarioRunner {
                 .filter(c -> c != null)
                 .toList();
 
-        return new ScenarioResult(scenario, loopResult, workspace, toolResultTexts);
+        return new ScenarioResult(scenario, loopResult, workspace, toolResultTexts,
+                gate.asked, gate.granted, gate.denied, gate.remembered, gate.details,
+                null, "", null, List.of(), 0, List.of(), List.of(llm));
     }
 
     // ── Private helpers ──────────────────────────────────────────────
 
-    private static ApprovalGate policyGate(ScenarioApprovalPolicy policy) {
-        return switch (policy) {
-            case APPROVE_ALL -> (description, detail) -> true;
-            case DENY_WRITES -> (description, detail) -> false;
-            case DENY_ALL    -> (description, detail) -> false;
-        };
-    }
-
     private static boolean isToolResultContent(String content) {
         return content != null && content.contains("[tool_result:");
+    }
+
+    /** Run a scenario through the loop and persist snapshot + turn log for artifact assertions. */
+    public static ScenarioResult runWithPersistence(ScenarioDefinition scenario,
+                                                    Result assistantResult,
+                                                    TurnAudit audit) {
+        var base = runInternal(scenario, false);
+        Path sessionsDir = null;
+        LlmClient llm = null;
+        try {
+            sessionsDir = java.nio.file.Files.createTempDirectory("talos-e2e-sessions-");
+            JsonSessionStore store = new JsonSessionStore(sessionsDir);
+            String sessionId = JsonSessionStore.sessionIdFor(base.workspace().path());
+
+            SessionMemory memory = new SessionMemory();
+            ConversationManager cm = new ConversationManager(memory);
+            // Determinism: persistence path must not consult a real backend.
+            // MemoryUpdateListener.onTurnComplete delegates to
+            // ConversationManager.maybeCompact(llm), which would otherwise
+            // call LlmClient.chatFull(...) for sketch generation and
+            // introduce network-dependent nondeterminism into snapshots.
+            llm = LlmClient.scripted(java.util.List.of(""));
+            MemoryUpdateListener memoryListener = new MemoryUpdateListener(cm, llm);
+            JsonTurnLogAppender appender = new JsonTurnLogAppender(store, sessionId);
+
+            TurnResult turnResult = new TurnResult(
+                    assistantResult,
+                    null,
+                    1,
+                    Duration.ofMillis(25),
+                    audit == null ? TurnAudit.empty() : audit
+            );
+
+            String userPrompt = scenario.userPrompt().isBlank()
+                    ? "scenario: " + scenario.name()
+                    : scenario.userPrompt();
+            memoryListener.onTurnComplete(turnResult, userPrompt);
+            appender.onTurnComplete(turnResult, userPrompt);
+
+            SessionData snapshot = new SessionData(
+                    sessionId,
+                    base.workspace().path().toString(),
+                    cm.sketch() == null ? "" : cm.sketch(),
+                    cm.turnCount(),
+                    Instant.now(),
+                    memory.getTurns().stream()
+                            .map(m -> new SessionData.Turn(m.role(), m.content(),
+                                    "assistant".equals(m.role()) ? "ok" : ""))
+                            .toList(),
+                    llm.getModel()
+            );
+            store.save(snapshot);
+
+            List<TurnRecord> turnLog = store.loadTurns(sessionId);
+            List<AutoCloseable> resourcesToClose = new ArrayList<>(base.resourcesToClose());
+            resourcesToClose.add(llm);
+            return new ScenarioResult(
+                    base.definition(),
+                    base.loopResult(),
+                    base.workspace(),
+                    base.toolResultTexts(),
+                    base.approvalsAsked(),
+                    base.approvalsGranted(),
+                    base.approvalsDenied(),
+                    base.approvalsRemembered(),
+                    base.approvalDetails(),
+                    sessionsDir,
+                    sessionId,
+                    store.load(sessionId).orElse(snapshot),
+                    turnLog,
+                    0,
+                    List.of(),
+                    resourcesToClose
+            );
+        } catch (Exception e) {
+            try {
+                if (llm != null) llm.close();
+            } catch (Exception ignored) { }
+            deleteRecursive(sessionsDir);
+            try {
+                base.closeWorkspace();
+            } catch (Exception ignored) { }
+            throw new RuntimeException("Failed to run persistent scenario: " + scenario.name(), e);
+        }
+    }
+
+    /** Replay turn-log fallback path via TalosBootstrap.replayTurnLog using reflection to avoid widening prod seams. */
+    public static ScenarioResult replayTurnLogFallback(ScenarioDefinition scenario,
+                                                       List<TurnRecord> records) {
+        try {
+            var workspace = ScenarioWorkspaceFixture.withFiles(scenario.initialFiles());
+            Path sessionsDir = java.nio.file.Files.createTempDirectory("talos-e2e-replay-");
+            JsonSessionStore store = new JsonSessionStore(sessionsDir);
+            String sessionId = JsonSessionStore.sessionIdFor(workspace.path());
+            for (TurnRecord record : records) {
+                store.appendTurn(sessionId, record);
+            }
+
+            SessionMemory memory = new SessionMemory();
+            ConversationManager cm = new ConversationManager(memory);
+
+            Method replay = dev.talos.cli.repl.TalosBootstrap.class.getDeclaredMethod(
+                    "replayTurnLog", SessionStore.class, String.class, SessionMemory.class);
+            replay.setAccessible(true);
+            int replayed = (Integer) replay.invoke(null, store, sessionId, memory);
+
+            List<String> restoredAssistantTurns = memory.getTurns().stream()
+                    .filter(m -> "assistant".equals(m.role()))
+                    .map(ChatMessage::content)
+                    .toList();
+
+            return new ScenarioResult(
+                    scenario,
+                    new ToolCallLoop.LoopResult("", 0, 0, List.of(), new ArrayList<>(),
+                            0, 0, false, 0, List.of(), 0, 0, 0, 0),
+                    workspace,
+                    List.of(),
+                    0, 0, 0, 0, List.of(),
+                    sessionsDir,
+                    sessionId,
+                    null,
+                    store.loadTurns(sessionId),
+                    replayed,
+                    restoredAssistantTurns,
+                    List.of()
+            );
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to replay turn-log fallback scenario: " + scenario.name(), e);
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -240,9 +394,62 @@ public final class ScenarioRunner {
         AssistantTurnExecutor.TurnOutput turnOut =
                 AssistantTurnExecutor.execute(messages, workspace.path(), ctx, opts);
 
-        return new ExecutorScenarioResult(scenario, turnOut, workspace);
+        return new ExecutorScenarioResult(scenario, turnOut, workspace, scriptedLlm);
+    }
+
+    private static final class GateRecorder implements ApprovalGate {
+        private final ScenarioApprovalPolicy policy;
+        private int asked;
+        private int granted;
+        private int denied;
+        private int remembered;
+        private final List<String> details = new ArrayList<>();
+
+        private GateRecorder(ScenarioApprovalPolicy policy) {
+            this.policy = policy == null ? ScenarioApprovalPolicy.APPROVE_ALL : policy;
+        }
+
+        @Override
+        public boolean approve(String description, String detail) {
+            return approveFull(description, detail).isApproved();
+        }
+
+        @Override
+        public ApprovalResponse approveFull(String description, String detail) {
+            asked++;
+            if (detail != null) details.add(detail);
+            return switch (policy) {
+                case APPROVE_ALL -> {
+                    granted++;
+                    yield ApprovalResponse.APPROVED;
+                }
+                case APPROVE_REMEMBER_WRITES -> {
+                    granted++;
+                    remembered++;
+                    yield ApprovalResponse.APPROVED_REMEMBER;
+                }
+                case DENY_WRITES, DENY_ALL -> {
+                    denied++;
+                    yield ApprovalResponse.DENIED;
+                }
+            };
+        }
+    }
+
+    private static ApprovalGate policyGate(ScenarioApprovalPolicy policy) {
+        return new GateRecorder(policy == null ? ScenarioApprovalPolicy.APPROVE_ALL : policy);
+    }
+
+    private static void deleteRecursive(Path path) {
+        if (path == null || !java.nio.file.Files.exists(path)) return;
+        try (var walk = java.nio.file.Files.walk(path)) {
+            walk.sorted(java.util.Comparator.reverseOrder())
+                    .forEach(p -> {
+                        try { java.nio.file.Files.deleteIfExists(p); }
+                        catch (Exception ignored) { }
+                    });
+        } catch (Exception ignored) { }
     }
 }
-
 
 

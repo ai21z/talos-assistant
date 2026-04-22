@@ -109,7 +109,7 @@ public final class TalosKnowledgeEngine {
      * Immutable response from the knowledge engine.
      * Carries typed snippets with structured metadata for richer provenance.
      * <p>
-     * <strong>API compatibility note (v0.9.0-beta):</strong>
+     * <strong>API compatibility note (v0.9.0):</strong>
      * {@link #snippets()} now returns {@code List<ContextResult.Snippet>} instead
      * of the previous {@code List<Map<String, String>>}. This is a source-level
      * breaking change for any external consumer that compiled against the old

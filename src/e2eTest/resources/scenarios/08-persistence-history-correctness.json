@@ -1,0 +1,8 @@
+{
+  "name": "persistence history correctness",
+  "fixture": "mini-site",
+  "runner": "persistence",
+  "userPrompt": "Make the site darker.",
+  "rawAssistantText": "[Used 1 tool(s): talos.write_file | 1 iteration(s)]\n✓ Wrote index.html\n\nThe site is now darker.",
+  "expectedAssistantText": "The site is now darker."
+}
