@@ -234,6 +234,8 @@ The short version:
 The full work-cycle writeup lives here:
 
 - [docs/work-test-cycle.md](docs/work-test-cycle.md)
+- [docs/work-test-cycle-setup.md](docs/work-test-cycle-setup.md)
+- [docs/work-test-cycle-step-by-step.md](docs/work-test-cycle-step-by-step.md)
 
 ## What You Need To Run Talos Well
 
@@ -263,6 +265,38 @@ Talos is local-first.
 - Talos talks to Ollama over localhost
 - you still need to download models ahead of time
 
+## Quality Reports
+
+Talos can generate reviewer-friendly Markdown quality reports from the machine-readable summaries in `build/reports/talos/`.
+
+Use this when you want local snapshots for coverage, E2E, Qodana, and build artifact provenance:
+
+```powershell
+./gradlew.bat writeQualityMarkdownReports
+```
+
+For a full fresh local quality run that refreshes native Qodana first, use:
+
+```powershell
+./gradlew.bat talosQualityLocal
+```
+
+Reports are written to the repository-root `reports/` folder using this format:
+
+```text
+<reportName>-DDMMYYYY-<talosVersion>.md
+```
+
+Example:
+
+```text
+coverage-23042026-090.md
+```
+
+The generated `reports/` folder is intentionally ignored by Git. The tracked `reports-disabled/README.md` explains how to use it: either create `reports/`, or rename/copy `reports-disabled/` to `reports/`. Gradle will also create `reports/` automatically when the report task runs.
+
+Before writing new reports, the generator removes older generated report snapshots with the standard report filename pattern. Manual files with other names are preserved.
+
 ## Current Limitations
 
 This is the honest part.
@@ -290,12 +324,13 @@ High-level layout:
 |-- scripts/             helper scripts
 |-- tools/               install and support tooling
 |-- local/               ignored local working space
+|-- reports-disabled/    tracked docs for ignored local reports
 |-- build/               generated outputs
 |-- CHANGELOG.md         human-readable version history
 `-- README.md            project overview
 ```
 
-The `local/` folder is for personal workspace material on this machine. It is intentionally ignored by Git.
+The `local/` folder is for personal workspace material on this machine, including manual-testing notes. It is intentionally ignored by Git. Generated `reports/` are also ignored; keep only usage instructions in `reports-disabled/`.
 
 ## Bottom Line
 

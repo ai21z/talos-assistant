@@ -4,9 +4,26 @@
 #-------------------------------------------------------------------------------#
 version: "1.0"
 
-#Specify inspection profile for code analysis
+# Specify inspection profile for code analysis.
 profile:
   name: qodana.starter
+
+# Project-owned scope rules. Qodana should inspect source/config/docs, not
+# generated evidence, local scratch material, or previous Qodana reports.
+exclude:
+  - name: All
+    paths:
+      - build
+      - .qodana
+      - local
+      - .gradle
+
+# Optional quality gate for local Qodana runs. Qodana remains highly
+# recommended, not part of the hard Gradle `check` gate. If a developer runs
+# Qodana, critical findings should fail the Qodana command immediately.
+failureConditions:
+  severityThresholds:
+    critical: 0
 
 #Enable inspections
 #include:
@@ -27,17 +44,6 @@ projectJDK: "21" #(Applied in CI/CD pipeline)
 #plugins:
 #  - id: <plugin.id> #(plugin id can be found at https://plugins.jetbrains.com)
 
-# Quality gate. Will fail the CI/CD pipeline if any condition is not met
-# severityThresholds - configures maximum thresholds for different problem severities
-# testCoverageThresholds - configures minimum code coverage on a whole project and newly added code
-# Code Coverage is available in Ultimate and Ultimate Plus plans
-#failureConditions:
-#  severityThresholds:
-#    any: 15
-#    critical: 5
-#  testCoverageThresholds:
-#    fresh: 70
-#    total: 50
-
-#Specify Qodana linter for analysis (Applied in CI/CD pipeline)
-linter: jetbrains/qodana-jvm:2025.2
+# Specify the free Community linter for local-first analysis.
+# The paid jetbrains/qodana-jvm image requires a Qodana token.
+linter: jetbrains/qodana-jvm-community:2026.1
