@@ -35,6 +35,7 @@
 *.hprof
 hs_err_pid*
 replay_pid*
+/reports/
 
 # Qodana (JetBrains code quality) — keep config, ignore outputs
 .qodana/
@@ -80,8 +81,8 @@ test-remote-config.yaml
 *.orig
 *.rej
 
-# ---- Local test data (uncomment if you create these)
-# /local/
+# ---- Local test data
+/local/
 # /corpus/
 # /sandbox/
 # .talos/            # if you ever generate a per-repo runtime dir (by default it lives under your HOME)
@@ -94,7 +95,6 @@ V1_IMPLEMENTATION_BRIDGE.md
 /playground/
 /.github/
 .external assistant/
-/manual-testing/auto-mode-output.txt
 
 # ---- Security: common secret patterns (use explicit names; avoid *.yaml wildcards)
 *.env
