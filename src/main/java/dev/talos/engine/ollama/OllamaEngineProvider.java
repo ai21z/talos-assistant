@@ -34,7 +34,7 @@ public final class OllamaEngineProvider implements ModelEngineProvider {
         Object v = ollama.get("model");
         if (v != null) return String.valueOf(v);
 
-        return "qwen3:8b";
+        return "qwen2.5-coder:14b";
     }
 
     private static boolean nativeToolCallingFrom(Config cfg) {

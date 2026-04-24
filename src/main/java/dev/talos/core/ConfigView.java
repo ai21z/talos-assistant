@@ -68,7 +68,7 @@ public final class ConfigView {
 
     public record OllamaConfig(Map<String, Object> m) {
         public String host()  { return strAt(m, "host", "http://127.0.0.1:11434"); }
-        public String model() { return strAt(m, "model", "qwen3:8b"); }
+        public String model() { return strAt(m, "model", "qwen2.5-coder:14b"); }
         public String embed() { return strAt(m, "embed", "bge-m3"); }
         public boolean allowRemote() { return CfgUtil.boolAt(m, "allow_remote", false); }
     }

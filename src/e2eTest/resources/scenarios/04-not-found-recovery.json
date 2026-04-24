@@ -1,6 +1,10 @@
 {
   "name": "not-found recovery",
   "fixture": "doc-repo",
+  "v1Pack": true,
+  "claims": [
+    "path-input-recovery-without-total-derailment"
+  ],
   "runner": "executor",
   "approvalPolicy": "APPROVE_ALL",
   "userPrompt": "Read README.md and tell me the product name.",

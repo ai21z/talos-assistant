@@ -202,7 +202,7 @@ public class Config {
         Map<String,Object> ollama = map(data.get("ollama"));
         if (ollama == null) { ollama = new LinkedHashMap<>(); data.put("ollama", ollama); defaulted("ollama"); }
         if (!ollama.containsKey("host"))  { ollama.put("host", "http://localhost:11434"); defaulted("ollama.host"); }
-        if (!ollama.containsKey("model")) { ollama.put("model", "qwen3:8b");             defaulted("ollama.model"); }
+        if (!ollama.containsKey("model")) { ollama.put("model", "qwen2.5-coder:14b");   defaulted("ollama.model"); }
 
         // ----- net -----
         Map<String,Object> net = map(data.get("net"));

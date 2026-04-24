@@ -68,7 +68,7 @@ public class DiagnoseCmd implements Runnable {
             // 2. Ollama connection
             Map<String, Object> ollama = CfgUtil.map(cfg.data.get("ollama"));
             String ollamaHost = String.valueOf(ollama.getOrDefault("host", "http://127.0.0.1:11434"));
-            String ollamaModel = String.valueOf(ollama.getOrDefault("model", "qwen3:8b"));
+            String ollamaModel = String.valueOf(ollama.getOrDefault("model", "qwen2.5-coder:14b"));
             System.out.println("Ollama:");
             System.out.println("  Host:  " + ollamaHost);
             System.out.println("  Model: " + ollamaModel);
