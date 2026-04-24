@@ -1,5 +1,6 @@
 package dev.talos.harness;
 
+import dev.talos.cli.modes.AssistantTurnExecutor;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -156,6 +157,42 @@ class JsonScenarioPackTest {
                     .assertAnswerContains("old_string not found")
                     .assertAnswerContains("style.css")
                     .assertAnswerNotContains("The title was changed to Melodic Horror Synthwave");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/12-repeated-missing-path-stops-at-loop-cap.json] 12: repeated missing-path failure stops at the loop cap")
+    void repeatedMissingPathFailureStopsAtLoopCap() {
+        var loaded = JsonScenarioLoader.load("scenarios/12-repeated-missing-path-stops-at-loop-cap.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("[Tool-call limit reached. Some tool calls were not executed.]")
+                    .assertAnswerContains("[iteration limit reached]")
+                    .assertFileContains("README.md", "Talos");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/13-streaming-no-tool-grounding-visible.json] 13: streaming no-tool fabricated evidence answer is visibly marked ungrounded")
+    void streamingNoToolEvidenceAnswerIsVisiblyUngrounded() {
+        var loaded = JsonScenarioLoader.load("scenarios/13-streaming-no-tool-grounding-visible.json");
+
+        try (var result = ScenarioRunner.runThroughExecutorStreaming(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains(AssistantTurnExecutor.UNGROUNDED_ANNOTATION)
+                    .assertAnswerContains("There are no mismatches")
+                    .assertAnswerContains("cta-button")
+                    .assertFileContains("index.html", "<title>Horror Synthwave Band</title>");
+
+            assertTrue(result.streamed(),
+                    "runThroughExecutorStreaming should drive the streaming branch");
         }
     }
 }

@@ -1,6 +1,10 @@
 {
   "name": "approval denied",
   "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "approval-denial-preserves-files"
+  ],
   "runner": "loop",
   "approvalPolicy": "DENY_WRITES",
   "userPrompt": "Replace index.html with denied content.",

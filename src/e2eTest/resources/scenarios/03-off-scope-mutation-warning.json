@@ -1,6 +1,10 @@
 {
   "name": "off-scope mutation warning",
   "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "off-scope-write-surfaces-warning-before-approval"
+  ],
   "runner": "loop",
   "approvalPolicy": "APPROVE_ALL",
   "userPrompt": "Redesign this website by updating index.html.",

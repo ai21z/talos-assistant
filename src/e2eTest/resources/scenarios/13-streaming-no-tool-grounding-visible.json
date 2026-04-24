@@ -1,0 +1,14 @@
+{
+  "name": "streaming no-tool evidence answer is visibly ungrounded",
+  "fixture": "horror-synth-site",
+  "v1Pack": true,
+  "claims": [
+    "streaming-no-tool-evidence-answers-are-visibly-ungrounded"
+  ],
+  "runner": "executor-streaming",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Check whether this website has mismatches between HTML classes/IDs and the selectors used in CSS or JavaScript. Do not change anything yet.",
+  "scriptedResponses": [
+    "To check for mismatches, I will review the files.\n\n### `index.html`\n```html\n<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"UTF-8\">\n    <meta name=\"viewport\" c>\n    <title>Melodic Horror Synthwave</title>\n</head>\n<body class=\"synthwave-theme\">\n    <div class=\"hero-content\">\n        <a href=\"#\" class=\"cta-button\">Join Us</a>\n    </div>\n</body>\n</html>\n```\n\n### `style.css`\n```css\n.synthwave-theme {\n    background-color: #1e1e1e;\n    color: #ffffff;\n}\n\n.hero-content {\n    text-align: center;\n}\n\n.cta-button {\n    display: inline-block;\n}\n```\n\n### `script.js`\n```javascript\ndocument.addEventListener('DOMContentLoaded', function() {\n    const button = document.querySelector('.cta-button');\n    button.addEventListener('click', function() {\n        alert('Button clicked!');\n    });\n});\n```\n\nThere are no mismatches between the HTML classes/IDs and the selectors used in CSS or JavaScript."
+  ]
+}
