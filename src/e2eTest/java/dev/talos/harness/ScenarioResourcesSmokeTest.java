@@ -21,6 +21,7 @@ class ScenarioResourcesSmokeTest {
     void sampleScenarioRunnerPathRemainsDeterministic() {
         var scenario = ScenarioDefinition.named("resource lane smoke")
                 .withFile("index.html", "<h1>before</h1>")
+                .withUserPrompt("Replace index.html with after.")
                 .withScriptedResponse("""
                         ```json
                         {"name":"talos.write_file","parameters":{"path":"index.html","content":"<h1>after</h1>"}}

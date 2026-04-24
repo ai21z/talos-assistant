@@ -145,6 +145,23 @@ class ToolCallLoopCompactionTest {
         }
 
         @Test
+        void skipsSyntheticToolResultUserMessagesOnTextPath() {
+            var messages = new ArrayList<ChatMessage>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user("tell me what is in this workspace"),
+                    ChatMessage.assistant("{\"name\":\"talos.edit_file\",\"arguments\":{}}"),
+                    ChatMessage.user("[tool_result: talos.edit_file]\n"
+                            + "[error] This exact edit was already attempted and failed. "
+                            + "Alternatively, use talos.write_file to replace the entire file content.\n"
+                            + "[/tool_result]")
+            ));
+
+            String req = ToolCallLoop.latestUserRequestIn(messages);
+
+            assertEquals("tell me what is in this workspace", req);
+        }
+
+        @Test
         void returnsNullOnEmptyOrMissingUser() {
             assertNull(ToolCallLoop.latestUserRequestIn(null));
             assertNull(ToolCallLoop.latestUserRequestIn(List.of()));

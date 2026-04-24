@@ -55,6 +55,14 @@ class AssistantTurnExecutorMutationRequestTest {
                 "What are the contents of this workspace?"));
     }
     @Test
+    void syntheticToolResultWithReplaceMarkerDoesNotFire() {
+        assertFalse(AssistantTurnExecutor.looksLikeMutationRequest(
+                "[tool_result: talos.edit_file]\n"
+                        + "[error] This exact edit was already attempted and failed. "
+                        + "Alternatively, use talos.write_file to replace the entire file content.\n"
+                        + "[/tool_result]"));
+    }
+    @Test
     void explanationQuestionDoesNotFire() {
         assertFalse(AssistantTurnExecutor.looksLikeMutationRequest(
                 "oh nice what is this index.html for?"));

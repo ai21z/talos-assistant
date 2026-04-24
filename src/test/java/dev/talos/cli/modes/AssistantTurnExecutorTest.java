@@ -9,6 +9,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -460,6 +461,119 @@ class AssistantTurnExecutorTest {
             assertEquals("redesign index.html as a spring garden", req,
                     "latestUserRequest must skip role=tool messages and return the user turn");
         }
+
+        @Test
+        void latestUserRequestSkipsSyntheticToolResultsOnTextPath() {
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("hey can you tell me what is in this workspace?"));
+            messages.add(ChatMessage.assistant("{\"name\":\"talos.edit_file\",\"arguments\":{}}"));
+            messages.add(ChatMessage.user("[tool_result: talos.edit_file]\n"
+                    + "[error] This exact edit was already attempted and failed. "
+                    + "Alternatively, use talos.write_file to replace the entire file content.\n"
+                    + "[/tool_result]"));
+
+            String req = AssistantTurnExecutor.latestUserRequest(messages);
+
+            assertEquals("hey can you tell me what is in this workspace?", req,
+                    "latestUserRequest must not treat text-path tool results as user intent");
+        }
+
+        @Test
+        void mutationRetryExecutesTextFallbackToolCallsInsteadOfReturningRawJson() {
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.TalosTool() {
+                @Override public String name() { return "talos.list_dir"; }
+                @Override public String description() { return "List files"; }
+                @Override public dev.talos.tools.ToolDescriptor descriptor() {
+                    return new dev.talos.tools.ToolDescriptor(
+                            name(), description(), "{\"path\":\"string\"}");
+                }
+                @Override public dev.talos.tools.ToolResult execute(
+                        dev.talos.tools.ToolCall call, dev.talos.tools.ToolContext ctx) {
+                    return dev.talos.tools.ToolResult.ok("index.html\nstyle.css");
+                }
+            });
+
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}",
+                            "Listed files from the retry.")))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("change the file"));
+            var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                    "original answer", 1, 1, List.of("talos.read_file"), messages,
+                    0, 0, false, 0, List.of(), 0, 0, 0, 0);
+
+            var result = AssistantTurnExecutor.mutationRequestRetryIfNeeded(
+                    "original answer", messages, loopResult, WS, ctx);
+
+            assertEquals("Listed files from the retry.", result.answer());
+            assertFalse(result.answer().contains("\"name\""),
+                    "text-fallback tool JSON must not leak as the final answer");
+            assertNotNull(result.extraSummary(),
+                    "text-fallback retry tool calls should re-enter the tool loop");
+        }
+
+        @Test
+        void mutationRetryDoesNotFireFromSyntheticToolResultTail() {
+            var ctx = scriptedContext("retry should not be called");
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("hey can you tell me what is in this workspace?"));
+            messages.add(ChatMessage.assistant("{\"name\":\"talos.edit_file\",\"arguments\":{}}"));
+            messages.add(ChatMessage.user("[tool_result: talos.edit_file]\n"
+                    + "[error] This exact edit was already attempted and failed. "
+                    + "Alternatively, use talos.write_file to replace the entire file content.\n"
+                    + "[/tool_result]"));
+            var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                    "original answer", 10, 8, List.of("talos.edit_file"), messages,
+                    3, 2, true, 0, List.of("index.html"), 0, 0, 2, 0);
+
+            var result = AssistantTurnExecutor.mutationRequestRetryIfNeeded(
+                    "original answer", messages, loopResult, WS, ctx);
+
+            assertEquals("original answer", result.answer(),
+                    "synthetic B3 diagnostic must not be treated as mutation intent");
+            assertEquals(0, result.mutationsInRetry());
+            assertNull(result.extraSummary());
+        }
+
+        @Test
+        void mutationRetryDoesNotFireAfterApprovalDeniedMutation() {
+            var ctx = scriptedContext("retry should not be called");
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("I think the html is completely wrong. Can you fix it?"));
+            var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                    "manual replacement prose", 3, 5,
+                    List.of("talos.read_file", "talos.edit_file", "talos.write_file"),
+                    messages, 2, 0, false, 0, List.of("index.html"),
+                    0, 0, 0, 0,
+                    List.of(
+                            new dev.talos.runtime.ToolCallLoop.ToolOutcome(
+                                    "talos.edit_file", "index.html", false, true, true, "",
+                                    "User did not approve the talos.edit_file call."),
+                            new dev.talos.runtime.ToolCallLoop.ToolOutcome(
+                                    "talos.write_file", "index.html", false, true, true, "",
+                                    "User did not approve the talos.write_file call.")
+                    ));
+
+            var result = AssistantTurnExecutor.mutationRequestRetryIfNeeded(
+                    "manual replacement prose", messages, loopResult, WS, ctx);
+
+            assertEquals("manual replacement prose", result.answer());
+            assertEquals(0, result.mutationsInRetry());
+            assertNull(result.extraSummary(),
+                    "approval denial already explains zero mutations, so missing-mutation retry must not fire");
+        }
     }
 
     // ── Regression: inspect-only failure class ───────────────────────
@@ -629,6 +743,98 @@ class AssistantTurnExecutorTest {
             String answer = "I updated the file.";
             assertEquals(answer,
                     AssistantTurnExecutor.annotateIfFalseMutationClaim(answer, null));
+        }
+
+        @Test
+        @DisplayName("partial mutation success replaces answer with verified outcome summary")
+        void partialMutationTurnGetsVerifiedSummary() {
+            String answer = "Great! The title, header, hero copy, and stylesheet have all been updated.";
+            var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                    "unused", 2, 4,
+                    List.of("talos.edit_file", "talos.edit_file", "talos.edit_file", "talos.write_file"),
+                    List.of(), 1, 0, false, 3, List.of(),
+                    0, 0, 0, 0,
+                    List.of(
+                            new dev.talos.runtime.ToolCallLoop.ToolOutcome(
+                                    "talos.edit_file", "index.html", false, true, "",
+                                    "old_string not found in index.html. The exact text was not found in the file."),
+                            new dev.talos.runtime.ToolCallLoop.ToolOutcome(
+                                    "talos.edit_file", "index.html", true, true,
+                                    "Edited index.html: replaced 4 line(s) with 4 line(s)", ""),
+                            new dev.talos.runtime.ToolCallLoop.ToolOutcome(
+                                    "talos.edit_file", "index.html", true, true,
+                                    "Edited index.html: replaced 6 line(s) with 6 line(s)", ""),
+                            new dev.talos.runtime.ToolCallLoop.ToolOutcome(
+                                    "talos.write_file", "style.css", true, true,
+                                    "Updated style.css (28 lines, 540 bytes)", "")
+                    ));
+
+            String out = AssistantTurnExecutor.summarizePartialMutationOutcomesIfNeeded(answer, loopResult, 0);
+
+            assertTrue(out.startsWith(AssistantTurnExecutor.PARTIAL_MUTATION_ANNOTATION));
+            assertTrue(out.contains("Succeeded:"));
+            assertTrue(out.contains("Failed:"));
+            assertTrue(out.contains("style.css"));
+            assertTrue(out.contains("old_string not found"));
+            assertFalse(out.contains("title, header, hero copy, and stylesheet have all been updated"),
+                    "unverified model prose must be replaced on partial-success mutation turns");
+        }
+
+        @Test
+        @DisplayName("denied mutation turn replaces manual-update prose with factual no-change summary")
+        void deniedMutationTurnGetsNoChangeSummary() {
+            String answer = """
+                    I understand the user's request and will proceed by manually updating the file.
+
+                    ### Corrected `index.html` Content:
+                    ```html
+                    <!DOCTYPE html><html>broken replacement</html>
+                    ```
+                    """;
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("I think the html is completely wrong. Can you fix it?"));
+            var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                    "unused", 2, 3,
+                    List.of("talos.read_file", "talos.edit_file"),
+                    messages, 1, 0, false, 0, List.of("index.html"),
+                    0, 0, 0, 0,
+                    List.of(
+                            new dev.talos.runtime.ToolCallLoop.ToolOutcome(
+                                    "talos.edit_file", "index.html", false, true, true, "",
+                                    "User did not approve the talos.edit_file call.")
+                    ));
+
+            String out = AssistantTurnExecutor.summarizeDeniedMutationOutcomesIfNeeded(
+                    answer, messages, loopResult, 0);
+
+            assertTrue(out.startsWith(AssistantTurnExecutor.DENIED_MUTATION_ANNOTATION));
+            assertTrue(out.contains("No file changes were applied"));
+            assertTrue(out.contains("approval was denied"));
+            assertTrue(out.contains("index.html"));
+            assertFalse(out.contains("Corrected `index.html` Content"),
+                    "manual replacement prose must not survive a denied mutation turn");
+        }
+
+        @Test
+        @DisplayName("denied mutation does not also get generic false-mutation annotation")
+        void deniedMutationSkipsGenericFalseMutationAnnotation() {
+            String answer = "The changes have been applied to `index.html`.";
+            var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                    "unused", 1, 1,
+                    List.of("talos.edit_file"),
+                    List.of(), 1, 0, false, 0, List.of("index.html"),
+                    0, 0, 0, 0,
+                    List.of(
+                            new dev.talos.runtime.ToolCallLoop.ToolOutcome(
+                                    "talos.edit_file", "index.html", false, true, true, "",
+                                    "User did not approve the talos.edit_file call.")
+                    ));
+
+            String out = AssistantTurnExecutor.annotateIfFalseMutationClaim(answer, loopResult, 0);
+
+            assertEquals(answer, out,
+                    "denied mutation turns should be handled by the dedicated denied-mutation summary only");
         }
     }
 
@@ -1269,6 +1475,75 @@ class AssistantTurnExecutorTest {
         }
     }
 
+    @Nested
+    @DisplayName("Streaming no-tool truthfulness")
+    class StreamingNoToolTruthfulnessTests {
+
+        @Test
+        @DisplayName("evidence-request fabrication is visibly annotated on streaming no-tool path")
+        void streamingEvidenceFabricationIsAnnotated() {
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Check whether this website has mismatches between HTML classes/IDs and the selectors used in CSS or JavaScript. Do not change anything yet."));
+
+            String fabricated = "Based on the workspace contents, index.html contains a CTA button, "
+                    + "style.css defines `.cta-button`, and script.js wires it up with querySelector. "
+                    + "There are no mismatches between the files. "
+                    + "x".repeat(AssistantTurnExecutor.UNGROUNDED_MIN_CHARS);
+
+            String out = AssistantTurnExecutor.enforceStreamingNoToolTruthfulness(fabricated, messages);
+
+            assertTrue(out.startsWith(AssistantTurnExecutor.UNGROUNDED_ANNOTATION),
+                    "streaming no-tool evidence fabrication must be visibly annotated");
+            assertTrue(out.contains(fabricated));
+        }
+
+        @Test
+        @DisplayName("explicit mutation no-tool narration is replaced with factual no-change notice")
+        void streamingMutationNarrationIsReplaced() {
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("I think the html is completely wrong. Can you fix it?"));
+
+            String fabricated = """
+                    Sure! Here is the updated index.html.
+
+                    ### Updated `index.html`
+                    Summary of changes:
+                    - updated index.html
+                    - these changes should ensure the selectors now match
+                    """;
+
+            String out = AssistantTurnExecutor.enforceStreamingNoToolTruthfulness(fabricated, messages);
+
+            assertEquals(AssistantTurnExecutor.STREAMING_NO_TOOL_MUTATION_REPLACEMENT, out,
+                    "explicit mutation no-tool narration must not survive as final answer text");
+        }
+
+        @Test
+        @DisplayName("narrow mutation narrative marker set does not flag descriptive analysis")
+        void streamingMutationNarrativeMarkersStayNarrow() {
+            String descriptive = "The label has been updated to read 'Weight', and the CSS class is documented below.";
+            assertFalse(AssistantTurnExecutor.containsStreamingMutationNarrative(descriptive));
+        }
+
+        @Test
+        @DisplayName("meta-question about tool use does not trigger explicit mutation replacement")
+        void metaQuestionAboutEditToolRemainsReadOnly() {
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Why didn't you call the edit tool?"));
+
+            String answer = """
+                    I should have called the edit tool once you explicitly requested a change.
+                    """; 
+
+            assertFalse(AssistantTurnExecutor.shouldReplaceStreamingNoToolMutationNarrative(answer, messages));
+            assertEquals(answer, AssistantTurnExecutor.enforceStreamingNoToolTruthfulness(answer, messages));
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     //  N3 — Inspect under-completion truth layer
     //
@@ -1440,6 +1715,65 @@ class AssistantTurnExecutorTest {
             assertEquals(3, AssistantTurnExecutor.readOnlyToolCount(mixed),
                     "should count read_file + list_dir + grep, not edit_file / write_file");
             assertEquals(0, AssistantTurnExecutor.readOnlyToolCount(null));
+        }
+    }
+
+    @Nested
+    @DisplayName("Selector mismatch grounding")
+    class SelectorMismatchGroundingTests {
+
+        @Test
+        @DisplayName("selector mismatch request is overridden by deterministic workspace analysis")
+        void selectorMismatchAnswerIsGroundedFromWorkspace() throws Exception {
+            Path ws = Files.createTempDirectory("talos-selector-grounding-");
+            try {
+                Files.writeString(ws.resolve("index.html"), """
+                        <!DOCTYPE html>
+                        <html>
+                          <body class="synthwave-theme">
+                            <section id="hero">
+                              <div class="hero-content"></div>
+                            </section>
+                          </body>
+                        </html>
+                        """);
+                Files.writeString(ws.resolve("style.css"), """
+                        body.synthwave-theme {}
+                        #hero {}
+                        .hero-content {}
+                        .cta-button {}
+                        """);
+                Files.writeString(ws.resolve("script.js"), """
+                        document.querySelector('.cta-button');
+                        """);
+
+                var messages = new ArrayList<ChatMessage>();
+                messages.add(ChatMessage.system("sys"));
+                messages.add(ChatMessage.user("Check whether this website has mismatches between HTML classes/IDs and the selectors used in CSS or JavaScript. Do not change anything yet."));
+
+                var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                        "unused", 4, 4,
+                        List.of("talos.list_dir", "talos.read_file", "talos.read_file", "talos.read_file"),
+                        List.of(), 0, 0, false, 0, List.of("index.html", "style.css", "script.js"),
+                        0, 0, 0, 0);
+
+                String bogus = "There are no mismatches. The class `cta-button` is present in HTML and JavaScript.";
+                String out = AssistantTurnExecutor.overrideSelectorMismatchAnalysisIfNeeded(
+                        bogus, messages, loopResult, ws);
+
+                assertNotEquals(bogus, out);
+                assertTrue(out.contains("Mismatches found:"));
+                assertTrue(out.contains("`.cta-button`"));
+                assertFalse(out.contains("present in HTML and JavaScript"));
+                assertFalse(out.contains("#ff4500"));
+                assertFalse(out.contains("#ffffff"));
+            } finally {
+                try (var walk = Files.walk(ws)) {
+                    walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                        try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                    });
+                }
+            }
         }
     }
 }
