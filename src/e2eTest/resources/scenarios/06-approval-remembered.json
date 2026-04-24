@@ -1,6 +1,10 @@
 {
   "name": "approval remembered in session",
   "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "session-approval-memory-behaves-predictably"
+  ],
   "runner": "loop",
   "approvalPolicy": "APPROVE_REMEMBER_WRITES",
   "userPrompt": "Update the homepage files in this website.",

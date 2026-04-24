@@ -1,6 +1,10 @@
 {
   "name": "replay from turn-log fallback",
   "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "replay-restores-only-good-turns"
+  ],
   "runner": "replay",
   "userPrompt": "Recover the previous session.",
   "okUserInput": "What is this site?",

@@ -1,6 +1,10 @@
 {
   "name": "selector mismatch analysis is grounded",
   "fixture": "horror-synth-site",
+  "v1Pack": true,
+  "claims": [
+    "grounded-analysis-reports-real-selector-mismatch"
+  ],
   "runner": "executor",
   "approvalPolicy": "APPROVE_ALL",
   "userPrompt": "Check whether this website has mismatches between HTML classes/IDs and the selectors used in CSS or JavaScript. Do not change anything yet.",

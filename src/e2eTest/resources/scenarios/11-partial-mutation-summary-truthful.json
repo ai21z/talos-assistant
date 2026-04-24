@@ -1,6 +1,10 @@
 {
   "name": "partial mutation summary is truthful",
   "fixture": "horror-synth-site",
+  "v1Pack": true,
+  "claims": [
+    "partial-mutation-summaries-are-truthful"
+  ],
   "runner": "executor",
   "approvalPolicy": "APPROVE_ALL",
   "userPrompt": "Check it and edit it",

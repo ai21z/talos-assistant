@@ -404,6 +404,63 @@ public final class ScenarioRunner {
                 gate.asked, gate.granted, gate.denied, gate.remembered);
     }
 
+    /**
+     * Streaming sibling of {@link #runThroughExecutor(ScenarioDefinition, String, List)}.
+     *
+     * <p>Drives {@link AssistantTurnExecutor#execute} with a real {@code streamSink}
+     * so the streaming branch executes. The sink buffers emitted chunks only to keep
+     * the test seam deterministic; assertions should still use the executor's final
+     * answer text via {@link ExecutorScenarioResult#finalAnswer()}.
+     */
+    public static ExecutorScenarioResult runThroughExecutorStreaming(
+            ScenarioDefinition scenario,
+            String userPrompt,
+            List<String> scriptedResponses) {
+
+        var workspace = ScenarioWorkspaceFixture.withFiles(scenario.initialFiles());
+
+        var undoStack = new FileUndoStack();
+        var registry  = new ToolRegistry(false);
+        registry.register(new ReadFileTool());
+        registry.register(new FileWriteTool(undoStack));
+        registry.register(new FileEditTool(undoStack));
+        registry.register(new GrepTool());
+        registry.register(new ListDirTool());
+
+        GateRecorder gate = new GateRecorder(scenario.approvalPolicy());
+
+        var processor = new TurnProcessor(
+                ModeController.defaultController(), gate, registry);
+        var loop = new ToolCallLoop(
+                processor, ToolCallLoop.DEFAULT_MAX_ITERATIONS, null, false);
+
+        var messages = new ArrayList<ChatMessage>(List.of(
+                ChatMessage.system("harness (executor path, streaming)"),
+                ChatMessage.user(userPrompt)));
+
+        var streamedChunks = new StringBuilder();
+        var scriptedLlm = LlmClient.scripted(scriptedResponses);
+        var ctx = Context.builder(new Config())
+                .sandbox(new Sandbox(workspace.path(), Map.of()))
+                .toolCallLoop(loop)
+                .llm(scriptedLlm)
+                .streamSink(streamedChunks::append)
+                .build();
+
+        var opts = new AssistantTurnExecutor.Options();
+        AssistantTurnExecutor.TurnOutput turnOut;
+        TurnUserRequestCapture.set(userPrompt);
+        try {
+            turnOut = AssistantTurnExecutor.execute(messages, workspace.path(), ctx, opts);
+        } finally {
+            TurnUserRequestCapture.clear();
+        }
+
+        return new ExecutorScenarioResult(
+                scenario, turnOut, workspace, scriptedLlm,
+                gate.asked, gate.granted, gate.denied, gate.remembered);
+    }
+
     private static final class GateRecorder implements ApprovalGate {
         private final ScenarioApprovalPolicy policy;
         private int asked;

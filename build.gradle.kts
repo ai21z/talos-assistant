@@ -882,6 +882,18 @@ val writeE2eSummary by tasks.registering {
             val scenarioFiles = fileTree("src/e2eTest/resources/scenarios") {
                 include("**/*.json")
             }.files.sortedBy { it.name }
+            val slurper = groovy.json.JsonSlurper()
+            val scenarioMetadata = scenarioFiles.map { file ->
+                val parsed = (slurper.parse(file) as? Map<*, *>) ?: emptyMap<String, Any?>()
+                val claims = (parsed["claims"] as? List<*>)?.map { it.toString() } ?: emptyList()
+                mapOf(
+                    "resource" to "scenarios/${file.name}",
+                    "name" to ((parsed["name"] as? String) ?: file.nameWithoutExtension),
+                    "runner" to ((parsed["runner"] as? String) ?: ""),
+                    "v1Pack" to (parsed["v1Pack"] == true),
+                    "claims" to claims
+                )
+            }
 
             var tests = 0
             var failures = 0
@@ -950,6 +962,48 @@ val writeE2eSummary by tasks.registering {
             val executedJsonScenarioResources = jsonScenarioExecutions.mapNotNull { it["resource"] as? String }.distinct().sorted()
             val allJsonScenarioResources = scenarioFiles.map { "scenarios/${it.name}" }
             val unexecutedJsonScenarioResources = allJsonScenarioResources.filterNot(executedJsonScenarioResources::contains)
+            fun aggregateScenarioStatus(executions: List<Map<String, Any?>>): String = when {
+                executions.any { (it["status"] as? String) == "error" } -> "error"
+                executions.any { (it["status"] as? String) == "failed" } -> "failed"
+                executions.any { (it["status"] as? String) == "skipped" } -> "skipped"
+                executions.any { (it["status"] as? String) == "passed" } -> "passed"
+                else -> "not-executed"
+            }
+            val scenarioStatusByResource = allJsonScenarioResources.associateWith { resource ->
+                aggregateScenarioStatus(jsonScenarioExecutions.filter { it["resource"] == resource })
+            }
+            val passedJsonScenarioResources = scenarioStatusByResource
+                .filterValues { it == "passed" }
+                .keys
+                .sorted()
+            val failedJsonScenarioResources = scenarioStatusByResource
+                .filterValues { it == "failed" || it == "error" }
+                .keys
+                .sorted()
+            val skippedJsonScenarioResources = scenarioStatusByResource
+                .filterValues { it == "skipped" }
+                .keys
+                .sorted()
+            val v1ScenarioMetadata = scenarioMetadata.filter { it["v1Pack"] == true }
+            val v1ScenarioResources = v1ScenarioMetadata.mapNotNull { it["resource"] as? String }.sorted()
+            val executedV1Resources = v1ScenarioResources.filter(executedJsonScenarioResources::contains)
+            val passedV1Resources = v1ScenarioResources.filter(passedJsonScenarioResources::contains)
+            val failedV1Resources = v1ScenarioResources.filter(failedJsonScenarioResources::contains)
+            val unexecutedV1Resources = v1ScenarioResources.filterNot(executedJsonScenarioResources::contains)
+            val v1Claims = v1ScenarioMetadata.flatMap { (it["claims"] as? List<*>)?.map { claim -> claim.toString() } ?: emptyList() }
+                .distinct()
+                .sorted()
+            val executedV1Claims = v1ScenarioMetadata
+                .filter { executedJsonScenarioResources.contains(it["resource"] as? String) }
+                .flatMap { (it["claims"] as? List<*>)?.map { claim -> claim.toString() } ?: emptyList() }
+                .distinct()
+                .sorted()
+            val passedV1Claims = v1ScenarioMetadata
+                .filter { passedJsonScenarioResources.contains(it["resource"] as? String) }
+                .flatMap { (it["claims"] as? List<*>)?.map { claim -> claim.toString() } ?: emptyList() }
+                .distinct()
+                .sorted()
+            val unprovenV1Claims = v1Claims.filterNot(passedV1Claims::contains)
             val resourceTraceabilityStatus = when {
                 allJsonScenarioResources.isEmpty() -> "no-json-scenarios-defined"
                 executedTestCases == 0 -> "no-testcases-executed"
@@ -963,6 +1017,13 @@ val writeE2eSummary by tasks.registering {
                 jsonScenarioBackedExecutedCases == 0 -> "json-scenario-subset-not-detected-in-results"
                 untaggedExecutedTestCases == 0 -> "all-executed-cases-are-json-scenario-backed"
                 else -> "suite-mixes-json-scenario-backed-and-non-json-harness-cases"
+            }
+            val v1PackCoverageStatus = when {
+                v1ScenarioResources.isEmpty() -> "no-v1-pack-defined"
+                executedTestCases == 0 -> "suite-did-not-execute"
+                passedV1Resources.isEmpty() -> "v1-pack-not-proven"
+                passedV1Resources.size == v1ScenarioResources.size -> "all-v1-pack-resources-passed"
+                else -> "partially-proven-v1-pack"
             }
 
             mapOf(
@@ -988,18 +1049,44 @@ val writeE2eSummary by tasks.registering {
                 "scenarioResources" to mapOf(
                     "jsonScenarioFiles" to scenarioFiles.map { it.name },
                     "jsonScenarioFileCount" to scenarioFiles.size,
-                    "jsonScenarioResourcePaths" to allJsonScenarioResources
+                    "jsonScenarioResourcePaths" to allJsonScenarioResources,
+                    "metadata" to scenarioMetadata
                 ),
                 "jsonScenarioCoverage" to mapOf(
                     "executedTestCaseCount" to jsonScenarioBackedExecutedCases,
                     "untaggedExecutedTestCaseCount" to untaggedExecutedTestCases,
                     "executedResourceCount" to executedJsonScenarioResources.size,
+                    "passedResourceCount" to passedJsonScenarioResources.size,
                     "resourceCount" to allJsonScenarioResources.size,
                     "resourceTraceabilityStatus" to resourceTraceabilityStatus,
                     "traceabilityScopeStatus" to traceabilityScopeStatus,
                     "executedResources" to executedJsonScenarioResources,
+                    "passedResources" to passedJsonScenarioResources,
+                    "failedResources" to failedJsonScenarioResources,
+                    "skippedResources" to skippedJsonScenarioResources,
                     "unexecutedResources" to unexecutedJsonScenarioResources,
+                    "resourceStatuses" to allJsonScenarioResources.map { resource ->
+                        mapOf(
+                            "resource" to resource,
+                            "status" to scenarioStatusByResource.getValue(resource)
+                        )
+                    },
                     "executions" to jsonScenarioExecutions
+                ),
+                "v1ScenarioPack" to mapOf(
+                    "resourceCount" to v1ScenarioResources.size,
+                    "executedResourceCount" to executedV1Resources.size,
+                    "passedResourceCount" to passedV1Resources.size,
+                    "coverageStatus" to v1PackCoverageStatus,
+                    "resources" to v1ScenarioMetadata,
+                    "executedResources" to executedV1Resources,
+                    "passedResources" to passedV1Resources,
+                    "failedResources" to failedV1Resources,
+                    "unexecutedResources" to unexecutedV1Resources,
+                    "claims" to v1Claims,
+                    "executedClaims" to executedV1Claims,
+                    "passedClaims" to passedV1Claims,
+                    "unprovenClaims" to unprovenV1Claims
                 ),
                 "scenarios" to scenarios
             )
@@ -1148,6 +1235,7 @@ tasks.register("writeQualityMarkdownReports") {
         val e2eExecution = mdMap(e2e["testExecution"])
         val scenarioCoverage = mdMap(e2e["jsonScenarioCoverage"])
         val scenarioResources = mdMap(e2e["scenarioResources"])
+        val v1ScenarioPack = mdMap(e2e["v1ScenarioPack"])
         val e2eTotal = mdInt(e2eExecution["total"])
         val e2ePassed = mdInt(e2eExecution["passed"])
         val e2eFailures = mdInt(e2eExecution["failures"])
@@ -1155,14 +1243,32 @@ tasks.register("writeQualityMarkdownReports") {
         val e2eSkipped = mdInt(e2eExecution["skipped"])
         val resourceCount = mdInt(scenarioCoverage["resourceCount"])
         val executedResourceCount = mdInt(scenarioCoverage["executedResourceCount"])
+        val passedResourceCount = mdInt(scenarioCoverage["passedResourceCount"])
         val jsonBacked = mdInt(scenarioCoverage["executedTestCaseCount"])
         val untagged = mdInt(scenarioCoverage["untaggedExecutedTestCaseCount"])
-        val scenarioFiles = mdList(scenarioResources["jsonScenarioFiles"]).map { it.toString() }
-        val scenarioLines = scenarioFiles.joinToString("\n") { file ->
+        val scenarioStatuses = mdList(scenarioCoverage["resourceStatuses"]).map { mdMap(it) }
+        val v1Resources = mdList(v1ScenarioPack["resources"]).map { mdMap(it) }
+        val v1PassedClaims = mdList(v1ScenarioPack["passedClaims"]).map { it.toString() }
+        val v1UnprovenClaims = mdList(v1ScenarioPack["unprovenClaims"]).map { it.toString() }
+        val scenarioLines = scenarioStatuses.joinToString("\n") { resourceStatus ->
+            val file = mdSafe(resourceStatus["resource"]).removePrefix("scenarios/")
             val label = file.removeSuffix(".json").replace(Regex("^\\d+-"), "").replace("-", " ")
-            "  +-- ${label.padEnd(42, '.')} PASS"
+            val status = mdSafe(resourceStatus["status"]).uppercase()
+            "  +-- ${label.padEnd(42, '.')} $status"
         }
         val indentedScenarioLines = (scenarioLines.ifBlank { "  +-- no JSON scenarios discovered" }).prependIndent("            ")
+        val v1ScenarioLines = v1Resources.joinToString("\n") { resource ->
+            val label = mdSafe(resource["name"])
+            val claims = mdList(resource["claims"]).map { it.toString() }
+            val claimSummary = if (claims.isEmpty()) "no claims tagged" else claims.joinToString(", ")
+            val resourcePath = mdSafe(resource["resource"])
+            val status = scenarioStatuses.firstOrNull { mdSafe(mdMap(it)["resource"]) == resourcePath }
+                ?.let { mdSafe(it["status"]).uppercase() } ?: "NOT-EXECUTED"
+            "  +-- ${label.padEnd(34, '.')} ${status.padEnd(11, ' ')} ${claimSummary}"
+        }
+        val indentedV1ScenarioLines = (v1ScenarioLines.ifBlank { "  +-- no V1 scenario pack metadata present" }).prependIndent("            ")
+        val v1ClaimSummary = if (v1PassedClaims.isEmpty()) "none" else v1PassedClaims.joinToString(", ")
+        val v1ClaimGapSummary = if (v1UnprovenClaims.isEmpty()) "none" else v1UnprovenClaims.joinToString(", ")
 
         writeReport("e2e", talosVersion, """
             # E2E Report - $reportDate - Talos $talosVersion
@@ -1182,7 +1288,7 @@ tasks.register("writeQualityMarkdownReports") {
             | Question | Answer | Confidence |
             | --- | --- | --- |
             | Did every E2E test pass? | ${if (e2eFailures == 0 && e2eErrors == 0 && e2eSkipped == 0) "Yes, `$e2ePassed / $e2eTotal` passed" else "No, review failures/errors/skips"} | High |
-            | Did every JSON scenario resource execute? | ${if (executedResourceCount == resourceCount) "Yes, `$executedResourceCount / $resourceCount` executed" else "No, `$executedResourceCount / $resourceCount` executed"} | High |
+            | Did every JSON scenario resource pass? | ${if (passedResourceCount == resourceCount) "Yes, `$passedResourceCount / $resourceCount` passed" else "No, `$passedResourceCount / $resourceCount` passed"} | High |
             | Is traceability complete for all E2E cases? | ${if (untagged == 0) "Yes" else "No, `$untagged` harness cases are not JSON-resource-backed"} | Medium |
             | Is this report useful for release review? | Yes for workflow confidence, partial for scenario inventory governance | High |
 
@@ -1194,6 +1300,22 @@ tasks.register("writeQualityMarkdownReports") {
             User workflow checks
 
 ${indentedScenarioLines}
+            ```
+
+            ## V1 Scenario Pack
+
+            Decision question: which architecture claims are explicitly covered by the curated V1 pack?
+
+            ```text
+            Curated V1 pack resources
+
+${indentedV1ScenarioLines}
+
+            Proven V1 claims:
+              $v1ClaimSummary
+
+            Remaining V1 claim gaps:
+              $v1ClaimGapSummary
             ```
 
             ## Traceability Gap
