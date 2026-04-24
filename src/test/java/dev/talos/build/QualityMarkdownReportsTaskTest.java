@@ -49,7 +49,27 @@ class QualityMarkdownReportsTaskTest {
                     "executedTestCaseCount": 1,
                     "untaggedExecutedTestCaseCount": 1,
                     "executedResourceCount": 1,
-                    "resourceCount": 1
+                    "passedResourceCount": 1,
+                    "resourceCount": 1,
+                    "resourceStatuses": [
+                      {
+                        "resource": "scenarios/01-sample-flow.json",
+                        "status": "passed"
+                      }
+                    ]
+                  },
+                  "v1ScenarioPack": {
+                    "resources": [
+                      {
+                        "resource": "scenarios/01-sample-flow.json",
+                        "name": "sample flow",
+                        "runner": "executor",
+                        "v1Pack": true,
+                        "claims": ["read-only-requests-remain-read-only", "inspect-first-analysis-is-grounded"]
+                      }
+                    ],
+                    "passedClaims": ["read-only-requests-remain-read-only"],
+                    "unprovenClaims": ["inspect-first-analysis-is-grounded"]
                   }
                 }
                 """);
@@ -117,6 +137,12 @@ class QualityMarkdownReportsTaskTest {
         assertFalse(coverage.contains("Usefulness Assessment"));
         assertTrue(coverage.contains("80.00%"));
         assertTrue(e2e.contains("sample flow"));
+        assertTrue(e2e.contains("## V1 Scenario Pack"));
+        assertTrue(e2e.contains("PASSED"));
+        assertTrue(e2e.contains("Did every JSON scenario resource pass?"));
+        assertTrue(e2e.contains("Proven V1 claims"));
+        assertTrue(e2e.contains("read-only-requests-remain-read-only"));
+        assertTrue(e2e.contains("inspect-first-analysis-is-grounded"));
         assertTrue(qodana.contains("3 Qodana findings"));
         assertTrue(qodana.contains("Yes, `2` high"));
         assertTrue(version.contains("artifact is fresh for this packet"));

@@ -190,7 +190,14 @@ public final class ToolCallLoop {
                     parseStage.parse(state.currentText, state.currentNativeCalls, state.iterations + 1);
             if (!parsed.useNativePath() && !parsed.useTextPath()) break;
             state.iterations++;
-            if (parsed.calls().isEmpty()) break;
+            if (parsed.calls().isEmpty()) {
+                if (shouldSuppressUnfinishedToolContinuation(state.currentText, state.totalToolsInvoked)) {
+                    LOG.warn("Suppressing unfinished tool-call continuation after {} executed tool(s)",
+                            state.totalToolsInvoked);
+                    state.currentText = unresolvedContinuationFallback();
+                }
+                break;
+            }
 
             ToolCallExecutionStage.IterationOutcome outcome = executionStage.execute(state, parsed);
             if (!repromptStage.reprompt(state, outcome)) {
@@ -205,8 +212,7 @@ public final class ToolCallLoop {
                     + "\n\n[Tool-call limit reached. Some tool calls were not executed.]";
         }
 
-        String finalAnswer = Sanitize.stripSuspiciousHtml(
-                ToolCallParser.stripToolCalls(state.currentText));
+        String finalAnswer = finalizeAnswer(state.currentText, state.totalToolsInvoked);
 
         LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked, {} failed",
                 state.iterations, state.totalToolsInvoked, state.failedCalls);
@@ -220,6 +226,21 @@ public final class ToolCallLoop {
                 state.cushionFiresRedundantRead,
                 cushionFiresAliasRescue, state.cushionFiresB3EditShortCircuit,
                 state.cushionFiresE1Suggestion, List.copyOf(state.toolOutcomes));
+    }
+
+    private static String finalizeAnswer(String currentText, int toolsInvoked) {
+        if (shouldSuppressUnfinishedToolContinuation(currentText, toolsInvoked)) {
+            return unresolvedContinuationFallback();
+        }
+        return Sanitize.stripSuspiciousHtml(ToolCallParser.stripToolCalls(currentText));
+    }
+
+    private static boolean shouldSuppressUnfinishedToolContinuation(String text, int toolsInvoked) {
+        return toolsInvoked > 0 && ToolCallParser.looksLikeUnfinishedToolPayload(text);
+    }
+
+    private static String unresolvedContinuationFallback() {
+        return "[Tool-call continuation could not be completed. No further tool calls were executed.]";
     }
 
     static List<ToolCall> convertNativeToolCalls(List<NativeToolCall> nativeCalls) {

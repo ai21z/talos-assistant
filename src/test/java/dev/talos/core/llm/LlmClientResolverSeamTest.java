@@ -22,7 +22,7 @@ final class LlmClientResolverSeamTest {
         LlmClient client = new LlmClient(engineConfig(), resolver);
 
         assertEquals("ollama", resolver.selectedBackend);
-        assertEquals("qwen3:8b", resolver.selectedModel);
+        assertEquals("qwen2.5-coder:14b", resolver.selectedModel);
 
         client.setModel("mock/custom-model");
 
@@ -49,7 +49,7 @@ final class LlmClientResolverSeamTest {
         cfg.data.put("llm", llm);
 
         LinkedHashMap<String, Object> ollama = new LinkedHashMap<>();
-        ollama.put("model", "qwen3:8b");
+        ollama.put("model", "qwen2.5-coder:14b");
         cfg.data.put("ollama", ollama);
         return cfg;
     }

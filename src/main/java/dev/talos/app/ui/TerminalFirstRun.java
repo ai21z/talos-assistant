@@ -29,7 +29,7 @@ public final class TerminalFirstRun {
     private static final Path SENTINEL =
             Paths.get(System.getProperty("user.home"), ".talos", "first_run_done");
 
-    private static final String DEFAULT_MODEL = "qwen3:8b";
+    private static final String DEFAULT_MODEL = "qwen2.5-coder:14b";
 
     private TerminalFirstRun() {}
 

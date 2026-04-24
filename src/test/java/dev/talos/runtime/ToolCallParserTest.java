@@ -443,6 +443,38 @@ class ToolCallParserTest {
                 "\n{\"name\": \"talos.read_file\", \"parameters\": {\"path\": \"x\"}}"));
     }
 
+    @Test
+    void parseStandaloneRawJsonWithArgumentsKey() {
+        String response = """
+                {
+                  "name": "talos.grep",
+                  "arguments": {
+                    "pattern": "TODO",
+                    "include": "*.java"
+                  }
+                }
+                """;
+
+        List<ToolCall> calls = ToolCallParser.parse(response);
+        assertEquals(1, calls.size());
+        assertEquals("talos.grep", calls.get(0).toolName());
+        assertEquals("TODO", calls.get(0).param("pattern"));
+    }
+
+    @Test
+    void stripToolCallsRemovesStandaloneRawJsonToolPayload() {
+        String response = """
+                {
+                  "name": "talos.grep",
+                  "arguments": {
+                    "pattern": "TODO"
+                  }
+                }
+                """;
+
+        assertEquals("", ToolCallParser.stripToolCalls(response));
+    }
+
     // ── Protocol hardening: JSON key normalization ───────────────────
 
     @Test

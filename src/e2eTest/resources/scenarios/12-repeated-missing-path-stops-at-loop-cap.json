@@ -1,0 +1,14 @@
+{
+  "name": "repeated missing-path failure stops at loop cap",
+  "fixture": "doc-repo",
+  "v1Pack": true,
+  "claims": [
+    "repeated-failure-stops-at-loop-cap"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Read README.md and tell me the product name.",
+  "scriptedResponses": [
+    "I'll inspect the README file first.\n```json\n{\"name\":\"talos.read_file\",\"parameters\":{\"path\":\"READMEE.md\"}}\n```"
+  ]
+}

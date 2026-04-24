@@ -32,13 +32,21 @@ class E2eSummaryTaskTest {
         Path projectDir = createBuildFixture();
         Path scenariosDir = Files.createDirectories(projectDir.resolve("src/e2eTest/resources/scenarios"));
         Files.createDirectories(projectDir.resolve("build/test-results/candidateE2eTest"));
-        writeUtf8(scenariosDir.resolve("01-read-only.json"), "{ \"id\": \"01\" }\n");
+        writeUtf8(scenariosDir.resolve("01-read-only.json"), """
+                {
+                  "id": "01",
+                  "name": "read-only workspace",
+                  "v1Pack": true,
+                  "claims": ["read-only-requests-remain-read-only"]
+                }
+                """);
 
         runWriteE2eSummary(projectDir);
 
         Map<String, Object> summary = readSummary(projectDir);
         Map<String, Object> testExecution = castMap(summary.get("testExecution"));
         Map<String, Object> jsonScenarioCoverage = castMap(summary.get("jsonScenarioCoverage"));
+        Map<String, Object> v1ScenarioPack = castMap(summary.get("v1ScenarioPack"));
 
         assertEquals("no-results", testExecution.get("status"));
         assertEquals(0, testExecution.get("executedTestCaseCount"));
@@ -46,9 +54,22 @@ class E2eSummaryTaskTest {
         assertEquals("suite-did-not-execute", jsonScenarioCoverage.get("traceabilityScopeStatus"));
         assertEquals(0, jsonScenarioCoverage.get("executedTestCaseCount"));
         assertEquals(0, jsonScenarioCoverage.get("untaggedExecutedTestCaseCount"));
+        assertEquals(0, jsonScenarioCoverage.get("passedResourceCount"));
         assertIterableEquals(
                 List.of("scenarios/01-read-only.json"),
                 castList(jsonScenarioCoverage.get("unexecutedResources"))
+        );
+        assertEquals(1, v1ScenarioPack.get("resourceCount"));
+        assertEquals(0, v1ScenarioPack.get("executedResourceCount"));
+        assertEquals(0, v1ScenarioPack.get("passedResourceCount"));
+        assertEquals("suite-did-not-execute", v1ScenarioPack.get("coverageStatus"));
+        assertIterableEquals(
+                List.of("read-only-requests-remain-read-only"),
+                castList(v1ScenarioPack.get("claims"))
+        );
+        assertIterableEquals(
+                List.of("read-only-requests-remain-read-only"),
+                castList(v1ScenarioPack.get("unprovenClaims"))
         );
     }
 
@@ -59,8 +80,22 @@ class E2eSummaryTaskTest {
         Path scenariosDir = Files.createDirectories(projectDir.resolve("src/e2eTest/resources/scenarios"));
         Path resultsDir = Files.createDirectories(projectDir.resolve("build/test-results/candidateE2eTest"));
 
-        writeUtf8(scenariosDir.resolve("01-read-only.json"), "{ \"id\": \"01\" }\n");
-        writeUtf8(scenariosDir.resolve("02-edit.json"), "{ \"id\": \"02\" }\n");
+        writeUtf8(scenariosDir.resolve("01-read-only.json"), """
+                {
+                  "id": "01",
+                  "name": "read-only path",
+                  "v1Pack": true,
+                  "claims": ["read-only-requests-remain-read-only"]
+                }
+                """);
+        writeUtf8(scenariosDir.resolve("02-edit.json"), """
+                {
+                  "id": "02",
+                  "name": "edit path",
+                  "v1Pack": true,
+                  "claims": ["narrow-file-edit-mutates-only-requested-target"]
+                }
+                """);
         writeUtf8(resultsDir.resolve("TEST-dev.talos.harness.Mixed.xml"), """
                 <?xml version="1.0" encoding="UTF-8"?>
                 <testsuite name="mixed" tests="3" failures="0" errors="0" skipped="0">
@@ -81,12 +116,14 @@ class E2eSummaryTaskTest {
         Map<String, Object> summary = readSummary(projectDir);
         Map<String, Object> testExecution = castMap(summary.get("testExecution"));
         Map<String, Object> jsonScenarioCoverage = castMap(summary.get("jsonScenarioCoverage"));
+        Map<String, Object> v1ScenarioPack = castMap(summary.get("v1ScenarioPack"));
 
         assertEquals("passed", testExecution.get("status"));
         assertEquals(3, testExecution.get("executedTestCaseCount"));
         assertEquals(2, jsonScenarioCoverage.get("executedTestCaseCount"));
         assertEquals(1, jsonScenarioCoverage.get("untaggedExecutedTestCaseCount"));
         assertEquals(2, jsonScenarioCoverage.get("executedResourceCount"));
+        assertEquals(2, jsonScenarioCoverage.get("passedResourceCount"));
         assertEquals(2, jsonScenarioCoverage.get("resourceCount"));
         assertEquals("partially-traceable-executed-cases", jsonScenarioCoverage.get("resourceTraceabilityStatus"));
         assertEquals("suite-mixes-json-scenario-backed-and-non-json-harness-cases",
@@ -96,6 +133,85 @@ class E2eSummaryTaskTest {
                 castList(jsonScenarioCoverage.get("executedResources"))
         );
         assertIterableEquals(List.of(), castList(jsonScenarioCoverage.get("unexecutedResources")));
+        assertEquals(2, v1ScenarioPack.get("resourceCount"));
+        assertEquals(2, v1ScenarioPack.get("executedResourceCount"));
+        assertEquals(2, v1ScenarioPack.get("passedResourceCount"));
+        assertEquals("all-v1-pack-resources-passed", v1ScenarioPack.get("coverageStatus"));
+        assertIterableEquals(
+                List.of("narrow-file-edit-mutates-only-requested-target", "read-only-requests-remain-read-only"),
+                castList(v1ScenarioPack.get("claims"))
+        );
+        assertIterableEquals(
+                List.of("narrow-file-edit-mutates-only-requested-target", "read-only-requests-remain-read-only"),
+                castList(v1ScenarioPack.get("passedClaims"))
+        );
+        assertIterableEquals(List.of(), castList(v1ScenarioPack.get("unprovenClaims")));
+    }
+
+    @Test
+    @DisplayName("writeE2eSummary separates executed resources from passed resources for V1 claim coverage")
+    void distinguishesPassedResourcesFromExecutedResources() throws Exception {
+        Path projectDir = createBuildFixture();
+        Path scenariosDir = Files.createDirectories(projectDir.resolve("src/e2eTest/resources/scenarios"));
+        Path resultsDir = Files.createDirectories(projectDir.resolve("build/test-results/candidateE2eTest"));
+
+        writeUtf8(scenariosDir.resolve("01-pass.json"), """
+                {
+                  "id": "01",
+                  "name": "passing path",
+                  "v1Pack": true,
+                  "claims": ["claim-pass"]
+                }
+                """);
+        writeUtf8(scenariosDir.resolve("02-fail.json"), """
+                {
+                  "id": "02",
+                  "name": "failing path",
+                  "v1Pack": true,
+                  "claims": ["claim-fail"]
+                }
+                """);
+        writeUtf8(resultsDir.resolve("TEST-dev.talos.harness.MixedStatus.xml"), """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <testsuite name="mixed-status" tests="2" failures="1" errors="0" skipped="0">
+                  <testcase classname="dev.talos.harness.JsonScenarioPackTest"
+                            name="[json-scenario:scenarios/01-pass.json] pass path"
+                            time="0.011" />
+                  <testcase classname="dev.talos.harness.JsonScenarioPackTest"
+                            name="[json-scenario:scenarios/02-fail.json] fail path"
+                            time="0.012">
+                    <failure message="boom">boom</failure>
+                  </testcase>
+                </testsuite>
+                """);
+
+        runWriteE2eSummary(projectDir);
+
+        Map<String, Object> summary = readSummary(projectDir);
+        Map<String, Object> jsonScenarioCoverage = castMap(summary.get("jsonScenarioCoverage"));
+        Map<String, Object> v1ScenarioPack = castMap(summary.get("v1ScenarioPack"));
+
+        assertEquals(2, jsonScenarioCoverage.get("executedResourceCount"));
+        assertEquals(1, jsonScenarioCoverage.get("passedResourceCount"));
+        assertIterableEquals(
+                List.of("scenarios/01-pass.json"),
+                castList(jsonScenarioCoverage.get("passedResources"))
+        );
+        assertIterableEquals(
+                List.of("scenarios/02-fail.json"),
+                castList(jsonScenarioCoverage.get("failedResources"))
+        );
+        assertEquals(2, v1ScenarioPack.get("executedResourceCount"));
+        assertEquals(1, v1ScenarioPack.get("passedResourceCount"));
+        assertEquals("partially-proven-v1-pack", v1ScenarioPack.get("coverageStatus"));
+        assertIterableEquals(
+                List.of("claim-pass"),
+                castList(v1ScenarioPack.get("passedClaims"))
+        );
+        assertIterableEquals(
+                List.of("claim-fail"),
+                castList(v1ScenarioPack.get("unprovenClaims"))
+        );
     }
 
     @Test
