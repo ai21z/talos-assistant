@@ -2,9 +2,11 @@ package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.core.llm.LlmClient;
+import dev.talos.runtime.MutationIntent;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.ToolCallStreamFilter;
+import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import org.slf4j.Logger;
@@ -15,6 +17,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -152,6 +156,9 @@ public final class AssistantTurnExecutor {
                                 answer, messages, loopResult, workspace, ctx);
                         answer = irr.answer();
                         if (irr.extraSummary() != null) out.append(irr.extraSummary()).append("\n\n");
+                        answer = overrideSelectorMismatchAnalysisIfNeeded(answer, messages, loopResult, workspace);
+                        answer = summarizeDeniedMutationOutcomesIfNeeded(answer, messages, loopResult, mrr.mutationsInRetry());
+                        answer = summarizePartialMutationOutcomesIfNeeded(answer, loopResult, mrr.mutationsInRetry());
                         // Claim-vs-action truth layer: annotate if the answer claims a mutation
                         // that no mutating tool actually performed this turn.
                         answer = annotateIfFalseMutationClaim(answer, loopResult, mrr.mutationsInRetry());
@@ -163,24 +170,19 @@ public final class AssistantTurnExecutor {
                         out.append(answer);
                     } else {
                         // No tool calls — content was streamed; record full text for memory.
-                        //
-                        // N2 (streaming-path R6): we cannot silently retry here — the
-                        // prose is already on the terminal. If the R6 shape matches
-                        // (long answer, zero tools, evidence-request prompt), append
-                        // a trailing grounding notice. The notice is written to the
-                        // stream sink so the user actually sees it, and appended to
-                        // {@code out} so it enters the turn record / history.
+                        // Streaming no-tool branch. We cannot silently retry here
+                        // because prose is already on the terminal, so truthfulness
+                        // must be enforced by visible annotation of high-risk shapes.
                         streamed = true;
-                        out.append(answer);
                         if (shouldAppendStreamingGroundingAnnotation(answer, messages)) {
                             LOG.info("Streaming grounding annotation appended: answer={} chars, "
                                     + "zero tools, user asked for evidence.", answer.length());
-                            String notice = "\n\n" + UNGROUNDED_ANNOTATION.stripTrailing() + "\n";
-                            if (ctx.streamSink() != null) {
-                                try { ctx.streamSink().accept(notice); } catch (Exception ignored) { }
-                            }
-                            out.append(notice);
                         }
+                        if (annotateStreamingNoToolMutationClaim(answer, messages) != answer) {
+                            LOG.info("Streaming no-tool mutation annotation appended: zero tools, "
+                                    + "response narrates completed changes.");
+                        }
+                        out.append(enforceStreamingNoToolTruthfulness(answer, messages));
                     }
                 } else {
                     out.append("(no answer)");
@@ -214,6 +216,9 @@ public final class AssistantTurnExecutor {
                                 answer, messages, loopResult, workspace, ctx);
                         answer = irr.answer();
                         if (irr.extraSummary() != null) out.append(irr.extraSummary()).append("\n\n");
+                        answer = overrideSelectorMismatchAnalysisIfNeeded(answer, messages, loopResult, workspace);
+                        answer = summarizeDeniedMutationOutcomesIfNeeded(answer, messages, loopResult, mrr.mutationsInRetry());
+                        answer = summarizePartialMutationOutcomesIfNeeded(answer, loopResult, mrr.mutationsInRetry());
                         // Claim-vs-action truth layer: annotate if the answer claims a mutation
                         // that no mutating tool actually performed this turn.
                         answer = annotateIfFalseMutationClaim(answer, loopResult, mrr.mutationsInRetry());
@@ -465,6 +470,14 @@ public final class AssistantTurnExecutor {
             + "but no file-mutating tool succeeded in this turn. "
             + "No file on disk was actually modified.]\n\n";
 
+    public static final String PARTIAL_MUTATION_ANNOTATION =
+            "⚠ [Truth check: some requested file changes succeeded and some failed. "
+            + "Verified outcomes for this turn are listed below.]\n\n";
+
+    public static final String DENIED_MUTATION_ANNOTATION =
+            "⚠ [Truth check: no file was changed in this turn because the requested "
+            + "write was not approved.]\n\n";
+
     /**
      * Returns {@code true} if the answer contains language that strongly
      * asserts a file mutation was performed (applied, edited, written,
@@ -516,11 +529,92 @@ public final class AssistantTurnExecutor {
         if (loopResult == null) return answer;
         int totalMutations = loopResult.mutatingToolSuccesses() + Math.max(0, extraMutationSuccesses);
         if (totalMutations > 0) return answer; // a real mutation backs the claim
+        if (hasDeniedMutation(loopResult)) return answer;
         if (!containsMutationClaim(answer)) return answer;
 
         LOG.warn("False mutation claim detected: answer asserts a file change, "
                 + "but no mutating tool succeeded this turn. Annotating.");
         return FALSE_MUTATION_ANNOTATION + answer;
+    }
+
+    static String summarizePartialMutationOutcomesIfNeeded(String answer,
+                                                           ToolCallLoop.LoopResult loopResult,
+                                                           int extraMutationSuccesses) {
+        if (loopResult == null) return answer;
+        if (extraMutationSuccesses > 0) return answer;
+
+        List<ToolCallLoop.ToolOutcome> outcomes = loopResult.toolOutcomes();
+        if (outcomes == null || outcomes.isEmpty()) return answer;
+
+        List<ToolCallLoop.ToolOutcome> mutating = outcomes.stream()
+                .filter(ToolCallLoop.ToolOutcome::mutating)
+                .toList();
+        if (mutating.isEmpty()) return answer;
+
+        List<ToolCallLoop.ToolOutcome> successes = mutating.stream()
+                .filter(ToolCallLoop.ToolOutcome::success)
+                .toList();
+        List<ToolCallLoop.ToolOutcome> failures = mutating.stream()
+                .filter(o -> !o.success())
+                .toList();
+        if (successes.isEmpty() || failures.isEmpty()) return answer;
+
+        StringBuilder out = new StringBuilder(PARTIAL_MUTATION_ANNOTATION);
+        out.append("Succeeded:\n");
+        for (ToolCallLoop.ToolOutcome outcome : successes) {
+            out.append("- ")
+                    .append(outcome.pathHint().isBlank() ? outcome.toolName() : outcome.pathHint())
+                    .append(": ")
+                    .append(outcome.summary().isBlank() ? "mutation applied" : outcome.summary())
+                    .append('\n');
+        }
+        out.append("Failed:\n");
+        for (ToolCallLoop.ToolOutcome outcome : failures) {
+            out.append("- ")
+                    .append(outcome.pathHint().isBlank() ? outcome.toolName() : outcome.pathHint())
+                    .append(": ")
+                    .append(trimFailureMessage(outcome.errorMessage()))
+                    .append('\n');
+        }
+        out.append("\nThe assistant summary was replaced with this verified mutation outcome because the turn had partial success.");
+        return out.toString().stripTrailing();
+    }
+
+    private static String trimFailureMessage(String errorMessage) {
+        if (errorMessage == null || errorMessage.isBlank()) return "mutation failed";
+        String msg = errorMessage.strip();
+        int newline = msg.indexOf('\n');
+        if (newline > 0) msg = msg.substring(0, newline).strip();
+        if (msg.length() > 180) msg = msg.substring(0, 177) + "…";
+        return msg;
+    }
+
+    static String summarizeDeniedMutationOutcomesIfNeeded(String answer,
+                                                          List<ChatMessage> messages,
+                                                          ToolCallLoop.LoopResult loopResult,
+                                                          int extraMutationSuccesses) {
+        if (loopResult == null) return answer;
+        if (extraMutationSuccesses > 0) return answer;
+        if (loopResult.mutatingToolSuccesses() > 0) return answer;
+        if (!looksLikeMutationRequest(latestUserRequest(messages))) return answer;
+
+        List<ToolCallLoop.ToolOutcome> outcomes = loopResult.toolOutcomes();
+        if (outcomes == null || outcomes.isEmpty()) return answer;
+        List<ToolCallLoop.ToolOutcome> deniedMutations = outcomes.stream()
+                .filter(ToolCallLoop.ToolOutcome::mutating)
+                .filter(ToolCallLoop.ToolOutcome::denied)
+                .toList();
+        if (deniedMutations.isEmpty()) return answer;
+
+        StringBuilder out = new StringBuilder(DENIED_MUTATION_ANNOTATION);
+        out.append("No file changes were applied because approval was denied for:\n");
+        for (ToolCallLoop.ToolOutcome outcome : deniedMutations) {
+            out.append("- ")
+                    .append(outcome.pathHint().isBlank() ? outcome.toolName() : outcome.pathHint())
+                    .append(": approval denied\n");
+        }
+        out.append("\nTalos can still help in a later turn if you want to retry the edit or take a read-only approach.");
+        return out.toString().stripTrailing();
     }
 
     // ── Point 3 — Missing-mutation retry ─────────────────────────────────
@@ -531,25 +625,6 @@ public final class AssistantTurnExecutor {
      * message. Deliberately narrow: we only want to fire this retry when
      * the user's language is unambiguous about wanting a change applied.
      */
-    private static final Set<String> MUTATION_REQUEST_MARKERS = Set.of(
-            "edit it", "edit the", "edit this", "edit that",
-            "modify it", "modify the", "modify this", "modify that",
-            "change it", "change the", "change this", "change that",
-            "change everything", "change all",
-            "update it", "update the", "update this", "update that",
-            "fix it", "fix the", "fix this", "fix that",
-            "rewrite it", "rewrite the", "rewrite this",
-            "replace it", "replace the", "replace this",
-            "redesign", "restyle", "re-style", "re-design",
-            "make it ", "make the ", "make this ", "make that ",
-            "write a ", "write the ", "create a ", "create the ",
-            "save it", "save the",
-            "apply the", "apply these", "apply those",
-            "add a ", "add the ", "remove the ", "delete the ",
-            "refactor ",
-            "darker and more minimal"
-    );
-
     /** Result of the missing-mutation retry gate. */
     record MutationRetryResult(String answer, int mutationsInRetry, String extraSummary) {}
 
@@ -558,12 +633,7 @@ public final class AssistantTurnExecutor {
      * verb. Package-private for direct testing.
      */
     static boolean looksLikeMutationRequest(String userRequest) {
-        if (userRequest == null || userRequest.isBlank()) return false;
-        String lower = userRequest.toLowerCase();
-        for (String marker : MUTATION_REQUEST_MARKERS) {
-            if (lower.contains(marker)) return true;
-        }
-        return false;
+        return MutationIntent.looksExplicitMutationRequest(userRequest);
     }
 
     /**
@@ -602,6 +672,7 @@ public final class AssistantTurnExecutor {
         if (loopResult.mutatingToolSuccesses() > 0) return new MutationRetryResult(answer, 0, null);
         if (ctx == null || ctx.llm() == null) return new MutationRetryResult(answer, 0, null);
         if (ctx.toolCallLoop() == null) return new MutationRetryResult(answer, 0, null);
+        if (hasDeniedMutation(loopResult)) return new MutationRetryResult(answer, 0, null);
 
         String userRequest = latestUserRequest(messages);
         if (!looksLikeMutationRequest(userRequest)) return new MutationRetryResult(answer, 0, null);
@@ -626,7 +697,7 @@ public final class AssistantTurnExecutor {
             LlmClient.StreamResult retry = ctx.llm().chatFull(messages);
             String retryText = retry.text() == null ? "" : retry.text();
 
-            if (retry.hasToolCalls()) {
+            if (retry.hasToolCalls() || ToolCallParser.containsToolCalls(retryText)) {
                 // Re-enter the tool loop so the mutating call actually executes.
                 ToolCallLoop.LoopResult retryLoop = ctx.toolCallLoop().run(
                         retryText, retry.toolCalls(), messages, workspace, ctx);
@@ -646,7 +717,8 @@ public final class AssistantTurnExecutor {
             // text if it's non-blank (model explained why it can't), otherwise
             // fall back to the original answer.
             if (!retryText.isBlank() && !retryText.equals(answer)) {
-                return new MutationRetryResult(retryText, 0, null);
+                String stripped = ToolCallParser.stripToolCalls(retryText);
+                return new MutationRetryResult(stripped.isBlank() ? answer : stripped, 0, null);
             }
         } catch (Exception e) {
             LOG.warn("Missing-mutation retry failed: {}", e.getMessage());
@@ -654,7 +726,32 @@ public final class AssistantTurnExecutor {
         return new MutationRetryResult(answer, 0, null);
     }
 
+    private static boolean hasDeniedMutation(ToolCallLoop.LoopResult loopResult) {
+        if (loopResult == null || loopResult.toolOutcomes() == null) return false;
+        return loopResult.toolOutcomes().stream()
+                .anyMatch(outcome -> outcome.mutating() && outcome.denied());
+    }
+
     record InspectRetryResult(String answer, String extraSummary) {}
+
+    private static final Set<String> SELECTOR_MISMATCH_MARKERS = Set.of(
+            "mismatches between html classes/ids and the selectors used in css or javascript",
+            "mismatches between html classes/ids",
+            "selectors used in css or javascript",
+            "html classes/ids",
+            "selector mismatch",
+            "selectors used in css",
+            "selectors used in javascript"
+    );
+
+    private static final Pattern HTML_CLASS_ATTR = Pattern.compile("class\\s*=\\s*\"([^\"]+)\"");
+    private static final Pattern HTML_ID_ATTR = Pattern.compile("id\\s*=\\s*\"([^\"]+)\"");
+    private static final Pattern CSS_CLASS_SELECTOR = Pattern.compile("\\.([A-Za-z_][A-Za-z0-9_-]*)");
+    private static final Pattern CSS_ID_SELECTOR = Pattern.compile("#([A-Za-z_][A-Za-z0-9_-]*)");
+    private static final Pattern CSS_SELECTOR_PRELUDE = Pattern.compile("(?s)([^{}]+)\\{");
+    private static final Pattern JS_QUERY_SELECTOR = Pattern.compile("querySelector(?:All)?\\s*\\(\\s*['\"]([#.][A-Za-z_][A-Za-z0-9_-]*)['\"]\\s*\\)");
+    private static final Pattern JS_GET_BY_ID = Pattern.compile("getElementById\\s*\\(\\s*['\"]([A-Za-z_][A-Za-z0-9_-]*)['\"]\\s*\\)");
+    private static final Pattern JS_GET_BY_CLASS = Pattern.compile("getElementsByClassName\\s*\\(\\s*['\"]([A-Za-z_][A-Za-z0-9_-]*)['\"]\\s*\\)");
 
     // ── Inspect under-completion truth layer (N3 / P4) ───────────────────
 
@@ -853,6 +950,206 @@ public final class AssistantTurnExecutor {
         return new InspectRetryResult(answer, null);
     }
 
+    static String overrideSelectorMismatchAnalysisIfNeeded(
+            String answer,
+            List<ChatMessage> messages,
+            ToolCallLoop.LoopResult loopResult,
+            Path workspace) {
+        if (answer == null || answer.isBlank()) return answer;
+        if (loopResult == null || workspace == null) return answer;
+        if (loopResult.mutatingToolSuccesses() > 0) return answer;
+        String userRequest = latestUserRequest(messages);
+        if (!looksLikeSelectorMismatchRequest(userRequest)) return answer;
+
+        SelectorWorkspaceAnalysis analysis = analyzeWorkspaceSelectors(workspace, loopResult);
+        if (analysis == null || !analysis.complete()) return answer;
+        return analysis.render();
+    }
+
+    static boolean looksLikeSelectorMismatchRequest(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return false;
+        String lower = userRequest.toLowerCase();
+        for (String marker : SELECTOR_MISMATCH_MARKERS) {
+            if (lower.contains(marker)) return true;
+        }
+        return lower.contains("mismatch") && lower.contains("selector");
+    }
+
+    private record SelectorWorkspaceAnalysis(
+            String htmlFile,
+            String cssFile,
+            String jsFile,
+            Set<String> htmlClasses,
+            Set<String> htmlIds,
+            Set<String> cssClasses,
+            Set<String> cssIds,
+            Set<String> jsClasses,
+            Set<String> jsIds
+    ) {
+        boolean complete() {
+            return htmlFile != null && cssFile != null && jsFile != null;
+        }
+
+        String render() {
+            Set<String> cssMissingClasses = new LinkedHashSet<>(cssClasses);
+            cssMissingClasses.removeAll(htmlClasses);
+            Set<String> jsMissingClasses = new LinkedHashSet<>(jsClasses);
+            jsMissingClasses.removeAll(htmlClasses);
+            Set<String> cssMissingIds = new LinkedHashSet<>(cssIds);
+            cssMissingIds.removeAll(htmlIds);
+            Set<String> jsMissingIds = new LinkedHashSet<>(jsIds);
+            jsMissingIds.removeAll(htmlIds);
+
+            StringBuilder out = new StringBuilder();
+            out.append("I checked the selectors against the actual workspace files:\n\n");
+            out.append("- HTML: `").append(htmlFile).append("`\n");
+            out.append("- CSS: `").append(cssFile).append("`\n");
+            out.append("- JavaScript: `").append(jsFile).append("`\n\n");
+
+            out.append("Observed in HTML:\n");
+            out.append("- Classes: ").append(renderObserved(htmlClasses)).append('\n');
+            out.append("- IDs: ").append(renderObserved(htmlIds)).append("\n\n");
+
+            List<String> mismatches = new ArrayList<>();
+            if (!cssMissingClasses.isEmpty()) {
+                mismatches.add("CSS references missing class selectors: " + renderSelectors(cssMissingClasses, "."));
+            }
+            if (!cssMissingIds.isEmpty()) {
+                mismatches.add("CSS references missing ID selectors: " + renderSelectors(cssMissingIds, "#"));
+            }
+            if (!jsMissingClasses.isEmpty()) {
+                mismatches.add("JavaScript references missing class selectors: " + renderSelectors(jsMissingClasses, "."));
+            }
+            if (!jsMissingIds.isEmpty()) {
+                mismatches.add("JavaScript references missing IDs: " + renderSelectors(jsMissingIds, "#"));
+            }
+
+            if (mismatches.isEmpty()) {
+                out.append("Conclusion: I did not find selector mismatches in these files.");
+            } else {
+                out.append("Mismatches found:\n");
+                for (String mismatch : mismatches) {
+                    out.append("- ").append(mismatch).append('\n');
+                }
+            }
+            return out.toString().stripTrailing();
+        }
+    }
+
+    private static SelectorWorkspaceAnalysis analyzeWorkspaceSelectors(
+            Path workspace, ToolCallLoop.LoopResult loopResult) {
+        List<String> primary = obviousPrimaryFiles(workspace);
+        if (primary.size() < 3) return null;
+        String htmlFile = pickPrimary(primary, ".html", ".htm");
+        String cssFile = pickPrimary(primary, ".css");
+        String jsFile = pickPrimary(primary, ".js");
+        if (htmlFile == null || cssFile == null || jsFile == null) return null;
+
+        Set<String> read = new LinkedHashSet<>(loopResult.readPaths());
+        if (!read.contains(htmlFile) || !read.contains(cssFile) || !read.contains(jsFile)) {
+            return null;
+        }
+
+        try {
+            String html = Files.readString(workspace.resolve(htmlFile));
+            String css = Files.readString(workspace.resolve(cssFile));
+            String js = Files.readString(workspace.resolve(jsFile));
+            return new SelectorWorkspaceAnalysis(
+                    htmlFile, cssFile, jsFile,
+                    extractMatches(html, HTML_CLASS_ATTR, true),
+                    extractMatches(html, HTML_ID_ATTR, false),
+                    extractCssSelectors(css, CSS_CLASS_SELECTOR),
+                    extractCssSelectors(css, CSS_ID_SELECTOR),
+                    extractJsClasses(js),
+                    extractJsIds(js));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static String pickPrimary(List<String> files, String... exts) {
+        for (String file : files) {
+            String lower = file.toLowerCase();
+            for (String ext : exts) {
+                if (lower.endsWith(ext)) return file;
+            }
+        }
+        return null;
+    }
+
+    private static Set<String> extractMatches(String text, Pattern pattern, boolean splitOnWhitespace) {
+        Set<String> out = new LinkedHashSet<>();
+        Matcher matcher = pattern.matcher(text);
+        while (matcher.find()) {
+            String value = matcher.group(1);
+            if (value == null || value.isBlank()) continue;
+            if (splitOnWhitespace) {
+                for (String token : value.trim().split("\\s+")) {
+                    if (!token.isBlank()) out.add(token);
+                }
+            } else {
+                out.add(value.trim());
+            }
+        }
+        return out;
+    }
+
+    private static Set<String> extractCssSelectors(String css, Pattern selectorPattern) {
+        Set<String> out = new LinkedHashSet<>();
+        if (css == null || css.isBlank()) return out;
+        Matcher preludeMatcher = CSS_SELECTOR_PRELUDE.matcher(css);
+        while (preludeMatcher.find()) {
+            String prelude = preludeMatcher.group(1);
+            if (prelude == null || prelude.isBlank()) continue;
+            Matcher selectorMatcher = selectorPattern.matcher(prelude);
+            while (selectorMatcher.find()) {
+                String value = selectorMatcher.group(1);
+                if (value != null && !value.isBlank()) out.add(value.trim());
+            }
+        }
+        return out;
+    }
+
+    private static Set<String> extractJsClasses(String js) {
+        Set<String> out = new LinkedHashSet<>();
+        Matcher qs = JS_QUERY_SELECTOR.matcher(js);
+        while (qs.find()) {
+            String selector = qs.group(1);
+            if (selector != null && selector.startsWith(".")) out.add(selector.substring(1));
+        }
+        Matcher gcn = JS_GET_BY_CLASS.matcher(js);
+        while (gcn.find()) {
+            String cls = gcn.group(1);
+            if (cls != null && !cls.isBlank()) out.add(cls);
+        }
+        return out;
+    }
+
+    private static Set<String> extractJsIds(String js) {
+        Set<String> out = new LinkedHashSet<>();
+        Matcher qs = JS_QUERY_SELECTOR.matcher(js);
+        while (qs.find()) {
+            String selector = qs.group(1);
+            if (selector != null && selector.startsWith("#")) out.add(selector.substring(1));
+        }
+        Matcher gid = JS_GET_BY_ID.matcher(js);
+        while (gid.find()) {
+            String id = gid.group(1);
+            if (id != null && !id.isBlank()) out.add(id);
+        }
+        return out;
+    }
+
+    private static String renderObserved(Set<String> values) {
+        if (values == null || values.isEmpty()) return "none";
+        return values.stream().sorted().map(v -> "`" + v + "`").reduce((a, b) -> a + ", " + b).orElse("none");
+    }
+
+    private static String renderSelectors(Set<String> values, String prefix) {
+        return values.stream().sorted().map(v -> "`" + prefix + v + "`")
+                .reduce((a, b) -> a + ", " + b).orElse("none");
+    }
+
     /**
      * Inspect under-completion truth layer (annotate-first).
      *
@@ -969,6 +1266,16 @@ public final class AssistantTurnExecutor {
             + "contents, but no files were read this turn. The response below was "
             + "produced without reading any files.]\n\n";
 
+    public static final String STREAMING_NO_TOOL_MUTATION_ANNOTATION =
+            "⚠ [Truth check: the response below narrates completed file changes, "
+            + "but no file tool was called in this turn. Treat it as unverified.]\n\n";
+
+    public static final String STREAMING_NO_TOOL_MUTATION_REPLACEMENT =
+            "⚠ [Truth check: no file was changed in this turn. The user asked for a "
+            + "modification, but the assistant did not call any file-editing tool, so "
+            + "the prior \"updated file\" narrative was discarded.]\n\n"
+            + "No file changes were applied. Please retry with actual tool-backed edits.";
+
     /**
      * Returns the content of the latest user-role message in {@code messages},
      * or {@code null} if none. Package-private for testability.
@@ -979,6 +1286,7 @@ public final class AssistantTurnExecutor {
             ChatMessage m = messages.get(i);
             if ("user".equals(m.role())) {
                 String content = m.content();
+                if (ToolCallSupport.isSyntheticToolResultContent(content)) continue;
                 return (content == null || content.isBlank()) ? null : content;
             }
         }
@@ -1028,6 +1336,58 @@ public final class AssistantTurnExecutor {
         if (answer == null || answer.isBlank()) return false;
         if (answer.length() < UNGROUNDED_MIN_CHARS) return false;
         return looksLikeEvidenceRequest(latestUserRequest(messages));
+    }
+
+    static String annotateStreamingNoToolMutationClaim(String answer, List<ChatMessage> messages) {
+        if (answer == null || answer.isBlank()) return answer;
+        if (!looksLikeMutationRequest(latestUserRequest(messages))) return answer;
+        if (!containsMutationClaim(answer) && !containsStreamingMutationNarrative(answer)) return answer;
+        return STREAMING_NO_TOOL_MUTATION_ANNOTATION + answer;
+    }
+
+    private static final Set<String> STREAMING_MUTATION_NARRATIVE_MARKERS = Set.of(
+            "updated `index.html`",
+            "updated index.html",
+            "updated `style.css`",
+            "updated style.css",
+            "updated `script.js`",
+            "updated script.js",
+            "here is the updated",
+            "summary of changes",
+            "summary of changes and verifications",
+            "### updated `index.html`",
+            "### updated `style.css`",
+            "### updated `script.js`",
+            "these changes should ensure",
+            "these changes should align"
+    );
+
+    static boolean containsStreamingMutationNarrative(String answer) {
+        if (answer == null || answer.isBlank()) return false;
+        String lower = answer.toLowerCase();
+        for (String marker : STREAMING_MUTATION_NARRATIVE_MARKERS) {
+            if (lower.contains(marker)) return true;
+        }
+        return false;
+    }
+
+    static String enforceStreamingNoToolTruthfulness(String answer, List<ChatMessage> messages) {
+        String out = answer;
+        if (shouldReplaceStreamingNoToolMutationNarrative(answer, messages)) {
+            return STREAMING_NO_TOOL_MUTATION_REPLACEMENT;
+        }
+        if (shouldAppendStreamingGroundingAnnotation(answer, messages)) {
+            out = UNGROUNDED_ANNOTATION + answer;
+        }
+        out = annotateStreamingNoToolMutationClaim(out, messages);
+        return out;
+    }
+
+    static boolean shouldReplaceStreamingNoToolMutationNarrative(
+            String answer, List<ChatMessage> messages) {
+        if (answer == null || answer.isBlank()) return false;
+        if (!looksLikeMutationRequest(latestUserRequest(messages))) return false;
+        return containsMutationClaim(answer) || containsStreamingMutationNarrative(answer);
     }
 
     /**

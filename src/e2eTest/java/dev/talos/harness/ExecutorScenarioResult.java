@@ -31,16 +31,28 @@ public final class ExecutorScenarioResult implements AutoCloseable {
     private final AssistantTurnExecutor.TurnOutput turnOutput;
     private final ScenarioWorkspaceFixture workspace;
     private final AutoCloseable resourceToClose;
+    private final int approvalsAsked;
+    private final int approvalsGranted;
+    private final int approvalsDenied;
+    private final int approvalsRemembered;
 
     ExecutorScenarioResult(
             ScenarioDefinition definition,
             AssistantTurnExecutor.TurnOutput turnOutput,
             ScenarioWorkspaceFixture workspace,
-            AutoCloseable resourceToClose) {
+            AutoCloseable resourceToClose,
+            int approvalsAsked,
+            int approvalsGranted,
+            int approvalsDenied,
+            int approvalsRemembered) {
         this.definition = definition;
         this.turnOutput = turnOutput;
         this.workspace = workspace;
         this.resourceToClose = resourceToClose;
+        this.approvalsAsked = approvalsAsked;
+        this.approvalsGranted = approvalsGranted;
+        this.approvalsDenied = approvalsDenied;
+        this.approvalsRemembered = approvalsRemembered;
     }
 
     public ScenarioDefinition definition() { return definition; }
@@ -52,6 +64,18 @@ public final class ExecutorScenarioResult implements AutoCloseable {
 
     /** True if the turn was streamed to a sink. */
     public boolean streamed() { return turnOutput.streamed(); }
+
+    public ExecutorScenarioResult assertApprovalCounts(int asked, int granted, int denied, int remembered) {
+        if (approvalsAsked != asked || approvalsGranted != granted
+                || approvalsDenied != denied || approvalsRemembered != remembered) {
+            throw new AssertionError("Scenario '" + definition.name()
+                    + "': expected approvals asked/granted/denied/remembered = "
+                    + asked + "/" + granted + "/" + denied + "/" + remembered
+                    + " but was "
+                    + approvalsAsked + "/" + approvalsGranted + "/" + approvalsDenied + "/" + approvalsRemembered);
+        }
+        return this;
+    }
 
     // ── Answer-text assertions (mirrors ScenarioResult API) ───────────
 

@@ -126,6 +126,7 @@ class AnswerAssertionScenariosTest {
                 """;
 
         var scenario = ScenarioDefinition.named("turn6 fenced alias keys end-to-end")
+                .withUserPrompt("Write index.html so the title becomes updated.")
                 .withScriptedResponse(scripted)
                 .build();
 
