@@ -143,22 +143,10 @@ public final class AssistantTurnExecutor {
                         LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked",
                                 loopResult.iterations(), loopResult.toolsInvoked());
                         appendSummary(out, loopResult);
-                        // Post-tool answer acceptance gate: retry synthesis if deflected
-                        answer = synthesisRetryIfNeeded(answer, loopResult.toolsInvoked(), messages, ctx);
-                        // Point 3 — missing-mutation retry: user asked for a write
-                        // but nothing was mutated. Re-prompt once with an explicit
-                        // instruction to call write_file / edit_file.
-                        MutationRetryResult mrr = mutationRequestRetryIfNeeded(
-                                answer, messages, loopResult, workspace, ctx);
-                        answer = mrr.answer();
-                        if (mrr.extraSummary() != null) out.append(mrr.extraSummary()).append("\n\n");
-                        InspectRetryResult irr = inspectCompletenessRetryIfNeeded(
-                                answer, messages, loopResult, workspace, ctx);
-                        answer = irr.answer();
-                        if (irr.extraSummary() != null) out.append(irr.extraSummary()).append("\n\n");
-                        answer = shapeAnswerAfterToolLoop(
-                                answer, messages, loopResult, workspace, mrr.mutationsInRetry(), opts);
-                        out.append(answer);
+                        ToolLoopAnswerResolution resolution = resolveToolLoopAnswer(
+                                answer, messages, loopResult, workspace, ctx, opts);
+                        appendExtraSummary(out, resolution.extraSummary());
+                        out.append(resolution.answer());
                     } else {
                         // No tool calls — content was streamed; record full text for memory.
                         // Streaming no-tool branch. We cannot silently retry here
@@ -189,19 +177,10 @@ public final class AssistantTurnExecutor {
                         LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked",
                                 loopResult.iterations(), loopResult.toolsInvoked());
                         appendSummary(out, loopResult);
-                        // Post-tool answer acceptance gate: retry synthesis if deflected
-                        answer = synthesisRetryIfNeeded(answer, loopResult.toolsInvoked(), messages, ctx);
-                        // Point 3 — missing-mutation retry
-                        MutationRetryResult mrr = mutationRequestRetryIfNeeded(
-                                answer, messages, loopResult, workspace, ctx);
-                        answer = mrr.answer();
-                        if (mrr.extraSummary() != null) out.append(mrr.extraSummary()).append("\n\n");
-                        InspectRetryResult irr = inspectCompletenessRetryIfNeeded(
-                                answer, messages, loopResult, workspace, ctx);
-                        answer = irr.answer();
-                        if (irr.extraSummary() != null) out.append(irr.extraSummary()).append("\n\n");
-                        answer = shapeAnswerAfterToolLoop(
-                                answer, messages, loopResult, workspace, mrr.mutationsInRetry(), opts);
+                        ToolLoopAnswerResolution resolution = resolveToolLoopAnswer(
+                                answer, messages, loopResult, workspace, ctx, opts);
+                        appendExtraSummary(out, resolution.extraSummary());
+                        answer = resolution.answer();
                     } else {
                         // No-tool-call path. Zero tools were invoked this turn.
                         // Grounding retry gate: if the user explicitly asked for evidence
@@ -247,6 +226,46 @@ public final class AssistantTurnExecutor {
             answer = answer.substring(0, (int) opts.responseMaxChars) + "\n\n[output truncated]";
         }
         return answer;
+    }
+
+    record ToolLoopAnswerResolution(String answer, String extraSummary) {}
+
+    private static ToolLoopAnswerResolution resolveToolLoopAnswer(
+            String answer,
+            List<ChatMessage> messages,
+            ToolCallLoop.LoopResult loopResult,
+            Path workspace,
+            Context ctx,
+            Options opts
+    ) {
+        answer = synthesisRetryIfNeeded(answer, loopResult.toolsInvoked(), messages, ctx);
+
+        MutationRetryResult mrr = mutationRequestRetryIfNeeded(
+                answer, messages, loopResult, workspace, ctx);
+        answer = mrr.answer();
+
+        InspectRetryResult irr = inspectCompletenessRetryIfNeeded(
+                answer, messages, loopResult, workspace, ctx);
+        answer = irr.answer();
+
+        String finalAnswer = shapeAnswerAfterToolLoop(
+                answer, messages, loopResult, workspace, mrr.mutationsInRetry(), opts);
+
+        return new ToolLoopAnswerResolution(
+                finalAnswer,
+                joinExtraSummaries(mrr.extraSummary(), irr.extraSummary())
+        );
+    }
+
+    private static void appendExtraSummary(StringBuilder out, String extraSummary) {
+        if (extraSummary != null) out.append(extraSummary).append("\n\n");
+    }
+
+    private static String joinExtraSummaries(String first, String second) {
+        if ((first == null || first.isBlank()) && (second == null || second.isBlank())) return null;
+        if (first == null || first.isBlank()) return second;
+        if (second == null || second.isBlank()) return first;
+        return first + "\n\n" + second;
     }
 
     private static String shapeAnswerAfterToolLoop(
