@@ -1,8 +1,8 @@
-# [partly done] Ticket: Centralize Execution Outcome And Truth Handling
+# [done] Ticket: Centralize Execution Outcome And Truth Handling
 
 Date: 2026-04-24
 Priority: high
-Status: partly done
+Status: done
 Architecture references:
 - `local/tickets/new-work.md`
 - `docs/new-architecture/talos-harness-plan.md`
