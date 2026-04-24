@@ -76,8 +76,38 @@ public final class ToolCallLoop {
             int cushionFiresRedundantRead,
             int cushionFiresAliasRescue,
             int cushionFiresB3EditShortCircuit,
-            int cushionFiresE1Suggestion
+            int cushionFiresE1Suggestion,
+            List<ToolOutcome> toolOutcomes
     ) {
+        public LoopResult {
+            toolNames = toolNames == null ? List.of() : List.copyOf(toolNames);
+            messages = messages == null ? List.of() : messages;
+            readPaths = readPaths == null ? List.of() : List.copyOf(readPaths);
+            toolOutcomes = toolOutcomes == null ? List.of() : List.copyOf(toolOutcomes);
+        }
+
+        public LoopResult(
+                String finalAnswer,
+                int iterations,
+                int toolsInvoked,
+                List<String> toolNames,
+                List<ChatMessage> messages,
+                int failedCalls,
+                int retriedCalls,
+                boolean hitIterLimit,
+                int mutatingToolSuccesses,
+                List<String> readPaths,
+                int cushionFiresRedundantRead,
+                int cushionFiresAliasRescue,
+                int cushionFiresB3EditShortCircuit,
+                int cushionFiresE1Suggestion
+        ) {
+            this(finalAnswer, iterations, toolsInvoked, toolNames, messages, failedCalls,
+                    retriedCalls, hitIterLimit, mutatingToolSuccesses, readPaths,
+                    cushionFiresRedundantRead, cushionFiresAliasRescue,
+                    cushionFiresB3EditShortCircuit, cushionFiresE1Suggestion, List.of());
+        }
+
         public String summary() {
             if (toolsInvoked <= 0) return null;
             var unique = new java.util.LinkedHashSet<>(toolNames != null ? toolNames : List.of());
@@ -90,6 +120,34 @@ public final class ToolCallLoop {
                 base += " [iteration limit reached]";
             }
             return base;
+        }
+    }
+
+    public record ToolOutcome(
+            String toolName,
+            String pathHint,
+            boolean success,
+            boolean mutating,
+            boolean denied,
+            String summary,
+            String errorMessage
+    ) {
+        public ToolOutcome {
+            toolName = toolName == null ? "" : toolName;
+            pathHint = pathHint == null ? "" : pathHint;
+            summary = summary == null ? "" : summary;
+            errorMessage = errorMessage == null ? "" : errorMessage;
+        }
+
+        public ToolOutcome(
+                String toolName,
+                String pathHint,
+                boolean success,
+                boolean mutating,
+                String summary,
+                String errorMessage
+        ) {
+            this(toolName, pathHint, success, mutating, false, summary, errorMessage);
         }
     }
 
@@ -109,7 +167,7 @@ public final class ToolCallLoop {
                         + "File writes were NOT performed. The model should use tool_call format for file operations.");
             }
             return new LoopResult(initialAnswer, 0, 0, List.of(), messages, 0, 0, false, 0,
-                    List.of(), 0, 0, 0, 0);
+                    List.of(), 0, 0, 0, 0, List.of());
         }
 
         Session toolSession = new Session(workspace, ctx.cfg());
@@ -161,7 +219,7 @@ public final class ToolCallLoop {
                 hitIterLimit, state.mutatingToolSuccesses, List.copyOf(state.pathsReadThisTurn),
                 state.cushionFiresRedundantRead,
                 cushionFiresAliasRescue, state.cushionFiresB3EditShortCircuit,
-                state.cushionFiresE1Suggestion);
+                state.cushionFiresE1Suggestion, List.copyOf(state.toolOutcomes));
     }
 
     static List<ToolCall> convertNativeToolCalls(List<NativeToolCall> nativeCalls) {

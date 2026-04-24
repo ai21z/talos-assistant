@@ -4,6 +4,7 @@ import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
 import dev.talos.core.retrieval.RetrievalTrace;
+import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.tools.*;
 
 import java.nio.file.Path;
@@ -184,6 +185,8 @@ public final class TurnProcessor {
      * <p>Decision order for mutating tools:
      * <ol>
      *   <li>Resolve target path (for scope warning + policy classification).</li>
+     *   <li>Mutation-intent guard — reject write/edit calls when the original
+     *       user prompt did not explicitly request a modification.</li>
      *   <li>{@link ScopeGuard} — if the request is web-scoped and the target
      *       looks obviously off-scope, a warning is prepended to the approval
      *       detail so the user sees it at decision time. Posture is warn,
@@ -214,6 +217,17 @@ public final class TurnProcessor {
         ToolRiskLevel risk = tool.descriptor().riskLevel();
         String path = resolvePathParam(call);
         String userRequest = TurnUserRequestCapture.get();
+
+        if (ToolCallSupport.isMutatingTool(call.toolName())
+                && userRequest != null
+                && !MutationIntent.looksExplicitMutationRequest(userRequest)) {
+            TurnAuditCapture.recordToolCall(call.toolName(), path == null ? "" : path, false);
+            return ToolResult.fail(ToolError.denied(
+                    "The user did not ask to modify files on this turn, so do not call "
+                            + call.toolName()
+                            + " for a read-only request. Answer with information only, "
+                            + "or wait for an explicit change request in a later turn."));
+        }
 
         // Template-placeholder guard — reject BEFORE the approval gate.
         // Transcript-observed failure (qwen2.5-coder:14b, April 2026): the

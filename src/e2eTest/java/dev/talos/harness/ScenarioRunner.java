@@ -366,7 +366,7 @@ public final class ScenarioRunner {
         registry.register(new ListDirTool());
 
         // 3. Approval gate per scenario policy.
-        ApprovalGate gate = policyGate(scenario.approvalPolicy());
+        GateRecorder gate = new GateRecorder(scenario.approvalPolicy());
 
         // 4. Turn processor + tool-call loop (normal mode; N4 scope).
         var processor = new TurnProcessor(
@@ -391,10 +391,17 @@ public final class ScenarioRunner {
 
         // 7. Drive the executor end-to-end.
         var opts = new AssistantTurnExecutor.Options();
-        AssistantTurnExecutor.TurnOutput turnOut =
-                AssistantTurnExecutor.execute(messages, workspace.path(), ctx, opts);
+        AssistantTurnExecutor.TurnOutput turnOut;
+        TurnUserRequestCapture.set(userPrompt);
+        try {
+            turnOut = AssistantTurnExecutor.execute(messages, workspace.path(), ctx, opts);
+        } finally {
+            TurnUserRequestCapture.clear();
+        }
 
-        return new ExecutorScenarioResult(scenario, turnOut, workspace, scriptedLlm);
+        return new ExecutorScenarioResult(
+                scenario, turnOut, workspace, scriptedLlm,
+                gate.asked, gate.granted, gate.denied, gate.remembered);
     }
 
     private static final class GateRecorder implements ApprovalGate {

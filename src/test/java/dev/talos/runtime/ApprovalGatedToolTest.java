@@ -181,6 +181,199 @@ class ApprovalGatedToolTest {
         assertTrue(result.success(), "NoOpApprovalGate should approve everything");
     }
 
+    @Test
+    void readOnlyPromptBlocksEditFileBeforeApproval() {
+        var registry = new ToolRegistry();
+        registry.register(editFileTool());
+
+        final int[] gateCalls = {0};
+        ApprovalGate gate = (desc, detail) -> {
+            gateCalls[0]++;
+            return true;
+        };
+        var processor = new TurnProcessor(
+                ModeController.defaultController(),
+                gate,
+                registry);
+
+        var ctx = Context.builder(new Config()).build();
+        var session = new Session(WS, new Config());
+        var call = new ToolCall("talos.edit_file", Map.of(
+                "path", "index.html",
+                "old_string", "<title>Night Drive</title>",
+                "new_string", "<title>Changed</title>"));
+
+        TurnUserRequestCapture.set("hey can you tell me what is in this workspace?");
+        try {
+            ToolResult result = processor.executeTool(session, call, ctx);
+            assertFalse(result.success(), "read-only prompt must reject edit_file");
+            assertEquals(ToolError.DENIED, result.error().code());
+            assertTrue(result.errorMessage().contains("did not ask to modify files on this turn"));
+            assertEquals(0, gateCalls[0], "mutation-intent guard must fire before approval");
+        } finally {
+            TurnUserRequestCapture.clear();
+        }
+    }
+
+    @Test
+    void readOnlyPromptBlocksWriteFileBeforeApproval() {
+        var registry = new ToolRegistry();
+        registry.register(writeFileTool());
+
+        final int[] gateCalls = {0};
+        ApprovalGate gate = (desc, detail) -> {
+            gateCalls[0]++;
+            return true;
+        };
+        var processor = new TurnProcessor(
+                ModeController.defaultController(),
+                gate,
+                registry);
+
+        var ctx = Context.builder(new Config()).build();
+        var session = new Session(WS, new Config());
+        var call = new ToolCall("talos.write_file", Map.of(
+                "path", "index.html",
+                "content", "<h1>changed</h1>"));
+
+        TurnUserRequestCapture.set("what files are in this workspace?");
+        try {
+            ToolResult result = processor.executeTool(session, call, ctx);
+            assertFalse(result.success(), "read-only prompt must reject write_file");
+            assertEquals(ToolError.DENIED, result.error().code());
+            assertTrue(result.errorMessage().contains("did not ask to modify files on this turn"));
+            assertEquals(0, gateCalls[0], "mutation-intent guard must fire before approval");
+        } finally {
+            TurnUserRequestCapture.clear();
+        }
+    }
+
+    @Test
+    void explicitEditRequestStillReachesApproval() {
+        var registry = new ToolRegistry();
+        registry.register(editFileTool());
+
+        final int[] gateCalls = {0};
+        ApprovalGate gate = (desc, detail) -> {
+            gateCalls[0]++;
+            return true;
+        };
+        var processor = new TurnProcessor(
+                ModeController.defaultController(),
+                gate,
+                registry);
+
+        var ctx = Context.builder(new Config()).build();
+        var session = new Session(WS, new Config());
+        var call = new ToolCall("talos.edit_file", Map.of(
+                "path", "index.html",
+                "old_string", "old",
+                "new_string", "new"));
+
+        TurnUserRequestCapture.set("edit the title in index.html");
+        try {
+            ToolResult result = processor.executeTool(session, call, ctx);
+            assertTrue(result.success(), "explicit edit request should keep approval path");
+            assertEquals(1, gateCalls[0], "approval should still be consulted");
+        } finally {
+            TurnUserRequestCapture.clear();
+        }
+    }
+
+    @Test
+    void explicitWriteRequestStillReachesApproval() {
+        var registry = new ToolRegistry();
+        registry.register(writeFileTool());
+
+        final int[] gateCalls = {0};
+        ApprovalGate gate = (desc, detail) -> {
+            gateCalls[0]++;
+            return true;
+        };
+        var processor = new TurnProcessor(
+                ModeController.defaultController(),
+                gate,
+                registry);
+
+        var ctx = Context.builder(new Config()).build();
+        var session = new Session(WS, new Config());
+        var call = new ToolCall("talos.write_file", Map.of(
+                "path", "README.md",
+                "content", "# hi"));
+
+        TurnUserRequestCapture.set("create a README.md file with a short project description");
+        try {
+            ToolResult result = processor.executeTool(session, call, ctx);
+            assertTrue(result.success(), "explicit write request should keep approval path");
+            assertEquals(1, gateCalls[0], "approval should still be consulted");
+        } finally {
+            TurnUserRequestCapture.clear();
+        }
+    }
+
+    @Test
+    void directImperativeEditRequestStillReachesApproval() {
+        var registry = new ToolRegistry();
+        registry.register(editFileTool());
+
+        final int[] gateCalls = {0};
+        ApprovalGate gate = (desc, detail) -> {
+            gateCalls[0]++;
+            return true;
+        };
+        var processor = new TurnProcessor(
+                ModeController.defaultController(),
+                gate,
+                registry);
+
+        var ctx = Context.builder(new Config()).build();
+        var session = new Session(WS, new Config());
+        var call = new ToolCall("talos.edit_file", Map.of(
+                "path", "greeting.txt",
+                "old_string", "Hello world",
+                "new_string", "Hello Talos"));
+
+        TurnUserRequestCapture.set("Edit greeting.txt so Hello world becomes Hello Talos.");
+        try {
+            ToolResult result = processor.executeTool(session, call, ctx);
+            assertTrue(result.success(), "direct imperative edit request should keep approval path");
+            assertEquals(1, gateCalls[0], "approval should still be consulted");
+        } finally {
+            TurnUserRequestCapture.clear();
+        }
+    }
+
+    @Test
+    void directImperativeWriteRequestStillReachesApproval() {
+        var registry = new ToolRegistry();
+        registry.register(writeFileTool());
+
+        final int[] gateCalls = {0};
+        ApprovalGate gate = (desc, detail) -> {
+            gateCalls[0]++;
+            return true;
+        };
+        var processor = new TurnProcessor(
+                ModeController.defaultController(),
+                gate,
+                registry);
+
+        var ctx = Context.builder(new Config()).build();
+        var session = new Session(WS, new Config());
+        var call = new ToolCall("talos.write_file", Map.of(
+                "path", "index.html",
+                "content", "<h1>after</h1>"));
+
+        TurnUserRequestCapture.set("Replace index.html with after.");
+        try {
+            ToolResult result = processor.executeTool(session, call, ctx);
+            assertTrue(result.success(), "direct imperative write request should keep approval path");
+            assertEquals(1, gateCalls[0], "approval should still be consulted");
+        } finally {
+            TurnUserRequestCapture.clear();
+        }
+    }
+
     // ── Stub tools ──────────────────────────────────────────────────
 
     private static TalosTool readOnlyTool() {
@@ -213,6 +406,28 @@ class ApprovalGatedToolTest {
                 return new ToolDescriptor("talos.test_destroy", "Destructive test", null, ToolRiskLevel.DESTRUCTIVE);
             }
             @Override public ToolResult execute(ToolCall call, ToolContext ctx) { return ToolResult.ok("destroy-ok"); }
+        };
+    }
+
+    private static TalosTool writeFileTool() {
+        return new TalosTool() {
+            @Override public String name() { return "talos.write_file"; }
+            @Override public String description() { return "Write file test tool"; }
+            @Override public ToolDescriptor descriptor() {
+                return new ToolDescriptor("talos.write_file", "Write file test", null, ToolRiskLevel.WRITE);
+            }
+            @Override public ToolResult execute(ToolCall call, ToolContext ctx) { return ToolResult.ok("write-file-ok"); }
+        };
+    }
+
+    private static TalosTool editFileTool() {
+        return new TalosTool() {
+            @Override public String name() { return "talos.edit_file"; }
+            @Override public String description() { return "Edit file test tool"; }
+            @Override public ToolDescriptor descriptor() {
+                return new ToolDescriptor("talos.edit_file", "Edit file test", null, ToolRiskLevel.WRITE);
+            }
+            @Override public ToolResult execute(ToolCall call, ToolContext ctx) { return ToolResult.ok("edit-file-ok"); }
         };
     }
 }

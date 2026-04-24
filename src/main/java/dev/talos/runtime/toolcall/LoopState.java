@@ -34,6 +34,7 @@ public final class LoopState {
     public final int aliasRescueBaseline;
 
     public final List<String> toolNames = new ArrayList<>();
+    public final List<dev.talos.runtime.ToolCallLoop.ToolOutcome> toolOutcomes = new ArrayList<>();
     public final Set<String> failedCallSignatures = new HashSet<>();
     public final Map<String, Integer> editFailuresByPath = new HashMap<>();
     public final Set<String> pathsReadThisTurn = new HashSet<>();
