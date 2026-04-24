@@ -87,7 +87,7 @@ llm:
 
 ollama:
   host: "http://127.0.0.1:11434"
-  model: "qwen3:8b"
+  model: "qwen2.5-coder:14b"
   embed: "bge-m3"
   allow_remote: false  # Set to true to allow non-localhost Ollama hosts
 

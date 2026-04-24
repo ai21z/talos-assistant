@@ -45,13 +45,13 @@ class LlmEngineResolverTest {
     void interface_contract_is_implementable_without_llm_client() throws Exception {
         FakeResolver fake = new FakeResolver();
 
-        fake.select("ollama", "qwen3:8b");
+        fake.select("ollama", "qwen2.5-coder:14b");
         assertEquals(1, fake.selectCalls.get());
         assertEquals("ollama", fake.lastBackend);
-        assertEquals("qwen3:8b", fake.lastModel);
+        assertEquals("qwen2.5-coder:14b", fake.lastModel);
 
         ChatRequest request = new ChatRequest(
-                "ollama", "qwen3:8b",
+                "ollama", "qwen2.5-coder:14b",
                 "be helpful", "ping",
                 List.of(), null,
                 List.of(new ChatMessage("user", "ping")));
@@ -97,7 +97,7 @@ class LlmEngineResolverTest {
         try {
             // Selecting the same backend with a new model should be a no-op
             // on the engine — no backend change means no provider.create(cfg).
-            assertDoesNotThrow(() -> resolver.select("ollama", "qwen3:8b"));
+            assertDoesNotThrow(() -> resolver.select("ollama", "qwen2.5-coder:14b"));
             assertDoesNotThrow(() -> resolver.select("ollama", "other-model"));
         } finally {
             resolver.close();
@@ -116,7 +116,7 @@ class LlmEngineResolverTest {
         // EngineRegistry contract: null Config becomes an empty Config.
         RegistryLlmEngineResolver resolver = new RegistryLlmEngineResolver(null);
         try {
-            assertDoesNotThrow(() -> resolver.select("ollama", "qwen3:8b"));
+            assertDoesNotThrow(() -> resolver.select("ollama", "qwen2.5-coder:14b"));
         } finally {
             resolver.close();
         }
@@ -131,7 +131,7 @@ class LlmEngineResolverTest {
         cfg.data.put("llm", llm);
 
         Map<String, Object> ollama = new LinkedHashMap<>();
-        ollama.put("model", "qwen3:8b");
+        ollama.put("model", "qwen2.5-coder:14b");
         cfg.data.put("ollama", ollama);
         return cfg;
     }

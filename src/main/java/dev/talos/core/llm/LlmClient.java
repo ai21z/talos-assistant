@@ -141,7 +141,7 @@ public final class LlmClient implements AutoCloseable {
         if (envModel != null && !envModel.isBlank()) {
             cfgModel = envModel.trim();
         } else {
-            cfgModel = String.valueOf(ollama.getOrDefault("model", "qwen3:8b"));
+            cfgModel = String.valueOf(ollama.getOrDefault("model", "qwen2.5-coder:14b"));
         }
         this.model = sanitizeModelName(cfgModel);
         this.backend = Objects.toString(CfgUtil.map(this.cfg.data.get("llm")).getOrDefault("default_backend", "ollama"));

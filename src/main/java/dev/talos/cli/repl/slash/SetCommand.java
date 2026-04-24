@@ -17,7 +17,7 @@ public final class SetCommand implements Command {
     public Result execute(String args, Context ctx) throws Exception {
         String a = args == null ? "" : args.trim();
         if (a.isEmpty() || !a.toLowerCase(Locale.ROOT).startsWith("model")) {
-            return new Result.Error("Usage: /set model <name>\nExample: /set model qwen3:8b\n", 200);
+            return new Result.Error("Usage: /set model <name>\nExample: /set model qwen2.5-coder:14b\n", 200);
         }
         String rest = a.substring("model".length()).trim();
         if (rest.isEmpty()) return new Result.Error("Usage: /set model <name>\n", 200);

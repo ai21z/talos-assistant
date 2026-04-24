@@ -41,7 +41,7 @@ public final class EngineRegistry implements AutoCloseable {
         this.activeBackend = String.valueOf(llm.getOrDefault("default_backend", "ollama"));
 
         Map<String, Object> ollama = map(this.cfg.data.get("ollama"));
-        this.activeModel = String.valueOf(ollama.getOrDefault("model", "qwen3:8b"));
+        this.activeModel = String.valueOf(ollama.getOrDefault("model", "qwen2.5-coder:14b"));
     }
 
     /** Switch backend and/or model. Engine will be recreated lazily on next engine() call if backend changed. */
@@ -142,7 +142,7 @@ public final class EngineRegistry implements AutoCloseable {
         if (activeBackend == null || activeBackend.isBlank()) activeBackend = "ollama";
         if (activeModel == null || activeModel.isBlank()) {
             Map<String, Object> ollama = map(cfg.data.get("ollama"));
-            activeModel = String.valueOf(ollama.getOrDefault("model", "qwen3:8b"));
+            activeModel = String.valueOf(ollama.getOrDefault("model", "qwen2.5-coder:14b"));
         }
     }
 
