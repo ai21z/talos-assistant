@@ -141,6 +141,13 @@ public final class ToolCallParser {
                     + "The model should use native tool calling or JSON code-fence format.");
         }
 
+        if (calls.isEmpty()) {
+            ToolCall standalone = tryParseStandaloneToolJson(llmResponse);
+            if (standalone != null) {
+                calls.add(standalone);
+            }
+        }
+
         return Collections.unmodifiableList(calls);
     }
 
@@ -152,12 +159,16 @@ public final class ToolCallParser {
         if (llmResponse == null || llmResponse.isBlank()) return false;
         return VARIANT_TAG_PATTERN.matcher(llmResponse).find()
                 || CODE_FENCE_PATTERN.matcher(llmResponse).find()
-                || BARE_JSON_PATTERN.matcher(llmResponse).find();
+                || BARE_JSON_PATTERN.matcher(llmResponse).find()
+                || tryParseStandaloneToolJson(llmResponse) != null;
     }
 
     /** Strip all recognized tool-call blocks, returning only the LLM's prose. */
     public static String stripToolCalls(String llmResponse) {
         if (llmResponse == null) return "";
+        if (tryParseStandaloneToolJson(llmResponse) != null) {
+            return "";
+        }
         String stripped = STRIP_PATTERN.matcher(llmResponse).replaceAll("");
         // Also strip code-fenced tool calls
         stripped = CODE_FENCE_PATTERN.matcher(stripped).replaceAll("");
@@ -166,6 +177,33 @@ public final class ToolCallParser {
         // Collapse excessive blank lines left by removed blocks
         stripped = stripped.replaceAll("\\n{3,}", "\n\n");
         return stripped.strip();
+    }
+
+    static boolean looksLikeUnfinishedToolPayload(String llmResponse) {
+        if (llmResponse == null || llmResponse.isBlank()) {
+            return false;
+        }
+        String trimmed = llmResponse.strip();
+        // Intentional: once the runtime has already entered real tool execution,
+        // a fully parseable tool payload in final-answer position still means the
+        // continuation was left unfinished. The loop should normally consume it;
+        // if it survives to final-answer acceptance, we prefer a truthful runtime
+        // fallback over surfacing raw tool JSON to the user.
+        if (containsToolCalls(trimmed)) {
+            return true;
+        }
+        boolean startsLikeToolEnvelope = trimmed.startsWith("{")
+                || trimmed.startsWith("```json")
+                || trimmed.startsWith("```")
+                || trimmed.startsWith("<tool_call>")
+                || trimmed.startsWith("<function_call>")
+                || trimmed.startsWith("<tool>")
+                || trimmed.startsWith("<function>");
+        boolean mentionsToolShape = trimmed.contains("\"name\"")
+                || trimmed.contains("\"tool_name\"")
+                || trimmed.contains("\"function\"")
+                || trimmed.contains("\"tool\"");
+        return startsLikeToolEnvelope && mentionsToolShape && trimmed.contains("talos.");
     }
 
     // ── Internal extraction helpers ──────────────────────────────────
@@ -192,6 +230,24 @@ public final class ToolCallParser {
                 LOG.warn("Failed to parse tool_call JSON: {}", e.getMessage());
                 LOG.debug("Malformed payload: {}", jsonPayload);
             }
+        }
+    }
+
+    private static ToolCall tryParseStandaloneToolJson(String text) {
+        String trimmed = text == null ? "" : text.strip();
+        if (trimmed.isEmpty() || !trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+            return null;
+        }
+        try {
+            ToolCall call = parseJson(trimmed);
+            if (call == null) {
+                return null;
+            }
+            return call.toolName() != null && call.toolName().startsWith("talos.")
+                    ? call
+                    : null;
+        } catch (Exception ignored) {
+            return null;
         }
     }
 

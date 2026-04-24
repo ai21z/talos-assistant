@@ -3,6 +3,7 @@ package dev.talos.runtime;
 import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
+import dev.talos.core.llm.LlmClient;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.*;
 import org.junit.jupiter.api.Test;
@@ -239,6 +240,80 @@ class ToolCallLoopTest {
 
         // containsToolCalls returns true, but parse returns empty → breaks
         assertEquals(0, result.toolsInvoked());
+    }
+
+    @Test
+    void standaloneRawJsonContinuationExecutesNextTool() {
+        var registry = new ToolRegistry();
+        registry.register(listDirTool());
+        registry.register(grepTool());
+        var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+        var loop = new ToolCallLoop(processor);
+
+        String initialResponse = """
+                {
+                  "name": "talos.list_dir",
+                  "arguments": {
+                    "path": "."
+                  }
+                }
+                """;
+
+        var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user("audit workspace")));
+        var ctx = Context.builder(new Config())
+                .llm(LlmClient.scripted(List.of(
+                        """
+                        {
+                          "name": "talos.grep",
+                          "arguments": {
+                            "pattern": "cta-button",
+                            "include": "*.css"
+                          }
+                        }
+                        """,
+                        "Grounded final answer.")))
+                .build();
+
+        var result = loop.run(initialResponse, messages, WS, ctx);
+
+        assertEquals(2, result.iterations(), "A standalone raw JSON continuation should be parsed and executed");
+        assertEquals(2, result.toolsInvoked());
+        assertEquals("Grounded final answer.", result.finalAnswer());
+    }
+
+    @Test
+    void malformedContinuationAfterToolExecutionUsesTruthfulFallback() {
+        var registry = new ToolRegistry();
+        registry.register(listDirTool());
+        var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+        var loop = new ToolCallLoop(processor);
+
+        String initialResponse = """
+                {
+                  "name": "talos.list_dir",
+                  "arguments": {
+                    "path": "."
+                  }
+                }
+                """;
+
+        var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user("audit workspace")));
+        var ctx = Context.builder(new Config())
+                .llm(LlmClient.scripted(List.of(
+                        """
+                        {
+                          "name": "talos.grep",
+                          "arguments": {
+                        """)))
+                .build();
+
+        var result = loop.run(initialResponse, messages, WS, ctx);
+
+        assertEquals(1, result.iterations(), "Malformed continuation should stop after the first executed tool");
+        assertEquals(1, result.toolsInvoked());
+        assertFalse(result.finalAnswer().contains("talos.grep"));
+        assertTrue(result.finalAnswer().contains("No further tool calls were executed."),
+                "Should surface a truthful fallback instead of raw tool JSON");
     }
 
     // ── LoopResult accessors ────────────────────────────────────────
@@ -538,6 +613,32 @@ class ToolCallLoopTest {
             }
             @Override public ToolResult execute(ToolCall call, ToolContext ctx) {
                 return ToolResult.ok("echo: " + call.param("input", ""));
+            }
+        };
+    }
+
+    private static TalosTool listDirTool() {
+        return new TalosTool() {
+            @Override public String name() { return "talos.list_dir"; }
+            @Override public String description() { return "List dir"; }
+            @Override public ToolDescriptor descriptor() {
+                return new ToolDescriptor("talos.list_dir", "List files");
+            }
+            @Override public ToolResult execute(ToolCall call, ToolContext ctx) {
+                return ToolResult.ok("index.html\nstyle.css\nscript.js\n");
+            }
+        };
+    }
+
+    private static TalosTool grepTool() {
+        return new TalosTool() {
+            @Override public String name() { return "talos.grep"; }
+            @Override public String description() { return "Search files"; }
+            @Override public ToolDescriptor descriptor() {
+                return new ToolDescriptor("talos.grep", "Search files");
+            }
+            @Override public ToolResult execute(ToolCall call, ToolContext ctx) {
+                return ToolResult.ok("style.css:12:.cta-button");
             }
         };
     }
