@@ -29,6 +29,7 @@ class Phase0ScenariosTest {
     @DisplayName("S1: write_file creates a new file in an empty workspace")
     void s1_writeFileCreatesNewFile() {
         var scenario = ScenarioDefinition.named("S1 create file")
+            .withUserPrompt("Create a new file named hello.txt with the text Hello, Talos!")
             .withScriptedResponse(
                 "I will create the file now.\n" +
                 "<tool_call>{\"name\": \"talos.write_file\", \"parameters\": {\"path\": \"hello.txt\", \"content\": \"Hello, Talos!\"}}</tool_call>\n")
@@ -48,6 +49,7 @@ class Phase0ScenariosTest {
     void s2_writeFileOverwritesExistingFile() {
         var scenario = ScenarioDefinition.named("S2 overwrite file")
             .withFile("notes.txt", "old content")
+            .withUserPrompt("Replace the contents of notes.txt with new content.")
             .withScriptedResponse(
                 "Replacing the file.\n" +
                 "<tool_call>{\"name\": \"talos.write_file\", \"parameters\": {\"path\": \"notes.txt\", \"content\": \"new content\"}}</tool_call>\n")
@@ -67,6 +69,7 @@ class Phase0ScenariosTest {
     void s3_readThenEditSucceeds() {
         var scenario = ScenarioDefinition.named("S3 read then edit")
             .withFile("greeting.txt", "Hello world")
+            .withUserPrompt("Edit greeting.txt so Hello world becomes Hello Talos.")
             .withScriptedResponse(
                 "Reading first.\n" +
                 "<tool_call>{\"name\": \"talos.read_file\", \"parameters\": {\"path\": \"greeting.txt\"}}</tool_call>\n" +
@@ -87,6 +90,7 @@ class Phase0ScenariosTest {
     void s4_editWithoutReadProducesNudge() {
         var scenario = ScenarioDefinition.named("S4 edit without read")
             .withFile("data.txt", "original")
+            .withUserPrompt("Edit data.txt and replace original with modified.")
             .withScriptedResponse(
                 "<tool_call>{\"name\": \"talos.edit_file\", \"parameters\": {\"path\": \"data.txt\", \"old_string\": \"original\", \"new_string\": \"modified\"}}</tool_call>\n")
             .build();
@@ -107,6 +111,7 @@ class Phase0ScenariosTest {
     @DisplayName("S5: DENY_WRITES policy prevents file creation")
     void s5_deniedWriteDoesNotCreateFile() {
         var scenario = ScenarioDefinition.named("S5 denied write")
+            .withUserPrompt("Create secret.txt with private content.")
             .withScriptedResponse(
                 "<tool_call>{\"name\": \"talos.write_file\", \"parameters\": {\"path\": \"secret.txt\", \"content\": \"private\"}}</tool_call>\n")
             .withApprovalPolicy(ScenarioApprovalPolicy.DENY_WRITES)
@@ -145,6 +150,7 @@ class Phase0ScenariosTest {
     @DisplayName("S7: write_file with missing path parameter produces an error")
     void s7_missingPathProducesError() {
         var scenario = ScenarioDefinition.named("S7 missing path")
+            .withUserPrompt("Write a new file with the text no path here.")
             .withScriptedResponse(
                 "<tool_call>{\"name\": \"talos.write_file\", \"parameters\": {\"content\": \"no path here\"}}</tool_call>\n")
             .build();
@@ -203,6 +209,7 @@ class Phase0ScenariosTest {
     void s10_multiToolTurnReadAndEdit() {
         var scenario = ScenarioDefinition.named("S10 multi-tool")
             .withFile("app.js", "const version = '1.0';\n")
+            .withUserPrompt("Update app.js and change version 1.0 to 2.0.")
             .withScriptedResponse(
                 "First read, then edit.\n" +
                 "<tool_call>{\"name\": \"talos.read_file\", \"parameters\": {\"path\": \"app.js\"}}</tool_call>\n" +

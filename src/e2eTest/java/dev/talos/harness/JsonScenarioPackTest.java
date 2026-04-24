@@ -106,4 +106,56 @@ class JsonScenarioPackTest {
                             + result.loopResult().summary());
         }
     }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/09-read-only-workspace-no-unsolicited-mutation.json] 09: read-only workspace question rejects unsolicited edit before approval")
+    void readOnlyWorkspaceQuestionRejectsUnsolicitedMutation() {
+        var loaded = JsonScenarioLoader.load("scenarios/09-read-only-workspace-no-unsolicited-mutation.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("index.html")
+                    .assertAnswerContains("script.js")
+                    .assertAnswerContains("style.css")
+                    .assertFileContains("index.html", "<title>Night Drive</title>")
+                    .assertFileNotContains("index.html", "<title>Welcome to My Modern Web Experience</title>");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/10-selector-mismatch-grounded.json] 10: selector mismatch analysis is grounded in actual files")
+    void selectorMismatchAnalysisIsGrounded() {
+        var loaded = JsonScenarioLoader.load("scenarios/10-selector-mismatch-grounded.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("Mismatches found:")
+                    .assertAnswerContains("`.cta-button`")
+                    .assertAnswerNotContains("There are no mismatches")
+                    .assertAnswerNotContains("present in both HTML and JavaScript");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/11-partial-mutation-summary-truthful.json] 11: partial mutation summary reports only verified outcomes")
+    void partialMutationSummaryIsTruthful() {
+        var loaded = JsonScenarioLoader.load("scenarios/11-partial-mutation-summary-truthful.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertAnswerContains("Succeeded:")
+                    .assertAnswerContains("Failed:")
+                    .assertAnswerContains("old_string not found")
+                    .assertAnswerContains("style.css")
+                    .assertAnswerNotContains("The title was changed to Melodic Horror Synthwave");
+        }
+    }
 }

@@ -86,10 +86,19 @@ public final class ToolCallSupport {
             ChatMessage m = messages.get(i);
             if ("user".equals(m.role())) {
                 String c = m.content();
+                if (isSyntheticToolResultContent(c)) continue;
                 return (c == null || c.isBlank()) ? null : c;
             }
         }
         return null;
+    }
+
+    public static boolean isSyntheticToolResultContent(String content) {
+        if (content == null) return false;
+        String c = content.stripLeading();
+        return c.startsWith("[tool_result:")
+                || c.startsWith("[compacted:")
+                || c.startsWith("[tool_result]");
     }
 
     public static String summarizeToolResult(String body) {

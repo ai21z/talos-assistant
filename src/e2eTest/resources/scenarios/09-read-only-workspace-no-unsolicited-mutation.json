@@ -1,0 +1,13 @@
+{
+  "name": "read-only workspace question rejects unsolicited mutation",
+  "fixture": "mini-site",
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "hey can you tell me what is in this workspace?",
+  "scriptedResponses": [
+    "```json\n{\"name\":\"talos.list_dir\",\"parameters\":{\"path\":\".\"}}\n```",
+    "```json\n{\"name\":\"talos.read_file\",\"parameters\":{\"path\":\"index.html\"}}\n```",
+    "```json\n{\"name\":\"talos.edit_file\",\"parameters\":{\"path\":\"index.html\",\"old_string\":\"<title>Night Drive</title>\",\"new_string\":\"<title>Welcome to My Modern Web Experience</title>\"}}\n```",
+    "The workspace contains the following files:\n\n1. `index.html`\n2. `script.js`\n3. `style.css`"
+  ]
+}
