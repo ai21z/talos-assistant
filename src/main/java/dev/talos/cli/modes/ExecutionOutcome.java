@@ -35,6 +35,7 @@ record ExecutionOutcome(
         boolean mutationRequested,
         boolean toolLoopRan,
         boolean deniedMutation,
+        boolean invalidMutation,
         boolean partialMutation,
         boolean falseMutationClaim,
         boolean inspectUnderCompleted,
@@ -85,15 +86,23 @@ record ExecutionOutcome(
         boolean deniedMutation = !Objects.equals(current, shaped);
         current = shaped;
 
+        shaped = AssistantTurnExecutor.summarizeInvalidMutationOutcomesIfNeeded(
+                current, messages, loopResult, extraMutationSuccesses);
+        boolean invalidMutation = !Objects.equals(current, shaped);
+        current = shaped;
+
         shaped = AssistantTurnExecutor.summarizePartialMutationOutcomesIfNeeded(
                 current, loopResult, extraMutationSuccesses);
         boolean partialMutation = !Objects.equals(current, shaped);
         current = shaped;
 
-        shaped = AssistantTurnExecutor.annotateIfFalseMutationClaim(
-                current, loopResult, extraMutationSuccesses);
-        boolean falseMutationClaim = !Objects.equals(current, shaped);
-        current = shaped;
+        boolean falseMutationClaim = false;
+        if (!invalidMutation) {
+            shaped = AssistantTurnExecutor.annotateIfFalseMutationClaim(
+                    current, loopResult, extraMutationSuccesses);
+            falseMutationClaim = !Objects.equals(current, shaped);
+            current = shaped;
+        }
 
         shaped = AssistantTurnExecutor.annotateIfInspectUnderCompletion(
                 current, messages, loopResult);
@@ -102,6 +111,7 @@ record ExecutionOutcome(
 
         CompletionStatus completionStatus = completionStatus(
                 deniedMutation,
+                invalidMutation,
                 partialMutation,
                 falseMutationClaim || inspectUnderCompleted,
                 false
@@ -132,6 +142,7 @@ record ExecutionOutcome(
                 taskVerification,
                 toolLoopWarnings(
                         deniedMutation,
+                        invalidMutation,
                         partialMutation,
                         falseMutationClaim,
                         inspectUnderCompleted,
@@ -153,6 +164,7 @@ record ExecutionOutcome(
                 mutationRequested,
                 true,
                 deniedMutation,
+                invalidMutation,
                 partialMutation,
                 falseMutationClaim,
                 inspectUnderCompleted,
@@ -185,7 +197,7 @@ record ExecutionOutcome(
         boolean ungrounded = shaped != null
                 && shaped.startsWith(AssistantTurnExecutor.UNGROUNDED_ANNOTATION);
         boolean advisoryOnly = ungrounded && !blocked;
-        CompletionStatus completionStatus = completionStatus(false, false, advisoryOnly, blocked);
+        CompletionStatus completionStatus = completionStatus(false, false, false, advisoryOnly, blocked);
         TaskVerificationResult verification = TaskVerificationResult.notRun("Post-apply verification was not applicable.");
         List<TruthWarning> warnings = noToolWarnings(noToolMutationReplaced, ungrounded);
         TaskOutcome taskOutcome = new TaskOutcome(
@@ -210,6 +222,7 @@ record ExecutionOutcome(
                 false,
                 false,
                 false,
+                false,
                 noToolMutationReplaced,
                 advisoryOnly
         );
@@ -217,10 +230,12 @@ record ExecutionOutcome(
 
     private static CompletionStatus completionStatus(
             boolean deniedMutation,
+            boolean invalidMutation,
             boolean partialMutation,
             boolean advisoryOnly,
             boolean blocked
     ) {
+        if (invalidMutation) return CompletionStatus.FAILED;
         if (deniedMutation || blocked) return CompletionStatus.BLOCKED;
         if (partialMutation) return CompletionStatus.PARTIAL;
         if (advisoryOnly) return CompletionStatus.ADVISORY_ONLY;
@@ -274,6 +289,7 @@ record ExecutionOutcome(
 
     private static List<TruthWarning> toolLoopWarnings(
             boolean deniedMutation,
+            boolean invalidMutation,
             boolean partialMutation,
             boolean falseMutationClaim,
             boolean inspectUnderCompleted,
@@ -285,6 +301,11 @@ record ExecutionOutcome(
             warnings.add(TruthWarning.of(
                     TruthWarningType.DENIED_MUTATION,
                     "A mutating tool call was denied by approval."));
+        }
+        if (invalidMutation) {
+            warnings.add(TruthWarning.of(
+                    TruthWarningType.INVALID_MUTATION_ARGUMENTS,
+                    "A mutating tool call had invalid arguments and no file changed."));
         }
         if (partialMutation) {
             warnings.add(TruthWarning.of(
