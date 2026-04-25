@@ -1,5 +1,7 @@
 package dev.talos.harness;
 
+import dev.talos.runtime.phase.ExecutionPhase;
+
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -15,6 +17,7 @@ import java.util.Map;
  *       executes them against the real tool registry, so filesystem side-effects are real.</li>
  *   <li><b>approvalPolicy</b> — controls how write/edit approvals are resolved
  *       without interactive user input</li>
+ *   <li><b>executionPhase</b> — optional forced phase for policy scenarios</li>
  * </ul>
  *
  * <p>Scenarios are intentionally simple: one scripted LLM response, one workspace state.
@@ -26,17 +29,18 @@ public record ScenarioDefinition(
         Map<String, String> initialFiles,
         String userPrompt,
         String scriptedResponse,
-        ScenarioApprovalPolicy approvalPolicy
+        ScenarioApprovalPolicy approvalPolicy,
+        ExecutionPhase executionPhase
 ) {
 
     /** Construct with a default {@link ScenarioApprovalPolicy#APPROVE_ALL} policy. */
     public ScenarioDefinition(String name, Map<String, String> initialFiles, String scriptedResponse) {
-        this(name, initialFiles, "", scriptedResponse, ScenarioApprovalPolicy.APPROVE_ALL);
+        this(name, initialFiles, "", scriptedResponse, ScenarioApprovalPolicy.APPROVE_ALL, null);
     }
 
     /** Back-compat constructor with user prompt and default approval policy. */
     public ScenarioDefinition(String name, Map<String, String> initialFiles, String userPrompt, String scriptedResponse) {
-        this(name, initialFiles, userPrompt, scriptedResponse, ScenarioApprovalPolicy.APPROVE_ALL);
+        this(name, initialFiles, userPrompt, scriptedResponse, ScenarioApprovalPolicy.APPROVE_ALL, null);
     }
 
     // ── Builder ──────────────────────────────────────────────────────
@@ -52,6 +56,7 @@ public record ScenarioDefinition(
         private String userPrompt = "";
         private String scriptedResponse = "";
         private ScenarioApprovalPolicy policy = ScenarioApprovalPolicy.APPROVE_ALL;
+        private ExecutionPhase executionPhase;
 
         private Builder(String name) {
             this.name = name;
@@ -84,8 +89,15 @@ public record ScenarioDefinition(
             return this;
         }
 
+        /** Force a runtime execution phase for phase-policy scenarios. */
+        public Builder withExecutionPhase(ExecutionPhase executionPhase) {
+            this.executionPhase = executionPhase;
+            return this;
+        }
+
         public ScenarioDefinition build() {
-            return new ScenarioDefinition(name, Map.copyOf(files), userPrompt, scriptedResponse, policy);
+            return new ScenarioDefinition(
+                    name, Map.copyOf(files), userPrompt, scriptedResponse, policy, executionPhase);
         }
     }
 }
