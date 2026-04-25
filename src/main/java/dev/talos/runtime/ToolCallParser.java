@@ -223,6 +223,32 @@ public final class ToolCallParser {
         return startsLikeToolEnvelope && mentionsToolShape && trimmed.contains("talos.");
     }
 
+    /**
+     * Returns true when {@code text} is exactly one standalone JSON object that
+     * parses as a Talos tool call.
+     *
+     * <p>Unlike {@link #parseJson(String)}, this helper does not log warnings
+     * for ordinary non-tool JSON. It exists for display filtering, where normal
+     * JSON examples may be inspected speculatively before deciding whether to
+     * suppress them from the terminal stream.
+     */
+    static boolean looksLikeStandaloneToolJson(String text) {
+        String trimmed = text == null ? "" : text.strip();
+        if (trimmed.isEmpty() || !trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+            return false;
+        }
+        try {
+            JsonNode root = MAPPER.readTree(trimmed);
+            if (!root.isObject()) return false;
+            ToolCall call = parseJsonNode(root);
+            return call != null
+                    && call.toolName() != null
+                    && call.toolName().startsWith("talos.");
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
     // ── Internal extraction helpers ──────────────────────────────────
 
     /**
