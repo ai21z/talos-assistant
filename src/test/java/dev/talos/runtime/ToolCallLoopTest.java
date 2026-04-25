@@ -434,6 +434,51 @@ class ToolCallLoopTest {
     }
 
     @Test
+    void readOnlyMutationGuardStopsWithoutReprompting() {
+        var registry = new ToolRegistry();
+        registry.register(writeFileTool());
+        final int[] gateCalls = {0};
+        var processor = new TurnProcessor(
+                ModeController.defaultController(),
+                (description, detail) -> {
+                    gateCalls[0]++;
+                    return true;
+                },
+                registry);
+        var loop = new ToolCallLoop(processor);
+
+        String initialResponse = """
+                {"name": "talos.write_file", "arguments": {"path": "index.html", "content": "<h1>new</h1>"}}
+                """;
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user("Check the workspace. Do not change anything yet.")));
+        var ctx = Context.builder(new Config())
+                .llm(LlmClient.scripted(List.of(
+                        "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"style.css\",\"content\":\"body{}\"}}")))
+                .build();
+
+        TurnUserRequestCapture.set("Check the workspace. Do not change anything yet.");
+        try {
+            var result = loop.run(initialResponse, messages, WS, ctx);
+
+            assertEquals(1, result.iterations(),
+                    "Read-only mutation guard should stop the loop immediately");
+            assertEquals(1, result.toolsInvoked(),
+                    "No follow-up write should be requested after the policy denial");
+            assertEquals(1, result.failedCalls());
+            assertFalse(result.hitIterLimit(),
+                    "Policy denial stop should not be reported as an iteration-limit stop");
+            assertTrue(result.finalAnswer().contains("mutating tool was not allowed"));
+            assertEquals(0, gateCalls[0], "mutation-intent guard must fire before approval");
+            assertEquals(1, result.toolOutcomes().size());
+            assertTrue(result.toolOutcomes().get(0).denied());
+        } finally {
+            TurnUserRequestCapture.clear();
+        }
+    }
+
+    @Test
     void repeatedSameToolFailureStopsByFailurePolicyBeforeIterationLimit() {
         var registry = new ToolRegistry();
         registry.register(alwaysFailTool());
