@@ -6,6 +6,8 @@ import dev.talos.cli.repl.Result;
 import dev.talos.core.retrieval.RetrievalTrace;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.tools.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
 import java.time.Duration;
@@ -32,6 +34,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * directly by the command registry — this only processes prompts.
  */
 public final class TurnProcessor {
+
+    private static final Logger LOG = LoggerFactory.getLogger(TurnProcessor.class);
 
     private final ModeController modes;
     private final ApprovalGate approvalGate;
@@ -229,6 +233,26 @@ public final class TurnProcessor {
                             + "or wait for an explicit change request in a later turn."));
         }
 
+        // Path-parameter placeholder guard — applies to ALL tools regardless of
+        // risk level. Transcript-observed failure (qwen2.5-coder:14b, April 2026):
+        // the model emitted planning narration with mixed real and template tool
+        // calls: read_file(path=<html-file-path>). read_file is READ_ONLY so the
+        // content-guard below (scoped to requiresApproval) was skipped entirely.
+        // Path.of("<html-file-path>") is illegal on Windows (Illegal char '<' at
+        // index 0), propagated uncaught as an InvalidPathException through
+        // executeTool → ToolCallLoop → AssistantTurnExecutor, and was logged as
+        // "LLM call failed" — killing the whole turn. A placeholder path is
+        // definitionally wrong for any file tool; refuse here and return a directed
+        // error so the model retries with the actual workspace path.
+        for (String k : List.of("path", "file_path", "filepath", "file", "filename", "from", "to")) {
+            String v = call.param(k);
+            if (v != null && TemplatePlaceholderGuard.looksLikeTemplatePlaceholder(v)) {
+                String msg = TemplatePlaceholderGuard.rejectionMessage(call.toolName(), k, v);
+                TurnAuditCapture.recordToolCall(call.toolName(), path == null ? "" : path, false);
+                return ToolResult.fail(ToolError.invalidParams(msg));
+            }
+        }
+
         // Template-placeholder guard — reject BEFORE the approval gate.
         // Transcript-observed failure (qwen2.5-coder:14b, April 2026): the
         // model emits a pedagogical "step-by-step" answer using Python-style
@@ -348,7 +372,17 @@ public final class TurnProcessor {
                 session.config()
         );
 
-        ToolResult result = toolRegistry.execute(call, toolCtx);
+        ToolResult result;
+        try {
+            result = toolRegistry.execute(call, toolCtx);
+        } catch (Exception e) {
+            LOG.warn("Tool {} threw unexpected exception: {} — returning fail result instead of crashing turn",
+                    call.toolName(), e.getMessage());
+            LOG.debug("Tool execution exception stack trace:", e);
+            result = ToolResult.fail(ToolError.internal(
+                    "Tool execution failed unexpectedly: "
+                            + e.getClass().getSimpleName() + ": " + e.getMessage()));
+        }
         TurnAuditCapture.recordToolCall(call.toolName(), path == null ? "" : path, result.success());
         return result;
     }
