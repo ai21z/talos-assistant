@@ -167,6 +167,57 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void selectorGroundingStillOverridesAfterGrepOnlyUnderinspection() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-selector-grep-only-");
+        try {
+            Files.writeString(ws.resolve("index.html"), """
+                    <!DOCTYPE html>
+                    <html>
+                      <body class="synthwave-theme">
+                        <section id="hero">
+                          <div class="hero-content"></div>
+                        </section>
+                      </body>
+                    </html>
+                    """);
+            Files.writeString(ws.resolve("style.css"), """
+                    body.synthwave-theme {}
+                    #hero {}
+                    .hero-content {}
+                    .cta-button {}
+                    """);
+            Files.writeString(ws.resolve("script.js"), """
+                    document.querySelector('.cta-button');
+                    """);
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Check whether this website has mismatches between HTML classes/IDs and the selectors used in CSS or JavaScript. Do not change anything yet."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "unused", 3, 3,
+                    List.of("talos.grep", "talos.grep", "talos.grep"),
+                    List.of(), 0, 0, false, 0, List.of(),
+                    0, 0, 0, 0);
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "Based on the tool results, there are no mismatches.", messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.GroundingStatus.GROUNDED, outcome.groundingStatus());
+            assertTrue(outcome.selectorGroundedOverride());
+            assertTrue(outcome.finalAnswer().contains("Mismatches found:"));
+            assertTrue(outcome.finalAnswer().contains("`.cta-button`"));
+            assertFalse(outcome.finalAnswer().contains("There are no mismatches"));
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void postApplySelectorFailureIsClassifiedAsFailedVerification() throws Exception {
         Path ws = Files.createTempDirectory("talos-execution-outcome-verify-fail-");
         try {
