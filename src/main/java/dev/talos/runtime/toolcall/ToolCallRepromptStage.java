@@ -73,10 +73,7 @@ public final class ToolCallRepromptStage {
         }
 
         try {
-            java.util.function.Consumer<String> sink = state.ctx.streamSink();
-            LlmClient.StreamResult repromptResult = sink != null
-                    ? state.ctx.llm().chatStreamFull(state.messages, sink)
-                    : state.ctx.llm().chatFull(state.messages);
+            LlmClient.StreamResult repromptResult = state.ctx.llm().chatFull(state.messages);
             state.currentText = repromptResult.text();
             state.currentNativeCalls = repromptResult.hasToolCalls()
                     ? new ArrayList<>(repromptResult.toolCalls()) : List.of();
@@ -104,10 +101,7 @@ public final class ToolCallRepromptStage {
             LOG.warn("Transient error during tool-call loop iteration {}: {}", state.iterations, tr.getMessage());
             try {
                 Thread.sleep(400);
-                java.util.function.Consumer<String> sink = state.ctx.streamSink();
-                LlmClient.StreamResult retryResult = sink != null
-                        ? state.ctx.llm().chatStreamFull(state.messages, sink)
-                        : state.ctx.llm().chatFull(state.messages);
+                LlmClient.StreamResult retryResult = state.ctx.llm().chatFull(state.messages);
                 state.currentText = retryResult.text();
                 state.currentNativeCalls = retryResult.hasToolCalls()
                         ? new ArrayList<>(retryResult.toolCalls()) : List.of();
