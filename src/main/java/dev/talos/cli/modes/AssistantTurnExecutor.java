@@ -999,7 +999,7 @@ public final class AssistantTurnExecutor {
         String userRequest = latestUserRequest(messages);
         if (!looksLikeSelectorMismatchRequest(userRequest)) return answer;
 
-        String grounded = StaticTaskVerifier.renderSelectorInspection(workspace, loopResult.readPaths());
+        String grounded = StaticTaskVerifier.renderSelectorInspection(workspace);
         return grounded == null || grounded.isBlank() ? answer : grounded;
     }
 
