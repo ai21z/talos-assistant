@@ -249,6 +249,23 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/20-selector-mismatch-grep-only-grounded.json] 20: grep-only selector underinspection is grounded")
+    void selectorMismatchGrepOnlyUnderinspectionIsGrounded() {
+        var loaded = JsonScenarioLoader.load("scenarios/20-selector-mismatch-grep-only-grounded.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("Mismatches found:")
+                    .assertAnswerContains("`.cta-button`")
+                    .assertAnswerNotContains("There are no mismatches")
+                    .assertAnswerNotContains("No further action is needed");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/11-partial-mutation-summary-truthful.json] 11: partial mutation summary reports only verified outcomes")
     void partialMutationSummaryIsTruthful() {
         var loaded = JsonScenarioLoader.load("scenarios/11-partial-mutation-summary-truthful.json");

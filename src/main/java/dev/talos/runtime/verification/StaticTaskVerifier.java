@@ -269,6 +269,10 @@ public final class StaticTaskVerifier {
     public static String renderSelectorInspection(Path workspace, Collection<String> readPaths) {
         List<String> missing = missingPrimaryReads(workspace, readPaths);
         if (!missing.isEmpty()) return null;
+        return renderSelectorInspection(workspace);
+    }
+
+    public static String renderSelectorInspection(Path workspace) {
         List<String> primary = obviousPrimaryFiles(workspace);
         String htmlFile = pickPrimary(primary, ".html", ".htm");
         String cssFile = pickPrimary(primary, ".css");
