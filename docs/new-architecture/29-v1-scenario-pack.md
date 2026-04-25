@@ -385,7 +385,20 @@ Missing:
 - browser/runtime verification
 - shell/test-runner verification
 
-### 3. Failure Discipline Is Still Too Coarse
+### 3. Minimal TaskOutcome Exists, But Failure Discipline Is Still Too Coarse
+
+Talos now has a minimal structured `TaskOutcome` layer carrying:
+
+- the resolved `TaskContract`
+- mutation outcome status and per-tool mutation outcomes
+- static verification result
+- first-class truth warnings
+- a runtime completion status
+
+This is an important architectural step, but it is still a first slice. The
+CLI-facing `ExecutionOutcome` remains the adapter that renders current answer
+annotations, and the scenario pack does not yet emit per-scenario trajectory
+artifacts from `TaskOutcome`.
 
 The loop cap is necessary but not enough.
 
@@ -531,5 +544,7 @@ scenario evidence tied to first-class runtime concepts:
 ExecutionPhase -> TaskContract -> TaskOutcome -> TaskVerifier -> FailurePolicy
 ```
 
-That is the path from useful V1 harness to reference-grade local operator
-architecture.
+Talos now has first slices of `ExecutionPhase`, `TaskContract`,
+`TaskOutcome`, and static `TaskVerifier`. The largest remaining architecture
+gap is turning failure/reset discipline and scenario trajectory evidence into
+first-class runtime artifacts.

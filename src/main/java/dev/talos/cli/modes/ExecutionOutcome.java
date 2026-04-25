@@ -2,6 +2,11 @@ package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.outcome.MutationOutcome;
+import dev.talos.runtime.outcome.TaskCompletionStatus;
+import dev.talos.runtime.outcome.TaskOutcome;
+import dev.talos.runtime.outcome.TruthWarning;
+import dev.talos.runtime.outcome.TruthWarningType;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.verification.StaticTaskVerifier;
@@ -10,6 +15,7 @@ import dev.talos.runtime.verification.TaskVerificationStatus;
 import dev.talos.spi.types.ChatMessage;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
@@ -25,6 +31,7 @@ record ExecutionOutcome(
         CompletionStatus completionStatus,
         GroundingStatus groundingStatus,
         VerificationStatus verificationStatus,
+        TaskOutcome taskOutcome,
         boolean mutationRequested,
         boolean toolLoopRan,
         boolean deniedMutation,
@@ -118,6 +125,21 @@ record ExecutionOutcome(
             current = staticVerificationPassedAnnotation(taskVerification) + current;
         }
 
+        TaskOutcome taskOutcome = new TaskOutcome(
+                contract,
+                toTaskCompletionStatus(completionStatus, verificationStatus, contract, false),
+                MutationOutcome.from(contract, loopResult, extraMutationSuccesses),
+                taskVerification,
+                toolLoopWarnings(
+                        deniedMutation,
+                        partialMutation,
+                        falseMutationClaim,
+                        inspectUnderCompleted,
+                        selectorGroundedOverride,
+                        verificationStatus),
+                loopResult == null ? List.of() : loopResult.toolOutcomes()
+        );
+
         GroundingStatus groundingStatus = selectorGroundedOverride
                 ? GroundingStatus.GROUNDED
                 : GroundingStatus.UNKNOWN;
@@ -127,6 +149,7 @@ record ExecutionOutcome(
                 completionStatus,
                 groundingStatus,
                 verificationStatus,
+                taskOutcome,
                 mutationRequested,
                 true,
                 deniedMutation,
@@ -162,12 +185,24 @@ record ExecutionOutcome(
         boolean ungrounded = shaped != null
                 && shaped.startsWith(AssistantTurnExecutor.UNGROUNDED_ANNOTATION);
         boolean advisoryOnly = ungrounded && !blocked;
+        CompletionStatus completionStatus = completionStatus(false, false, advisoryOnly, blocked);
+        TaskVerificationResult verification = TaskVerificationResult.notRun("Post-apply verification was not applicable.");
+        List<TruthWarning> warnings = noToolWarnings(noToolMutationReplaced, ungrounded);
+        TaskOutcome taskOutcome = new TaskOutcome(
+                contract,
+                toTaskCompletionStatus(completionStatus, VerificationStatus.NOT_RUN, contract, noToolMutationReplaced),
+                MutationOutcome.from(contract, null, 0),
+                verification,
+                warnings,
+                List.of()
+        );
 
         return new ExecutionOutcome(
                 shaped,
-                completionStatus(false, false, advisoryOnly, blocked),
+                completionStatus,
                 ungrounded ? GroundingStatus.UNGROUNDED : GroundingStatus.UNKNOWN,
                 VerificationStatus.NOT_RUN,
+                taskOutcome,
                 mutationRequested,
                 false,
                 false,
@@ -212,6 +247,93 @@ record ExecutionOutcome(
             case FAILED -> VerificationStatus.FAILED;
             case UNAVAILABLE -> VerificationStatus.UNAVAILABLE;
         };
+    }
+
+    private static TaskCompletionStatus toTaskCompletionStatus(
+            CompletionStatus completionStatus,
+            VerificationStatus verificationStatus,
+            TaskContract contract,
+            boolean blockedByPolicy
+    ) {
+        if (completionStatus == CompletionStatus.FAILED) return TaskCompletionStatus.FAILED;
+        if (completionStatus == CompletionStatus.PARTIAL) return TaskCompletionStatus.PARTIAL;
+        if (completionStatus == CompletionStatus.ADVISORY_ONLY) return TaskCompletionStatus.ADVISORY_ONLY;
+        if (completionStatus == CompletionStatus.BLOCKED) {
+            return blockedByPolicy
+                    ? TaskCompletionStatus.BLOCKED_BY_POLICY
+                    : TaskCompletionStatus.BLOCKED_BY_APPROVAL;
+        }
+        if (verificationStatus == VerificationStatus.PASSED) {
+            return TaskCompletionStatus.COMPLETED_VERIFIED;
+        }
+        if (contract != null && !contract.mutationRequested()) {
+            return TaskCompletionStatus.READ_ONLY_ANSWERED;
+        }
+        return TaskCompletionStatus.COMPLETED_UNVERIFIED;
+    }
+
+    private static List<TruthWarning> toolLoopWarnings(
+            boolean deniedMutation,
+            boolean partialMutation,
+            boolean falseMutationClaim,
+            boolean inspectUnderCompleted,
+            boolean selectorGroundedOverride,
+            VerificationStatus verificationStatus
+    ) {
+        List<TruthWarning> warnings = new ArrayList<>();
+        if (deniedMutation) {
+            warnings.add(TruthWarning.of(
+                    TruthWarningType.DENIED_MUTATION,
+                    "A mutating tool call was denied by approval."));
+        }
+        if (partialMutation) {
+            warnings.add(TruthWarning.of(
+                    TruthWarningType.PARTIAL_MUTATION,
+                    "At least one mutating tool call succeeded and at least one failed."));
+        }
+        if (falseMutationClaim) {
+            warnings.add(TruthWarning.of(
+                    TruthWarningType.FALSE_MUTATION_CLAIM,
+                    "The answer claimed a mutation without a successful mutating tool outcome."));
+        }
+        if (inspectUnderCompleted) {
+            warnings.add(TruthWarning.of(
+                    TruthWarningType.INSPECT_UNDER_COMPLETION,
+                    "The answer sounded complete after an inspection-only tool path."));
+        }
+        if (selectorGroundedOverride) {
+            warnings.add(TruthWarning.of(
+                    TruthWarningType.SELECTOR_GROUNDED_OVERRIDE,
+                    "Selector/linkage analysis was corrected from workspace evidence."));
+        }
+        if (verificationStatus == VerificationStatus.FAILED) {
+            warnings.add(TruthWarning.of(
+                    TruthWarningType.STATIC_VERIFICATION_FAILED,
+                    "Static post-apply verification failed."));
+        } else if (verificationStatus == VerificationStatus.UNAVAILABLE) {
+            warnings.add(TruthWarning.of(
+                    TruthWarningType.STATIC_VERIFICATION_UNAVAILABLE,
+                    "Static post-apply verification could not complete."));
+        }
+        return List.copyOf(warnings);
+    }
+
+    private static List<TruthWarning> noToolWarnings(
+            boolean noToolMutationReplaced,
+            boolean ungrounded
+    ) {
+        List<TruthWarning> warnings = new ArrayList<>();
+        if (noToolMutationReplaced) {
+            warnings.add(TruthWarning.of(
+                    TruthWarningType.STREAMING_NO_TOOL_MUTATION_REPLACED,
+                    "A streaming no-tool mutation narrative was blocked."));
+        }
+        if (ungrounded) {
+            warnings.add(TruthWarning.of(
+                    TruthWarningType.STREAMING_NO_TOOL_UNGROUNDED,
+                    "A streaming no-tool answer made workspace-evidence claims without tool grounding."));
+        }
+        return List.copyOf(warnings);
     }
 
     private static String staticVerificationPassedAnnotation(TaskVerificationResult result) {
