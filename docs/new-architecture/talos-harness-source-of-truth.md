@@ -160,7 +160,7 @@ These are mandatory.
 
 ## 5.2 Internal project source files already provided in local sources
 
-4. `alex000kim-article.txt`
+4. `alex000kim-article.txt - https://alex000kim.com/posts/2026-03-31-claude-code-source-leak/`
    - very useful as a warning source
    - good for understanding product-specific mechanisms in Claude Code
    - not a source to blindly copy from

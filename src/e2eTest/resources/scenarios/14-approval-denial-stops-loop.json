@@ -1,0 +1,15 @@
+{
+  "name": "approval denial stops loop",
+  "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "approval-denial-stops-loop-without-retry"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "DENY_WRITES",
+  "userPrompt": "Change index.html so the title is Denied Retry Regression. Use the edit tool.",
+  "scriptedResponses": [
+    "```json\n{\"name\":\"talos.edit_file\",\"parameters\":{\"path\":\"index.html\",\"old_string\":\"<title>Night Drive</title>\",\"new_string\":\"<title>Denied Retry Regression</title>\"}}\n```",
+    "I'll retry the edit.\n```json\n{\"name\":\"talos.edit_file\",\"parameters\":{\"path\":\"index.html\",\"old_string\":\"<h1>Night Drive</h1>\",\"new_string\":\"<h1>Denied Retry Regression</h1>\"}}\n```"
+  ]
+}
