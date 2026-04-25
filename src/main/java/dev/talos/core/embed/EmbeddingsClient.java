@@ -114,6 +114,7 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
         );
 
         Exception lastErr = null;
+        List<String> attemptFailures = new ArrayList<>();
         for (Ep ep : attempts) {
             try {
                 Map<String,Object> body = new LinkedHashMap<>();
@@ -133,6 +134,8 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
 
                 HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
                 if (resp.statusCode() / 100 != 2) {
+                    attemptFailures.add(ep.path + " " + ep.param + " -> HTTP "
+                            + resp.statusCode() + " " + truncate(resp.body(), 120));
                     LOG.debug("embed non-2xx at {} {} -> {} {}", ep.path, ep.param, resp.statusCode(),
                             truncate(resp.body(), 120));
                     continue;
@@ -142,6 +145,7 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
                 float[] vec = parseEmbeddingFlexible(root);
                 if (vec != null && vec.length > 0) {
                     if (!isValidVector(vec)) {
+                        attemptFailures.add(ep.path + " " + ep.param + " -> invalid vector");
                         LOG.warn("Embedding vector invalid (NaN/Inf/zero) from {} {} — skipping", ep.path, ep.param);
                         continue;
                     }
@@ -151,16 +155,29 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
                     }
                     return vec;
                 } else {
+                    attemptFailures.add(ep.path + " " + ep.param + " -> empty embedding");
                     LOG.debug("Empty embedding from {} {} (continuing to next attempt)", ep.path, ep.param);
                 }
             } catch (Exception e) {
                 lastErr = e;
+                attemptFailures.add(ep.path + " " + ep.param + " -> " + e.getClass().getSimpleName()
+                        + ": " + truncate(e.getMessage(), 120));
                 LOG.debug("embed attempt failed at {} {} : {}", ep.path, ep.param, e.toString());
             }
         }
         // If we got here, we failed all permutations
-        if (lastErr != null) throw lastErr;
-        throw new IllegalStateException("No embedding returned from Ollama");
+        String message = embeddingFailureMessage("embedding", cleaned, attemptFailures);
+        if (lastErr != null) throw new IllegalStateException(message, lastErr);
+        throw new IllegalStateException(message);
+    }
+
+    private String embeddingFailureMessage(String operation, String cleanedInput, List<String> attemptFailures) {
+        String attempts = (attemptFailures == null || attemptFailures.isEmpty())
+                ? "no endpoint attempt details recorded"
+                : String.join("; ", attemptFailures);
+        return "No " + operation + " returned from Ollama for model '" + model
+                + "' after endpoint fallback attempts. inputPreview='"
+                + truncate(cleanedInput, 96) + "'. Attempts: " + attempts;
     }
 
     private float[] parseEmbeddingFlexible(Map<String, Object> root) {
