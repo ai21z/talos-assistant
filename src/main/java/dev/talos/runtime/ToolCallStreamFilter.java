@@ -19,6 +19,9 @@ import java.util.regex.Pattern;
  *       bypassing this filter entirely.</li>
  *   <li><b>JSON code fences (active text fallback)</b> — suppressed when the content
  *       matches a tool-call signature ({@code "name": "talos."}).</li>
+ *   <li><b>Bare standalone JSON (compat fallback)</b> — buffered until a complete
+ *       top-level object is available, then suppressed only if it parses as a
+ *       Talos tool call.</li>
  *   <li><b>XML tags (deprecated compatibility)</b> — {@code <tool_call>},
  *       {@code <function_call>}, {@code <tool>}, {@code <function>} — retained
  *       temporarily for models that emit XML from training habits. Not actively
@@ -50,7 +53,7 @@ public final class ToolCallStreamFilter implements Consumer<String> {
     /** Current suppression state.
      *  SUPPRESSING_XML is DEPRECATED compatibility-only (for models that emit XML from training).
      *  Scheduled for removal once native tool calling is stable across model versions. */
-    private enum State { PASSTHROUGH, SUPPRESSING_XML, BUFFERING_FENCE, SUPPRESSING_FENCE }
+    private enum State { PASSTHROUGH, SUPPRESSING_XML, BUFFERING_FENCE, SUPPRESSING_FENCE, BUFFERING_BARE_JSON }
     private State state = State.PASSTHROUGH;
 
     /** Opening XML tags that start suppression.
@@ -88,6 +91,15 @@ public final class ToolCallStreamFilter implements Consumer<String> {
     /** All possible code fence opening prefixes (for chunk boundary detection). */
     private static final String CODE_FENCE_PREFIX = "```";
 
+    /** Upper bound for speculative bare-JSON buffering in the display path. */
+    private static final int MAX_BARE_JSON_BUFFER_CHARS = 2 * 1024 * 1024;
+
+    /** Incomplete bare JSON tool-call signature used only during flush. */
+    private static final Pattern INCOMPLETE_BARE_TOOL_JSON = Pattern.compile(
+            "\"(?:name|function|tool_name|tool)\"\\s*:\\s*\"talos\\.",
+            Pattern.DOTALL
+    );
+
     public ToolCallStreamFilter(Consumer<String> delegate) {
         this.delegate = (delegate != null) ? delegate : s -> {};
     }
@@ -116,6 +128,13 @@ public final class ToolCallStreamFilter implements Consumer<String> {
                 case BUFFERING_FENCE:
                     // Never completed — emit opening fence + content as regular text
                     delegate.accept(fenceOpening + buffer.toString());
+                    break;
+                case BUFFERING_BARE_JSON:
+                    if (looksLikeIncompleteBareToolJson(buffer.toString())) {
+                        // Incomplete protocol debris — discard
+                    } else {
+                        delegate.accept(buffer.toString());
+                    }
                     break;
                 case SUPPRESSING_XML:
                 case SUPPRESSING_FENCE:
@@ -146,6 +165,7 @@ public final class ToolCallStreamFilter implements Consumer<String> {
                 case SUPPRESSING_XML -> drainSuppressingXml();
                 case SUPPRESSING_FENCE -> drainSuppressingFence();
                 case BUFFERING_FENCE -> drainBufferingFence();
+                case BUFFERING_BARE_JSON -> drainBufferingBareJson();
                 case PASSTHROUGH -> drainPassthrough();
             };
             if (!progress) break;
@@ -171,6 +191,43 @@ public final class ToolCallStreamFilter implements Consumer<String> {
         }
         // Still inside block, wait for more chunks
         return false;
+    }
+
+    /**
+     * In bare-JSON buffering mode: wait until a complete top-level JSON object
+     * is available, then suppress only Talos tool-call objects.
+     */
+    private boolean drainBufferingBareJson() {
+        String text = buffer.toString();
+        if (text.isEmpty()) return false;
+
+        if (!couldStillBeJsonObject(text)) {
+            delegate.accept(text);
+            buffer.setLength(0);
+            state = State.PASSTHROUGH;
+            return true;
+        }
+
+        int objectEnd = findCompleteJsonObjectEnd(text);
+        if (objectEnd < 0) {
+            if (buffer.length() > MAX_BARE_JSON_BUFFER_CHARS) {
+                delegate.accept(buffer.toString());
+                buffer.setLength(0);
+                state = State.PASSTHROUGH;
+                return true;
+            }
+            return false;
+        }
+
+        String candidate = text.substring(0, objectEnd + 1);
+        String remainder = text.substring(objectEnd + 1);
+        if (!ToolCallParser.looksLikeStandaloneToolJson(candidate)) {
+            delegate.accept(candidate);
+        }
+        buffer.setLength(0);
+        buffer.append(remainder);
+        state = State.PASSTHROUGH;
+        return true;
     }
 
     /**
@@ -240,8 +297,11 @@ public final class ToolCallStreamFilter implements Consumer<String> {
         Matcher fm = CODE_FENCE_OPEN.matcher(text);
         int fenceStart = fm.find() ? fm.start() : -1;
 
-        // Neither found — try to emit safe prefix
-        if (xmlStart < 0 && fenceStart < 0) {
+        // Check for bare standalone JSON object opening
+        int jsonStart = findBareJsonStart(text);
+
+        // None found — try to emit safe prefix
+        if (xmlStart < 0 && fenceStart < 0 && jsonStart < 0) {
             int safeEnd = findSafeEmitEnd(text);
             if (safeEnd > 0) {
                 delegate.accept(text.substring(0, safeEnd));
@@ -254,13 +314,17 @@ public final class ToolCallStreamFilter implements Consumer<String> {
 
         // Determine which comes first
         int firstPos;
-        boolean isXml;
-        if (xmlStart >= 0 && (fenceStart < 0 || xmlStart <= fenceStart)) {
+        MatchKind kind;
+        if (xmlStart >= 0 && (fenceStart < 0 || xmlStart <= fenceStart)
+                && (jsonStart < 0 || xmlStart <= jsonStart)) {
             firstPos = xmlStart;
-            isXml = true;
-        } else {
+            kind = MatchKind.XML;
+        } else if (fenceStart >= 0 && (jsonStart < 0 || fenceStart <= jsonStart)) {
             firstPos = fenceStart;
-            isXml = false;
+            kind = MatchKind.FENCE;
+        } else {
+            firstPos = jsonStart;
+            kind = MatchKind.BARE_JSON;
         }
 
         // Emit everything before the first match
@@ -268,23 +332,32 @@ public final class ToolCallStreamFilter implements Consumer<String> {
             delegate.accept(text.substring(0, firstPos));
         }
 
-        if (isXml) {
-            // XML tag — enter XML suppression
-            String remainder = text.substring(om.end());
-            buffer.setLength(0);
-            buffer.append(remainder);
-            state = State.SUPPRESSING_XML;
-        } else {
-            // Code fence — enter fence buffering.
-            // Store only the content AFTER the opening fence (```json\n)
-            // so the close-fence pattern doesn't match the opening fence.
-            String remainder = text.substring(fm.end());
-            buffer.setLength(0);
-            buffer.append(remainder);
-            // Remember the opening fence text for re-emission if it turns out
-            // to be a non-tool-call code fence.
-            fenceOpening = text.substring(fenceStart, fm.end());
-            state = State.BUFFERING_FENCE;
+        switch (kind) {
+            case XML -> {
+                // XML tag — enter XML suppression
+                String remainder = text.substring(om.end());
+                buffer.setLength(0);
+                buffer.append(remainder);
+                state = State.SUPPRESSING_XML;
+            }
+            case FENCE -> {
+                // Code fence — enter fence buffering.
+                // Store only the content AFTER the opening fence (```json\n)
+                // so the close-fence pattern doesn't match the opening fence.
+                String remainder = text.substring(fm.end());
+                buffer.setLength(0);
+                buffer.append(remainder);
+                // Remember the opening fence text for re-emission if it turns out
+                // to be a non-tool-call code fence.
+                fenceOpening = text.substring(fenceStart, fm.end());
+                state = State.BUFFERING_FENCE;
+            }
+            case BARE_JSON -> {
+                String remainder = text.substring(firstPos);
+                buffer.setLength(0);
+                buffer.append(remainder);
+                state = State.BUFFERING_BARE_JSON;
+            }
         }
         return true;
     }
@@ -319,6 +392,73 @@ public final class ToolCallStreamFilter implements Consumer<String> {
             }
         }
         return len;
+    }
+
+    private enum MatchKind { XML, FENCE, BARE_JSON }
+
+    private static int findBareJsonStart(String text) {
+        for (int i = 0; i < text.length(); i++) {
+            if (text.charAt(i) != '{') continue;
+            if (!isStandaloneBoundary(text, i)) continue;
+            if (couldBeginJsonObject(text, i)) return i;
+        }
+        return -1;
+    }
+
+    private static boolean isStandaloneBoundary(String text, int braceIndex) {
+        if (braceIndex <= 0) return true;
+        char prev = text.charAt(braceIndex - 1);
+        return Character.isWhitespace(prev);
+    }
+
+    private static boolean couldBeginJsonObject(String text, int braceIndex) {
+        int i = braceIndex + 1;
+        while (i < text.length() && Character.isWhitespace(text.charAt(i))) {
+            i++;
+        }
+        if (i >= text.length()) return true;
+        char c = text.charAt(i);
+        return c == '"' || c == '}';
+    }
+
+    private static boolean couldStillBeJsonObject(String text) {
+        if (!text.startsWith("{")) return false;
+        return couldBeginJsonObject(text, 0);
+    }
+
+    private static int findCompleteJsonObjectEnd(String text) {
+        int depth = 0;
+        boolean inString = false;
+        boolean escaped = false;
+
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (inString) {
+                if (escaped) {
+                    escaped = false;
+                } else if (c == '\\') {
+                    escaped = true;
+                } else if (c == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+
+            if (c == '"') {
+                inString = true;
+            } else if (c == '{') {
+                depth++;
+            } else if (c == '}') {
+                depth--;
+                if (depth == 0) return i;
+                if (depth < 0) return -1;
+            }
+        }
+        return -1;
+    }
+
+    private static boolean looksLikeIncompleteBareToolJson(String text) {
+        return text != null && INCOMPLETE_BARE_TOOL_JSON.matcher(text).find();
     }
 
     /**

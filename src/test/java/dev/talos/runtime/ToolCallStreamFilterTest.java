@@ -431,6 +431,97 @@ class ToolCallStreamFilterTest {
         }
     }
 
+    // ── Bare JSON tool call suppression ────────────────────────────────
+
+    @Nested
+    @DisplayName("Bare JSON tool call suppression")
+    class BareJsonSuppression {
+
+        @Test
+        @DisplayName("bare standalone JSON tool call is suppressed")
+        void bare_json_tool_call_suppressed() {
+            String input = """
+                    {"name": "talos.read_file", "arguments": {"path": "index.html"}}
+                    """;
+            String result = joined(f -> f.accept(input));
+            assertEquals("\n", result);
+        }
+
+        @Test
+        @DisplayName("prose around bare JSON tool call is preserved")
+        void prose_around_bare_json_is_preserved() {
+            String result = joined(f -> f.accept(
+                    "Let me check.\n"
+                            + "{\"name\": \"talos.read_file\", \"parameters\": {\"path\": \"index.html\"}}\n"
+                            + "Done."));
+            assertEquals("Let me check.\n\nDone.", result);
+        }
+
+        @Test
+        @DisplayName("chunked multiline bare JSON tool call is suppressed")
+        void chunked_multiline_bare_json_suppressed() {
+            String result = joined(f -> {
+                f.accept("Before\n{\n  \"name\": ");
+                f.accept("\"talos.grep\",\n  \"arguments\": {\n");
+                f.accept("    \"pattern\": \"cta-button\",\n    \"glob\": \"*.html\"\n  }\n}");
+                f.accept("\nAfter");
+            });
+            assertFalse(result.contains("talos.grep"));
+            assertEquals("Before\n\nAfter", result);
+        }
+
+        @Test
+        @DisplayName("adjacent bare JSON tool calls are suppressed")
+        void adjacent_bare_json_tool_calls_suppressed() {
+            String result = joined(f -> f.accept(
+                    "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}"
+                            + "{\"tool_name\":\"talos.grep\",\"params\":{\"pattern\":\"cta\"}}"
+                            + "final"));
+            assertEquals("final", result);
+        }
+
+        @Test
+        @DisplayName("bare JSON tool call with braces inside string is suppressed")
+        void bare_json_with_braces_in_string_suppressed() {
+            String result = joined(f -> f.accept(
+                    "{\"name\":\"talos.edit_file\",\"parameters\":{\"path\":\"style.css\","
+                            + "\"old_string\":\".hero { color: red; }\","
+                            + "\"new_string\":\".hero { color: blue; }\"}}"
+                            + "after"));
+            assertEquals("after", result);
+        }
+
+        @Test
+        @DisplayName("non-tool JSON passes through unchanged")
+        void non_tool_json_passes_through() {
+            String input = "Example: {\"name\": \"ordinary\", \"arguments\": {\"path\": \"x\"}} done";
+            String result = joined(f -> f.accept(input));
+            assertEquals(input, result);
+        }
+
+        @Test
+        @DisplayName("ordinary JSON object split across chunks passes through")
+        void chunked_non_tool_json_passes_through() {
+            String result = joined(f -> {
+                f.accept("Data ");
+                f.accept("{\"key\": ");
+                f.accept("\"value\", \"count\": 2}");
+                f.accept(" end");
+            });
+            assertEquals("Data {\"key\": \"value\", \"count\": 2} end", result);
+        }
+
+        @Test
+        @DisplayName("CSS braces are not mistaken for bare JSON")
+        void css_braces_pass_through() {
+            String result = joined(f -> {
+                f.accept("Use body {");
+                f.accept(" color: red; } here.");
+            });
+            assertEquals("Use body { color: red; } here.", result);
+        }
+    }
+
     // ── Flush with JSON fences ───────────────────────────────────────────
 
     @Nested
@@ -448,6 +539,34 @@ class ToolCallStreamFilterTest {
             String result = String.join("", chunks);
             assertTrue(result.contains("text"), "Text should be emitted");
             assertTrue(result.contains("just_data"), "Incomplete fence content should be emitted");
+        }
+    }
+
+    // ── Flush with bare JSON ────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("Flush behavior with bare JSON")
+    class FlushBareJson {
+
+        @Test
+        @DisplayName("incomplete bare tool-call JSON is discarded on flush")
+        void flush_discards_incomplete_bare_tool_json() {
+            List<String> chunks = new ArrayList<>();
+            ToolCallStreamFilter filter = new ToolCallStreamFilter(chunks::add);
+            filter.accept("text {\"name\": \"talos.read_file\", \"arguments\": {\"path\": ");
+            filter.flush();
+            assertEquals("text ", String.join("", chunks));
+        }
+
+        @Test
+        @DisplayName("incomplete ordinary bare JSON is emitted on flush")
+        void flush_emits_incomplete_ordinary_json() {
+            List<String> chunks = new ArrayList<>();
+            ToolCallStreamFilter filter = new ToolCallStreamFilter(chunks::add);
+            filter.accept("text {\"name\": \"ordinary\", \"arguments\": {\"path\": ");
+            filter.flush();
+            assertEquals("text {\"name\": \"ordinary\", \"arguments\": {\"path\": ",
+                    String.join("", chunks));
         }
     }
 }
