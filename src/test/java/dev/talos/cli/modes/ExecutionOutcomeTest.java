@@ -6,6 +6,7 @@ import dev.talos.runtime.outcome.TaskCompletionStatus;
 import dev.talos.runtime.outcome.TruthWarningType;
 import dev.talos.runtime.verification.TaskVerificationStatus;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.tools.ToolError;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -47,6 +48,39 @@ class ExecutionOutcomeTest {
         assertEquals(MutationOutcomeStatus.DENIED, outcome.taskOutcome().mutationOutcome().status());
         assertEquals(1, outcome.taskOutcome().mutationOutcome().denied().size());
         assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.DENIED_MUTATION));
+    }
+
+    @Test
+    void invalidMutationArgumentsAreClassifiedAsFailedWithoutApprovalDenial() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Edit index.html to add the CTA button."));
+
+        var loopResult = new ToolCallLoop.LoopResult(
+                "I updated index.html.", 1, 1,
+                List.of("talos.edit_file"), List.of(),
+                1, 0, false, 0, List.of(),
+                0, 0, 0, 0,
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.edit_file", "index.html", false, true, false,
+                        "", "Invalid talos.edit_file call: `old_string` must be present and non-empty. "
+                        + "No approval was requested and no file was changed.",
+                        null, ToolError.INVALID_PARAMS
+                )));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                "I updated index.html.", messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.FAILED, outcome.completionStatus());
+        assertTrue(outcome.invalidMutation());
+        assertFalse(outcome.deniedMutation());
+        assertTrue(outcome.finalAnswer().startsWith(AssistantTurnExecutor.INVALID_MUTATION_ANNOTATION),
+                outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains("invalid mutation arguments"));
+        assertTrue(outcome.finalAnswer().contains("old_string"));
+        assertEquals(TaskCompletionStatus.FAILED, outcome.taskOutcome().completionStatus());
+        assertEquals(MutationOutcomeStatus.FAILED, outcome.taskOutcome().mutationOutcome().status());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.INVALID_MUTATION_ARGUMENTS));
     }
 
     @Test
