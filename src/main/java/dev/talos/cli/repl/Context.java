@@ -12,6 +12,7 @@ import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.ApprovalGate;
 import dev.talos.runtime.NoOpApprovalGate;
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.phase.ExecutionPhaseState;
 import dev.talos.tools.ToolRegistry;
 
 import java.nio.file.Path;
@@ -35,8 +36,13 @@ public record Context(
         ConversationManager conversationManager,
         ToolCallLoop toolCallLoop,
         Consumer<String> streamSink,
-        Runnable onStreamComplete
+        Runnable onStreamComplete,
+        ExecutionPhaseState executionPhaseState
 ) {
+    public Context {
+        if (executionPhaseState == null) executionPhaseState = new ExecutionPhaseState();
+    }
+
     /** Backward-compatible constructor without onStreamComplete. */
     public Context(Config cfg, Limits limits, SessionState session, Audit audit,
                    Redactor redactor, Sandbox sandbox, RagService rag, LlmClient llm,
@@ -44,7 +50,7 @@ public record Context(
                    ToolRegistry toolRegistry, ConversationManager conversationManager,
                    ToolCallLoop toolCallLoop, Consumer<String> streamSink) {
         this(cfg, limits, session, audit, redactor, sandbox, rag, llm, netPolicy,
-             memory, approvalGate, toolRegistry, conversationManager, toolCallLoop, streamSink, null);
+             memory, approvalGate, toolRegistry, conversationManager, toolCallLoop, streamSink, null, null);
     }
 
     /** Backward-compatible constructor without streamSink or onStreamComplete. */
@@ -54,7 +60,7 @@ public record Context(
                    ToolRegistry toolRegistry, ConversationManager conversationManager,
                    ToolCallLoop toolCallLoop) {
         this(cfg, limits, session, audit, redactor, sandbox, rag, llm, netPolicy,
-             memory, approvalGate, toolRegistry, conversationManager, toolCallLoop, null, null);
+             memory, approvalGate, toolRegistry, conversationManager, toolCallLoop, null, null, null);
     }
 
     /** Backward-compatible constructor without toolCallLoop, streamSink, or onStreamComplete. */
@@ -63,7 +69,7 @@ public record Context(
                    NetPolicy netPolicy, SessionMemory memory, ApprovalGate approvalGate,
                    ToolRegistry toolRegistry, ConversationManager conversationManager) {
         this(cfg, limits, session, audit, redactor, sandbox, rag, llm, netPolicy,
-             memory, approvalGate, toolRegistry, conversationManager, null, null, null);
+             memory, approvalGate, toolRegistry, conversationManager, null, null, null, null);
     }
 
     /** Backward-compatible constructor without conversationManager or toolCallLoop. */
@@ -104,6 +110,7 @@ public record Context(
         private ToolCallLoop toolCallLoop;
         private Consumer<String> streamSink;
         private Runnable onStreamComplete;
+        private ExecutionPhaseState executionPhaseState;
 
         public Builder(Config cfg) { this.cfg = (cfg == null ? new Config() : cfg); }
 
@@ -122,6 +129,7 @@ public record Context(
         public Builder toolCallLoop(ToolCallLoop l)  { this.toolCallLoop = l; return this; }
         public Builder streamSink(Consumer<String> s) { this.streamSink = s; return this; }
         public Builder onStreamComplete(Runnable r)  { this.onStreamComplete = r; return this; }
+        public Builder executionPhaseState(ExecutionPhaseState s) { this.executionPhaseState = s; return this; }
 
         /** Convenience for ad-hoc usage; tests should prefer explicit setters for control. */
         public Builder withDefaults(Path workspace, SessionState session) {
@@ -169,10 +177,11 @@ public record Context(
             if (toolRegistry == null) toolRegistry = new ToolRegistry();
             if (conversationManager == null) conversationManager =
                     new ConversationManager(memory, TokenBudget.fromConfig(cfg));
+            if (executionPhaseState == null) executionPhaseState = new ExecutionPhaseState();
 
             return new Context(cfg, limits, session, audit, redactor, sandbox, rag, llm, net,
                     memory, approvalGate, toolRegistry, conversationManager, toolCallLoop, streamSink,
-                    onStreamComplete);
+                    onStreamComplete, executionPhaseState);
         }
     }
 }

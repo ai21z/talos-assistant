@@ -4,6 +4,7 @@ import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
 import dev.talos.core.retrieval.RetrievalTrace;
+import dev.talos.runtime.phase.PhasePolicy;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.tools.*;
 import org.slf4j.Logger;
@@ -191,6 +192,7 @@ public final class TurnProcessor {
      *   <li>Resolve target path (for scope warning + policy classification).</li>
      *   <li>Mutation-intent guard — reject write/edit calls when the original
      *       user prompt did not explicitly request a modification.</li>
+     *   <li>Execution phase policy — reject mutating calls outside APPLY.</li>
      *   <li>{@link ScopeGuard} — if the request is web-scoped and the target
      *       looks obviously off-scope, a warning is prepended to the approval
      *       detail so the user sees it at decision time. Posture is warn,
@@ -231,6 +233,15 @@ public final class TurnProcessor {
                             + call.toolName()
                             + " for a read-only request. Answer with information only, "
                             + "or wait for an explicit change request in a later turn."));
+        }
+
+        if (ctx != null && ctx.executionPhaseState() != null) {
+            ToolResult phaseRejection = PhasePolicy.rejectIfDisallowed(
+                    ctx.executionPhaseState().phase(), tool.name(), risk);
+            if (phaseRejection != null) {
+                TurnAuditCapture.recordToolCall(call.toolName(), path == null ? "" : path, false);
+                return phaseRejection;
+            }
         }
 
         // Path-parameter placeholder guard — applies to ALL tools regardless of

@@ -2,6 +2,7 @@ package dev.talos.harness;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.talos.runtime.phase.ExecutionPhase;
 
 import java.net.URI;
 import java.nio.file.Files;
@@ -28,6 +29,7 @@ public final class JsonScenarioLoader {
             files.forEach(builder::withFile);
             builder.withUserPrompt(text(root, "userPrompt"));
             builder.withApprovalPolicy(parsePolicy(text(root, "approvalPolicy")));
+            builder.withExecutionPhase(parseExecutionPhase(text(root, "executionPhase")));
 
             String scriptedResponse = text(root, "scriptedResponse");
             if (!scriptedResponse.isBlank()) {
@@ -103,6 +105,11 @@ public final class JsonScenarioLoader {
     private static ScenarioApprovalPolicy parsePolicy(String value) {
         if (value == null || value.isBlank()) return ScenarioApprovalPolicy.APPROVE_ALL;
         return ScenarioApprovalPolicy.valueOf(value);
+    }
+
+    private static ExecutionPhase parseExecutionPhase(String value) {
+        if (value == null || value.isBlank()) return null;
+        return ExecutionPhase.valueOf(value);
     }
 
     private static String text(JsonNode root, String field) {
