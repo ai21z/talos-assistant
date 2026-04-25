@@ -2,11 +2,11 @@ package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.core.llm.LlmClient;
-import dev.talos.runtime.MutationIntent;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.ToolCallStreamFilter;
 import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.verification.StaticTaskVerifier;
 import dev.talos.spi.EngineException;
@@ -270,7 +270,7 @@ public final class AssistantTurnExecutor {
 
     private static void initializeExecutionPhaseForTurn(List<ChatMessage> messages, Context ctx) {
         if (ctx == null || ctx.executionPhaseState() == null) return;
-        ExecutionPhase initial = looksLikeMutationRequest(latestUserRequest(messages))
+        ExecutionPhase initial = TaskContractResolver.fromMessages(messages).mutationAllowed()
                 ? ExecutionPhase.APPLY
                 : ExecutionPhase.INSPECT;
         ctx.executionPhaseState().moveTo(initial);
@@ -676,7 +676,7 @@ public final class AssistantTurnExecutor {
      * verb. Package-private for direct testing.
      */
     static boolean looksLikeMutationRequest(String userRequest) {
-        return MutationIntent.looksExplicitMutationRequest(userRequest);
+        return TaskContractResolver.fromUserRequest(userRequest).mutationRequested();
     }
 
     /**

@@ -5,6 +5,8 @@ import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
 import dev.talos.core.retrieval.RetrievalTrace;
 import dev.talos.runtime.phase.PhasePolicy;
+import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.tools.*;
 import org.slf4j.Logger;
@@ -223,10 +225,11 @@ public final class TurnProcessor {
         ToolRiskLevel risk = tool.descriptor().riskLevel();
         String path = resolvePathParam(call);
         String userRequest = TurnUserRequestCapture.get();
+        TaskContract taskContract = TaskContractResolver.fromUserRequest(userRequest);
 
         if (ToolCallSupport.isMutatingTool(call.toolName())
                 && userRequest != null
-                && !MutationIntent.looksExplicitMutationRequest(userRequest)) {
+                && !taskContract.mutationAllowed()) {
             TurnAuditCapture.recordToolCall(call.toolName(), path == null ? "" : path, false);
             return ToolResult.fail(ToolError.denied(
                     "The user did not ask to modify files on this turn, so do not call "

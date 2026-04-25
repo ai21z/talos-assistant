@@ -249,6 +249,39 @@ class ApprovalGatedToolTest {
     }
 
     @Test
+    void metaQuestionAboutEditToolStillBlocksMutationBeforeApproval() {
+        var registry = new ToolRegistry();
+        registry.register(editFileTool());
+
+        final int[] gateCalls = {0};
+        ApprovalGate gate = (desc, detail) -> {
+            gateCalls[0]++;
+            return true;
+        };
+        var processor = new TurnProcessor(
+                ModeController.defaultController(),
+                gate,
+                registry);
+
+        var ctx = Context.builder(new Config()).build();
+        var session = new Session(WS, new Config());
+        var call = new ToolCall("talos.edit_file", Map.of(
+                "path", "index.html",
+                "old_string", "old",
+                "new_string", "new"));
+
+        TurnUserRequestCapture.set("Why didn't you call the edit tool?");
+        try {
+            ToolResult result = processor.executeTool(session, call, ctx);
+            assertFalse(result.success(), "meta-question must remain read-only");
+            assertEquals(ToolError.DENIED, result.error().code());
+            assertEquals(0, gateCalls[0], "contract guard must fire before approval");
+        } finally {
+            TurnUserRequestCapture.clear();
+        }
+    }
+
+    @Test
     void explicitEditRequestStillReachesApproval() {
         var registry = new ToolRegistry();
         registry.register(editFileTool());

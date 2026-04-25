@@ -2,6 +2,8 @@ package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.verification.StaticTaskVerifier;
 import dev.talos.runtime.verification.TaskVerificationResult;
 import dev.talos.runtime.verification.TaskVerificationStatus;
@@ -63,8 +65,8 @@ record ExecutionOutcome(
             int extraMutationSuccesses
     ) {
         String current = answer == null ? "" : answer;
-        boolean mutationRequested = AssistantTurnExecutor.looksLikeMutationRequest(
-                AssistantTurnExecutor.latestUserRequest(messages));
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+        boolean mutationRequested = contract.mutationRequested();
 
         String shaped = AssistantTurnExecutor.overrideSelectorMismatchAnalysisIfNeeded(
                 current, messages, loopResult, workspace);
@@ -99,10 +101,10 @@ record ExecutionOutcome(
         );
 
         TaskVerificationResult taskVerification = shouldVerifyPostApply(
-                completionStatus, loopResult, extraMutationSuccesses)
+                contract, completionStatus, loopResult, extraMutationSuccesses)
                 ? StaticTaskVerifier.verify(
                         workspace,
-                        AssistantTurnExecutor.latestUserRequest(messages),
+                        contract,
                         loopResult,
                         extraMutationSuccesses)
                 : TaskVerificationResult.notRun("Post-apply verification was not applicable.");
@@ -154,8 +156,8 @@ record ExecutionOutcome(
             shaped = AssistantTurnExecutor.groundingRetryIfNeeded(shaped, messages, ctx);
         }
 
-        boolean mutationRequested = AssistantTurnExecutor.looksLikeMutationRequest(
-                AssistantTurnExecutor.latestUserRequest(messages));
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+        boolean mutationRequested = contract.mutationRequested();
         boolean blocked = noToolMutationReplaced;
         boolean ungrounded = shaped != null
                 && shaped.startsWith(AssistantTurnExecutor.UNGROUNDED_ANNOTATION);
@@ -191,12 +193,14 @@ record ExecutionOutcome(
     }
 
     private static boolean shouldVerifyPostApply(
+            TaskContract contract,
             CompletionStatus completionStatus,
             ToolCallLoop.LoopResult loopResult,
             int extraMutationSuccesses
     ) {
         if (completionStatus != CompletionStatus.COMPLETE) return false;
         if (loopResult == null) return false;
+        if (contract == null || !contract.verificationRequired()) return false;
         return loopResult.mutatingToolSuccesses() + Math.max(0, extraMutationSuccesses) > 0;
     }
 

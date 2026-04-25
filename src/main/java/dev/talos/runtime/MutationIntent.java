@@ -16,10 +16,10 @@ import java.util.regex.Pattern;
 public final class MutationIntent {
 
     private static final java.util.List<Pattern> REQUEST_PATTERNS = java.util.List.of(
-            Pattern.compile("^(?:please\\s+)?(?:edit|modify|change|update|fix|rewrite|replace|redesign|restyle|re-style|re-design|make|write|create|save|apply|add|remove|delete|refactor)\\b"),
-            Pattern.compile("^(?:can|could|would|will)\\s+you\\s+(?:please\\s+)?(?:edit|modify|change|update|fix|rewrite|replace|redesign|restyle|re-style|re-design|make|write|create|save|apply|add|remove|delete|refactor)\\b"),
+            Pattern.compile("^(?:now\\s+)?(?:please\\s+)?(?:edit|modify|change|update|fix|rewrite|replace|redesign|restyle|re-style|re-design|make|write|create|save|apply|add|remove|delete|refactor)\\b"),
+            Pattern.compile("^(?:now\\s+)?(?:can|could|would|will)\\s+you\\s+(?:please\\s+)?(?:edit|modify|change|update|fix|rewrite|replace|redesign|restyle|re-style|re-design|make|write|create|save|apply|add|remove|delete|refactor)\\b"),
             Pattern.compile("^i\\s+(?:want|need)\\s+you\\s+to\\s+(?:edit|modify|change|update|fix|rewrite|replace|redesign|restyle|re-style|re-design|make|write|create|save|apply|add|remove|delete|refactor)\\b"),
-            Pattern.compile("^(?:let's|lets)\\s+(?:edit|modify|change|update|fix|rewrite|replace|redesign|restyle|re-style|re-design|make|write|create|save|apply|add|remove|delete|refactor)\\b")
+            Pattern.compile("^(?:now\\s+)?(?:let's|lets)\\s+(?:edit|modify|change|update|fix|rewrite|replace|redesign|restyle|re-style|re-design|make|write|create|save|apply|add|remove|delete|refactor)\\b")
     );
 
     private static final Set<String> MARKERS = Set.of(
