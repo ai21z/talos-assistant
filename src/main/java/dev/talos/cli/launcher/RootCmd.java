@@ -10,7 +10,8 @@ import picocli.CommandLine;
         description = "Talos - Local Knowledge Engine",
         subcommands = {
                 SetupCmd.class, RagIndexCmd.class, RagAskCmd.class, RunCmd.class,
-                NetCmd.class, TopLevelStatusCmd.class, VersionCmd.class, DiagnoseCmd.class
+                NetCmd.class, TopLevelStatusCmd.class, VersionCmd.class, DiagnoseCmd.class,
+                PromptRenderCmd.class
         }
 )
 public class RootCmd implements Runnable {
