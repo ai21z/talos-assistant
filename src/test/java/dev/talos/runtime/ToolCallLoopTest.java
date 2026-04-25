@@ -434,6 +434,34 @@ class ToolCallLoopTest {
     }
 
     @Test
+    void repeatedSameToolFailureStopsByFailurePolicyBeforeIterationLimit() {
+        var registry = new ToolRegistry();
+        registry.register(alwaysFailTool());
+        var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+        var loop = new ToolCallLoop(processor, 10);
+
+        String failingCall = """
+                {"name": "talos.always_fail", "arguments": {"input": "x"}}
+                """;
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user("try the failing thing")));
+        var ctx = Context.builder(new Config())
+                .llm(LlmClient.scripted(List.of(failingCall)))
+                .build();
+
+        var result = loop.run(failingCall, messages, WS, ctx);
+
+        assertEquals(3, result.iterations(), "Failure policy should stop after the threshold");
+        assertEquals(3, result.toolsInvoked());
+        assertEquals(3, result.failedCalls());
+        assertTrue(result.failureDecision().shouldStop());
+        assertFalse(result.hitIterLimit(), "Failure policy stop should happen before max iterations");
+        assertTrue(result.finalAnswer().contains("Tool loop stopped by failure policy"));
+        assertTrue(result.summary().contains("failure policy stopped"));
+    }
+
+    @Test
     void successfulCallNotCountedAsFailed() {
         var loop = createLoop(echoTool());
         var messages = new ArrayList<>(List.of(
