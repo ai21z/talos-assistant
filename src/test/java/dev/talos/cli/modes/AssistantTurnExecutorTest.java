@@ -574,6 +574,51 @@ class AssistantTurnExecutorTest {
             assertNull(result.extraSummary(),
                     "approval denial already explains zero mutations, so missing-mutation retry must not fire");
         }
+
+        @Test
+        void mutationRetryApprovalDenialUsesDeniedMutationSummary() {
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.TalosTool() {
+                @Override public String name() { return "talos.edit_file"; }
+                @Override public String description() { return "Edit file"; }
+                @Override public dev.talos.tools.ToolDescriptor descriptor() {
+                    return new dev.talos.tools.ToolDescriptor(
+                            name(), description(), null, dev.talos.tools.ToolRiskLevel.WRITE);
+                }
+                @Override public dev.talos.tools.ToolResult execute(
+                        dev.talos.tools.ToolCall call, dev.talos.tools.ToolContext ctx) {
+                    return dev.talos.tools.ToolResult.ok("edit-ok");
+                }
+            });
+
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, (description, detail) -> false, registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.edit_file\",\"arguments\":{\"path\":\"index.html\","
+                                    + "\"old_string\":\"<div class=\\\"hero-content\\\">\","
+                                    + "\"new_string\":\"<div class=\\\"hero-content cta-button\\\">\"}}")))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Now apply the smallest fix by editing index.html."));
+            var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                    "raw malformed tool call", 1, 0, List.of(), messages,
+                    0, 0, false, 0, List.of(), 0, 0, 0, 0);
+
+            var result = AssistantTurnExecutor.mutationRequestRetryIfNeeded(
+                    "raw malformed tool call", messages, loopResult, WS, ctx);
+
+            assertEquals(0, result.mutationsInRetry());
+            assertNotNull(result.extraSummary());
+            assertTrue(result.answer().contains("No file changes were applied because approval was denied for:"));
+            assertTrue(result.answer().contains("index.html: approval denied"));
+            assertFalse(result.answer().contains("Tool loop stopped because the requested mutation was not approved."),
+                    "retry-path denial should use the same denied-mutation summary as the main tool loop");
+        }
     }
 
     // ── Regression: inspect-only failure class ───────────────────────
