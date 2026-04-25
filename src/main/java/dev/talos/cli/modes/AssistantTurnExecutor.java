@@ -11,6 +11,7 @@ import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.verification.StaticTaskVerifier;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.tools.ToolError;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -521,6 +522,10 @@ public final class AssistantTurnExecutor {
             "⚠ [Truth check: no file was changed in this turn because the requested "
             + "write was not approved.]\n\n";
 
+    public static final String INVALID_MUTATION_ANNOTATION =
+            "⚠ [Truth check: no file was changed in this turn because the requested "
+            + "write tool call was invalid.]\n\n";
+
     /**
      * Returns {@code true} if the answer contains language that strongly
      * asserts a file mutation was performed (applied, edited, written,
@@ -657,6 +662,38 @@ public final class AssistantTurnExecutor {
                     .append(": approval denied\n");
         }
         out.append("\nTalos can still help in a later turn if you want to retry the edit or take a read-only approach.");
+        return out.toString().stripTrailing();
+    }
+
+    static String summarizeInvalidMutationOutcomesIfNeeded(String answer,
+                                                           List<ChatMessage> messages,
+                                                           ToolCallLoop.LoopResult loopResult,
+                                                           int extraMutationSuccesses) {
+        if (loopResult == null) return answer;
+        if (extraMutationSuccesses > 0) return answer;
+        if (loopResult.mutatingToolSuccesses() > 0) return answer;
+        if (!looksLikeMutationRequest(latestUserRequest(messages))) return answer;
+
+        List<ToolCallLoop.ToolOutcome> outcomes = loopResult.toolOutcomes();
+        if (outcomes == null || outcomes.isEmpty()) return answer;
+        List<ToolCallLoop.ToolOutcome> invalidMutations = outcomes.stream()
+                .filter(ToolCallLoop.ToolOutcome::mutating)
+                .filter(outcome -> !outcome.success())
+                .filter(outcome -> !outcome.denied())
+                .filter(outcome -> ToolError.INVALID_PARAMS.equals(outcome.errorCode()))
+                .toList();
+        if (invalidMutations.isEmpty()) return answer;
+
+        StringBuilder out = new StringBuilder(INVALID_MUTATION_ANNOTATION);
+        out.append("No file changes were applied because Talos proposed invalid mutation arguments:\n");
+        for (ToolCallLoop.ToolOutcome outcome : invalidMutations) {
+            out.append("- ")
+                    .append(outcome.pathHint().isBlank() ? outcome.toolName() : outcome.pathHint())
+                    .append(": ")
+                    .append(trimFailureMessage(outcome.errorMessage()))
+                    .append('\n');
+        }
+        out.append("\nTalos needs to inspect the current file content and retry with exact, valid tool arguments before any edit can be applied.");
         return out.toString().stripTrailing();
     }
 

@@ -310,6 +310,14 @@ public final class TurnProcessor {
             }
         }
 
+        if (risk.requiresApproval()) {
+            ToolResult preApprovalValidation = validateBeforeApproval(call);
+            if (preApprovalValidation != null) {
+                TurnAuditCapture.recordToolCall(call.toolName(), path == null ? "" : path, false);
+                return preApprovalValidation;
+            }
+        }
+
         // Scope guard — narrow, lexical, warn-first. Fires only for mutating
         // calls where the request looks web-scoped and the target extension
         // is obviously off-scope. If it fires, the warning is surfaced to
@@ -425,6 +433,52 @@ public final class TurnProcessor {
         for (String key : List.of("path", "file_path", "filepath", "file", "filename")) {
             String value = call.param(key);
             if (value != null && !value.isBlank()) return value;
+        }
+        return null;
+    }
+
+    private static ToolResult validateBeforeApproval(ToolCall call) {
+        if (!"talos.edit_file".equals(call.toolName())) {
+            return null;
+        }
+
+        String path = resolveParam(call, "path", "file_path", "filepath", "file", "filename");
+        if (path == null || path.isBlank()) {
+            return ToolResult.fail(ToolError.invalidParams(
+                    "Invalid talos.edit_file call: missing required parameter `path`. "
+                            + "No approval was requested and no file was changed."));
+        }
+
+        String oldString = resolveParam(call, "old_string", "oldString", "old_text", "search", "find", "original");
+        if (oldString == null || oldString.isEmpty()) {
+            return ToolResult.fail(ToolError.invalidParams(
+                    "Invalid talos.edit_file call: `old_string` must be present and non-empty. "
+                            + "Call talos.read_file first, then provide the exact text to replace. "
+                            + "No approval was requested and no file was changed."));
+        }
+
+        String newString = resolveParam(call, "new_string", "newString", "new_text", "replace", "replacement");
+        if (newString == null) {
+            return ToolResult.fail(ToolError.invalidParams(
+                    "Invalid talos.edit_file call: missing required parameter `new_string`. "
+                            + "No approval was requested and no file was changed."));
+        }
+
+        if (oldString.equals(newString)) {
+            return ToolResult.fail(ToolError.invalidParams(
+                    "Invalid talos.edit_file call: `old_string` and `new_string` are identical, "
+                            + "so no edit would be made. No approval was requested and no file was changed."));
+        }
+
+        return null;
+    }
+
+    private static String resolveParam(ToolCall call, String canonical, String... aliases) {
+        String value = call.param(canonical);
+        if (value != null) return value;
+        for (String alias : aliases) {
+            value = call.param(alias);
+            if (value != null) return value;
         }
         return null;
     }

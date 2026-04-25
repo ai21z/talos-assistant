@@ -164,13 +164,28 @@ public final class ToolCallLoop {
             boolean denied,
             String summary,
             String errorMessage,
-            dev.talos.tools.VerificationStatus fileVerificationStatus
+            dev.talos.tools.VerificationStatus fileVerificationStatus,
+            String errorCode
     ) {
         public ToolOutcome {
             toolName = toolName == null ? "" : toolName;
             pathHint = pathHint == null ? "" : pathHint;
             summary = summary == null ? "" : summary;
             errorMessage = errorMessage == null ? "" : errorMessage;
+            errorCode = errorCode == null ? "" : errorCode;
+        }
+
+        public ToolOutcome(
+                String toolName,
+                String pathHint,
+                boolean success,
+                boolean mutating,
+                boolean denied,
+                String summary,
+                String errorMessage,
+                dev.talos.tools.VerificationStatus fileVerificationStatus
+        ) {
+            this(toolName, pathHint, success, mutating, denied, summary, errorMessage, fileVerificationStatus, "");
         }
 
         public ToolOutcome(

@@ -2,6 +2,7 @@ package dev.talos.runtime.outcome;
 
 public enum TruthWarningType {
     DENIED_MUTATION,
+    INVALID_MUTATION_ARGUMENTS,
     PARTIAL_MUTATION,
     FALSE_MUTATION_CLAIM,
     INSPECT_UNDER_COMPLETION,

@@ -314,6 +314,140 @@ class ApprovalGatedToolTest {
     }
 
     @Test
+    void editFileWithEmptyOldStringFailsBeforeApproval() {
+        var registry = new ToolRegistry();
+        registry.register(editFileTool());
+
+        final int[] gateCalls = {0};
+        ApprovalGate gate = (desc, detail) -> {
+            gateCalls[0]++;
+            return true;
+        };
+        var processor = new TurnProcessor(
+                ModeController.defaultController(),
+                gate,
+                registry);
+
+        var ctx = Context.builder(new Config()).build();
+        var session = new Session(WS, new Config());
+        var call = new ToolCall("talos.edit_file", Map.of(
+                "path", "index.html",
+                "old_string", "",
+                "new_string", ""));
+
+        TurnUserRequestCapture.set("edit index.html to add the CTA class");
+        try {
+            ToolResult result = processor.executeTool(session, call, ctx);
+            assertFalse(result.success(), "invalid edit_file args must fail before approval");
+            assertEquals(ToolError.INVALID_PARAMS, result.error().code());
+            assertTrue(result.errorMessage().contains("old_string"));
+            assertTrue(result.errorMessage().contains("No approval was requested"));
+            assertEquals(0, gateCalls[0], "invalid edit_file args must not ask approval");
+        } finally {
+            TurnUserRequestCapture.clear();
+        }
+    }
+
+    @Test
+    void editFileNoOpFailsBeforeApproval() {
+        var registry = new ToolRegistry();
+        registry.register(editFileTool());
+
+        final int[] gateCalls = {0};
+        ApprovalGate gate = (desc, detail) -> {
+            gateCalls[0]++;
+            return true;
+        };
+        var processor = new TurnProcessor(
+                ModeController.defaultController(),
+                gate,
+                registry);
+
+        var ctx = Context.builder(new Config()).build();
+        var session = new Session(WS, new Config());
+        var call = new ToolCall("talos.edit_file", Map.of(
+                "path", "index.html",
+                "old_string", "Horror Synth",
+                "new_string", "Horror Synth"));
+
+        TurnUserRequestCapture.set("edit the title in index.html");
+        try {
+            ToolResult result = processor.executeTool(session, call, ctx);
+            assertFalse(result.success(), "no-op edit_file calls must fail before approval");
+            assertEquals(ToolError.INVALID_PARAMS, result.error().code());
+            assertTrue(result.errorMessage().contains("identical"));
+            assertEquals(0, gateCalls[0], "no-op edit_file calls must not ask approval");
+        } finally {
+            TurnUserRequestCapture.clear();
+        }
+    }
+
+    @Test
+    void editFileDeletionStillReachesApproval() {
+        var registry = new ToolRegistry();
+        registry.register(editFileTool());
+
+        final int[] gateCalls = {0};
+        ApprovalGate gate = (desc, detail) -> {
+            gateCalls[0]++;
+            return true;
+        };
+        var processor = new TurnProcessor(
+                ModeController.defaultController(),
+                gate,
+                registry);
+
+        var ctx = Context.builder(new Config()).build();
+        var session = new Session(WS, new Config());
+        var call = new ToolCall("talos.edit_file", Map.of(
+                "path", "index.html",
+                "old_string", "<div class=\"unused\"></div>",
+                "new_string", ""));
+
+        TurnUserRequestCapture.set("remove the unused div from index.html");
+        try {
+            ToolResult result = processor.executeTool(session, call, ctx);
+            assertTrue(result.success(), "empty new_string is valid deletion and should reach approval");
+            assertEquals(1, gateCalls[0], "valid deletion should still ask approval");
+        } finally {
+            TurnUserRequestCapture.clear();
+        }
+    }
+
+    @Test
+    void editFileMissingPathFailsBeforeApproval() {
+        var registry = new ToolRegistry();
+        registry.register(editFileTool());
+
+        final int[] gateCalls = {0};
+        ApprovalGate gate = (desc, detail) -> {
+            gateCalls[0]++;
+            return true;
+        };
+        var processor = new TurnProcessor(
+                ModeController.defaultController(),
+                gate,
+                registry);
+
+        var ctx = Context.builder(new Config()).build();
+        var session = new Session(WS, new Config());
+        var call = new ToolCall("talos.edit_file", Map.of(
+                "old_string", "old",
+                "new_string", "new"));
+
+        TurnUserRequestCapture.set("edit the file");
+        try {
+            ToolResult result = processor.executeTool(session, call, ctx);
+            assertFalse(result.success(), "missing path must fail before approval");
+            assertEquals(ToolError.INVALID_PARAMS, result.error().code());
+            assertTrue(result.errorMessage().contains("path"));
+            assertEquals(0, gateCalls[0], "missing path must not ask approval");
+        } finally {
+            TurnUserRequestCapture.clear();
+        }
+    }
+
+    @Test
     void explicitWriteRequestStillReachesApproval() {
         var registry = new ToolRegistry();
         registry.register(writeFileTool());
