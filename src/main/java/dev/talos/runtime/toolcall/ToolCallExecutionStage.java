@@ -31,7 +31,8 @@ public final class ToolCallExecutionStage {
      */
     public record IterationOutcome(int mutationsThisIteration,
                                    List<String> mutationSummaries,
-                                   int failuresThisIteration) {}
+                                   int failuresThisIteration,
+                                   boolean approvalDeniedThisIteration) {}
 
     private final TurnProcessor turnProcessor;
     private final ToolProgressSink progressSink;
@@ -52,6 +53,7 @@ public final class ToolCallExecutionStage {
 
         int mutationsThisIter = 0;
         int failuresThisIter = 0;
+        boolean approvalDeniedThisIter = false;
         List<String> mutationSummariesThisIter = new ArrayList<>();
 
         for (int i = 0; i < parsed.calls().size(); i++) {
@@ -137,6 +139,9 @@ public final class ToolCallExecutionStage {
             boolean denied = !result.success()
                     && result.error() != null
                     && ToolError.DENIED.equals(result.error().code());
+            if (isUserApprovalDenial(result) && ToolCallSupport.isMutatingTool(effective.toolName())) {
+                approvalDeniedThisIter = true;
+            }
             state.toolOutcomes.add(new dev.talos.runtime.ToolCallLoop.ToolOutcome(
                     effective.toolName(),
                     pathHint,
@@ -180,7 +185,20 @@ public final class ToolCallExecutionStage {
                             : "error: " + result.errorMessage());
         }
 
-        return new IterationOutcome(mutationsThisIter, mutationSummariesThisIter, failuresThisIter);
+        return new IterationOutcome(
+                mutationsThisIter,
+                mutationSummariesThisIter,
+                failuresThisIter,
+                approvalDeniedThisIter);
+    }
+
+    private static boolean isUserApprovalDenial(ToolResult result) {
+        if (result == null || result.success() || result.error() == null) return false;
+        if (!ToolError.DENIED.equals(result.error().code())) return false;
+        // DENIED also covers policy guards such as read-only mutation attempts.
+        // Only a real approval-gate refusal should terminally stop the loop.
+        String message = result.errorMessage();
+        return message != null && message.startsWith("User did not approve ");
     }
 
     private void appendResultMessage(LoopState state, boolean nativePath, int callIndex, String content) {

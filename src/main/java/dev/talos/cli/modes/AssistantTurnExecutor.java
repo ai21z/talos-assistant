@@ -729,6 +729,10 @@ public final class AssistantTurnExecutor {
                         retryText, retry.toolCalls(), messages, workspace, ctx);
                 String mergedAnswer = retryLoop.finalAnswer();
                 String summary = retryLoop.summary();
+                if (hasDeniedMutation(retryLoop)) {
+                    mergedAnswer = summarizeDeniedMutationOutcomesIfNeeded(
+                            mergedAnswer, messages, retryLoop, 0);
+                }
                 if (retryLoop.mutatingToolSuccesses() > 0) {
                     LOG.info("Missing-mutation retry succeeded: {} mutation(s) performed.",
                             retryLoop.mutatingToolSuccesses());
