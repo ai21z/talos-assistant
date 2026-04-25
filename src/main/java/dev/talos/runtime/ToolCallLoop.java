@@ -2,6 +2,7 @@ package dev.talos.runtime;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.core.util.Sanitize;
+import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.toolcall.LoopState;
 import dev.talos.runtime.toolcall.ToolCallExecutionStage;
 import dev.talos.runtime.toolcall.ToolCallParseStage;
@@ -77,12 +78,16 @@ public final class ToolCallLoop {
             int cushionFiresAliasRescue,
             int cushionFiresB3EditShortCircuit,
             int cushionFiresE1Suggestion,
+            FailureDecision failureDecision,
             List<ToolOutcome> toolOutcomes
     ) {
         public LoopResult {
             toolNames = toolNames == null ? List.of() : List.copyOf(toolNames);
             messages = messages == null ? List.of() : messages;
             readPaths = readPaths == null ? List.of() : List.copyOf(readPaths);
+            failureDecision = failureDecision == null
+                    ? FailureDecision.continueLoop()
+                    : failureDecision;
             toolOutcomes = toolOutcomes == null ? List.of() : List.copyOf(toolOutcomes);
         }
 
@@ -105,7 +110,32 @@ public final class ToolCallLoop {
             this(finalAnswer, iterations, toolsInvoked, toolNames, messages, failedCalls,
                     retriedCalls, hitIterLimit, mutatingToolSuccesses, readPaths,
                     cushionFiresRedundantRead, cushionFiresAliasRescue,
-                    cushionFiresB3EditShortCircuit, cushionFiresE1Suggestion, List.of());
+                    cushionFiresB3EditShortCircuit, cushionFiresE1Suggestion,
+                    FailureDecision.continueLoop(), List.of());
+        }
+
+        public LoopResult(
+                String finalAnswer,
+                int iterations,
+                int toolsInvoked,
+                List<String> toolNames,
+                List<ChatMessage> messages,
+                int failedCalls,
+                int retriedCalls,
+                boolean hitIterLimit,
+                int mutatingToolSuccesses,
+                List<String> readPaths,
+                int cushionFiresRedundantRead,
+                int cushionFiresAliasRescue,
+                int cushionFiresB3EditShortCircuit,
+                int cushionFiresE1Suggestion,
+                List<ToolOutcome> toolOutcomes
+        ) {
+            this(finalAnswer, iterations, toolsInvoked, toolNames, messages, failedCalls,
+                    retriedCalls, hitIterLimit, mutatingToolSuccesses, readPaths,
+                    cushionFiresRedundantRead, cushionFiresAliasRescue,
+                    cushionFiresB3EditShortCircuit, cushionFiresE1Suggestion,
+                    FailureDecision.continueLoop(), toolOutcomes);
         }
 
         public String summary() {
@@ -118,6 +148,9 @@ public final class ToolCallLoop {
             }
             if (hitIterLimit) {
                 base += " [iteration limit reached]";
+            }
+            if (failureDecision.shouldStop()) {
+                base += " [failure policy stopped]";
             }
             return base;
         }
@@ -238,7 +271,7 @@ public final class ToolCallLoop {
                 hitIterLimit, state.mutatingToolSuccesses, List.copyOf(state.pathsReadThisTurn),
                 state.cushionFiresRedundantRead,
                 cushionFiresAliasRescue, state.cushionFiresB3EditShortCircuit,
-                state.cushionFiresE1Suggestion, List.copyOf(state.toolOutcomes));
+                state.cushionFiresE1Suggestion, state.failureDecision, List.copyOf(state.toolOutcomes));
     }
 
     private static String finalizeAnswer(String currentText, int toolsInvoked) {

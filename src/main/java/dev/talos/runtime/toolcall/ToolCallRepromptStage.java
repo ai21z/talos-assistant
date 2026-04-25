@@ -1,6 +1,8 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.core.llm.LlmClient;
+import dev.talos.runtime.failure.FailureDecision;
+import dev.talos.runtime.failure.FailurePolicy;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
@@ -46,6 +48,16 @@ public final class ToolCallRepromptStage {
                     + "this iteration) so the model can retry the failed call(s)",
                     outcome.mutationsThisIteration(), outcome.failuresThisIteration());
             // fall through to the re-prompt path below
+        }
+
+        FailureDecision failureDecision = FailurePolicy.defaults(state.maxIterations)
+                .afterIteration(state, outcome);
+        if (failureDecision.shouldStop()) {
+            state.failureDecision = failureDecision;
+            state.currentText = failurePolicyStopMessage(failureDecision);
+            state.currentNativeCalls = List.of();
+            LOG.debug("Stopping tool-call loop by failure policy: {}", failureDecision.reason());
+            return false;
         }
 
         if (state.iterations >= 3) {
@@ -144,5 +156,14 @@ public final class ToolCallRepromptStage {
     public boolean hitIterationLimit(LoopState state) {
         return state.iterations >= state.maxIterations
                 && (!state.currentNativeCalls.isEmpty() || ToolCallParser.containsToolCalls(state.currentText));
+    }
+
+    private static String failurePolicyStopMessage(FailureDecision decision) {
+        String reason = decision == null || decision.reason().isBlank()
+                ? "repeated tool failures"
+                : decision.reason();
+        return "[Tool loop stopped by failure policy: "
+                + reason
+                + " Review the latest tool errors before retrying.]";
     }
 }

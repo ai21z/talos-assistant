@@ -222,7 +222,7 @@ Use these labels when mapping scenarios to architecture claims:
 | `09-read-only-workspace-no-unsolicited-mutation` | Executor path blocks unsolicited mutation through the read-only `TaskContract` shape and avoids approval prompts. | `partially-covered` | Important guard evidence, but not a full semantic task contract or planner. |
 | `10-selector-mismatch-grounded` | Executor path corrects unsupported "no mismatch" prose using actual `index.html`, `style.css`, and `script.js` evidence. | `covered` | Selector grounding is a narrow web/static check, not a general verifier. |
 | `11-partial-mutation-summary-truthful` | Final answer reports succeeded and failed mutation outcomes without claiming the failed title change. | `covered` | Truthful summary is outcome shaping, not full task verification. |
-| `12-repeated-missing-path-stops-at-loop-cap` | Repeated bad path stops at the hard iteration cap and annotates the final answer. | `baseline-only` | The target is earlier controlled stop/reset/downgrade, not waiting for the cap. |
+| `12-repeated-missing-path-stops-at-loop-cap` | Repeated bad path now stops by the minimal failure policy before the hard iteration cap. | `covered` | Covers same-path/no-progress stop only; richer reset/reread actions remain planned. |
 | `13-streaming-no-tool-grounding-visible` | Streaming no-tool fabricated evidence answer is annotated as ungrounded. | `covered` | Covers final-answer truthfulness. It does not fully solve live terminal stream/protocol leakage. |
 | `14-approval-denial-stops-loop` | Executor path scripts a second mutating retry after denial and proves it is not reached. | `covered` | Covers approval-denial failure discipline for a known mutation retry shape. |
 | `15-inspect-phase-blocks-mutation` | Loop path forces `INSPECT`; a scripted `write_file` is blocked before approval or disk mutation. | `covered` | Proves phase gating for the forced inspect shape, not automatic task planning. |
@@ -263,7 +263,7 @@ Use these labels when mapping scenarios to architecture claims:
 | Session replay skips error residue | `07` | `covered` | Does not prove long-session quality. |
 | Persisted memory strips UI chrome | `08` | `covered` | Does not prove memory usefulness. |
 | Partial mutation summaries are truthful | `11` | `covered` | Outcome shaping only; not task verification. |
-| Failure loops are bounded | `12` | `baseline-only` | Hard cap exists; formal failure/reset policy still missing. |
+| Failure loops are bounded | `12`; `ToolCallLoopTest` | `covered` | Minimal same-path/tool/no-progress policy exists; richer reset/reread actions remain planned. |
 | Streaming no-tool evidence answers are marked ungrounded | `13` | `covered` | Final-answer gate only; installed-CLI stream transcript remains a separate evidence lane. |
 | Executor-layer false mutation claims are caught | `ExecutorScenarioTest.T5` | `covered` | Applies to known false-claim shape. |
 | Strict mode reveals raw tool/runtime weakness | `StrictModeScenariosTest` | `covered` | Needs report-visible metrics beyond unit assertions. |
@@ -385,7 +385,7 @@ Missing:
 - browser/runtime verification
 - shell/test-runner verification
 
-### 3. Minimal TaskOutcome Exists, But Failure Discipline Is Still Too Coarse
+### 3. Minimal TaskOutcome And Failure Policy Exist, But Reset Is Still Narrow
 
 Talos now has a minimal structured `TaskOutcome` layer carrying:
 
@@ -400,17 +400,22 @@ CLI-facing `ExecutionOutcome` remains the adapter that renders current answer
 annotations, and the scenario pack does not yet emit per-scenario trajectory
 artifacts from `TaskOutcome`.
 
-The loop cap is necessary but not enough.
+The loop cap is necessary but not enough. Talos now has a first
+`FailurePolicy` slice that stops repeated same-path, same-tool, and no-progress
+failures before the hard iteration cap.
 
 The target behavior is:
 
 - repeated same missing path stops early
-- repeated same failed edit stops or downgrades
+- repeated same failed edit stops early
 - approval denial is terminal for that mutation path
 - no-progress turns stop with a truthful outcome
 
-The recent approval-denial failure-discipline fix belongs in this direction and
-should be reflected by expanding scenario `05` or adding a dedicated scenario.
+Still missing:
+
+- reset-to-inspect behavior
+- automatic reread-before-retry sequencing
+- explicit user-facing failure/outcome trace
 
 ### 4. No Adversarial Safety Pack
 

@@ -266,8 +266,8 @@ class JsonScenarioPackTest {
     }
 
     @Test
-    @DisplayName("[json-scenario:scenarios/12-repeated-missing-path-stops-at-loop-cap.json] 12: repeated missing-path failure stops at the loop cap")
-    void repeatedMissingPathFailureStopsAtLoopCap() {
+    @DisplayName("[json-scenario:scenarios/12-repeated-missing-path-stops-at-loop-cap.json] 12: repeated missing-path failure stops by failure policy")
+    void repeatedMissingPathFailureStopsByFailurePolicy() {
         var loaded = JsonScenarioLoader.load("scenarios/12-repeated-missing-path-stops-at-loop-cap.json");
 
         try (var result = ScenarioRunner.runThroughExecutor(
@@ -275,8 +275,9 @@ class JsonScenarioPackTest {
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
             result.assertApprovalCounts(0, 0, 0, 0)
-                    .assertAnswerContains("[Tool-call limit reached. Some tool calls were not executed.]")
-                    .assertAnswerContains("[iteration limit reached]")
+                    .assertAnswerContains("Tool loop stopped by failure policy")
+                    .assertAnswerContains("[failure policy stopped]")
+                    .assertAnswerNotContains("[iteration limit reached]")
                     .assertFileContains("README.md", "Talos");
         }
     }
