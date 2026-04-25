@@ -108,8 +108,12 @@ class TurnProcessorPlaceholderGuardTest {
     }
 
     @Test
-    void readOnlyToolWithPlaceholderLookingParamIsNotAffected() {
-        // READ_ONLY tools don't mutate — the guard must not fire on them.
+    void readOnlyToolWithPlaceholderPathIsNowRejected() {
+        // Path-param placeholder guard was extended to cover ALL tools after
+        // a live-transcript failure: read_file(path=<html-file-path>) caused
+        // an InvalidPathException crash because Path.of("<html-file-path>") is
+        // illegal on Windows. Placeholder paths are definitionally wrong for
+        // any file tool, so the guard now fires unconditionally on path params.
         ToolRegistry reg = new ToolRegistry();
         reg.register(new NopReadTool());
         TurnProcessor tp = new TurnProcessor(
@@ -117,12 +121,57 @@ class TurnProcessorPlaceholderGuardTest {
         Session s = new Session(WS, new Config());
         Context ctx = Context.builder(new Config()).build();
 
-        // Odd but legal: a read call with a content-shaped param. Not a
-        // mutation, so the guard should leave it alone.
         ToolCall call = new ToolCall("test.read", Map.of(
-                "path", "<placeholder>"));   // this is path, not content
+                "path", "<html-file-path>"));
         ToolResult r = tp.executeTool(s, call, ctx);
-        assertTrue(r.success());
+
+        assertFalse(r.success(), "placeholder path must be rejected for read-only tools");
+        String err = r.errorMessage() == null ? "" : r.errorMessage();
+        assertTrue(err.toLowerCase().contains("placeholder"),
+                "error must identify the problem as a placeholder: " + err);
+        assertTrue(err.contains("<html-file-path>"),
+                "error should echo the offending value so the model sees it: " + err);
+    }
+
+    @Test
+    void mutatingToolWithPlaceholderPathIsAlsoRejectedBeforeApproval() {
+        // The path-param guard runs before the approval gate, so mutating tools
+        // with a placeholder path value don't reach the gate either.
+        TurnProcessor tp = processorWithWriteTool(unreachableGate());
+        Session s = new Session(WS, new Config());
+        Context ctx = Context.builder(new Config()).build();
+        TurnUserRequestCapture.set("update the file");
+
+        ToolCall call = new ToolCall("test.write", Map.of(
+                "path", "<target-file>",
+                "content", "real content here"));
+        ToolResult r = tp.executeTool(s, call, ctx);
+
+        assertFalse(r.success(), "placeholder path must be rejected even for mutating tools");
+        assertTrue(r.errorMessage().contains("<target-file>"),
+                "error should echo the offending path: " + r.errorMessage());
+    }
+
+    @Test
+    void toolThrowingRuntimeExceptionProducesFailResultInsteadOfCrash() {
+        // Exception wrapping: if a tool throws unexpectedly (e.g. InvalidPathException
+        // from Path.of with bad input that slipped through guards), executeTool must
+        // return ToolResult.fail rather than propagating the exception up through
+        // ToolCallLoop → AssistantTurnExecutor where it becomes "LLM call failed".
+        ToolRegistry reg = new ToolRegistry();
+        reg.register(new ThrowingTool(new RuntimeException("synthetic tool crash")));
+        TurnProcessor tp = new TurnProcessor(
+                ModeController.defaultController(), unreachableGate(), reg);
+        Session s = new Session(WS, new Config());
+        Context ctx = Context.builder(new Config()).build();
+
+        ToolCall call = new ToolCall("test.thrower", Map.of());
+        ToolResult r = tp.executeTool(s, call, ctx);
+
+        assertFalse(r.success(), "unexpected exception must produce a failed tool result");
+        String err = r.errorMessage() == null ? "" : r.errorMessage();
+        assertTrue(err.contains("synthetic tool crash"),
+                "error message should include the original exception message: " + err);
     }
 
     // ---- helper tools ----
@@ -143,6 +192,17 @@ class TurnProcessorPlaceholderGuardTest {
             return new ToolDescriptor("test.read", "read", null, ToolRiskLevel.READ_ONLY);
         }
         @Override public ToolResult execute(ToolCall call, ToolContext ctx) { return ToolResult.ok("read"); }
+    }
+
+    private static final class ThrowingTool implements TalosTool {
+        private final RuntimeException toThrow;
+        ThrowingTool(RuntimeException ex) { this.toThrow = ex; }
+        @Override public String name() { return "test.thrower"; }
+        @Override public String description() { return "throws on every call"; }
+        @Override public ToolDescriptor descriptor() {
+            return new ToolDescriptor("test.thrower", "throws on every call", null, ToolRiskLevel.READ_ONLY);
+        }
+        @Override public ToolResult execute(ToolCall call, ToolContext ctx) { throw toThrow; }
     }
 }
 
