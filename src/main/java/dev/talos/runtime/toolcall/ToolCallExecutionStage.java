@@ -32,7 +32,8 @@ public final class ToolCallExecutionStage {
     public record IterationOutcome(int mutationsThisIteration,
                                    List<String> mutationSummaries,
                                    int failuresThisIteration,
-                                   boolean approvalDeniedThisIteration) {}
+                                   boolean approvalDeniedThisIteration,
+                                   int successesThisIteration) {}
 
     private final TurnProcessor turnProcessor;
     private final ToolProgressSink progressSink;
@@ -53,6 +54,7 @@ public final class ToolCallExecutionStage {
 
         int mutationsThisIter = 0;
         int failuresThisIter = 0;
+        int successesThisIter = 0;
         boolean approvalDeniedThisIter = false;
         List<String> mutationSummariesThisIter = new ArrayList<>();
 
@@ -72,6 +74,7 @@ public final class ToolCallExecutionStage {
                     state.failedCalls++;
                     state.cushionFiresB3EditShortCircuit++;
                     failuresThisIter++;
+                    recordFailure(state, effective.toolName(), pathHint);
                     String diagnostic = "[tool_result: " + effective.toolName() + "]\n"
                             + "[error] This exact edit was already attempted and failed. "
                             + "Call talos.read_file to see the file's current state, "
@@ -115,6 +118,9 @@ public final class ToolCallExecutionStage {
 
             ToolResult result = turnProcessor.executeTool(state.toolSession, effective, state.ctx);
             emitToolResult(effective.toolName(), result);
+            if (result.success()) {
+                successesThisIter++;
+            }
 
             if ("talos.read_file".equals(effective.toolName()) && pathHint != null && result.success()) {
                 state.pathsReadThisTurn.add(ToolCallSupport.normalizePath(pathHint));
@@ -155,6 +161,7 @@ public final class ToolCallExecutionStage {
             if (!result.success()) {
                 state.failedCalls++;
                 failuresThisIter++;
+                recordFailure(state, effective.toolName(), pathHint);
                 if (ToolCallSupport.isMutatingTool(effective.toolName())) {
                     state.successfulReadCalls.clear();
                 }
@@ -190,7 +197,18 @@ public final class ToolCallExecutionStage {
                 mutationsThisIter,
                 mutationSummariesThisIter,
                 failuresThisIter,
-                approvalDeniedThisIter);
+                approvalDeniedThisIter,
+                successesThisIter);
+    }
+
+    private static void recordFailure(LoopState state, String toolName, String pathHint) {
+        if (state == null) return;
+        if (toolName != null && !toolName.isBlank()) {
+            state.failureCountsByTool.merge(toolName, 1, Integer::sum);
+        }
+        if (pathHint != null && !pathHint.isBlank()) {
+            state.failureCountsByPath.merge(ToolCallSupport.normalizePath(pathHint), 1, Integer::sum);
+        }
     }
 
     private static boolean isUserApprovalDenial(ToolResult result) {

@@ -32,11 +32,16 @@ public final class LoopState {
     public int cushionFiresB3EditShortCircuit;
     public int cushionFiresE1Suggestion;
     public final int aliasRescueBaseline;
+    public int noProgressIterations;
+    public dev.talos.runtime.failure.FailureDecision failureDecision =
+            dev.talos.runtime.failure.FailureDecision.continueLoop();
 
     public final List<String> toolNames = new ArrayList<>();
     public final List<dev.talos.runtime.ToolCallLoop.ToolOutcome> toolOutcomes = new ArrayList<>();
     public final Set<String> failedCallSignatures = new HashSet<>();
     public final Map<String, Integer> editFailuresByPath = new HashMap<>();
+    public final Map<String, Integer> failureCountsByTool = new HashMap<>();
+    public final Map<String, Integer> failureCountsByPath = new HashMap<>();
     public final Set<String> pathsReadThisTurn = new HashSet<>();
     public final Map<String, String> successfulReadCalls = new HashMap<>();
     public boolean mutationSinceStart;
