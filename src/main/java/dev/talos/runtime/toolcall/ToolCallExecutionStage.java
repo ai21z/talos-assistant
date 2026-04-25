@@ -82,7 +82,8 @@ public final class ToolCallExecutionStage {
                             + "Alternatively, use talos.write_file to replace the entire file content."
                             + "\n[/tool_result]";
                     state.toolOutcomes.add(new dev.talos.runtime.ToolCallLoop.ToolOutcome(
-                            effective.toolName(), pathHint, false, true, false, "", diagnostic, null));
+                            effective.toolName(), pathHint, false, true, false, "", diagnostic,
+                            null, ToolError.INVALID_PARAMS));
                     appendResultMessage(state, parsed.useNativePath(), i, diagnostic);
                     LOG.debug("  Skipped duplicate failing edit_file call for path: {}", pathHint);
                     continue;
@@ -156,7 +157,8 @@ public final class ToolCallExecutionStage {
                     denied,
                     result.success() ? ToolCallSupport.firstSentenceSummary(result.output()) : "",
                     result.success() ? "" : result.errorMessage(),
-                    result.verification()));
+                    result.verification(),
+                    result.error() == null ? "" : result.error().code()));
 
             if (!result.success()) {
                 state.failedCalls++;
