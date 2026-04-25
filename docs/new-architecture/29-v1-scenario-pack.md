@@ -35,6 +35,7 @@ Current local evidence checked:
 - `src/test/java/dev/talos/cli/modes/AssistantTurnExecutorTest.java`
 - `src/main/java/dev/talos/runtime/ToolCallLoop.java`
 - `src/main/java/dev/talos/runtime/phase/PhasePolicy.java`
+- `src/main/java/dev/talos/runtime/verification/StaticTaskVerifier.java`
 - `src/main/java/dev/talos/runtime/toolcall/ToolCallExecutionStage.java`
 - `src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java`
 - `src/main/java/dev/talos/cli/modes/ExecutionOutcome.java`
@@ -114,7 +115,7 @@ The V1 pack does not prove:
 - whole-surface sandboxing
 - prompt-injection resistance
 - full phase lifecycle enforcement
-- task-level verification
+- full task-level verification beyond the narrow static verifier slice
 - live Ollama behavior in the installed CLI
 
 Those are future or separate evidence lanes.
@@ -148,6 +149,9 @@ Current JSON scenarios:
 - `14-approval-denial-stops-loop.json`
 - `15-inspect-phase-blocks-mutation.json`
 - `16-verify-phase-blocks-mutation.json`
+- `17-static-verifier-selector-fails-after-wrong-edit.json`
+- `18-static-verifier-selector-passes-after-cta-fix.json`
+- `19-static-verifier-partial-mutation-not-verified-complete.json`
 
 ### B. Executor-Path Scenarios
 
@@ -222,7 +226,10 @@ Use these labels when mapping scenarios to architecture claims:
 | `13-streaming-no-tool-grounding-visible` | Streaming no-tool fabricated evidence answer is annotated as ungrounded. | `covered` | Covers final-answer truthfulness. It does not fully solve live terminal stream/protocol leakage. |
 | `14-approval-denial-stops-loop` | Executor path scripts a second mutating retry after denial and proves it is not reached. | `covered` | Covers approval-denial failure discipline for a known mutation retry shape. |
 | `15-inspect-phase-blocks-mutation` | Loop path forces `INSPECT`; a scripted `write_file` is blocked before approval or disk mutation. | `covered` | Proves phase gating for the forced inspect shape, not automatic task planning. |
-| `16-verify-phase-blocks-mutation` | Loop path forces `VERIFY`; a scripted `write_file` is blocked before approval or disk mutation. | `covered` | Proves verify-phase mutation blocking; static task verification still remains future work. |
+| `16-verify-phase-blocks-mutation` | Loop path forces `VERIFY`; a scripted `write_file` is blocked before approval or disk mutation. | `covered` | Proves verify-phase mutation blocking; static verifier coverage is handled by `17`-`19`. |
+| `17-static-verifier-selector-fails-after-wrong-edit` | Executor path applies a mutation, then static verification rejects the completion claim because `.cta-button` remains missing from HTML. | `covered` | Narrow selector/linkage verifier only; not full semantic task completion. |
+| `18-static-verifier-selector-passes-after-cta-fix` | Executor path applies the CTA fix and final answer reports passed post-apply static verification. | `covered` | Proves a bounded web/static pass shape. It does not run browser or shell checks. |
+| `19-static-verifier-partial-mutation-not-verified-complete` | Partial mutation summary remains partial and is not blessed as statically verified complete. | `covered` | Protects against verifier overclaiming on mixed success/failure turns. |
 
 ### 6.2 Supporting Executor-Path Scenarios
 
@@ -260,7 +267,7 @@ Use these labels when mapping scenarios to architecture claims:
 | Streaming no-tool evidence answers are marked ungrounded | `13` | `covered` | Final-answer gate only; installed-CLI stream transcript remains a separate evidence lane. |
 | Executor-layer false mutation claims are caught | `ExecutorScenarioTest.T5` | `covered` | Applies to known false-claim shape. |
 | Strict mode reveals raw tool/runtime weakness | `StrictModeScenariosTest` | `covered` | Needs report-visible metrics beyond unit assertions. |
-| Task-level verification | none | `planned` | Covered by `talos-static-task-verifier.md`, not current V1 pack. |
+| Static post-apply task verification | `17`, `18`, `19`; `StaticTaskVerifierTest`; `ExecutionOutcomeTest` | `partially-covered` | Narrow static workspace facts only; no full `TaskContract`, shell, browser, or semantic verifier. |
 | Phase-aware tool policy | `15`, `16`; `TurnProcessorPhasePolicyTest`; `PhasePolicyTest` | `partially-covered` | Mutating tools are blocked outside APPLY. Apply-to-verify task verification remains planned. |
 | Prompt-injection/tool-abuse resistance | none | `not-covered` | Must be added before claiming serious security evaluation. |
 
@@ -348,29 +355,29 @@ exist.
 
 ## 9. Current Gaps That Matter
 
-### 1. No First-Class Phase Model
+### 1. Minimal Phase Model Exists, But Is Not A Full Phase Runtime
 
-The V1 pack can show that some scripted turns inspect before acting. It cannot
-prove phase discipline. Current code still lacks:
+The V1 pack now proves a minimal phase-policy slice:
 
 - `ExecutionPhase`
-- phase transitions
 - phase-aware tool policy
-- write/edit blocking during inspect or verify
+- write/edit blocking during forced `INSPECT` and `VERIFY`
+- successful apply turns moving toward `VERIFY`
 
-This remains the next major runtime architecture move.
+This is not yet the full target runtime. Talos still lacks explicit `PLAN`,
+formal task contracts, and a user-visible phase trace.
 
-### 2. No Task-Level Verifier
+### 2. Static Task Verifier Is Narrow, Not Complete
 
-Current checks prove file effects and some answer truthfulness. They do not
-prove task completion.
+The V1 pack now has a bounded static post-apply verifier for selector/linkage
+and mutation-target facts. It does not prove arbitrary task completion.
 
 Missing:
 
-- expected target changed
-- forbidden targets unchanged
-- post-apply static verification result
-- distinction between applied, verified, failed verification, and unverified
+- explicit `TaskContract`
+- semantic expected/forbidden target derivation beyond observed tool outcomes
+- browser/runtime verification
+- shell/test-runner verification
 
 ### 3. Failure Discipline Is Still Too Coarse
 
@@ -446,11 +453,11 @@ Add these in order as the relevant runtime work lands.
 ### Static Verifier V1.2
 
 - `apply-succeeds-verifier-fails.json`
-  - file write succeeds but static verifier finds unresolved selector/linkage
+  - implemented as `17-static-verifier-selector-fails-after-wrong-edit.json`
 - `apply-succeeds-verifier-passes.json`
-  - expected target changed and static web coherence checks pass
+  - implemented as `18-static-verifier-selector-passes-after-cta-fix.json`
 - `partial-mutation-not-verified-as-complete.json`
-  - one mutation succeeds, one fails, verifier does not bless the whole task
+  - implemented as `19-static-verifier-partial-mutation-not-verified-complete.json`
 
 ### Safety/Adversarial V1.3
 
