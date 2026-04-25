@@ -1,9 +1,9 @@
 {
-  "name": "repeated missing-path failure stops at loop cap",
+  "name": "repeated missing-path failure stops by failure policy",
   "fixture": "doc-repo",
   "v1Pack": true,
   "claims": [
-    "repeated-failure-stops-at-loop-cap"
+    "repeated-failure-stops-by-policy"
   ],
   "runner": "executor",
   "approvalPolicy": "APPROVE_ALL",
