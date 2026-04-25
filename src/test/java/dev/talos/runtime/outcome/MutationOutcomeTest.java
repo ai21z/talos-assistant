@@ -44,6 +44,23 @@ class MutationOutcomeTest {
     }
 
     @Test
+    void deniedMutationDominatesNoSuccessTurnEvenWithEarlierFailures() {
+        var contract = TaskContractResolver.fromUserRequest("Edit index.html.");
+
+        MutationOutcome outcome = MutationOutcome.from(contract, loopResult(List.of(
+                new ToolCallLoop.ToolOutcome(
+                        "talos.edit_file", "index.html", false, true, false, "", "invalid args"),
+                new ToolCallLoop.ToolOutcome(
+                        "talos.edit_file", "index.html", false, true, true, "", "approval denied")
+        )), 0);
+
+        assertEquals(MutationOutcomeStatus.DENIED, outcome.status());
+        assertEquals(1, outcome.failed().size());
+        assertEquals(1, outcome.denied().size());
+        assertEquals(2, outcome.failureCount());
+    }
+
+    @Test
     void mixedMutationSuccessAndFailureIsPartial() {
         var contract = TaskContractResolver.fromUserRequest("Edit index.html and style.css.");
 

@@ -33,6 +33,7 @@ public final class ToolCallExecutionStage {
                                    List<String> mutationSummaries,
                                    int failuresThisIteration,
                                    boolean approvalDeniedThisIteration,
+                                   boolean mutatingDeniedThisIteration,
                                    int successesThisIteration) {}
 
     private final TurnProcessor turnProcessor;
@@ -56,6 +57,7 @@ public final class ToolCallExecutionStage {
         int failuresThisIter = 0;
         int successesThisIter = 0;
         boolean approvalDeniedThisIter = false;
+        boolean mutatingDeniedThisIter = false;
         List<String> mutationSummariesThisIter = new ArrayList<>();
 
         for (int i = 0; i < parsed.calls().size(); i++) {
@@ -146,6 +148,9 @@ public final class ToolCallExecutionStage {
             boolean denied = !result.success()
                     && result.error() != null
                     && ToolError.DENIED.equals(result.error().code());
+            if (denied && ToolCallSupport.isMutatingTool(effective.toolName())) {
+                mutatingDeniedThisIter = true;
+            }
             if (isUserApprovalDenial(result) && ToolCallSupport.isMutatingTool(effective.toolName())) {
                 approvalDeniedThisIter = true;
             }
@@ -200,6 +205,7 @@ public final class ToolCallExecutionStage {
                 mutationSummariesThisIter,
                 failuresThisIter,
                 approvalDeniedThisIter,
+                mutatingDeniedThisIter,
                 successesThisIter);
     }
 
@@ -216,8 +222,6 @@ public final class ToolCallExecutionStage {
     private static boolean isUserApprovalDenial(ToolResult result) {
         if (result == null || result.success() || result.error() == null) return false;
         if (!ToolError.DENIED.equals(result.error().code())) return false;
-        // DENIED also covers policy guards such as read-only mutation attempts.
-        // Only a real approval-gate refusal should terminally stop the loop.
         String message = result.errorMessage();
         return message != null && message.startsWith("User did not approve ");
     }
