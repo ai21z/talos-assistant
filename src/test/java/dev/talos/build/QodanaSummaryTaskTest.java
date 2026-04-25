@@ -202,7 +202,7 @@ class QodanaSummaryTaskTest {
         Map<String, Object> summary = readSummary(projectDir);
         assertEquals("summary-generation-failed", summary.get("summaryStatus"));
         assertEquals("qodana-summary", summary.get("summaryName"));
-        assertEquals("0.9.0", summary.get("version"));
+        assertEquals(BuildTestVersions.currentTalosVersion(), summary.get("version"));
     }
 
     private void initGitFixture(Path projectDir) throws Exception {

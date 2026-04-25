@@ -143,6 +143,56 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/17-static-verifier-selector-fails-after-wrong-edit.json] 17: static verifier fails unresolved selector linkage after mutation")
+    void staticVerifierFailsWrongSelectorEdit() {
+        var loaded = JsonScenarioLoader.load("scenarios/17-static-verifier-selector-fails-after-wrong-edit.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(1, 1, 0, 0)
+                    .assertAnswerContains("Static verification failed")
+                    .assertAnswerContains("`.cta-button`")
+                    .assertFileContains("index.html", "<title>Horror Synthwave Fixed</title>")
+                    .assertFileNotContains("index.html", "class=\"cta-button\"");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/18-static-verifier-selector-passes-after-cta-fix.json] 18: static verifier passes after cta selector fix")
+    void staticVerifierPassesAfterCtaFix() {
+        var loaded = JsonScenarioLoader.load("scenarios/18-static-verifier-selector-passes-after-cta-fix.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(1, 1, 0, 0)
+                    .assertAnswerContains("Static verification: passed")
+                    .assertAnswerNotContains("Static verification failed")
+                    .assertFileContains("index.html", "class=\"cta-button\"");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/19-static-verifier-partial-mutation-not-verified-complete.json] 19: partial mutation is not blessed as statically verified complete")
+    void staticVerifierDoesNotBlessPartialMutationAsComplete() {
+        var loaded = JsonScenarioLoader.load("scenarios/19-static-verifier-partial-mutation-not-verified-complete.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertAnswerContains("Succeeded:")
+                    .assertAnswerContains("Failed:")
+                    .assertAnswerContains("style.css")
+                    .assertAnswerNotContains("Static verification: passed")
+                    .assertFileContains("index.html", "class=\"cta-button\"");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/06-approval-remembered.json] 06: remembered approval asks once and lets later writes proceed")
     void approvalRememberedInSession() {
         var loaded = JsonScenarioLoader.load("scenarios/06-approval-remembered.json");

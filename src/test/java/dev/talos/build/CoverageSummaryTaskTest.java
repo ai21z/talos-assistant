@@ -104,7 +104,7 @@ class CoverageSummaryTaskTest {
         Map<String, Object> summary = readSummary(projectDir);
         assertEquals("summary-generation-failed", summary.get("summaryStatus"));
         assertEquals("coverage-summary", summary.get("summaryName"));
-        assertEquals("0.9.0", summary.get("version"));
+        assertEquals(BuildTestVersions.currentTalosVersion(), summary.get("version"));
     }
 
     private Path createBuildFixture() throws IOException {

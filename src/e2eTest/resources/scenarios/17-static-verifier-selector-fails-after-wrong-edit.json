@@ -1,0 +1,15 @@
+{
+  "name": "static verifier fails after wrong selector edit",
+  "fixture": "horror-synth-site",
+  "v1Pack": true,
+  "claims": [
+    "post-apply-static-verifier-fails-unresolved-selector-linkage"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Now apply the smallest fix by editing index.html so the CSS and JavaScript .cta-button selector has a matching element in the HTML. Use the file edit tool; do not just show code.",
+  "scriptedResponses": [
+    "```json\n{\"name\":\"talos.edit_file\",\"parameters\":{\"path\":\"index.html\",\"old_string\":\"<title>Horror Synthwave Band</title>\",\"new_string\":\"<title>Horror Synthwave Fixed</title>\"}}\n```",
+    "The CTA selector fix has been applied."
+  ]
+}
