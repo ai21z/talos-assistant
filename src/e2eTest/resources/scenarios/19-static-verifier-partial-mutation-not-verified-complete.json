@@ -1,0 +1,15 @@
+{
+  "name": "static verifier does not bless partial mutation as complete",
+  "fixture": "horror-synth-site",
+  "v1Pack": true,
+  "claims": [
+    "partial-mutation-is-not-static-verified-complete"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Now apply the smallest fix by editing index.html so the CSS and JavaScript .cta-button selector has a matching element in the HTML, and update style.css too.",
+  "scriptedResponses": [
+    "```json\n{\"name\":\"talos.edit_file\",\"parameters\":{\"path\":\"index.html\",\"old_string\":\"        <p>Dive into a world of innovation and cutting-edge design.</p>\\r\\n      </div>\",\"new_string\":\"        <p>Dive into a world of innovation and cutting-edge design.</p>\\r\\n        <a class=\\\"cta-button\\\" href=\\\"#tickets\\\">Listen now</a>\\r\\n      </div>\"}}\n```\n```json\n{\"name\":\"talos.edit_file\",\"parameters\":{\"path\":\"style.css\",\"old_string\":\".does-not-exist { color: red; }\",\"new_string\":\".does-not-exist { color: cyan; }\"}}\n```",
+    "All requested updates were applied and verified."
+  ]
+}

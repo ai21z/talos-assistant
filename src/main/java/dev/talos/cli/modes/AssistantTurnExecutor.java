@@ -8,18 +8,14 @@ import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.ToolCallStreamFilter;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.toolcall.ToolCallSupport;
+import dev.talos.runtime.verification.StaticTaskVerifier;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -795,15 +791,6 @@ public final class AssistantTurnExecutor {
             "selectors used in javascript"
     );
 
-    private static final Pattern HTML_CLASS_ATTR = Pattern.compile("class\\s*=\\s*\"([^\"]+)\"");
-    private static final Pattern HTML_ID_ATTR = Pattern.compile("id\\s*=\\s*\"([^\"]+)\"");
-    private static final Pattern CSS_CLASS_SELECTOR = Pattern.compile("\\.([A-Za-z_][A-Za-z0-9_-]*)");
-    private static final Pattern CSS_ID_SELECTOR = Pattern.compile("#([A-Za-z_][A-Za-z0-9_-]*)");
-    private static final Pattern CSS_SELECTOR_PRELUDE = Pattern.compile("(?s)([^{}]+)\\{");
-    private static final Pattern JS_QUERY_SELECTOR = Pattern.compile("querySelector(?:All)?\\s*\\(\\s*['\"]([#.][A-Za-z_][A-Za-z0-9_-]*)['\"]\\s*\\)");
-    private static final Pattern JS_GET_BY_ID = Pattern.compile("getElementById\\s*\\(\\s*['\"]([A-Za-z_][A-Za-z0-9_-]*)['\"]\\s*\\)");
-    private static final Pattern JS_GET_BY_CLASS = Pattern.compile("getElementsByClassName\\s*\\(\\s*['\"]([A-Za-z_][A-Za-z0-9_-]*)['\"]\\s*\\)");
-
     // ── Inspect under-completion truth layer (N3 / P4) ───────────────────
 
     /**
@@ -908,51 +895,14 @@ public final class AssistantTurnExecutor {
         return n;
     }
 
-    private static final Set<String> SMALL_WORKSPACE_WEB_EXTS = Set.of(
-            ".html", ".htm", ".css", ".js", ".ts", ".jsx", ".tsx"
-    );
-
     static List<String> obviousPrimaryFiles(Path workspace) {
-        if (workspace == null || !Files.isDirectory(workspace)) return List.of();
-        try {
-            List<Path> files = new ArrayList<>();
-            try (var stream = Files.list(workspace)) {
-                stream.filter(Files::isRegularFile).forEach(files::add);
-            }
-            if (files.isEmpty() || files.size() > 5) return List.of();
-            List<String> out = new ArrayList<>();
-            for (Path file : files) {
-                String name = file.getFileName() == null ? "" : file.getFileName().toString();
-                if (name.isBlank() || name.startsWith(".")) continue;
-                String lower = name.toLowerCase();
-                int dot = lower.lastIndexOf('.');
-                String ext = dot >= 0 ? lower.substring(dot) : "";
-                if (!SMALL_WORKSPACE_WEB_EXTS.contains(ext)) return List.of();
-                out.add(name.replace('\\', '/'));
-            }
-            return out.size() >= 2 ? List.copyOf(out) : List.of();
-        } catch (Exception e) {
-            return List.of();
-        }
+        return StaticTaskVerifier.obviousPrimaryFiles(workspace);
     }
 
     static List<String> missingPrimaryReads(Path workspace, ToolCallLoop.LoopResult loopResult) {
-        List<String> primary = obviousPrimaryFiles(workspace);
-        if (primary.isEmpty() || loopResult == null) return List.of();
-        Set<String> read = new LinkedHashSet<>();
-        if (loopResult.readPaths() != null) {
-            for (String p : loopResult.readPaths()) {
-                if (p == null || p.isBlank()) continue;
-                String normalized = p.replace('\\', '/');
-                int slash = normalized.lastIndexOf('/');
-                read.add(slash >= 0 ? normalized.substring(slash + 1) : normalized);
-            }
-        }
-        List<String> missing = new ArrayList<>();
-        for (String file : primary) {
-            if (!read.contains(file)) missing.add(file);
-        }
-        return List.copyOf(missing);
+        return loopResult == null
+                ? List.of()
+                : StaticTaskVerifier.missingPrimaryReads(workspace, loopResult.readPaths());
     }
 
     static InspectRetryResult inspectCompletenessRetryIfNeeded(
@@ -1012,9 +962,8 @@ public final class AssistantTurnExecutor {
         String userRequest = latestUserRequest(messages);
         if (!looksLikeSelectorMismatchRequest(userRequest)) return answer;
 
-        SelectorWorkspaceAnalysis analysis = analyzeWorkspaceSelectors(workspace, loopResult);
-        if (analysis == null || !analysis.complete()) return answer;
-        return analysis.render();
+        String grounded = StaticTaskVerifier.renderSelectorInspection(workspace, loopResult.readPaths());
+        return grounded == null || grounded.isBlank() ? answer : grounded;
     }
 
     static boolean looksLikeSelectorMismatchRequest(String userRequest) {
@@ -1024,181 +973,6 @@ public final class AssistantTurnExecutor {
             if (lower.contains(marker)) return true;
         }
         return lower.contains("mismatch") && lower.contains("selector");
-    }
-
-    private record SelectorWorkspaceAnalysis(
-            String htmlFile,
-            String cssFile,
-            String jsFile,
-            Set<String> htmlClasses,
-            Set<String> htmlIds,
-            Set<String> cssClasses,
-            Set<String> cssIds,
-            Set<String> jsClasses,
-            Set<String> jsIds
-    ) {
-        boolean complete() {
-            return htmlFile != null && cssFile != null && jsFile != null;
-        }
-
-        String render() {
-            Set<String> cssMissingClasses = new LinkedHashSet<>(cssClasses);
-            cssMissingClasses.removeAll(htmlClasses);
-            Set<String> jsMissingClasses = new LinkedHashSet<>(jsClasses);
-            jsMissingClasses.removeAll(htmlClasses);
-            Set<String> cssMissingIds = new LinkedHashSet<>(cssIds);
-            cssMissingIds.removeAll(htmlIds);
-            Set<String> jsMissingIds = new LinkedHashSet<>(jsIds);
-            jsMissingIds.removeAll(htmlIds);
-
-            StringBuilder out = new StringBuilder();
-            out.append("I checked the selectors against the actual workspace files:\n\n");
-            out.append("- HTML: `").append(htmlFile).append("`\n");
-            out.append("- CSS: `").append(cssFile).append("`\n");
-            out.append("- JavaScript: `").append(jsFile).append("`\n\n");
-
-            out.append("Observed in HTML:\n");
-            out.append("- Classes: ").append(renderObserved(htmlClasses)).append('\n');
-            out.append("- IDs: ").append(renderObserved(htmlIds)).append("\n\n");
-
-            List<String> mismatches = new ArrayList<>();
-            if (!cssMissingClasses.isEmpty()) {
-                mismatches.add("CSS references missing class selectors: " + renderSelectors(cssMissingClasses, "."));
-            }
-            if (!cssMissingIds.isEmpty()) {
-                mismatches.add("CSS references missing ID selectors: " + renderSelectors(cssMissingIds, "#"));
-            }
-            if (!jsMissingClasses.isEmpty()) {
-                mismatches.add("JavaScript references missing class selectors: " + renderSelectors(jsMissingClasses, "."));
-            }
-            if (!jsMissingIds.isEmpty()) {
-                mismatches.add("JavaScript references missing IDs: " + renderSelectors(jsMissingIds, "#"));
-            }
-
-            if (mismatches.isEmpty()) {
-                out.append("Conclusion: I did not find selector mismatches in these files.");
-            } else {
-                out.append("Mismatches found:\n");
-                for (String mismatch : mismatches) {
-                    out.append("- ").append(mismatch).append('\n');
-                }
-            }
-            return out.toString().stripTrailing();
-        }
-    }
-
-    private static SelectorWorkspaceAnalysis analyzeWorkspaceSelectors(
-            Path workspace, ToolCallLoop.LoopResult loopResult) {
-        List<String> primary = obviousPrimaryFiles(workspace);
-        if (primary.size() < 3) return null;
-        String htmlFile = pickPrimary(primary, ".html", ".htm");
-        String cssFile = pickPrimary(primary, ".css");
-        String jsFile = pickPrimary(primary, ".js");
-        if (htmlFile == null || cssFile == null || jsFile == null) return null;
-
-        Set<String> read = new LinkedHashSet<>(loopResult.readPaths());
-        if (!read.contains(htmlFile) || !read.contains(cssFile) || !read.contains(jsFile)) {
-            return null;
-        }
-
-        try {
-            String html = Files.readString(workspace.resolve(htmlFile));
-            String css = Files.readString(workspace.resolve(cssFile));
-            String js = Files.readString(workspace.resolve(jsFile));
-            return new SelectorWorkspaceAnalysis(
-                    htmlFile, cssFile, jsFile,
-                    extractMatches(html, HTML_CLASS_ATTR, true),
-                    extractMatches(html, HTML_ID_ATTR, false),
-                    extractCssSelectors(css, CSS_CLASS_SELECTOR),
-                    extractCssSelectors(css, CSS_ID_SELECTOR),
-                    extractJsClasses(js),
-                    extractJsIds(js));
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private static String pickPrimary(List<String> files, String... exts) {
-        for (String file : files) {
-            String lower = file.toLowerCase();
-            for (String ext : exts) {
-                if (lower.endsWith(ext)) return file;
-            }
-        }
-        return null;
-    }
-
-    private static Set<String> extractMatches(String text, Pattern pattern, boolean splitOnWhitespace) {
-        Set<String> out = new LinkedHashSet<>();
-        Matcher matcher = pattern.matcher(text);
-        while (matcher.find()) {
-            String value = matcher.group(1);
-            if (value == null || value.isBlank()) continue;
-            if (splitOnWhitespace) {
-                for (String token : value.trim().split("\\s+")) {
-                    if (!token.isBlank()) out.add(token);
-                }
-            } else {
-                out.add(value.trim());
-            }
-        }
-        return out;
-    }
-
-    private static Set<String> extractCssSelectors(String css, Pattern selectorPattern) {
-        Set<String> out = new LinkedHashSet<>();
-        if (css == null || css.isBlank()) return out;
-        Matcher preludeMatcher = CSS_SELECTOR_PRELUDE.matcher(css);
-        while (preludeMatcher.find()) {
-            String prelude = preludeMatcher.group(1);
-            if (prelude == null || prelude.isBlank()) continue;
-            Matcher selectorMatcher = selectorPattern.matcher(prelude);
-            while (selectorMatcher.find()) {
-                String value = selectorMatcher.group(1);
-                if (value != null && !value.isBlank()) out.add(value.trim());
-            }
-        }
-        return out;
-    }
-
-    private static Set<String> extractJsClasses(String js) {
-        Set<String> out = new LinkedHashSet<>();
-        Matcher qs = JS_QUERY_SELECTOR.matcher(js);
-        while (qs.find()) {
-            String selector = qs.group(1);
-            if (selector != null && selector.startsWith(".")) out.add(selector.substring(1));
-        }
-        Matcher gcn = JS_GET_BY_CLASS.matcher(js);
-        while (gcn.find()) {
-            String cls = gcn.group(1);
-            if (cls != null && !cls.isBlank()) out.add(cls);
-        }
-        return out;
-    }
-
-    private static Set<String> extractJsIds(String js) {
-        Set<String> out = new LinkedHashSet<>();
-        Matcher qs = JS_QUERY_SELECTOR.matcher(js);
-        while (qs.find()) {
-            String selector = qs.group(1);
-            if (selector != null && selector.startsWith("#")) out.add(selector.substring(1));
-        }
-        Matcher gid = JS_GET_BY_ID.matcher(js);
-        while (gid.find()) {
-            String id = gid.group(1);
-            if (id != null && !id.isBlank()) out.add(id);
-        }
-        return out;
-    }
-
-    private static String renderObserved(Set<String> values) {
-        if (values == null || values.isEmpty()) return "none";
-        return values.stream().sorted().map(v -> "`" + v + "`").reduce((a, b) -> a + ", " + b).orElse("none");
-    }
-
-    private static String renderSelectors(Set<String> values, String prefix) {
-        return values.stream().sorted().map(v -> "`" + prefix + v + "`")
-                .reduce((a, b) -> a + ", " + b).orElse("none");
     }
 
     /**

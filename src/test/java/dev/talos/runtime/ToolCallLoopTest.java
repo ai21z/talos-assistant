@@ -685,7 +685,9 @@ class ToolCallLoopTest {
     }
 
     private static Context defaultCtx() {
-        return Context.builder(new Config()).build();
+        return Context.builder(new Config())
+                .llm(LlmClient.scripted(List.of("")))
+                .build();
     }
 
     private static TalosTool echoTool() {

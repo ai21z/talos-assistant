@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1] - 2026-04-25
+
+### Changed
+- Added a narrow post-apply static task verifier for mutation targets and small HTML/CSS/JS selector coherence.
+- Wired verifier status into central execution outcomes so Talos can distinguish applied, verified, failed, and incomplete static checks.
+- Added deterministic verifier scenarios for failed selector repair, successful CTA repair, and partial mutation non-completion.
+
 All notable Talos distribution changes should be recorded in this file.
 
 The format is intentionally simple:
