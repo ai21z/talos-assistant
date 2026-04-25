@@ -661,6 +661,22 @@ public final class AssistantTurnExecutor {
                     .append(outcome.pathHint().isBlank() ? outcome.toolName() : outcome.pathHint())
                     .append(": approval denied\n");
         }
+        List<ToolCallLoop.ToolOutcome> invalidMutations = outcomes.stream()
+                .filter(ToolCallLoop.ToolOutcome::mutating)
+                .filter(outcome -> !outcome.success())
+                .filter(outcome -> !outcome.denied())
+                .filter(outcome -> ToolError.INVALID_PARAMS.equals(outcome.errorCode()))
+                .toList();
+        if (!invalidMutations.isEmpty()) {
+            out.append("\nEarlier invalid mutation attempts in this turn were also rejected before approval:\n");
+            for (ToolCallLoop.ToolOutcome outcome : invalidMutations) {
+                out.append("- ")
+                        .append(outcome.pathHint().isBlank() ? outcome.toolName() : outcome.pathHint())
+                        .append(": ")
+                        .append(trimFailureMessage(outcome.errorMessage()))
+                        .append('\n');
+            }
+        }
         out.append("\nTalos can still help in a later turn if you want to retry the edit or take a read-only approach.");
         return out.toString().stripTrailing();
     }
@@ -676,6 +692,7 @@ public final class AssistantTurnExecutor {
 
         List<ToolCallLoop.ToolOutcome> outcomes = loopResult.toolOutcomes();
         if (outcomes == null || outcomes.isEmpty()) return answer;
+        if (hasDeniedMutation(loopResult)) return answer;
         List<ToolCallLoop.ToolOutcome> invalidMutations = outcomes.stream()
                 .filter(ToolCallLoop.ToolOutcome::mutating)
                 .filter(outcome -> !outcome.success())
@@ -753,6 +770,8 @@ public final class AssistantTurnExecutor {
         if (ctx == null || ctx.llm() == null) return new MutationRetryResult(answer, 0, null);
         if (ctx.toolCallLoop() == null) return new MutationRetryResult(answer, 0, null);
         if (hasDeniedMutation(loopResult)) return new MutationRetryResult(answer, 0, null);
+        if (loopResult.failureDecision().shouldStop()) return new MutationRetryResult(answer, 0, null);
+        if (hasInvalidMutatingFailure(loopResult)) return new MutationRetryResult(answer, 0, null);
 
         String userRequest = latestUserRequest(messages);
         if (!looksLikeMutationRequest(userRequest)) return new MutationRetryResult(answer, 0, null);
@@ -808,6 +827,15 @@ public final class AssistantTurnExecutor {
             LOG.warn("Missing-mutation retry failed: {}", e.getMessage());
         }
         return new MutationRetryResult(answer, 0, null);
+    }
+
+    private static boolean hasInvalidMutatingFailure(ToolCallLoop.LoopResult loopResult) {
+        if (loopResult == null || loopResult.toolOutcomes() == null) return false;
+        return loopResult.toolOutcomes().stream()
+                .anyMatch(outcome -> outcome.mutating()
+                        && !outcome.success()
+                        && !outcome.denied()
+                        && ToolError.INVALID_PARAMS.equals(outcome.errorCode()));
     }
 
     private static boolean hasDeniedMutation(ToolCallLoop.LoopResult loopResult) {
