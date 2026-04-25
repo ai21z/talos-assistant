@@ -145,10 +145,48 @@ class AssistantTurnExecutorTest {
                     "tool protocol must be suppressed from streamed output");
             assertTrue(visible.contains("I will inspect."),
                     "ordinary prose before the tool call should remain visible");
-            assertTrue(visible.contains("The file contains Hello."),
-                    "post-tool streamed answer should remain visible");
+            assertFalse(visible.contains("The file contains Hello."),
+                    "tool-loop follow-up prose should not stream before final answer shaping");
             assertTrue(out.text().contains("The file contains Hello."),
                     "raw response must still enter the tool loop and complete normally");
+        }
+
+        @Test
+        void reprompt_stream_filter_flushes_protocol_debris_between_turns(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("index.html"), "<h1>Hello</h1>");
+
+            var visibleChunks = new ArrayList<String>();
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var streamFilter = new dev.talos.runtime.ToolCallStreamFilter(visibleChunks::add);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}",
+                            "```json\n\n```",
+                            "plain second turn")))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .streamSink(streamFilter)
+                    .build();
+
+            AssistantTurnExecutor.execute(new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user("Read index.html."))), workspace, ctx,
+                    new AssistantTurnExecutor.Options());
+            AssistantTurnExecutor.execute(new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user("Say hello."))), workspace, ctx,
+                    new AssistantTurnExecutor.Options());
+
+            String visible = String.join("", visibleChunks);
+            assertFalse(visible.contains("```json"),
+                    "empty protocol fence buffered during a tool-loop reprompt must not leak into the next turn");
+            assertTrue(visible.contains("plain second turn"),
+                    "the next normal streamed turn should still be visible");
         }
     }
 

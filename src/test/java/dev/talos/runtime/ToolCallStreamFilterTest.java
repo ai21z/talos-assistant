@@ -305,6 +305,13 @@ class ToolCallStreamFilterTest {
         @Test void not_a_tag_html() {
             assertFalse(ToolCallStreamFilter.couldBeOpenTagPrefix("<html"));
         }
+
+        @Test void code_fence_backtick_prefix() {
+            assertTrue(ToolCallStreamFilter.couldBeCodeFenceOpenPrefix("`"));
+            assertTrue(ToolCallStreamFilter.couldBeCodeFenceOpenPrefix("``"));
+            assertTrue(ToolCallStreamFilter.couldBeCodeFenceOpenPrefix("```j"));
+            assertFalse(ToolCallStreamFilter.couldBeCodeFenceOpenPrefix("```java"));
+        }
     }
 
     // ── Large content suppression ───────────────────────────────────────
@@ -384,6 +391,55 @@ class ToolCallStreamFilterTest {
         }
 
         @Test
+        @DisplayName("empty json code fence is suppressed as protocol debris")
+        void empty_json_fence_suppressed() {
+            String input = "Before\n```json\n\n```\nAfter";
+            String result = joined(f -> f.accept(input));
+            assertEquals("Before\nAfter", result);
+        }
+
+        @Test
+        @DisplayName("empty json fence before adjacent tool JSON is suppressed")
+        void empty_json_fence_before_adjacent_tool_json_suppressed() {
+            String input = "```json\n\n```{\"name\": \"talos.edit_file\", \"arguments\": {\"path\": \"index.html\"}}";
+            String result = joined(f -> f.accept(input));
+            assertEquals("", result);
+        }
+
+        @Test
+        @DisplayName("empty generic code fence still passes through")
+        void empty_generic_fence_passes() {
+            String input = "Before\n```\n\n```\nAfter";
+            String result = joined(f -> f.accept(input));
+            assertEquals(input, result);
+        }
+
+        @Test
+        @DisplayName("speculative pre-tool prose is suppressed with tool-call fence")
+        void speculative_pre_tool_prose_suppressed_with_tool_fence() {
+            String input = "Let's assume the relevant section looks like this:\n"
+                    + "```json\n"
+                    + "{\"name\": \"talos.read_file\", \"parameters\": {\"path\": \"index.html\"}}\n"
+                    + "```\n"
+                    + "After.";
+            String result = joined(f -> f.accept(input));
+            assertFalse(result.contains("Let's assume"));
+            assertEquals("After.", result);
+        }
+
+        @Test
+        @DisplayName("ordinary pre-tool prose is preserved with tool-call fence")
+        void ordinary_pre_tool_prose_preserved_with_tool_fence() {
+            String input = "Let me check.\n"
+                    + "```json\n"
+                    + "{\"name\": \"talos.read_file\", \"parameters\": {\"path\": \"index.html\"}}\n"
+                    + "```\n"
+                    + "Done.";
+            String result = joined(f -> f.accept(input));
+            assertEquals("Let me check.\nDone.", result);
+        }
+
+        @Test
         @DisplayName("multiple JSON tool calls suppressed, prose preserved")
         void multiple_json_fences_suppressed() {
             String input = "First.\n```json\n{\"name\": \"talos.read_file\", \"parameters\": {\"path\": \"a.txt\"}}\n```\nThen.\n```json\n{\"name\": \"talos.grep\", \"parameters\": {\"pattern\": \"TODO\"}}\n```\nDone.";
@@ -411,6 +467,18 @@ class ToolCallStreamFilterTest {
                     "Text before chunked fence should pass through");
             assertTrue(result.contains("outro"),
                     "Text after chunked fence should pass through");
+        }
+
+        @Test
+        @DisplayName("JSON fence streamed one character at a time is suppressed")
+        void json_fence_char_by_char() {
+            String input = "```json\n\n```";
+            String result = joined(f -> {
+                for (char c : input.toCharArray()) {
+                    f.accept(String.valueOf(c));
+                }
+            });
+            assertEquals("", result);
         }
 
         @Test
@@ -458,6 +526,17 @@ class ToolCallStreamFilterTest {
         }
 
         @Test
+        @DisplayName("speculative prose before bare JSON tool call is suppressed")
+        void speculative_prose_before_bare_json_tool_call_is_suppressed() {
+            String result = joined(f -> f.accept(
+                    "Assume the relevant section looks like this:\n"
+                            + "{\"name\": \"talos.read_file\", \"parameters\": {\"path\": \"index.html\"}}\n"
+                            + "Done."));
+            assertFalse(result.contains("Assume the relevant"));
+            assertEquals("\nDone.", result);
+        }
+
+        @Test
         @DisplayName("chunked multiline bare JSON tool call is suppressed")
         void chunked_multiline_bare_json_suppressed() {
             String result = joined(f -> {
@@ -488,6 +567,21 @@ class ToolCallStreamFilterTest {
                             + "\"old_string\":\".hero { color: red; }\","
                             + "\"new_string\":\".hero { color: blue; }\"}}"
                             + "after"));
+            assertEquals("after", result);
+        }
+
+        @Test
+        @DisplayName("malformed bare Talos protocol JSON is suppressed")
+        void malformed_bare_talos_protocol_json_is_suppressed() {
+            String result = joined(f -> f.accept(
+                    "{\n"
+                            + "  \"name\": \"talos.edit_file\",\n"
+                            + "  \"arguments\": {\n"
+                            + "    \"path\": \"index.html\",\n"
+                            + "    \"old_string\": '<div class=\"hero-content\">',\n"
+                            + "    \"new_string\": '<div class=\"hero-content cta-button\">'\n"
+                            + "  }\n"
+                            + "}after"));
             assertEquals("after", result);
         }
 
@@ -539,6 +633,16 @@ class ToolCallStreamFilterTest {
             String result = String.join("", chunks);
             assertTrue(result.contains("text"), "Text should be emitted");
             assertTrue(result.contains("just_data"), "Incomplete fence content should be emitted");
+        }
+
+        @Test
+        @DisplayName("blank incomplete JSON fence is discarded on flush")
+        void flush_discards_blank_incomplete_json_fence() {
+            List<String> chunks = new ArrayList<>();
+            ToolCallStreamFilter filter = new ToolCallStreamFilter(chunks::add);
+            filter.accept("```json\n");
+            filter.flush();
+            assertEquals("", String.join("", chunks));
         }
     }
 
