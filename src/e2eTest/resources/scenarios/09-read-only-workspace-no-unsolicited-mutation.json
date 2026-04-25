@@ -4,7 +4,8 @@
   "v1Pack": true,
   "claims": [
     "read-only-requests-remain-read-only",
-    "inspect-before-mutate"
+    "inspect-before-mutate",
+    "task-contract-read-only-blocks-mutation"
   ],
   "runner": "executor",
   "approvalPolicy": "APPROVE_ALL",
