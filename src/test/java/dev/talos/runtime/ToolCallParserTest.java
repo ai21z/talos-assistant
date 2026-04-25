@@ -444,6 +444,32 @@ class ToolCallParserTest {
     }
 
     @Test
+    void containsToolCallsDetectsAdjacentJsonWithBraceInStringValue() {
+        // Both objects have brace-containing string values — BARE_JSON_PATTERN misses both.
+        // containsToolCalls must still return true via the Pass 2b Jackson detection path.
+        String response = """
+                {
+                  "name": "talos.edit_file",
+                  "arguments": {
+                    "path": "style.css",
+                    "old_string": ".foo { color: red; }",
+                    "new_string": ".foo { color: blue; }"
+                  }
+                }
+                {
+                  "name": "talos.edit_file",
+                  "arguments": {
+                    "path": "other.css",
+                    "old_string": ".bar { margin: 0; }",
+                    "new_string": ".bar { margin: 4px; }"
+                  }
+                }
+                """;
+        assertTrue(ToolCallParser.containsToolCalls(response),
+                "containsToolCalls must detect adjacent raw JSON even when all string values contain braces");
+    }
+
+    @Test
     void parseStandaloneRawJsonWithArgumentsKey() {
         String response = """
                 {
@@ -473,6 +499,80 @@ class ToolCallParserTest {
                 """;
 
         assertEquals("", ToolCallParser.stripToolCalls(response));
+    }
+
+    // ── Pass 2b: adjacent standalone raw JSON objects (Jackson-based) ──
+
+    @Test
+    void parseTwoAdjacentStandaloneRawJsonObjects() {
+        // Both objects have simple string values — tests basic multi-object extraction
+        String response = """
+                {
+                  "name": "talos.read_file",
+                  "arguments": {
+                    "path": "index.html"
+                  }
+                }
+                {
+                  "name": "talos.read_file",
+                  "arguments": {
+                    "path": "style.css"
+                  }
+                }
+                """;
+
+        List<ToolCall> calls = ToolCallParser.parse(response);
+        assertEquals(2, calls.size(), "Both adjacent JSON objects should be parsed");
+        assertEquals("talos.read_file", calls.get(0).toolName());
+        assertEquals("index.html", calls.get(0).param("path"));
+        assertEquals("talos.read_file", calls.get(1).toolName());
+        assertEquals("style.css", calls.get(1).param("path"));
+    }
+
+    @Test
+    void parseTwoAdjacentRawJsonWhereSecondHasBraceInStringValue() {
+        // Mirrors the real transcript failure shape: edit_file with CSS rules in
+        // old_string/new_string. BARE_JSON_PATTERN misses the second object because
+        // [^{}]* cannot traverse string values containing literal braces.
+        // The Jackson-based Pass 2b must catch it.
+        String response = """
+                {
+                  "name": "talos.edit_file",
+                  "arguments": {
+                    "path": "script.js",
+                    "old_string": "document.querySelector('.cta-button');",
+                    "new_string": "document.querySelector('.synthwave-theme .cta-button');"
+                  }
+                }
+                {
+                  "name": "talos.edit_file",
+                  "arguments": {
+                    "path": "style.css",
+                    "old_string": ".cta-button { background-color: #ff6347; }",
+                    "new_string": ".synthwave-theme .cta-button { background-color: #ff6347; }"
+                  }
+                }
+                """;
+
+        List<ToolCall> calls = ToolCallParser.parse(response);
+        assertEquals(2, calls.size(), "Second object with CSS braces in string values must also be parsed");
+        assertEquals("talos.edit_file", calls.get(0).toolName());
+        assertEquals("script.js", calls.get(0).param("path"));
+        assertEquals("talos.edit_file", calls.get(1).toolName());
+        assertEquals("style.css", calls.get(1).param("path"));
+        assertEquals(".cta-button { background-color: #ff6347; }", calls.get(1).param("old_string"));
+    }
+
+    @Test
+    void adjacentNonToolJsonObjectsNotTreatedAsToolCalls() {
+        // JSON objects without "talos." prefix must not be treated as tool calls
+        String response = """
+                {"status": "ok", "code": 200}
+                {"message": "success", "data": null}
+                """;
+
+        List<ToolCall> calls = ToolCallParser.parse(response);
+        assertEquals(0, calls.size(), "Non-tool JSON objects must not be parsed as tool calls");
     }
 
     // ── Protocol hardening: JSON key normalization ───────────────────

@@ -130,6 +130,14 @@ public final class ToolCallParser {
             extractFromPattern(BARE_JSON_PATTERN, 1, llmResponse, calls, consumedPayloads);
         }
 
+        // Pass 2b: Jackson-based adjacent standalone JSON objects.
+        // Supplements Pass 2 when BARE_JSON_PATTERN misses objects whose string values
+        // contain literal brace characters (e.g. CSS rules in old_string/new_string,
+        // JavaScript function bodies in content). Uses call-identity deduplication to
+        // avoid re-adding anything Pass 2 already found.
+        // Only runs for responses that start with '{' — i.e. raw-JSON-only model output.
+        extractAdjacentStandaloneToolJsons(llmResponse, calls);
+
         // Pass 3: XML-tagged blocks — DEPRECATED COMPATIBILITY ONLY (checked last).
         //         Not actively instructed. Retained only for models that still emit
         //         XML from training habits. Will be removed once native calling is stable.
@@ -153,14 +161,23 @@ public final class ToolCallParser {
 
     /**
      * Returns true if the response contains at least one recognizable
-     * tool-call block (tagged, code-fenced, or bare JSON).
+     * tool-call block (tagged, code-fenced, bare JSON, or adjacent standalone JSON).
+     *
+     * <p>The final check mirrors Pass 2b in {@link #parse}: uses Jackson streaming
+     * to detect adjacent raw JSON objects whose string values contain brace characters
+     * that {@link #BARE_JSON_PATTERN} cannot traverse.
      */
     public static boolean containsToolCalls(String llmResponse) {
         if (llmResponse == null || llmResponse.isBlank()) return false;
-        return VARIANT_TAG_PATTERN.matcher(llmResponse).find()
-                || CODE_FENCE_PATTERN.matcher(llmResponse).find()
-                || BARE_JSON_PATTERN.matcher(llmResponse).find()
-                || tryParseStandaloneToolJson(llmResponse) != null;
+        if (VARIANT_TAG_PATTERN.matcher(llmResponse).find()) return true;
+        if (CODE_FENCE_PATTERN.matcher(llmResponse).find()) return true;
+        if (BARE_JSON_PATTERN.matcher(llmResponse).find()) return true;
+        if (tryParseStandaloneToolJson(llmResponse) != null) return true;
+        // Align with Pass 2b: detect adjacent standalone raw JSON objects that
+        // BARE_JSON_PATTERN misses when string values contain literal brace chars.
+        var probe = new ArrayList<ToolCall>(1);
+        extractAdjacentStandaloneToolJsons(llmResponse, probe);
+        return !probe.isEmpty();
     }
 
     /** Strip all recognized tool-call blocks, returning only the LLM's prose. */
@@ -208,6 +225,56 @@ public final class ToolCallParser {
 
     // ── Internal extraction helpers ──────────────────────────────────
 
+    /**
+     * Pass 2b: Jackson streaming extractor for adjacent standalone raw JSON tool objects.
+     *
+     * <p>The regex-based {@link #BARE_JSON_PATTERN} uses {@code [^{}]*} for inner
+     * content and therefore misses JSON objects whose string values contain literal
+     * brace characters (for example CSS rules in {@code old_string}, or JavaScript
+     * function bodies in {@code content}). This pass uses Jackson's streaming
+     * {@code MappingIterator} which correctly handles braces inside string values.
+     *
+     * <p>Runs after Pass 2 and supplements it: any valid {@code talos.*} calls not
+     * already present in {@code calls} are appended. Deduplication is by call identity
+     * (toolName + parameters) so the key format is independent of the raw-text
+     * normalization used by {@link #extractFromPattern}.
+     *
+     * <p>Restricted to raw-JSON-only model output: only runs when the trimmed text
+     * starts with an open brace, ensuring prose, code-fenced, and XML-tagged
+     * responses are never affected.
+     */
+    private static void extractAdjacentStandaloneToolJsons(String text, List<ToolCall> calls) {
+        String trimmed = text == null ? "" : text.strip();
+        if (trimmed.isEmpty() || !trimmed.startsWith("{")) {
+            return;
+        }
+        try (var jp = MAPPER.createParser(trimmed)) {
+            var iter = MAPPER.readerFor(JsonNode.class).<JsonNode>readValues(jp);
+            while (iter.hasNextValue()) {
+                JsonNode node;
+                try {
+                    node = iter.nextValue();
+                } catch (Exception e) {
+                    LOG.debug("Adjacent JSON pass: stopping at non-JSON boundary: {}", e.getMessage());
+                    break;
+                }
+                if (!node.isObject()) continue;
+                ToolCall call = parseJsonNode(node);
+                if (call == null || call.toolName() == null || !call.toolName().startsWith("talos.")) {
+                    continue;
+                }
+                boolean duplicate = calls.stream().anyMatch(c ->
+                        c.toolName().equals(call.toolName()) &&
+                        c.parameters().equals(call.parameters()));
+                if (!duplicate) {
+                    calls.add(call);
+                }
+            }
+        } catch (Exception e) {
+            LOG.debug("Adjacent JSON pass: extraction failed: {}", e.getMessage());
+        }
+    }
+
     /** Extract tool calls from all matches of a pattern, deduplicating by payload. */
     private static void extractFromPattern(Pattern pattern, int group,
                                            String text, List<ToolCall> calls,
@@ -254,21 +321,24 @@ public final class ToolCallParser {
     /** Parse a single JSON payload into a ToolCall (handles key aliases and nested wrappers). */
     static ToolCall parseJson(String json) throws Exception {
         JsonNode root = MAPPER.readTree(json);
+        ToolCall call = parseJsonNode(root);
+        if (call == null) {
+            LOG.warn("tool_call missing 'name' field: {}", json);
+        }
+        return call;
+    }
 
-        // Auto-unwrap nested wrapper: {"tool_call": {...}}
+    /**
+     * Parse a pre-parsed {@link JsonNode} into a {@link ToolCall}, handling key
+     * aliases and nested wrappers. Returns {@code null} if the name is missing.
+     */
+    private static ToolCall parseJsonNode(JsonNode root) {
         root = unwrapIfNeeded(root);
-
-        // Extract name (with key normalization)
         String name = extractName(root);
         if (name == null || name.isBlank()) {
-            LOG.warn("tool_call missing 'name' field: {}", json);
             return null;
         }
-
-        // Extract parameters (with key normalization)
-        Map<String, String> params = extractParams(root);
-
-        return new ToolCall(name, params);
+        return new ToolCall(name, extractParams(root));
     }
 
     /** Unwrap {@code {"tool_call": {...}}} or {@code {"function_call": {...}}} nesting. */

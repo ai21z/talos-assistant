@@ -282,6 +282,58 @@ class ToolCallLoopTest {
     }
 
     @Test
+    void twoAdjacentRawJsonContinuationCallsBothExecute() {
+        // Regression for the multi-adjacent-raw-JSON-toolcalls bug:
+        // when a follow-up contains two adjacent standalone raw JSON calls,
+        // both must be parsed and executed in the same iteration.
+        var registry = new ToolRegistry();
+        registry.register(listDirTool());
+        registry.register(grepTool());
+        var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+        var loop = new ToolCallLoop(processor);
+
+        String initialResponse = """
+                {
+                  "name": "talos.list_dir",
+                  "arguments": {
+                    "path": "."
+                  }
+                }
+                """;
+
+        var messages = new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user("audit workspace")));
+        var ctx = Context.builder(new Config())
+                .llm(LlmClient.scripted(List.of(
+                        // Follow-up: two adjacent standalone raw JSON calls (different params)
+                        """
+                        {
+                          "name": "talos.grep",
+                          "arguments": {
+                            "pattern": "cta-button",
+                            "include": "*.css"
+                          }
+                        }
+                        {
+                          "name": "talos.grep",
+                          "arguments": {
+                            "pattern": "cta-button",
+                            "include": "*.html"
+                          }
+                        }
+                        """,
+                        "Grounded final answer.")))
+                .build();
+
+        var result = loop.run(initialResponse, messages, WS, ctx);
+
+        assertEquals(2, result.iterations(),
+                "Adjacent continuation calls should both run in the second iteration");
+        assertEquals(3, result.toolsInvoked(),
+                "Initial list_dir + two adjacent grep calls = 3 total invocations");
+        assertEquals("Grounded final answer.", result.finalAnswer());
+    }
+
+    @Test
     void malformedContinuationAfterToolExecutionUsesTruthfulFallback() {
         var registry = new ToolRegistry();
         registry.register(listDirTool());
