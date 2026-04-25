@@ -88,6 +88,27 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/14-approval-denial-stops-loop.json] 14: approval denial stops without re-prompting for another mutating retry")
+    void approvalDenialStopsLoopWithoutRetry() {
+        var loaded = JsonScenarioLoader.load("scenarios/14-approval-denial-stops-loop.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(1, 0, 1, 0)
+                    .assertAnswerContains(AssistantTurnExecutor.DENIED_MUTATION_ANNOTATION)
+                    .assertAnswerContains("No file changes were applied because approval was denied")
+                    .assertAnswerContains("index.html: approval denied")
+                    .assertAnswerNotContains("iteration limit reached")
+                    .assertAnswerNotContains("I'll retry the edit")
+                    .assertFileContains("index.html", "<title>Night Drive</title>")
+                    .assertFileContains("index.html", "<h1>Night Drive</h1>")
+                    .assertFileNotContains("index.html", "Denied Retry Regression");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/06-approval-remembered.json] 06: remembered approval asks once and lets later writes proceed")
     void approvalRememberedInSession() {
         var loaded = JsonScenarioLoader.load("scenarios/06-approval-remembered.json");
