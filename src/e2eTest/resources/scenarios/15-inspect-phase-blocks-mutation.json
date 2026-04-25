@@ -1,0 +1,13 @@
+{
+  "name": "inspect phase blocks mutation",
+  "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "inspect-phase-blocks-mutation-before-approval"
+  ],
+  "runner": "loop",
+  "executionPhase": "INSPECT",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Update index.html so the title is Inspect Phase Regression.",
+  "scriptedResponse": "```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"index.html\",\"content\":\"<h1>Inspect Phase Regression</h1>\"}}\n```"
+}
