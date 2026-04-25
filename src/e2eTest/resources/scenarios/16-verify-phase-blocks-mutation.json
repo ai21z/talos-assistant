@@ -1,0 +1,13 @@
+{
+  "name": "verify phase blocks mutation",
+  "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "verify-phase-blocks-mutation-before-approval"
+  ],
+  "runner": "loop",
+  "executionPhase": "VERIFY",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Update index.html so the title is Verify Phase Regression.",
+  "scriptedResponse": "```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"index.html\",\"content\":\"<h1>Verify Phase Regression</h1>\"}}\n```"
+}

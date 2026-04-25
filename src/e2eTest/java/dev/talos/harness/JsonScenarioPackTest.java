@@ -109,6 +109,40 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/15-inspect-phase-blocks-mutation.json] 15: inspect phase blocks mutation before approval")
+    void inspectPhaseBlocksMutationBeforeApproval() {
+        var loaded = JsonScenarioLoader.load("scenarios/15-inspect-phase-blocks-mutation.json");
+
+        try (var result = ScenarioRunner.run(loaded.definition())) {
+            result.assertUsedTool("talos.write_file")
+                    .assertFailedCalls(1)
+                    .assertApprovalCounts(0, 0, 0, 0)
+                    .assertFileContains("index.html", "<title>Night Drive</title>")
+                    .assertFileNotContains("index.html", "Inspect Phase Regression");
+
+            assertTrue(result.anyToolResultContains(
+                    "Phase policy blocked talos.write_file during INSPECT"));
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/16-verify-phase-blocks-mutation.json] 16: verify phase blocks mutation before approval")
+    void verifyPhaseBlocksMutationBeforeApproval() {
+        var loaded = JsonScenarioLoader.load("scenarios/16-verify-phase-blocks-mutation.json");
+
+        try (var result = ScenarioRunner.run(loaded.definition())) {
+            result.assertUsedTool("talos.write_file")
+                    .assertFailedCalls(1)
+                    .assertApprovalCounts(0, 0, 0, 0)
+                    .assertFileContains("index.html", "<title>Night Drive</title>")
+                    .assertFileNotContains("index.html", "Verify Phase Regression");
+
+            assertTrue(result.anyToolResultContains(
+                    "Phase policy blocked talos.write_file during VERIFY"));
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/06-approval-remembered.json] 06: remembered approval asks once and lets later writes proceed")
     void approvalRememberedInSession() {
         var loaded = JsonScenarioLoader.load("scenarios/06-approval-remembered.json");

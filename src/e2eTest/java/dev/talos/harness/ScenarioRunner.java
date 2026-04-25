@@ -10,6 +10,8 @@ import dev.talos.core.context.ConversationManager;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.*;
+import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.phase.ExecutionPhaseState;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.*;
 import dev.talos.tools.impl.*;
@@ -150,6 +152,7 @@ public final class ScenarioRunner {
         var ctx = Context.builder(new Config())
                 .sandbox(new Sandbox(workspace.path(), Map.of()))
                 .llm(llm)
+                .executionPhaseState(new ExecutionPhaseState(scenarioPhaseOrApply(scenario)))
                 .build();
         ToolCallLoop.LoopResult loopResult;
         TurnUserRequestCapture.set(userPrompt);
@@ -387,6 +390,7 @@ public final class ScenarioRunner {
                 .sandbox(new Sandbox(workspace.path(), Map.of()))
                 .toolCallLoop(loop)
                 .llm(scriptedLlm)
+                .executionPhaseState(new ExecutionPhaseState(scenarioPhaseOrApply(scenario)))
                 .build();
 
         // 7. Drive the executor end-to-end.
@@ -445,6 +449,7 @@ public final class ScenarioRunner {
                 .toolCallLoop(loop)
                 .llm(scriptedLlm)
                 .streamSink(streamedChunks::append)
+                .executionPhaseState(new ExecutionPhaseState(scenarioPhaseOrApply(scenario)))
                 .build();
 
         var opts = new AssistantTurnExecutor.Options();
@@ -502,6 +507,10 @@ public final class ScenarioRunner {
 
     private static ApprovalGate policyGate(ScenarioApprovalPolicy policy) {
         return new GateRecorder(policy == null ? ScenarioApprovalPolicy.APPROVE_ALL : policy);
+    }
+
+    private static ExecutionPhase scenarioPhaseOrApply(ScenarioDefinition scenario) {
+        return scenario.executionPhase() == null ? ExecutionPhase.APPLY : scenario.executionPhase();
     }
 
     private static void deleteRecursive(Path path) {

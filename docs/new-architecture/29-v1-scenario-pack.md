@@ -30,8 +30,11 @@ Current local evidence checked:
 - `src/e2eTest/java/dev/talos/harness/StrictModeScenariosTest.java`
 - `src/e2eTest/java/dev/talos/harness/PersistenceScenarioPackTest.java`
 - `src/test/java/dev/talos/runtime/ToolCallLoopTest.java`
+- `src/test/java/dev/talos/runtime/TurnProcessorPhasePolicyTest.java`
+- `src/test/java/dev/talos/runtime/phase/PhasePolicyTest.java`
 - `src/test/java/dev/talos/cli/modes/AssistantTurnExecutorTest.java`
 - `src/main/java/dev/talos/runtime/ToolCallLoop.java`
+- `src/main/java/dev/talos/runtime/phase/PhasePolicy.java`
 - `src/main/java/dev/talos/runtime/toolcall/ToolCallExecutionStage.java`
 - `src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java`
 - `src/main/java/dev/talos/cli/modes/ExecutionOutcome.java`
@@ -110,7 +113,7 @@ The V1 pack does not prove:
 - shell/test-runner verification
 - whole-surface sandboxing
 - prompt-injection resistance
-- first-class phase enforcement
+- full phase lifecycle enforcement
 - task-level verification
 - live Ollama behavior in the installed CLI
 
@@ -143,6 +146,8 @@ Current JSON scenarios:
 - `12-repeated-missing-path-stops-at-loop-cap.json`
 - `13-streaming-no-tool-grounding-visible.json`
 - `14-approval-denial-stops-loop.json`
+- `15-inspect-phase-blocks-mutation.json`
+- `16-verify-phase-blocks-mutation.json`
 
 ### B. Executor-Path Scenarios
 
@@ -216,6 +221,8 @@ Use these labels when mapping scenarios to architecture claims:
 | `12-repeated-missing-path-stops-at-loop-cap` | Repeated bad path stops at the hard iteration cap and annotates the final answer. | `baseline-only` | The target is earlier controlled stop/reset/downgrade, not waiting for the cap. |
 | `13-streaming-no-tool-grounding-visible` | Streaming no-tool fabricated evidence answer is annotated as ungrounded. | `covered` | Covers final-answer truthfulness. It does not fully solve live terminal stream/protocol leakage. |
 | `14-approval-denial-stops-loop` | Executor path scripts a second mutating retry after denial and proves it is not reached. | `covered` | Covers approval-denial failure discipline for a known mutation retry shape. |
+| `15-inspect-phase-blocks-mutation` | Loop path forces `INSPECT`; a scripted `write_file` is blocked before approval or disk mutation. | `covered` | Proves phase gating for the forced inspect shape, not automatic task planning. |
+| `16-verify-phase-blocks-mutation` | Loop path forces `VERIFY`; a scripted `write_file` is blocked before approval or disk mutation. | `covered` | Proves verify-phase mutation blocking; static task verification still remains future work. |
 
 ### 6.2 Supporting Executor-Path Scenarios
 
@@ -238,7 +245,7 @@ Use these labels when mapping scenarios to architecture claims:
 | Discipline / claim | Primary evidence | Evidence strength | Current boundary |
 |---|---|---|---|
 | Read-only requests remain read-only | `01`, `09` | `covered` for scripted shapes | Does not prove all read-only phrasings or prompt-injection cases. |
-| Inspect-first behavior exists in important scenarios | `01`, `02`, `09`, `10` | `partially-covered` | No first-class `ExecutionPhase` yet. |
+| Inspect-first behavior exists in important scenarios | `01`, `02`, `09`, `10`, `15` | `partially-covered` | `ExecutionPhase` now blocks forced inspect-phase mutation, but full task phase planning is not implemented. |
 | Retrieval discipline | none in V1 JSON pack | `not-covered` | `ScenarioRunner` intentionally omits `RetrieveTool`; add later once retrieval scenarios are stable. |
 | Narrow file edits mutate intended content | `02` | `covered` | Does not prove target derivation from arbitrary user requests. |
 | Off-scope writes surface warning before approval | `03` | `covered` | Warning is not the same as policy-level block. |
@@ -254,7 +261,7 @@ Use these labels when mapping scenarios to architecture claims:
 | Executor-layer false mutation claims are caught | `ExecutorScenarioTest.T5` | `covered` | Applies to known false-claim shape. |
 | Strict mode reveals raw tool/runtime weakness | `StrictModeScenariosTest` | `covered` | Needs report-visible metrics beyond unit assertions. |
 | Task-level verification | none | `planned` | Covered by `talos-static-task-verifier.md`, not current V1 pack. |
-| Phase-aware tool policy | none | `planned` | Covered by `talos-minimal-execution-phase-policy.md`, not current V1 pack. |
+| Phase-aware tool policy | `15`, `16`; `TurnProcessorPhasePolicyTest`; `PhasePolicyTest` | `partially-covered` | Mutating tools are blocked outside APPLY. Apply-to-verify task verification remains planned. |
 | Prompt-injection/tool-abuse resistance | none | `not-covered` | Must be added before claiming serious security evaluation. |
 
 ---
@@ -428,12 +435,13 @@ Add these in order as the relevant runtime work lands.
 
 ### Phase Policy V1.1
 
-- `inspect-phase-blocks-write.json`
-  - user asks diagnose-only; model emits write; runtime blocks due to phase
+- `15-inspect-phase-blocks-mutation.json`
+  - implemented: forced INSPECT phase blocks a scripted write before approval
 - `apply-phase-still-asks-approval.json`
-  - explicit mutation enters apply and still requires approval
-- `verify-phase-blocks-write.json`
-  - after apply, model tries another edit during verify; runtime blocks it
+  - still useful as executor-path proof that explicit mutation starts in APPLY
+    and preserves approval semantics
+- `16-verify-phase-blocks-mutation.json`
+  - implemented: forced VERIFY phase blocks a scripted write before approval
 
 ### Static Verifier V1.2
 
@@ -472,13 +480,7 @@ Do improve it in place:
 - add scenario trace/report output before growing the scenario count too far
 - avoid claiming unsupported architecture guarantees
 
-The next implementation ticket should still be:
-
-```text
-local/tickets/talos-minimal-execution-phase-policy.md
-```
-
-After that:
+After the minimal phase-policy slice, the next implementation ticket is:
 
 ```text
 local/tickets/talos-static-task-verifier.md

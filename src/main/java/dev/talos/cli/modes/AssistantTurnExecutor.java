@@ -6,6 +6,7 @@ import dev.talos.runtime.MutationIntent;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.ToolCallStreamFilter;
+import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
@@ -111,6 +112,7 @@ public final class AssistantTurnExecutor {
                               Context ctx, Options opts) {
         StringBuilder out = new StringBuilder();
         boolean streamed = false;
+        initializeExecutionPhaseForTurn(messages, ctx);
 
         try {
             if (ctx.streamSink() != null) {
@@ -248,6 +250,8 @@ public final class AssistantTurnExecutor {
                 answer, messages, loopResult, workspace, ctx);
         answer = irr.answer();
 
+        moveToVerifyAfterSuccessfulMutation(ctx, loopResult, mrr.mutationsInRetry());
+
         String finalAnswer = shapeAnswerAfterToolLoop(
                 answer, messages, loopResult, workspace, mrr.mutationsInRetry(), opts);
 
@@ -266,6 +270,23 @@ public final class AssistantTurnExecutor {
         if (first == null || first.isBlank()) return second;
         if (second == null || second.isBlank()) return first;
         return first + "\n\n" + second;
+    }
+
+    private static void initializeExecutionPhaseForTurn(List<ChatMessage> messages, Context ctx) {
+        if (ctx == null || ctx.executionPhaseState() == null) return;
+        ExecutionPhase initial = looksLikeMutationRequest(latestUserRequest(messages))
+                ? ExecutionPhase.APPLY
+                : ExecutionPhase.INSPECT;
+        ctx.executionPhaseState().moveTo(initial);
+    }
+
+    private static void moveToVerifyAfterSuccessfulMutation(
+            Context ctx, ToolCallLoop.LoopResult loopResult, int extraMutationSuccesses) {
+        if (ctx == null || ctx.executionPhaseState() == null || loopResult == null) return;
+        int totalMutations = loopResult.mutatingToolSuccesses() + Math.max(0, extraMutationSuccesses);
+        if (totalMutations > 0) {
+            ctx.executionPhaseState().moveTo(ExecutionPhase.VERIFY);
+        }
     }
 
     private static String shapeAnswerAfterToolLoop(
