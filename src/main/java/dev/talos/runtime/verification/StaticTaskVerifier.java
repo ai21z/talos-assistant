@@ -2,6 +2,8 @@ package dev.talos.runtime.verification;
 
 import dev.talos.runtime.TemplatePlaceholderGuard;
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.tools.VerificationStatus;
 
 import java.nio.file.Files;
@@ -57,6 +59,19 @@ public final class StaticTaskVerifier {
             ToolCallLoop.LoopResult loopResult,
             int extraMutationSuccesses
     ) {
+        return verify(
+                workspace,
+                TaskContractResolver.fromUserRequest(userRequest),
+                loopResult,
+                extraMutationSuccesses);
+    }
+
+    public static TaskVerificationResult verify(
+            Path workspace,
+            TaskContract contract,
+            ToolCallLoop.LoopResult loopResult,
+            int extraMutationSuccesses
+    ) {
         if (loopResult == null) {
             return TaskVerificationResult.notRun("No tool-loop result was available.");
         }
@@ -98,7 +113,9 @@ public final class StaticTaskVerifier {
             verifyMutationTarget(root, pathHint, outcome.fileVerificationStatus(), facts, problems);
         }
 
-        if (shouldCheckSelectorCoherence(userRequest)) {
+        verifyExpectedTargets(contract, mutatedPaths, facts, problems);
+
+        if (shouldCheckSelectorCoherence(contract)) {
             verifySmallWebWorkspace(root, facts, problems);
         }
 
@@ -108,6 +125,31 @@ public final class StaticTaskVerifier {
         return TaskVerificationResult.passed(
                 "Post-apply static checks passed for " + mutatedPaths.size() + " mutated target(s).",
                 facts);
+    }
+
+    private static void verifyExpectedTargets(
+            TaskContract contract,
+            Set<String> mutatedPaths,
+            List<String> facts,
+            List<String> problems
+    ) {
+        if (contract == null || contract.expectedTargets().isEmpty()) return;
+        Set<String> normalizedMutations = new LinkedHashSet<>();
+        for (String path : mutatedPaths) {
+            String normalized = normalizePath(path);
+            if (!normalized.isBlank()) normalizedMutations.add(normalized);
+        }
+        for (String target : contract.expectedTargets()) {
+            String expected = normalizePath(target);
+            if (expected.isBlank()) continue;
+            if (!normalizedMutations.contains(expected)) {
+                problems.add(expected + ": expected target was not successfully mutated.");
+            }
+        }
+        if (problems.stream().noneMatch(p -> p.contains("expected target was not successfully mutated"))) {
+            facts.add("Expected mutation target(s) were updated: "
+                    + String.join(", ", contract.expectedTargets()) + ".");
+        }
     }
 
     private static void verifyMutationTarget(
@@ -252,6 +294,10 @@ public final class StaticTaskVerifier {
                 || lower.contains("wire")
                 || lower.contains("reference");
         return namesWebParts && asksAlignment;
+    }
+
+    private static boolean shouldCheckSelectorCoherence(TaskContract contract) {
+        return contract != null && shouldCheckSelectorCoherence(contract.originalUserRequest());
     }
 
     private static SelectorFacts selectorFacts(Path root, String htmlFile, String cssFile, String jsFile) {

@@ -219,7 +219,7 @@ Use these labels when mapping scenarios to architecture claims:
 | `06-approval-remembered` | Remembered approval asks once and lets later writes proceed. | `covered` | Covers session approval memory only for this narrow write pattern. |
 | `07-replay-turn-log-fallback` | Replay restores ok assistant turn and skips error-tagged residue. | `covered` | Session-discipline evidence, not task-completion evidence. |
 | `08-persistence-history-correctness` | Snapshot and turn log store chrome-stripped assistant text. | `covered` | Persistence correctness only; does not prove memory quality. |
-| `09-read-only-workspace-no-unsolicited-mutation` | Executor path blocks unsolicited mutation on a read-only workspace question and avoids approval prompts. | `partially-covered` | Important guard evidence, but not a full `INSPECT` phase model. |
+| `09-read-only-workspace-no-unsolicited-mutation` | Executor path blocks unsolicited mutation through the read-only `TaskContract` shape and avoids approval prompts. | `partially-covered` | Important guard evidence, but not a full semantic task contract or planner. |
 | `10-selector-mismatch-grounded` | Executor path corrects unsupported "no mismatch" prose using actual `index.html`, `style.css`, and `script.js` evidence. | `covered` | Selector grounding is a narrow web/static check, not a general verifier. |
 | `11-partial-mutation-summary-truthful` | Final answer reports succeeded and failed mutation outcomes without claiming the failed title change. | `covered` | Truthful summary is outcome shaping, not full task verification. |
 | `12-repeated-missing-path-stops-at-loop-cap` | Repeated bad path stops at the hard iteration cap and annotates the final answer. | `baseline-only` | The target is earlier controlled stop/reset/downgrade, not waiting for the cap. |
@@ -228,7 +228,7 @@ Use these labels when mapping scenarios to architecture claims:
 | `15-inspect-phase-blocks-mutation` | Loop path forces `INSPECT`; a scripted `write_file` is blocked before approval or disk mutation. | `covered` | Proves phase gating for the forced inspect shape, not automatic task planning. |
 | `16-verify-phase-blocks-mutation` | Loop path forces `VERIFY`; a scripted `write_file` is blocked before approval or disk mutation. | `covered` | Proves verify-phase mutation blocking; static verifier coverage is handled by `17`-`19`. |
 | `17-static-verifier-selector-fails-after-wrong-edit` | Executor path applies a mutation, then static verification rejects the completion claim because `.cta-button` remains missing from HTML. | `covered` | Narrow selector/linkage verifier only; not full semantic task completion. |
-| `18-static-verifier-selector-passes-after-cta-fix` | Executor path applies the CTA fix and final answer reports passed post-apply static verification. | `covered` | Proves a bounded web/static pass shape. It does not run browser or shell checks. |
+| `18-static-verifier-selector-passes-after-cta-fix` | Executor path applies the CTA fix through an explicit edit contract and final answer reports passed post-apply static verification. | `covered` | Proves a bounded web/static pass shape. It does not run browser or shell checks. |
 | `19-static-verifier-partial-mutation-not-verified-complete` | Partial mutation summary remains partial and is not blessed as statically verified complete. | `covered` | Protects against verifier overclaiming on mixed success/failure turns. |
 
 ### 6.2 Supporting Executor-Path Scenarios
@@ -267,7 +267,7 @@ Use these labels when mapping scenarios to architecture claims:
 | Streaming no-tool evidence answers are marked ungrounded | `13` | `covered` | Final-answer gate only; installed-CLI stream transcript remains a separate evidence lane. |
 | Executor-layer false mutation claims are caught | `ExecutorScenarioTest.T5` | `covered` | Applies to known false-claim shape. |
 | Strict mode reveals raw tool/runtime weakness | `StrictModeScenariosTest` | `covered` | Needs report-visible metrics beyond unit assertions. |
-| Static post-apply task verification | `17`, `18`, `19`; `StaticTaskVerifierTest`; `ExecutionOutcomeTest` | `partially-covered` | Narrow static workspace facts only; no full `TaskContract`, shell, browser, or semantic verifier. |
+| Static post-apply task verification | `17`, `18`, `19`; `StaticTaskVerifierTest`; `ExecutionOutcomeTest` | `partially-covered` | Narrow static workspace facts with minimal deterministic `TaskContract` target hints; no shell, browser, or full semantic verifier. |
 | Phase-aware tool policy | `15`, `16`; `TurnProcessorPhasePolicyTest`; `PhasePolicyTest` | `partially-covered` | Mutating tools are blocked outside APPLY. Apply-to-verify task verification remains planned. |
 | Prompt-injection/tool-abuse resistance | none | `not-covered` | Must be added before claiming serious security evaluation. |
 
@@ -365,17 +365,23 @@ The V1 pack now proves a minimal phase-policy slice:
 - successful apply turns moving toward `VERIFY`
 
 This is not yet the full target runtime. Talos still lacks explicit `PLAN`,
-formal task contracts, and a user-visible phase trace.
+full semantic task-contract behavior, and a user-visible phase trace.
 
-### 2. Static Task Verifier Is Narrow, Not Complete
+### 2. Minimal TaskContract And Static Task Verifier Are Narrow
 
-The V1 pack now has a bounded static post-apply verifier for selector/linkage
-and mutation-target facts. It does not prove arbitrary task completion.
+Talos now has a minimal deterministic `TaskContract` slice for current-turn
+local workspace tasks. It can classify common read-only, diagnose, create,
+edit, and verify shapes; derive mutation allowance; require verification for
+mutating contracts; and provide obvious target hints such as `index.html`.
+
+The V1 pack also has a bounded static post-apply verifier for selector/linkage
+and mutation-target facts. Together, these move Talos away from raw text
+heuristics, but they still do not prove arbitrary task completion.
 
 Missing:
 
-- explicit `TaskContract`
-- semantic expected/forbidden target derivation beyond observed tool outcomes
+- full semantic task-contract derivation
+- expected/forbidden target derivation beyond obvious local file mentions
 - browser/runtime verification
 - shell/test-runner verification
 

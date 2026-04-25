@@ -1,6 +1,7 @@
 package dev.talos.runtime.verification;
 
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.tools.VerificationStatus;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -108,6 +109,22 @@ class StaticTaskVerifierTest {
 
         assertEquals(TaskVerificationStatus.FAILED, result.status());
         assertTrue(result.summary().contains("file-level verification reported warning"));
+    }
+
+    @Test
+    void expectedTargetFromContractMustBeMutated() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), "<html><body><main></main></body></html>");
+        Files.writeString(workspace.resolve("style.css"), "body { color: white; }");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                TaskContractResolver.fromUserRequest("Edit index.html so the title changes."),
+                loopResult(List.of(successfulEdit("style.css", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("index.html: expected target was not successfully mutated")));
     }
 
     private void writeWebFiles(String html) throws Exception {

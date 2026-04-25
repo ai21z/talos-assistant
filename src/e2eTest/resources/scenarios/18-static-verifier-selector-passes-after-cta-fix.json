@@ -3,7 +3,8 @@
   "fixture": "horror-synth-site",
   "v1Pack": true,
   "claims": [
-    "post-apply-static-verifier-passes-selector-linkage"
+    "post-apply-static-verifier-passes-selector-linkage",
+    "task-contract-explicit-edit-requires-verification"
   ],
   "runner": "executor",
   "approvalPolicy": "APPROVE_ALL",
