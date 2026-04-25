@@ -51,6 +51,44 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void deniedMutationDominatesMixedInvalidAndDeniedNoSuccessTurn() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Edit index.html to add the CTA button."));
+
+        var loopResult = new ToolCallLoop.LoopResult(
+                "manual replacement prose", 4, 3,
+                List.of("talos.edit_file", "talos.read_file", "talos.edit_file"), List.of(),
+                3, 1, false, 0, List.of("index.html"),
+                0, 0, 1, 1,
+                List.of(
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.edit_file", "index.html", false, true, false,
+                                "", "Invalid talos.edit_file call: `old_string` must be present and non-empty.",
+                                null, ToolError.INVALID_PARAMS),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.edit_file", "index.html", false, true, true,
+                                "", "User did not approve the talos.edit_file call.",
+                                null, ToolError.DENIED)
+                ));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                "manual replacement prose", messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.BLOCKED, outcome.completionStatus());
+        assertTrue(outcome.deniedMutation());
+        assertFalse(outcome.invalidMutation());
+        assertTrue(outcome.finalAnswer().startsWith(AssistantTurnExecutor.DENIED_MUTATION_ANNOTATION));
+        assertTrue(outcome.finalAnswer().contains("approval was denied"));
+        assertTrue(outcome.finalAnswer().contains("Earlier invalid mutation attempts"));
+        assertTrue(outcome.finalAnswer().contains("old_string"));
+        assertEquals(TaskCompletionStatus.BLOCKED_BY_APPROVAL, outcome.taskOutcome().completionStatus());
+        assertEquals(MutationOutcomeStatus.DENIED, outcome.taskOutcome().mutationOutcome().status());
+        assertEquals(1, outcome.taskOutcome().mutationOutcome().failed().size());
+        assertEquals(1, outcome.taskOutcome().mutationOutcome().denied().size());
+    }
+
+    @Test
     void invalidMutationArgumentsAreClassifiedAsFailedWithoutApprovalDenial() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));

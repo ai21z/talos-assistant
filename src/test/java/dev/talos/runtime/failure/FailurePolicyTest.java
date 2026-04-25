@@ -70,11 +70,11 @@ class FailurePolicyTest {
     }
 
     private static ToolCallExecutionStage.IterationOutcome failedIteration() {
-        return new ToolCallExecutionStage.IterationOutcome(0, List.of(), 1, false, 0);
+        return new ToolCallExecutionStage.IterationOutcome(0, List.of(), 1, false, false, 0);
     }
 
     private static ToolCallExecutionStage.IterationOutcome successIteration() {
-        return new ToolCallExecutionStage.IterationOutcome(0, List.of(), 0, false, 1);
+        return new ToolCallExecutionStage.IterationOutcome(0, List.of(), 0, false, false, 1);
     }
 
     private static LoopState state() {

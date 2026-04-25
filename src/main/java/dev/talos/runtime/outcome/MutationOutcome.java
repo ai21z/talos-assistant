@@ -67,7 +67,7 @@ public record MutationOutcome(
                     ? MutationOutcomeStatus.NOT_ATTEMPTED
                     : MutationOutcomeStatus.NOT_REQUESTED;
         }
-        if (!denied.isEmpty() && totalSuccesses == 0 && failed.isEmpty()) {
+        if (!denied.isEmpty() && totalSuccesses == 0) {
             return MutationOutcomeStatus.DENIED;
         }
         if (totalSuccesses > 0 && (failed.size() + denied.size()) > 0) {

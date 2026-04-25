@@ -656,6 +656,72 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void mutationRetryDoesNotFireAfterInvalidMutatingArgs() {
+            var registry = new dev.talos.tools.ToolRegistry();
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of("retry should not be called")))
+                    .toolRegistry(registry)
+                    .toolCallLoop(new dev.talos.runtime.ToolCallLoop(processor, 3))
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Now apply the smallest fix by editing index.html."));
+            var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                    "invalid mutation summary", 1, 1,
+                    List.of("talos.edit_file"),
+                    messages, 1, 0, false, 0, List.of("index.html"),
+                    0, 0, 0, 0,
+                    List.of(new dev.talos.runtime.ToolCallLoop.ToolOutcome(
+                            "talos.edit_file", "index.html", false, true, false,
+                            "", "Invalid talos.edit_file call: `old_string` must be present and non-empty.",
+                            null, dev.talos.tools.ToolError.INVALID_PARAMS
+                    )));
+
+            var result = AssistantTurnExecutor.mutationRequestRetryIfNeeded(
+                    "invalid mutation summary", messages, loopResult, WS, ctx);
+
+            assertEquals("invalid mutation summary", result.answer());
+            assertEquals(0, result.mutationsInRetry());
+            assertNull(result.extraSummary(),
+                    "invalid mutating arguments already explain zero mutations, so retry must not fire");
+        }
+
+        @Test
+        void mutationRetryDoesNotFireAfterFailurePolicyStop() {
+            var registry = new dev.talos.tools.ToolRegistry();
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of("retry should not be called")))
+                    .toolRegistry(registry)
+                    .toolCallLoop(new dev.talos.runtime.ToolCallLoop(processor, 3))
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Now apply the smallest fix by editing index.html."));
+            var stop = dev.talos.runtime.failure.FailureDecision.stop(
+                    dev.talos.runtime.failure.FailureAction.ASK_USER,
+                    "failure policy stopped the tool loop after repeated failures");
+            var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                    "failure policy stopped", 3, 3,
+                    List.of("talos.edit_file", "talos.edit_file", "talos.edit_file"),
+                    messages, 3, 0, false, 0, List.of("index.html"),
+                    0, 0, 0, 0,
+                    stop,
+                    List.of());
+
+            var result = AssistantTurnExecutor.mutationRequestRetryIfNeeded(
+                    "failure policy stopped", messages, loopResult, WS, ctx);
+
+            assertEquals("failure policy stopped", result.answer());
+            assertEquals(0, result.mutationsInRetry());
+            assertNull(result.extraSummary(),
+                    "failure-policy stop is terminal for the main loop, so retry must not restart it");
+        }
+
+        @Test
         void mutationRetryApprovalDenialUsesDeniedMutationSummary() {
             var registry = new dev.talos.tools.ToolRegistry();
             registry.register(new dev.talos.tools.TalosTool() {
