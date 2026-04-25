@@ -402,6 +402,38 @@ class ToolCallLoopTest {
     }
 
     @Test
+    void deniedMutationStopsWithoutReprompting() {
+        var registry = new ToolRegistry();
+        registry.register(writeFileTool());
+        var processor = new TurnProcessor(
+                ModeController.defaultController(),
+                (description, detail) -> false,
+                registry);
+        var loop = new ToolCallLoop(processor);
+
+        String initialResponse = """
+                {"name": "talos.write_file", "arguments": {"path": "index.html", "content": "<h1>new</h1>"}}
+                """;
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user("edit index.html")));
+        var ctx = Context.builder(new Config())
+                .llm(LlmClient.scripted(List.of(
+                        "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"style.css\",\"content\":\"body{}\"}}")))
+                .build();
+
+        var result = loop.run(initialResponse, messages, WS, ctx);
+
+        assertEquals(1, result.iterations(), "Denied mutation should stop the loop immediately");
+        assertEquals(1, result.toolsInvoked(), "No follow-up write should be requested after denial");
+        assertEquals(1, result.failedCalls());
+        assertFalse(result.hitIterLimit(), "Denial stop should not be reported as an iteration-limit stop");
+        assertTrue(result.finalAnswer().contains("not approved"));
+        assertEquals(1, result.toolOutcomes().size());
+        assertTrue(result.toolOutcomes().get(0).denied());
+    }
+
+    @Test
     void successfulCallNotCountedAsFailed() {
         var loop = createLoop(echoTool());
         var messages = new ArrayList<>(List.of(
@@ -704,6 +736,19 @@ class ToolCallLoopTest {
             }
             @Override public ToolResult execute(ToolCall call, ToolContext ctx) {
                 return ToolResult.fail("deliberate test failure");
+            }
+        };
+    }
+
+    private static TalosTool writeFileTool() {
+        return new TalosTool() {
+            @Override public String name() { return "talos.write_file"; }
+            @Override public String description() { return "Write file"; }
+            @Override public ToolDescriptor descriptor() {
+                return new ToolDescriptor("talos.write_file", "Write file", null, ToolRiskLevel.WRITE);
+            }
+            @Override public ToolResult execute(ToolCall call, ToolContext ctx) {
+                return ToolResult.ok("write-ok");
             }
         };
     }

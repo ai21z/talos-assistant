@@ -14,6 +14,13 @@ public final class ToolCallRepromptStage {
     private static final Logger LOG = LoggerFactory.getLogger(ToolCallRepromptStage.class);
 
     public boolean reprompt(LoopState state, ToolCallExecutionStage.IterationOutcome outcome) {
+        if (outcome.approvalDeniedThisIteration()) {
+            state.currentText = "[Tool loop stopped because the requested mutation was not approved.]";
+            state.currentNativeCalls = List.of();
+            LOG.debug("Stopping tool-call loop after denied mutating tool call; not re-prompting.");
+            return false;
+        }
+
         // CCR-020: skip the post-mutation re-prompt only when every call in
         // this iteration succeeded. A partial-success iteration (at least
         // one mutation succeeded AND at least one call failed) MUST re-prompt
