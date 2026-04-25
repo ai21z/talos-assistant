@@ -3,6 +3,8 @@ package dev.talos.cli.modes;
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Limits;
 import dev.talos.cli.repl.Result;
+import dev.talos.cli.prompt.LastPromptCapture;
+import dev.talos.cli.prompt.PromptInspector;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.ingest.ParserUtil;
 import dev.talos.core.rag.RagService;
@@ -136,6 +138,14 @@ public final class RagMode implements Mode {
 
         // Build structured conversation messages for /api/chat
         List<ChatMessage> messages = buildMessages(system, userMessage, ctxMaps, history);
+        LastPromptCapture.record(PromptInspector.fromMessages(
+                "rag",
+                "rag",
+                workspace,
+                ctx,
+                nativeTools,
+                history.size(),
+                messages));
 
         // Execute LLM turn via shared executor (streaming, tool-call loop, error handling)
         var opts = new AssistantTurnExecutor.Options()

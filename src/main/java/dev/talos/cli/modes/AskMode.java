@@ -2,6 +2,8 @@ package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
+import dev.talos.cli.prompt.LastPromptCapture;
+import dev.talos.cli.prompt.PromptInspector;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.llm.SystemPromptBuilder;
 import dev.talos.spi.types.ChatMessage;
@@ -78,6 +80,14 @@ public final class AskMode implements Mode {
 
         // Build structured conversation messages for /api/chat
         List<ChatMessage> messages = buildMessages(system, rawLine, history);
+        LastPromptCapture.record(PromptInspector.fromMessages(
+                "ask",
+                "ask",
+                workspace,
+                ctx,
+                nativeTools,
+                history.size(),
+                messages));
 
         // Execute LLM turn via shared executor
         var opts = new AssistantTurnExecutor.Options()
