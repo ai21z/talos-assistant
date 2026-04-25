@@ -8,6 +8,7 @@ import dev.talos.spi.types.ChatMessage;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -107,6 +108,47 @@ class AssistantTurnExecutorTest {
             String streamed = String.join("", chunks);
             assertEquals(streamed, out.text(),
                     "Returned text should match what was streamed");
+        }
+
+        @Test
+        void stream_filter_hides_bare_json_while_tool_loop_still_executes(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("index.html"), "<h1>Hello</h1>");
+
+            var visibleChunks = new ArrayList<String>();
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var streamFilter = new dev.talos.runtime.ToolCallStreamFilter(visibleChunks::add);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "I will inspect.\n"
+                                    + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}",
+                            "The file contains Hello.")))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .streamSink(streamFilter)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Read index.html and summarize it."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            String visible = String.join("", visibleChunks);
+            assertFalse(visible.contains("\"name\""),
+                    "bare tool-call JSON must not be visible in streamed output");
+            assertFalse(visible.contains("talos.read_file"),
+                    "tool protocol must be suppressed from streamed output");
+            assertTrue(visible.contains("I will inspect."),
+                    "ordinary prose before the tool call should remain visible");
+            assertTrue(visible.contains("The file contains Hello."),
+                    "post-tool streamed answer should remain visible");
+            assertTrue(out.text().contains("The file contains Hello."),
+                    "raw response must still enter the tool loop and complete normally");
         }
     }
 
