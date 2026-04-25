@@ -1,6 +1,10 @@
 package dev.talos.cli.modes;
 
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.outcome.MutationOutcomeStatus;
+import dev.talos.runtime.outcome.TaskCompletionStatus;
+import dev.talos.runtime.outcome.TruthWarningType;
+import dev.talos.runtime.verification.TaskVerificationStatus;
 import dev.talos.spi.types.ChatMessage;
 import org.junit.jupiter.api.Test;
 
@@ -38,6 +42,11 @@ class ExecutionOutcomeTest {
         assertEquals(ExecutionOutcome.CompletionStatus.BLOCKED, outcome.completionStatus());
         assertTrue(outcome.deniedMutation());
         assertTrue(outcome.finalAnswer().startsWith(AssistantTurnExecutor.DENIED_MUTATION_ANNOTATION));
+        assertEquals(TaskCompletionStatus.BLOCKED_BY_APPROVAL, outcome.taskOutcome().completionStatus());
+        assertTrue(outcome.taskOutcome().contract().mutationRequested());
+        assertEquals(MutationOutcomeStatus.DENIED, outcome.taskOutcome().mutationOutcome().status());
+        assertEquals(1, outcome.taskOutcome().mutationOutcome().denied().size());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.DENIED_MUTATION));
     }
 
     @Test
@@ -64,6 +73,11 @@ class ExecutionOutcomeTest {
         assertEquals(ExecutionOutcome.CompletionStatus.PARTIAL, outcome.completionStatus());
         assertTrue(outcome.partialMutation());
         assertTrue(outcome.finalAnswer().startsWith(AssistantTurnExecutor.PARTIAL_MUTATION_ANNOTATION));
+        assertEquals(TaskCompletionStatus.PARTIAL, outcome.taskOutcome().completionStatus());
+        assertEquals(MutationOutcomeStatus.PARTIAL, outcome.taskOutcome().mutationOutcome().status());
+        assertEquals(1, outcome.taskOutcome().mutationOutcome().successful().size());
+        assertEquals(1, outcome.taskOutcome().mutationOutcome().failed().size());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.PARTIAL_MUTATION));
     }
 
     @Test
@@ -107,6 +121,8 @@ class ExecutionOutcomeTest {
             assertTrue(outcome.selectorGroundedOverride());
             assertTrue(outcome.finalAnswer().contains("Mismatches found:"));
             assertFalse(outcome.finalAnswer().contains("#ff4500"));
+            assertEquals(TaskCompletionStatus.READ_ONLY_ANSWERED, outcome.taskOutcome().completionStatus());
+            assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.SELECTOR_GROUNDED_OVERRIDE));
         } finally {
             try (var walk = Files.walk(ws)) {
                 walk.sorted(Comparator.reverseOrder()).forEach(path -> {
@@ -152,6 +168,9 @@ class ExecutionOutcomeTest {
             assertEquals(ExecutionOutcome.VerificationStatus.FAILED, outcome.verificationStatus());
             assertTrue(outcome.finalAnswer().startsWith("⚠ [Static verification failed:"));
             assertTrue(outcome.finalAnswer().contains("`.cta-button`"));
+            assertEquals(TaskCompletionStatus.FAILED, outcome.taskOutcome().completionStatus());
+            assertEquals(TaskVerificationStatus.FAILED, outcome.taskOutcome().verificationResult().status());
+            assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.STATIC_VERIFICATION_FAILED));
         } finally {
             try (var walk = Files.walk(ws)) {
                 walk.sorted(Comparator.reverseOrder()).forEach(path -> {
@@ -196,6 +215,9 @@ class ExecutionOutcomeTest {
             assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
             assertEquals(ExecutionOutcome.VerificationStatus.PASSED, outcome.verificationStatus());
             assertTrue(outcome.finalAnswer().startsWith("[Static verification: passed -"));
+            assertEquals(TaskCompletionStatus.COMPLETED_VERIFIED, outcome.taskOutcome().completionStatus());
+            assertEquals(List.of("index.html"), outcome.taskOutcome().contract().expectedTargets().stream().toList());
+            assertEquals(TaskVerificationStatus.PASSED, outcome.taskOutcome().verificationResult().status());
         } finally {
             try (var walk = Files.walk(ws)) {
                 walk.sorted(Comparator.reverseOrder()).forEach(path -> {
@@ -224,6 +246,8 @@ class ExecutionOutcomeTest {
         assertTrue(outcome.advisoryOnly());
         assertFalse(outcome.noToolMutationReplaced());
         assertTrue(outcome.finalAnswer().startsWith(AssistantTurnExecutor.UNGROUNDED_ANNOTATION));
+        assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.STREAMING_NO_TOOL_UNGROUNDED));
     }
 
     @Test
@@ -246,5 +270,8 @@ class ExecutionOutcomeTest {
         assertEquals(ExecutionOutcome.CompletionStatus.BLOCKED, outcome.completionStatus());
         assertTrue(outcome.noToolMutationReplaced());
         assertEquals(AssistantTurnExecutor.STREAMING_NO_TOOL_MUTATION_REPLACEMENT, outcome.finalAnswer());
+        assertEquals(TaskCompletionStatus.BLOCKED_BY_POLICY, outcome.taskOutcome().completionStatus());
+        assertEquals(MutationOutcomeStatus.NOT_ATTEMPTED, outcome.taskOutcome().mutationOutcome().status());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.STREAMING_NO_TOOL_MUTATION_REPLACED));
     }
 }
