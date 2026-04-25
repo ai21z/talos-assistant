@@ -49,6 +49,8 @@ public final class ToolCallStreamFilter implements Consumer<String> {
     private final StringBuilder buffer = new StringBuilder();
     /** Saved opening fence text (e.g. "```json\n") for re-emission of non-tool fences. */
     private String fenceOpening = "";
+    /** Text immediately before a JSON protocol candidate, held until the candidate is classified. */
+    private String pendingProtocolPrefix = "";
 
     /** Current suppression state.
      *  SUPPRESSING_XML is DEPRECATED compatibility-only (for models that emit XML from training).
@@ -78,10 +80,10 @@ public final class ToolCallStreamFilter implements Consumer<String> {
     };
 
     /** Opening code fence that could start a tool-call block. */
-    private static final Pattern CODE_FENCE_OPEN = Pattern.compile("```(?:json)?\\s*\\n");
+    private static final Pattern CODE_FENCE_OPEN = Pattern.compile("```(?:json)?[ \\t]*\\R");
 
-    /** Closing code fence: ``` at start of a line (preceded by newline) or at end of content. */
-    private static final Pattern CODE_FENCE_CLOSE = Pattern.compile("\\n```(?:\\s*\\n|\\s*$)");
+    /** Closing code fence at the start of a line. Some models put adjacent JSON immediately after it. */
+    private static final Pattern CODE_FENCE_CLOSE = Pattern.compile("\\R```(?:[ \\t]*\\R|[ \\t]*(?=\\{|$))");
 
     /** Tool-call JSON signature inside a code fence. */
     private static final Pattern TOOL_CALL_JSON = Pattern.compile(
@@ -98,6 +100,18 @@ public final class ToolCallStreamFilter implements Consumer<String> {
     private static final Pattern INCOMPLETE_BARE_TOOL_JSON = Pattern.compile(
             "\"(?:name|function|tool_name|tool)\"\\s*:\\s*\"talos\\.",
             Pattern.DOTALL
+    );
+
+    /** Narrow phrases that are misleading if printed immediately before a suppressed tool protocol block. */
+    private static final Pattern SPECULATIVE_PRE_TOOL_PROSE = Pattern.compile(
+            "(?is)\\b("
+                    + "let's\\s+assume|"
+                    + "assume\\s+the\\s+relevant|"
+                    + "assuming\\s+the\\s+relevant|"
+                    + "suppose\\s+the\\s+relevant|"
+                    + "the\\s+relevant\\s+section\\s+looks\\s+like|"
+                    + "here'?s\\s+a\\s+possible"
+                    + ")\\b"
     );
 
     public ToolCallStreamFilter(Consumer<String> delegate) {
@@ -123,27 +137,38 @@ public final class ToolCallStreamFilter implements Consumer<String> {
         if (buffer.length() > 0 || !fenceOpening.isEmpty()) {
             switch (state) {
                 case PASSTHROUGH:
+                    emitPendingProtocolPrefix(false);
                     delegate.accept(buffer.toString());
                     break;
                 case BUFFERING_FENCE:
-                    // Never completed — emit opening fence + content as regular text
-                    delegate.accept(fenceOpening + buffer.toString());
+                    if (isJsonFenceOpening(fenceOpening) && buffer.toString().isBlank()) {
+                        // Blank, incomplete JSON fence — protocol debris.
+                        emitPendingProtocolPrefix(true);
+                    } else {
+                        // Never completed — emit opening fence + content as regular text
+                        emitPendingProtocolPrefix(false);
+                        delegate.accept(fenceOpening + buffer.toString());
+                    }
                     break;
                 case BUFFERING_BARE_JSON:
                     if (looksLikeIncompleteBareToolJson(buffer.toString())) {
                         // Incomplete protocol debris — discard
+                        emitPendingProtocolPrefix(true);
                     } else {
+                        emitPendingProtocolPrefix(false);
                         delegate.accept(buffer.toString());
                     }
                     break;
                 case SUPPRESSING_XML:
                 case SUPPRESSING_FENCE:
                     // Incomplete tool-call block — discard
+                    emitPendingProtocolPrefix(true);
                     break;
             }
         }
         buffer.setLength(0);
         fenceOpening = "";
+        pendingProtocolPrefix = "";
         state = State.PASSTHROUGH;
     }
 
@@ -153,6 +178,7 @@ public final class ToolCallStreamFilter implements Consumer<String> {
     public void reset() {
         buffer.setLength(0);
         fenceOpening = "";
+        pendingProtocolPrefix = "";
         state = State.PASSTHROUGH;
     }
 
@@ -202,6 +228,7 @@ public final class ToolCallStreamFilter implements Consumer<String> {
         if (text.isEmpty()) return false;
 
         if (!couldStillBeJsonObject(text)) {
+            emitPendingProtocolPrefix(false);
             delegate.accept(text);
             buffer.setLength(0);
             state = State.PASSTHROUGH;
@@ -221,8 +248,13 @@ public final class ToolCallStreamFilter implements Consumer<String> {
 
         String candidate = text.substring(0, objectEnd + 1);
         String remainder = text.substring(objectEnd + 1);
-        if (!ToolCallParser.looksLikeStandaloneToolJson(candidate)) {
+        boolean toolProtocol = ToolCallParser.looksLikeStandaloneToolJson(candidate)
+                || looksLikeIncompleteBareToolJson(candidate);
+        if (!toolProtocol) {
+            emitPendingProtocolPrefix(false);
             delegate.accept(candidate);
+        } else {
+            emitPendingProtocolPrefix(true);
         }
         buffer.setLength(0);
         buffer.append(remainder);
@@ -258,8 +290,11 @@ public final class ToolCallStreamFilter implements Consumer<String> {
         if (cm.find()) {
             // We have the full code fence content — check if it's a tool call
             String fenceContent = text.substring(0, cm.start());
-            if (TOOL_CALL_JSON.matcher(fenceContent).find()) {
-                // It's a tool call — suppress the entire block including closing fence
+            boolean toolCallFence = TOOL_CALL_JSON.matcher(fenceContent).find();
+            boolean emptyJsonFence = isJsonFenceOpening(fenceOpening) && fenceContent.isBlank();
+            if (toolCallFence || emptyJsonFence) {
+                // Tool-call or empty JSON protocol debris — suppress the fence.
+                emitPendingProtocolPrefix(true);
                 String remainder = text.substring(cm.end());
                 buffer.setLength(0);
                 buffer.append(remainder);
@@ -268,6 +303,7 @@ public final class ToolCallStreamFilter implements Consumer<String> {
                 return true;
             } else {
                 // Not a tool call — emit the opening fence + content + closing fence
+                emitPendingProtocolPrefix(false);
                 String full = fenceOpening + text.substring(0, cm.end());
                 String remainder = text.substring(cm.end());
                 delegate.accept(full);
@@ -328,8 +364,10 @@ public final class ToolCallStreamFilter implements Consumer<String> {
         }
 
         // Emit everything before the first match
-        if (firstPos > 0) {
+        if (firstPos > 0 && kind == MatchKind.XML) {
             delegate.accept(text.substring(0, firstPos));
+        } else if (firstPos > 0) {
+            pendingProtocolPrefix += text.substring(0, firstPos);
         }
 
         switch (kind) {
@@ -373,6 +411,7 @@ public final class ToolCallStreamFilter implements Consumer<String> {
      */
     private static int findSafeEmitEnd(String text) {
         int len = text.length();
+        int safeEnd = len;
         // Scan from end: longest XML tag "<function_call>" = 16 chars, fence "```json\n" = 8
         int scanFrom = Math.max(0, len - 16);
 
@@ -381,17 +420,21 @@ public final class ToolCallStreamFilter implements Consumer<String> {
             if (c == '<') {
                 String tail = text.substring(i);
                 if (couldBeOpenTagPrefix(tail)) {
-                    return i;
-                }
-            }
-            if (c == '`') {
-                String tail = text.substring(i);
-                if (CODE_FENCE_PREFIX.startsWith(tail) || tail.startsWith(CODE_FENCE_PREFIX)) {
-                    return i;
+                    safeEnd = Math.min(safeEnd, i);
                 }
             }
         }
-        return len;
+
+        for (int i = scanFrom; i < len; i++) {
+            if (text.charAt(i) != '`') continue;
+            String tail = text.substring(i);
+            if (couldBeCodeFenceOpenPrefix(tail)) {
+                safeEnd = Math.min(safeEnd, i);
+                break;
+            }
+        }
+
+        return safeEnd;
     }
 
     private enum MatchKind { XML, FENCE, BARE_JSON }
@@ -461,6 +504,26 @@ public final class ToolCallStreamFilter implements Consumer<String> {
         return text != null && INCOMPLETE_BARE_TOOL_JSON.matcher(text).find();
     }
 
+    private void emitPendingProtocolPrefix(boolean suppressingProtocol) {
+        if (pendingProtocolPrefix.isEmpty()) return;
+        String prefix = pendingProtocolPrefix;
+        pendingProtocolPrefix = "";
+        if (suppressingProtocol && looksLikeSpeculativePreToolProse(prefix)) {
+            return;
+        }
+        delegate.accept(prefix);
+    }
+
+    private static boolean isJsonFenceOpening(String opening) {
+        return opening != null && "```json".equalsIgnoreCase(opening.trim());
+    }
+
+    private static boolean looksLikeSpeculativePreToolProse(String text) {
+        return text != null
+                && text.length() <= 1000
+                && SPECULATIVE_PRE_TOOL_PROSE.matcher(text).find();
+    }
+
     /**
      * Returns true if {@code s} is a prefix of any known opening tag.
      */
@@ -469,6 +532,25 @@ public final class ToolCallStreamFilter implements Consumer<String> {
             if (tag.startsWith(s)) return true;
         }
         return false;
+    }
+
+    static boolean couldBeCodeFenceOpenPrefix(String s) {
+        if (s == null || s.isEmpty() || s.length() > 16) return false;
+        if (CODE_FENCE_PREFIX.startsWith(s)) return true;
+
+        String lower = s.toLowerCase(java.util.Locale.ROOT);
+        if ("```json".startsWith(lower)) return true;
+        if (!lower.startsWith(CODE_FENCE_PREFIX)) return false;
+
+        String rest = lower.substring(CODE_FENCE_PREFIX.length());
+        if (rest.startsWith("json")) {
+            rest = rest.substring("json".length());
+        }
+        for (int i = 0; i < rest.length(); i++) {
+            char c = rest.charAt(i);
+            if (c != ' ' && c != '\t' && c != '\r') return false;
+        }
+        return true;
     }
 }
 
