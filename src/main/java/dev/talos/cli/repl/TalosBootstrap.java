@@ -353,6 +353,7 @@ public final class TalosBootstrap {
         registry.register(new SetModelCommand());
         registry.register(new ModeCommand(modes));
         registry.register(new StatusCommand(modes, workspace));
+        registry.register(new PromptCommand(modes, workspace));
         registry.register(new WorkspaceCommand(workspace));
         registry.register(new ReindexCommand(workspace, modes::invalidateSymbolCache));
         registry.register(new MemoryCommand());

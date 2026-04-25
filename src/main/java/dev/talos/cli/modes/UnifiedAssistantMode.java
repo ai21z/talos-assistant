@@ -2,6 +2,8 @@ package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
+import dev.talos.cli.prompt.LastPromptCapture;
+import dev.talos.cli.prompt.PromptInspector;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.llm.SystemPromptBuilder;
 import dev.talos.spi.types.ChatMessage;
@@ -82,6 +84,14 @@ public final class UnifiedAssistantMode implements Mode {
 
         // Build structured conversation messages: system + history + user
         List<ChatMessage> messages = buildMessages(system, rawLine, history);
+        LastPromptCapture.record(PromptInspector.fromMessages(
+                "auto",
+                "unified",
+                workspace,
+                ctx,
+                nativeTools,
+                history.size(),
+                messages));
 
         // Execute LLM turn via shared executor (streaming, tool-call loop, error handling)
         var opts = new AssistantTurnExecutor.Options()
