@@ -117,6 +117,95 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void postApplySelectorFailureIsClassifiedAsFailedVerification() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-verify-fail-");
+        try {
+            Files.writeString(ws.resolve("index.html"), """
+                    <!DOCTYPE html>
+                    <html><body><main id="hero"><p>No CTA yet</p></main></body></html>
+                    """);
+            Files.writeString(ws.resolve("style.css"), """
+                    #hero {}
+                    .cta-button {}
+                    """);
+            Files.writeString(ws.resolve("script.js"), "document.querySelector('.cta-button');");
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Now edit index.html so the CSS and JavaScript .cta-button selector has a matching element."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Updated index.html.", 1, 1,
+                    List.of("talos.edit_file"), List.of(),
+                    0, 0, false, 1, List.of(),
+                    0, 0, 0, 0,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.edit_file", "index.html", true, true, false,
+                            "edited index.html", "", dev.talos.tools.VerificationStatus.PASS
+                    )));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "Updated index.html.", messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.FAILED, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.FAILED, outcome.verificationStatus());
+            assertTrue(outcome.finalAnswer().startsWith("⚠ [Static verification failed:"));
+            assertTrue(outcome.finalAnswer().contains("`.cta-button`"));
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
+    void postApplySelectorSuccessIsClassifiedAsPassedVerification() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-verify-pass-");
+        try {
+            Files.writeString(ws.resolve("index.html"), """
+                    <!DOCTYPE html>
+                    <html><body><main id="hero"><a class="cta-button">Listen</a></main></body></html>
+                    """);
+            Files.writeString(ws.resolve("style.css"), """
+                    #hero {}
+                    .cta-button {}
+                    """);
+            Files.writeString(ws.resolve("script.js"), "document.querySelector('.cta-button');");
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Now edit index.html so the CSS and JavaScript .cta-button selector has a matching element."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Updated index.html.", 1, 1,
+                    List.of("talos.edit_file"), List.of(),
+                    0, 0, false, 1, List.of(),
+                    0, 0, 0, 0,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.edit_file", "index.html", true, true, false,
+                            "edited index.html", "", dev.talos.tools.VerificationStatus.PASS
+                    )));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "Updated index.html.", messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.PASSED, outcome.verificationStatus());
+            assertTrue(outcome.finalAnswer().startsWith("[Static verification: passed -"));
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void streamingNoToolEvidenceAnswerIsAdvisoryAndUngrounded() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));

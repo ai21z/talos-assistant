@@ -79,7 +79,7 @@ public final class ToolCallExecutionStage {
                             + "Alternatively, use talos.write_file to replace the entire file content."
                             + "\n[/tool_result]";
                     state.toolOutcomes.add(new dev.talos.runtime.ToolCallLoop.ToolOutcome(
-                            effective.toolName(), pathHint, false, true, false, "", diagnostic));
+                            effective.toolName(), pathHint, false, true, false, "", diagnostic, null));
                     appendResultMessage(state, parsed.useNativePath(), i, diagnostic);
                     LOG.debug("  Skipped duplicate failing edit_file call for path: {}", pathHint);
                     continue;
@@ -149,7 +149,8 @@ public final class ToolCallExecutionStage {
                     ToolCallSupport.isMutatingTool(effective.toolName()),
                     denied,
                     result.success() ? ToolCallSupport.firstSentenceSummary(result.output()) : "",
-                    result.success() ? "" : result.errorMessage()));
+                    result.success() ? "" : result.errorMessage(),
+                    result.verification()));
 
             if (!result.success()) {
                 state.failedCalls++;

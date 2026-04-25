@@ -2,6 +2,9 @@ package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.verification.StaticTaskVerifier;
+import dev.talos.runtime.verification.TaskVerificationResult;
+import dev.talos.runtime.verification.TaskVerificationStatus;
 import dev.talos.spi.types.ChatMessage;
 
 import java.nio.file.Path;
@@ -35,7 +38,8 @@ record ExecutionOutcome(
         COMPLETE,
         PARTIAL,
         BLOCKED,
-        ADVISORY_ONLY
+        ADVISORY_ONLY,
+        FAILED
     }
 
     enum GroundingStatus {
@@ -93,6 +97,25 @@ record ExecutionOutcome(
                 falseMutationClaim || inspectUnderCompleted,
                 false
         );
+
+        TaskVerificationResult taskVerification = shouldVerifyPostApply(
+                completionStatus, loopResult, extraMutationSuccesses)
+                ? StaticTaskVerifier.verify(
+                        workspace,
+                        AssistantTurnExecutor.latestUserRequest(messages),
+                        loopResult,
+                        extraMutationSuccesses)
+                : TaskVerificationResult.notRun("Post-apply verification was not applicable.");
+        VerificationStatus verificationStatus = mapVerificationStatus(taskVerification.status());
+        if (verificationStatus == VerificationStatus.FAILED) {
+            current = staticVerificationFailedAnnotation(taskVerification) + current;
+            completionStatus = CompletionStatus.FAILED;
+        } else if (verificationStatus == VerificationStatus.UNAVAILABLE) {
+            current = staticVerificationUnavailableAnnotation(taskVerification) + current;
+        } else if (verificationStatus == VerificationStatus.PASSED) {
+            current = staticVerificationPassedAnnotation(taskVerification) + current;
+        }
+
         GroundingStatus groundingStatus = selectorGroundedOverride
                 ? GroundingStatus.GROUNDED
                 : GroundingStatus.UNKNOWN;
@@ -101,7 +124,7 @@ record ExecutionOutcome(
                 current,
                 completionStatus,
                 groundingStatus,
-                VerificationStatus.NOT_RUN,
+                verificationStatus,
                 mutationRequested,
                 true,
                 deniedMutation,
@@ -165,5 +188,45 @@ record ExecutionOutcome(
         if (partialMutation) return CompletionStatus.PARTIAL;
         if (advisoryOnly) return CompletionStatus.ADVISORY_ONLY;
         return CompletionStatus.COMPLETE;
+    }
+
+    private static boolean shouldVerifyPostApply(
+            CompletionStatus completionStatus,
+            ToolCallLoop.LoopResult loopResult,
+            int extraMutationSuccesses
+    ) {
+        if (completionStatus != CompletionStatus.COMPLETE) return false;
+        if (loopResult == null) return false;
+        return loopResult.mutatingToolSuccesses() + Math.max(0, extraMutationSuccesses) > 0;
+    }
+
+    private static VerificationStatus mapVerificationStatus(TaskVerificationStatus status) {
+        if (status == null) return VerificationStatus.NOT_RUN;
+        return switch (status) {
+            case NOT_RUN -> VerificationStatus.NOT_RUN;
+            case PASSED -> VerificationStatus.PASSED;
+            case FAILED -> VerificationStatus.FAILED;
+            case UNAVAILABLE -> VerificationStatus.UNAVAILABLE;
+        };
+    }
+
+    private static String staticVerificationPassedAnnotation(TaskVerificationResult result) {
+        return "[Static verification: passed - " + verificationSummary(result) + "]\n\n";
+    }
+
+    private static String staticVerificationFailedAnnotation(TaskVerificationResult result) {
+        return "⚠ [Static verification failed: " + verificationSummary(result) + "]\n\n";
+    }
+
+    private static String staticVerificationUnavailableAnnotation(TaskVerificationResult result) {
+        return "⚠ [Static verification incomplete: " + verificationSummary(result) + "]\n\n";
+    }
+
+    private static String verificationSummary(TaskVerificationResult result) {
+        if (result == null || result.summary() == null || result.summary().isBlank()) {
+            return "no additional detail";
+        }
+        String summary = result.summary().replace('\n', ' ').replace('\r', ' ').strip();
+        return summary.length() <= 240 ? summary : summary.substring(0, 237) + "...";
     }
 }
