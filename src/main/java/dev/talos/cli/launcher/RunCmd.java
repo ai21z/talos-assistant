@@ -10,9 +10,11 @@ import dev.talos.cli.ui.AnsiColor;
 import dev.talos.cli.ui.TalosBanner;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
+import org.jline.reader.Completer;
 import org.jline.reader.EndOfFileException;
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
+import org.jline.reader.UserInterruptException;
 import org.jline.nativ.CLibrary;
 import org.jline.nativ.Kernel32;
 import org.jline.terminal.Attributes;
@@ -86,8 +88,9 @@ public class RunCmd implements Runnable, SessionState {
         }
 
         // Router: commands + modes (workspace-aware), with *this* as SessionState.
-        // JLine LineReader is created first so the approval gate can use it
-        // (same terminal input system as the REPL prompt — no competing Scanner on System.in).
+        // The REPL loop and approval gate must share one input owner. JLine is
+        // used for real interactive terminals; redirected/scripted stdin uses a
+        // plain reader so approval responses cannot drift into later turns.
         ReplRouter router = null;
         try {
             boolean useSystemTerminal = shouldUseSystemTerminal(
@@ -95,18 +98,27 @@ public class RunCmd implements Runnable, SessionState {
                     fileDescriptorIsTerminal(0),
                     fileDescriptorIsTerminal(1),
                     bufferedInputBytes(System.in));
-            Terminal term = buildTerminal(useSystemTerminal);
-            LineReader reader = baseLineReaderBuilder(term).build();
+            LineReader reader = null;
+            ReplInput input;
+            AtomicReference<Completer> completerRef = new AtomicReference<>();
+            if (useSystemTerminal) {
+                Terminal term = buildTerminal(true);
+                reader = baseLineReaderBuilder(term)
+                        .completer(delegatingCompleter(completerRef))
+                        .build();
+                input = ReplInput.jline(reader);
+            } else {
+                input = ReplInput.scripted(System.in, System.out);
+            }
 
             // Create router with JLine-integrated approval gate
-            router = TalosBootstrap.create(this, cfg, System.out, ws, reader);
+            router = TalosBootstrap.create(this, cfg, System.out, ws, reader, input.approvalReader());
             final ReplRouter routerRef = router;
 
-            // Now that the router (and its command registry) exist, rebuild
-            // the LineReader with tab-completion wired to the command registry
-            reader = baseLineReaderBuilder(term)
-                    .completer(new SlashCommandCompleter(router.getRegistry()))
-                    .build();
+            // Now that the router (and its command registry) exist, activate
+            // slash completion on the same LineReader used by approval prompts.
+            // Scripted stdin has no completer and no competing reader.
+            completerRef.set(new SlashCommandCompleter(router.getRegistry()));
 
             // Show banner unless --no-logo
             String activeMode = router.getModes().getActiveName();
@@ -140,8 +152,12 @@ public class RunCmd implements Runnable, SessionState {
                 }
 
                 String line;
-                try { line = reader.readLine(prompt); }
+                try { line = input.readLine(prompt); }
                 catch (EndOfFileException eof) { break; }
+                catch (UserInterruptException interrupt) {
+                    System.out.println();
+                    continue;
+                }
                 if (line == null) break;
 
                 line = sanitizeOutput(line).trim();
@@ -233,6 +249,15 @@ public class RunCmd implements Runnable, SessionState {
         return LineReaderBuilder.builder()
                 .terminal(term)
                 .option(LineReader.Option.BRACKETED_PASTE, false);
+    }
+
+    private static Completer delegatingCompleter(AtomicReference<Completer> delegateRef) {
+        return (reader, line, candidates) -> {
+            Completer delegate = delegateRef == null ? null : delegateRef.get();
+            if (delegate != null) {
+                delegate.complete(reader, line, candidates);
+            }
+        };
     }
 
     static boolean shouldUseSystemTerminal(
