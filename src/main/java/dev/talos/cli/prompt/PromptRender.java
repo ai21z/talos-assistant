@@ -13,6 +13,10 @@ public record PromptRender(
         boolean nativeTools,
         Path workspace,
         int historyMessages,
+        String taskType,
+        boolean mutationAllowed,
+        boolean verificationRequired,
+        List<String> registryTools,
         List<String> tools,
         List<String> sections,
         List<ChatMessage> messages,
@@ -23,6 +27,8 @@ public record PromptRender(
         resolvedMode = resolvedMode == null ? "unified" : resolvedMode;
         model = model == null ? "unknown" : model;
         workspace = workspace == null ? Path.of(".").toAbsolutePath().normalize() : workspace;
+        taskType = taskType == null ? "UNKNOWN" : taskType;
+        registryTools = registryTools == null ? List.of() : List.copyOf(registryTools);
         tools = tools == null ? List.of() : List.copyOf(tools);
         sections = sections == null ? List.of() : List.copyOf(sections);
         messages = messages == null ? List.of() : List.copyOf(messages);
