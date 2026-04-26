@@ -71,8 +71,8 @@ public final class TalosBanner {
         String model = resolveModel(cfg);
         String ws = CliUtil.shortenPath(workspace);
         out.println("  " + AnsiColor.brand("Talos") + " " + AnsiColor.dim("v" + version())
-                + AnsiColor.grey(" · ") + model
-                + AnsiColor.grey(" · ") + ws
+                + AnsiColor.grey(separator()) + model
+                + AnsiColor.grey(separator()) + ws
                 + AnsiColor.grey(" [") + AnsiColor.blue(activeMode) + AnsiColor.grey("]"));
         out.println();
     }
@@ -98,7 +98,7 @@ public final class TalosBanner {
     private static void printTagline(PrintStream out) {
         out.println();
         out.println("  " + AnsiColor.brand("Talos")
-                + AnsiColor.grey(" · Local Knowledge Engine · ")
+                + AnsiColor.grey(separator() + "Local Knowledge Engine" + separator())
                 + AnsiColor.dim("v" + version()));
         // R7 — surface commit/build provenance when available so transcripts
         // can be tied to a specific build. Rendered dim + indented so it does
@@ -109,7 +109,7 @@ public final class TalosBanner {
         }
     }
 
-    /** Build the "commit &lt;sha&gt; · built &lt;ts&gt;" suffix; empty if nothing is known. */
+    /** Build the "commit &lt;sha&gt; - built &lt;ts&gt;" suffix; empty if nothing is known. */
     static String buildProvenanceLine() {
         String sha = BuildInfo.commitSha();
         String ts  = BuildInfo.buildTimestamp();
@@ -119,14 +119,14 @@ public final class TalosBanner {
         StringBuilder sb = new StringBuilder();
         if (hasSha) sb.append("commit ").append(sha);
         if (hasTs) {
-            if (!sb.isEmpty()) sb.append(" · ");
+            if (!sb.isEmpty()) sb.append(separator());
             sb.append("built ").append(ts);
         }
         return sb.toString();
     }
 
     private static void printSeparator(PrintStream out) {
-        out.println("  " + AnsiColor.dim("─".repeat(52)));
+        out.println("  " + AnsiColor.dim(ruleChar().repeat(52)));
     }
 
     // ── Context info ──────────────────────────────────────────────────────
@@ -147,11 +147,11 @@ public final class TalosBanner {
 
         String wsVal = wsDisplay;
         if (chunks > 0) {
-            wsVal += AnsiColor.grey(" · ") + AnsiColor.green(chunks + " chunks");
+            wsVal += AnsiColor.grey(separator()) + AnsiColor.green(chunks + " chunks");
         } else if (chunks == 0) {
-            wsVal += AnsiColor.grey(" · ") + AnsiColor.yellow("not indexed");
+            wsVal += AnsiColor.grey(separator()) + AnsiColor.yellow("not indexed");
         } else {
-            wsVal += AnsiColor.grey(" · ") + AnsiColor.dim("no index");
+            wsVal += AnsiColor.grey(separator()) + AnsiColor.dim("no index");
         }
         printInfoLine(out, "Workspace", wsVal);
         printInfoLine(out, "Mode", AnsiColor.blue(activeMode));
@@ -169,6 +169,14 @@ public final class TalosBanner {
                 + AnsiColor.blue("/help")
                 + AnsiColor.grey(" for commands"));
         out.println();
+    }
+
+    private static String separator() {
+        return AnsiColor.isUnicodeSafe() ? " · " : " - ";
+    }
+
+    private static String ruleChar() {
+        return AnsiColor.isUnicodeSafe() ? "─" : "-";
     }
 
     // ── Config readers ────────────────────────────────────────────────────

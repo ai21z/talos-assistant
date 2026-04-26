@@ -12,10 +12,10 @@ public class Main {
     private static final Logger LOG = LoggerFactory.getLogger(Main.class);
 
     public static void main(String[] args) {
-        // R7 — single build-identity line per process so transcripts and
+        // R7 - single build-identity line per process so transcripts and
         // log files can be traced to a specific build. Graceful "unknown"
         // fallbacks when metadata is absent (see BuildInfo).
-        LOG.info("Talos startup — {}", BuildInfo.summary());
+        LOG.info("Talos startup - {}", BuildInfo.summary());
 
         boolean hasArgs = args != null && args.length > 0;
         if (!hasArgs && TerminalFirstRun.shouldRun()) {
