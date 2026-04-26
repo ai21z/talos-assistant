@@ -414,6 +414,26 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/29-stale-edit-retry-requires-reread.json] 29: stale same-file edit retry requires reread")
+    void staleEditRetryRequiresReread() {
+        var loaded = JsonScenarioLoader.load("scenarios/29-stale-edit-retry-requires-reread.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(2, 2, 0, 0)
+                    .assertAnswerContains("some requested file changes succeeded and some failed")
+                    .assertAnswerContains("Call talos.read_file for `README.md`")
+                    .assertAnswerContains("separate follow-up")
+                    .assertAnswerNotContains("This response should not be reached")
+                    .assertFileContains("README.md", "# Talos Local")
+                    .assertFileContains("README.md", "Talos is a local-first knowledge engine.")
+                    .assertFileNotContains("README.md", "disciplined local-first");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/11-partial-mutation-summary-truthful.json] 11: partial mutation summary reports only verified outcomes")
     void partialMutationSummaryIsTruthful() {
         var loaded = JsonScenarioLoader.load("scenarios/11-partial-mutation-summary-truthful.json");
