@@ -106,6 +106,39 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void scopedNoOtherFilesLanguageDoesNotSuppressExplicitEditIntent() {
+        List<String> inputs = List.of(
+                "Change TODO to DONE in notes.txt. Use the edit tool and do not modify anything else.",
+                "Edit notes.txt to replace TODO with DONE. Do not modify anything else.",
+                "Update notes.txt only; do not edit any other files.",
+                "Only change notes.txt.");
+
+        for (String input : inputs) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+            assertEquals(TaskType.FILE_EDIT, contract.type(), input);
+            assertTrue(contract.mutationRequested(), input);
+            assertTrue(contract.mutationAllowed(), input);
+            assertTrue(contract.verificationRequired(), input);
+            assertTrue(contract.expectedTargets().contains("notes.txt"), input);
+        }
+    }
+
+    @Test
+    void globalNoMutationLanguageStillSuppressesEditIntent() {
+        List<String> inputs = List.of(
+                "Check notes.txt. Do not modify anything.",
+                "What would you change in notes.txt? Do not modify files.",
+                "Inspect notes.txt without changing it.",
+                "Show me how to replace TODO with DONE in notes.txt, do not edit files.");
+
+        for (String input : inputs) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+            assertFalse(contract.mutationRequested(), input);
+            assertFalse(contract.mutationAllowed(), input);
+        }
+    }
+
+    @Test
     void readOnlySelectorCheckBecomesDiagnoseOnlyContract() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Check whether this website has mismatches between HTML classes and CSS selectors. Do not change anything.");
