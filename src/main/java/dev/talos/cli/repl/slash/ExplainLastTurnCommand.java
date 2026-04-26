@@ -7,9 +7,11 @@ import dev.talos.runtime.SessionStore;
 import dev.talos.runtime.TurnRecord;
 
 import java.nio.file.Path;
+import java.util.LinkedHashSet;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * /explain-last-turn - render the latest structured turn audit for this workspace.
@@ -31,17 +33,16 @@ public final class ExplainLastTurnCommand implements Command {
     public CommandSpec spec() {
         return new CommandSpec(
                 "explain-last-turn",
-                List.of("explain"),
-                "/explain-last-turn",
-                "Explain the latest turn from structured audit data.",
+                List.of("explain", "last"),
+                "/last [summary|tools|sources|trace]",
+                "Inspect the latest turn from structured audit data.",
                 CommandGroup.DEBUG);
     }
 
     @Override
     public Result execute(String args, Context ctx) {
-        if (args != null && !args.isBlank()) {
-            return new Result.Error("Usage: /explain-last-turn", 200);
-        }
+        String view = normalizeView(args);
+        if (!isSupportedView(view)) return new Result.Error("Usage: /last [summary|tools|sources|trace]", 200);
         if (store == null) {
             return new Result.Info("No session store is available in this process.");
         }
@@ -57,7 +58,16 @@ public final class ExplainLastTurnCommand implements Command {
         if (latest == null) {
             return new Result.Info("No completed turn has been recorded for this workspace yet.");
         }
-        return new Result.TrustedInfo(render(latest));
+        return new Result.TrustedInfo(renderView(latest, view));
+    }
+
+    private static String renderView(TurnRecord latest, String view) {
+        return switch (view) {
+            case "tools" -> renderTools(latest);
+            case "sources" -> renderSources(latest);
+            case "trace" -> renderTrace(latest);
+            default -> render(latest);
+        };
     }
 
     static String render(TurnRecord turn) {
@@ -97,6 +107,62 @@ public final class ExplainLastTurnCommand implements Command {
             sb.append("  ").append(preview(turn.assistantText())).append('\n');
         }
 
+        return sb.toString();
+    }
+
+    static String renderTools(TurnRecord turn) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Last Turn Tools\n\n");
+        if (turn.toolCalls().isEmpty()) {
+            sb.append("  none\n");
+            return sb.toString();
+        }
+        int index = 1;
+        for (TurnRecord.ToolCallSummary call : turn.toolCalls()) {
+            sb.append("  ").append(index++).append(". ")
+                    .append(blankDefault(call.name(), "(unknown tool)"));
+            if (call.pathHint() != null && !call.pathHint().isBlank()) {
+                sb.append(" -> ").append(call.pathHint());
+            }
+            sb.append(call.success() ? " [ok]" : " [failed]").append('\n');
+        }
+        return sb.toString();
+    }
+
+    static String renderSources(TurnRecord turn) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Last Turn Sources\n\n");
+        if (turn.retrievalTraceSummary() != null && !turn.retrievalTraceSummary().isBlank()) {
+            sb.append("  Retrieval: ").append(turn.retrievalTraceSummary()).append('\n');
+        } else {
+            sb.append("  Retrieval: none recorded\n");
+        }
+
+        Set<String> paths = new LinkedHashSet<>();
+        for (TurnRecord.ToolCallSummary call : turn.toolCalls()) {
+            if (call.pathHint() != null && !call.pathHint().isBlank()) {
+                paths.add(call.pathHint());
+            }
+        }
+
+        sb.append("\n  Tool path hints\n");
+        if (paths.isEmpty()) {
+            sb.append("  none\n");
+        } else {
+            for (String path : paths) {
+                sb.append("  - ").append(path).append('\n');
+            }
+        }
+        return sb.toString();
+    }
+
+    static String renderTrace(TurnRecord turn) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(render(turn));
+        sb.append("\nTrace Detail\n");
+        sb.append("  Retrieval: ").append(blankDefault(turn.retrievalTraceSummary(), "none recorded")).append('\n');
+        sb.append("  Tool calls: ").append(turn.toolCalls().size()).append('\n');
+        sb.append("  Status tag: ").append(blankDefault(turn.status(), "unknown")).append('\n');
         return sb.toString();
     }
 
@@ -147,5 +213,15 @@ public final class ExplainLastTurnCommand implements Command {
 
     private static String blankDefault(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value;
+    }
+
+    private static String normalizeView(String args) {
+        String view = args == null ? "" : args.trim().toLowerCase(Locale.ROOT);
+        while (view.startsWith("/")) view = view.substring(1);
+        return view.isBlank() ? "summary" : view;
+    }
+
+    private static boolean isSupportedView(String view) {
+        return "summary".equals(view) || "tools".equals(view) || "sources".equals(view) || "trace".equals(view);
     }
 }
