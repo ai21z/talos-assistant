@@ -30,6 +30,18 @@ class PromptCommandTest {
     }
 
     @Test
+    void promptCommandAppliesTaskContractForInputPreview() throws Exception {
+        PromptCommand command = new PromptCommand(ModeController.defaultController(), Path.of("."));
+
+        Result result = command.execute("hello", context());
+
+        Result.TrustedInfo info = assertInstanceOf(Result.TrustedInfo.class, result);
+        assertTrue(info.text.contains("Task contract: SMALL_TALK"));
+        assertTrue(info.text.contains("Tools exposed: (none)"));
+        assertTrue(info.text.contains("Do not call tools"));
+    }
+
+    @Test
     void promptLastReportsMissingCapture() throws Exception {
         LastPromptCapture.clear();
         PromptCommand command = new PromptCommand(ModeController.defaultController(), Path.of("."));

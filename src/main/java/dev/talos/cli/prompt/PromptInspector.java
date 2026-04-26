@@ -1,9 +1,14 @@
 package dev.talos.cli.prompt;
 
+import dev.talos.cli.modes.AssistantTurnExecutor;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.context.ConversationManager;
 import dev.talos.core.llm.SystemPromptBuilder;
+import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
 import dev.talos.spi.types.ChatMessage;
 
@@ -32,18 +37,39 @@ public final class PromptInspector {
         String input = userInput == null || userInput.isBlank()
                 ? DEFAULT_INPUT_PLACEHOLDER
                 : userInput;
+        TaskContract contract = "unified".equals(resolvedMode)
+                ? TaskContractResolver.fromUserRequest(input)
+                : TaskContract.unknown(input);
+        boolean smallTalk = "unified".equals(resolvedMode)
+                && contract.type() == TaskType.SMALL_TALK;
 
-        String system = builderFor(resolvedMode)
-                .withTools(ctx == null ? null : ctx.toolRegistry())
-                .withWorkspace(workspace)
+        SystemPromptBuilder builder = builderFor(resolvedMode)
                 .withNativeTools(nativeTools)
-                .withHistory(hasHistory)
-                .build();
+                .withHistory(hasHistory);
+        if ("unified".equals(resolvedMode)) {
+            if (!smallTalk) {
+                builder
+                        .withTools(ctx == null ? null : ctx.toolRegistry())
+                        .withWorkspace(workspace)
+                        .withReadOnlyToolMode(!contract.mutationAllowed());
+            }
+        } else {
+            builder
+                    .withTools(ctx == null ? null : ctx.toolRegistry())
+                    .withWorkspace(workspace);
+        }
+        String system = builder.build();
 
         List<ChatMessage> messages = new ArrayList<>();
         messages.add(ChatMessage.system(system));
         messages.addAll(history);
         messages.add(ChatMessage.user(input));
+        if ("unified".equals(resolvedMode)) {
+            AssistantTurnExecutor.injectTaskContractInstruction(messages);
+        }
+
+        List<String> registryTools = registryToolNames(ctx);
+        List<String> effectiveTools = effectiveToolNames(resolvedMode, contract, ctx);
 
         return new PromptRender(
                 mode,
@@ -52,8 +78,18 @@ public final class PromptInspector {
                 nativeTools,
                 workspace,
                 history.size(),
-                toolNames(ctx),
-                sectionNames(resolvedMode, workspace, ctx, hasHistory, nativeTools),
+                contract.type().name(),
+                contract.mutationAllowed(),
+                contract.verificationRequired(),
+                registryTools,
+                effectiveTools,
+                sectionNames(
+                        resolvedMode,
+                        workspace,
+                        hasHistory,
+                        nativeTools,
+                        effectiveTools,
+                        !smallTalk),
                 messages,
                 Instant.now()
         );
@@ -68,6 +104,8 @@ public final class PromptInspector {
             int historyMessages,
             List<ChatMessage> messages
     ) {
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+        List<String> effectiveTools = effectiveToolNames(resolvePromptMode(resolvedMode), contract, ctx);
         return new PromptRender(
                 normalizeMode(requestedMode),
                 resolvePromptMode(resolvedMode),
@@ -75,8 +113,18 @@ public final class PromptInspector {
                 nativeTools,
                 workspace,
                 historyMessages,
-                toolNames(ctx),
-                sectionNames(resolvePromptMode(resolvedMode), workspace, ctx, historyMessages > 0, nativeTools),
+                contract.type().name(),
+                contract.mutationAllowed(),
+                contract.verificationRequired(),
+                registryToolNames(ctx),
+                effectiveTools,
+                sectionNames(
+                        resolvePromptMode(resolvedMode),
+                        workspace,
+                        historyMessages > 0,
+                        nativeTools,
+                        effectiveTools,
+                        contract.type() != TaskType.SMALL_TALK),
                 messages,
                 Instant.now()
         );
@@ -94,9 +142,23 @@ public final class PromptInspector {
         sb.append("- Native tools: ").append(render.nativeTools()).append('\n');
         sb.append("- Workspace: ").append(render.workspace().toAbsolutePath().normalize()).append('\n');
         sb.append("- History messages included: ").append(render.historyMessages()).append('\n');
+        sb.append("- Task contract: ")
+                .append(render.taskType())
+                .append(" mutationAllowed=")
+                .append(render.mutationAllowed())
+                .append(" verificationRequired=")
+                .append(render.verificationRequired())
+                .append('\n');
         sb.append("- Tools exposed: ");
         sb.append(render.tools().isEmpty() ? "(none)" : String.join(", ", render.tools()));
         sb.append('\n');
+        if (!render.registryTools().equals(render.tools())) {
+            sb.append("- Registry tools: ");
+            sb.append(render.registryTools().isEmpty()
+                    ? "(none)"
+                    : String.join(", ", render.registryTools()));
+            sb.append('\n');
+        }
         sb.append("- Sections: ");
         sb.append(render.sections().isEmpty() ? "(unknown)" : String.join(", ", render.sections()));
         sb.append('\n');
@@ -162,11 +224,23 @@ public final class PromptInspector {
         return ctx.llm().getModel();
     }
 
-    private static List<String> toolNames(Context ctx) {
+    private static List<String> effectiveToolNames(String resolvedMode, TaskContract contract, Context ctx) {
         if (ctx == null || ctx.toolRegistry() == null) return List.of();
         if (ctx.hasNativeToolSpecOverride()) {
             return NativeToolSpecPolicy.names(ctx.nativeToolSpecs());
         }
+        if ("unified".equals(resolvePromptMode(resolvedMode)) && contract != null) {
+            ExecutionPhase phase = contract.mutationAllowed()
+                    ? ExecutionPhase.APPLY
+                    : ExecutionPhase.INSPECT;
+            return NativeToolSpecPolicy.names(
+                    NativeToolSpecPolicy.select(contract, phase, ctx.toolRegistry()));
+        }
+        return registryToolNames(ctx);
+    }
+
+    private static List<String> registryToolNames(Context ctx) {
+        if (ctx == null || ctx.toolRegistry() == null) return List.of();
         return ctx.toolRegistry().descriptors().stream()
                 .map(descriptor -> descriptor.name())
                 .sorted()
@@ -176,15 +250,16 @@ public final class PromptInspector {
     private static List<String> sectionNames(
             String resolvedMode,
             Path workspace,
-            Context ctx,
             boolean hasHistory,
-            boolean nativeTools
+            boolean nativeTools,
+            List<String> effectiveTools,
+            boolean includeWorkspaceSection
     ) {
         List<String> sections = new ArrayList<>();
         sections.add("identity");
-        if (workspace != null) sections.add("workspace");
+        if (workspace != null && includeWorkspaceSection) sections.add("workspace");
         sections.add("mode:" + resolvePromptMode(resolvedMode));
-        if (ctx != null && ctx.toolRegistry() != null && !ctx.toolRegistry().isEmpty()) {
+        if (effectiveTools != null && !effectiveTools.isEmpty()) {
             sections.add(nativeTools ? "tools:native" : "tools:text-fallback");
         }
         if (hasHistory) sections.add("conversation");
