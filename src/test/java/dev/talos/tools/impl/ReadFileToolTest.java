@@ -121,6 +121,20 @@ class ReadFileToolTest {
     }
 
     @Test
+    void unsupportedBinaryDocumentReportsCapabilityLimit() throws IOException {
+        Files.writeString(workspace.resolve("sample.pdf"), "%PDF-1.7 fake test payload");
+
+        ToolCall call = new ToolCall("talos.read_file", Map.of("path", "sample.pdf"));
+        ToolResult r = tool.execute(call, ctx);
+
+        assertFalse(r.success());
+        assertEquals(ToolError.UNSUPPORTED_FORMAT, r.error().code());
+        assertTrue(r.errorMessage().contains("Unsupported binary document format: sample.pdf"));
+        assertTrue(r.errorMessage().contains("cannot extract PDF contents"));
+        assertFalse(r.errorMessage().contains("empty"));
+    }
+
+    @Test
     void nullContextFails() {
         ToolCall call = new ToolCall("talos.read_file", Map.of("path", "hello.txt"));
         ToolResult r = tool.execute(call, null);
