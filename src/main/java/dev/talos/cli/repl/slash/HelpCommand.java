@@ -90,7 +90,7 @@ public final class HelpCommand implements Command {
         appendIfRegistered(sb, "files", "list indexed files");
         appendIfRegistered(sb, "k", "set retrieval depth");
         appendIfRegistered(sb, "debug", "toggle developer hints");
-        appendIfRegistered(sb, "clear", "reset conversation context");
+        appendIfRegistered(sb, "clear", "reset conversation context; alias /reset");
         appendIfRegistered(sb, "q", "exit");
 
         sb.append('\n');
