@@ -455,6 +455,27 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/31-read-only-web-diagnostics-grounded.json] 31: read-only web diagnostics are grounded")
+    void readOnlyWebDiagnosticsAreGrounded() {
+        var loaded = JsonScenarioLoader.load("scenarios/31-read-only-web-diagnostics-grounded.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("Static web diagnostics found:")
+                    .assertAnswerContains("index.html: malformed closing tag `</button>`")
+                    .assertAnswerContains("index.html: malformed closing tag `</script>`")
+                    .assertAnswerContains("`calculator-container` should probably be `.calculator-container`")
+                    .assertAnswerContains("No files were changed.")
+                    .assertAnswerNotContains("script.js` file is missing a closing script tag")
+                    .assertFileContains("index.html", "<button type=\"submit\">Calculate BMI</button")
+                    .assertFileContains("index.html", "<script src=\"script.js\"></script");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/11-partial-mutation-summary-truthful.json] 11: partial mutation summary reports only verified outcomes")
     void partialMutationSummaryIsTruthful() {
         var loaded = JsonScenarioLoader.load("scenarios/11-partial-mutation-summary-truthful.json");

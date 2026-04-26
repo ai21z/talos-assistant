@@ -2077,6 +2077,86 @@ class AssistantTurnExecutorTest {
             }
         }
     }
+
+    @Nested
+    @DisplayName("Read-only web diagnostics grounding")
+    class ReadOnlyWebDiagnosticsGroundingTests {
+
+        @Test
+        @DisplayName("web diagnostic request is overridden by deterministic static facts")
+        void readOnlyWebDiagnosticAnswerIsGroundedFromWorkspace() throws Exception {
+            Path ws = Files.createTempDirectory("talos-web-diagnostics-grounding-");
+            try {
+                Files.writeString(ws.resolve("index.html"), """
+                        <!DOCTYPE html>
+                        <html>
+                          <head><link rel="stylesheet" href="styles.css"></head>
+                          <body>
+                            <div class="calculator-container">
+                              <form id="bmi-form">
+                                <button type="submit">Calculate BMI</button
+                              </form>
+                            </div>
+                            <script src="script.js"></script
+                          </body>
+                        </html>
+                        """);
+                Files.writeString(ws.resolve("styles.css"), """
+                        calculator-container { max-width: 420px; }
+                        """);
+                Files.writeString(ws.resolve("script.js"), """
+                        document.getElementById('bmi-form');
+                        """);
+
+                var messages = new ArrayList<ChatMessage>();
+                messages.add(ChatMessage.system("sys"));
+                messages.add(ChatMessage.user(
+                        "Inspect this BMI website and identify why it is not working. Do not edit files yet."));
+
+                var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                        "unused", 4, 4,
+                        List.of("talos.list_dir", "talos.read_file", "talos.read_file", "talos.read_file"),
+                        List.of(), 0, 0, false, 0,
+                        List.of("index.html", "styles.css", "script.js"),
+                        0, 0, 0, 0);
+
+                String bogus = "The issue is that the script.js file is missing a closing script tag.";
+                String out = AssistantTurnExecutor.overrideReadOnlyWebDiagnosticsIfNeeded(
+                        bogus, messages, loopResult, ws);
+
+                assertNotEquals(bogus, out);
+                assertTrue(out.contains("Static web diagnostics found:"), out);
+                assertTrue(out.contains("index.html: malformed closing tag `</button>`"), out);
+                assertTrue(out.contains("index.html: malformed closing tag `</script>`"), out);
+                assertTrue(out.contains("`calculator-container` should probably be `.calculator-container`"), out);
+                assertFalse(out.contains("script.js file is missing a closing script tag"));
+            } finally {
+                try (var walk = Files.walk(ws)) {
+                    walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                        try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                    });
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("mutation requests do not use read-only web diagnostic override")
+        void mutationRequestsAreNotOverridden() {
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Fix this BMI website."));
+
+            var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                    "unused", 1, 1,
+                    List.of("talos.read_file"), List.of(),
+                    0, 0, false, 0, List.of("index.html"),
+                    0, 0, 0, 0);
+
+            String answer = "I can fix it.";
+            assertEquals(answer, AssistantTurnExecutor.overrideReadOnlyWebDiagnosticsIfNeeded(
+                    answer, messages, loopResult, WS));
+        }
+    }
 }
 
 
