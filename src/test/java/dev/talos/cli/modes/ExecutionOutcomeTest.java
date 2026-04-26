@@ -122,6 +122,40 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void preApprovalPathEscapeIsClassifiedAsInvalidNotDenied() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user(
+                "Create a file at ../outside-talos-qa.txt with the text hello from Talos."));
+
+        var loopResult = new ToolCallLoop.LoopResult(
+                "I created the file.", 1, 1,
+                List.of("talos.write_file"), List.of(),
+                1, 0, false, 0, List.of(),
+                0, 0, 0, 0,
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.write_file", "../outside-talos-qa.txt", false, true, false,
+                        "", "Path not allowed before approval for `path`: ../outside-talos-qa.txt "
+                        + "(path escapes workspace). No approval was requested and no file was changed.",
+                        null, ToolError.INVALID_PARAMS
+                )));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                "I created the file.", messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.FAILED, outcome.completionStatus());
+        assertTrue(outcome.invalidMutation());
+        assertFalse(outcome.deniedMutation());
+        assertTrue(outcome.finalAnswer().startsWith(AssistantTurnExecutor.INVALID_MUTATION_ANNOTATION),
+                outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains("Path not allowed before approval"));
+        assertTrue(outcome.finalAnswer().contains("No approval was requested"));
+        assertEquals(TaskCompletionStatus.FAILED, outcome.taskOutcome().completionStatus());
+        assertEquals(MutationOutcomeStatus.FAILED, outcome.taskOutcome().mutationOutcome().status());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.INVALID_MUTATION_ARGUMENTS));
+    }
+
+    @Test
     void toolLoopPartialMutationIsClassifiedAsPartial() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));
