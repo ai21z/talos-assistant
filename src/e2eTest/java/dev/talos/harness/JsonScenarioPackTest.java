@@ -325,6 +325,22 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/24-small-talk-direct-no-tools.json] 24: small talk answers directly without tools")
+    void smallTalkAnswersDirectlyWithoutTools() {
+        var loaded = JsonScenarioLoader.load("scenarios/24-small-talk-direct-no-tools.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("Hi.")
+                    .assertAnswerNotContains("Used ")
+                    .assertAnswerNotContains("iteration limit reached");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/11-partial-mutation-summary-truthful.json] 11: partial mutation summary reports only verified outcomes")
     void partialMutationSummaryIsTruthful() {
         var loaded = JsonScenarioLoader.load("scenarios/11-partial-mutation-summary-truthful.json");

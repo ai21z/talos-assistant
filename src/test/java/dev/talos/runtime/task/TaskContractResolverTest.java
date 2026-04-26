@@ -69,6 +69,26 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void trivialGreetingBecomesSmallTalkContract() {
+        for (String input : List.of("hello", "hey", "hi!", "good morning", "thanks")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertEquals(TaskType.SMALL_TALK, contract.type(), input);
+            assertFalse(contract.mutationRequested(), input);
+            assertFalse(contract.mutationAllowed(), input);
+            assertFalse(contract.verificationRequired(), input);
+        }
+    }
+
+    @Test
+    void greetingWithWorkspaceIntentStillInspectsWorkspace() {
+        TaskContract contract = TaskContractResolver.fromUserRequest("Hey, what is in this workspace?");
+
+        assertEquals(TaskType.WORKSPACE_EXPLAIN, contract.type());
+        assertFalse(contract.mutationAllowed());
+    }
+
+    @Test
     void buildAndMakeQuestionsRemainReadOnlyWhenNotAskingForWorkspaceMutation() {
         List<String> inputs = List.of(
                 "What can you build?",

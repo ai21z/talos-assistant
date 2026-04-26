@@ -2,6 +2,7 @@ package dev.talos.runtime.toolcall;
 
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskType;
 import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.ToolDescriptor;
 import dev.talos.tools.ToolRegistry;
@@ -19,6 +20,7 @@ public final class NativeToolSpecPolicy {
             ToolRegistry registry
     ) {
         if (registry == null || registry.isEmpty()) return List.of();
+        if (contract != null && contract.type() == TaskType.SMALL_TALK) return List.of();
 
         boolean mutationAllowed = contract != null
                 && contract.mutationAllowed()
