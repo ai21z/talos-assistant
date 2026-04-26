@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.4] - 2026-04-26
+
+### Changed
+- [T01-done-high] Blocked no-tool answers that deny Talos can access local
+  workspace files when read tools are available; such turns now finalize as an
+  advisory capability correction, and streaming sessions visibly emit the
+  correction after the raw model output.
+
 ## [0.9.3] - 2026-04-26
 
 ### Changed

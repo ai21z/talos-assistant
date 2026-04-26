@@ -1,0 +1,15 @@
+{
+  "name": "no-tool local access denial is corrected",
+  "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "workspace-tool-capability-claims-are-truthful",
+    "no-tool-local-access-denial-is-not-finalized"
+  ],
+  "runner": "executor-streaming",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "But you told me you can help me with that. What is the problem with this workspace?",
+  "scriptedResponses": [
+    "I apologize for any confusion. As an AI language model, I don't have direct access to your local workspace or files to analyze them."
+  ]
+}

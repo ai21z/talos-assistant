@@ -31,6 +31,7 @@ public final class ExecutorScenarioResult implements AutoCloseable {
     private final AssistantTurnExecutor.TurnOutput turnOutput;
     private final ScenarioWorkspaceFixture workspace;
     private final AutoCloseable resourceToClose;
+    private final String streamedText;
     private final int approvalsAsked;
     private final int approvalsGranted;
     private final int approvalsDenied;
@@ -41,6 +42,7 @@ public final class ExecutorScenarioResult implements AutoCloseable {
             AssistantTurnExecutor.TurnOutput turnOutput,
             ScenarioWorkspaceFixture workspace,
             AutoCloseable resourceToClose,
+            String streamedText,
             int approvalsAsked,
             int approvalsGranted,
             int approvalsDenied,
@@ -49,6 +51,7 @@ public final class ExecutorScenarioResult implements AutoCloseable {
         this.turnOutput = turnOutput;
         this.workspace = workspace;
         this.resourceToClose = resourceToClose;
+        this.streamedText = streamedText == null ? "" : streamedText;
         this.approvalsAsked = approvalsAsked;
         this.approvalsGranted = approvalsGranted;
         this.approvalsDenied = approvalsDenied;
@@ -64,6 +67,9 @@ public final class ExecutorScenarioResult implements AutoCloseable {
 
     /** True if the turn was streamed to a sink. */
     public boolean streamed() { return turnOutput.streamed(); }
+
+    /** Text emitted to the stream sink during execution. Empty for non-streaming runs. */
+    public String streamedText() { return streamedText; }
 
     public ExecutorScenarioResult assertApprovalCounts(int asked, int granted, int denied, int remembered) {
         if (approvalsAsked != asked || approvalsGranted != granted
@@ -105,6 +111,15 @@ public final class ExecutorScenarioResult implements AutoCloseable {
             throw new AssertionError("Scenario '" + definition.name()
                     + "': expected answer to start with [" + expected
                     + "]\nActual answer:\n" + answer);
+        }
+        return this;
+    }
+
+    public ExecutorScenarioResult assertStreamedTextContains(String expected) {
+        if (!streamedText.contains(expected)) {
+            throw new AssertionError("Scenario '" + definition.name()
+                    + "': expected streamed text to contain [" + expected
+                    + "]\nActual streamed text:\n" + streamedText);
         }
         return this;
     }

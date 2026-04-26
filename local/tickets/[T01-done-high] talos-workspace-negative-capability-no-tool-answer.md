@@ -1,13 +1,13 @@
-# [open] Ticket: Block Negative Local-Access Claims On Workspace Turns
+# [done] Ticket: Block Negative Local-Access Claims On Workspace Turns
 Date: 2026-04-26
 Priority: high
-Status: open
+Status: done
 Architecture references:
 - `local/tickets/new-work.md`
 - `docs/new-architecture/talos-harness-source-of-truth.md`
 - `docs/work-test-cycle.md`
 - `local/tickets/talos-execution-outcome-centralization.md`
-- `local/tickets/talos-natural-workspace-explain-underinspection.md`
+- `local/tickets/[T03-open-high] talos-natural-workspace-explain-underinspection.md`
 
 ## Why This Ticket Exists
 
@@ -140,3 +140,24 @@ But you can read the files in this workspace
 - Unsupported capability limitations remain allowed when scoped to the actual
   missing capability.
 - The finding is covered by deterministic tests.
+
+## Resolution Notes
+
+Implemented a centralized no-tool outcome correction for negative local
+workspace/file access claims. Affected turns now become advisory and use a
+truthful capability correction instead of finalizing the model's denial.
+
+The correction is scoped to non-mutation workspace turns so it does not mask
+explicit mutation safety behavior. Streaming mutation requests with no tool
+execution remain tracked by
+`local/tickets/talos-streaming-no-tool-explicit-mutation-and-selector-grounding.md`.
+
+Streaming turns also emit the correction to the stream sink so interactive users
+see the correction, while the stored final answer excludes the raw negative
+claim.
+
+Added deterministic coverage in:
+
+- `ExecutionOutcomeTest`
+- `JsonScenarioPackTest`
+- `scenarios/38-no-tool-local-access-claim-corrected.json`

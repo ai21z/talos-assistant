@@ -405,6 +405,7 @@ public final class ScenarioRunner {
 
         return new ExecutorScenarioResult(
                 scenario, turnOut, workspace, scriptedLlm,
+                "",
                 gate.asked, gate.granted, gate.denied, gate.remembered);
     }
 
@@ -463,6 +464,7 @@ public final class ScenarioRunner {
 
         return new ExecutorScenarioResult(
                 scenario, turnOut, workspace, scriptedLlm,
+                streamedChunks.toString(),
                 gate.asked, gate.granted, gate.denied, gate.remembered);
     }
 
