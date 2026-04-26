@@ -577,6 +577,68 @@ class ToolCallLoopTest {
     }
 
     @Test
+    void emptyEditArgsCanRecoverToValidEditApprovalAfterRead() throws Exception {
+        Path ws = Files.createTempDirectory("talos-empty-edit-recovery-");
+        try {
+            Path index = ws.resolve("index.html");
+            String original = "<html><body><h1>Night Drive</h1></body></html>\n";
+            Files.writeString(index, original);
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileEditTool(new FileUndoStack()));
+
+            final int[] approvalRequests = {0};
+            var processor = new TurnProcessor(
+                    ModeController.defaultController(),
+                    (description, detail) -> {
+                        approvalRequests[0]++;
+                        return false;
+                    },
+                    registry);
+            var loop = new ToolCallLoop(processor, 10);
+
+            String emptyEdit = """
+                    {"name":"talos.edit_file","arguments":{"path":"index.html","old_string":"","new_string":""}}
+                    """;
+            String readFile = """
+                    {"name":"talos.read_file","arguments":{"path":"index.html"}}
+                    """;
+            String validEdit = """
+                    {"name":"talos.edit_file","arguments":{"path":"index.html","old_string":"<html><body><h1>Night Drive</h1></body></html>\\n","new_string":"<html><body><h1>Night Drive</h1><a class=\\"cta-button\\" href=\\"#listen\\">Listen now</a></body></html>\\n"}}
+                    """;
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user("Now apply the smallest fix by editing index.html.")));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of(readFile, validEdit, "should not be called")))
+                    .build();
+
+            TurnUserRequestCapture.set("Now apply the smallest fix by editing index.html.");
+            ToolCallLoop.LoopResult result;
+            try {
+                result = loop.run(emptyEdit, messages, ws, ctx);
+            } finally {
+                TurnUserRequestCapture.clear();
+            }
+
+            assertEquals(3, result.iterations());
+            assertEquals(3, result.toolsInvoked());
+            assertEquals(1, approvalRequests[0],
+                    "The recovered edit must reach the approval gate exactly once.");
+            assertEquals(0, result.mutatingToolSuccesses(),
+                    "Denied approval should still prevent mutation.");
+            assertFalse(result.failureDecision().shouldStop(),
+                    "A valid recovered edit should not be stopped by empty-args failure policy.");
+            assertTrue(result.finalAnswer().contains("requested mutation was not approved"));
+            assertEquals(original, Files.readString(index));
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
     void successfulCallNotCountedAsFailed() {
         var loop = createLoop(echoTool());
         var messages = new ArrayList<>(List.of(

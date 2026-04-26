@@ -43,6 +43,7 @@ public final class LoopState {
     public final Map<String, Integer> failureCountsByTool = new HashMap<>();
     public final Map<String, Integer> failureCountsByPath = new HashMap<>();
     public final Map<String, Integer> emptyEditArgumentFailuresByPath = new HashMap<>();
+    public final Set<String> emptyEditRepairPromptedPaths = new HashSet<>();
     public final Set<String> pathsReadThisTurn = new HashSet<>();
     public final Map<String, String> successfulReadCalls = new HashMap<>();
     public boolean mutationSinceStart;

@@ -11,6 +11,7 @@ import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatMessage.NativeToolCall;
 import dev.talos.tools.ToolCall;
+import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolProgressSink;
 import dev.talos.tools.ToolResult;
 import org.slf4j.Logger;
@@ -209,6 +210,17 @@ public final class ToolCallLoop {
                 String errorMessage
         ) {
             this(toolName, pathHint, success, mutating, false, summary, errorMessage);
+        }
+
+        public boolean invalidEmptyEditArguments() {
+            if (!"talos.edit_file".equals(toolName)) return false;
+            if (!mutating || success || denied) return false;
+            if (!ToolError.INVALID_PARAMS.equals(errorCode)) return false;
+            String lower = errorMessage.toLowerCase(java.util.Locale.ROOT);
+            return lower.contains("old_string")
+                    && (lower.contains("empty")
+                    || lower.contains("non-empty")
+                    || lower.contains("present"));
         }
     }
 

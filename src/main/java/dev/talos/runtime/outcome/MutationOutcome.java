@@ -39,11 +39,31 @@ public record MutationOutcome(
                 .toList();
         List<ToolCallLoop.ToolOutcome> failed = mutating.stream()
                 .filter(outcome -> !outcome.success() && !outcome.denied())
+                .filter(outcome -> !isRecoveredInvalidEditFailure(outcome, successful))
                 .toList();
 
         int totalSuccesses = successful.size() + Math.max(0, extraSuccesses);
         MutationOutcomeStatus status = classify(contract, mutating, totalSuccesses, failed, denied);
         return new MutationOutcome(status, successful, failed, denied, extraSuccesses);
+    }
+
+    private static boolean isRecoveredInvalidEditFailure(
+            ToolCallLoop.ToolOutcome failure,
+            List<ToolCallLoop.ToolOutcome> successes
+    ) {
+        if (failure == null || successes == null || successes.isEmpty()) return false;
+        if (!failure.invalidEmptyEditArguments()) return false;
+        String failedPath = normalizePath(failure.pathHint());
+        if (failedPath.isBlank()) return false;
+        return successes.stream()
+                .anyMatch(success -> success.mutating()
+                        && success.success()
+                        && failedPath.equals(normalizePath(success.pathHint())));
+    }
+
+    private static String normalizePath(String path) {
+        if (path == null || path.isBlank()) return "";
+        return path.replace('\\', '/').replaceFirst("^\\./+", "");
     }
 
     public int successCount() {
