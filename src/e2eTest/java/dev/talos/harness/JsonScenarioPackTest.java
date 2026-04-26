@@ -277,7 +277,7 @@ class JsonScenarioPackTest {
             result.assertApprovalCounts(0, 0, 0, 0)
                     .assertAnswerContains(AssistantTurnExecutor.INVALID_MUTATION_ANNOTATION)
                     .assertAnswerContains("No file changes were applied")
-                    .assertAnswerContains("Repeated empty talos.edit_file arguments")
+                    .assertAnswerContains("Repeated empty or missing talos.edit_file arguments")
                     .assertAnswerNotContains("[iteration limit reached]")
                     .assertAnswerNotContains("This response should not be reached")
                     .assertFileContains("index.html", "<title>Horror Synthwave Band</title>")
@@ -513,6 +513,28 @@ class JsonScenarioPackTest {
                     .assertAnswerNotContains("10 iteration(s)")
                     .assertAnswerNotContains("failure policy stopped")
                     .assertAnswerNotContains("This response should not be reached");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/34-empty-edit-args-cross-path-stop.json] 34: empty edit args across paths stop before iteration cap")
+    void emptyEditArgsAcrossPathsStop() {
+        var loaded = JsonScenarioLoader.load("scenarios/34-empty-edit-args-cross-path-stop.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("No file changes were applied")
+                    .assertAnswerContains("empty or missing talos.edit_file argument failure")
+                    .assertAnswerContains("across 3 path(s)")
+                    .assertAnswerContains("No approval was requested")
+                    .assertAnswerNotContains("iteration limit reached")
+                    .assertAnswerNotContains("This response should not be reached")
+                    .assertFileContains("index.html", "<button type=\"submit\">Calculate BMI</button")
+                    .assertFileContains("styles.css", "calculator-container")
+                    .assertFileContains("script.js", "bmi-form");
         }
     }
 
