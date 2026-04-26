@@ -23,7 +23,7 @@ public enum SourceFormat {
     MARKDOWN, PLAIN_TEXT, RST, ADOC, HTML,
 
     // --- Configuration / data ---
-    YAML, JSON, XML, PROPERTIES, TOML, INI, ENV, CSV,
+    YAML, JSON, XML, PROPERTIES, TOML, INI, ENV, CSV, TSV,
 
     // --- Build / infrastructure ---
     GRADLE_KTS, GRADLE, MAVEN_POM, DOCKERFILE, MAKEFILE,
@@ -75,6 +75,7 @@ public enum SourceFormat {
             Map.entry("ini",        INI),
             Map.entry("env",        ENV),
             Map.entry("csv",        CSV),
+            Map.entry("tsv",        TSV),
             Map.entry("cfg",        INI),
             Map.entry("conf",       INI)
     );

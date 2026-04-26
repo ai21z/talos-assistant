@@ -74,6 +74,7 @@ class SourceFormatTest {
             "settings.ini,      INI",
             ".env,              ENV",
             "data.csv,          CSV",
+            "data.tsv,          TSV",
             "app.cfg,           INI",
             "app.conf,          INI",
     })

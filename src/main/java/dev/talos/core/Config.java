@@ -167,6 +167,7 @@ public class Config {
                     "**/*.xml",
                     "**/*.yml", "**/*.yaml",
                     "**/*.json",
+                    "**/*.csv", "**/*.tsv",
                     "**/*.properties",
                     "**/*.html", "**/*.htm"
             )));

@@ -13,6 +13,8 @@ rag:
     - "**/*.yml"
     - "**/*.yaml"
     - "**/*.json"
+    - "**/*.csv"
+    - "**/*.tsv"
     - "**/*.properties"
     - "**/*.html"
     - "**/*.htm"

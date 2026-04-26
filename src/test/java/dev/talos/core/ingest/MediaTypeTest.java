@@ -33,7 +33,7 @@ class MediaTypeTest {
     void structuredFormats() {
         for (SourceFormat f : new SourceFormat[]{
                 SourceFormat.JSON, SourceFormat.XML, SourceFormat.YAML,
-                SourceFormat.CSV, SourceFormat.MAVEN_POM
+                SourceFormat.CSV, SourceFormat.TSV, SourceFormat.MAVEN_POM
         }) {
             assertEquals(MediaType.STRUCTURED, MediaType.forFormat(f), "Expected STRUCTURED for " + f);
         }
