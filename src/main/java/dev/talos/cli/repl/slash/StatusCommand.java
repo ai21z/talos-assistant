@@ -4,6 +4,7 @@ import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
 import dev.talos.cli.ui.AnsiColor;
+import dev.talos.cli.ui.CliStatusDashboard;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.IndexPathResolver;
 import dev.talos.runtime.XmlCompatTelemetry;
@@ -41,6 +42,20 @@ public final class StatusCommand implements Command {
 
         var sb = new StringBuilder();
         var cfg = ctx.cfg();
+        String activeModel = ctx.llm() == null
+                ? CliStatusDashboard.resolveModel(cfg)
+                : ctx.llm().getModel();
+
+        if (!verbose) {
+            var snapshot = CliStatusDashboard.snapshot(
+                    workspace,
+                    cfg,
+                    modes.getActiveName(),
+                    activeModel,
+                    ctx.session() != null && ctx.session().isDebug() ? "on" : "off",
+                    "/status --verbose for diagnostics");
+            return new Result.TrustedInfo(CliStatusDashboard.render(snapshot));
+        }
 
         Path absWorkspace = workspace.toAbsolutePath().normalize();
         Path indexDir = IndexPathResolver.getIndexDirectory(absWorkspace);
@@ -71,7 +86,6 @@ public final class StatusCommand implements Command {
 
         var oll = CfgUtil.map(cfg.data.get("ollama"));
         String host = Objects.toString(oll.getOrDefault("host", "http://127.0.0.1:11434"));
-        String activeModel = ctx.llm().getModel();
         String embedModel = Objects.toString(oll.getOrDefault("embed", "bge-m3"));
 
         sb.append(AnsiColor.grey("  Mode      ")).append(AnsiColor.blue(modes.getActiveName())).append("\n");
