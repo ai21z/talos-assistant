@@ -76,7 +76,7 @@ public final class TerminalFirstRun {
             // Re-check
             ollamaInstalled = checkOllamaInstalled();
             if (!ollamaInstalled) {
-                System.out.println("  ⚠ Ollama still not detected. You can continue, but LLM features won't work.");
+                System.out.println("  ! Ollama still not detected. You can continue, but LLM features won't work.");
                 System.out.println();
             } else {
                 System.out.println("  ✓ Ollama detected");
@@ -100,7 +100,7 @@ public final class TerminalFirstRun {
                     if (pulled) {
                         System.out.println("  ✓ Model pulled successfully");
                     } else {
-                        System.out.println("  ⚠ Pull failed. You can pull manually: ollama pull " + DEFAULT_MODEL);
+                        System.out.println("  ! Pull failed. You can pull manually: ollama pull " + DEFAULT_MODEL);
                     }
                 } else {
                     System.out.println("  Skipped. Pull later with: ollama pull " + DEFAULT_MODEL);

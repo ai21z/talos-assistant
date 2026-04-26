@@ -544,20 +544,20 @@ public final class AssistantTurnExecutor {
      * from the model's own prose so the annotation is visually obvious.
      */
     public static final String FALSE_MUTATION_ANNOTATION =
-            "⚠ [Truth check: the response below claims a file was changed, "
+            "[Truth check: the response below claims a file was changed, "
             + "but no file-mutating tool succeeded in this turn. "
             + "No file on disk was actually modified.]\n\n";
 
     public static final String PARTIAL_MUTATION_ANNOTATION =
-            "⚠ [Truth check: some requested file changes succeeded and some failed. "
+            "[Truth check: some requested file changes succeeded and some failed. "
             + "Verified outcomes for this turn are listed below.]\n\n";
 
     public static final String DENIED_MUTATION_ANNOTATION =
-            "⚠ [Truth check: no file was changed in this turn because the requested "
+            "[Truth check: no file was changed in this turn because the requested "
             + "write was not approved.]\n\n";
 
     public static final String INVALID_MUTATION_ANNOTATION =
-            "⚠ [Truth check: no file was changed in this turn because the requested "
+            "[Truth check: no file was changed in this turn because the requested "
             + "write tool call was invalid.]\n\n";
 
     /**
@@ -946,7 +946,7 @@ public final class AssistantTurnExecutor {
      * user asking for multi-file inspection.
      */
     public static final String UNDER_INSPECTION_ANNOTATION =
-            "⚠ [Inspect check: the user asked for multiple files to be read "
+            "[Inspect check: the user asked for multiple files to be read "
             + "before answering, but only one read-only tool call was made "
             + "this turn. The response below may not reflect the full "
             + "workspace contents.]\n\n";
@@ -1186,16 +1186,16 @@ public final class AssistantTurnExecutor {
      * user informed without silently rewriting.
      */
     public static final String UNGROUNDED_ANNOTATION =
-            "⚠ [Grounding check: the user asked for an answer based on workspace "
+            "[Grounding check: the user asked for an answer based on workspace "
             + "contents, but no files were read this turn. The response below was "
             + "produced without reading any files.]\n\n";
 
     public static final String STREAMING_NO_TOOL_MUTATION_ANNOTATION =
-            "⚠ [Truth check: the response below narrates completed file changes, "
+            "[Truth check: the response below narrates completed file changes, "
             + "but no file tool was called in this turn. Treat it as unverified.]\n\n";
 
     public static final String STREAMING_NO_TOOL_MUTATION_REPLACEMENT =
-            "⚠ [Truth check: no file was changed in this turn. The user asked for a "
+            "[Truth check: no file was changed in this turn. The user asked for a "
             + "modification, but the assistant did not call any file-editing tool, so "
             + "the prior \"updated file\" narrative was discarded.]\n\n"
             + "No file changes were applied. Please retry with actual tool-backed edits.";
