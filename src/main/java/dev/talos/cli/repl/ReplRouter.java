@@ -138,6 +138,9 @@ public final class ReplRouter {
 
         // Show turn stats (timing) after the answer
         if (lastTurnResult != null) {
+            if (ctx.session() != null && ctx.session().getDebugLevel() == DebugLevel.TRACE) {
+                render.render(new Result.TrustedInfo(formatCurrentTurnTrace(lastTurnResult)));
+            }
             int responseLen = (r instanceof Result.Ok ok) ? ok.text.length()
                     : (r instanceof Result.Streamed st) ? st.fullText.length()
                     : 0;
@@ -159,4 +162,28 @@ public final class ReplRouter {
     public Session getRuntimeSession()   { return runtimeSession; }
     public CommandRegistry getRegistry() { return registry; }
     public String getStartupNotice()     { return startupNotice; }
+
+    static String formatCurrentTurnTrace(TurnResult turnResult) {
+        if (turnResult == null || turnResult.audit() == null) return "";
+        var trace = turnResult.audit().policyTrace();
+        if (trace == null || !trace.hasPolicyData()) return "";
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("\nCurrent Turn Trace\n");
+        sb.append("  contract: ").append(trace.taskType())
+                .append(" mutationAllowed=").append(trace.mutationAllowed())
+                .append(" verificationRequired=").append(trace.verificationRequired())
+                .append('\n');
+        sb.append("  phase: initial=").append(trace.initialPhase())
+                .append(" final=").append(trace.finalPhase())
+                .append('\n');
+        sb.append("  nativeTools: ").append(listOrNone(trace.nativeTools())).append('\n');
+        sb.append("  promptTools: ").append(listOrNone(trace.promptTools())).append('\n');
+        sb.append("  blocked: ").append(listOrNone(trace.blocks())).append('\n');
+        return sb.toString();
+    }
+
+    private static String listOrNone(java.util.List<String> values) {
+        return values == null || values.isEmpty() ? "none" : String.join(", ", values);
+    }
 }

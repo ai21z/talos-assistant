@@ -93,13 +93,16 @@ public final class ExplainLastTurnCommand implements Command {
         if (turn.toolCalls().isEmpty()) {
             sb.append("  none\n");
         } else {
-            for (TurnRecord.ToolCallSummary call : turn.toolCalls()) {
-                sb.append("  - ").append(blankDefault(call.name(), "(unknown tool)"));
-                if (call.pathHint() != null && !call.pathHint().isBlank()) {
-                    sb.append(" -> ").append(call.pathHint());
-                }
-                sb.append(call.success() ? " [ok]" : " [failed]").append('\n');
+        for (TurnRecord.ToolCallSummary call : turn.toolCalls()) {
+            sb.append("  - ").append(blankDefault(call.name(), "(unknown tool)"));
+            if (call.pathHint() != null && !call.pathHint().isBlank()) {
+                sb.append(" -> ").append(call.pathHint());
             }
+            sb.append(call.success() ? " [ok]" : " [failed]").append('\n');
+            if (!call.success() && call.reason() != null && !call.reason().isBlank()) {
+                sb.append("      reason: ").append(call.reason()).append('\n');
+            }
+        }
         }
 
         if (turn.assistantText() != null && !turn.assistantText().isBlank()) {
@@ -125,6 +128,9 @@ public final class ExplainLastTurnCommand implements Command {
                 sb.append(" -> ").append(call.pathHint());
             }
             sb.append(call.success() ? " [ok]" : " [failed]").append('\n');
+            if (!call.success() && call.reason() != null && !call.reason().isBlank()) {
+                sb.append("      reason: ").append(call.reason()).append('\n');
+            }
         }
         return sb.toString();
     }
@@ -160,10 +166,38 @@ public final class ExplainLastTurnCommand implements Command {
         StringBuilder sb = new StringBuilder();
         sb.append(render(turn));
         sb.append("\nTrace Detail\n");
+        appendPolicyTrace(sb, turn.policyTrace());
         sb.append("  Retrieval: ").append(blankDefault(turn.retrievalTraceSummary(), "none recorded")).append('\n');
         sb.append("  Tool calls: ").append(turn.toolCalls().size()).append('\n');
         sb.append("  Status tag: ").append(blankDefault(turn.status(), "unknown")).append('\n');
         return sb.toString();
+    }
+
+    private static void appendPolicyTrace(StringBuilder sb, dev.talos.runtime.TurnPolicyTrace trace) {
+        if (trace == null || !trace.hasPolicyData()) {
+            sb.append("  Policy: none recorded\n");
+            return;
+        }
+        sb.append("  Contract: ").append(trace.taskType())
+                .append(" mutationAllowed=").append(trace.mutationAllowed())
+                .append(" verificationRequired=").append(trace.verificationRequired())
+                .append('\n');
+        if (!trace.expectedTargets().isEmpty()) {
+            sb.append("  Expected targets: ").append(String.join(", ", trace.expectedTargets())).append('\n');
+        }
+        if (!trace.forbiddenTargets().isEmpty()) {
+            sb.append("  Forbidden targets: ").append(String.join(", ", trace.forbiddenTargets())).append('\n');
+        }
+        sb.append("  Phase: initial=").append(trace.initialPhase())
+                .append(" final=").append(trace.finalPhase())
+                .append('\n');
+        sb.append("  Native tools: ").append(listOrNone(trace.nativeTools())).append('\n');
+        sb.append("  Prompt tools: ").append(listOrNone(trace.promptTools())).append('\n');
+        sb.append("  Blocked: ").append(listOrNone(trace.blocks())).append('\n');
+    }
+
+    private static String listOrNone(List<String> values) {
+        return values == null || values.isEmpty() ? "none" : String.join(", ", values);
     }
 
     static String inferOutcome(TurnRecord turn) {

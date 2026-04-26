@@ -14,20 +14,32 @@ import java.util.List;
  * @param approvalsRequired number of mutating tool calls that reached the approval gate
  * @param approvalsGranted  approvals granted (including remembered policy approvals)
  * @param approvalsDenied   approvals denied
+ * @param policyTrace       compact task contract / phase / tool-surface trace
  */
 public record TurnAudit(
         List<TurnRecord.ToolCallSummary> toolCalls,
         int approvalsRequired,
         int approvalsGranted,
-        int approvalsDenied
+        int approvalsDenied,
+        TurnPolicyTrace policyTrace
 ) {
     public TurnAudit {
         toolCalls = (toolCalls == null) ? List.of() : List.copyOf(toolCalls);
+        policyTrace = policyTrace == null ? TurnPolicyTrace.empty() : policyTrace;
+    }
+
+    public TurnAudit(
+            List<TurnRecord.ToolCallSummary> toolCalls,
+            int approvalsRequired,
+            int approvalsGranted,
+            int approvalsDenied
+    ) {
+        this(toolCalls, approvalsRequired, approvalsGranted, approvalsDenied, TurnPolicyTrace.empty());
     }
 
     /** An empty audit (no tool calls, no approvals). */
     public static TurnAudit empty() {
-        return new TurnAudit(List.of(), 0, 0, 0);
+        return new TurnAudit(List.of(), 0, 0, 0, TurnPolicyTrace.empty());
     }
 }
 
