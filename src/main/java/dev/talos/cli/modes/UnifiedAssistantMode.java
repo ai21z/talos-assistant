@@ -9,6 +9,7 @@ import dev.talos.core.llm.SystemPromptBuilder;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
 import dev.talos.spi.types.ChatMessage;
 import org.slf4j.Logger;
@@ -71,13 +72,17 @@ public final class UnifiedAssistantMode implements Mode {
                 || (ctx.memory() != null && ctx.memory().hasContent());
         boolean nativeTools = CfgUtil.boolAt(CfgUtil.map(ctx.cfg().data.get("tools")), "native_calling", true);
         TaskContract taskContract = TaskContractResolver.fromUserRequest(rawLine);
-        String system = SystemPromptBuilder.forUnified()
-                .withTools(ctx.toolRegistry())
-                .withWorkspace(workspace)
+        boolean smallTalk = taskContract.type() == TaskType.SMALL_TALK;
+        SystemPromptBuilder promptBuilder = SystemPromptBuilder.forUnified()
                 .withNativeTools(nativeTools)
-                .withReadOnlyToolMode(!taskContract.mutationAllowed())
-                .withHistory(hasHistory)
-                .build();
+                .withHistory(hasHistory);
+        if (!smallTalk) {
+            promptBuilder
+                    .withTools(ctx.toolRegistry())
+                    .withWorkspace(workspace)
+                    .withReadOnlyToolMode(!taskContract.mutationAllowed());
+        }
+        String system = promptBuilder.build();
 
         // Build conversation history — unified mode uses the larger assist budget (55%)
         // since there are no pre-injected RAG snippets competing for context space.
