@@ -36,13 +36,20 @@ public final class TalosBanner {
      * Prints the compact beta startup dashboard with session debug state.
      */
     public static void print(Path workspace, Config cfg, String activeMode, boolean debug, PrintStream out) {
+        print(workspace, cfg, activeMode, debug ? "brief" : "off", out);
+    }
+
+    /**
+     * Prints the compact beta startup dashboard with session debug level.
+     */
+    public static void print(Path workspace, Config cfg, String activeMode, String debug, PrintStream out) {
         out.println();
         var snapshot = CliStatusDashboard.snapshot(
                 workspace,
                 cfg,
                 activeMode,
                 resolveModel(cfg),
-                debug ? "on" : "off",
+                debug,
                 "Type a request or /help");
         out.print(CliStatusDashboard.render(snapshot));
     }

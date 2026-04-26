@@ -341,6 +341,8 @@ public final class TalosBootstrap {
             @Override public void setK(int k)          { session.setK(k); }
             @Override public boolean isDebug()          { return session.isDebug(); }
             @Override public void setDebug(boolean on)  { session.setDebug(on); }
+            @Override public DebugLevel getDebugLevel() { return session.getDebugLevel(); }
+            @Override public void setDebugLevel(DebugLevel level) { session.setDebugLevel(level); }
         };
 
         registry.register(new HelpCommand(registry));
