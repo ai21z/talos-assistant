@@ -286,6 +286,25 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/22-build-website-prompt-allows-apply.json] 22: build website prompt is apply-capable")
+    void buildWebsitePromptAllowsApply() {
+        var loaded = JsonScenarioLoader.load("scenarios/22-build-website-prompt-allows-apply.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(3, 3, 0, 3)
+                    .assertAnswerContains("Static verification: passed")
+                    .assertFileContains("index.html", "BMI Calculator")
+                    .assertFileContains("index.html", "styles.css")
+                    .assertFileContains("index.html", "script.js")
+                    .assertFileContains("styles.css", ".calculator")
+                    .assertFileContains("script.js", "dataset.ready");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/11-partial-mutation-summary-truthful.json] 11: partial mutation summary reports only verified outcomes")
     void partialMutationSummaryIsTruthful() {
         var loaded = JsonScenarioLoader.load("scenarios/11-partial-mutation-summary-truthful.json");
