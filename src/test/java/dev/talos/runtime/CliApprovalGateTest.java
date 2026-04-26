@@ -92,6 +92,12 @@ class CliApprovalGateTest {
             String output = bout.toString(StandardCharsets.UTF_8);
             assertTrue(output.contains("write to database"),
                     "Output should include the operation description");
+            assertTrue(output.contains("Action:"),
+                    "Output should label the action");
+            assertTrue(output.contains("Risk:"),
+                    "Output should label the inferred risk");
+            assertTrue(output.contains("Choices:"),
+                    "Output should show choices");
             assertTrue(output.contains("Allow?"),
                     "Output should include the approval prompt");
         }
@@ -108,6 +114,22 @@ class CliApprovalGateTest {
             String output = bout.toString(StandardCharsets.UTF_8);
             assertTrue(output.contains("src/main/Main.java"),
                     "Output should include the detail");
+            assertTrue(output.contains("Details:"),
+                    "Output should label detail lines");
+        }
+
+        @Test
+        void outputUsesAsciiWarningMarker() {
+            var bout = new ByteArrayOutputStream();
+            var gate = new CliApprovalGate(
+                    new ByteArrayInputStream("n\n".getBytes(StandardCharsets.UTF_8)),
+                    new PrintStream(bout));
+
+            gate.approve("write file", "target: src/main/Main.java");
+
+            String output = bout.toString(StandardCharsets.UTF_8);
+            assertTrue(output.contains("! Approval required"));
+            assertFalse(output.contains("⚠"));
         }
 
         @Test
