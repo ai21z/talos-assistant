@@ -102,6 +102,23 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void assistantIdentityQuestionsBecomeSmallTalkContract() {
+        for (String input : List.of(
+                "hello who are you?",
+                "who are you?",
+                "what are you?",
+                "what is talos?",
+                "who is talos?")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertEquals(TaskType.SMALL_TALK, contract.type(), input);
+            assertFalse(contract.mutationRequested(), input);
+            assertFalse(contract.mutationAllowed(), input);
+            assertFalse(contract.verificationRequired(), input);
+        }
+    }
+
+    @Test
     void greetingWithWorkspaceIntentStillInspectsWorkspace() {
         TaskContract contract = TaskContractResolver.fromUserRequest("Hey, what is in this workspace?");
 
@@ -177,6 +194,19 @@ class TaskContractResolverTest {
 
         assertEquals(TaskType.WORKSPACE_EXPLAIN, contract.type());
         assertFalse(contract.mutationAllowed());
+    }
+
+    @Test
+    void naturalFolderAndSiteQuestionsBecomeWorkspaceExplainContracts() {
+        for (String input : List.of(
+                "What is this folder for?",
+                "Can you explain this directory?",
+                "What is this site for?")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertEquals(TaskType.WORKSPACE_EXPLAIN, contract.type(), input);
+            assertFalse(contract.mutationAllowed(), input);
+        }
     }
 
     @Test

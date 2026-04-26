@@ -56,8 +56,8 @@ public final class GrepCommand implements Command {
             PathMatcher codeRootMatcher = fs.getPathMatcher("glob:*.{java,kt,kts,py,rb,go,rs,cpp,c,h,hpp,js,ts,jsx,tsx,php,cs,sh,bat,cmd,ps1,psm1,gradle}");
 
             // Documentation and markup files
-            PathMatcher docMatcher = fs.getPathMatcher("glob:**/*.{md,markdown,txt,html,htm,xml}");
-            PathMatcher docRootMatcher = fs.getPathMatcher("glob:*.{md,markdown,txt,html,htm,xml}");
+            PathMatcher docMatcher = fs.getPathMatcher("glob:**/*.{md,markdown,txt,html,htm,xml,css,scss,sass,less}");
+            PathMatcher docRootMatcher = fs.getPathMatcher("glob:*.{md,markdown,txt,html,htm,xml,css,scss,sass,less}");
 
             // Configuration files
             PathMatcher configMatcher = fs.getPathMatcher("glob:**/*.{yaml,yml,json,properties,ini,conf,config,toml,env}");

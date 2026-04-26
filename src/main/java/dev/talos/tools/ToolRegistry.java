@@ -77,6 +77,8 @@ public final class ToolRegistry {
             // snake_case variants
             Map.entry("file_write",    "talos.write_file"),
             Map.entry("write_file",    "talos.write_file"),
+            Map.entry("file_create",   "talos.write_file"),
+            Map.entry("create_file",   "talos.write_file"),
             Map.entry("file_read",     "talos.read_file"),
             Map.entry("read_file",     "talos.read_file"),
             Map.entry("file_edit",     "talos.edit_file"),
@@ -96,6 +98,7 @@ public final class ToolRegistry {
             Map.entry("retrieve",      "talos.retrieve"),
             // camelCase variants (models frequently emit these)
             Map.entry("writefile",     "talos.write_file"),
+            Map.entry("createfile",    "talos.write_file"),
             Map.entry("readfile",      "talos.read_file"),
             Map.entry("editfile",      "talos.edit_file"),
             Map.entry("listdir",       "talos.list_dir"),

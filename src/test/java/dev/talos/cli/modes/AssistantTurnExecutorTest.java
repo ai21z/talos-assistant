@@ -110,6 +110,40 @@ class AssistantTurnExecutorTest {
 
             assertFalse(out.text().isBlank());
         }
+
+        @Test
+        void explicitMutationNoToolAnswerRetriesAndExecutesWrite(@TempDir Path workspace)
+                throws Exception {
+            var registry = new dev.talos.tools.ToolRegistry();
+            var undoStack = new dev.talos.tools.FileUndoStack();
+            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "Create `script.js` with the following JavaScript code.",
+                            "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"script.js\","
+                                    + "\"content\":\"document.body.dataset.ready = 'true';\"}}",
+                            "Created script.js.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Create the script.js file you need in this workspace."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(Files.exists(workspace.resolve("script.js")),
+                    "no-tool mutation retry must execute the write_file call");
+            assertEquals("document.body.dataset.ready = 'true';",
+                    Files.readString(workspace.resolve("script.js")));
+            assertTrue(out.text().contains("[Used 1 tool(s): talos.write_file"),
+                    "retry tool execution summary should be visible");
+        }
     }
 
     @Nested
@@ -222,6 +256,28 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void streamingIdentityQuestionEmitsTalosIdentity() {
+            var chunks = new ArrayList<String>();
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted("I'm Qwen, made by Alibaba Cloud."))
+                    .streamSink(chunks::add)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("You are Talos."));
+            messages.add(ChatMessage.user("who are you?"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, WS, ctx, new AssistantTurnExecutor.Options());
+
+            String visible = String.join("", chunks);
+            assertTrue(out.streamed(), "identity response should use the visible streaming path");
+            assertEquals(visible, out.text());
+            assertTrue(out.text().contains("Talos"), out.text());
+            assertFalse(out.text().toLowerCase().contains("qwen"), out.text());
+            assertFalse(out.text().toLowerCase().contains("alibaba"), out.text());
+        }
+
+        @Test
         void stream_filter_hides_bare_json_while_tool_loop_still_executes(@TempDir Path workspace)
                 throws Exception {
             Files.writeString(workspace.resolve("index.html"), "<h1>Hello</h1>");
@@ -315,7 +371,7 @@ class AssistantTurnExecutorTest {
                     .build();
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
-            messages.add(ChatMessage.user("Make the edits please."));
+            messages.add(ChatMessage.user("Explain what edit you would make. Do not change files."));
 
             AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
                     messages, WS, ctx, new AssistantTurnExecutor.Options());
@@ -329,6 +385,44 @@ class AssistantTurnExecutorTest {
                     "streamed user-visible output should contain the truthful replacement");
             assertEquals(AssistantTurnExecutor.MALFORMED_TOOL_PROTOCOL_REPLACEMENT, out.text());
             assertTrue(out.streamed());
+        }
+
+        @Test
+        void explicitMutationWithStreamSinkUsesBufferedRetryPath(@TempDir Path workspace)
+                throws Exception {
+            var visibleChunks = new ArrayList<String>();
+            var registry = new dev.talos.tools.ToolRegistry();
+            var undoStack = new dev.talos.tools.FileUndoStack();
+            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "Create `script.js` with this JavaScript code.",
+                            "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"script.js\","
+                                    + "\"content\":\"document.body.dataset.ready = 'stream-buffered';\"}}",
+                            "Created script.js.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .streamSink(visibleChunks::add)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Create the script.js file you need in this workspace."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertFalse(out.streamed(),
+                    "mutation turns should be buffered so advisory no-tool prose is not printed first");
+            assertTrue(visibleChunks.isEmpty(),
+                    "initial advisory no-tool prose must not reach the stream sink");
+            assertTrue(Files.exists(workspace.resolve("script.js")));
+            assertEquals("document.body.dataset.ready = 'stream-buffered';",
+                    Files.readString(workspace.resolve("script.js")));
+            assertTrue(out.text().contains("[Used 1 tool(s): talos.write_file"));
         }
     }
 
@@ -481,6 +575,22 @@ class AssistantTurnExecutorTest {
             AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(messages, WS, ctx, opts);
 
             assertFalse(out.text().isBlank());
+        }
+
+        @Test
+        void identityQuestionUsesTalosIdentityNotModelProvider() {
+            var ctx = scriptedContext(
+                    "I'm Qwen, a large language model created by Alibaba Cloud.");
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("You are Talos."));
+            messages.add(ChatMessage.user("hello who are you?"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, WS, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains("Talos"), out.text());
+            assertFalse(out.text().toLowerCase().contains("qwen"), out.text());
+            assertFalse(out.text().toLowerCase().contains("alibaba"), out.text());
         }
     }
 
@@ -2115,6 +2225,13 @@ class AssistantTurnExecutorTest {
     class ReadOnlyWebDiagnosticsGroundingTests {
 
         @Test
+        @DisplayName("natural site diagnostic request is recognized")
+        void naturalSiteDiagnosticRequestIsRecognized() {
+            assertTrue(AssistantTurnExecutor.looksLikeReadOnlyWebDiagnosticRequest(
+                    "This site has broken links. Can you check what is wrong without changing files?"));
+        }
+
+        @Test
         @DisplayName("web diagnostic request is overridden by deterministic static facts")
         void readOnlyWebDiagnosticAnswerIsGroundedFromWorkspace() throws Exception {
             Path ws = Files.createTempDirectory("talos-web-diagnostics-grounding-");
@@ -2187,6 +2304,41 @@ class AssistantTurnExecutorTest {
             String answer = "I can fix it.";
             assertEquals(answer, AssistantTurnExecutor.overrideReadOnlyWebDiagnosticsIfNeeded(
                     answer, messages, loopResult, WS));
+        }
+    }
+
+    @Nested
+    @DisplayName("Verified follow-up summaries")
+    class VerifiedFollowUpSummaries {
+
+        @Test
+        void changeSummaryFollowUpUsesPreviousPartialVerificationInsteadOfNewUnsupportedClaim() {
+            var ctx = scriptedContext("I added the Listen Now button and wired script.js.");
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Fix the broken CTA on this page."));
+            messages.add(ChatMessage.assistant("""
+                    Partial verification: static checks failed after the mutation.
+                    The turn remains partial; the requested task is not verified complete.
+
+                    Succeeded:
+                    - talos.edit_file -> index.html
+
+                    Remaining static verification problems:
+                    - index.html: HTML references missing script.js.
+                    - index.html: `.cta-button` is still not present in the HTML.
+                    """));
+            messages.add(ChatMessage.user("Can you summarize what changed?"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, WS, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains("partial"), out.text());
+            assertTrue(out.text().contains("index.html"), out.text());
+            assertTrue(out.text().contains("script.js"), out.text());
+            assertTrue(out.text().contains(".cta-button"), out.text());
+            assertFalse(out.text().contains("I added the Listen Now button"), out.text());
+            assertFalse(out.text().contains("wired script.js"), out.text());
         }
     }
 }

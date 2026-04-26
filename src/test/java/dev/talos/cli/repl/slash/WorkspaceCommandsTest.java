@@ -98,6 +98,18 @@ class WorkspaceCommandsTest {
         }
 
         @Test
+        void searches_css_files_by_default() throws IOException {
+            Files.writeString(ws.resolve("style.css"), ".cta-button { color: white; }\n");
+            var cmd = new GrepCommand(ws);
+
+            Result r = cmd.execute("cta-button", ctx);
+
+            assertInstanceOf(Result.Ok.class, r);
+            assertTrue(r.toString().contains("style.css"), r.toString());
+            assertTrue(r.toString().contains(".cta-button"), r.toString());
+        }
+
+        @Test
         void skips_build_directories() throws IOException {
             Path buildDir = ws.resolve("build");
             Files.createDirectories(buildDir);
