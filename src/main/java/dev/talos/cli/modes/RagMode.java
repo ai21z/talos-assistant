@@ -82,7 +82,7 @@ public final class RagMode implements Mode {
 
         // Surface retrieval warnings when empty due to error (vs. genuinely no matches)
         if (prepared.hasError() && prepared.snippets().isEmpty()) {
-            LOG.warn("Retrieval returned empty due to error: {}", prepared.errorReason());
+            LOG.debug("Retrieval returned empty due to error: {}", prepared.errorReason());
         }
 
         // Pack snippets using unified ContextPacker (pinned-first, budget-aware, deduplicated)

@@ -2,6 +2,7 @@ package dev.talos.app;
  
 import dev.talos.app.ui.TerminalFirstRun;
 import dev.talos.cli.launcher.RootCmd;
+import dev.talos.cli.ui.ConsoleNoisePolicy;
 import dev.talos.core.util.BuildInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,6 +13,8 @@ public class Main {
     private static final Logger LOG = LoggerFactory.getLogger(Main.class);
 
     public static void main(String[] args) {
+        ConsoleNoisePolicy.install();
+
         // R7 - single build-identity line per process so transcripts and
         // log files can be traced to a specific build. Graceful "unknown"
         // fallbacks when metadata is absent (see BuildInfo).
