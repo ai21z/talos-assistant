@@ -150,3 +150,40 @@ Sources
 Conclusion: classifier expansion alone is insufficient. `WORKSPACE_EXPLAIN`
 needs a no-tool retry/static grounding policy similar to the mutation and web
 diagnostic gates.
+
+## Additional Retest Notes - test2 installed 0.9.3
+
+The same failure shape reproduced in `local/playground/test2` with installed
+Talos 0.9.3 and `/debug trace` enabled:
+
+```text
+Can you check this folder here and tell me what is it?
+
+Sure, I can help with that. Please provide the path of the folder you want me
+to inspect.
+
+Current Turn Trace
+  contract: WORKSPACE_EXPLAIN mutationAllowed=false verificationRequired=false
+  phase: initial=INSPECT final=INSPECT
+  nativeTools: talos.grep, talos.list_dir, talos.read_file, talos.retrieve
+  promptTools: talos.grep, talos.list_dir, talos.read_file, talos.retrieve
+```
+
+Important details:
+
+- The contract was correct: `WORKSPACE_EXPLAIN`.
+- Read-only tools were exposed.
+- Zero tools were called.
+- The answer asked for a path even though the active workspace root was already
+  known and shown in the startup banner.
+
+Technical analysis:
+
+- This is no longer primarily a classifier problem for the initial prompt.
+- The failure sits after classification: a `WORKSPACE_EXPLAIN` no-tool answer
+  can still be accepted as complete when it should require inspection or a
+  truthful local fallback.
+- The likely owner is the no-tool path in
+  `AssistantTurnExecutor.resolveNoToolAnswer` /
+  `ExecutionOutcome.fromNoTool`, plus prompt/task-contract guidance for
+  workspace explain turns.
