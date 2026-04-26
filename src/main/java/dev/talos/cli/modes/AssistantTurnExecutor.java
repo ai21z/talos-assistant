@@ -301,7 +301,7 @@ public final class AssistantTurnExecutor {
         return ctx.llm().chatFull(messages, ctx.nativeToolSpecs());
     }
 
-    static void injectTaskContractInstruction(List<ChatMessage> messages) {
+    public static void injectTaskContractInstruction(List<ChatMessage> messages) {
         if (messages == null || messages.isEmpty()) return;
         if (messages.stream().anyMatch(AssistantTurnExecutor::isTaskContractInstruction)) return;
 
