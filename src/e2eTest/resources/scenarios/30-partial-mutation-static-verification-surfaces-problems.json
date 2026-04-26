@@ -1,0 +1,16 @@
+{
+  "name": "partial mutation static verification surfaces problems",
+  "fixture": "horror-synth-site",
+  "v1Pack": true,
+  "claims": [
+    "partial-mutation-turns-run-static-verification",
+    "partial-summary-includes-remaining-static-problems"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Fix this website with the smallest exact edits so the HTML, CSS, and JavaScript remain valid and linked.",
+  "scriptedResponses": [
+    "```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"index.html\",\"content\":\"<!DOCTYPE html>\\n<html lang=\\\"en\\\">\\n<head>\\n  <meta charset=\\\"UTF-8\\\">\\n  <title>Broken Repair</title>\\n  <link rel=\\\"stylesheet\\\" href=\\\"style.css\\\">\\n</head>\\n<body>\\n  <main class=\\\"hero-content\\\"><h1>Broken Repair</h1></main>\\n  <script src=\\\"script.js\\\">\\n</body>\\n</html>\\n\"}}\n```\n```json\n{\"name\":\"talos.edit_file\",\"parameters\":{\"path\":\"index.html\",\"old_string\":\"<h1>Welcome to My Website</h1>\"}}\n```",
+    "The website has been repaired."
+  ]
+}

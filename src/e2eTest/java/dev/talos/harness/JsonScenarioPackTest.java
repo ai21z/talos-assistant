@@ -434,6 +434,27 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/30-partial-mutation-static-verification-surfaces-problems.json] 30: partial mutation surfaces static verification problems")
+    void partialMutationStaticVerificationSurfacesProblems() {
+        var loaded = JsonScenarioLoader.load("scenarios/30-partial-mutation-static-verification-surfaces-problems.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(1, 1, 0, 0)
+                    .assertAnswerContains("Partial verification: static checks failed")
+                    .assertAnswerContains("The turn remains partial")
+                    .assertAnswerContains("Remaining static verification problems")
+                    .assertAnswerContains("file-level verification reported warning")
+                    .assertAnswerContains("some requested file changes succeeded and some failed")
+                    .assertFileContains("index.html", "<title>Broken Repair</title>")
+                    .assertFileContains("index.html", "<script src=\"script.js\">")
+                    .assertFileNotContains("index.html", "<script src=\"script.js\"></script>");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/11-partial-mutation-summary-truthful.json] 11: partial mutation summary reports only verified outcomes")
     void partialMutationSummaryIsTruthful() {
         var loaded = JsonScenarioLoader.load("scenarios/11-partial-mutation-summary-truthful.json");
