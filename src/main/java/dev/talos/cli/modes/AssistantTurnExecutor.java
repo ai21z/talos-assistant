@@ -683,6 +683,7 @@ public final class AssistantTurnExecutor {
                 .toList();
         List<ToolCallLoop.ToolOutcome> failures = mutating.stream()
                 .filter(o -> !o.success())
+                .filter(o -> !isRecoveredInvalidEditFailure(o, successes))
                 .toList();
         if (successes.isEmpty() || failures.isEmpty()) return answer;
 
@@ -705,6 +706,20 @@ public final class AssistantTurnExecutor {
         }
         out.append("\nThe assistant summary was replaced with this verified mutation outcome because the turn had partial success.");
         return out.toString().stripTrailing();
+    }
+
+    private static boolean isRecoveredInvalidEditFailure(
+            ToolCallLoop.ToolOutcome failure,
+            List<ToolCallLoop.ToolOutcome> successes
+    ) {
+        if (failure == null || successes == null || successes.isEmpty()) return false;
+        if (!failure.invalidEmptyEditArguments()) return false;
+        String failedPath = ToolCallSupport.normalizePath(failure.pathHint());
+        if (failedPath == null || failedPath.isBlank()) return false;
+        return successes.stream()
+                .anyMatch(success -> success.mutating()
+                        && success.success()
+                        && failedPath.equals(ToolCallSupport.normalizePath(success.pathHint())));
     }
 
     private static String trimFailureMessage(String errorMessage) {
