@@ -159,6 +159,36 @@ public final class ToolCallSupport {
         return call.toolName() + ":" + (path != null ? path : "") + ":" + oldHash;
     }
 
+    public static boolean hasEmptyEditArguments(ToolCall call) {
+        if (call == null || !"talos.edit_file".equals(call.toolName())) return false;
+        String oldString = firstPresentParam(
+                call,
+                "old_string",
+                "oldString",
+                "old_text",
+                "search",
+                "find",
+                "original");
+        String newString = firstPresentParam(
+                call,
+                "new_string",
+                "newString",
+                "new_text",
+                "replace",
+                "replacement");
+        return (oldString == null || oldString.isBlank())
+                && (newString == null || newString.isBlank());
+    }
+
+    private static String firstPresentParam(ToolCall call, String... keys) {
+        if (call == null || keys == null) return null;
+        for (String key : keys) {
+            String value = call.param(key);
+            if (value != null) return value;
+        }
+        return null;
+    }
+
     public static String canonicalizeReadPath(String path) {
         if (path == null) return "";
         String p = path.replace('\\', '/');
