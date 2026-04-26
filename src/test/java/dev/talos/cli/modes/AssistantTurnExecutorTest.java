@@ -3,6 +3,7 @@ package dev.talos.cli.modes;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
+import dev.talos.runtime.TurnAuditCapture;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import org.junit.jupiter.api.DisplayName;
@@ -33,6 +34,28 @@ class AssistantTurnExecutorTest {
         return Context.builder(new Config())
                 .llm(LlmClient.scripted(List.of(responses)))
                 .build();
+    }
+
+    @Test
+    @DisplayName("records task contract and phase in active turn audit")
+    void recordsPolicyTraceInActiveTurnAudit() {
+        var ctx = scriptedContext("done");
+        List<ChatMessage> messages = new ArrayList<>(List.of(
+                ChatMessage.system("system"),
+                ChatMessage.user("Create index.html")));
+
+        TurnAuditCapture.begin();
+        try {
+            AssistantTurnExecutor.execute(messages, WS, ctx, new AssistantTurnExecutor.Options());
+            var audit = TurnAuditCapture.end();
+
+            assertEquals("FILE_CREATE", audit.policyTrace().taskType());
+            assertTrue(audit.policyTrace().mutationAllowed());
+            assertTrue(audit.policyTrace().verificationRequired());
+            assertEquals("APPLY", audit.policyTrace().initialPhase());
+        } finally {
+            if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
+        }
     }
 
     @Test

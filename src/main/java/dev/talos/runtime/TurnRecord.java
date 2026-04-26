@@ -30,6 +30,7 @@ import java.util.List;
  *                                {@code "info"} (Info / TrustedInfo / Table), or {@code ""}
  *                                (unknown / not-applicable). Makes errored turns
  *                                distinguishable from silent turns on audit.
+ * @param policyTrace             compact task contract / phase / tool-surface trace
  */
 public record TurnRecord(
         int turnNumber,
@@ -42,7 +43,8 @@ public record TurnRecord(
         int approvalsGranted,
         int approvalsDenied,
         String retrievalTraceSummary,
-        String status
+        String status,
+        TurnPolicyTrace policyTrace
 ) {
 
     /** Defensive copy + null normalization. */
@@ -53,6 +55,7 @@ public record TurnRecord(
         toolCalls             = (toolCalls == null) ? List.of() : List.copyOf(toolCalls);
         retrievalTraceSummary = (retrievalTraceSummary == null) ? "" : retrievalTraceSummary;
         status                = (status == null) ? "" : status;
+        policyTrace           = (policyTrace == null) ? TurnPolicyTrace.empty() : policyTrace;
     }
 
     /**
@@ -72,7 +75,23 @@ public record TurnRecord(
                       String retrievalTraceSummary) {
         this(turnNumber, timestamp, durationMs, userInput, assistantText,
                 toolCalls, approvalsRequired, approvalsGranted, approvalsDenied,
-                retrievalTraceSummary, "");
+                retrievalTraceSummary, "", TurnPolicyTrace.empty());
+    }
+
+    public TurnRecord(int turnNumber,
+                      Instant timestamp,
+                      long durationMs,
+                      String userInput,
+                      String assistantText,
+                      List<ToolCallSummary> toolCalls,
+                      int approvalsRequired,
+                      int approvalsGranted,
+                      int approvalsDenied,
+                      String retrievalTraceSummary,
+                      String status) {
+        this(turnNumber, timestamp, durationMs, userInput, assistantText,
+                toolCalls, approvalsRequired, approvalsGranted, approvalsDenied,
+                retrievalTraceSummary, status, TurnPolicyTrace.empty());
     }
 
     /**
@@ -81,11 +100,17 @@ public record TurnRecord(
      * @param name     the tool name (e.g. {@code talos.edit_file})
      * @param pathHint the resolved target path, if the tool accepted one (may be blank)
      * @param success  whether the tool reported success
+     * @param reason   compact failure/block reason, if the call did not succeed
      */
-    public record ToolCallSummary(String name, String pathHint, boolean success) {
+    public record ToolCallSummary(String name, String pathHint, boolean success, String reason) {
         public ToolCallSummary {
             name     = (name == null) ? "" : name;
             pathHint = (pathHint == null) ? "" : pathHint;
+            reason   = (reason == null) ? "" : reason;
+        }
+
+        public ToolCallSummary(String name, String pathHint, boolean success) {
+            this(name, pathHint, success, "");
         }
     }
 }
