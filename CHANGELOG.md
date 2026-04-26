@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2] - 2026-04-26
+
+### Changed
+- Made saved workspace sessions explicit by default: Talos now reports saved history without injecting it into prompt context unless `session.auto_load=true` or `/session load` is used.
+- Honored `session.persistence=false` in CLI bootstrap so ephemeral runs skip persistent session reads and writes.
+- Preserved explicit session restore, including JSONL crash-recovery fallback, and improved cleanup of turn-log-only sessions.
+
 ## [0.9.1] - 2026-04-25
 
 ### Changed

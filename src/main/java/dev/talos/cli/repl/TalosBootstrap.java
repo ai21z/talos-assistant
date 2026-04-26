@@ -17,6 +17,7 @@ import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.CliApprovalGate;
 import dev.talos.runtime.JsonSessionStore;
 import dev.talos.runtime.MemoryUpdateListener;
+import dev.talos.runtime.NoOpSessionStore;
 import dev.talos.runtime.Session;
 import dev.talos.runtime.SessionData;
 import dev.talos.runtime.SessionStore;
@@ -59,8 +60,8 @@ import java.util.stream.Collectors;
  */
 public final class TalosBootstrap {
 
-    record RestoreSummary(int pairsReplayed, java.time.Instant createdAt, String model) {
-        boolean hasReplay() { return pairsReplayed > 0; }
+    public record RestoreSummary(int pairsReplayed, java.time.Instant createdAt, String model) {
+        public boolean hasReplay() { return pairsReplayed > 0; }
     }
 
     private TalosBootstrap() {} // static factory only
@@ -143,30 +144,17 @@ public final class TalosBootstrap {
                 new ConversationManager(memory, TokenBudget.fromConfig(cfg));
 
         // ── Session persistence ──────────────────────────────────────────
-        SessionStore sessionStore = new JsonSessionStore();
+        boolean sessionPersistenceEnabled = cfg.view().session().persistence();
+        boolean sessionAutoLoadEnabled = sessionPersistenceEnabled && cfg.view().session().autoLoad();
+        SessionStore sessionStore = sessionPersistenceEnabled ? new JsonSessionStore() : new NoOpSessionStore();
         String sessionId = JsonSessionStore.sessionIdFor(workspace);
 
-        // Auto-load previous session if one exists.
-        //
-        // Snapshot-first, JSONL-fallback reconciliation:
-        //   1. If snapshot exists AND replays ≥1 turn → snapshot wins.
-        //      The JSONL is left on disk; the next graceful close will
-        //      overwrite it via the snapshot path (close-only save), so
-        //      we don't need to truncate it here.
-        //   2. Otherwise (snapshot missing, or snapshot has zero turns —
-        //      the real crash-recovery case: process killed before
-        //      onSessionEnd fired the snapshot save) → replay turns from
-        //      the per-turn JSONL companion file into memory.
-        //
-        // This is NOT a merge engine. Snapshot wins when it has content;
-        // JSONL is strictly a fallback for the crash path the snapshot
-        // model cannot cover on its own.
-        RestoreSummary restoreSummary = replaySnapshot(sessionStore, sessionId, memory, conversationManager);
-        if (!restoreSummary.hasReplay()) {
-            int turnLogTurnsReplayed = replayTurnLog(sessionStore, sessionId, memory);
-            if (turnLogTurnsReplayed > 0) {
-                restoreSummary = new RestoreSummary(turnLogTurnsReplayed, null, "");
-            }
+        RestoreSummary restoreSummary = new RestoreSummary(0, null, "");
+        RestoreSummary savedSessionSummary = new RestoreSummary(0, null, "");
+        if (sessionAutoLoadEnabled) {
+            restoreSummary = restoreSavedSession(sessionStore, sessionId, memory, conversationManager);
+        } else if (sessionPersistenceEnabled) {
+            savedSessionSummary = inspectSavedSession(sessionStore, sessionId);
         }
         if (restoreSummary.model() != null && !restoreSummary.model().isBlank()) {
             llm.setModel(restoreSummary.model());
@@ -226,23 +214,26 @@ public final class TalosBootstrap {
         // ToolCallStreamFilter, so the rawSink never fires stopSpinner().
         final Runnable onStreamComplete = spinnerStopper;
 
-        // Auto-save session on close
-        final ConversationManager cmRef = conversationManager;
-        final SessionMemory memRef = memory;
-        final String sidRef = sessionId;
-        final Path wsRef = workspace;
-        runtimeSession.addCloseListener(new dev.talos.runtime.SessionListener() {
-            @Override public void onSessionEnd() {
-                java.util.List<SessionData.Turn> turns = memRef.getTurns().stream()
-                        .map(m -> new SessionData.Turn(m.role(), m.content(), "assistant".equals(m.role()) ? "ok" : ""))
-                        .toList();
-                String sketch = cmRef.sketch();
-                SessionData data = new SessionData(sidRef, wsRef.toString(),
-                        sketch != null ? sketch : "", cmRef.turnCount(),
-                        runtimeSession.startedAt(), turns, llm.getModel());
-                sessionStore.save(data);
-            }
-        });
+        if (sessionPersistenceEnabled) {
+            // Auto-save session evidence on close. Saved evidence is not prompt
+            // context unless session.auto_load=true or the user runs /session load.
+            final ConversationManager cmRef = conversationManager;
+            final SessionMemory memRef = memory;
+            final String sidRef = sessionId;
+            final Path wsRef = workspace;
+            runtimeSession.addCloseListener(new dev.talos.runtime.SessionListener() {
+                @Override public void onSessionEnd() {
+                    java.util.List<SessionData.Turn> turns = memRef.getTurns().stream()
+                            .map(m -> new SessionData.Turn(m.role(), m.content(), "assistant".equals(m.role()) ? "ok" : ""))
+                            .toList();
+                    String sketch = cmRef.sketch();
+                    SessionData data = new SessionData(sidRef, wsRef.toString(),
+                            sketch != null ? sketch : "", cmRef.turnCount(),
+                            runtimeSession.startedAt(), turns, llm.getModel());
+                    sessionStore.save(data);
+                }
+            });
+        }
 
         // ── Stream sink ───────────────────────────────────────────────────
         // Wrapped in ToolCallStreamFilter to suppress text-form tool-call protocol
@@ -312,8 +303,10 @@ public final class TalosBootstrap {
         // Per-turn structured durability (Step 2): appends one JSON line per
         // completed turn to ~/.talos/sessions/<sid>.turns.jsonl. Complements
         // the close-only snapshot and enables crash recovery.
-        turnProcessor.addListener(
-                new dev.talos.runtime.JsonTurnLogAppender(sessionStore, sessionId));
+        if (sessionPersistenceEnabled) {
+            turnProcessor.addListener(
+                    new dev.talos.runtime.JsonTurnLogAppender(sessionStore, sessionId));
+        }
 
         // ── Commands ─────────────────────────────────────────────────────
         AtomicBoolean quit = new AtomicBoolean(false);
@@ -323,7 +316,7 @@ public final class TalosBootstrap {
         // ── Assemble router ──────────────────────────────────────────────
         String startupNotice = restoreSummary.hasReplay()
                 ? buildRestoreNotice(restoreSummary)
-                : "";
+                : buildSavedSessionNotice(savedSessionSummary);
         return new ReplRouter(modes, turnProcessor, runtimeSession, ctx, render,
                               registry, workspace, quit, startupNotice);
     }
@@ -396,12 +389,42 @@ public final class TalosBootstrap {
 
     // ── Session reconciliation helpers ──────────────────────────────────
 
-    /**
-     * Replay the JSON snapshot into memory and conversation state.
-     *
-     * @return number of user/assistant pairs actually replayed (0 if no snapshot,
-     *         or snapshot present but turns list empty / unpaired)
-     */
+    /** Restore saved session context through snapshot-first, JSONL-fallback replay. */
+    public static RestoreSummary restoreSavedSession(SessionStore store, String sessionId,
+                                         SessionMemory memory, ConversationManager cm) {
+        RestoreSummary restoreSummary = replaySnapshot(store, sessionId, memory, cm);
+        if (!restoreSummary.hasReplay()) {
+            int turnLogTurnsReplayed = replayTurnLog(store, sessionId, memory);
+            if (turnLogTurnsReplayed > 0) {
+                restoreSummary = new RestoreSummary(turnLogTurnsReplayed, null, "");
+            }
+        }
+        return restoreSummary;
+    }
+
+    public static RestoreSummary inspectSavedSession(SessionStore store, String sessionId) {
+        if (store == null || sessionId == null || sessionId.isBlank()) {
+            return new RestoreSummary(0, null, "");
+        }
+        var loaded = store.load(sessionId);
+        if (loaded.isPresent()) {
+            SessionData data = loaded.get();
+            int pairs = countReplayableSnapshotPairs(data);
+            if (pairs > 0) {
+                return new RestoreSummary(pairs, data.createdAt(), data.model());
+            }
+        }
+        int turnLogPairs = 0;
+        java.time.Instant createdAt = null;
+        for (var rec : store.loadTurns(sessionId)) {
+            if (isReplayableTurnRecord(rec)) {
+                turnLogPairs++;
+                if (createdAt == null) createdAt = rec.timestamp();
+            }
+        }
+        return new RestoreSummary(turnLogPairs, createdAt, "");
+    }
+
     static RestoreSummary replaySnapshot(SessionStore store, String sessionId,
                               SessionMemory memory, ConversationManager cm) {
         var loaded = store.load(sessionId);
@@ -412,9 +435,7 @@ public final class TalosBootstrap {
             for (int i = 0; i < data.turns().size() - 1; i += 2) {
                 SessionData.Turn u = data.turns().get(i);
                 SessionData.Turn a = data.turns().get(i + 1);
-                String status = a.status();
-                boolean replayable = status == null || status.isBlank() || "ok".equals(status);
-                if ("user".equals(u.role()) && "assistant".equals(a.role()) && replayable) {
+                if (isReplayableSnapshotPair(u, a)) {
                     memory.update(u.content(), a.content());
                     pairs++;
                 }
@@ -457,21 +478,48 @@ public final class TalosBootstrap {
         if (records == null || records.isEmpty()) return 0;
         int replayed = 0;
         for (var rec : records) {
-            if (rec == null) continue;
-            String status = rec.status();
-            // Accept "ok" and "" (legacy records written before the status
-            // field existed). Anything else — "error", "aborted", "info",
-            // "stream", or a future tag — is non-conversational and must
-            // not re-enter SessionMemory.
-            if (status != null && !status.isEmpty() && !"ok".equals(status)) continue;
-            String u = rec.userInput();
-            String a = rec.assistantText();
-            if (u != null && !u.isBlank() && a != null && !a.isBlank()) {
-                memory.update(u, a);
-                replayed++;
-            }
+            if (!isReplayableTurnRecord(rec)) continue;
+            memory.update(rec.userInput(), rec.assistantText());
+            replayed++;
         }
         return replayed;
+    }
+
+    private static int countReplayableSnapshotPairs(SessionData data) {
+        if (data == null || data.turns() == null) return 0;
+        int pairs = 0;
+        for (int i = 0; i < data.turns().size() - 1; i += 2) {
+            SessionData.Turn u = data.turns().get(i);
+            SessionData.Turn a = data.turns().get(i + 1);
+            if (isReplayableSnapshotPair(u, a)) {
+                pairs++;
+            }
+        }
+        return pairs;
+    }
+
+    private static boolean isReplayableSnapshotPair(SessionData.Turn user, SessionData.Turn assistant) {
+        if (user == null || assistant == null) return false;
+        String status = assistant.status();
+        boolean replayable = status == null || status.isBlank() || "ok".equals(status);
+        return replayable
+                && "user".equals(user.role())
+                && "assistant".equals(assistant.role())
+                && user.content() != null && !user.content().isBlank()
+                && assistant.content() != null && !assistant.content().isBlank();
+    }
+
+    private static boolean isReplayableTurnRecord(dev.talos.runtime.TurnRecord rec) {
+        if (rec == null) return false;
+        String status = rec.status();
+        // Accept "ok" and "" (legacy records written before the status
+        // field existed). Anything else — "error", "aborted", "info",
+        // "stream", or a future tag — is non-conversational and must
+        // not re-enter SessionMemory.
+        if (status != null && !status.isEmpty() && !"ok".equals(status)) return false;
+        String u = rec.userInput();
+        String a = rec.assistantText();
+        return u != null && !u.isBlank() && a != null && !a.isBlank();
     }
 
     static String buildRestoreNotice(RestoreSummary summary) {
@@ -492,6 +540,24 @@ public final class TalosBootstrap {
             sb.append(AnsiColor.isUnicodeSafe() ? " · model " : " - model ")
                     .append(summary.model());
         }
+        return sb.toString();
+    }
+
+    static String buildSavedSessionNotice(RestoreSummary summary) {
+        if (summary == null || !summary.hasReplay()) return "";
+        String age = "";
+        if (summary.createdAt() != null) {
+            java.time.Duration d = java.time.Duration.between(summary.createdAt(), java.time.Instant.now());
+            if (d.toDays() > 0) age = d.toDays() + "d ago";
+            else if (d.toHours() > 0) age = d.toHours() + "h ago";
+            else if (d.toMinutes() > 0) age = d.toMinutes() + "m ago";
+            else age = d.toSeconds() + "s ago";
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("  saved session found: ").append(summary.pairsReplayed()).append(" prior exchange")
+                .append(summary.pairsReplayed() == 1 ? "" : "s");
+        if (!age.isBlank()) sb.append(" from ").append(age);
+        sb.append(". Not loaded. Use /session load to resume or /session clear to delete.");
         return sb.toString();
     }
 

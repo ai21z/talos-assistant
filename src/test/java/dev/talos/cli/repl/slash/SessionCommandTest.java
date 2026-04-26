@@ -6,6 +6,7 @@ import dev.talos.core.Config;
 import dev.talos.core.context.ConversationManager;
 import dev.talos.runtime.JsonSessionStore;
 import dev.talos.runtime.SessionData;
+import dev.talos.runtime.TurnRecord;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -95,6 +96,26 @@ class SessionCommandTest {
             assertInstanceOf(Result.Info.class, r);
             assertTrue(((Result.Info) r).text.contains("No saved session"));
         }
+        @Test void load_usesTurnLogFallbackWhenSnapshotMissing() throws Exception {
+            var st = store();
+            Path ws = Path.of("/crash/project").toAbsolutePath().normalize();
+            var cmd = new SessionCommand(ws, st);
+            st.appendTurn(cmd.sessionId(), new TurnRecord(1, Instant.now(), 0L,
+                    "recover me", "recovered answer", List.of(), 0, 0, 0, "", "ok"));
+
+            SessionMemory freshMem = new SessionMemory();
+            ConversationManager freshCm = new ConversationManager(freshMem);
+            Context freshCtx = Context.builder(new Config())
+                    .memory(freshMem)
+                    .conversationManager(freshCm)
+                    .build();
+
+            Result loadResult = cmd.execute("load", freshCtx);
+            assertInstanceOf(Result.Info.class, loadResult);
+            assertTrue(((Result.Info) loadResult).text.contains("Session restored"));
+            assertEquals(1, freshCm.turnCount());
+            assertTrue(freshMem.get().contains("recovered answer"));
+        }
     }
     // -- Clear --
     @Nested class Clear {
@@ -114,6 +135,17 @@ class SessionCommandTest {
             Result r = cmd.execute("clear", minimalCtx());
             assertInstanceOf(Result.Info.class, r);
             assertTrue(((Result.Info) r).text.contains("No saved session to delete"));
+        }
+        @Test void clear_turnLogOnly_deletesCompanionFile() throws Exception {
+            var st = store();
+            var cmd = new SessionCommand(Path.of("/ws-turn-log-only"), st);
+            st.appendTurn(cmd.sessionId(), new TurnRecord(1, Instant.now(), 0L,
+                    "u", "a", List.of(), 0, 0, 0, "", "ok"));
+
+            Result r = cmd.execute("clear", minimalCtx());
+            assertInstanceOf(Result.Info.class, r);
+            assertTrue(((Result.Info) r).text.contains("Saved session deleted"));
+            assertTrue(st.loadTurns(cmd.sessionId()).isEmpty());
         }
     }
     // -- Unknown subcommand --

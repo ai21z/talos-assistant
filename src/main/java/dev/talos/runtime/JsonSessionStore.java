@@ -114,8 +114,8 @@ public final class JsonSessionStore implements SessionStore {
         try {
             boolean snap = Files.deleteIfExists(fileFor(sessionId));
             // Also remove the companion per-turn log, if any.
-            Files.deleteIfExists(turnsFileFor(sessionId));
-            return snap;
+            boolean turns = Files.deleteIfExists(turnsFileFor(sessionId));
+            return snap || turns;
         } catch (IOException e) {
             LOG.warn("Failed to delete session {}: {}", sessionId, e.getMessage());
             return false;
