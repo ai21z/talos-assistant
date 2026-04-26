@@ -21,7 +21,7 @@ public final class MutationIntent {
                     + "cool|hey|hi|hello|hmm+),?\\s+)*";
 
     private static final String CORE_MUTATION_VERBS =
-            "(?:edit|modify|change|update|fix|rewrite|replace|redesign|"
+            "(?:edit|modify|change|update|fix|repair|rewrite|replace|redesign|"
                     + "restyle|re-style|re-design|write|create|save|"
                     + "apply|add|remove|delete|refactor|put|implement)";
 
