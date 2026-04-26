@@ -2,6 +2,7 @@ package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.outcome.MutationOutcome;
 import dev.talos.runtime.outcome.TaskCompletionStatus;
 import dev.talos.runtime.outcome.TaskOutcome;
@@ -43,6 +44,7 @@ record ExecutionOutcome(
         boolean webDiagnosticGroundedOverride,
         boolean selectorGroundedOverride,
         boolean noToolMutationReplaced,
+        boolean malformedProtocolDebrisReplaced,
         boolean advisoryOnly
 ) {
 
@@ -192,6 +194,7 @@ record ExecutionOutcome(
                 webDiagnosticGroundedOverride,
                 selectorGroundedOverride,
                 false,
+                false,
                 completionStatus == CompletionStatus.ADVISORY_ONLY
         );
     }
@@ -204,8 +207,12 @@ record ExecutionOutcome(
     ) {
         String shaped = answer == null ? "" : answer;
         boolean noToolMutationReplaced = false;
+        boolean malformedProtocolDebrisReplaced = false;
 
-        if (streamed) {
+        if (ToolCallParser.looksLikeMalformedProtocolArrayDebris(shaped)) {
+            shaped = AssistantTurnExecutor.MALFORMED_TOOL_PROTOCOL_REPLACEMENT;
+            malformedProtocolDebrisReplaced = true;
+        } else if (streamed) {
             String replaced = AssistantTurnExecutor.enforceStreamingNoToolTruthfulness(shaped, messages);
             noToolMutationReplaced = AssistantTurnExecutor.STREAMING_NO_TOOL_MUTATION_REPLACEMENT.equals(replaced);
             shaped = replaced;
@@ -219,9 +226,14 @@ record ExecutionOutcome(
         boolean ungrounded = shaped != null
                 && shaped.startsWith(AssistantTurnExecutor.UNGROUNDED_ANNOTATION);
         boolean advisoryOnly = ungrounded && !blocked;
-        CompletionStatus completionStatus = completionStatus(false, false, false, advisoryOnly, blocked);
+        CompletionStatus completionStatus = malformedProtocolDebrisReplaced
+                ? CompletionStatus.FAILED
+                : completionStatus(false, false, false, advisoryOnly, blocked);
         TaskVerificationResult verification = TaskVerificationResult.notRun("Post-apply verification was not applicable.");
-        List<TruthWarning> warnings = noToolWarnings(noToolMutationReplaced, ungrounded);
+        List<TruthWarning> warnings = noToolWarnings(
+                noToolMutationReplaced,
+                ungrounded,
+                malformedProtocolDebrisReplaced);
         TaskOutcome taskOutcome = new TaskOutcome(
                 contract,
                 toTaskCompletionStatus(completionStatus, VerificationStatus.NOT_RUN, contract, noToolMutationReplaced),
@@ -248,6 +260,7 @@ record ExecutionOutcome(
                 false,
                 false,
                 noToolMutationReplaced,
+                malformedProtocolDebrisReplaced,
                 advisoryOnly
         );
     }
@@ -378,7 +391,8 @@ record ExecutionOutcome(
 
     private static List<TruthWarning> noToolWarnings(
             boolean noToolMutationReplaced,
-            boolean ungrounded
+            boolean ungrounded,
+            boolean malformedProtocolDebrisReplaced
     ) {
         List<TruthWarning> warnings = new ArrayList<>();
         if (noToolMutationReplaced) {
@@ -390,6 +404,11 @@ record ExecutionOutcome(
             warnings.add(TruthWarning.of(
                     TruthWarningType.STREAMING_NO_TOOL_UNGROUNDED,
                     "A streaming no-tool answer made workspace-evidence claims without tool grounding."));
+        }
+        if (malformedProtocolDebrisReplaced) {
+            warnings.add(TruthWarning.of(
+                    TruthWarningType.MALFORMED_TOOL_PROTOCOL_DEBRIS_REPLACED,
+                    "Malformed tool protocol debris was replaced with a no-action notice."));
         }
         return List.copyOf(warnings);
     }

@@ -69,7 +69,8 @@ class AssistantTurnExecutorTest {
                 AssistantTurnExecutor.UNDER_INSPECTION_ANNOTATION,
                 AssistantTurnExecutor.UNGROUNDED_ANNOTATION,
                 AssistantTurnExecutor.STREAMING_NO_TOOL_MUTATION_ANNOTATION,
-                AssistantTurnExecutor.STREAMING_NO_TOOL_MUTATION_REPLACEMENT
+                AssistantTurnExecutor.STREAMING_NO_TOOL_MUTATION_REPLACEMENT,
+                AssistantTurnExecutor.MALFORMED_TOOL_PROTOCOL_REPLACEMENT
         );
 
         for (String annotation : annotations) {
@@ -297,6 +298,37 @@ class AssistantTurnExecutorTest {
                     "empty protocol fence buffered during a tool-loop reprompt must not leak into the next turn");
             assertTrue(visible.contains("plain second turn"),
                     "the next normal streamed turn should still be visible");
+        }
+
+        @Test
+        void malformed_protocol_array_is_hidden_and_replaced_on_streaming_no_tool_path() {
+            var visibleChunks = new ArrayList<String>();
+            var streamFilter = new dev.talos.runtime.ToolCallStreamFilter(visibleChunks::add);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted("""
+                            [
+                                ,
+
+                            ]
+                            """))
+                    .streamSink(streamFilter)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Make the edits please."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, WS, ctx, new AssistantTurnExecutor.Options());
+
+            String visible = String.join("", visibleChunks);
+            assertFalse(dev.talos.runtime.ToolCallParser.looksLikeMalformedProtocolArrayDebris(visible),
+                    "malformed protocol array must not be visible in streamed output");
+            assertFalse(visible.contains("\n    ,"),
+                    "the raw comma-only protocol array body must not be visible");
+            assertTrue(visible.contains("invalid tool-call payload"),
+                    "streamed user-visible output should contain the truthful replacement");
+            assertEquals(AssistantTurnExecutor.MALFORMED_TOOL_PROTOCOL_REPLACEMENT, out.text());
+            assertTrue(out.streamed());
         }
     }
 
