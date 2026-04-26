@@ -5,7 +5,7 @@ Status: open
 Architecture references:
 - `local/tickets/new-work.md`
 - `docs/new-architecture/talos-harness-source-of-truth.md`
-- `docs/work-test-cycle.md`
+- `work-cycle-docs/work-test-cycle.md`
 - `local/tickets/talos-minimal-task-contract.md`
 - `local/tickets/[T03-open-high] talos-natural-workspace-explain-underinspection.md`
 

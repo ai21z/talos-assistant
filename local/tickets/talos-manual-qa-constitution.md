@@ -4,8 +4,8 @@ Priority: medium
 Status: open
 Architecture references:
 - `local/tickets/new-work.md`
-- `docs/work-test-cycle.md`
-- `docs/work-test-cycle-step-by-step.md`
+- `work-cycle-docs/work-test-cycle.md`
+- `work-cycle-docs/work-test-cycle-step-by-step.md`
 - `.external assistant/openclaw/qa/scenarios/index.md`
 - `.external assistant/openclaw/docs/concepts/qa-e2e-automation.md`
 

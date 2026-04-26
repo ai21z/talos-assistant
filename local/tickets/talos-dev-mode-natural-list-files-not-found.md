@@ -4,7 +4,7 @@ Priority: medium
 Status: open
 Architecture references:
 - `local/tickets/new-work.md`
-- `docs/work-test-cycle.md`
+- `work-cycle-docs/work-test-cycle.md`
 - `local/prompts/talos-manual-qa-suite.md`
 
 ## Why This Ticket Exists

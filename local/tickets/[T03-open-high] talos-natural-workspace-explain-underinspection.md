@@ -5,7 +5,7 @@ Status: open
 Architecture references:
 - `local/tickets/new-work.md`
 - `docs/new-architecture/talos-harness-source-of-truth.md`
-- `docs/work-test-cycle.md`
+- `work-cycle-docs/work-test-cycle.md`
 
 ## Why This Ticket Exists
 

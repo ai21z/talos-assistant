@@ -3,7 +3,7 @@ Date: 2026-04-26
 Priority: low
 Status: done
 Architecture references:
-- `docs/work-test-cycle.md`
+- `work-cycle-docs/work-test-cycle.md`
 - `local/tickets/talos-cli-last-run-introspection.md`
 - `local/tickets/talos-current-turn-debug-trace.md`
 
