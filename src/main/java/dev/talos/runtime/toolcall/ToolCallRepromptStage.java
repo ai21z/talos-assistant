@@ -80,7 +80,8 @@ public final class ToolCallRepromptStage {
         }
 
         try {
-            LlmClient.StreamResult repromptResult = state.ctx.llm().chatFull(state.messages);
+            LlmClient.StreamResult repromptResult =
+                    state.ctx.llm().chatFull(state.messages, state.ctx.nativeToolSpecs());
             state.currentText = repromptResult.text();
             state.currentNativeCalls = repromptResult.hasToolCalls()
                     ? new ArrayList<>(repromptResult.toolCalls()) : List.of();
@@ -108,7 +109,8 @@ public final class ToolCallRepromptStage {
             LOG.warn("Transient error during tool-call loop iteration {}: {}", state.iterations, tr.getMessage());
             try {
                 Thread.sleep(400);
-                LlmClient.StreamResult retryResult = state.ctx.llm().chatFull(state.messages);
+                LlmClient.StreamResult retryResult =
+                        state.ctx.llm().chatFull(state.messages, state.ctx.nativeToolSpecs());
                 state.currentText = retryResult.text();
                 state.currentNativeCalls = retryResult.hasToolCalls()
                         ? new ArrayList<>(retryResult.toolCalls()) : List.of();
@@ -182,7 +184,8 @@ public final class ToolCallRepromptStage {
         anchorIndex = state.messages.size() - 1;
 
         try {
-            LlmClient.StreamResult terminal = state.ctx.llm().chatFull(state.messages);
+            LlmClient.StreamResult terminal =
+                    state.ctx.llm().chatFull(state.messages, state.ctx.nativeToolSpecs());
             String text = terminal.text() == null ? "" : terminal.text();
             if (terminal.hasToolCalls()) {
                 return deniedMutationStopMessage();

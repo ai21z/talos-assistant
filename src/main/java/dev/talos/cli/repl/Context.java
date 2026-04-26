@@ -13,9 +13,11 @@ import dev.talos.runtime.ApprovalGate;
 import dev.talos.runtime.NoOpApprovalGate;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.phase.ExecutionPhaseState;
+import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.ToolRegistry;
 
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
@@ -37,10 +39,12 @@ public record Context(
         ToolCallLoop toolCallLoop,
         Consumer<String> streamSink,
         Runnable onStreamComplete,
-        ExecutionPhaseState executionPhaseState
+        ExecutionPhaseState executionPhaseState,
+        List<ToolSpec> nativeToolSpecs
 ) {
     public Context {
         if (executionPhaseState == null) executionPhaseState = new ExecutionPhaseState();
+        if (nativeToolSpecs != null) nativeToolSpecs = List.copyOf(nativeToolSpecs);
     }
 
     /** Backward-compatible constructor without onStreamComplete. */
@@ -50,7 +54,7 @@ public record Context(
                    ToolRegistry toolRegistry, ConversationManager conversationManager,
                    ToolCallLoop toolCallLoop, Consumer<String> streamSink) {
         this(cfg, limits, session, audit, redactor, sandbox, rag, llm, netPolicy,
-             memory, approvalGate, toolRegistry, conversationManager, toolCallLoop, streamSink, null, null);
+             memory, approvalGate, toolRegistry, conversationManager, toolCallLoop, streamSink, null, null, null);
     }
 
     /** Backward-compatible constructor without streamSink or onStreamComplete. */
@@ -60,7 +64,7 @@ public record Context(
                    ToolRegistry toolRegistry, ConversationManager conversationManager,
                    ToolCallLoop toolCallLoop) {
         this(cfg, limits, session, audit, redactor, sandbox, rag, llm, netPolicy,
-             memory, approvalGate, toolRegistry, conversationManager, toolCallLoop, null, null, null);
+             memory, approvalGate, toolRegistry, conversationManager, toolCallLoop, null, null, null, null);
     }
 
     /** Backward-compatible constructor without toolCallLoop, streamSink, or onStreamComplete. */
@@ -69,7 +73,7 @@ public record Context(
                    NetPolicy netPolicy, SessionMemory memory, ApprovalGate approvalGate,
                    ToolRegistry toolRegistry, ConversationManager conversationManager) {
         this(cfg, limits, session, audit, redactor, sandbox, rag, llm, netPolicy,
-             memory, approvalGate, toolRegistry, conversationManager, null, null, null, null);
+             memory, approvalGate, toolRegistry, conversationManager, null, null, null, null, null);
     }
 
     /** Backward-compatible constructor without conversationManager or toolCallLoop. */
@@ -88,6 +92,16 @@ public record Context(
                    NetPolicy netPolicy, SessionMemory memory, ApprovalGate approvalGate) {
         this(cfg, limits, session, audit, redactor, sandbox, rag, llm, netPolicy,
              memory, approvalGate, new ToolRegistry());
+    }
+
+    public boolean hasNativeToolSpecOverride() {
+        return nativeToolSpecs != null;
+    }
+
+    public Context withNativeToolSpecs(List<ToolSpec> specs) {
+        return new Context(cfg, limits, session, audit, redactor, sandbox, rag, llm,
+                netPolicy, memory, approvalGate, toolRegistry, conversationManager,
+                toolCallLoop, streamSink, onStreamComplete, executionPhaseState, specs);
     }
 
     /** Fluent builder for tests and advanced wiring. Prefer explicit setter calls over withDefaults in prod. */
@@ -111,6 +125,7 @@ public record Context(
         private Consumer<String> streamSink;
         private Runnable onStreamComplete;
         private ExecutionPhaseState executionPhaseState;
+        private List<ToolSpec> nativeToolSpecs;
 
         public Builder(Config cfg) { this.cfg = (cfg == null ? new Config() : cfg); }
 
@@ -130,6 +145,7 @@ public record Context(
         public Builder streamSink(Consumer<String> s) { this.streamSink = s; return this; }
         public Builder onStreamComplete(Runnable r)  { this.onStreamComplete = r; return this; }
         public Builder executionPhaseState(ExecutionPhaseState s) { this.executionPhaseState = s; return this; }
+        public Builder nativeToolSpecs(List<ToolSpec> specs) { this.nativeToolSpecs = specs; return this; }
 
         /** Convenience for ad-hoc usage; tests should prefer explicit setters for control. */
         public Builder withDefaults(Path workspace, SessionState session) {
@@ -181,7 +197,7 @@ public record Context(
 
             return new Context(cfg, limits, session, audit, redactor, sandbox, rag, llm, net,
                     memory, approvalGate, toolRegistry, conversationManager, toolCallLoop, streamSink,
-                    onStreamComplete, executionPhaseState);
+                    onStreamComplete, executionPhaseState, nativeToolSpecs);
         }
     }
 }

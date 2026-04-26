@@ -1,0 +1,120 @@
+package dev.talos.core.llm;
+
+import dev.talos.cli.modes.AssistantTurnExecutor;
+import dev.talos.cli.repl.Context;
+import dev.talos.core.Config;
+import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ChatRequest;
+import dev.talos.spi.types.TokenChunk;
+import dev.talos.spi.types.ToolSpec;
+import dev.talos.tools.FileUndoStack;
+import dev.talos.tools.ToolRegistry;
+import dev.talos.tools.impl.FileEditTool;
+import dev.talos.tools.impl.FileWriteTool;
+import dev.talos.tools.impl.ReadFileTool;
+import org.junit.jupiter.api.Test;
+
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.stream.Stream;
+
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class AssistantTurnExecutorNativeToolSurfaceTest {
+
+    @Test
+    void readOnlyTurnSendsOnlyReadOnlyNativeToolSpecs() {
+        RecordingResolver resolver = new RecordingResolver();
+        Context ctx = context(resolver);
+
+        AssistantTurnExecutor.execute(
+                messages("hello"),
+                Path.of("."),
+                ctx,
+                new AssistantTurnExecutor.Options());
+
+        List<String> names = toolNames(resolver.lastRequest);
+        assertTrue(names.contains("talos.read_file"));
+        assertFalse(names.contains("talos.write_file"));
+        assertFalse(names.contains("talos.edit_file"));
+    }
+
+    @Test
+    void mutationTurnSendsWriteAndEditNativeToolSpecs() {
+        RecordingResolver resolver = new RecordingResolver();
+        Context ctx = context(resolver);
+
+        AssistantTurnExecutor.execute(
+                messages("Create a README.md file."),
+                Path.of("."),
+                ctx,
+                new AssistantTurnExecutor.Options());
+
+        List<String> names = toolNames(resolver.lastRequest);
+        assertTrue(names.contains("talos.read_file"));
+        assertTrue(names.contains("talos.write_file"));
+        assertTrue(names.contains("talos.edit_file"));
+    }
+
+    private static Context context(RecordingResolver resolver) {
+        ToolRegistry registry = new ToolRegistry();
+        FileUndoStack undoStack = new FileUndoStack();
+        registry.register(new ReadFileTool());
+        registry.register(new FileWriteTool(undoStack));
+        registry.register(new FileEditTool(undoStack));
+
+        LlmClient llm = new LlmClient(engineConfig(), resolver);
+        llm.setToolSpecs(registry.descriptors().stream()
+                .map(d -> new ToolSpec(d.name(), d.description(), d.parametersSchema()))
+                .toList());
+
+        return Context.builder(engineConfig())
+                .llm(llm)
+                .toolRegistry(registry)
+                .build();
+    }
+
+    private static List<ChatMessage> messages(String user) {
+        return new ArrayList<>(List.of(ChatMessage.system("system"), ChatMessage.user(user)));
+    }
+
+    private static List<String> toolNames(ChatRequest request) {
+        return request.tools.stream().map(ToolSpec::name).sorted().toList();
+    }
+
+    private static Config engineConfig() {
+        Config cfg = new Config();
+        LinkedHashMap<String, Object> llm = new LinkedHashMap<>();
+        llm.put("transport", "engine");
+        llm.put("default_backend", "ollama");
+        cfg.data.put("llm", llm);
+
+        LinkedHashMap<String, Object> ollama = new LinkedHashMap<>();
+        ollama.put("model", "qwen2.5-coder:14b");
+        cfg.data.put("ollama", ollama);
+        return cfg;
+    }
+
+    private static final class RecordingResolver implements LlmEngineResolver {
+        private volatile ChatRequest lastRequest;
+
+        @Override
+        public void select(String backend, String model) {
+            // no-op
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(ChatRequest request) {
+            this.lastRequest = request;
+            return Stream.of(TokenChunk.of("plain reply"), TokenChunk.eos());
+        }
+
+        @Override
+        public void close() {
+            // no-op
+        }
+    }
+}

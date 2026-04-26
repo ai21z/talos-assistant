@@ -4,6 +4,7 @@ import dev.talos.cli.repl.Context;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.context.ConversationManager;
 import dev.talos.core.llm.SystemPromptBuilder;
+import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
 import dev.talos.spi.types.ChatMessage;
 
 import java.nio.file.Path;
@@ -163,6 +164,9 @@ public final class PromptInspector {
 
     private static List<String> toolNames(Context ctx) {
         if (ctx == null || ctx.toolRegistry() == null) return List.of();
+        if (ctx.hasNativeToolSpecOverride()) {
+            return NativeToolSpecPolicy.names(ctx.nativeToolSpecs());
+        }
         return ctx.toolRegistry().descriptors().stream()
                 .map(descriptor -> descriptor.name())
                 .sorted()
