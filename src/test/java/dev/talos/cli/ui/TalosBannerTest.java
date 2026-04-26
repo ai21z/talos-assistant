@@ -21,15 +21,16 @@ class TalosBannerTest {
         return baos.toString(StandardCharsets.UTF_8);
     }
     @Test
-    void print_contains_logo_block_characters() {
+    void print_uses_compact_dashboard_not_legacy_logo() {
         String output = capturePrint(Path.of("."), "rag");
-        assertTrue(output.contains("\u2588\u2588"), "Banner should contain block characters from logo");
+        assertTrue(output.contains("Talos"), "Dashboard should contain Talos brand name");
+        assertFalse(output.contains("\u2588\u2588"), "Dashboard should not print the legacy block logo");
     }
     @Test
-    void print_contains_tagline() {
+    void print_contains_dashboard_identity() {
         String output = capturePrint(Path.of("."), "rag");
-        assertTrue(output.contains("Talos"), "Banner should contain Talos brand name");
-        assertTrue(output.contains("Local Knowledge Engine"), "Banner should contain tagline");
+        assertTrue(output.contains("Talos"), "Dashboard should contain Talos brand name");
+        assertTrue(output.contains("Workspace"), "Dashboard should show workspace");
     }
     @Test
     void print_contains_version() {
@@ -40,7 +41,10 @@ class TalosBannerTest {
     void print_contains_context_labels() {
         String output = capturePrint(Path.of("."), "rag");
         assertTrue(output.contains("Model"), "Banner should show Model label");
-        assertTrue(output.contains("Embed"), "Banner should show Embed label");
+        assertTrue(output.contains("Index"), "Banner should show Index label");
+        assertTrue(output.contains("Policy"), "Banner should show Policy label");
+        assertTrue(output.contains("Debug"), "Banner should show Debug label");
+        assertTrue(output.contains("Next"), "Banner should show Next label");
         assertTrue(output.contains("Workspace"), "Banner should show Workspace label");
         assertTrue(output.contains("Mode"), "Banner should show Mode label");
     }

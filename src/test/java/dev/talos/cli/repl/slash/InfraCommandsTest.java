@@ -54,7 +54,7 @@ class InfraCommandsTest {
         @Test void output_contains_status_header() {
             var cmd = new StatusCommand(ModeController.defaultController(), ws);
             String text = cmd.execute("", ctx).toString();
-            assertTrue(text.contains("Status"), "Should contain status header");
+            assertTrue(text.contains("Talos v"), "Should contain dashboard header");
         }
 
         @Test void output_contains_mode() {
@@ -65,7 +65,7 @@ class InfraCommandsTest {
 
         @Test void output_contains_limits() {
             var cmd = new StatusCommand(ModeController.defaultController(), ws);
-            String text = cmd.execute("", ctx).toString();
+            String text = cmd.execute("--verbose", ctx).toString();
             assertTrue(text.contains("Limits"), "Should contain limits section");
             assertTrue(text.contains("top_k_max"), "Should show top_k_max limit");
         }
@@ -81,7 +81,7 @@ class InfraCommandsTest {
             Result r = cmd.execute("--verbose", ctx);
             assertInstanceOf(Result.TrustedInfo.class, r);
             // Verbose output should NOT suggest --verbose
-            assertFalse(r.toString().contains("(/status --verbose)"));
+            assertFalse(r.toString().contains("/status --verbose for diagnostics"));
         }
 
         @Test void v_flag_accepted() {
@@ -92,7 +92,7 @@ class InfraCommandsTest {
 
         @Test void output_contains_config_info() {
             var cmd = new StatusCommand(ModeController.defaultController(), ws);
-            String text = cmd.execute("", ctx).toString();
+            String text = cmd.execute("--verbose", ctx).toString();
             assertTrue(text.contains("Config"), "Should contain config section");
         }
 

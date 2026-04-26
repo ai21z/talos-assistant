@@ -2,6 +2,7 @@ package dev.talos.cli.repl;
 
 import dev.talos.cli.repl.slash.*;
 import dev.talos.cli.modes.ModeController;
+import dev.talos.cli.ui.AnsiColor;
 import dev.talos.core.Audit;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
@@ -470,7 +471,8 @@ public final class TalosBootstrap {
                 .append(summary.pairsReplayed() == 1 ? "" : "s");
         if (!age.isBlank()) sb.append(" from ").append(age);
         if (summary.model() != null && !summary.model().isBlank()) {
-            sb.append(" · model ").append(summary.model());
+            sb.append(AnsiColor.isUnicodeSafe() ? " · model " : " - model ")
+                    .append(summary.model());
         }
         return sb.toString();
     }
