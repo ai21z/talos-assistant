@@ -330,10 +330,10 @@ public final class ToolCallExecutionStage {
                 ? "the target file"
                 : "`" + pathHint + "`";
         String prefix = pathWasRead
-                ? "Repeated empty talos.edit_file arguments for " + target + " after the file was read. "
-                : "Repeated empty talos.edit_file arguments for " + target + ". ";
+                ? "Repeated empty or missing talos.edit_file arguments for " + target + " after the file was read. "
+                : "Repeated empty or missing talos.edit_file arguments for " + target + ". ";
         return prefix
-                + "`old_string` and `new_string` were empty, so no approval was requested "
+                + "`old_string` was empty or `new_string` was missing, so no approval was requested "
                 + "and no file was changed. Copy the exact `old_string` from the latest "
                 + "talos.read_file result and provide the intended `new_string`, or stop "
                 + "and explain why the edit cannot be formed.";

@@ -217,10 +217,13 @@ public final class ToolCallLoop {
             if (!mutating || success || denied) return false;
             if (!ToolError.INVALID_PARAMS.equals(errorCode)) return false;
             String lower = errorMessage.toLowerCase(java.util.Locale.ROOT);
-            return lower.contains("old_string")
+            boolean oldStringProblem = lower.contains("old_string")
                     && (lower.contains("empty")
                     || lower.contains("non-empty")
                     || lower.contains("present"));
+            boolean newStringProblem = lower.contains("new_string")
+                    && lower.contains("missing required parameter");
+            return oldStringProblem || newStringProblem;
         }
     }
 
