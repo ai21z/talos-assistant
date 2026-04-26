@@ -1,0 +1,13 @@
+{
+  "name": "scoped negation allows edit",
+  "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "scoped-no-other-files-language-does-not-suppress-mutation-intent",
+    "explicit-edit-with-scoped-limiter-reaches-approval"
+  ],
+  "runner": "loop",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Change the title text in index.html to Night Signal. Use the edit tool and do not modify anything else.",
+  "scriptedResponse": "```json\n{\"name\":\"talos.read_file\",\"parameters\":{\"path\":\"index.html\"}}\n```\n```json\n{\"name\":\"talos.edit_file\",\"parameters\":{\"path\":\"index.html\",\"old_string\":\"<title>Night Drive</title>\",\"new_string\":\"<title>Night Signal</title>\"}}\n```"
+}
