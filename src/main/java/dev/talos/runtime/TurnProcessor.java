@@ -495,14 +495,14 @@ public final class TurnProcessor {
         var sb = new StringBuilder();
 
         if (scopeWarning != null && !scopeWarning.isBlank()) {
-            sb.append("⚠ ").append(scopeWarning).append('\n');
+            sb.append("warning: ").append(scopeWarning).append('\n');
             sb.append("    ");
         }
 
         if (path != null && !path.isBlank()) {
             sb.append("target: ").append(path);
         } else {
-            sb.append("(warning: no target path specified — may fail)");
+            sb.append("(warning: no target path specified - may fail)");
         }
 
         // For write_file: show content size and preview
@@ -534,8 +534,8 @@ public final class TurnProcessor {
         if (oldStr != null && newStr != null) {
             String oldPreview = oldStr.length() > 60 ? oldStr.substring(0, 57) + "..." : oldStr;
             String newPreview = newStr.length() > 60 ? newStr.substring(0, 57) + "..." : newStr;
-            sb.append("\n    replace: ").append(oldPreview.replace('\n', '↵'));
-            sb.append("\n    with:    ").append(newPreview.replace('\n', '↵'));
+            sb.append("\n    replace: ").append(oldPreview.replace("\n", "\\n"));
+            sb.append("\n    with:    ").append(newPreview.replace("\n", "\\n"));
         }
 
         return sb.toString();
