@@ -6,6 +6,7 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.ToolCallStreamFilter;
 import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.verification.StaticTaskVerifier;
@@ -110,6 +111,7 @@ public final class AssistantTurnExecutor {
         StringBuilder out = new StringBuilder();
         boolean streamed = false;
         initializeExecutionPhaseForTurn(messages, ctx);
+        injectTaskContractInstruction(messages);
 
         try {
             if (ctx.streamSink() != null) {
@@ -275,6 +277,38 @@ public final class AssistantTurnExecutor {
                 ? ExecutionPhase.APPLY
                 : ExecutionPhase.INSPECT;
         ctx.executionPhaseState().moveTo(initial);
+    }
+
+    static void injectTaskContractInstruction(List<ChatMessage> messages) {
+        if (messages == null || messages.isEmpty()) return;
+        if (messages.stream().anyMatch(AssistantTurnExecutor::isTaskContractInstruction)) return;
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+        if (contract.mutationAllowed()) return;
+
+        String instruction = """
+                [TaskContract]
+                type: %s
+                mutationAllowed: false
+                This turn is read-only or diagnostic. Do not call talos.write_file or talos.edit_file.
+                Use talos.list_dir, talos.read_file, talos.grep, or talos.retrieve as needed to inspect.
+                If you identify a possible fix, describe it and wait for an explicit change request before editing.""".formatted(contract.type());
+
+        int insertAt = 0;
+        for (int i = 0; i < messages.size(); i++) {
+            if ("system".equals(messages.get(i).role())) {
+                insertAt = i + 1;
+                break;
+            }
+        }
+        messages.add(insertAt, ChatMessage.system(instruction));
+    }
+
+    private static boolean isTaskContractInstruction(ChatMessage message) {
+        return message != null
+                && "system".equals(message.role())
+                && message.content() != null
+                && message.content().startsWith("[TaskContract]");
     }
 
     private static void moveToVerifyAfterSuccessfulMutation(
