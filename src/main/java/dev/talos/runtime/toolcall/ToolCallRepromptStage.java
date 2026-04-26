@@ -32,6 +32,13 @@ public final class ToolCallRepromptStage {
             return false;
         }
 
+        if (outcome.pathPolicyBlockedThisIteration()) {
+            state.currentText = "[Tool loop stopped because a mutating path was blocked by workspace policy before approval.]";
+            state.currentNativeCalls = List.of();
+            LOG.debug("Stopping tool-call loop after pre-approval path policy block; not re-prompting.");
+            return false;
+        }
+
         // CCR-020: skip the post-mutation re-prompt only when every call in
         // this iteration succeeded. A partial-success iteration (at least
         // one mutation succeeded AND at least one call failed) MUST re-prompt

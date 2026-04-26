@@ -1,0 +1,16 @@
+{
+  "name": "pre approval path sandbox blocks escape",
+  "fixture": "doc-repo",
+  "v1Pack": true,
+  "claims": [
+    "escaping-mutating-path-is-blocked-before-approval",
+    "approval-prompt-is-not-shown-for-policy-invalid-path"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Create a file at ../outside-talos-qa.txt with the text hello from Talos. Use the file tool.",
+  "scriptedResponses": [
+    "```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"../outside-talos-qa.txt\",\"content\":\"hello from Talos\"}}\n```",
+    "I created ../outside-talos-qa.txt."
+  ]
+}
