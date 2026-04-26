@@ -4,6 +4,8 @@ import dev.talos.core.Config;
 import org.junit.jupiter.api.Test;
 
 import java.io.PrintStream;
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -110,6 +112,22 @@ class TalosBootstrapTest {
 
         // Non-command text should not be handled as command
         assertFalse(router.tryHandle("hello world"));
+    }
+
+    @Test
+    void quitCommandDoesNotRenderInternalToken() {
+        SessionState session = new SessionState() {
+            private int k = 6; private boolean dbg;
+            public int getK() { return k; } public void setK(int v) { k = v; }
+            public boolean isDebug() { return dbg; } public void setDebug(boolean on) { dbg = on; }
+        };
+        var sink = new ByteArrayOutputStream();
+        ReplRouter router = TalosBootstrap.create(session, new Config(),
+                new PrintStream(sink, true, StandardCharsets.UTF_8), WS);
+
+        assertTrue(router.tryHandle("/q"));
+        assertTrue(router.shouldQuit());
+        assertFalse(sink.toString(StandardCharsets.UTF_8).contains("__QUIT__"));
     }
 }
 

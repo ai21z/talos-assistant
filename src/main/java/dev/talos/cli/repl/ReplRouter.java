@@ -103,6 +103,7 @@ public final class ReplRouter {
                 ctx, "/" + name
         );
 
+        if (quit.get()) return true;
         render.render(r);
         return true;
     }
