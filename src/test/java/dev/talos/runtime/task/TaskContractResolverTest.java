@@ -36,6 +36,56 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void buildWebsiteRequestBecomesFileCreateContract() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Can you build a small BMI calculator website here with separate CSS and JavaScript files? "
+                        + "Use the file tools if you can; do not just show code.");
+
+        assertEquals(TaskType.FILE_CREATE, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+    }
+
+    @Test
+    void prefixedMakeWebsiteRequestBecomesFileCreateContract() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Ah okay can you make a cool looking BMI calculator website? "
+                        + "I want different files for styling and scripting please. "
+                        + "I want it modern user friendly and functioning.");
+
+        assertEquals(TaskType.FILE_CREATE, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+    }
+
+    @Test
+    void makeItRequestRemainsMutationCapableForFollowUpTurns() {
+        TaskContract contract = TaskContractResolver.fromUserRequest("Can you make it?");
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+    }
+
+    @Test
+    void buildAndMakeQuestionsRemainReadOnlyWhenNotAskingForWorkspaceMutation() {
+        List<String> inputs = List.of(
+                "What can you build?",
+                "Can you explain how to build a BMI calculator?",
+                "Can you make sense of this code?",
+                "Why did you not make changes?",
+                "Show me how to make one, do not edit files.");
+
+        for (String input : inputs) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+            assertEquals(TaskType.READ_ONLY_QA, contract.type(), input);
+            assertFalse(contract.mutationRequested(), input);
+            assertFalse(contract.mutationAllowed(), input);
+        }
+    }
+
+    @Test
     void readOnlySelectorCheckBecomesDiagnoseOnlyContract() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Check whether this website has mismatches between HTML classes and CSS selectors. Do not change anything.");
