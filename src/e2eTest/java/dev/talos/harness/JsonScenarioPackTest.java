@@ -375,6 +375,27 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/27-static-verifier-missing-script-downgrades-incomplete.json] 27: missing script target downgrades completion")
+    void staticVerifierMissingScriptDowngradesIncomplete() {
+        var loaded = JsonScenarioLoader.load("scenarios/27-static-verifier-missing-script-downgrades-incomplete.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(2, 2, 0, 2)
+                    .assertAnswerContains("Task incomplete: Static verification failed")
+                    .assertAnswerContains("The requested task is not verified complete.")
+                    .assertAnswerContains("script.js: expected target was not successfully mutated.")
+                    .assertAnswerContains("Expected web-app build to successfully mutate a JavaScript file.")
+                    .assertAnswerNotContains("Static verification: passed")
+                    .assertFileContains("index.html", "BMI Calculator")
+                    .assertFileContains("style.css", ".calculator")
+                    .assertFileAbsent("script.js");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/11-partial-mutation-summary-truthful.json] 11: partial mutation summary reports only verified outcomes")
     void partialMutationSummaryIsTruthful() {
         var loaded = JsonScenarioLoader.load("scenarios/11-partial-mutation-summary-truthful.json");

@@ -336,9 +336,11 @@ class ExecutionOutcomeTest {
 
             assertEquals(ExecutionOutcome.CompletionStatus.FAILED, outcome.completionStatus());
             assertEquals(ExecutionOutcome.VerificationStatus.FAILED, outcome.verificationStatus());
-            assertTrue(outcome.finalAnswer().startsWith("[Static verification failed:"));
+            assertTrue(outcome.finalAnswer().startsWith("[Task incomplete: Static verification failed -"));
             assertTrue(outcome.finalAnswer().chars().allMatch(ch -> ch < 128),
                     "Static verifier annotation should be ASCII-safe in redirected output");
+            assertTrue(outcome.finalAnswer().contains("The requested task is not verified complete."));
+            assertTrue(outcome.finalAnswer().contains("Unresolved static verification problems:"));
             assertTrue(outcome.finalAnswer().contains("`.cta-button`"));
             assertEquals(TaskCompletionStatus.FAILED, outcome.taskOutcome().completionStatus());
             assertEquals(TaskVerificationStatus.FAILED, outcome.taskOutcome().verificationResult().status());
@@ -443,8 +445,63 @@ class ExecutionOutcomeTest {
 
             assertEquals(ExecutionOutcome.CompletionStatus.FAILED, outcome.completionStatus());
             assertEquals(ExecutionOutcome.VerificationStatus.FAILED, outcome.verificationStatus());
-            assertTrue(outcome.finalAnswer().startsWith("[Static verification failed:"));
+            assertTrue(outcome.finalAnswer().startsWith("[Task incomplete: Static verification failed -"));
+            assertTrue(outcome.finalAnswer().contains("The requested task is not verified complete."));
             assertTrue(outcome.finalAnswer().contains("`#bmi-form`"));
+            assertEquals(TaskCompletionStatus.FAILED, outcome.taskOutcome().completionStatus());
+            assertEquals(TaskVerificationStatus.FAILED, outcome.taskOutcome().verificationResult().status());
+            assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.STATIC_VERIFICATION_FAILED));
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
+    void postApplyBroadWebAppMissingScriptIsDowngradedAsIncomplete() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-webapp-missing-script-");
+        try {
+            Files.writeString(ws.resolve("index.html"), """
+                    <!DOCTYPE html>
+                    <html>
+                      <head><link rel="stylesheet" href="styles.css"></head>
+                      <body><main class="calculator"><h1>BMI</h1></main></body>
+                    </html>
+                    """);
+            Files.writeString(ws.resolve("styles.css"), ".calculator { max-width: 28rem; }");
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Create a modern BMI calculator website with separate index.html, styles.css, and script.js files."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "[ok] Created index.html\n[ok] Created styles.css", 1, 2,
+                    List.of("talos.write_file", "talos.write_file"),
+                    List.of(), 0, 0, false, 2, List.of(),
+                    0, 0, 0, 0,
+                    List.of(
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.write_file", "index.html", true, true, false,
+                                    "wrote index.html", "", dev.talos.tools.VerificationStatus.PASS),
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.write_file", "styles.css", true, true, false,
+                                    "wrote styles.css", "", dev.talos.tools.VerificationStatus.PASS)
+                    ));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "[ok] Created index.html\n[ok] Created styles.css", messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.FAILED, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.FAILED, outcome.verificationStatus());
+            assertTrue(outcome.finalAnswer().startsWith("[Task incomplete: Static verification failed -"));
+            assertTrue(outcome.finalAnswer().contains("The requested task is not verified complete."));
+            assertTrue(outcome.finalAnswer().contains("script.js: expected target was not successfully mutated."));
+            assertTrue(outcome.finalAnswer().contains("Expected web-app build to successfully mutate a JavaScript file."));
+            assertTrue(outcome.finalAnswer().contains("[ok] Created index.html"));
             assertEquals(TaskCompletionStatus.FAILED, outcome.taskOutcome().completionStatus());
             assertEquals(TaskVerificationStatus.FAILED, outcome.taskOutcome().verificationResult().status());
             assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.STATIC_VERIFICATION_FAILED));
