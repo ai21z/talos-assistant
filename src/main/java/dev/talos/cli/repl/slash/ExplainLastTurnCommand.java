@@ -34,7 +34,7 @@ public final class ExplainLastTurnCommand implements Command {
         return new CommandSpec(
                 "explain-last-turn",
                 List.of("explain", "last"),
-                "/last [summary|tools|sources|trace]",
+                "/last [summary|tools|sources|trace|--verbose]",
                 "Inspect the latest turn from structured audit data.",
                 CommandGroup.DEBUG);
     }
@@ -53,7 +53,8 @@ public final class ExplainLastTurnCommand implements Command {
         }
 
         TurnRecord latest = turns.stream()
-                .max(Comparator.comparingInt(TurnRecord::turnNumber))
+                .max(Comparator.comparing(TurnRecord::timestamp)
+                        .thenComparingInt(TurnRecord::turnNumber))
                 .orElse(null);
         if (latest == null) {
             return new Result.Info("No completed turn has been recorded for this workspace yet.");
@@ -252,6 +253,9 @@ public final class ExplainLastTurnCommand implements Command {
     private static String normalizeView(String args) {
         String view = args == null ? "" : args.trim().toLowerCase(Locale.ROOT);
         while (view.startsWith("/")) view = view.substring(1);
+        if ("--verbose".equals(view) || "-v".equals(view) || "verbose".equals(view)) {
+            return "trace";
+        }
         return view.isBlank() ? "summary" : view;
     }
 

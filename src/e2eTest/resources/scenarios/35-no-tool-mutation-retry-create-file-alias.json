@@ -1,0 +1,17 @@
+{
+  "name": "no-tool mutation retry executes create_file alias",
+  "fixture": "doc-repo",
+  "v1Pack": true,
+  "claims": [
+    "explicit-mutation-no-tool-answer-retries",
+    "create-file-alias-counts-as-mutating"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Create the script.js file you need in this workspace.",
+  "scriptedResponses": [
+    "Create `script.js` with this JavaScript code:\n```javascript\ndocument.body.dataset.ready = 'retry-create-file-alias';\n```",
+    "```json\n{\"function_name\":\"talos.create_file\",\"arguments\":{\"path\":\"script.js\",\"content\":\"document.body.dataset.ready = 'retry-create-file-alias';\"}}\n```",
+    "Created script.js."
+  ]
+}

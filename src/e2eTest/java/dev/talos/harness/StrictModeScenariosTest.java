@@ -56,6 +56,7 @@ class StrictModeScenariosTest {
 
         var scenario = ScenarioDefinition.named("alias rescue")
                 .withScriptedResponse(scripted)
+                .withUserPrompt("Write out.txt with hello.")
                 .build();
 
         // Normal mode — alias rescue is active.

@@ -28,4 +28,14 @@ class ToolCallSupportTest {
 
         assertFalse(ToolCallSupport.hasEmptyEditArguments(call));
     }
+
+    @Test
+    void createFileAliasesAreClassifiedAsMutatingAndPathRequired() {
+        for (String name : java.util.List.of("talos.create_file", "create_file", "file_create", "createfile")) {
+            assertTrue(ToolCallSupport.isMutatingTool(name), name);
+            ToolCall call = new ToolCall(name, Map.of("content", "x"));
+            assertTrue(ToolCallSupport.repairMissingPath(call) == call,
+                    "path repair should preserve create-file alias calls so the write tool reports the missing path");
+        }
+    }
 }

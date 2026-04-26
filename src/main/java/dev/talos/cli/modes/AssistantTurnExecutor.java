@@ -55,6 +55,27 @@ public final class AssistantTurnExecutor {
 
     private static final Logger LOG = LoggerFactory.getLogger(AssistantTurnExecutor.class);
 
+    private static final String TALOS_IDENTITY_ANSWER =
+            "I am Talos, a local-first workspace assistant that can inspect files "
+            + "and apply approved changes in this workspace.";
+
+    private static final Set<String> ASSISTANT_IDENTITY_TURN_MARKERS = Set.of(
+            "who are you",
+            "what are you",
+            "what is talos",
+            "who is talos",
+            "tell me about yourself"
+    );
+
+    private static final Set<String> CHANGE_SUMMARY_FOLLOW_UP_MARKERS = Set.of(
+            "summarize what changed",
+            "what changed",
+            "what did you change",
+            "what was changed",
+            "what did you do",
+            "summary of changes"
+    );
+
     private AssistantTurnExecutor() {} // utility class
 
     /**
@@ -123,9 +144,14 @@ public final class AssistantTurnExecutor {
         recordPolicyTrace(taskContract, ctx);
         injectTaskContractInstruction(messages);
         Context turnContext = ctx;
+        String directAnswer = deterministicDirectAnswerIfNeeded(messages, taskContract);
+        if (directAnswer != null) {
+            return directTurnOutput(directAnswer, ctx, opts);
+        }
+        boolean useStreaming = ctx.streamSink() != null && !taskContract.mutationAllowed();
 
         try {
-            if (ctx.streamSink() != null) {
+            if (useStreaming) {
                 // ── Streaming path ──────────────────────────────────────────
                 LlmClient.StreamResult streamResult = chatStreamFull(ctx, messages);
                 String answer = streamResult.text();
@@ -180,6 +206,9 @@ public final class AssistantTurnExecutor {
                 CompletableFuture<LlmClient.StreamResult> fut = CompletableFuture.supplyAsync(
                         () -> chatFull(turnContext, messages));
                 LlmClient.StreamResult streamResult = fut.get(opts.llmTimeoutMs, TimeUnit.MILLISECONDS);
+                if (ctx.streamSink() != null && ctx.onStreamComplete() != null) {
+                    try { ctx.onStreamComplete().run(); } catch (Exception ignored) { }
+                }
                 String answer = streamResult.text();
                 if (answer != null) {
                     if (ctx.toolCallLoop() != null && hasAnyToolCalls(streamResult)) {
@@ -200,7 +229,10 @@ public final class AssistantTurnExecutor {
                         // Grounding retry gate: if the user explicitly asked for evidence
                         // / reading / inspection and the answer is long-and-confident,
                         // re-prompt once asking the model to answer from workspace evidence.
-                        answer = shapeAnswerWithoutTools(answer, messages, ctx, false, opts);
+                        ToolLoopAnswerResolution resolution = resolveNoToolAnswer(
+                                answer, messages, workspace, ctx, opts);
+                        appendExtraSummary(out, resolution.extraSummary());
+                        answer = resolution.answer();
                     }
                     out.append(answer);
                 } else {
@@ -242,6 +274,18 @@ public final class AssistantTurnExecutor {
         return answer;
     }
 
+    private static TurnOutput directTurnOutput(String answer, Context ctx, Options opts) {
+        String shaped = sanitizeAndTruncate(answer == null ? "" : answer, opts);
+        boolean streamed = ctx != null && ctx.streamSink() != null;
+        if (streamed) {
+            ctx.streamSink().accept(shaped);
+            if (ctx.onStreamComplete() != null) {
+                try { ctx.onStreamComplete().run(); } catch (Exception ignored) { }
+            }
+        }
+        return new TurnOutput(shaped, streamed);
+    }
+
     record ToolLoopAnswerResolution(String answer, String extraSummary) {}
 
     private static ToolLoopAnswerResolution resolveToolLoopAnswer(
@@ -271,6 +315,54 @@ public final class AssistantTurnExecutor {
                 finalAnswer,
                 joinExtraSummaries(mrr.extraSummary(), irr.extraSummary())
         );
+    }
+
+    private static ToolLoopAnswerResolution resolveNoToolAnswer(
+            String answer,
+            List<ChatMessage> messages,
+            Path workspace,
+            Context ctx,
+            Options opts
+    ) {
+        ToolCallLoop.LoopResult noToolLoopResult = emptyNoToolLoopResult(answer, messages);
+        MutationRetryResult mrr = mutationRequestRetryIfNeeded(
+                answer, messages, noToolLoopResult, workspace, ctx);
+        if (mrr.extraSummary() != null || mrr.mutationsInRetry() > 0) {
+            ToolCallLoop.LoopResult verificationLoop =
+                    mrr.retryLoopResult() == null ? noToolLoopResult : mrr.retryLoopResult();
+            int extraMutationSuccesses =
+                    mrr.retryLoopResult() == null ? mrr.mutationsInRetry() : 0;
+            moveToVerifyAfterSuccessfulMutation(ctx, verificationLoop, extraMutationSuccesses);
+            return new ToolLoopAnswerResolution(
+                    shapeAnswerAfterToolLoop(
+                            mrr.answer(), messages, verificationLoop, workspace,
+                            extraMutationSuccesses, opts),
+                    mrr.extraSummary());
+        }
+        return new ToolLoopAnswerResolution(
+                shapeAnswerWithoutTools(mrr.answer(), messages, ctx, false, opts),
+                null);
+    }
+
+    private static ToolCallLoop.LoopResult emptyNoToolLoopResult(
+            String answer,
+            List<ChatMessage> messages
+    ) {
+        return new ToolCallLoop.LoopResult(
+                answer == null ? "" : answer,
+                0,
+                0,
+                List.of(),
+                messages,
+                0,
+                0,
+                false,
+                0,
+                List.of(),
+                0,
+                0,
+                0,
+                0);
     }
 
     private static void appendExtraSummary(StringBuilder out, String extraSummary) {
@@ -359,6 +451,82 @@ public final class AssistantTurnExecutor {
                 && "system".equals(message.role())
                 && message.content() != null
                 && message.content().startsWith("[TaskContract]");
+    }
+
+    private static String deterministicDirectAnswerIfNeeded(
+            List<ChatMessage> messages,
+            TaskContract contract
+    ) {
+        String userRequest = latestUserRequest(messages);
+        if (contract != null
+                && contract.type() == TaskType.SMALL_TALK
+                && looksLikeAssistantIdentityTurn(userRequest)) {
+            return TALOS_IDENTITY_ANSWER;
+        }
+        return verifiedFollowUpSummaryIfNeeded(messages, userRequest);
+    }
+
+    static boolean looksLikeAssistantIdentityTurn(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return false;
+        String lower = userRequest.toLowerCase(Locale.ROOT);
+        for (String marker : ASSISTANT_IDENTITY_TURN_MARKERS) {
+            if (lower.contains(marker)) return true;
+        }
+        return false;
+    }
+
+    private static String verifiedFollowUpSummaryIfNeeded(
+            List<ChatMessage> messages,
+            String userRequest
+    ) {
+        if (!looksLikeChangeSummaryFollowUp(userRequest)) return null;
+        if (messages == null || messages.isEmpty()) return null;
+
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            ChatMessage message = messages.get(i);
+            if (message == null || !"assistant".equals(message.role())) continue;
+            String content = message.content();
+            if (!looksLikeVerifiedMutationOutcome(content)) continue;
+            return renderVerifiedFollowUpSummary(content);
+        }
+        return null;
+    }
+
+    static boolean looksLikeChangeSummaryFollowUp(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return false;
+        String lower = userRequest.toLowerCase(Locale.ROOT);
+        for (String marker : CHANGE_SUMMARY_FOLLOW_UP_MARKERS) {
+            if (lower.contains(marker)) return true;
+        }
+        return false;
+    }
+
+    private static boolean looksLikeVerifiedMutationOutcome(String content) {
+        if (content == null || content.isBlank()) return false;
+        String lower = content.toLowerCase(Locale.ROOT);
+        return lower.contains("static verification")
+                || lower.contains("partial verification")
+                || lower.contains("remaining static verification problems")
+                || lower.contains("task incomplete");
+    }
+
+    private static String renderVerifiedFollowUpSummary(String previousAssistantText) {
+        String excerpt = previousAssistantText == null ? "" : previousAssistantText.strip();
+        String lower = excerpt.toLowerCase(Locale.ROOT);
+        String status;
+        if (lower.contains("partial verification") || lower.contains("the turn remains partial")) {
+            status = "The previous verified result says the last change is partial, not complete.";
+        } else if (lower.contains("task incomplete") || lower.contains("static verification failed")) {
+            status = "The previous verified result says the last change is not complete.";
+        } else if (lower.contains("static verification: passed")) {
+            status = "The previous verified result says the last change passed static verification.";
+        } else {
+            status = "The previous turn included a verified result.";
+        }
+        if (excerpt.length() > 1500) {
+            excerpt = excerpt.substring(0, 1500) + "\n\n[summary truncated]";
+        }
+        return status + "\n\n" + excerpt;
     }
 
     private static void moveToVerifyAfterSuccessfulMutation(
@@ -853,7 +1021,16 @@ public final class AssistantTurnExecutor {
      * the user's language is unambiguous about wanting a change applied.
      */
     /** Result of the missing-mutation retry gate. */
-    record MutationRetryResult(String answer, int mutationsInRetry, String extraSummary) {}
+    record MutationRetryResult(
+            String answer,
+            int mutationsInRetry,
+            String extraSummary,
+            ToolCallLoop.LoopResult retryLoopResult
+    ) {
+        MutationRetryResult(String answer, int mutationsInRetry, String extraSummary) {
+            this(answer, mutationsInRetry, extraSummary, null);
+        }
+    }
 
     /**
      * True iff the latest user request contains an unambiguous mutation
@@ -943,7 +1120,8 @@ public final class AssistantTurnExecutor {
                 return new MutationRetryResult(
                         mergedAnswer == null || mergedAnswer.isBlank() ? answer : mergedAnswer,
                         retryLoop.mutatingToolSuccesses(),
-                        summary);
+                        summary,
+                        retryLoop);
             }
 
             // No tool calls on the retry — the model declined. Keep the retry

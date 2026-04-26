@@ -604,6 +604,39 @@ class ToolCallParserTest {
     }
 
     @Test
+    void parseFunctionNameKeyAsName() {
+        String response = """
+                <tool_call>
+                {"function_name": "talos.write_file", "arguments": {"path": "index.html", "content": "ok"}}
+                </tool_call>
+                """;
+
+        List<ToolCall> calls = ToolCallParser.parse(response);
+        assertEquals(1, calls.size());
+        assertEquals("talos.write_file", calls.get(0).toolName());
+        assertEquals("index.html", calls.get(0).param("path"));
+        assertEquals("ok", calls.get(0).param("content"));
+    }
+
+    @Test
+    void parseStandaloneFunctionNameJson() {
+        String response = """
+                {
+                  "function_name": "talos.write_file",
+                  "arguments": {
+                    "path": "script.js",
+                    "content": "console.log('ok');"
+                  }
+                }
+                """;
+
+        List<ToolCall> calls = ToolCallParser.parse(response);
+        assertEquals(1, calls.size());
+        assertEquals("talos.write_file", calls.get(0).toolName());
+        assertEquals("script.js", calls.get(0).param("path"));
+    }
+
+    @Test
     void parseArgumentsKeyAsParameters() {
         String response = """
                 <tool_call>

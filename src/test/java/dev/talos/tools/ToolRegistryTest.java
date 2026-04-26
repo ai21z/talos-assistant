@@ -230,6 +230,17 @@ class ToolRegistryTest {
     }
 
     @Test
+    void fuzzy_match_create_file_aliases_to_write_file() {
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new dev.talos.tools.impl.FileWriteTool());
+
+        for (String alias : java.util.List.of("create_file", "talos.create_file", "file_create", "createfile")) {
+            assertNotNull(registry.get(alias), alias + " should match talos.write_file");
+            assertEquals("talos.write_file", registry.get(alias).name(), alias);
+        }
+    }
+
+    @Test
     void fuzzy_match_known_alias_read_file() {
         ToolRegistry registry = new ToolRegistry();
         registry.register(new dev.talos.tools.impl.ReadFileTool());

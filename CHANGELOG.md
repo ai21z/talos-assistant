@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.3] - 2026-04-26
+
+### Changed
+- Added tool-backed retry for explicit mutation turns where the model first answers without calling file tools, including compatibility for `create_file` / `function_name` tool-call aliases.
+- Improved natural conversational flow: identity small talk answers as Talos, natural read-only site diagnostics are grounded in static workspace facts, and follow-up change summaries reuse prior verified outcomes.
+- Improved manual QA/debug ergonomics: `/last --verbose` maps to trace output, stale turn selection prefers latest timestamps, and slash `/grep` searches CSS-family files by default.
+
 ## [0.9.2] - 2026-04-26
 
 ### Changed

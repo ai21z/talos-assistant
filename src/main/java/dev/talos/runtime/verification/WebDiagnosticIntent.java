@@ -17,9 +17,12 @@ public final class WebDiagnosticIntent {
                 || lower.contains("web app")
                 || lower.contains("webpage")
                 || lower.contains("web page")
+                || containsWholeWord(lower, "site")
+                || containsWholeWord(lower, "page")
                 || lower.contains("html")
                 || lower.contains("css")
                 || lower.contains("javascript")
+                || lower.contains("script")
                 || lower.contains("script.js")
                 || lower.contains("bmi");
         boolean diagnostic = lower.contains("not working")
@@ -33,5 +36,10 @@ public final class WebDiagnosticIntent {
                 || lower.contains("check")
                 || lower.contains("why");
         return webSurface && diagnostic;
+    }
+
+    private static boolean containsWholeWord(String value, String word) {
+        if (value == null || word == null || word.isBlank()) return false;
+        return value.matches(".*\\b" + java.util.regex.Pattern.quote(word) + "\\b.*");
     }
 }

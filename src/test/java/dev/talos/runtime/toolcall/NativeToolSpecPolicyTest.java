@@ -30,12 +30,14 @@ class NativeToolSpecPolicyTest {
 
     @Test
     void smallTalkContractExposesNoNativeTools() {
-        var contract = TaskContractResolver.fromUserRequest("hello");
+        for (String prompt : List.of("hello", "hello who are you?", "what is talos?")) {
+            var contract = TaskContractResolver.fromUserRequest(prompt);
 
-        List<String> names = NativeToolSpecPolicy.names(
-                NativeToolSpecPolicy.select(contract, ExecutionPhase.INSPECT, registry()));
+            List<String> names = NativeToolSpecPolicy.names(
+                    NativeToolSpecPolicy.select(contract, ExecutionPhase.INSPECT, registry()));
 
-        assertTrue(names.isEmpty());
+            assertTrue(names.isEmpty(), prompt);
+        }
     }
 
     @Test

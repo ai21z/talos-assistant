@@ -62,6 +62,7 @@ class ExplainLastTurnCommandTest {
 
         assertTrue(cmd.spec().aliases().contains("last"));
         assertTrue(cmd.spec().usage().contains("sources"));
+        assertTrue(cmd.spec().usage().contains("--verbose"));
     }
 
     @Test
@@ -125,6 +126,64 @@ class ExplainLastTurnCommandTest {
         assertTrue(text.contains("Last Turn"));
         assertTrue(text.contains("Trace Detail"));
         assertTrue(text.contains("Tool calls: 1"));
+    }
+
+    @Test
+    void verboseFlagRendersTraceView() {
+        Path workspace = Path.of("/project/verbose").toAbsolutePath().normalize();
+        var store = new JsonSessionStore(tempDir);
+        var cmd = new ExplainLastTurnCommand(workspace, store);
+        store.appendTurn(JsonSessionStore.sessionIdFor(workspace), record(
+                1,
+                "Inspect files",
+                "Done.",
+                List.of(new TurnRecord.ToolCallSummary("talos.list_dir", ".", true)),
+                0,
+                0,
+                0,
+                "ok"));
+
+        Result result = cmd.execute("--verbose", minimalCtx());
+
+        assertInstanceOf(Result.TrustedInfo.class, result);
+        String text = ((Result.TrustedInfo) result).text;
+        assertTrue(text.contains("Trace Detail"), text);
+        assertTrue(text.contains("Tool calls: 1"), text);
+    }
+
+    @Test
+    void executeSelectsNewestTimestampWhenTurnNumbersRestartAfterSessionClear() {
+        Path workspace = Path.of("/project/restarted-turns").toAbsolutePath().normalize();
+        var store = new JsonSessionStore(tempDir);
+        var cmd = new ExplainLastTurnCommand(workspace, store);
+        String sessionId = JsonSessionStore.sessionIdFor(workspace);
+        store.appendTurn(sessionId, recordAt(
+                11,
+                Instant.parse("2026-04-26T08:00:00Z"),
+                "Old saved request",
+                "Old saved answer",
+                List.of(),
+                0,
+                0,
+                0,
+                "ok"));
+        store.appendTurn(sessionId, recordAt(
+                1,
+                Instant.parse("2026-04-26T20:00:00Z"),
+                "hello",
+                "Hi.",
+                List.of(),
+                0,
+                0,
+                0,
+                "ok"));
+
+        Result result = cmd.execute("", minimalCtx());
+
+        assertInstanceOf(Result.TrustedInfo.class, result);
+        String text = ((Result.TrustedInfo) result).text;
+        assertTrue(text.contains("hello"), text);
+        assertFalse(text.contains("Old saved request"), text);
     }
 
     @Test
@@ -245,6 +304,30 @@ class ExplainLastTurnCommandTest {
         return new TurnRecord(
                 turnNumber,
                 Instant.parse("2026-04-26T00:00:00Z"),
+                1234,
+                userInput,
+                assistantText,
+                toolCalls,
+                approvalsRequired,
+                approvalsGranted,
+                approvalsDenied,
+                "2 stages, 5.0ms, final=3",
+                status);
+    }
+
+    private static TurnRecord recordAt(
+            int turnNumber,
+            Instant timestamp,
+            String userInput,
+            String assistantText,
+            List<TurnRecord.ToolCallSummary> toolCalls,
+            int approvalsRequired,
+            int approvalsGranted,
+            int approvalsDenied,
+            String status) {
+        return new TurnRecord(
+                turnNumber,
+                timestamp,
                 1234,
                 userInput,
                 assistantText,

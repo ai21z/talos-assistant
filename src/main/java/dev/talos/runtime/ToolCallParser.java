@@ -87,6 +87,8 @@ public final class ToolCallParser {
     private static final Set<String> TOOL_NAME_ALIASES = Set.of(
             "file_write",
             "write_file",
+            "file_create",
+            "create_file",
             "file_read",
             "read_file",
             "file_edit",
@@ -99,6 +101,7 @@ public final class ToolCallParser {
             "search",
             "retrieve",
             "writefile",
+            "createfile",
             "readfile",
             "editfile",
             "listdir",
@@ -116,18 +119,18 @@ public final class ToolCallParser {
     );
 
     /** Code-fenced JSON blocks containing any of the recognized name-key aliases.
-     *  The alias set ({@code name | function | tool_name | tool}) is kept in sync with
+     *  The alias set ({@code name | function | function_name | tool_name | tool}) is kept in sync with
      *  {@link #extractName(JsonNode)} so the detection gate is not narrower than the
      *  alias-aware extractor. Without this, a model emitting {@code ```json { "tool_name": ... }```}
      *  has its fallback tool call silently dropped before extraction. */
     private static final Pattern CODE_FENCE_PATTERN = Pattern.compile(
-            "```(?:json)?\\s*\\n(\\{[^`]*\"(?:name|function|tool_name|tool)\"[^`]*\\})\\s*\\n?```",
+            "```(?:json)?\\s*\\n(\\{[^`]*\"(?:name|function|function_name|tool_name|tool)\"[^`]*\\})\\s*\\n?```",
             Pattern.DOTALL
     );
 
     /** Bare JSON at line boundaries with "talos." prefix (model forgot XML wrapper). */
     private static final Pattern BARE_JSON_PATTERN = Pattern.compile(
-            "(?:^|\\n)\\s*(\\{\\s*\"(?:name|function|tool_name|tool)\"\\s*:\\s*\"talos\\.(?:[^{}]*|\\{[^{}]*\\})*\\})",
+            "(?:^|\\n)\\s*(\\{\\s*\"(?:name|function|function_name|tool_name|tool)\"\\s*:\\s*\"talos\\.(?:[^{}]*|\\{[^{}]*\\})*\\})",
             Pattern.DOTALL
     );
 
@@ -249,6 +252,7 @@ public final class ToolCallParser {
                 || trimmed.startsWith("<function>");
         boolean mentionsToolShape = trimmed.contains("\"name\"")
                 || trimmed.contains("\"tool_name\"")
+                || trimmed.contains("\"function_name\"")
                 || trimmed.contains("\"function\"")
                 || trimmed.contains("\"tool\"");
         return startsLikeToolEnvelope && mentionsToolShape && trimmed.contains("talos.");
@@ -454,15 +458,15 @@ public final class ToolCallParser {
     }
 
     private static boolean hasNameAlias(JsonNode root) {
-        for (String key : List.of("name", "function", "tool_name", "tool")) {
+        for (String key : List.of("name", "function", "function_name", "tool_name", "tool")) {
             if (root.has(key)) return true;
         }
         return false;
     }
 
-    /** Extract tool name, trying "name", "function", "tool_name", "tool". */
+    /** Extract tool name, trying "name", "function", "function_name", "tool_name", "tool". */
     private static String extractName(JsonNode root) {
-        for (String key : List.of("name", "function", "tool_name", "tool")) {
+        for (String key : List.of("name", "function", "function_name", "tool_name", "tool")) {
             JsonNode node = root.path(key);
             if (!node.isMissingNode() && !node.asText("").isBlank()) {
                 return node.asText();

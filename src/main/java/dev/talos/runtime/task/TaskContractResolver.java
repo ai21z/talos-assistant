@@ -29,12 +29,13 @@ public final class TaskContractResolver {
     private static final Set<String> DIAGNOSE_MARKERS = Set.of(
             "inspect", "diagnose", "check whether", "check if", "mismatch",
             "selector", "linkage", "wired", "wiring", "broken reference",
-            "suspicious reference", "do not change"
+            "suspicious reference", "do not change", "broken", "what is wrong"
     );
 
     private static final Set<String> WORKSPACE_MARKERS = Set.of(
             "workspace", "repo", "repository", "project", "codebase", "what files",
-            "what is in this", "explain this"
+            "what is in this", "explain this", "this folder", "this directory",
+            "this site"
     );
 
     private static final Pattern SMALL_TALK_ONLY = Pattern.compile(
@@ -45,6 +46,15 @@ public final class TaskContractResolver {
                     + "ok|okay|cool|nice|great|"
                     + "hmm+|huh"
                     + ")[\\s.!?]*$");
+
+    private static final Set<String> ASSISTANT_IDENTITY_MARKERS = Set.of(
+            "who are you",
+            "what are you",
+            "what is talos",
+            "who is talos",
+            "what can you do",
+            "tell me about yourself"
+    );
 
     private TaskContractResolver() {}
 
@@ -100,7 +110,7 @@ public final class TaskContractResolver {
         if (containsAny(lower, WORKSPACE_MARKERS)) {
             return TaskType.WORKSPACE_EXPLAIN;
         }
-        if (looksSmallTalkOnly(lower)) {
+        if (looksSmallTalkOnly(lower) || looksAssistantIdentityQuestion(lower)) {
             return TaskType.SMALL_TALK;
         }
         return TaskType.READ_ONLY_QA;
@@ -108,6 +118,10 @@ public final class TaskContractResolver {
 
     private static boolean looksSmallTalkOnly(String lower) {
         return lower != null && SMALL_TALK_ONLY.matcher(lower).matches();
+    }
+
+    private static boolean looksAssistantIdentityQuestion(String lower) {
+        return lower != null && containsAny(lower, ASSISTANT_IDENTITY_MARKERS);
     }
 
     private static boolean containsAny(String lower, Set<String> markers) {

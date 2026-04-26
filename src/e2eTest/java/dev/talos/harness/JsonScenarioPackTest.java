@@ -341,6 +341,22 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/35-no-tool-mutation-retry-create-file-alias.json] 35: no-tool mutation retry executes create_file alias")
+    void noToolMutationRetryExecutesCreateFileAlias() {
+        var loaded = JsonScenarioLoader.load("scenarios/35-no-tool-mutation-retry-create-file-alias.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(1, 1, 0, 0)
+                    .assertAnswerContains("Static verification: passed")
+                    .assertAnswerContains("script.js")
+                    .assertFileContains("script.js", "retry-create-file-alias");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/25-empty-edit-args-recovers-after-read.json] 25: empty edit args recover after read")
     void emptyEditArgsRecoverAfterRead() {
         var loaded = JsonScenarioLoader.load("scenarios/25-empty-edit-args-recovers-after-read.json");
@@ -472,6 +488,41 @@ class JsonScenarioPackTest {
                     .assertAnswerNotContains("script.js` file is missing a closing script tag")
                     .assertFileContains("index.html", "<button type=\"submit\">Calculate BMI</button")
                     .assertFileContains("index.html", "<script src=\"script.js\"></script");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/36-natural-site-diagnostic-grounded.json] 36: natural site diagnostic prompt is grounded")
+    void naturalSiteDiagnosticPromptIsGrounded() {
+        var loaded = JsonScenarioLoader.load("scenarios/36-natural-site-diagnostic-grounded.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("Static web diagnostics found:")
+                    .assertAnswerContains("index.html: malformed closing tag `</button>`")
+                    .assertAnswerContains("index.html: malformed closing tag `</script>`")
+                    .assertAnswerNotContains("newer browser")
+                    .assertAnswerNotContains("There are no static HTML, CSS, or JavaScript problems");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/37-identity-small-talk-talos.json] 37: identity small talk answers as Talos")
+    void identitySmallTalkAnswersAsTalos() {
+        var loaded = JsonScenarioLoader.load("scenarios/37-identity-small-talk-talos.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("Talos")
+                    .assertAnswerNotContains("Qwen")
+                    .assertAnswerNotContains("Alibaba")
+                    .assertAnswerNotContains("Used ");
         }
     }
 

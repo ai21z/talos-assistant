@@ -10,6 +10,7 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -18,13 +19,20 @@ public final class ToolCallSupport {
     public static final int KEEP_RECENT_TOOL_RESULTS = 2;
 
     private static final Set<String> READ_ONLY_TOOLS = Set.of(
-            "talos.read_file", "talos.list_dir", "talos.grep"
+            "read_file", "file_read", "readfile",
+            "list_dir", "list_directory", "dir_list", "ls", "listdir", "listdirectory",
+            "grep", "search", "grepsearch",
+            "retrieve"
     );
     private static final Set<String> MUTATING_TOOLS = Set.of(
-            "talos.write_file", "talos.edit_file"
+            "write_file", "file_write", "writefile",
+            "create_file", "file_create", "createfile",
+            "edit_file", "file_edit", "editfile"
     );
     private static final Set<String> PATH_REQUIRED_TOOLS = Set.of(
-            "talos.write_file", "talos.edit_file"
+            "write_file", "file_write", "writefile",
+            "create_file", "file_create", "createfile",
+            "edit_file", "file_edit", "editfile"
     );
     private static final List<String> PATH_PARAM_KEYS = List.of(
             "path", "file_path", "filepath", "file", "filename"
@@ -160,7 +168,7 @@ public final class ToolCallSupport {
     }
 
     public static boolean hasEmptyEditArguments(ToolCall call) {
-        if (call == null || !"talos.edit_file".equals(call.toolName())) return false;
+        if (call == null || !isEditFileTool(call.toolName())) return false;
         String oldString = firstPresentParam(
                 call,
                 "old_string",
@@ -204,11 +212,33 @@ public final class ToolCallSupport {
     }
 
     public static boolean isReadOnlyTool(String toolName) {
-        return READ_ONLY_TOOLS.contains(toolName);
+        return READ_ONLY_TOOLS.contains(normalizeToolName(toolName));
     }
 
     public static boolean isMutatingTool(String toolName) {
-        return MUTATING_TOOLS.contains(toolName);
+        return MUTATING_TOOLS.contains(normalizeToolName(toolName));
+    }
+
+    private static boolean isEditFileTool(String toolName) {
+        String normalized = normalizeToolName(toolName);
+        return "edit_file".equals(normalized)
+                || "file_edit".equals(normalized)
+                || "editfile".equals(normalized);
+    }
+
+    private static String normalizeToolName(String toolName) {
+        if (toolName == null) return "";
+        String normalized = toolName.strip().toLowerCase(Locale.ROOT);
+        if (normalized.length() > 5 && normalized.regionMatches(true, 0, "talos", 0, 5)) {
+            char c = normalized.charAt(5);
+            if (c == ':' || c == '/' || c == '-' || c == '_') {
+                normalized = "talos." + normalized.substring(6);
+            }
+        }
+        if (normalized.startsWith("talos.")) {
+            normalized = normalized.substring("talos.".length());
+        }
+        return normalized;
     }
 
     public static String buildReadCallSignature(ToolCall call) {
@@ -223,7 +253,7 @@ public final class ToolCallSupport {
     }
 
     public static ToolCall repairMissingPath(ToolCall call) {
-        if (!PATH_REQUIRED_TOOLS.contains(call.toolName())) {
+        if (!PATH_REQUIRED_TOOLS.contains(normalizeToolName(call.toolName()))) {
             return call;
         }
         for (String key : PATH_PARAM_KEYS) {
