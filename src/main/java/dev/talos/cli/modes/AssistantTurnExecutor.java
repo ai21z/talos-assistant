@@ -165,7 +165,9 @@ public final class AssistantTurnExecutor {
                         // because prose is already on the terminal, so truthfulness
                         // must be enforced by visible annotation of high-risk shapes.
                         streamed = true;
+                        String rawAnswer = answer;
                         answer = shapeAnswerWithoutTools(answer, messages, ctx, true, opts);
+                        emitMalformedProtocolReplacementIfNeeded(rawAnswer, answer, ctx);
                         out.append(answer);
                     }
                 } else {
@@ -379,6 +381,19 @@ public final class AssistantTurnExecutor {
         ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
                 answer, messages, loopResult, workspace, extraMutationSuccesses);
         return sanitizeAndTruncate(outcome.finalAnswer(), opts);
+    }
+
+    private static void emitMalformedProtocolReplacementIfNeeded(
+            String rawAnswer,
+            String shapedAnswer,
+            Context ctx
+    ) {
+        if (!ToolCallParser.looksLikeMalformedProtocolArrayDebris(rawAnswer)) return;
+        if (ctx == null) return;
+        if (!(ctx.streamSink() instanceof ToolCallStreamFilter filter)) return;
+        if (shapedAnswer == null || shapedAnswer.isBlank()) return;
+        filter.accept(shapedAnswer);
+        filter.flush();
     }
 
     private static String shapeAnswerWithoutTools(
@@ -1398,6 +1413,10 @@ public final class AssistantTurnExecutor {
             + "modification, but the assistant did not call any file-editing tool, so "
             + "the prior \"updated file\" narrative was discarded.]\n\n"
             + "No file changes were applied. Please retry with actual tool-backed edits.";
+
+    public static final String MALFORMED_TOOL_PROTOCOL_REPLACEMENT =
+            "[Truth check: the model produced an invalid tool-call payload, so no action was taken.]\n\n"
+            + "No file changes were applied. Please retry the request.";
 
     /**
      * Returns the content of the latest user-role message in {@code messages},

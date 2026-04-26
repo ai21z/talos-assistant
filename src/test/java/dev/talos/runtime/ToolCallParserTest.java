@@ -765,6 +765,27 @@ class ToolCallParserTest {
     }
 
     @Test
+    void detectsOnlyMalformedEmptyProtocolArrayDebris() {
+        assertTrue(ToolCallParser.looksLikeMalformedProtocolArrayDebris("""
+                [
+                    ,
+
+                ]
+                """));
+        assertTrue(ToolCallParser.looksLikeMalformedProtocolArrayDebris("[,,]"));
+
+        assertFalse(ToolCallParser.looksLikeMalformedProtocolArrayDebris("[]"));
+        assertFalse(ToolCallParser.looksLikeMalformedProtocolArrayDebris("[1, 2, 3]"));
+        assertFalse(ToolCallParser.looksLikeMalformedProtocolArrayDebris("""
+                [
+                  {"name": "ordinary"}
+                ]
+                """));
+        assertFalse(ToolCallParser.looksLikeMalformedProtocolArrayDebris(
+                "Example JSON: [ , ] is invalid syntax."));
+    }
+
+    @Test
     void parseCodeFencedJsonWithToolKey() {
         String response = """
                 ```json

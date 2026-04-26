@@ -650,6 +650,60 @@ class ToolCallStreamFilterTest {
         }
     }
 
+    @Nested
+    @DisplayName("Malformed protocol array suppression")
+    class MalformedProtocolArraySuppression {
+
+        @Test
+        @DisplayName("observed malformed empty protocol array is suppressed")
+        void malformed_empty_protocol_array_suppressed() {
+            String input = """
+                    [
+                        ,
+
+                    ]
+                    """;
+            String result = joined(f -> f.accept(input));
+            assertEquals("", result);
+        }
+
+        @Test
+        @DisplayName("malformed protocol array streamed one character at a time is suppressed")
+        void malformed_protocol_array_char_by_char_suppressed() {
+            String input = "[\n  ,\n]";
+            String result = joined(f -> {
+                for (char c : input.toCharArray()) {
+                    f.accept(String.valueOf(c));
+                }
+            });
+            assertEquals("", result);
+        }
+
+        @Test
+        @DisplayName("prose around malformed protocol array is preserved")
+        void prose_around_malformed_protocol_array_preserved() {
+            String input = "Before\n[\n,\n]\nAfter";
+            String result = joined(f -> f.accept(input));
+            assertEquals("Before\n\nAfter", result);
+        }
+
+        @Test
+        @DisplayName("ordinary JSON arrays pass through")
+        void ordinary_json_arrays_pass_through() {
+            String input = "Examples:\n[]\n[1, 2, 3]\n[{\"name\":\"ordinary\"}]";
+            String result = joined(f -> f.accept(input));
+            assertEquals(input, result);
+        }
+
+        @Test
+        @DisplayName("malformed array mentioned inline as text passes through")
+        void inline_malformed_array_example_passes_through() {
+            String input = "Example JSON: [ , ] is invalid syntax.";
+            String result = joined(f -> f.accept(input));
+            assertEquals(input, result);
+        }
+    }
+
     // ── Flush with JSON fences ───────────────────────────────────────────
 
     @Nested

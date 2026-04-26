@@ -255,6 +255,34 @@ public final class ToolCallParser {
     }
 
     /**
+     * Returns true for a narrow malformed native-tool protocol debris shape:
+     * a small standalone JSON-like array containing only commas and whitespace,
+     * for example {@code [ , ]}.
+     *
+     * <p>This deliberately does not treat {@code []}, ordinary JSON arrays, or
+     * user-facing JSON examples as protocol. The observed failure shape was an
+     * invalid empty array fragment from a failed tool-call attempt, not a broad
+     * JSON syntax problem.
+     */
+    public static boolean looksLikeMalformedProtocolArrayDebris(String text) {
+        String trimmed = text == null ? "" : text.strip();
+        if (trimmed.length() < 3 || trimmed.length() > 512) return false;
+        if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) return false;
+
+        String inner = trimmed.substring(1, trimmed.length() - 1);
+        boolean sawComma = false;
+        for (int i = 0; i < inner.length(); i++) {
+            char c = inner.charAt(i);
+            if (c == ',') {
+                sawComma = true;
+            } else if (!Character.isWhitespace(c)) {
+                return false;
+            }
+        }
+        return sawComma;
+    }
+
+    /**
      * Returns true when {@code text} is exactly one standalone JSON object that
      * parses as a Talos tool call.
      *
