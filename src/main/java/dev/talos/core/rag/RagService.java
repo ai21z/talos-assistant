@@ -146,7 +146,7 @@ public class RagService {
                 } catch (Exception e) {
                     // If embeddings fail, proceed BM25-only but record why
                     embedFailReason = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
-                    LOG.warn("Embedding failed, proceeding BM25-only: {}", embedFailReason);
+                    LOG.debug("Embedding failed, proceeding BM25-only: {}", embedFailReason);
                 }
             }
 
