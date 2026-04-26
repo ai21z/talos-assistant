@@ -72,12 +72,17 @@ public final class TalosBootstrap {
      * @param cfg        loaded configuration
      * @param out        output stream (typically System.out)
      * @param workspace  workspace root directory
-     * @param lineReader optional JLine LineReader for approval prompts; when non-null,
-     *                   approval uses the same terminal input system as the REPL
+     * @param lineReader optional JLine LineReader for signal and stream-writer
+     *                   integration; when non-null, streaming output uses the
+     *                   terminal writer to preserve cursor state
+     * @param approvalReader optional shared prompt reader for approval prompts;
+     *                       when non-null, approval uses the same input owner as
+     *                       the REPL loop
      * @return a configured ReplRouter
      */
     public static ReplRouter create(SessionState session, Config cfg, PrintStream out,
-                                    Path workspace, LineReader lineReader) {
+                                    Path workspace, LineReader lineReader,
+                                    Function<String, String> approvalReader) {
         cfg = (cfg == null) ? new Config() : cfg;
         workspace = (workspace == null) ? Path.of(".") : workspace;
         out = (out == null) ? System.out : out;
@@ -181,15 +186,18 @@ public final class TalosBootstrap {
         // The pre-prompt hook stops the spinner so the approval line renders cleanly.
         Runnable spinnerStopper = render::stopSpinner;
         CliApprovalGate approvalGate;
-        if (lineReader != null) {
-            Function<String, String> jlineReader = prompt -> {
+        Function<String, String> effectiveApprovalReader = approvalReader;
+        if (effectiveApprovalReader == null && lineReader != null) {
+            effectiveApprovalReader = prompt -> {
                 try {
                     return lineReader.readLine(prompt);
                 } catch (org.jline.reader.EndOfFileException | org.jline.reader.UserInterruptException e) {
                     return null; // EOF / Ctrl-C → deny
                 }
             };
-            approvalGate = new CliApprovalGate(jlineReader, out, spinnerStopper);
+        }
+        if (effectiveApprovalReader != null) {
+            approvalGate = new CliApprovalGate(effectiveApprovalReader, out, spinnerStopper);
         } else {
             // Fallback: Scanner-based (tests, non-interactive pipelines)
             approvalGate = new CliApprovalGate();
@@ -326,6 +334,14 @@ public final class TalosBootstrap {
      */
     public static ReplRouter create(SessionState session, Config cfg, PrintStream out, Path workspace) {
         return create(session, cfg, out, workspace, null);
+    }
+
+    /**
+     * Backward-compatible JLine factory.
+     */
+    public static ReplRouter create(SessionState session, Config cfg, PrintStream out,
+                                    Path workspace, LineReader lineReader) {
+        return create(session, cfg, out, workspace, lineReader, null);
     }
 
     /**

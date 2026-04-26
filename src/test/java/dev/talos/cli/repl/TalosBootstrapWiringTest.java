@@ -9,6 +9,8 @@ import dev.talos.runtime.TurnProcessor;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -152,6 +154,24 @@ class TalosBootstrapWiringTest {
         String stdOut = stdoutSink.toString(java.nio.charset.StandardCharsets.UTF_8);
         assertTrue(stdOut.contains("CHUNK-PROBE"),
                 "with no LineReader, sink must fall back to the passed PrintStream");
+    }
+
+    @Test
+    void bootstrapUsesSuppliedApprovalReaderWhenNoLineReaderIsPresent() {
+        List<String> prompts = new ArrayList<>();
+        ReplRouter router = TalosBootstrap.create(
+                stubSession(), new Config(),
+                new java.io.PrintStream(java.io.OutputStream.nullOutputStream()),
+                WS,
+                null,
+                prompt -> {
+                    prompts.add(prompt);
+                    return "n";
+                });
+
+        assertFalse(router.context().approvalGate().approve("write file", "target: index.html"));
+        assertEquals(1, prompts.size(), "approval should read exactly one scripted response");
+        assertTrue(prompts.getFirst().contains("Allow?"));
     }
 }
 
