@@ -77,6 +77,21 @@ class TalosBootstrapTest {
     }
 
     @Test
+    void explainLastTurnCommandIsRegistered() {
+        SessionState session = new SessionState() {
+            private int k = 6; private boolean dbg;
+            public int getK() { return k; } public void setK(int v) { k = v; }
+            public boolean isDebug() { return dbg; } public void setDebug(boolean on) { dbg = on; }
+        };
+
+        ReplRouter router = TalosBootstrap.create(session, new Config(),
+                new PrintStream(java.io.OutputStream.nullOutputStream()), WS);
+
+        assertTrue(router.getRegistry().has("explain-last-turn"));
+        assertTrue(router.getRegistry().has("explain"));
+    }
+
+    @Test
     void unknownCommandIsNotHandled() {
         SessionState session = new SessionState() {
             private int k = 6; private boolean dbg;
