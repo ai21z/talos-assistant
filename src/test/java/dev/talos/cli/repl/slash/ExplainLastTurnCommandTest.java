@@ -56,6 +56,87 @@ class ExplainLastTurnCommandTest {
     }
 
     @Test
+    void specIncludesLastAlias() {
+        var cmd = new ExplainLastTurnCommand(Path.of("/ws"), new JsonSessionStore(tempDir));
+
+        assertTrue(cmd.spec().aliases().contains("last"));
+        assertTrue(cmd.spec().usage().contains("sources"));
+    }
+
+    @Test
+    void rendersToolsView() {
+        TurnRecord turn = record(
+                5,
+                "Inspect files",
+                "Done.",
+                List.of(
+                        new TurnRecord.ToolCallSummary("talos.read_file", "index.html", true),
+                        new TurnRecord.ToolCallSummary("talos.grep", ".cta-button", false)),
+                0,
+                0,
+                0,
+                "ok");
+
+        String text = ExplainLastTurnCommand.renderTools(turn);
+
+        assertTrue(text.contains("Last Turn Tools"));
+        assertTrue(text.contains("1. talos.read_file -> index.html [ok]"));
+        assertTrue(text.contains("2. talos.grep -> .cta-button [failed]"));
+    }
+
+    @Test
+    void rendersSourcesViewFromTraceAndToolPaths() {
+        TurnRecord turn = record(
+                6,
+                "Inspect files",
+                "Done.",
+                List.of(
+                        new TurnRecord.ToolCallSummary("talos.read_file", "index.html", true),
+                        new TurnRecord.ToolCallSummary("talos.read_file", "index.html", true),
+                        new TurnRecord.ToolCallSummary("talos.grep", "script.js", true)),
+                0,
+                0,
+                0,
+                "ok");
+
+        String text = ExplainLastTurnCommand.renderSources(turn);
+
+        assertTrue(text.contains("Last Turn Sources"));
+        assertTrue(text.contains("Retrieval:"));
+        assertEquals(1, countOccurrences(text, "index.html"));
+        assertTrue(text.contains("script.js"));
+    }
+
+    @Test
+    void rendersTraceView() {
+        TurnRecord turn = record(
+                7,
+                "Inspect files",
+                "Done.",
+                List.of(new TurnRecord.ToolCallSummary("talos.list_dir", ".", true)),
+                0,
+                0,
+                0,
+                "ok");
+
+        String text = ExplainLastTurnCommand.renderTrace(turn);
+
+        assertTrue(text.contains("Last Turn"));
+        assertTrue(text.contains("Trace Detail"));
+        assertTrue(text.contains("Tool calls: 1"));
+    }
+
+    @Test
+    void executeRejectsUnknownView() {
+        var cmd = new ExplainLastTurnCommand(Path.of("/ws"), new JsonSessionStore(tempDir));
+
+        Result result = cmd.execute("logs", minimalCtx());
+
+        assertInstanceOf(Result.Error.class, result);
+        assertTrue(result.toString().contains("Usage"));
+    }
+
+    @Test
     void rendersApprovalDeniedOutcome() {
         TurnRecord turn = record(
                 2,
@@ -131,5 +212,15 @@ class ExplainLastTurnCommandTest {
                 approvalsDenied,
                 "2 stages, 5.0ms, final=3",
                 status);
+    }
+
+    private static int countOccurrences(String text, String needle) {
+        int count = 0;
+        int index = 0;
+        while ((index = text.indexOf(needle, index)) >= 0) {
+            count++;
+            index += needle.length();
+        }
+        return count;
     }
 }
