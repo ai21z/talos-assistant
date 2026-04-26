@@ -1,6 +1,6 @@
 package dev.talos.cli.repl;
 
-import dev.talos.cli.ui.AnsiColor;
+import dev.talos.cli.ui.CliTheme;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
 import dev.talos.core.security.Redactor;
@@ -24,6 +24,7 @@ public final class RenderEngine {
     private final Config cfg;
     private final Redactor redactor;
     private final PrintStream out;
+    private final CliTheme theme;
     private final String statusLabel;
     private final boolean showStatusDuringAnswer;
     private final boolean showTimingAfterAnswer;
@@ -51,18 +52,23 @@ public final class RenderEngine {
      *                    hundreds of carriage-return lines.
      */
     public RenderEngine(Config cfg, Redactor redactor, PrintStream out, boolean interactive) {
+        this(cfg, redactor, out, interactive, CliTheme.current());
+    }
+
+    RenderEngine(Config cfg, Redactor redactor, PrintStream out, boolean interactive, CliTheme theme) {
         this.cfg = (cfg == null ? new Config() : cfg);
         this.redactor = (redactor == null ? new Redactor() : redactor);
         this.out = (out == null ? System.out : out);
         this.interactive = interactive;
+        this.theme = theme == null ? CliTheme.current() : theme;
 
         // UI config
         Map<String, Object> ui = CfgUtil.map(this.cfg.data.get("ui"));
         String rawLabel = ui == null ? "Thinking" : String.valueOf(ui.getOrDefault("status_label", "Thinking"));
-        this.statusLabel = AnsiColor.isUnicodeSafe() ? rawLabel : rawLabel.replace("…", "...");
+        this.statusLabel = unicodeSafe() ? rawLabel : rawLabel.replace("…", "...");
         this.showStatusDuringAnswer = ui == null || !(ui.get("show_status_during_answer") instanceof Boolean b) || b;
         this.showTimingAfterAnswer = ui == null || !(ui.get("show_timing_after_answer") instanceof Boolean b2) || b2;
-        this.spinnerFrames = AnsiColor.isUnicodeSafe() ? SPINNER_UNICODE : SPINNER_ASCII;
+        this.spinnerFrames = unicodeSafe() ? SPINNER_UNICODE : SPINNER_ASCII;
     }
 
     /**
@@ -77,13 +83,13 @@ public final class RenderEngine {
 
     /**
      * Print a subtle routing indicator for auto-mode.
-     * Shows dimmed text like {@code [auto → rag]} before the spinner.
+     * Shows dimmed text like {@code [auto -> rag]} before the spinner.
      * Suppressed in non-interactive mode.
      */
     public void printRouteHint(String routeLabel) {
         if (!interactive) return;
         if (routeLabel == null || routeLabel.isBlank()) return;
-        out.println(AnsiColor.DIM + "  [auto → " + routeLabel + "]" + AnsiColor.RESET);
+        out.println(theme.muted("  [auto -> " + routeLabel + "]"));
         out.flush();
     }
 
@@ -104,7 +110,7 @@ public final class RenderEngine {
         if (!interactive) return;
 
         StringBuilder sb = new StringBuilder();
-        sb.append("  ").append(AnsiColor.DIM);
+        sb.append("  ").append(theme.sgr("38;5;240"));
         sb.append("[Turn ").append(turnNumber);
 
         // Elapsed time
@@ -119,7 +125,7 @@ public final class RenderEngine {
             sb.append(" | ~").append(responseLen).append(" chars");
         }
 
-        sb.append("]").append(AnsiColor.RESET);
+        sb.append("]").append(theme.reset());
         out.println(sb.toString());
         out.flush();
     }
@@ -143,10 +149,10 @@ public final class RenderEngine {
                         ? secs + "s"
                         : String.format(Locale.ROOT, "%d:%02d", secs / 60, secs % 60);
 
-                // Colored spinner: orange dot + grey label + dim time
-                out.print("\r  " + AnsiColor.ORANGE + spinnerFrames[frame] + AnsiColor.RESET
-                        + " " + AnsiColor.GREY + statusLabel + AnsiColor.RESET
-                        + "  " + AnsiColor.DIM + elapsed + AnsiColor.RESET + "   ");
+                // Active status is renderer-owned; model text never controls styling.
+                out.print("\r  " + theme.active(spinnerFrames[frame])
+                        + " " + theme.metadata(statusLabel)
+                        + "  " + theme.muted(elapsed) + "   ");
                 out.flush();
                 try {
                     Thread.sleep(120);
@@ -196,8 +202,8 @@ public final class RenderEngine {
         }
         if (r instanceof Result.Error err) {
             String msg = sro(err.message);
-            String prefix = AnsiColor.red(AnsiColor.isUnicodeSafe() ? "✗" : "[error]");
-            if (err.code > 0) println("  " + prefix + " " + AnsiColor.DIM + "[" + err.code + "]" + AnsiColor.RESET + " " + msg);
+            String prefix = theme.error("x");
+            if (err.code > 0) println("  " + prefix + " " + theme.muted("[" + err.code + "]") + " " + msg);
             else println("  " + prefix + " " + msg);
             return;
         }
@@ -245,17 +251,18 @@ public final class RenderEngine {
      */
     public void printToolProgress(String toolName, String action, String detail) {
         if (!interactive) return;
-        String icon = "warning".equals(action) ? AnsiColor.YELLOW + "⚠" + AnsiColor.RESET
-                : AnsiColor.BLUE + "→" + AnsiColor.RESET;
-        String color = "warning".equals(action) ? AnsiColor.YELLOW : AnsiColor.DIM;
+        boolean warning = "warning".equals(action);
+        String icon = warning ? theme.warning("!") : theme.active(">");
 
         StringBuilder sb = new StringBuilder();
-        sb.append("  ").append(icon).append(" ").append(color);
+        sb.append("  ").append(icon).append(" ");
+        if (warning) sb.append(theme.sgr("38;5;214"));
+        else sb.append(theme.sgr("38;5;240"));
         sb.append(formatToolAction(action, toolName));
         if (detail != null && !detail.isBlank()) {
             sb.append(": ").append(detail);
         }
-        sb.append(AnsiColor.RESET);
+        sb.append(theme.reset());
         println(sb.toString());
     }
 
@@ -277,12 +284,12 @@ public final class RenderEngine {
 
     private void printResponse(String content) {
         if (content == null || content.isEmpty()) {
-            println("  " + AnsiColor.dim("(empty response)"));
+            println("  " + theme.muted("(empty response)"));
             return;
         }
 
         final int MAX_WIDTH = 96;
-        String border = AnsiColor.VIOLET + "│" + AnsiColor.RESET;
+        String border = theme.active("|");
         String[] lines = content.split("\n");
 
         println("");  // breathing room before response
@@ -326,25 +333,27 @@ public final class RenderEngine {
 
     private void renderTable(Result.Table tbl) {
         String title = sro(tbl.title);
-        if (!title.isEmpty()) println("  " + AnsiColor.bold(title));
+        if (!title.isEmpty()) println("  " + theme.bold(title));
 
         List<String> cols = (tbl.columns == null ? List.of() : tbl.columns);
         List<List<String>> rows = (tbl.rows == null ? List.of() : tbl.rows);
+        String separator = " | ";
+        String hline = "-";
 
         if (!cols.isEmpty()) {
             StringBuilder header = new StringBuilder();
             for (int i = 0; i < cols.size(); i++) {
-                if (i > 0) header.append(AnsiColor.dim(" │ "));
-                header.append(AnsiColor.bold(sroInline(cols.get(i))));
+                if (i > 0) header.append(theme.muted(separator));
+                header.append(theme.bold(sroInline(cols.get(i))));
             }
             println("  " + header);
-            println("  " + AnsiColor.dim("─".repeat(Math.max(3, stripAnsi(header.toString()).length()))));
+            println("  " + theme.muted(hline.repeat(Math.max(3, stripAnsi(header.toString()).length()))));
         }
 
         for (List<String> row : rows) {
             StringBuilder line = new StringBuilder();
             for (int i = 0; i < row.size(); i++) {
-                if (i > 0) line.append(AnsiColor.dim(" │ "));
+                if (i > 0) line.append(theme.muted(separator));
                 line.append(sroInline(row.get(i)));
             }
             println("  " + line);
@@ -366,6 +375,10 @@ public final class RenderEngine {
     private String sroInline(String s) {
         String cleaned = Sanitize.sanitizeForOutput(s == null ? "" : s);
         return redactor.redactLine(cleaned);
+    }
+
+    private boolean unicodeSafe() {
+        return theme.capabilities().unicodeSafe();
     }
 
     private void print(String s) { out.print(s); out.flush(); }
