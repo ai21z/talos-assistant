@@ -21,8 +21,8 @@ Internal architecture and process sources:
 - `docs/new-architecture/talos-harness-source-of-truth.md`
 - `docs/new-architecture/talos-harness-plan.md`
 - `local/docs/talos-source-pack-safe-local-alternative-2026-04-19.md`
-- `docs/work-test-cycle.md`
-- `docs/work-test-cycle-step-by-step.md`
+- `work-cycle-docs/work-test-cycle.md`
+- `work-cycle-docs/work-test-cycle-step-by-step.md`
 - `.github/copilot-instructions.md`
 - `docs/new-architecture/29-v1-scenario-pack.md`
 

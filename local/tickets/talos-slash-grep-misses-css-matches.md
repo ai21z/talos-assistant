@@ -3,7 +3,7 @@ Date: 2026-04-26
 Priority: medium
 Status: done
 Architecture references:
-- `docs/work-test-cycle.md`
+- `work-cycle-docs/work-test-cycle.md`
 - `local/tickets/new-work.md`
 
 ## Why This Ticket Exists

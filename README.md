@@ -233,9 +233,9 @@ The short version:
 
 The full work-cycle writeup lives here:
 
-- [docs/work-test-cycle.md](docs/work-test-cycle.md)
-- [docs/work-test-cycle-setup.md](docs/work-test-cycle-setup.md)
-- [docs/work-test-cycle-step-by-step.md](docs/work-test-cycle-step-by-step.md)
+- [work-cycle-docs/work-test-cycle.md](work-cycle-docs/work-test-cycle.md)
+- [work-cycle-docs/work-test-cycle-setup.md](work-cycle-docs/work-test-cycle-setup.md)
+- [work-cycle-docs/work-test-cycle-step-by-step.md](work-cycle-docs/work-test-cycle-step-by-step.md)
 
 ## What You Need To Run Talos Well
 
