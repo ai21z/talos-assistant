@@ -70,6 +70,8 @@ class ClearCommandTest {
         var cmd = new ClearCommand();
         assertEquals("clear", cmd.spec().name());
         assertTrue(cmd.spec().aliases().contains("cls"));
+        assertTrue(cmd.spec().aliases().contains("reset"));
+        assertTrue(cmd.spec().summary().contains("context"));
     }
 }
 
