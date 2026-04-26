@@ -323,7 +323,7 @@ public final class TurnProcessor {
         }
 
         if (risk.requiresApproval()) {
-            ToolResult preApprovalValidation = validateBeforeApproval(call);
+            ToolResult preApprovalValidation = validateBeforeApproval(call, session, ctx);
             if (preApprovalValidation != null) {
                 TurnAuditCapture.recordToolCall(
                         call.toolName(), path == null ? "" : path, false,
@@ -461,7 +461,12 @@ public final class TurnProcessor {
         return null;
     }
 
-    private static ToolResult validateBeforeApproval(ToolCall call) {
+    private static ToolResult validateBeforeApproval(ToolCall call, Session session, Context ctx) {
+        ToolResult sandboxPathValidation = validateSandboxPathBeforeApproval(call, session, ctx);
+        if (sandboxPathValidation != null) {
+            return sandboxPathValidation;
+        }
+
         if (!"talos.edit_file".equals(call.toolName())) {
             return null;
         }
@@ -497,9 +502,55 @@ public final class TurnProcessor {
         return null;
     }
 
+    private static ToolResult validateSandboxPathBeforeApproval(ToolCall call, Session session, Context ctx) {
+        if (call == null || !ToolCallSupport.isMutatingTool(call.toolName())) {
+            return null;
+        }
+        if (session == null || session.workspace() == null || ctx == null || ctx.sandbox() == null) {
+            return null;
+        }
+
+        for (PathParam param : pathParams(call)) {
+            Path resolved;
+            try {
+                resolved = session.workspace().resolve(param.value()).normalize();
+            } catch (Exception e) {
+                return ToolResult.fail(ToolError.invalidParams(
+                        "Invalid path before approval for `" + param.name() + "`: "
+                                + param.value() + ". No approval was requested and no file was changed."));
+            }
+            if (!ctx.sandbox().allowedPath(resolved)) {
+                return ToolResult.fail(ToolError.invalidParams(
+                        "Path not allowed before approval for `" + param.name() + "`: "
+                                + param.value() + " (" + ctx.sandbox().explain(resolved) + "). "
+                                + "No approval was requested and no file was changed."));
+            }
+        }
+        return null;
+    }
+
+    private static List<PathParam> pathParams(ToolCall call) {
+        var params = new java.util.ArrayList<PathParam>();
+        for (String key : List.of("path", "file_path", "filepath", "file", "filename", "from", "to")) {
+            String value = call.param(key);
+            if (value != null && !value.isBlank()) {
+                params.add(new PathParam(key, value));
+            }
+        }
+        return params;
+    }
+
     private static String preApprovalBlockReason(ToolCall call, ToolResult result) {
         String name = call == null ? "tool" : call.toolName();
         String message = result == null ? "" : result.errorMessage();
+        if (message != null && message.startsWith("Path not allowed before approval")) {
+            return "path blocked before approval"
+                    + (message.isBlank() ? "" : ": " + shortReason(message));
+        }
+        if (message != null && message.startsWith("Invalid path before approval")) {
+            return "invalid path before approval"
+                    + (message.isBlank() ? "" : ": " + shortReason(message));
+        }
         if ("talos.edit_file".equals(name)) {
             return "invalid edit args before approval"
                     + (message == null || message.isBlank() ? "" : ": " + shortReason(message));
@@ -587,5 +638,7 @@ public final class TurnProcessor {
 
         return sb.toString();
     }
+
+    private record PathParam(String name, String value) { }
 }
 

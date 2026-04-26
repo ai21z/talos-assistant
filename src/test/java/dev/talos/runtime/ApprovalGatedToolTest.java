@@ -3,9 +3,12 @@ package dev.talos.runtime;
 import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
+import dev.talos.core.security.Sandbox;
 import dev.talos.tools.*;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 
@@ -442,6 +445,82 @@ class ApprovalGatedToolTest {
             assertEquals(ToolError.INVALID_PARAMS, result.error().code());
             assertTrue(result.errorMessage().contains("path"));
             assertEquals(0, gateCalls[0], "missing path must not ask approval");
+        } finally {
+            TurnUserRequestCapture.clear();
+        }
+    }
+
+    @Test
+    void writeFileEscapingWorkspaceFailsBeforeApproval(@TempDir Path workspace) {
+        var registry = new ToolRegistry();
+        registry.register(writeFileTool());
+
+        final int[] gateCalls = {0};
+        ApprovalGate gate = (desc, detail) -> {
+            gateCalls[0]++;
+            return true;
+        };
+        var processor = new TurnProcessor(
+                ModeController.defaultController(),
+                gate,
+                registry);
+
+        var ctx = Context.builder(new Config())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .build();
+        var session = new Session(workspace, new Config());
+        var call = new ToolCall("talos.write_file", Map.of(
+                "path", "../outside-talos-qa.txt",
+                "content", "hello from Talos"));
+
+        TurnUserRequestCapture.set("Create a file at ../outside-talos-qa.txt with the text hello from Talos.");
+        try {
+            ToolResult result = processor.executeTool(session, call, ctx);
+            assertFalse(result.success(), "escaping write_file path must fail before approval");
+            assertEquals(ToolError.INVALID_PARAMS, result.error().code());
+            assertTrue(result.errorMessage().contains("Path not allowed before approval"));
+            assertTrue(result.errorMessage().contains("path escapes workspace"));
+            assertTrue(result.errorMessage().contains("No approval was requested"));
+            assertEquals(0, gateCalls[0], "escaping write_file path must not ask approval");
+            assertFalse(Files.exists(workspace.getParent().resolve("outside-talos-qa.txt")),
+                    "outside path must not be created");
+        } finally {
+            TurnUserRequestCapture.clear();
+        }
+    }
+
+    @Test
+    void editFileEscapingWorkspaceFailsBeforeApproval(@TempDir Path workspace) {
+        var registry = new ToolRegistry();
+        registry.register(editFileTool());
+
+        final int[] gateCalls = {0};
+        ApprovalGate gate = (desc, detail) -> {
+            gateCalls[0]++;
+            return true;
+        };
+        var processor = new TurnProcessor(
+                ModeController.defaultController(),
+                gate,
+                registry);
+
+        var ctx = Context.builder(new Config())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .build();
+        var session = new Session(workspace, new Config());
+        var call = new ToolCall("talos.edit_file", Map.of(
+                "path", "../outside-talos-qa.txt",
+                "old_string", "hello",
+                "new_string", "goodbye"));
+
+        TurnUserRequestCapture.set("Edit ../outside-talos-qa.txt so hello becomes goodbye.");
+        try {
+            ToolResult result = processor.executeTool(session, call, ctx);
+            assertFalse(result.success(), "escaping edit_file path must fail before approval");
+            assertEquals(ToolError.INVALID_PARAMS, result.error().code());
+            assertTrue(result.errorMessage().contains("Path not allowed before approval"));
+            assertTrue(result.errorMessage().contains("path escapes workspace"));
+            assertEquals(0, gateCalls[0], "escaping edit_file path must not ask approval");
         } finally {
             TurnUserRequestCapture.clear();
         }

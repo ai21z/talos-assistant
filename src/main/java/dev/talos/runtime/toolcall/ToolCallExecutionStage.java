@@ -34,6 +34,7 @@ public final class ToolCallExecutionStage {
                                    int failuresThisIteration,
                                    boolean approvalDeniedThisIteration,
                                    boolean mutatingDeniedThisIteration,
+                                   boolean pathPolicyBlockedThisIteration,
                                    int successesThisIteration) {}
 
     private final TurnProcessor turnProcessor;
@@ -58,6 +59,7 @@ public final class ToolCallExecutionStage {
         int successesThisIter = 0;
         boolean approvalDeniedThisIter = false;
         boolean mutatingDeniedThisIter = false;
+        boolean pathPolicyBlockedThisIter = false;
         List<String> mutationSummariesThisIter = new ArrayList<>();
 
         for (int i = 0; i < parsed.calls().size(); i++) {
@@ -158,6 +160,9 @@ public final class ToolCallExecutionStage {
             if (denied && ToolCallSupport.isMutatingTool(effective.toolName())) {
                 mutatingDeniedThisIter = true;
             }
+            if (isPreApprovalPathPolicyBlock(result) && ToolCallSupport.isMutatingTool(effective.toolName())) {
+                pathPolicyBlockedThisIter = true;
+            }
             if (isUserApprovalDenial(result) && ToolCallSupport.isMutatingTool(effective.toolName())) {
                 approvalDeniedThisIter = true;
             }
@@ -216,6 +221,7 @@ public final class ToolCallExecutionStage {
                 failuresThisIter,
                 approvalDeniedThisIter,
                 mutatingDeniedThisIter,
+                pathPolicyBlockedThisIter,
                 successesThisIter);
     }
 
@@ -260,6 +266,15 @@ public final class ToolCallExecutionStage {
         if (!ToolError.DENIED.equals(result.error().code())) return false;
         String message = result.errorMessage();
         return message != null && message.startsWith("User did not approve ");
+    }
+
+    private static boolean isPreApprovalPathPolicyBlock(ToolResult result) {
+        if (result == null || result.success() || result.error() == null) return false;
+        if (!ToolError.INVALID_PARAMS.equals(result.error().code())) return false;
+        String message = result.errorMessage();
+        return message != null
+                && (message.startsWith("Path not allowed before approval")
+                || message.startsWith("Invalid path before approval"));
     }
 
     private void appendResultMessage(LoopState state, boolean nativePath, int callIndex, String content) {
