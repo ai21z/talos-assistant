@@ -388,6 +388,70 @@ class SystemPromptBuilderTest {
     }
 
     @Test
+    void readOnlyToolModeOmitsMutatingToolDescriptors() {
+        var registry = new ToolRegistry();
+        registry.register(stubTool("talos.read_file", "Read a workspace file", ToolRiskLevel.READ_ONLY));
+        registry.register(stubTool("talos.write_file", "Create or overwrite a file", ToolRiskLevel.WRITE));
+        registry.register(stubTool("talos.edit_file", "Replace a unique string", ToolRiskLevel.WRITE));
+
+        String prompt = SystemPromptBuilder.forUnified()
+                .withTools(registry)
+                .withReadOnlyToolMode(true)
+                .build();
+
+        assertTrue(prompt.contains("Only inspection tools"),
+                "Read-only mode should use read-only tool guidance");
+        assertTrue(prompt.contains("Current Turn Contract"),
+                "Read-only mode should include an explicit current-turn contract");
+        assertTrue(prompt.contains("- **talos.read_file**"),
+                "Read-only mode should keep inspection tool descriptors");
+        assertFalse(prompt.contains("- **talos.write_file**"),
+                "Read-only mode should not list write_file as an available tool descriptor");
+        assertFalse(prompt.contains("- **talos.edit_file**"),
+                "Read-only mode should not list edit_file as an available tool descriptor");
+        assertFalse(prompt.contains("FILE CREATION AND MODIFICATION"),
+                "Read-only mode should not use the writable tool preamble");
+    }
+
+    @Test
+    void nativeReadOnlyToolModeOmitsMutatingToolDescriptors() {
+        var registry = new ToolRegistry();
+        registry.register(stubTool("talos.grep", "Search workspace files", ToolRiskLevel.READ_ONLY));
+        registry.register(stubTool("talos.edit_file", "Replace a unique string", ToolRiskLevel.WRITE));
+
+        String prompt = SystemPromptBuilder.forUnified()
+                .withTools(registry)
+                .withNativeTools(true)
+                .withReadOnlyToolMode(true)
+                .build();
+
+        assertTrue(prompt.contains("Only inspection tools"),
+                "Native read-only mode should use read-only tool guidance");
+        assertTrue(prompt.contains("- **talos.grep**"),
+                "Native read-only mode should keep read-only tool descriptors");
+        assertFalse(prompt.contains("- **talos.edit_file**"),
+                "Native read-only mode should filter mutating tool descriptors");
+        assertFalse(prompt.contains("runtime handles tool invocation format automatically — just decide WHICH tool"),
+                "Native read-only mode should not use the writable native preamble");
+    }
+
+    @Test
+    void normalToolModeStillIncludesMutatingToolDescriptors() {
+        var registry = new ToolRegistry();
+        registry.register(stubTool("talos.read_file", "Read a workspace file", ToolRiskLevel.READ_ONLY));
+        registry.register(stubTool("talos.write_file", "Create or overwrite a file", ToolRiskLevel.WRITE));
+
+        String prompt = SystemPromptBuilder.forUnified()
+                .withTools(registry)
+                .build();
+
+        assertTrue(prompt.contains("- **talos.read_file**"));
+        assertTrue(prompt.contains("- **talos.write_file**"));
+        assertTrue(prompt.contains("FILE CREATION AND MODIFICATION"),
+                "Writable mode should preserve file operation reinforcement");
+    }
+
+    @Test
     void nativeToolsReducesTokenEstimate() {
         var registry = new ToolRegistry();
         registry.register(stubTool("talos.read_file", "Read a file"));
@@ -475,10 +539,14 @@ class SystemPromptBuilderTest {
     // ── Helper ──────────────────────────────────────────────────────
 
     private static TalosTool stubTool(String name, String description) {
+        return stubTool(name, description, ToolRiskLevel.READ_ONLY);
+    }
+
+    private static TalosTool stubTool(String name, String description, ToolRiskLevel riskLevel) {
         return new TalosTool() {
             @Override public String name() { return name; }
             @Override public String description() { return description; }
-            @Override public ToolDescriptor descriptor() { return new ToolDescriptor(name, description); }
+            @Override public ToolDescriptor descriptor() { return new ToolDescriptor(name, description, null, riskLevel); }
             @Override public ToolResult execute(ToolCall call, ToolContext ctx) { return ToolResult.ok("stub"); }
         };
     }

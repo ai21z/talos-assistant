@@ -68,6 +68,57 @@ class AssistantTurnExecutorTest {
         }
     }
 
+    @Nested
+    @DisplayName("Task contract instruction")
+    class TaskContractInstruction {
+
+        @Test
+        void readOnlyTurnGetsNoMutationInstruction() {
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Check the workspace for selector mismatches. Do not change anything yet."));
+
+            AssistantTurnExecutor.injectTaskContractInstruction(messages);
+
+            assertEquals(3, messages.size());
+            assertEquals("system", messages.get(1).role());
+            String instruction = messages.get(1).content();
+            assertTrue(instruction.contains("[TaskContract]"));
+            assertTrue(instruction.contains("mutationAllowed: false"));
+            assertTrue(instruction.contains("Do not call talos.write_file or talos.edit_file"));
+            assertTrue(instruction.contains("wait for an explicit change request"));
+        }
+
+        @Test
+        void mutationTurnDoesNotGetReadOnlyInstruction() {
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Edit index.html to add the CTA button."));
+
+            AssistantTurnExecutor.injectTaskContractInstruction(messages);
+
+            assertEquals(2, messages.size());
+        }
+
+        @Test
+        void taskContractInstructionIsIdempotent() {
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Check the workspace. Do not change anything."));
+
+            AssistantTurnExecutor.injectTaskContractInstruction(messages);
+            AssistantTurnExecutor.injectTaskContractInstruction(messages);
+
+            long count = messages.stream()
+                    .filter(message -> "system".equals(message.role()))
+                    .filter(message -> message.content() != null)
+                    .filter(message -> message.content().startsWith("[TaskContract]"))
+                    .count();
+            assertEquals(1, count);
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     //  Streaming path (with streamSink)
     // ═══════════════════════════════════════════════════════════════════════
