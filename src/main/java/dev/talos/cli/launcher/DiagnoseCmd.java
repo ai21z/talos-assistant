@@ -8,6 +8,8 @@ import dev.talos.core.context.ContextResult;
 import dev.talos.core.context.TokenBudget;
 import dev.talos.core.embed.EmbeddingsClient;
 import dev.talos.core.rag.RagService;
+import dev.talos.core.util.Sanitize;
+import dev.talos.cli.ui.TerminalCapabilities;
 import picocli.CommandLine;
 
 import java.nio.file.Path;
@@ -46,6 +48,7 @@ public class DiagnoseCmd implements Runnable {
     @Override
     public void run() {
         try {
+            boolean unicodeSafe = TerminalCapabilities.detectDefault().unicodeSafe();
             // Resolve root
             if (root == null) {
                 String envWs = System.getenv("TALOS_WORKSPACE");
@@ -85,10 +88,10 @@ public class DiagnoseCmd implements Runnable {
                     System.out.println("  Status:    OK");
                     System.out.println("  Dimension: " + probe.length);
                 } else {
-                    System.out.println("  Status:    WARN — probe returned invalid vector (NaN/zero)");
+                    System.out.println(term("  Status:    WARN — probe returned invalid vector (NaN/zero)", unicodeSafe));
                 }
             } catch (Exception embErr) {
-                System.out.println("  Status:    ERROR — " + embErr.getMessage());
+                System.out.println(term("  Status:    ERROR — " + embErr.getMessage(), unicodeSafe));
             }
             System.out.println();
 
@@ -129,7 +132,7 @@ public class DiagnoseCmd implements Runnable {
                 // 5b. Print pipeline trace if requested
                 if (printTrace && prepared.trace() != null) {
                     System.out.println("Retrieval Pipeline Trace:");
-                    System.out.print(prepared.trace().summary());
+                    System.out.print(term(prepared.trace().summary(), unicodeSafe));
                     System.out.println();
                 }
 
@@ -155,7 +158,9 @@ public class DiagnoseCmd implements Runnable {
                     promptSample.append("\nContext snippets: ").append(packed.finalCount());
 
                     System.out.println("Prompt Head (first 400 chars):");
-                    System.out.println(promptSample.toString().substring(0, Math.min(400, promptSample.length())));
+                    System.out.println(term(
+                            promptSample.toString().substring(0, Math.min(400, promptSample.length())),
+                            unicodeSafe));
                     System.out.println("...");
                     System.out.println();
                 }
@@ -186,7 +191,7 @@ public class DiagnoseCmd implements Runnable {
 
                 if (!answerText.isEmpty()) {
                     System.out.println("Answer preview (first 200 chars):");
-                    System.out.println(answerText.substring(0, Math.min(200, answerText.length())));
+                    System.out.println(term(answerText.substring(0, Math.min(200, answerText.length())), unicodeSafe));
                     if (answerText.length() > 200) System.out.println("...");
                     System.out.println();
                 }
@@ -201,7 +206,7 @@ public class DiagnoseCmd implements Runnable {
                     System.exit(1);
                 }
 
-                System.out.println("✓ Diagnosis complete. No critical issues detected.");
+                System.out.println(term("✓ Diagnosis complete. No critical issues detected.", unicodeSafe));
                 System.exit(0);
             } else {
                 System.out.println("Mode '" + mode + "' diagnostics not yet implemented.");
@@ -214,6 +219,10 @@ public class DiagnoseCmd implements Runnable {
             e.printStackTrace();
             System.exit(2);
         }
+    }
+
+    private static String term(String text, boolean unicodeSafe) {
+        return Sanitize.sanitizeForTerminalOutput(text, unicodeSafe);
     }
 }
 
