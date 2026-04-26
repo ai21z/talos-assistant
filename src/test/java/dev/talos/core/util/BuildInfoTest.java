@@ -31,8 +31,8 @@ class BuildInfoTest {
         String v = BuildInfo.version();
         assertNotNull(v, "version() must not return null");
         assertTrue(!v.isBlank(), "version() must not return blank");
-        assertEquals("0.9.0", v,
-                "Exploded-class test runs should resolve version from generated build metadata.");
+        assertTrue(v.matches("\\d+\\.\\d+\\.\\d+(-[A-Za-z0-9._-]+)?"),
+                "Exploded-class test runs should resolve a semantic version from generated build metadata: " + v);
     }
 
     @Test

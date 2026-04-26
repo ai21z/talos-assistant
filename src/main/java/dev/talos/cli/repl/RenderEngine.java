@@ -65,7 +65,7 @@ public final class RenderEngine {
         // UI config
         Map<String, Object> ui = CfgUtil.map(this.cfg.data.get("ui"));
         String rawLabel = ui == null ? "Thinking" : String.valueOf(ui.getOrDefault("status_label", "Thinking"));
-        this.statusLabel = unicodeSafe() ? rawLabel : rawLabel.replace("…", "...");
+        this.statusLabel = terminalText(rawLabel);
         this.showStatusDuringAnswer = ui == null || !(ui.get("show_status_during_answer") instanceof Boolean b) || b;
         this.showTimingAfterAnswer = ui == null || !(ui.get("show_timing_after_answer") instanceof Boolean b2) || b2;
         this.spinnerFrames = unicodeSafe() ? SPINNER_UNICODE : SPINNER_ASCII;
@@ -196,8 +196,7 @@ public final class RenderEngine {
             return;
         }
         if (r instanceof Result.TrustedInfo trustedInfo) {
-            String cleaned = Sanitize.sanitizeForOutput(trustedInfo.text == null ? "" : trustedInfo.text);
-            println(cleaned);
+            println(trustedText(trustedInfo.text));
             return;
         }
         if (r instanceof Result.Error err) {
@@ -258,9 +257,9 @@ public final class RenderEngine {
         sb.append("  ").append(icon).append(" ");
         if (warning) sb.append(theme.sgr("38;5;214"));
         else sb.append(theme.sgr("38;5;240"));
-        sb.append(formatToolAction(action, toolName));
+        sb.append(sroInline(formatToolAction(action, toolName)));
         if (detail != null && !detail.isBlank()) {
-            sb.append(": ").append(detail);
+            sb.append(": ").append(sroInline(detail));
         }
         sb.append(theme.reset());
         println(sb.toString());
@@ -273,7 +272,8 @@ public final class RenderEngine {
     /** Format the action + tool name for display. */
     private static String formatToolAction(String action, String toolName) {
         // Strip the "talos." prefix for cleaner display
-        String shortName = toolName.startsWith("talos.") ? toolName.substring(6) : toolName;
+        String safeToolName = toolName == null ? "" : toolName;
+        String shortName = safeToolName.startsWith("talos.") ? safeToolName.substring(6) : safeToolName;
         return switch (action) {
             case "executing" -> "Using " + shortName;
             case "completed" -> shortName + " done";
@@ -425,13 +425,21 @@ public final class RenderEngine {
     // ── Sanitize → redact pipeline ────────────────────────────────────────
 
     private String sro(String s) {
-        String cleaned = Sanitize.sanitizeForOutput(s == null ? "" : s);
+        String cleaned = terminalText(s);
         return redactor.redactBlock(cleaned);
     }
 
     private String sroInline(String s) {
-        String cleaned = Sanitize.sanitizeForOutput(s == null ? "" : s);
+        String cleaned = terminalText(s);
         return redactor.redactLine(cleaned);
+    }
+
+    private String trustedText(String s) {
+        return terminalText(s);
+    }
+
+    private String terminalText(String s) {
+        return Sanitize.sanitizeForTerminalOutput(s == null ? "" : s, unicodeSafe());
     }
 
     private boolean unicodeSafe() {

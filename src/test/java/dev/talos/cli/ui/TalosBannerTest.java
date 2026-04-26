@@ -1,5 +1,6 @@
 package dev.talos.cli.ui;
 import dev.talos.core.Config;
+import dev.talos.core.util.BuildInfo;
 import org.junit.jupiter.api.Test;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -35,7 +36,7 @@ class TalosBannerTest {
     @Test
     void print_contains_version() {
         String output = capturePrint(Path.of("."), "rag");
-        assertTrue(output.contains("0.9.0"), "Banner should contain version string");
+        assertTrue(output.contains(BuildInfo.version()), "Banner should contain version string");
     }
     @Test
     void print_contains_context_labels() {
@@ -69,7 +70,7 @@ class TalosBannerTest {
     void printCompact_contains_brand_and_version() {
         String output = captureCompact(Path.of("."), "rag");
         assertTrue(output.contains("Talos"), "Compact banner should contain Talos");
-        assertTrue(output.contains("0.9.0"), "Compact banner should contain version");
+        assertTrue(output.contains(BuildInfo.version()), "Compact banner should contain version");
     }
     @Test
     void printCompact_contains_mode() {

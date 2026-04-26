@@ -3,6 +3,8 @@ package dev.talos.cli.launcher;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
 import dev.talos.core.rag.RagService;
+import dev.talos.core.util.Sanitize;
+import dev.talos.cli.ui.TerminalCapabilities;
 import picocli.CommandLine;
 
 import java.nio.file.Files;
@@ -17,6 +19,7 @@ public class RagAskCmd implements Runnable {
 
     @Override public void run() {
         try {
+            boolean unicodeSafe = TerminalCapabilities.detectDefault().unicodeSafe();
             Path r = resolveWorkspaceRoot();
             if (!Files.isDirectory(r)) {
                 System.err.println("rag-ask failed: not a directory: " + r);
@@ -29,7 +32,9 @@ public class RagAskCmd implements Runnable {
             Map<String, Object> ui = CfgUtil.map(cfg.data.get("ui"));
             boolean showStatus = ui == null || !(ui.get("show_status_during_answer") instanceof Boolean b) || b;
             boolean showTiming = ui == null || !(ui.get("show_timing_after_answer") instanceof Boolean b2) || b2;
-            String statusLabel = ui == null ? "Answering…" : String.valueOf(ui.getOrDefault("status_label", "Answering…"));
+            String statusLabel = term(ui == null
+                    ? "Answering…"
+                    : String.valueOf(ui.getOrDefault("status_label", "Answering…")), unicodeSafe);
 
             long t0 = System.nanoTime();
 
@@ -49,13 +54,13 @@ public class RagAskCmd implements Runnable {
                 System.out.flush();
             }
 
-            System.out.println(ans.text());
+            System.out.println(term(ans.text(), unicodeSafe));
             if (!ans.citations().isEmpty()) {
                 System.out.println("\n[Sources]");
                 for (var c : ans.citations()) {
                     // Paths are normalized to forward slashes
                     String normalized = c.replace('\\', '/');
-                    System.out.println(" - " + normalized);
+                    System.out.println(" - " + term(normalized, unicodeSafe));
                 }
             }
 
@@ -68,6 +73,10 @@ public class RagAskCmd implements Runnable {
         } catch (Exception e) {
             System.err.println("rag-ask failed: " + e.getMessage());
         }
+    }
+
+    private static String term(String text, boolean unicodeSafe) {
+        return Sanitize.sanitizeForTerminalOutput(text, unicodeSafe);
     }
 
     private Path resolveWorkspaceRoot() {

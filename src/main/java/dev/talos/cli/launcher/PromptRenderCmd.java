@@ -3,7 +3,9 @@ package dev.talos.cli.launcher;
 import dev.talos.cli.prompt.PromptInspector;
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.SessionState;
+import dev.talos.cli.ui.TerminalCapabilities;
 import dev.talos.core.Config;
+import dev.talos.core.util.Sanitize;
 import dev.talos.core.rag.RagService;
 import dev.talos.tools.FileUndoStack;
 import dev.talos.tools.ToolRegistry;
@@ -51,8 +53,11 @@ public class PromptRenderCmd implements Runnable {
                     .toolRegistry(registry)
                     .build();
 
-            System.out.print(PromptInspector.format(
-                    PromptInspector.renderNext(mode, input, workspace, ctx)));
+            String rendered = PromptInspector.format(
+                    PromptInspector.renderNext(mode, input, workspace, ctx));
+            System.out.print(Sanitize.sanitizeForTerminalOutput(
+                    rendered,
+                    TerminalCapabilities.detectDefault().unicodeSafe()));
         } catch (Exception e) {
             System.err.println("prompt-render failed: " + e.getMessage());
             if (Boolean.getBoolean("talos.debug")) e.printStackTrace(System.err);
