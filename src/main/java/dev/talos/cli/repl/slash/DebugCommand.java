@@ -1,5 +1,6 @@
 package dev.talos.cli.repl.slash;
 
+import dev.talos.cli.repl.DebugLevel;
 import dev.talos.cli.repl.Result;
 import dev.talos.cli.repl.Context;
 
@@ -10,16 +11,19 @@ public final class DebugCommand implements Command {
     public DebugCommand(CliRuntime rt) { this.rt = rt; }
 
     @Override public CommandSpec spec() {
-        return new CommandSpec("debug", List.of(), "/debug on|off", "Toggle debug output.", CommandGroup.DEBUG);
+        return new CommandSpec("debug", List.of(), "/debug [off|brief|rag|tools|trace]",
+                "Set debug output level.", CommandGroup.DEBUG);
     }
 
     @Override public Result execute(String args, Context ctx) {
         String a = (args == null ? "" : args.trim().toLowerCase());
-        if (a.isEmpty()) return new Result.Info("debug = " + rt.isDebug());
-        boolean on = a.equals("on") || a.equals("true") || a.equals("1") || a.equals("enable");
-        boolean off = a.equals("off") || a.equals("false") || a.equals("0") || a.equals("disable");
-        if (!on && !off) return new Result.Error("Usage: /debug on|off", 201);
-        rt.setDebug(on);
-        return new Result.Info("debug " + (on ? "ON" : "OFF"));
+        if (a.isEmpty()) return new Result.Info("debug = " + rt.getDebugLevel().label());
+
+        return DebugLevel.parse(a)
+                .<Result>map(level -> {
+                    rt.setDebugLevel(level);
+                    return new Result.Info("debug = " + level.label());
+                })
+                .orElseGet(() -> new Result.Error("Usage: /debug off|brief|rag|tools|trace", 201));
     }
 }
