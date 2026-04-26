@@ -53,6 +53,11 @@ public final class StaticTaskVerifier {
             "getElementById\\s*\\(\\s*['\"]([A-Za-z_][A-Za-z0-9_-]*)['\"]\\s*\\)");
     private static final Pattern JS_GET_BY_CLASS = Pattern.compile(
             "getElementsByClassName\\s*\\(\\s*['\"]([A-Za-z_][A-Za-z0-9_-]*)['\"]\\s*\\)");
+    private static final String[] HTML_STRUCTURAL_TAGS = {
+            "html", "head", "body", "div", "span", "section", "article",
+            "nav", "header", "footer", "main", "aside", "form", "button",
+            "select", "textarea", "script", "style", "svg"
+    };
 
     public static TaskVerificationResult verify(
             Path workspace,
@@ -310,6 +315,41 @@ public final class StaticTaskVerifier {
         return facts == null ? null : facts.renderInspection();
     }
 
+    public static String renderWebDiagnostics(Path workspace) {
+        List<String> primary = obviousPrimaryFiles(workspace);
+        if (!hasPrimaryWebSurface(primary)) return null;
+        Path root = workspace.toAbsolutePath().normalize();
+        SelectorFacts facts = selectorFacts(root, primary);
+        if (facts == null) return null;
+
+        List<String> problems = new ArrayList<>();
+        try {
+            String html = Files.readString(root.resolve(facts.htmlFile()));
+            problems.addAll(htmlStructureProblems(facts.htmlFile(), html));
+        } catch (Exception e) {
+            problems.add(facts.htmlFile() + ": could not be read for HTML structure checks.");
+        }
+        problems.addAll(facts.linkageProblems());
+        problems.addAll(facts.selectorProblems());
+
+        StringBuilder out = new StringBuilder();
+        out.append("I inspected the primary web files:\n\n");
+        out.append("- HTML: `").append(facts.htmlFile()).append("`\n");
+        out.append("- CSS: `").append(facts.cssFile()).append("`\n");
+        out.append("- JavaScript: `").append(facts.jsFile()).append("`\n\n");
+
+        if (problems.isEmpty()) {
+            out.append("Static web diagnostics did not find obvious HTML/CSS/JavaScript linkage problems.");
+        } else {
+            out.append("Static web diagnostics found:\n");
+            for (String problem : problems) {
+                out.append("- ").append(problem).append('\n');
+            }
+        }
+        out.append("\nNo files were changed.");
+        return out.toString().stripTrailing();
+    }
+
     private static boolean shouldCheckSelectorCoherence(String userRequest) {
         if (userRequest == null || userRequest.isBlank()) return false;
         String lower = userRequest.toLowerCase(Locale.ROOT);
@@ -425,6 +465,8 @@ public final class StaticTaskVerifier {
             String htmlFile = pickPrimary(primaryFiles, ".html", ".htm");
             if (htmlFile == null) return null;
             String html = Files.readString(root.resolve(htmlFile));
+            Set<String> htmlClasses = extractMatches(html, HTML_CLASS_ATTR, true);
+            Set<String> htmlIds = extractMatches(html, HTML_ID_ATTR, false);
             Set<String> linkedCssFiles = extractLinkedAssets(html, HTML_LINK_HREF, ".css");
             Set<String> linkedJsFiles = extractLinkedAssets(html, HTML_SCRIPT_SRC, ".js");
             String cssFile = pickLinkedOrPrimary(primaryFiles, linkedCssFiles, ".css");
@@ -436,10 +478,11 @@ public final class StaticTaskVerifier {
                     htmlFile,
                     cssFile,
                     jsFile,
-                    extractMatches(html, HTML_CLASS_ATTR, true),
-                    extractMatches(html, HTML_ID_ATTR, false),
+                    htmlClasses,
+                    htmlIds,
                     extractCssSelectors(css, CSS_CLASS_SELECTOR),
                     extractCssSelectors(css, CSS_ID_SELECTOR),
+                    extractBareClassSelectors(css, htmlClasses),
                     extractJsClasses(js),
                     extractJsIds(js),
                     linkedCssFiles,
@@ -458,6 +501,7 @@ public final class StaticTaskVerifier {
             Set<String> htmlIds,
             Set<String> cssClasses,
             Set<String> cssIds,
+            Set<String> cssBareClassSelectors,
             Set<String> jsClasses,
             Set<String> jsIds,
             Set<String> linkedCssFiles,
@@ -480,6 +524,10 @@ public final class StaticTaskVerifier {
             }
             if (!cssMissingIds.isEmpty()) {
                 out.add("CSS references missing ID selectors: " + renderSelectors(cssMissingIds, "#"));
+            }
+            if (!cssBareClassSelectors.isEmpty()) {
+                out.add("CSS likely uses bare element selectors where HTML defines classes: "
+                        + renderBareClassSelectorHints(cssBareClassSelectors));
             }
             if (!jsMissingClasses.isEmpty()) {
                 out.add("JavaScript references missing class selectors: " + renderSelectors(jsMissingClasses, "."));
@@ -537,6 +585,76 @@ public final class StaticTaskVerifier {
         }
     }
 
+    private static List<String> htmlStructureProblems(String htmlFile, String html) {
+        if (html == null || html.isBlank()) {
+            return List.of(htmlFile + ": HTML file is empty.");
+        }
+        String lower = html.toLowerCase(Locale.ROOT);
+        List<String> out = new ArrayList<>();
+        Set<String> malformedClosings = malformedClosingTags(lower);
+        for (String tag : malformedClosings) {
+            out.add(htmlFile + ": malformed closing tag `</" + tag + ">` is missing `>`.");
+        }
+        for (String tag : HTML_STRUCTURAL_TAGS) {
+            int opens = countCompleteTag(lower, "<" + tag, tag.length() + 1);
+            int closes = countCompleteTag(lower, "</" + tag, tag.length() + 2);
+            if (opens > closes && !malformedClosings.contains(tag)) {
+                out.add(htmlFile + ": unclosed `<" + tag + ">` tag (" + (opens - closes)
+                        + " open without close).");
+            }
+        }
+        return out;
+    }
+
+    private static Set<String> malformedClosingTags(String lowerHtml) {
+        Set<String> out = new LinkedHashSet<>();
+        if (lowerHtml == null || lowerHtml.isBlank()) return out;
+        int idx = lowerHtml.indexOf("</");
+        while (idx >= 0) {
+            int nameStart = idx + 2;
+            int pos = nameStart;
+            while (pos < lowerHtml.length()) {
+                char c = lowerHtml.charAt(pos);
+                if (Character.isLetterOrDigit(c) || c == '-' || c == ':') {
+                    pos++;
+                } else {
+                    break;
+                }
+            }
+            if (pos > nameStart) {
+                String tag = lowerHtml.substring(nameStart, pos);
+                int after = pos;
+                while (after < lowerHtml.length() && Character.isWhitespace(lowerHtml.charAt(after))) {
+                    after++;
+                }
+                if (after >= lowerHtml.length() || lowerHtml.charAt(after) != '>') {
+                    out.add(tag);
+                }
+            }
+            idx = lowerHtml.indexOf("</", Math.max(idx + 2, pos));
+        }
+        return out;
+    }
+
+    private static int countCompleteTag(String lowerHtml, String tagStart, int afterTagOffset) {
+        int count = 0;
+        int idx = 0;
+        while ((idx = lowerHtml.indexOf(tagStart, idx)) >= 0) {
+            int after = idx + afterTagOffset;
+            if (after >= lowerHtml.length()) break;
+            char delimiter = lowerHtml.charAt(after);
+            if (delimiter == '>' || delimiter == '/' || Character.isWhitespace(delimiter)) {
+                int closeBracket = lowerHtml.indexOf('>', after);
+                int nextTag = lowerHtml.indexOf('<', after);
+                if (closeBracket >= 0 && (nextTag < 0 || closeBracket < nextTag)) {
+                    count++;
+                }
+            }
+            idx = after;
+        }
+        return count;
+    }
+
     private static Set<String> extractMatches(String text, Pattern pattern, boolean splitOnWhitespace) {
         Set<String> out = new LinkedHashSet<>();
         if (text == null || text.isBlank()) return out;
@@ -566,6 +684,23 @@ public final class StaticTaskVerifier {
             while (selectorMatcher.find()) {
                 String value = selectorMatcher.group(1);
                 if (value != null && !value.isBlank()) out.add(value.trim());
+            }
+        }
+        return out;
+    }
+
+    private static Set<String> extractBareClassSelectors(String css, Set<String> htmlClasses) {
+        Set<String> out = new LinkedHashSet<>();
+        if (css == null || css.isBlank() || htmlClasses == null || htmlClasses.isEmpty()) return out;
+        Matcher preludeMatcher = CSS_SELECTOR_PRELUDE.matcher(css);
+        while (preludeMatcher.find()) {
+            String prelude = preludeMatcher.group(1);
+            if (prelude == null || prelude.isBlank()) continue;
+            for (String selector : prelude.split(",")) {
+                String trimmed = selector.strip();
+                if (htmlClasses.contains(trimmed)) {
+                    out.add(trimmed);
+                }
             }
         }
         return out;
@@ -693,5 +828,13 @@ public final class StaticTaskVerifier {
     private static String renderSelectors(Set<String> values, String prefix) {
         return values.stream().sorted().map(v -> "`" + prefix + v + "`")
                 .reduce((a, b) -> a + ", " + b).orElse("none");
+    }
+
+    private static String renderBareClassSelectorHints(Set<String> values) {
+        return values.stream()
+                .sorted()
+                .map(v -> "`" + v + "` should probably be `." + v + "`")
+                .reduce((a, b) -> a + ", " + b)
+                .orElse("none");
     }
 }

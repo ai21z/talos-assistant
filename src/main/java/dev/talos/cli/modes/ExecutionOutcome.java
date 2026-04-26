@@ -39,6 +39,7 @@ record ExecutionOutcome(
         boolean partialMutation,
         boolean falseMutationClaim,
         boolean inspectUnderCompleted,
+        boolean webDiagnosticGroundedOverride,
         boolean selectorGroundedOverride,
         boolean noToolMutationReplaced,
         boolean advisoryOnly
@@ -76,7 +77,12 @@ record ExecutionOutcome(
         TaskContract contract = TaskContractResolver.fromMessages(messages);
         boolean mutationRequested = contract.mutationRequested();
 
-        String shaped = AssistantTurnExecutor.overrideSelectorMismatchAnalysisIfNeeded(
+        String shaped = AssistantTurnExecutor.overrideReadOnlyWebDiagnosticsIfNeeded(
+                current, messages, loopResult, workspace);
+        boolean webDiagnosticGroundedOverride = !Objects.equals(current, shaped);
+        current = shaped;
+
+        shaped = AssistantTurnExecutor.overrideSelectorMismatchAnalysisIfNeeded(
                 current, messages, loopResult, workspace);
         boolean selectorGroundedOverride = !Objects.equals(current, shaped);
         current = shaped;
@@ -152,12 +158,13 @@ record ExecutionOutcome(
                         partialMutation,
                         falseMutationClaim,
                         inspectUnderCompleted,
+                        webDiagnosticGroundedOverride,
                         selectorGroundedOverride,
                         verificationStatus),
                 loopResult == null ? List.of() : loopResult.toolOutcomes()
         );
 
-        GroundingStatus groundingStatus = selectorGroundedOverride
+        GroundingStatus groundingStatus = selectorGroundedOverride || webDiagnosticGroundedOverride
                 ? GroundingStatus.GROUNDED
                 : GroundingStatus.UNKNOWN;
 
@@ -174,6 +181,7 @@ record ExecutionOutcome(
                 partialMutation,
                 falseMutationClaim,
                 inspectUnderCompleted,
+                webDiagnosticGroundedOverride,
                 selectorGroundedOverride,
                 false,
                 completionStatus == CompletionStatus.ADVISORY_ONLY
@@ -222,6 +230,7 @@ record ExecutionOutcome(
                 VerificationStatus.NOT_RUN,
                 taskOutcome,
                 mutationRequested,
+                false,
                 false,
                 false,
                 false,
@@ -300,6 +309,7 @@ record ExecutionOutcome(
             boolean partialMutation,
             boolean falseMutationClaim,
             boolean inspectUnderCompleted,
+            boolean webDiagnosticGroundedOverride,
             boolean selectorGroundedOverride,
             VerificationStatus verificationStatus
     ) {
@@ -333,6 +343,11 @@ record ExecutionOutcome(
             warnings.add(TruthWarning.of(
                     TruthWarningType.SELECTOR_GROUNDED_OVERRIDE,
                     "Selector/linkage analysis was corrected from workspace evidence."));
+        }
+        if (webDiagnosticGroundedOverride) {
+            warnings.add(TruthWarning.of(
+                    TruthWarningType.WEB_DIAGNOSTIC_GROUNDED_OVERRIDE,
+                    "Read-only web diagnostics were corrected from static workspace evidence."));
         }
         if (verificationStatus == VerificationStatus.FAILED) {
             warnings.add(TruthWarning.of(
