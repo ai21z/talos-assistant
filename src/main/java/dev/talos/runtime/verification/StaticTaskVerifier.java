@@ -4,6 +4,7 @@ import dev.talos.runtime.TemplatePlaceholderGuard;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.TaskType;
 import dev.talos.tools.VerificationStatus;
 
 import java.nio.file.Files;
@@ -115,15 +116,25 @@ public final class StaticTaskVerifier {
 
         verifyExpectedTargets(contract, mutatedPaths, facts, problems);
 
-        if (shouldCheckSelectorCoherence(contract)) {
+        boolean webCoherenceRequired = shouldCheckWebCoherence(contract, root, mutatedPaths);
+        if (shouldRequireSeparateWebAssetMutations(contract)) {
+            verifyPrimaryWebMutationCoverage(mutatedPaths, facts, problems);
+        }
+        if (webCoherenceRequired) {
             verifySmallWebWorkspace(root, facts, problems);
         }
 
         if (!problems.isEmpty()) {
             return TaskVerificationResult.failed(firstProblemSummary(problems), facts, problems);
         }
+        if (webCoherenceRequired) {
+            return TaskVerificationResult.passed(
+                    "Static web coherence checks passed for " + mutatedPaths.size() + " mutated target(s).",
+                    facts);
+        }
         return TaskVerificationResult.passed(
-                "Post-apply static checks passed for " + mutatedPaths.size() + " mutated target(s).",
+                "Target/readback checks passed for " + mutatedPaths.size()
+                        + " mutated target(s); no task-specific static verifier was applicable.",
                 facts);
     }
 
@@ -196,30 +207,50 @@ public final class StaticTaskVerifier {
         facts.add(pathHint + ": mutated target exists and is readable.");
     }
 
+    private static void verifyPrimaryWebMutationCoverage(
+            Set<String> mutatedPaths,
+            List<String> facts,
+            List<String> problems
+    ) {
+        boolean mutatedHtml = mutatedPaths.stream().anyMatch(path -> hasExtension(path, ".html", ".htm"));
+        boolean mutatedCss = mutatedPaths.stream().anyMatch(path -> hasExtension(path, ".css"));
+        boolean mutatedJs = mutatedPaths.stream().anyMatch(path -> hasExtension(path, ".js"));
+        if (!mutatedHtml) {
+            problems.add("Expected web-app build to successfully mutate an HTML file.");
+        }
+        if (!mutatedCss) {
+            problems.add("Expected web-app build to successfully mutate a CSS file.");
+        }
+        if (!mutatedJs) {
+            problems.add("Expected web-app build to successfully mutate a JavaScript file.");
+        }
+        if (mutatedHtml && mutatedCss && mutatedJs) {
+            facts.add("Expected HTML, CSS, and JavaScript targets were updated.");
+        }
+    }
+
     private static void verifySmallWebWorkspace(Path root, List<String> facts, List<String> problems) {
         List<String> primary = obviousPrimaryFiles(root);
         if (primary.size() < 3) {
-            problems.add("selector coherence could not be checked because the workspace does not expose a small HTML/CSS/JS surface.");
+            problems.add("web coherence could not be checked because the workspace does not expose a small HTML/CSS/JS surface.");
             return;
         }
-        String htmlFile = pickPrimary(primary, ".html", ".htm");
-        String cssFile = pickPrimary(primary, ".css");
-        String jsFile = pickPrimary(primary, ".js");
-        if (htmlFile == null || cssFile == null || jsFile == null) {
-            problems.add("selector coherence could not be checked because HTML, CSS, and JavaScript primary files were not all present.");
+        if (!hasPrimaryWebSurface(primary)) {
+            problems.add("web coherence could not be checked because HTML, CSS, and JavaScript primary files were not all present.");
             return;
         }
 
-        SelectorFacts selectors = selectorFacts(root, htmlFile, cssFile, jsFile);
+        SelectorFacts selectors = selectorFacts(root, primary);
         if (selectors == null) {
-            problems.add("selector coherence could not be checked because primary web files could not be read.");
+            problems.add("web coherence could not be checked because primary web files could not be read.");
             return;
         }
 
         problems.addAll(selectors.linkageProblems());
         problems.addAll(selectors.selectorProblems());
         if (selectors.linkageProblems().isEmpty() && selectors.selectorProblems().isEmpty()) {
-            facts.add("HTML/CSS/JS selector coherence passed for " + htmlFile + ", " + cssFile + ", and " + jsFile + ".");
+            facts.add("HTML/CSS/JS selector coherence passed for "
+                    + selectors.htmlFile() + ", " + selectors.cssFile() + ", and " + selectors.jsFile() + ".");
         }
     }
 
@@ -241,7 +272,7 @@ public final class StaticTaskVerifier {
                 if (!SMALL_WORKSPACE_WEB_EXTS.contains(ext)) return List.of();
                 out.add(name.replace('\\', '/'));
             }
-            return out.size() >= 2 ? List.copyOf(out) : List.of();
+            return out.size() >= 2 ? out.stream().sorted().toList() : List.of();
         } catch (Exception e) {
             return List.of();
         }
@@ -274,11 +305,8 @@ public final class StaticTaskVerifier {
 
     public static String renderSelectorInspection(Path workspace) {
         List<String> primary = obviousPrimaryFiles(workspace);
-        String htmlFile = pickPrimary(primary, ".html", ".htm");
-        String cssFile = pickPrimary(primary, ".css");
-        String jsFile = pickPrimary(primary, ".js");
-        if (htmlFile == null || cssFile == null || jsFile == null) return null;
-        SelectorFacts facts = selectorFacts(workspace.toAbsolutePath().normalize(), htmlFile, cssFile, jsFile);
+        if (!hasPrimaryWebSurface(primary)) return null;
+        SelectorFacts facts = selectorFacts(workspace.toAbsolutePath().normalize(), primary);
         return facts == null ? null : facts.renderInspection();
     }
 
@@ -300,13 +328,108 @@ public final class StaticTaskVerifier {
         return namesWebParts && asksAlignment;
     }
 
-    private static boolean shouldCheckSelectorCoherence(TaskContract contract) {
-        return contract != null && shouldCheckSelectorCoherence(contract.originalUserRequest());
+    private static boolean shouldCheckWebCoherence(
+            TaskContract contract,
+            Path root,
+            Set<String> mutatedPaths
+    ) {
+        if (contract == null) return false;
+        String request = contract.originalUserRequest();
+        if (shouldCheckSelectorCoherence(request) || looksBroadWebTask(contract)) return true;
+        return looksGenericMutationFollowUp(request) && mutatesSmallWebSurface(root, mutatedPaths);
     }
 
-    private static SelectorFacts selectorFacts(Path root, String htmlFile, String cssFile, String jsFile) {
+    private static boolean looksBroadWebTask(TaskContract contract) {
+        if (contract == null) return false;
+        String request = contract.originalUserRequest();
+        if (request == null || request.isBlank()) return false;
+        String lower = request.toLowerCase(Locale.ROOT);
+        boolean mutatingTask = contract.mutationRequested();
+        boolean mentionsWebSurface = lower.contains("website")
+                || lower.contains("web app")
+                || lower.contains("webpage")
+                || lower.contains("web page")
+                || lower.contains(" html")
+                || lower.startsWith("html")
+                || lower.contains(" site")
+                || lower.contains(" page");
+        boolean mentionsStyle = lower.contains("css")
+                || lower.contains("stylesheet")
+                || lower.contains("style.css")
+                || lower.contains("styles.css")
+                || lower.contains("styling");
+        boolean mentionsScript = lower.contains("javascript")
+                || lower.contains("script.js")
+                || lower.contains("scripting")
+                || lower.contains(" js ")
+                || lower.endsWith(" js")
+                || lower.contains("script file");
+        boolean asksFunctional = lower.contains("functioning")
+                || lower.contains("functional")
+                || lower.contains("working")
+                || lower.contains("interactive")
+                || lower.contains("calculator")
+                || lower.contains("form");
+        return mutatingTask && mentionsWebSurface
+                && ((mentionsStyle && mentionsScript) || asksFunctional);
+    }
+
+    private static boolean shouldRequireSeparateWebAssetMutations(TaskContract contract) {
+        if (contract == null || !looksBroadWebTask(contract)) return false;
+        String lower = contract.originalUserRequest().toLowerCase(Locale.ROOT);
+        boolean createLike = contract.type() == TaskType.FILE_CREATE
+                || lower.contains("build")
+                || lower.contains("create")
+                || lower.contains("generate")
+                || lower.contains("scaffold")
+                || lower.contains("set up")
+                || lower.contains("setup");
+        boolean separateAssets = (lower.contains("separate") || lower.contains("different files"))
+                && (lower.contains("css") || lower.contains("styling"))
+                && (lower.contains("javascript") || lower.contains("script") || lower.contains("scripting"));
+        return createLike && separateAssets;
+    }
+
+    private static boolean looksGenericMutationFollowUp(String request) {
+        if (request == null || request.isBlank()) return false;
+        String lower = request.toLowerCase(Locale.ROOT).strip();
+        return lower.equals("can you make it?")
+                || lower.equals("make it")
+                || lower.equals("make it please")
+                || lower.equals("do it")
+                || lower.equals("do it please")
+                || lower.equals("make the edits please")
+                || lower.equals("make the changes please")
+                || lower.equals("apply it")
+                || lower.equals("apply the changes")
+                || lower.equals("fix it")
+                || lower.equals("edit it");
+    }
+
+    private static boolean mutatesSmallWebSurface(Path root, Set<String> mutatedPaths) {
+        if (root == null || mutatedPaths == null || mutatedPaths.isEmpty()) return false;
+        if (mutatedPaths.stream().noneMatch(path -> hasExtension(path, ".html", ".htm", ".css", ".js"))) {
+            return false;
+        }
+        return hasPrimaryWebSurface(obviousPrimaryFiles(root));
+    }
+
+    private static boolean hasPrimaryWebSurface(List<String> files) {
+        return pickPrimary(files, ".html", ".htm") != null
+                && pickPrimary(files, ".css") != null
+                && pickPrimary(files, ".js") != null;
+    }
+
+    private static SelectorFacts selectorFacts(Path root, List<String> primaryFiles) {
         try {
+            String htmlFile = pickPrimary(primaryFiles, ".html", ".htm");
+            if (htmlFile == null) return null;
             String html = Files.readString(root.resolve(htmlFile));
+            Set<String> linkedCssFiles = extractLinkedAssets(html, HTML_LINK_HREF, ".css");
+            Set<String> linkedJsFiles = extractLinkedAssets(html, HTML_SCRIPT_SRC, ".js");
+            String cssFile = pickLinkedOrPrimary(primaryFiles, linkedCssFiles, ".css");
+            String jsFile = pickLinkedOrPrimary(primaryFiles, linkedJsFiles, ".js");
+            if (cssFile == null || jsFile == null) return null;
             String css = Files.readString(root.resolve(cssFile));
             String js = Files.readString(root.resolve(jsFile));
             return new SelectorFacts(
@@ -319,8 +442,8 @@ public final class StaticTaskVerifier {
                     extractCssSelectors(css, CSS_ID_SELECTOR),
                     extractJsClasses(js),
                     extractJsIds(js),
-                    extractLinkedAssets(html, HTML_LINK_HREF, ".css"),
-                    extractLinkedAssets(html, HTML_SCRIPT_SRC, ".js"),
+                    linkedCssFiles,
+                    linkedJsFiles,
                     existingFileNames(root));
         } catch (Exception e) {
             return null;
@@ -369,6 +492,12 @@ public final class StaticTaskVerifier {
 
         List<String> linkageProblems() {
             List<String> out = new ArrayList<>();
+            if (!linkedCssFiles.contains(cssFile)) {
+                out.add("HTML does not link CSS file: `" + cssFile + "`");
+            }
+            if (!linkedJsFiles.contains(jsFile)) {
+                out.add("HTML does not link JavaScript file: `" + jsFile + "`");
+            }
             for (String css : linkedCssFiles) {
                 if (!existingFileNames.contains(css)) {
                     out.add("HTML references missing CSS file: `" + css + "`");
@@ -394,6 +523,7 @@ public final class StaticTaskVerifier {
             out.append("- IDs: ").append(renderObserved(htmlIds)).append("\n\n");
 
             List<String> mismatches = new ArrayList<>();
+            mismatches.addAll(linkageProblems());
             mismatches.addAll(selectorProblems());
             if (mismatches.isEmpty()) {
                 out.append("Conclusion: I did not find selector mismatches in these files.");
@@ -515,6 +645,27 @@ public final class StaticTaskVerifier {
         return null;
     }
 
+    private static String pickLinkedOrPrimary(List<String> files, Set<String> linkedFiles, String ext) {
+        if (files == null || files.isEmpty()) return null;
+        if (linkedFiles != null) {
+            for (String linked : linkedFiles) {
+                for (String file : files) {
+                    if (file.equals(linked) && hasExtension(file, ext)) return file;
+                }
+            }
+        }
+        return pickPrimary(files, ext);
+    }
+
+    private static boolean hasExtension(String path, String... exts) {
+        if (path == null || exts == null) return false;
+        String lower = normalizePath(path).toLowerCase(Locale.ROOT);
+        for (String ext : exts) {
+            if (lower.endsWith(ext)) return true;
+        }
+        return false;
+    }
+
     private static String normalizePath(String path) {
         if (path == null) return "";
         String normalized = path.replace('\\', '/');
@@ -529,9 +680,9 @@ public final class StaticTaskVerifier {
 
     private static String firstProblemSummary(List<String> problems) {
         if (problems == null || problems.isEmpty()) return "Static verification failed.";
-        String first = problems.get(0);
-        if (first.length() > 220) first = first.substring(0, 217) + "...";
-        return first;
+        String summary = String.join("; ", problems.subList(0, Math.min(3, problems.size())));
+        if (summary.length() > 220) summary = summary.substring(0, 217) + "...";
+        return summary;
     }
 
     private static String renderObserved(Set<String> values) {

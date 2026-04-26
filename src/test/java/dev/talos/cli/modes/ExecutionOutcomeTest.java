@@ -261,7 +261,10 @@ class ExecutionOutcomeTest {
         try {
             Files.writeString(ws.resolve("index.html"), """
                     <!DOCTYPE html>
-                    <html><body><main id="hero"><p>No CTA yet</p></main></body></html>
+                    <html>
+                      <head><link rel="stylesheet" href="style.css"></head>
+                      <body><main id="hero"><p>No CTA yet</p></main><script src="script.js"></script></body>
+                    </html>
                     """);
             Files.writeString(ws.resolve("style.css"), """
                     #hero {}
@@ -311,7 +314,10 @@ class ExecutionOutcomeTest {
         try {
             Files.writeString(ws.resolve("index.html"), """
                     <!DOCTYPE html>
-                    <html><body><main id="hero"><a class="cta-button">Listen</a></main></body></html>
+                    <html>
+                      <head><link rel="stylesheet" href="style.css"></head>
+                      <body><main id="hero"><a class="cta-button">Listen</a></main><script src="script.js"></script></body>
+                    </html>
                     """);
             Files.writeString(ws.resolve("style.css"), """
                     #hero {}
@@ -343,6 +349,97 @@ class ExecutionOutcomeTest {
             assertEquals(TaskCompletionStatus.COMPLETED_VERIFIED, outcome.taskOutcome().completionStatus());
             assertEquals(List.of("index.html"), outcome.taskOutcome().contract().expectedTargets().stream().toList());
             assertEquals(TaskVerificationStatus.PASSED, outcome.taskOutcome().verificationResult().status());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
+    void postApplyBroadWebAppFailureIsClassifiedAsFailedVerification() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-webapp-verify-fail-");
+        try {
+            Files.writeString(ws.resolve("index.html"), """
+                    <!DOCTYPE html>
+                    <html>
+                      <head><link rel="stylesheet" href="styles.css"></head>
+                      <body><main class="calculator"><h1>BMI</h1></main><script src="script.js"></script></body>
+                    </html>
+                    """);
+            Files.writeString(ws.resolve("styles.css"), ".calculator { max-width: 28rem; }");
+            Files.writeString(ws.resolve("script.js"), "document.getElementById('bmi-form');");
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Can you build a small BMI calculator website here with separate CSS and JavaScript files?"));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Created the BMI calculator website files.", 1, 3,
+                    List.of("talos.write_file", "talos.write_file", "talos.write_file"),
+                    List.of(), 0, 0, false, 3, List.of(),
+                    0, 0, 0, 0,
+                    List.of(
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.write_file", "index.html", true, true, false,
+                                    "wrote index.html", "", dev.talos.tools.VerificationStatus.PASS),
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.write_file", "styles.css", true, true, false,
+                                    "wrote styles.css", "", dev.talos.tools.VerificationStatus.PASS),
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.write_file", "script.js", true, true, false,
+                                    "wrote script.js", "", dev.talos.tools.VerificationStatus.PASS)
+                    ));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "Created the BMI calculator website files.", messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.FAILED, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.FAILED, outcome.verificationStatus());
+            assertTrue(outcome.finalAnswer().startsWith("[Static verification failed:"));
+            assertTrue(outcome.finalAnswer().contains("`#bmi-form`"));
+            assertEquals(TaskCompletionStatus.FAILED, outcome.taskOutcome().completionStatus());
+            assertEquals(TaskVerificationStatus.FAILED, outcome.taskOutcome().verificationResult().status());
+            assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.STATIC_VERIFICATION_FAILED));
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
+    void postApplyNonWebTargetOnlyPassUsesNarrowVerificationSummary() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-target-readback-");
+        try {
+            Files.writeString(ws.resolve("README.md"), "# Talos\n");
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Update README.md."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Updated README.md.", 1, 1,
+                    List.of("talos.edit_file"), List.of(),
+                    0, 0, false, 1, List.of(),
+                    0, 0, 0, 0,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.edit_file", "README.md", true, true, false,
+                            "edited README.md", "", dev.talos.tools.VerificationStatus.UNKNOWN
+                    )));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "Updated README.md.", messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.PASSED, outcome.verificationStatus());
+            assertTrue(outcome.finalAnswer().startsWith("[Static verification: passed - Target/readback checks passed"));
+            assertTrue(outcome.finalAnswer().contains("no task-specific static verifier was applicable"));
         } finally {
             try (var walk = Files.walk(ws)) {
                 walk.sorted(Comparator.reverseOrder()).forEach(path -> {

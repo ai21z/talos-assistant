@@ -305,6 +305,26 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/23-static-verifier-web-app-build-fails-broken-linkage.json] 23: broad web app build fails broken static linkage")
+    void staticVerifierFailsBrokenWebAppBuildLinkage() {
+        var loaded = JsonScenarioLoader.load("scenarios/23-static-verifier-web-app-build-fails-broken-linkage.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(3, 3, 0, 3)
+                    .assertAnswerContains("Static verification failed")
+                    .assertAnswerContains("JavaScript references missing IDs")
+                    .assertAnswerContains("`#bmi-form`")
+                    .assertAnswerNotContains("Static verification: passed")
+                    .assertFileContains("index.html", "No form was added")
+                    .assertFileContains("styles.css", ".calculator")
+                    .assertFileContains("script.js", "getElementById('bmi-form')");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/11-partial-mutation-summary-truthful.json] 11: partial mutation summary reports only verified outcomes")
     void partialMutationSummaryIsTruthful() {
         var loaded = JsonScenarioLoader.load("scenarios/11-partial-mutation-summary-truthful.json");
