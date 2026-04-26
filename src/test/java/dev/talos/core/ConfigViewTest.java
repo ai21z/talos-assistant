@@ -80,6 +80,9 @@ class ConfigViewTest {
         @Test void persistence_returnsDefault() {
             assertTrue(view.session().persistence());
         }
+        @Test void autoLoad_isOptInByDefault() {
+            assertFalse(view.session().autoLoad());
+        }
     }
     @Nested class ConvenienceMethod {
         @Test void configView_sameFromCfgView() {

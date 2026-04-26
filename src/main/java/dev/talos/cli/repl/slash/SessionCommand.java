@@ -2,6 +2,7 @@ package dev.talos.cli.repl.slash;
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
 import dev.talos.cli.repl.SessionMemory;
+import dev.talos.cli.repl.TalosBootstrap;
 import dev.talos.core.context.ConversationManager;
 import dev.talos.runtime.JsonSessionStore;
 import dev.talos.runtime.SessionData;
@@ -11,7 +12,6 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 /**
  * /session - manage session persistence.
  *
@@ -73,15 +73,27 @@ public final class SessionCommand implements Command {
                 + data.turns().size() + " messages).");
     }
     private Result load(Context ctx) {
-        Optional<SessionData> opt = store.load(sessionId);
-        if (opt.isEmpty()) {
+        TalosBootstrap.RestoreSummary available = TalosBootstrap.inspectSavedSession(store, sessionId);
+        if (!available.hasReplay()) {
             return new Result.Info("No saved session found for this workspace.");
         }
-        SessionData data = opt.get();
-        restore(data, ctx);
-        String age = formatAge(data.createdAt());
-        return new Result.Info("Session restored: " + data.turnCount() + " exchange"
-                + (data.turnCount() == 1 ? "" : "s")
+        ConversationManager cm = ctx.conversationManager();
+        SessionMemory mem = ctx.memory();
+        if (cm == null && mem == null) {
+            return new Result.Error("Session context is unavailable.", 200);
+        }
+
+        if (cm != null) cm.clear();
+        else mem.clear();
+
+        ConversationManager targetCm = cm != null ? cm : new ConversationManager(mem);
+        TalosBootstrap.RestoreSummary restored = TalosBootstrap.restoreSavedSession(store, sessionId, mem, targetCm);
+        if (ctx.llm() != null && restored.model() != null && !restored.model().isBlank()) {
+            ctx.llm().setModel(restored.model());
+        }
+        String age = formatAge(restored.createdAt());
+        return new Result.Info("Session restored: " + restored.pairsReplayed() + " exchange"
+                + (restored.pairsReplayed() == 1 ? "" : "s")
                 + " (saved " + age + " ago).");
     }
     private Result clear() {
@@ -108,40 +120,13 @@ public final class SessionCommand implements Command {
         return new SessionData(sessionId, workspace.toString(), sketch != null ? sketch : "",
                 turnCount, Instant.now(), turns, ctx.llm() != null ? ctx.llm().getModel() : "");
     }
-    /** Restore conversation state from a SessionData record. */
-    void restore(SessionData data, Context ctx) {
-        ConversationManager cm = ctx.conversationManager();
-        SessionMemory mem = ctx.memory();
-        // Clear existing state
-        if (cm != null) cm.clear();
-        else if (mem != null) mem.clear();
-        // Replay turns into memory
-        if (mem != null && data.turns() != null) {
-            List<SessionData.Turn> turns = data.turns();
-            for (int i = 0; i < turns.size() - 1; i += 2) {
-                SessionData.Turn user = turns.get(i);
-                SessionData.Turn asst = turns.get(i + 1);
-                String status = asst.status();
-                boolean replayable = status == null || status.isBlank() || "ok".equals(status);
-                if ("user".equals(user.role()) && "assistant".equals(asst.role()) && replayable) {
-                    mem.update(user.content(), asst.content());
-                }
-            }
-        }
-        // Restore sketch
-        if (cm != null && data.sketch() != null && !data.sketch().isBlank()) {
-            cm.setSketch(data.sketch());
-        }
-        if (ctx.llm() != null && data.model() != null && !data.model().isBlank()) {
-            ctx.llm().setModel(data.model());
-        }
-    }
     /** The session ID for this workspace (for external use, e.g. auto-save). */
     public String sessionId() {
         return sessionId;
     }
     // -- Helpers --
     private static String formatAge(Instant then) {
+        if (then == null) return "unknown";
         Duration d = Duration.between(then, Instant.now());
         if (d.toDays() > 0) return d.toDays() + "d";
         if (d.toHours() > 0) return d.toHours() + "h";

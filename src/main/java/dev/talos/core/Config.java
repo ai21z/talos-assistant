@@ -238,6 +238,12 @@ public class Config {
         Map<String,Object> tools = map(data.get("tools"));
         if (tools == null) { tools = new LinkedHashMap<>(); data.put("tools", tools); defaulted("tools"); }
         putIfAbsent(tools, "native_calling", Boolean.TRUE, "tools.native_calling");
+
+        // ----- session -----
+        Map<String,Object> session = map(data.get("session"));
+        if (session == null) { session = new LinkedHashMap<>(); data.put("session", session); defaulted("session"); }
+        putIfAbsent(session, "persistence", Boolean.TRUE, "session.persistence");
+        putIfAbsent(session, "auto_load", Boolean.FALSE, "session.auto_load");
     }
 
     @SuppressWarnings("unchecked")
