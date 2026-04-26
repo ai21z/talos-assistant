@@ -80,6 +80,23 @@ class FailurePolicyTest {
     }
 
     @Test
+    void repeatedEmptyEditArgsAcrossPathsStopAfterFilesWereRead() {
+        LoopState state = state();
+        state.pathsReadThisTurn.add("index.html");
+        state.emptyEditArgumentFailuresByPath.put("public/script.js", 1);
+        state.emptyEditArgumentFailuresByPath.put("script.js", 1);
+        state.emptyEditArgumentFailuresByPath.put("style.css", 1);
+
+        FailureDecision decision = policy().afterIteration(state, failedIteration());
+
+        assertTrue(decision.shouldStop());
+        assertEquals(FailureAction.ASK_USER, decision.action());
+        assertTrue(decision.reason().contains("3 empty or missing talos.edit_file argument"));
+        assertTrue(decision.reason().contains("across 3 path(s)"));
+        assertTrue(decision.reason().contains("No approval was requested"));
+    }
+
+    @Test
     void successfulIterationResetsNoProgressCounter() {
         LoopState state = state();
         FailurePolicy policy = policy();

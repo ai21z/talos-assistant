@@ -176,8 +176,9 @@ public final class ToolCallSupport {
                 "new_text",
                 "replace",
                 "replacement");
-        return (oldString == null || oldString.isBlank())
-                && (newString == null || newString.isBlank());
+        boolean missingOldString = oldString == null || oldString.isBlank();
+        boolean missingNewString = newString == null;
+        return missingOldString || missingNewString;
     }
 
     private static String firstPresentParam(ToolCall call, String... keys) {

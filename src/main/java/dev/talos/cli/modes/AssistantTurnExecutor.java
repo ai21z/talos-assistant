@@ -686,7 +686,7 @@ public final class AssistantTurnExecutor {
                 .toList();
         List<ToolCallLoop.ToolOutcome> failures = mutating.stream()
                 .filter(o -> !o.success())
-                .filter(o -> !isRecoveredInvalidEditFailure(o, successes))
+                .filter(o -> !isRecoveredInvalidEditFailure(o, mutating))
                 .toList();
         if (successes.isEmpty() || failures.isEmpty()) return answer;
 
@@ -713,16 +713,26 @@ public final class AssistantTurnExecutor {
 
     private static boolean isRecoveredInvalidEditFailure(
             ToolCallLoop.ToolOutcome failure,
-            List<ToolCallLoop.ToolOutcome> successes
+            List<ToolCallLoop.ToolOutcome> orderedMutatingOutcomes
     ) {
-        if (failure == null || successes == null || successes.isEmpty()) return false;
+        if (failure == null || orderedMutatingOutcomes == null || orderedMutatingOutcomes.isEmpty()) return false;
         if (!failure.invalidEmptyEditArguments()) return false;
         String failedPath = ToolCallSupport.normalizePath(failure.pathHint());
         if (failedPath == null || failedPath.isBlank()) return false;
-        return successes.stream()
-                .anyMatch(success -> success.mutating()
-                        && success.success()
-                        && failedPath.equals(ToolCallSupport.normalizePath(success.pathHint())));
+        boolean sawFailure = false;
+        for (ToolCallLoop.ToolOutcome outcome : orderedMutatingOutcomes) {
+            if (outcome == failure) {
+                sawFailure = true;
+                continue;
+            }
+            if (!sawFailure) continue;
+            if (outcome.mutating()
+                    && outcome.success()
+                    && failedPath.equals(ToolCallSupport.normalizePath(outcome.pathHint()))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String trimFailureMessage(String errorMessage) {
@@ -805,6 +815,14 @@ public final class AssistantTurnExecutor {
                     .append(outcome.pathHint().isBlank() ? outcome.toolName() : outcome.pathHint())
                     .append(": ")
                     .append(trimFailureMessage(outcome.errorMessage()))
+                    .append('\n');
+        }
+        String failureReason = loopResult.failureDecision() == null
+                ? ""
+                : loopResult.failureDecision().reason();
+        if (failureReason != null && !failureReason.isBlank()) {
+            out.append("\nFailure policy reason:\n- ")
+                    .append(trimFailureMessage(failureReason))
                     .append('\n');
         }
         out.append("\nTalos needs to inspect the current file content and retry with exact, valid tool arguments before any edit can be applied.");

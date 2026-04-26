@@ -114,8 +114,25 @@ public record FailurePolicy(
                                 + " empty talos.edit_file argument failure(s) for path `"
                                 + entry.getKey()
                                 + "` after the file had already been read. "
-                                + "No approval was requested and no file was changed."))
-                .orElseGet(FailureDecision::continueLoop);
+                        + "No approval was requested and no file was changed."))
+                .orElseGet(() -> repeatedEmptyEditArgumentAcrossPathsDecision(state));
+    }
+
+    private static FailureDecision repeatedEmptyEditArgumentAcrossPathsDecision(LoopState state) {
+        int total = state.emptyEditArgumentFailuresByPath.values().stream()
+                .mapToInt(Integer::intValue)
+                .sum();
+        if (total < 3 || state.pathsReadThisTurn.isEmpty()) {
+            return FailureDecision.continueLoop();
+        }
+        return FailureDecision.stop(
+                FailureAction.ASK_USER,
+                "failure policy stopped the tool loop after "
+                        + total
+                        + " empty or missing talos.edit_file argument failure(s) across "
+                        + state.emptyEditArgumentFailuresByPath.size()
+                        + " path(s) after workspace files had already been read. "
+                        + "No approval was requested and no file was changed.");
     }
 
     private static FailureDecision withActionForProgress(LoopState state, String reason) {

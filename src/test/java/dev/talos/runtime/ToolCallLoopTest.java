@@ -639,6 +639,77 @@ class ToolCallLoopTest {
     }
 
     @Test
+    void repeatedEmptyEditArgsAcrossPathsStopsAfterReadBeforeGenericThreshold() throws Exception {
+        Path ws = Files.createTempDirectory("talos-empty-edit-cross-path-");
+        try {
+            Files.writeString(ws.resolve("index.html"), "<html><body><h1>BMI</h1></body></html>\n");
+            Files.writeString(ws.resolve("script.js"), "const ready = false;\n");
+            Files.writeString(ws.resolve("style.css"), ".calculator { color: red; }\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileEditTool(new FileUndoStack()));
+
+            final int[] approvalRequests = {0};
+            var processor = new TurnProcessor(
+                    ModeController.defaultController(),
+                    (description, detail) -> {
+                        approvalRequests[0]++;
+                        return true;
+                    },
+                    registry);
+            var loop = new ToolCallLoop(processor, 10);
+
+            String emptyPublicScript = """
+                    {"name":"talos.edit_file","arguments":{"path":"public/script.js","old_string":"","new_string":""}}
+                    """;
+            String readIndex = """
+                    {"name":"talos.read_file","arguments":{"path":"index.html"}}
+                    """;
+            String missingNewScript = """
+                    {"name":"talos.edit_file","arguments":{"path":"script.js","old_string":"const ready = false;\\n"}}
+                    """;
+            String emptyStyle = """
+                    {"name":"talos.edit_file","arguments":{"path":"style.css","old_string":"","new_string":""}}
+                    """;
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user("Repair this broken BMI website.")));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of(readIndex, missingNewScript, emptyStyle, "should not be called")))
+                    .build();
+
+            TurnUserRequestCapture.set("Repair this broken BMI website.");
+            ToolCallLoop.LoopResult result;
+            try {
+                result = loop.run(emptyPublicScript, messages, ws, ctx);
+            } finally {
+                TurnUserRequestCapture.clear();
+            }
+
+            assertEquals(4, result.iterations());
+            assertEquals(4, result.toolsInvoked());
+            assertEquals(3, result.failedCalls());
+            assertEquals(0, result.mutatingToolSuccesses());
+            assertEquals(0, approvalRequests[0],
+                    "Invalid edit arguments must not reach the approval gate");
+            assertFalse(result.hitIterLimit(),
+                    "Cross-path empty-argument policy should stop before the iteration cap");
+            assertTrue(result.failureDecision().shouldStop());
+            assertTrue(result.failureDecision().reason().contains("across 3 path(s)"));
+            assertTrue(result.failureDecision().reason().contains("No approval was requested"));
+            assertTrue(result.finalAnswer().contains("Tool loop stopped by failure policy"));
+            assertTrue(result.finalAnswer().contains("No approval was requested and no file was changed"));
+            assertEquals("<html><body><h1>BMI</h1></body></html>\n", Files.readString(ws.resolve("index.html")));
+            assertEquals("const ready = false;\n", Files.readString(ws.resolve("script.js")));
+            assertEquals(".calculator { color: red; }\n", Files.readString(ws.resolve("style.css")));
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
     void staleSameFileEditFailureRequiresRereadBeforeNextEdit() throws Exception {
         Path ws = Files.createTempDirectory("talos-stale-edit-reread-required-");
         try {
