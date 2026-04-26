@@ -355,16 +355,49 @@ class SimpleCommandsTest {
             var cmd = new HelpCommand(registry());
             Result r = cmd.execute("", ctx);
             assertInstanceOf(Result.Ok.class, r);
-            // Should mention at least some registered commands
+            assertTrue(r.toString().contains("Talos Help"), "Default help should be the short help page");
             assertTrue(r.toString().contains("/q"), "Should list quit");
             assertTrue(r.toString().contains("/debug"), "Should list debug");
+            assertTrue(r.toString().contains("/help all"), "Should point to full command inventory");
+        }
+
+        @Test void help_all_lists_full_inventory() {
+            var cmd = new HelpCommand(registry());
+            Result r = cmd.execute("all", ctx);
+            assertInstanceOf(Result.Ok.class, r);
+            assertTrue(r.toString().contains("Session"), "Full help should include grouped inventory");
+            assertTrue(r.toString().contains("Security"), "Full help should include security commands");
+        }
+
+        @Test void help_debug_topic() {
+            var cmd = new HelpCommand(registry());
+            Result r = cmd.execute("debug", ctx);
+            assertInstanceOf(Result.Ok.class, r);
+            assertTrue(r.toString().contains("Debug Help"));
+            assertTrue(r.toString().contains("/debug"));
+        }
+
+        @Test void help_security_topic() {
+            var cmd = new HelpCommand(registry());
+            Result r = cmd.execute("security", ctx);
+            assertInstanceOf(Result.Ok.class, r);
+            assertTrue(r.toString().contains("Security Help"));
+            assertTrue(r.toString().contains("/policy"));
+        }
+
+        @Test void help_rag_topic() {
+            var cmd = new HelpCommand(registry());
+            Result r = cmd.execute("rag", ctx);
+            assertInstanceOf(Result.Ok.class, r);
+            assertTrue(r.toString().contains("RAG Help"));
+            assertTrue(r.toString().contains("/k"));
         }
 
         @Test void help_specific_command() {
             var cmd = new HelpCommand(registry());
-            Result r = cmd.execute("debug", ctx);
+            Result r = cmd.execute("policy", ctx);
             assertInstanceOf(Result.Ok.class, r);
-            assertTrue(r.toString().contains("debug"));
+            assertTrue(r.toString().contains("policy"));
         }
 
         @Test void help_unknown_command_returns_error() {
