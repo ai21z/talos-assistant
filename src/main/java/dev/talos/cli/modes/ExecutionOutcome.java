@@ -208,23 +208,33 @@ record ExecutionOutcome(
         String shaped = answer == null ? "" : answer;
         boolean noToolMutationReplaced = false;
         boolean malformedProtocolDebrisReplaced = false;
+        boolean localAccessCapabilityCorrected = false;
 
         if (ToolCallParser.looksLikeMalformedProtocolArrayDebris(shaped)) {
             shaped = AssistantTurnExecutor.MALFORMED_TOOL_PROTOCOL_REPLACEMENT;
             malformedProtocolDebrisReplaced = true;
-        } else if (streamed) {
-            String replaced = AssistantTurnExecutor.enforceStreamingNoToolTruthfulness(shaped, messages);
-            noToolMutationReplaced = AssistantTurnExecutor.STREAMING_NO_TOOL_MUTATION_REPLACEMENT.equals(replaced);
-            shaped = replaced;
         } else {
-            shaped = AssistantTurnExecutor.groundingRetryIfNeeded(shaped, messages, ctx);
+            String corrected = AssistantTurnExecutor.correctNegativeLocalAccessClaimIfNeeded(shaped, messages);
+            localAccessCapabilityCorrected = !Objects.equals(shaped, corrected);
+            shaped = corrected;
+
+            if (!localAccessCapabilityCorrected) {
+                if (streamed) {
+                    String replaced = AssistantTurnExecutor.enforceStreamingNoToolTruthfulness(shaped, messages);
+                    noToolMutationReplaced = AssistantTurnExecutor.STREAMING_NO_TOOL_MUTATION_REPLACEMENT.equals(replaced);
+                    shaped = replaced;
+                } else {
+                    shaped = AssistantTurnExecutor.groundingRetryIfNeeded(shaped, messages, ctx);
+                }
+            }
         }
 
         TaskContract contract = TaskContractResolver.fromMessages(messages);
         boolean mutationRequested = contract.mutationRequested();
         boolean blocked = noToolMutationReplaced;
         boolean ungrounded = shaped != null
-                && shaped.startsWith(AssistantTurnExecutor.UNGROUNDED_ANNOTATION);
+                && (shaped.startsWith(AssistantTurnExecutor.UNGROUNDED_ANNOTATION)
+                || localAccessCapabilityCorrected);
         boolean advisoryOnly = ungrounded && !blocked;
         CompletionStatus completionStatus = malformedProtocolDebrisReplaced
                 ? CompletionStatus.FAILED
@@ -233,7 +243,8 @@ record ExecutionOutcome(
         List<TruthWarning> warnings = noToolWarnings(
                 noToolMutationReplaced,
                 ungrounded,
-                malformedProtocolDebrisReplaced);
+                malformedProtocolDebrisReplaced,
+                localAccessCapabilityCorrected);
         TaskOutcome taskOutcome = new TaskOutcome(
                 contract,
                 toTaskCompletionStatus(completionStatus, VerificationStatus.NOT_RUN, contract, noToolMutationReplaced),
@@ -392,7 +403,8 @@ record ExecutionOutcome(
     private static List<TruthWarning> noToolWarnings(
             boolean noToolMutationReplaced,
             boolean ungrounded,
-            boolean malformedProtocolDebrisReplaced
+            boolean malformedProtocolDebrisReplaced,
+            boolean localAccessCapabilityCorrected
     ) {
         List<TruthWarning> warnings = new ArrayList<>();
         if (noToolMutationReplaced) {
@@ -409,6 +421,11 @@ record ExecutionOutcome(
             warnings.add(TruthWarning.of(
                     TruthWarningType.MALFORMED_TOOL_PROTOCOL_DEBRIS_REPLACED,
                     "Malformed tool protocol debris was replaced with a no-action notice."));
+        }
+        if (localAccessCapabilityCorrected) {
+            warnings.add(TruthWarning.of(
+                    TruthWarningType.NO_TOOL_LOCAL_ACCESS_CAPABILITY_CORRECTED,
+                    "A no-tool answer denied local workspace access despite Talos read tools."));
         }
         return List.copyOf(warnings);
     }

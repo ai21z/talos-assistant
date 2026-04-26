@@ -527,6 +527,27 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/38-no-tool-local-access-claim-corrected.json] 38: no-tool local access denial is corrected")
+    void noToolLocalAccessClaimIsCorrected() {
+        var loaded = JsonScenarioLoader.load("scenarios/38-no-tool-local-access-claim-corrected.json");
+
+        try (var result = ScenarioRunner.runThroughExecutorStreaming(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains(AssistantTurnExecutor.LOCAL_ACCESS_CAPABILITY_CORRECTION)
+                    .assertAnswerContains("I can read, list, and search files")
+                    .assertAnswerNotContains("don't have direct access")
+                    .assertAnswerNotContains("As an AI language model")
+                    .assertStreamedTextContains(AssistantTurnExecutor.LOCAL_ACCESS_CAPABILITY_CORRECTION);
+
+            assertTrue(result.streamed(),
+                    "runThroughExecutorStreaming should drive the streaming branch");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/32-unsupported-binary-document-honesty.json] 32: unsupported binary document reads are capability-limited")
     void unsupportedBinaryDocumentHonesty() {
         var loaded = JsonScenarioLoader.load("scenarios/32-unsupported-binary-document-honesty.json");

@@ -710,6 +710,58 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void streamingNoToolNegativeLocalAccessClaimOnWorkspaceTurnIsCorrected() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user(
+                "But you told me you can help me with that. What is the problem with this workspace?"));
+
+        String negativeClaim = "I apologize for any confusion. As an AI language model, "
+                + "I don't have direct access to your local workspace or files to analyze them.";
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromNoTool(negativeClaim, messages, null, true);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
+        assertEquals(ExecutionOutcome.GroundingStatus.UNGROUNDED, outcome.groundingStatus());
+        assertTrue(outcome.advisoryOnly());
+        assertTrue(outcome.finalAnswer().startsWith("[Capability correction:"),
+                outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains("don't have direct access"));
+        assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
+        assertTrue(outcome.taskOutcome().hasWarning(
+                TruthWarningType.NO_TOOL_LOCAL_ACCESS_CAPABILITY_CORRECTED));
+    }
+
+    @Test
+    void streamingNoToolUnsupportedBinaryDocumentLimitationIsNotCorrected() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Summarize the documents in this workspace."));
+
+        String limitation = "Talos cannot extract PDF contents with the current local text-tool surface.";
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromNoTool(limitation, messages, null, true);
+
+        assertEquals(limitation, outcome.finalAnswer());
+        assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+    }
+
+    @Test
+    void streamingNoToolMutationRequestIsNotCapabilityCorrected() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Can you create script.js in this workspace?"));
+
+        String negativeClaim = "I don't have direct access to your local files to create that.";
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromNoTool(negativeClaim, messages, null, true);
+
+        assertEquals(negativeClaim, outcome.finalAnswer());
+        assertFalse(outcome.taskOutcome().hasWarning(
+                TruthWarningType.NO_TOOL_LOCAL_ACCESS_CAPABILITY_CORRECTED));
+    }
+
+    @Test
     void streamingNoToolMutationNarrativeIsBlocked() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));

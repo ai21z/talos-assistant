@@ -7,7 +7,7 @@ Architecture references:
 - `docs/new-architecture/talos-harness-source-of-truth.md`
 - `docs/work-test-cycle.md`
 - `local/tickets/talos-minimal-task-contract.md`
-- `local/tickets/talos-natural-workspace-explain-underinspection.md`
+- `local/tickets/[T03-open-high] talos-natural-workspace-explain-underinspection.md`
 
 ## Why This Ticket Exists
 

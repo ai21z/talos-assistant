@@ -193,6 +193,7 @@ public final class AssistantTurnExecutor {
                         streamed = true;
                         String rawAnswer = answer;
                         answer = shapeAnswerWithoutTools(answer, messages, ctx, true, opts);
+                        emitStreamingNoToolCorrectionIfNeeded(rawAnswer, answer, ctx);
                         emitMalformedProtocolReplacementIfNeeded(rawAnswer, answer, ctx);
                         out.append(answer);
                     }
@@ -562,6 +563,32 @@ public final class AssistantTurnExecutor {
         if (shapedAnswer == null || shapedAnswer.isBlank()) return;
         filter.accept(shapedAnswer);
         filter.flush();
+    }
+
+    private static void emitStreamingNoToolCorrectionIfNeeded(
+            String rawAnswer,
+            String shapedAnswer,
+            Context ctx
+    ) {
+        String correction = visibleStreamingNoToolCorrection(rawAnswer, shapedAnswer);
+        if (correction.isBlank()) return;
+        if (ctx == null || ctx.streamSink() == null) return;
+        ctx.streamSink().accept("\n\n" + correction);
+        if (ctx.streamSink() instanceof ToolCallStreamFilter filter) {
+            filter.flush();
+        }
+    }
+
+    static String visibleStreamingNoToolCorrection(
+            String rawAnswer,
+            String shapedAnswer
+    ) {
+        if (rawAnswer == null || shapedAnswer == null || shapedAnswer.isBlank()) return "";
+        if (shapedAnswer.equals(rawAnswer)) return "";
+        if (shapedAnswer.equals(LOCAL_ACCESS_CAPABILITY_CORRECTION)) {
+            return LOCAL_ACCESS_CAPABILITY_CORRECTION;
+        }
+        return "";
     }
 
     private static String shapeAnswerWithoutTools(
@@ -1596,6 +1623,43 @@ public final class AssistantTurnExecutor {
             "[Truth check: the model produced an invalid tool-call payload, so no action was taken.]\n\n"
             + "No file changes were applied. Please retry the request.";
 
+    public static final String LOCAL_ACCESS_CAPABILITY_CORRECTION =
+            "[Capability correction: Talos can inspect files in the current workspace "
+            + "with local read tools, but no file tool was called in this turn.]\n\n"
+            + "I can read, list, and search files in this workspace when the task calls "
+            + "for it. I did not inspect files in this turn, so I cannot give an "
+            + "evidence-backed workspace answer yet.";
+
+    private static final Set<String> NEGATIVE_LOCAL_ACCESS_MARKERS = Set.of(
+            "don't have direct access to your local workspace",
+            "do not have direct access to your local workspace",
+            "don't have direct access to your local files",
+            "do not have direct access to your local files",
+            "can't browse your local files",
+            "cannot browse your local files",
+            "can't access your local files",
+            "cannot access your local files",
+            "can't inspect your local files",
+            "cannot inspect your local files",
+            "can't read your files",
+            "cannot read your files",
+            "if you provide the file contents",
+            "if you provide specific details or content from the files"
+    );
+
+    private static final Set<String> LOCAL_WORKSPACE_TURN_MARKERS = Set.of(
+            "workspace",
+            "folder",
+            "directory",
+            "file",
+            "files",
+            "project",
+            "repo",
+            "repository",
+            "here",
+            "this"
+    );
+
     /**
      * Returns the content of the latest user-role message in {@code messages},
      * or {@code null} if none. Package-private for testability.
@@ -1622,6 +1686,59 @@ public final class AssistantTurnExecutor {
         if (userRequest == null || userRequest.isBlank()) return false;
         String lower = userRequest.toLowerCase();
         for (String marker : EVIDENCE_REQUEST_MARKERS) {
+            if (lower.contains(marker)) return true;
+        }
+        return false;
+    }
+
+    static String correctNegativeLocalAccessClaimIfNeeded(
+            String answer,
+            List<ChatMessage> messages
+    ) {
+        if (!shouldCorrectNegativeLocalAccessClaim(answer, messages)) return answer;
+        return LOCAL_ACCESS_CAPABILITY_CORRECTION;
+    }
+
+    static boolean shouldCorrectNegativeLocalAccessClaim(
+            String answer,
+            List<ChatMessage> messages
+    ) {
+        if (!containsNegativeLocalAccessClaim(answer)) return false;
+        return looksLikeLocalWorkspaceTurn(messages, answer);
+    }
+
+    static boolean containsNegativeLocalAccessClaim(String answer) {
+        if (answer == null || answer.isBlank()) return false;
+        String lower = answer.toLowerCase(Locale.ROOT);
+        for (String marker : NEGATIVE_LOCAL_ACCESS_MARKERS) {
+            if (lower.contains(marker)) return true;
+        }
+        return false;
+    }
+
+    private static boolean looksLikeLocalWorkspaceTurn(
+            List<ChatMessage> messages,
+            String answer
+    ) {
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+        if (contract.mutationRequested()) return false;
+
+        TaskType type = contract.type();
+        if (type == TaskType.WORKSPACE_EXPLAIN
+                || type == TaskType.DIAGNOSE_ONLY
+                || type == TaskType.VERIFY_ONLY) {
+            return true;
+        }
+
+        String userRequest = latestUserRequest(messages);
+        if (containsLocalWorkspaceMarker(userRequest)) return true;
+        return containsLocalWorkspaceMarker(answer) && type != TaskType.SMALL_TALK;
+    }
+
+    private static boolean containsLocalWorkspaceMarker(String value) {
+        if (value == null || value.isBlank()) return false;
+        String lower = value.toLowerCase(Locale.ROOT);
+        for (String marker : LOCAL_WORKSPACE_TURN_MARKERS) {
             if (lower.contains(marker)) return true;
         }
         return false;
