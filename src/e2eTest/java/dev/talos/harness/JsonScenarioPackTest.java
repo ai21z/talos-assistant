@@ -341,6 +341,24 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/25-empty-edit-args-recovers-after-read.json] 25: empty edit args recover after read")
+    void emptyEditArgsRecoverAfterRead() {
+        var loaded = JsonScenarioLoader.load("scenarios/25-empty-edit-args-recovers-after-read.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(1, 1, 0, 0)
+                    .assertAnswerContains("Static verification: passed")
+                    .assertAnswerNotContains("Tool loop stopped by failure policy")
+                    .assertAnswerNotContains("This response should not be reached")
+                    .assertFileContains("index.html", "class=\"cta-button\"")
+                    .assertFileContains("index.html", "Listen now");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/11-partial-mutation-summary-truthful.json] 11: partial mutation summary reports only verified outcomes")
     void partialMutationSummaryIsTruthful() {
         var loaded = JsonScenarioLoader.load("scenarios/11-partial-mutation-summary-truthful.json");

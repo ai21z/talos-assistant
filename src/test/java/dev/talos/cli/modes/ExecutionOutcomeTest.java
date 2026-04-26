@@ -153,6 +153,50 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void recoveredEmptyEditArgumentFailureDoesNotPoisonCompletion() throws Exception {
+        Path ws = Files.createTempDirectory("talos-recovered-empty-edit-outcome-");
+        try {
+            Files.writeString(ws.resolve("index.html"), "<html><body><a class=\"cta-button\">Listen</a></body></html>\n");
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Edit index.html to add the CTA button."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Edited index.html.", 3, 3,
+                    List.of("talos.edit_file", "talos.read_file", "talos.edit_file"), List.of(),
+                    1, 0, false, 1, List.of("index.html"),
+                    0, 0, 0, 0,
+                    List.of(
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.edit_file", "index.html", false, true, false,
+                                    "", "Invalid talos.edit_file call: `old_string` must be present and non-empty.",
+                                    null, ToolError.INVALID_PARAMS),
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.edit_file", "index.html", true, true, false,
+                                    "Edited index.html", "", dev.talos.tools.VerificationStatus.UNKNOWN)
+                    ));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "Edited index.html.", messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+            assertFalse(outcome.partialMutation());
+            assertEquals(ExecutionOutcome.VerificationStatus.PASSED, outcome.verificationStatus());
+            assertTrue(outcome.finalAnswer().startsWith("[Static verification: passed"));
+            assertEquals(MutationOutcomeStatus.SUCCEEDED, outcome.taskOutcome().mutationOutcome().status());
+            assertEquals(0, outcome.taskOutcome().mutationOutcome().failed().size());
+            assertFalse(outcome.taskOutcome().hasWarning(TruthWarningType.PARTIAL_MUTATION));
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void selectorGroundedOverrideIsClassifiedAsGrounded() throws Exception {
         Path ws = Files.createTempDirectory("talos-execution-outcome-selector-");
         try {

@@ -10,7 +10,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 
 public final class ToolCallRepromptStage {
     private static final Logger LOG = LoggerFactory.getLogger(ToolCallRepromptStage.class);
@@ -69,6 +71,14 @@ public final class ToolCallRepromptStage {
 
         if (state.iterations >= 3) {
             ToolCallSupport.compactOlderToolResultsInPlace(state.messages);
+        }
+
+        int repairIndex = -1;
+        Optional<EmptyEditRepair> repair = nextEmptyEditRepair(state);
+        if (repair.isPresent()) {
+            state.messages.add(ChatMessage.system(repair.get().instruction()));
+            state.emptyEditRepairPromptedPaths.add(repair.get().path());
+            repairIndex = state.messages.size() - 1;
         }
 
         int anchorIndex = -1;
@@ -153,6 +163,14 @@ public final class ToolCallRepromptStage {
                     state.messages.remove(anchorIndex);
                 }
             }
+            if (repairIndex >= 0 && repairIndex < state.messages.size()) {
+                ChatMessage m = state.messages.get(repairIndex);
+                if ("system".equals(m.role())
+                        && m.content() != null
+                        && m.content().startsWith("[Edit repair required]")) {
+                    state.messages.remove(repairIndex);
+                }
+            }
         }
     }
 
@@ -212,5 +230,39 @@ public final class ToolCallRepromptStage {
 
     private static String deniedMutationStopMessage() {
         return "[Tool loop stopped because a mutating tool was not allowed for this turn.]";
+    }
+
+    record EmptyEditRepair(String path, String instruction) {}
+
+    static Optional<EmptyEditRepair> nextEmptyEditRepair(LoopState state) {
+        if (state == null
+                || state.emptyEditArgumentFailuresByPath == null
+                || state.emptyEditArgumentFailuresByPath.isEmpty()
+                || state.pathsReadThisTurn == null
+                || state.pathsReadThisTurn.isEmpty()) {
+            return Optional.empty();
+        }
+
+        return state.emptyEditArgumentFailuresByPath.entrySet().stream()
+                .filter(entry -> entry.getValue() != null && entry.getValue() >= 1)
+                .filter(entry -> state.pathsReadThisTurn.contains(entry.getKey()))
+                .filter(entry -> !state.emptyEditRepairPromptedPaths.contains(entry.getKey()))
+                .max(Comparator
+                        .<java.util.Map.Entry<String, Integer>>comparingInt(java.util.Map.Entry::getValue)
+                        .thenComparing(java.util.Map.Entry::getKey))
+                .map(entry -> new EmptyEditRepair(entry.getKey(), emptyEditRepairInstruction(entry.getKey())));
+    }
+
+    static String emptyEditRepairInstruction(String path) {
+        String target = path == null || path.isBlank() ? "the target file" : "`" + path + "`";
+        return "[Edit repair required] You previously called talos.edit_file for "
+                + target
+                + " with empty old_string/new_string, and the file has now been read. "
+                + "Your next talos.edit_file call for this file must include a non-empty "
+                + "old_string copied exactly from the latest talos.read_file result, without "
+                + "line-number prefixes, and a new_string parameter containing the intended "
+                + "replacement. new_string may be empty only for an explicit deletion task. "
+                + "Do not call talos.edit_file with empty old_string again. If you "
+                + "cannot form the exact edit, stop and say no edit was applied.";
     }
 }
