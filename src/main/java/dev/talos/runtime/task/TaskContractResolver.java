@@ -21,7 +21,9 @@ public final class TaskContractResolver {
                     + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
 
     private static final Set<String> CREATE_MARKERS = Set.of(
-            "create", "write a", "write the", "save as", "add a", "add the", "new file"
+            "create", "write a", "write the", "save as", "add a", "add the",
+            "new file", "build", "generate", "scaffold", "set up", "setup",
+            "make a", "make an"
     );
 
     private static final Set<String> DIAGNOSE_MARKERS = Set.of(
