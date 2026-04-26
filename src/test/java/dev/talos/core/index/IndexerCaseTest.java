@@ -9,6 +9,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -111,6 +112,35 @@ class IndexerCaseTest {
         // Root HTML should be included, build HTML should be excluded
         assertTrue(predicate.test(rootHtml), "main.html should be included");
         assertFalse(predicate.test(buildHtml), "build/index.html should be excluded");
+    }
+
+    @Test
+    void defaultIncludesMatchCsvAndTsvFiles(@TempDir Path tempDir) throws Exception {
+        Path dataDir = tempDir.resolve("data");
+        Files.createDirectories(dataDir);
+        Path csv = dataDir.resolve("metrics.csv");
+        Path tsv = dataDir.resolve("metrics.tsv");
+        Files.writeString(csv, "name,value\nrequests,42\n");
+        Files.writeString(tsv, "name\tvalue\nrequests\t42\n");
+
+        Config config = new Config();
+        Indexer indexer = new Indexer(config);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> rag = (Map<String, Object>) config.data.get("rag");
+        @SuppressWarnings("unchecked")
+        List<String> includeGlobs = (List<String>) rag.get("includes");
+        @SuppressWarnings("unchecked")
+        List<String> excludeGlobs = (List<String>) rag.get("excludes");
+
+        var method = Indexer.class.getDeclaredMethod("createFileFilter", Path.class, java.util.List.class, java.util.List.class);
+        method.setAccessible(true);
+
+        @SuppressWarnings("unchecked")
+        java.util.function.Predicate<Path> predicate =
+                (java.util.function.Predicate<Path>) method.invoke(indexer, tempDir, includeGlobs, excludeGlobs);
+
+        assertTrue(predicate.test(csv), "metrics.csv should match default RAG includes");
+        assertTrue(predicate.test(tsv), "metrics.tsv should match default RAG includes");
     }
 
     private Config createTestConfig() throws Exception {
