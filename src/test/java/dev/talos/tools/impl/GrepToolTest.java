@@ -68,6 +68,19 @@ class GrepToolTest {
         assertTrue(r.output().contains("No matches"));
     }
 
+    @Test void includeGlobReportsUnsupportedBinaryDocuments() throws IOException {
+        Files.writeString(workspace.resolve("sample.xlsx"), "fake excel payload");
+
+        var r = tool.execute(new ToolCall("talos.grep", Map.of(
+                "pattern", "budget",
+                "include", "*.xlsx")), ctx);
+
+        assertTrue(r.success());
+        assertTrue(r.output().contains("No matches found"));
+        assertTrue(r.output().contains("Skipped unsupported binary document(s): sample.xlsx"));
+        assertTrue(r.output().contains("cannot extract PDF/Office binary contents"));
+    }
+
     @Test void maxResultsRespected() {
         var r = tool.execute(new ToolCall("talos.grep", Map.of("pattern", "public", "max_results", "1")), ctx);
         assertTrue(r.success());

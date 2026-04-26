@@ -39,6 +39,7 @@ record ExecutionOutcome(
         boolean partialMutation,
         boolean falseMutationClaim,
         boolean inspectUnderCompleted,
+        boolean unsupportedDocumentCapabilityOverride,
         boolean webDiagnosticGroundedOverride,
         boolean selectorGroundedOverride,
         boolean noToolMutationReplaced,
@@ -77,7 +78,12 @@ record ExecutionOutcome(
         TaskContract contract = TaskContractResolver.fromMessages(messages);
         boolean mutationRequested = contract.mutationRequested();
 
-        String shaped = AssistantTurnExecutor.overrideReadOnlyWebDiagnosticsIfNeeded(
+        String shaped = AssistantTurnExecutor.overrideUnsupportedDocumentClaimsIfNeeded(
+                current, loopResult);
+        boolean unsupportedDocumentCapabilityOverride = !Objects.equals(current, shaped);
+        current = shaped;
+
+        shaped = AssistantTurnExecutor.overrideReadOnlyWebDiagnosticsIfNeeded(
                 current, messages, loopResult, workspace);
         boolean webDiagnosticGroundedOverride = !Objects.equals(current, shaped);
         current = shaped;
@@ -158,6 +164,7 @@ record ExecutionOutcome(
                         partialMutation,
                         falseMutationClaim,
                         inspectUnderCompleted,
+                        unsupportedDocumentCapabilityOverride,
                         webDiagnosticGroundedOverride,
                         selectorGroundedOverride,
                         verificationStatus),
@@ -181,6 +188,7 @@ record ExecutionOutcome(
                 partialMutation,
                 falseMutationClaim,
                 inspectUnderCompleted,
+                unsupportedDocumentCapabilityOverride,
                 webDiagnosticGroundedOverride,
                 selectorGroundedOverride,
                 false,
@@ -230,6 +238,7 @@ record ExecutionOutcome(
                 VerificationStatus.NOT_RUN,
                 taskOutcome,
                 mutationRequested,
+                false,
                 false,
                 false,
                 false,
@@ -309,6 +318,7 @@ record ExecutionOutcome(
             boolean partialMutation,
             boolean falseMutationClaim,
             boolean inspectUnderCompleted,
+            boolean unsupportedDocumentCapabilityOverride,
             boolean webDiagnosticGroundedOverride,
             boolean selectorGroundedOverride,
             VerificationStatus verificationStatus
@@ -338,6 +348,11 @@ record ExecutionOutcome(
             warnings.add(TruthWarning.of(
                     TruthWarningType.INSPECT_UNDER_COMPLETION,
                     "The answer sounded complete after an inspection-only tool path."));
+        }
+        if (unsupportedDocumentCapabilityOverride) {
+            warnings.add(TruthWarning.of(
+                    TruthWarningType.UNSUPPORTED_DOCUMENT_CAPABILITY_NOTE,
+                    "Unsupported binary document reads were corrected to capability-based wording."));
         }
         if (selectorGroundedOverride) {
             warnings.add(TruthWarning.of(

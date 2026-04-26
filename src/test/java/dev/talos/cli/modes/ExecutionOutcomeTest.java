@@ -122,6 +122,49 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void unsupportedDocumentReadRemovesEmptyContentClaims() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Summarize the documents in this workspace."));
+
+        var loopResult = new ToolCallLoop.LoopResult(
+                "notes.txt: Project notes.\n"
+                        + "sample.pdf and sample.xlsx: Do not contain any extractable text.\n"
+                        + "These files are empty or do not contain readable text.",
+                3, 3,
+                List.of("talos.read_file", "talos.read_file", "talos.read_file"), List.of(),
+                2, 0, false, 0, List.of("notes.txt"),
+                0, 0, 0, 0,
+                List.of(
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", "notes.txt", true, false, false,
+                                "notes read", ""),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", "sample.pdf", false, false, false,
+                                "", "Unsupported binary document format: sample.pdf (PDF). "
+                                + "Talos cannot extract PDF contents with the current local text-tool surface.",
+                                null, ToolError.UNSUPPORTED_FORMAT),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", "sample.xlsx", false, false, false,
+                                "", "Unsupported binary document format: sample.xlsx (Microsoft Excel .xlsx). "
+                                + "Talos cannot extract Excel workbook contents with the current local text-tool surface.",
+                                null, ToolError.UNSUPPORTED_FORMAT)
+                ));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                loopResult.finalAnswer(), messages, loopResult, null, 0);
+
+        assertTrue(outcome.unsupportedDocumentCapabilityOverride());
+        assertTrue(outcome.finalAnswer().startsWith("[Document capability note:"));
+        assertTrue(outcome.finalAnswer().contains("sample.pdf"));
+        assertTrue(outcome.finalAnswer().contains("sample.xlsx"));
+        assertTrue(outcome.finalAnswer().contains("notes.txt: Project notes."));
+        assertFalse(outcome.finalAnswer().contains("Do not contain any extractable text"));
+        assertFalse(outcome.finalAnswer().contains("These files are empty"));
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.UNSUPPORTED_DOCUMENT_CAPABILITY_NOTE));
+    }
+
+    @Test
     void preApprovalPathEscapeIsClassifiedAsInvalidNotDenied() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));

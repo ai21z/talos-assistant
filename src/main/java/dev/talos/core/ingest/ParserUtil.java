@@ -14,6 +14,10 @@ public final class ParserUtil {
         String name = file.getFileName().toString().toLowerCase();
         String ext = extOf(name);
 
+        if (UnsupportedDocumentFormats.isUnsupported(file)) {
+            throw new IOException(UnsupportedDocumentFormats.capabilityMessage(file));
+        }
+
         // quick binary sniff
         if (!likelyText(file)) throw new IOException("Binary or unsupported file: " + file);
 

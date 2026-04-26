@@ -1,5 +1,6 @@
 package dev.talos.tools.impl;
 
+import dev.talos.core.ingest.UnsupportedDocumentFormats;
 import dev.talos.tools.*;
 
 import java.io.IOException;
@@ -65,6 +66,10 @@ public final class ReadFileTool implements TalosTool {
         }
         if (Files.isDirectory(resolved)) {
             return ToolResult.fail(ToolError.invalidParams("Path is a directory, not a file: " + pathParam));
+        }
+        if (UnsupportedDocumentFormats.isUnsupported(resolved)) {
+            return ToolResult.fail(ToolError.unsupportedFormat(
+                    UnsupportedDocumentFormats.capabilityMessage(resolved)));
         }
 
         // Size guard
