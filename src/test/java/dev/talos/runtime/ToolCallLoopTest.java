@@ -639,6 +639,125 @@ class ToolCallLoopTest {
     }
 
     @Test
+    void staleSameFileEditFailureRequiresRereadBeforeNextEdit() throws Exception {
+        Path ws = Files.createTempDirectory("talos-stale-edit-reread-required-");
+        try {
+            Path index = ws.resolve("index.html");
+            Files.writeString(index, "alpha\nbeta\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileEditTool(new FileUndoStack()));
+
+            final int[] approvalRequests = {0};
+            var processor = new TurnProcessor(
+                    ModeController.defaultController(),
+                    (description, detail) -> {
+                        approvalRequests[0]++;
+                        return true;
+                    },
+                    registry);
+            var loop = new ToolCallLoop(processor, 10);
+
+            String initial = """
+                    {"name":"talos.edit_file","arguments":{"path":"index.html","old_string":"alpha\\n","new_string":"alpha-updated\\n"}}
+                    {"name":"talos.edit_file","arguments":{"path":"index.html","old_string":"alpha\\nbeta\\n","new_string":"alpha-updated\\nbeta-fixed\\n"}}
+                    """;
+            String ignoredRereadRequirement = """
+                    {"name":"talos.edit_file","arguments":{"path":"index.html","old_string":"beta\\n","new_string":"beta-fixed\\n"}}
+                    """;
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user("Fix index.html with the smallest edits.")));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of(ignoredRereadRequirement, "should not be called")))
+                    .build();
+
+            TurnUserRequestCapture.set("Fix index.html with the smallest edits.");
+            ToolCallLoop.LoopResult result;
+            try {
+                result = loop.run(initial, messages, ws, ctx);
+            } finally {
+                TurnUserRequestCapture.clear();
+            }
+
+            assertEquals(2, result.iterations(),
+                    "The stale retry should stop after the model ignores the reread requirement");
+            assertEquals(2, result.toolsInvoked(),
+                    "The ignored stale retry is short-circuited before tool execution");
+            assertEquals(2, approvalRequests[0],
+                    "Only the two real edit attempts should reach approval");
+            assertEquals(1, result.mutatingToolSuccesses());
+            assertEquals(2, result.failedCalls());
+            assertTrue(result.failureDecision().shouldStop());
+            assertTrue(result.failureDecision().reason().contains("before rereading the file"));
+            assertTrue(result.finalAnswer().contains("Tool loop stopped by failure policy"));
+            assertEquals("alpha-updated\nbeta\n", Files.readString(index));
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
+    void staleSameFileEditCanRecoverAfterSeparateRead() throws Exception {
+        Path ws = Files.createTempDirectory("talos-stale-edit-recovery-");
+        try {
+            Path index = ws.resolve("index.html");
+            Files.writeString(index, "alpha\nbeta\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileEditTool(new FileUndoStack()));
+
+            final int[] approvalRequests = {0};
+            var processor = new TurnProcessor(
+                    ModeController.defaultController(),
+                    (description, detail) -> {
+                        approvalRequests[0]++;
+                        return true;
+                    },
+                    registry);
+            var loop = new ToolCallLoop(processor, 10);
+
+            String initial = """
+                    {"name":"talos.edit_file","arguments":{"path":"index.html","old_string":"alpha\\n","new_string":"alpha-updated\\n"}}
+                    {"name":"talos.edit_file","arguments":{"path":"index.html","old_string":"alpha\\nbeta\\n","new_string":"alpha-updated\\nbeta-fixed\\n"}}
+                    """;
+            String readCurrentFile = """
+                    {"name":"talos.read_file","arguments":{"path":"index.html"}}
+                    """;
+            String validRecoveredEdit = """
+                    {"name":"talos.edit_file","arguments":{"path":"index.html","old_string":"beta\\n","new_string":"beta-fixed\\n"}}
+                    """;
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user("Fix index.html with the smallest edits.")));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of(readCurrentFile, validRecoveredEdit, "should not be called")))
+                    .build();
+
+            TurnUserRequestCapture.set("Fix index.html with the smallest edits.");
+            ToolCallLoop.LoopResult result;
+            try {
+                result = loop.run(initial, messages, ws, ctx);
+            } finally {
+                TurnUserRequestCapture.clear();
+            }
+
+            assertEquals(3, result.iterations());
+            assertEquals(4, result.toolsInvoked());
+            assertEquals(3, approvalRequests[0]);
+            assertEquals(2, result.mutatingToolSuccesses());
+            assertFalse(result.failureDecision().shouldStop());
+            assertEquals("alpha-updated\nbeta-fixed\n", Files.readString(index));
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
     void successfulCallNotCountedAsFailed() {
         var loop = createLoop(echoTool());
         var messages = new ArrayList<>(List.of(
