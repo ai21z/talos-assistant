@@ -75,6 +75,37 @@ public final class ToolCallParser {
             .enable(JsonReadFeature.ALLOW_BACKSLASH_ESCAPING_ANY_CHARACTER)
             .build();
 
+    private static final Set<String> CANONICAL_TOOL_NAMES = Set.of(
+            "talos.read_file",
+            "talos.write_file",
+            "talos.edit_file",
+            "talos.list_dir",
+            "talos.grep",
+            "talos.retrieve"
+    );
+
+    private static final Set<String> TOOL_NAME_ALIASES = Set.of(
+            "file_write",
+            "write_file",
+            "file_read",
+            "read_file",
+            "file_edit",
+            "edit_file",
+            "list_dir",
+            "list_directory",
+            "dir_list",
+            "ls",
+            "grep",
+            "search",
+            "retrieve",
+            "writefile",
+            "readfile",
+            "editfile",
+            "listdir",
+            "listdirectory",
+            "grepsearch"
+    );
+
     /** Variant XML tags: tool_call, function_call, tool, function.
      *  DEPRECATED COMPATIBILITY ONLY — retained for models that emit XML variants.
      *  JSON code fences are the actively instructed text fallback.
@@ -243,10 +274,26 @@ public final class ToolCallParser {
             ToolCall call = parseJsonNode(root);
             return call != null
                     && call.toolName() != null
-                    && call.toolName().startsWith("talos.");
+                    && isRecognizedToolName(call.toolName());
         } catch (Exception ignored) {
             return false;
         }
+    }
+
+    static boolean isRecognizedToolName(String rawName) {
+        if (rawName == null || rawName.isBlank()) return false;
+        String normalized = rawName.strip().toLowerCase(Locale.ROOT);
+        if (normalized.length() > 5 && normalized.startsWith("talos")) {
+            char c = normalized.charAt(5);
+            if (c == ':' || c == '/' || c == '-' || c == '_') {
+                normalized = "talos." + normalized.substring(6);
+            }
+        }
+        if (CANONICAL_TOOL_NAMES.contains(normalized)) return true;
+        if (normalized.startsWith("talos.")) {
+            normalized = normalized.substring("talos.".length());
+        }
+        return TOOL_NAME_ALIASES.contains(normalized);
     }
 
     // ── Internal extraction helpers ──────────────────────────────────
@@ -286,7 +333,7 @@ public final class ToolCallParser {
                 }
                 if (!node.isObject()) continue;
                 ToolCall call = parseJsonNode(node);
-                if (call == null || call.toolName() == null || !call.toolName().startsWith("talos.")) {
+                if (call == null || call.toolName() == null || !isRecognizedToolName(call.toolName())) {
                     continue;
                 }
                 boolean duplicate = calls.stream().anyMatch(c ->
@@ -336,7 +383,7 @@ public final class ToolCallParser {
             if (call == null) {
                 return null;
             }
-            return call.toolName() != null && call.toolName().startsWith("talos.")
+            return call.toolName() != null && isRecognizedToolName(call.toolName())
                     ? call
                     : null;
         } catch (Exception ignored) {
@@ -371,11 +418,18 @@ public final class ToolCallParser {
     private static JsonNode unwrapIfNeeded(JsonNode root) {
         for (String wrapper : List.of("tool_call", "function_call")) {
             JsonNode inner = root.path(wrapper);
-            if (!inner.isMissingNode() && inner.isObject() && inner.has("name")) {
+            if (!inner.isMissingNode() && inner.isObject() && hasNameAlias(inner)) {
                 return inner;
             }
         }
         return root;
+    }
+
+    private static boolean hasNameAlias(JsonNode root) {
+        for (String key : List.of("name", "function", "tool_name", "tool")) {
+            if (root.has(key)) return true;
+        }
+        return false;
     }
 
     /** Extract tool name, trying "name", "function", "tool_name", "tool". */

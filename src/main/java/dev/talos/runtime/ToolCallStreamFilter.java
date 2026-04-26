@@ -83,12 +83,8 @@ public final class ToolCallStreamFilter implements Consumer<String> {
     private static final Pattern CODE_FENCE_OPEN = Pattern.compile("```(?:json)?[ \\t]*\\R");
 
     /** Closing code fence at the start of a line. Some models put adjacent JSON immediately after it. */
-    private static final Pattern CODE_FENCE_CLOSE = Pattern.compile("\\R```(?:[ \\t]*\\R|[ \\t]*(?=\\{|$))");
-
-    /** Tool-call JSON signature inside a code fence. */
-    private static final Pattern TOOL_CALL_JSON = Pattern.compile(
-            "\"name\"\\s*:\\s*\"talos\\."
-    );
+    private static final Pattern CODE_FENCE_CLOSE = Pattern.compile(
+            "\\R```(?:[ \\t]*\\R|[ \\t]*(?=\\S|$))");
 
     /** All possible code fence opening prefixes (for chunk boundary detection). */
     private static final String CODE_FENCE_PREFIX = "```";
@@ -98,8 +94,11 @@ public final class ToolCallStreamFilter implements Consumer<String> {
 
     /** Incomplete bare JSON tool-call signature used only during flush. */
     private static final Pattern INCOMPLETE_BARE_TOOL_JSON = Pattern.compile(
-            "\"(?:name|function|tool_name|tool)\"\\s*:\\s*\"talos\\.",
-            Pattern.DOTALL
+            "\"(?:name|function|tool_name|tool)\"\\s*:\\s*\"(?:talos[.:/_-])?"
+                    + "(?:read_file|write_file|edit_file|list_dir|grep|retrieve|"
+                    + "file_write|file_read|file_edit|list_directory|dir_list|ls|"
+                    + "search|writefile|readfile|editfile|listdir|listdirectory|grepsearch)\"",
+            Pattern.DOTALL | Pattern.CASE_INSENSITIVE
     );
 
     /** Narrow phrases that are misleading if printed immediately before a suppressed tool protocol block. */
@@ -290,7 +289,8 @@ public final class ToolCallStreamFilter implements Consumer<String> {
         if (cm.find()) {
             // We have the full code fence content — check if it's a tool call
             String fenceContent = text.substring(0, cm.start());
-            boolean toolCallFence = TOOL_CALL_JSON.matcher(fenceContent).find();
+            boolean toolCallFence = ToolCallParser.looksLikeStandaloneToolJson(fenceContent)
+                    || looksLikeIncompleteBareToolJson(fenceContent);
             boolean emptyJsonFence = isJsonFenceOpening(fenceOpening) && fenceContent.isBlank();
             if (toolCallFence || emptyJsonFence) {
                 // Tool-call or empty JSON protocol debris — suppress the fence.

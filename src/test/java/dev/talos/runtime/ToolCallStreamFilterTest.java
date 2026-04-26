@@ -371,6 +371,40 @@ class ToolCallStreamFilterTest {
         }
 
         @Test
+        @DisplayName("JSON code-fenced bare write_file alias is suppressed")
+        void json_fence_bare_write_file_alias_suppressed() {
+            String input = "```json\n{\"name\": \"write_file\", \"arguments\": {\"path\": \"index.html\"}}\n```";
+            String result = joined(f -> f.accept(input));
+            assertEquals("", result);
+        }
+
+        @Test
+        @DisplayName("JSON code-fenced function key alias is suppressed")
+        void json_fence_function_key_alias_suppressed() {
+            String input = "```json\n{\"function\": \"talos.write_file\", \"arguments\": {\"path\": \"index.html\"}}\n```";
+            String result = joined(f -> f.accept(input));
+            assertEquals("", result);
+        }
+
+        @Test
+        @DisplayName("JSON code-fenced tool_name key alias is suppressed")
+        void json_fence_tool_name_key_alias_suppressed() {
+            String input = "```json\n{\"tool_name\": \"talos.edit_file\", \"params\": {\"path\": \"index.html\"}}\n```";
+            String result = joined(f -> f.accept(input));
+            assertEquals("", result);
+        }
+
+        @Test
+        @DisplayName("adjacent JSON fences with tool aliases are suppressed")
+        void adjacent_json_fences_with_tool_aliases_suppressed() {
+            String input = "```json\n{\"name\": \"write_file\", \"arguments\": {\"path\": \"a.txt\"}}\n```"
+                    + "```json\n{\"tool_name\": \"talos.edit_file\", \"params\": {\"path\": \"b.txt\"}}\n```"
+                    + "done";
+            String result = joined(f -> f.accept(input));
+            assertEquals("done", result);
+        }
+
+        @Test
         @DisplayName("bare code fence with tool call is suppressed")
         void bare_fence_tool_call_suppressed() {
             String input = "```\n{\"name\": \"talos.list_dir\", \"parameters\": {\"path\": \".\"}}\n```";
