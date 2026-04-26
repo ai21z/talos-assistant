@@ -59,7 +59,8 @@ public final class JsonTurnLogAppender implements SessionListener {
                 audit.approvalsGranted(),
                 audit.approvalsDenied(),
                  summarize(result.trace()),
-                statusOf(result.result())
+                statusOf(result.result()),
+                audit.policyTrace()
         );
 
         try {

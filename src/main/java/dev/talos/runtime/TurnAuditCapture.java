@@ -26,6 +26,8 @@ public final class TurnAuditCapture {
     /** Mutable per-turn bag; finalized into {@link TurnAudit}. */
     static final class Bag {
         final List<TurnRecord.ToolCallSummary> toolCalls = new ArrayList<>();
+        final List<String> policyBlocks = new ArrayList<>();
+        TurnPolicyTrace policyTrace = TurnPolicyTrace.empty();
         int approvalsRequired;
         int approvalsGranted;
         int approvalsDenied;
@@ -45,9 +47,34 @@ public final class TurnAuditCapture {
 
     /** Append a tool-call summary to the current audit (no-op if none active). */
     public static void recordToolCall(String name, String pathHint, boolean success) {
+        recordToolCall(name, pathHint, success, "");
+    }
+
+    /** Append a tool-call summary with a diagnostic reason for failed calls. */
+    public static void recordToolCall(String name, String pathHint, boolean success, String reason) {
         Bag b = HOLDER.get();
         if (b != null) {
-            b.toolCalls.add(new TurnRecord.ToolCallSummary(name, pathHint, success));
+            String normalizedReason = reason == null ? "" : reason.strip();
+            b.toolCalls.add(new TurnRecord.ToolCallSummary(name, pathHint, success, normalizedReason));
+            if (!success && !normalizedReason.isBlank()) {
+                b.policyBlocks.add(normalizedReason);
+            }
+        }
+    }
+
+    /** Record compact task contract / phase / tool-surface metadata. */
+    public static void recordPolicyTrace(TurnPolicyTrace trace) {
+        Bag b = HOLDER.get();
+        if (b != null && trace != null) {
+            b.policyTrace = trace;
+        }
+    }
+
+    /** Update the final phase once the mode/tool loop has completed. */
+    public static void updateFinalPhase(String finalPhase) {
+        Bag b = HOLDER.get();
+        if (b != null) {
+            b.policyTrace = b.policyTrace.withFinalPhase(finalPhase);
         }
     }
 
@@ -77,11 +104,13 @@ public final class TurnAuditCapture {
         Bag b = HOLDER.get();
         HOLDER.remove();
         if (b == null) return TurnAudit.empty();
+        TurnPolicyTrace trace = b.policyTrace.withBlocks(List.copyOf(b.policyBlocks));
         return new TurnAudit(
                 List.copyOf(b.toolCalls),
                 b.approvalsRequired,
                 b.approvalsGranted,
-                b.approvalsDenied
+                b.approvalsDenied,
+                trace
         );
     }
 }

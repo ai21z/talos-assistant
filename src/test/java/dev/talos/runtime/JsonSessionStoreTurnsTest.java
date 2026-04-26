@@ -55,6 +55,51 @@ class JsonSessionStoreTurnsTest {
     }
 
     @Test
+    void policyTraceRoundTrips(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "session-policy";
+        TurnPolicyTrace trace = new TurnPolicyTrace(
+                "FILE_CREATE",
+                true,
+                true,
+                List.of("index.html"),
+                List.of(),
+                "APPLY",
+                "VERIFY",
+                List.of("talos.read_file", "talos.write_file"),
+                List.of("talos.read_file", "talos.write_file"),
+                List.of("approval denied by user for talos.write_file"));
+
+        store.appendTurn(sid, new TurnRecord(
+                1,
+                Instant.parse("2026-04-18T10:00:00Z"),
+                250,
+                "create site",
+                "No file changed.",
+                List.of(new TurnRecord.ToolCallSummary(
+                        "talos.write_file",
+                        "index.html",
+                        false,
+                        "approval denied by user for talos.write_file")),
+                1,
+                0,
+                1,
+                "",
+                "ok",
+                trace));
+
+        TurnRecord loaded = store.loadTurns(sid).get(0);
+
+        assertEquals("FILE_CREATE", loaded.policyTrace().taskType());
+        assertTrue(loaded.policyTrace().mutationAllowed());
+        assertEquals("APPLY", loaded.policyTrace().initialPhase());
+        assertEquals("VERIFY", loaded.policyTrace().finalPhase());
+        assertEquals(List.of("talos.read_file", "talos.write_file"), loaded.policyTrace().nativeTools());
+        assertEquals(List.of("approval denied by user for talos.write_file"), loaded.policyTrace().blocks());
+        assertEquals("approval denied by user for talos.write_file", loaded.toolCalls().get(0).reason());
+    }
+
+    @Test
     void snapshotPathUnchangedByTurnsLog(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "session-snapshot-compat";

@@ -5,6 +5,8 @@ import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.ToolCallStreamFilter;
+import dev.talos.runtime.TurnAuditCapture;
+import dev.talos.runtime.TurnPolicyTrace;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -115,6 +117,7 @@ public final class AssistantTurnExecutor {
         TaskContract taskContract = TaskContractResolver.fromMessages(messages);
         initializeExecutionPhaseForTurn(taskContract, ctx);
         ctx = withNativeToolSurface(ctx, taskContract);
+        recordPolicyTrace(taskContract, ctx);
         injectTaskContractInstruction(messages);
         Context turnContext = ctx;
 
@@ -291,6 +294,19 @@ public final class AssistantTurnExecutor {
                 : ctx.executionPhaseState().phase();
         return ctx.withNativeToolSpecs(
                 NativeToolSpecPolicy.select(contract, phase, ctx.toolRegistry()));
+    }
+
+    private static void recordPolicyTrace(TaskContract contract, Context ctx) {
+        if (ctx == null || !TurnAuditCapture.isActive()) return;
+        ExecutionPhase phase = ctx.executionPhaseState() == null
+                ? ExecutionPhase.APPLY
+                : ctx.executionPhaseState().phase();
+        List<String> nativeTools = NativeToolSpecPolicy.names(ctx.nativeToolSpecs());
+        TurnAuditCapture.recordPolicyTrace(TurnPolicyTrace.from(
+                contract,
+                phase.name(),
+                nativeTools,
+                nativeTools));
     }
 
     private static LlmClient.StreamResult chatStreamFull(Context ctx, List<ChatMessage> messages) {

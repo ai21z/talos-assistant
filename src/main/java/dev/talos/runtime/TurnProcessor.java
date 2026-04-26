@@ -156,6 +156,9 @@ public final class TurnProcessor {
             // Consume any retrieval trace captured during mode dispatch (e.g. by RagMode).
             // For non-RAG turns (AskMode, DevMode), this returns null — expected and correct.
             RetrievalTrace trace = TurnTraceCapture.consume();
+            if (ctx != null && ctx.executionPhaseState() != null) {
+                TurnAuditCapture.updateFinalPhase(ctx.executionPhaseState().phase().name());
+            }
 
             turnResult = new TurnResult(
                     result.get(),
@@ -219,6 +222,7 @@ public final class TurnProcessor {
         // Check if the tool exists
         TalosTool tool = toolRegistry.get(call.toolName());
         if (tool == null) {
+            TurnAuditCapture.recordToolCall(call.toolName(), "", false, "unknown tool");
             return ToolResult.fail(ToolError.notFound("Unknown tool: " + call.toolName()));
         }
 
@@ -230,7 +234,9 @@ public final class TurnProcessor {
         if (ToolCallSupport.isMutatingTool(call.toolName())
                 && userRequest != null
                 && !taskContract.mutationAllowed()) {
-            TurnAuditCapture.recordToolCall(call.toolName(), path == null ? "" : path, false);
+            TurnAuditCapture.recordToolCall(
+                    call.toolName(), path == null ? "" : path, false,
+                    "task-contract read-only denied " + call.toolName());
             return ToolResult.fail(ToolError.denied(
                     "The user did not ask to modify files on this turn, so do not call "
                             + call.toolName()
@@ -242,7 +248,9 @@ public final class TurnProcessor {
             ToolResult phaseRejection = PhasePolicy.rejectIfDisallowed(
                     ctx.executionPhaseState().phase(), tool.name(), risk);
             if (phaseRejection != null) {
-                TurnAuditCapture.recordToolCall(call.toolName(), path == null ? "" : path, false);
+                TurnAuditCapture.recordToolCall(
+                        call.toolName(), path == null ? "" : path, false,
+                        "phase " + ctx.executionPhaseState().phase() + " denied " + call.toolName());
                 return phaseRejection;
             }
         }
@@ -262,7 +270,9 @@ public final class TurnProcessor {
             String v = call.param(k);
             if (v != null && TemplatePlaceholderGuard.looksLikeTemplatePlaceholder(v)) {
                 String msg = TemplatePlaceholderGuard.rejectionMessage(call.toolName(), k, v);
-                TurnAuditCapture.recordToolCall(call.toolName(), path == null ? "" : path, false);
+                TurnAuditCapture.recordToolCall(
+                        call.toolName(), path == null ? "" : path, false,
+                        "placeholder path parameter `" + k + "` rejected");
                 return ToolResult.fail(ToolError.invalidParams(msg));
             }
         }
@@ -305,7 +315,9 @@ public final class TurnProcessor {
                 // — the call never reached the gate because the payload was
                 // definitionally bad, but from a trust-accounting perspective
                 // it is a denied mutation, not a success.
-                TurnAuditCapture.recordToolCall(call.toolName(), path == null ? "" : path, false);
+                TurnAuditCapture.recordToolCall(
+                        call.toolName(), path == null ? "" : path, false,
+                        "placeholder content parameter `" + placeholderParam + "` rejected");
                 return ToolResult.fail(ToolError.invalidParams(msg));
             }
         }
@@ -313,7 +325,9 @@ public final class TurnProcessor {
         if (risk.requiresApproval()) {
             ToolResult preApprovalValidation = validateBeforeApproval(call);
             if (preApprovalValidation != null) {
-                TurnAuditCapture.recordToolCall(call.toolName(), path == null ? "" : path, false);
+                TurnAuditCapture.recordToolCall(
+                        call.toolName(), path == null ? "" : path, false,
+                        preApprovalBlockReason(call, preApprovalValidation));
                 return preApprovalValidation;
             }
         }
@@ -351,6 +365,9 @@ public final class TurnProcessor {
 
             if (decision == ApprovalPolicy.Decision.DENY) {
                 TurnAuditCapture.recordApprovalDenied();
+                TurnAuditCapture.recordToolCall(
+                        call.toolName(), path == null ? "" : path, false,
+                        "approval policy denied " + call.toolName());
                 return ToolResult.fail(ToolError.denied(
                         "Policy denied the " + call.toolName()
                                 + " call. The session's approval policy prohibits this operation; "
@@ -365,6 +382,9 @@ public final class TurnProcessor {
 
                 if (response == ApprovalResponse.DENIED) {
                     TurnAuditCapture.recordApprovalDenied();
+                    TurnAuditCapture.recordToolCall(
+                            call.toolName(), path == null ? "" : path, false,
+                            "approval denied by user for " + call.toolName());
                     // Phrasing matters: previously "Operation denied by user" caused
                     // qwen2.5-coder to hallucinate a "permissions" excuse and tell
                     // the user to "ensure you have the necessary permissions" — the
@@ -405,7 +425,11 @@ public final class TurnProcessor {
                     "Tool execution failed unexpectedly: "
                             + e.getClass().getSimpleName() + ": " + e.getMessage()));
         }
-        TurnAuditCapture.recordToolCall(call.toolName(), path == null ? "" : path, result.success());
+        TurnAuditCapture.recordToolCall(
+                call.toolName(),
+                path == null ? "" : path,
+                result.success(),
+                result.success() ? "" : toolFailureReason(result));
         return result;
     }
 
@@ -471,6 +495,29 @@ public final class TurnProcessor {
         }
 
         return null;
+    }
+
+    private static String preApprovalBlockReason(ToolCall call, ToolResult result) {
+        String name = call == null ? "tool" : call.toolName();
+        String message = result == null ? "" : result.errorMessage();
+        if ("talos.edit_file".equals(name)) {
+            return "invalid edit args before approval"
+                    + (message == null || message.isBlank() ? "" : ": " + shortReason(message));
+        }
+        return "invalid tool args before approval"
+                + (message == null || message.isBlank() ? "" : ": " + shortReason(message));
+    }
+
+    private static String toolFailureReason(ToolResult result) {
+        if (result == null || result.success()) return "";
+        String code = result.error() == null ? "tool failed" : result.error().code();
+        String message = result.errorMessage();
+        return code + (message == null || message.isBlank() ? "" : ": " + shortReason(message));
+    }
+
+    private static String shortReason(String message) {
+        String oneLine = message.replace('\r', ' ').replace('\n', ' ').strip();
+        return oneLine.length() <= 160 ? oneLine : oneLine.substring(0, 157) + "...";
     }
 
     private static String resolveParam(ToolCall call, String canonical, String... aliases) {
