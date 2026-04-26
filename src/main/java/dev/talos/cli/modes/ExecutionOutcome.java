@@ -362,11 +362,11 @@ record ExecutionOutcome(
     }
 
     private static String staticVerificationFailedAnnotation(TaskVerificationResult result) {
-        return "⚠ [Static verification failed: " + verificationSummary(result) + "]\n\n";
+        return "[Static verification failed: " + verificationSummary(result) + "]\n\n";
     }
 
     private static String staticVerificationUnavailableAnnotation(TaskVerificationResult result) {
-        return "⚠ [Static verification incomplete: " + verificationSummary(result) + "]\n\n";
+        return "[Static verification incomplete: " + verificationSummary(result) + "]\n\n";
     }
 
     private static String verificationSummary(TaskVerificationResult result) {
