@@ -396,6 +396,24 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/28-pre-approval-path-sandbox-blocks-escape.json] 28: path escape is blocked before approval")
+    void preApprovalPathSandboxBlocksEscape() {
+        var loaded = JsonScenarioLoader.load("scenarios/28-pre-approval-path-sandbox-blocks-escape.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains(AssistantTurnExecutor.INVALID_MUTATION_ANNOTATION)
+                    .assertAnswerContains("Path not allowed before approval")
+                    .assertAnswerContains("No approval was requested")
+                    .assertAnswerNotContains("approval was denied")
+                    .assertFileAbsent("outside-talos-qa.txt");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/11-partial-mutation-summary-truthful.json] 11: partial mutation summary reports only verified outcomes")
     void partialMutationSummaryIsTruthful() {
         var loaded = JsonScenarioLoader.load("scenarios/11-partial-mutation-summary-truthful.json");
