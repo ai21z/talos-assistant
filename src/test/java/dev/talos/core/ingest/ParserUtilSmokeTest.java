@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -40,6 +41,18 @@ public class ParserUtilSmokeTest {
             // best-effort cleanup
             try { Files.walk(tmp).sorted((a,b)->b.compareTo(a)).forEach(p -> { try { Files.deleteIfExists(p);} catch(Exception ignored){} }); } catch (Exception ignored) {}
         }
+    }
+
+    @Test
+    public void smartParse_rejectsUnsupportedBinaryDocumentsAsCapabilityLimit(@TempDir Path tmp) throws Exception {
+        Path pdf = tmp.resolve("sample.pdf");
+        Files.writeString(pdf, "%PDF-1.7 fake test payload", StandardCharsets.UTF_8);
+
+        IOException ex = assertThrows(IOException.class, () -> ParserUtil.smartParse(pdf));
+
+        assertTrue(ex.getMessage().contains("Unsupported binary document format: sample.pdf"));
+        assertTrue(ex.getMessage().contains("cannot extract PDF contents"));
+        assertFalse(ex.getMessage().contains("empty"));
     }
 
     // ─── P1 regression: HTML/XML source preservation ───

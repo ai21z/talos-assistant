@@ -21,7 +21,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -1123,6 +1125,106 @@ public final class AssistantTurnExecutor {
 
         String grounded = StaticTaskVerifier.renderSelectorInspection(workspace);
         return grounded == null || grounded.isBlank() ? answer : grounded;
+    }
+
+    static String overrideUnsupportedDocumentClaimsIfNeeded(
+            String answer,
+            ToolCallLoop.LoopResult loopResult) {
+        if (loopResult == null || loopResult.toolOutcomes() == null) return answer;
+        List<String> unsupportedPaths = unsupportedDocumentReadPaths(loopResult);
+        if (unsupportedPaths.isEmpty()) return answer;
+
+        String current = answer == null ? "" : answer;
+        String cleaned = removeUnsupportedDocumentContentClaims(current, unsupportedPaths).strip();
+        String note = unsupportedDocumentCapabilityNote(unsupportedPaths);
+        if (cleaned.isBlank()) {
+            cleaned = "Talos inspected the supported text files it could read, but it did not inspect the "
+                    + "unsupported binary document contents.";
+        }
+        if (cleaned.startsWith(note)) return cleaned;
+        return note + "\n\n" + cleaned;
+    }
+
+    private static List<String> unsupportedDocumentReadPaths(ToolCallLoop.LoopResult loopResult) {
+        List<String> paths = new ArrayList<>();
+        for (ToolCallLoop.ToolOutcome outcome : loopResult.toolOutcomes()) {
+            if (outcome == null) continue;
+            if (!"talos.read_file".equals(outcome.toolName())) continue;
+            if (outcome.success()) continue;
+            if (!ToolError.UNSUPPORTED_FORMAT.equals(outcome.errorCode())) continue;
+            String path = outcome.pathHint();
+            if (path == null || path.isBlank()) continue;
+            if (!paths.contains(path)) paths.add(path);
+        }
+        return List.copyOf(paths);
+    }
+
+    private static String unsupportedDocumentCapabilityNote(List<String> unsupportedPaths) {
+        return "[Document capability note: Talos could not inspect unsupported binary document contents with "
+                + "the current local text-tool surface: "
+                + String.join(", ", unsupportedPaths)
+                + ". It cannot confirm whether those files are empty or what they contain.]";
+    }
+
+    private static String removeUnsupportedDocumentContentClaims(String answer, List<String> unsupportedPaths) {
+        if (answer == null || answer.isBlank()) return "";
+        StringBuilder kept = new StringBuilder();
+        String[] lines = answer.split("\\R", -1);
+        for (String line : lines) {
+            if (isUnsupportedDocumentContentClaim(line, unsupportedPaths)) {
+                StringBuilder sentenceKept = new StringBuilder();
+                for (String sentence : line.split("(?<=[.!?])\\s+")) {
+                    if (isUnsupportedDocumentContentClaim(sentence, unsupportedPaths)) continue;
+                    if (!sentence.isBlank()) {
+                        if (sentenceKept.length() > 0) sentenceKept.append(' ');
+                        sentenceKept.append(sentence.strip());
+                    }
+                }
+                if (sentenceKept.length() > 0) {
+                    kept.append(sentenceKept).append('\n');
+                }
+                continue;
+            }
+            kept.append(line).append('\n');
+        }
+        return kept.toString();
+    }
+
+    private static boolean isUnsupportedDocumentContentClaim(String line, List<String> unsupportedPaths) {
+        if (line == null || line.isBlank()) return false;
+        String lower = line.toLowerCase(Locale.ROOT);
+        boolean mentionsUnsupported = lower.contains("these files")
+                || lower.contains("binary files")
+                || lower.contains("document files");
+        for (String path : unsupportedPaths) {
+            if (path != null && !path.isBlank() && lower.contains(path.toLowerCase(Locale.ROOT))) {
+                mentionsUnsupported = true;
+                break;
+            }
+            String extension = extensionOf(path);
+            if (!extension.isBlank() && lower.contains("." + extension)) {
+                mentionsUnsupported = true;
+                break;
+            }
+        }
+        if (!mentionsUnsupported) return false;
+        return lower.contains("no extractable text")
+                || lower.contains("no readable text")
+                || lower.contains("do not contain any")
+                || lower.contains("does not contain any")
+                || lower.contains("are empty")
+                || lower.contains("is empty")
+                || lower.contains("no content")
+                || lower.contains("nothing to extract");
+    }
+
+    private static String extensionOf(String path) {
+        if (path == null || path.isBlank()) return "";
+        int slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+        String name = slash >= 0 ? path.substring(slash + 1) : path;
+        int dot = name.lastIndexOf('.');
+        if (dot < 0 || dot == name.length() - 1) return "";
+        return name.substring(dot + 1).toLowerCase(Locale.ROOT);
     }
 
     static String overrideReadOnlyWebDiagnosticsIfNeeded(
