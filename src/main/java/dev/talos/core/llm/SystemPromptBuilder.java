@@ -46,6 +46,7 @@ public final class SystemPromptBuilder {
     private ToolRegistry toolRegistry;
     private boolean hasHistory;
     private boolean nativeTools;
+    private boolean readOnlyToolMode;
     private java.nio.file.Path workspace;
 
     /** The prompt modes. */
@@ -84,6 +85,17 @@ public final class SystemPromptBuilder {
      */
     public SystemPromptBuilder withNativeTools(boolean nativeTools) {
         this.nativeTools = nativeTools;
+        return this;
+    }
+
+    /**
+     * Limit the visible tool surface to read-only tools for diagnostic turns.
+     *
+     * <p>This is prompt/tool-surface steering only. Runtime policy remains the
+     * authority that blocks mutating tools when the task contract disallows them.
+     */
+    public SystemPromptBuilder withReadOnlyToolMode(boolean readOnlyToolMode) {
+        this.readOnlyToolMode = readOnlyToolMode;
         return this;
     }
 
@@ -183,9 +195,14 @@ public final class SystemPromptBuilder {
     private String buildDynamicSections() {
         var sb = new StringBuilder();
 
+        if (readOnlyToolMode) {
+            sb.append(DEFAULT_READ_ONLY_TASK_CONTRACT);
+        }
+
         // Tools section
         String toolSection = buildToolSection();
         if (toolSection != null) {
+            if (!sb.isEmpty()) sb.append("\n\n");
             sb.append(toolSection);
         }
 
@@ -212,6 +229,11 @@ public final class SystemPromptBuilder {
         }
 
         List<ToolDescriptor> descriptors = toolRegistry.descriptors();
+        if (readOnlyToolMode) {
+            descriptors = descriptors.stream()
+                    .filter(td -> !td.riskLevel().requiresApproval())
+                    .toList();
+        }
         if (descriptors.isEmpty()) {
             return null;
         }
@@ -221,7 +243,11 @@ public final class SystemPromptBuilder {
         // Choose preamble based on native tool support:
         // - Native: shorter preamble without format instructions (API handles format)
         // - Fallback: full preamble with JSON code-fenced format instructions
-        if (nativeTools) {
+        if (readOnlyToolMode && nativeTools) {
+            sb.append(DEFAULT_READ_ONLY_TOOLS_PREAMBLE_NATIVE);
+        } else if (readOnlyToolMode) {
+            sb.append(DEFAULT_READ_ONLY_TOOLS_PREAMBLE);
+        } else if (nativeTools) {
             String nativePreamble = readResource(RES_TOOLS_NATIVE);
             if (nativePreamble != null) {
                 sb.append(nativePreamble.strip());
@@ -328,6 +354,52 @@ public final class SystemPromptBuilder {
             - Only call tools that are listed below. Do not invent tool names.
             - If a tool returns an error, explain the issue to the user.""";
 
+    private static final String DEFAULT_READ_ONLY_TOOLS_PREAMBLE = """
+            Available Tools
+            This turn is read-only or diagnostic. Only inspection tools are listed for this turn.
+            Do not call write/edit tools. If you identify a possible fix, describe it and wait for an explicit change request.
+
+            To invoke a tool, emit a tool call as a JSON object in EXACTLY this format:
+
+            ```json
+            {"name": "tool_name", "parameters": {"key": "value"}}
+            ```
+
+            When to call:
+            - Workspace questions -> talos.list_dir, talos.read_file, talos.grep, or talos.retrieve.
+            - Small workspaces -> list files, then read the obvious primary files before answering.
+            - Search tasks -> talos.grep for exact text or selectors.
+            - Semantic cross-file search on a large indexed workspace -> talos.retrieve.
+
+            Rules:
+            - Wait for tool results before answering. Do not fabricate results.
+            - Only call tools listed below. Do not invent names.
+            - Never call the same tool with the same parameters twice in one turn.""";
+
+    private static final String DEFAULT_READ_ONLY_TASK_CONTRACT = """
+            Current Turn Contract
+            - This specific user turn is read-only or diagnostic.
+            - Do not call talos.write_file or talos.edit_file in this turn.
+            - Inspect with read-only tools, then describe findings and possible fixes without applying them.
+            - Wait for an explicit change request before using mutating tools.""";
+
+    private static final String DEFAULT_READ_ONLY_TOOLS_PREAMBLE_NATIVE = """
+            Available Tools
+            This turn is read-only or diagnostic. Only inspection tools are listed for this turn.
+            Do not call write/edit tools. If you identify a possible fix, describe it and wait for an explicit change request.
+            The runtime handles tool invocation format automatically - decide which listed inspection tool to call and with what parameters.
+
+            When to call:
+            - Workspace questions -> talos.list_dir, talos.read_file, talos.grep, or talos.retrieve.
+            - Small workspaces -> list files, then read the obvious primary files before answering.
+            - Search tasks -> talos.grep for exact text or selectors.
+            - Semantic cross-file search on a large indexed workspace -> talos.retrieve.
+
+            Rules:
+            - Wait for tool results before answering. Do not fabricate results.
+            - Only call tools listed below. Do not invent names.
+            - Never call the same tool with the same parameters twice in one turn.""";
+
     private static final String DEFAULT_CONVERSATION = """
             Conversation Continuity (CRITICAL)
             - You are in a multi-turn conversation. Prior messages are provided as history.
@@ -352,6 +424,7 @@ public final class SystemPromptBuilder {
         return "SystemPromptBuilder[mode=" + mode
                 + ", tools=" + (toolRegistry != null && !toolRegistry.isEmpty())
                 + ", nativeTools=" + nativeTools
+                + ", readOnlyToolMode=" + readOnlyToolMode
                 + ", history=" + hasHistory + "]";
     }
 }

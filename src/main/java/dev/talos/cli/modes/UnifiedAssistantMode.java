@@ -6,6 +6,8 @@ import dev.talos.cli.prompt.LastPromptCapture;
 import dev.talos.cli.prompt.PromptInspector;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.llm.SystemPromptBuilder;
+import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.spi.types.ChatMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -66,10 +68,12 @@ public final class UnifiedAssistantMode implements Mode {
         boolean hasHistory = (ctx.conversationManager() != null && ctx.conversationManager().hasHistory())
                 || (ctx.memory() != null && ctx.memory().hasContent());
         boolean nativeTools = CfgUtil.boolAt(CfgUtil.map(ctx.cfg().data.get("tools")), "native_calling", true);
+        TaskContract taskContract = TaskContractResolver.fromUserRequest(rawLine);
         String system = SystemPromptBuilder.forUnified()
                 .withTools(ctx.toolRegistry())
                 .withWorkspace(workspace)
                 .withNativeTools(nativeTools)
+                .withReadOnlyToolMode(!taskContract.mutationAllowed())
                 .withHistory(hasHistory)
                 .build();
 
@@ -84,6 +88,7 @@ public final class UnifiedAssistantMode implements Mode {
 
         // Build structured conversation messages: system + history + user
         List<ChatMessage> messages = buildMessages(system, rawLine, history);
+        AssistantTurnExecutor.injectTaskContractInstruction(messages);
         LastPromptCapture.record(PromptInspector.fromMessages(
                 "auto",
                 "unified",
