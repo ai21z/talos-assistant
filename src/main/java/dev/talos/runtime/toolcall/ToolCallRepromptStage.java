@@ -358,7 +358,16 @@ public final class ToolCallRepromptStage {
                 + "old_string copied exactly from the latest talos.read_file result, without "
                 + "line-number prefixes, and a new_string parameter containing the intended "
                 + "replacement. new_string may be empty only for an explicit deletion task. "
+                + "Use this key layout: {\"name\":\"talos.edit_file\","
+                + "\"arguments\":{\"path\":\"" + targetPathForJson(path) + "\","
+                + "\"old_string\":\"...\",\"new_string\":\"...\"}}. "
+                + "Fill old_string and new_string with real file text, not placeholders. "
                 + "Do not call talos.edit_file with empty old_string again. If you "
                 + "cannot form the exact edit, stop and say no edit was applied.";
+    }
+
+    private static String targetPathForJson(String path) {
+        if (path == null || path.isBlank()) return "<target path>";
+        return path.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 }
