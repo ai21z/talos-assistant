@@ -117,7 +117,7 @@ record ExecutionOutcome(
                 false
         );
 
-        TaskVerificationResult taskVerification = shouldVerifyPostApply(
+        TaskVerificationResult taskVerification = workspace != null && shouldVerifyPostApply(
                 contract, completionStatus, loopResult, extraMutationSuccesses)
                 ? StaticTaskVerifier.verify(
                         workspace,
@@ -127,12 +127,18 @@ record ExecutionOutcome(
                 : TaskVerificationResult.notRun("Post-apply verification was not applicable.");
         VerificationStatus verificationStatus = mapVerificationStatus(taskVerification.status());
         if (verificationStatus == VerificationStatus.FAILED) {
-            current = staticVerificationFailedAnnotation(taskVerification) + current;
-            completionStatus = CompletionStatus.FAILED;
+            if (completionStatus == CompletionStatus.PARTIAL) {
+                current = partialStaticVerificationFailedAnnotation(taskVerification) + current;
+            } else {
+                current = staticVerificationFailedAnnotation(taskVerification) + current;
+                completionStatus = CompletionStatus.FAILED;
+            }
         } else if (verificationStatus == VerificationStatus.UNAVAILABLE) {
             current = staticVerificationUnavailableAnnotation(taskVerification) + current;
         } else if (verificationStatus == VerificationStatus.PASSED) {
-            current = staticVerificationPassedAnnotation(taskVerification) + current;
+            if (completionStatus == CompletionStatus.COMPLETE) {
+                current = staticVerificationPassedAnnotation(taskVerification) + current;
+            }
         }
 
         TaskOutcome taskOutcome = new TaskOutcome(
@@ -248,7 +254,8 @@ record ExecutionOutcome(
             ToolCallLoop.LoopResult loopResult,
             int extraMutationSuccesses
     ) {
-        if (completionStatus != CompletionStatus.COMPLETE) return false;
+        if (completionStatus != CompletionStatus.COMPLETE
+                && completionStatus != CompletionStatus.PARTIAL) return false;
         if (loopResult == null) return false;
         if (contract == null || !contract.verificationRequired()) return false;
         return loopResult.mutatingToolSuccesses() + Math.max(0, extraMutationSuccesses) > 0;
@@ -371,6 +378,26 @@ record ExecutionOutcome(
         List<String> problems = result == null ? List.of() : result.problems();
         if (!problems.isEmpty()) {
             out.append("\n\nUnresolved static verification problems:");
+            for (String problem : problems.subList(0, Math.min(5, problems.size()))) {
+                out.append("\n- ").append(singleLine(problem));
+            }
+            if (problems.size() > 5) {
+                out.append("\n- ... ").append(problems.size() - 5).append(" more");
+            }
+        }
+        out.append("\n\n");
+        return out.toString();
+    }
+
+    private static String partialStaticVerificationFailedAnnotation(TaskVerificationResult result) {
+        StringBuilder out = new StringBuilder();
+        out.append("[Partial verification: static checks failed - ")
+                .append(verificationSummary(result))
+                .append("]\n\n")
+                .append("The turn remains partial. Some changes were applied, but unresolved static problems remain.");
+        List<String> problems = result == null ? List.of() : result.problems();
+        if (!problems.isEmpty()) {
+            out.append("\n\nRemaining static verification problems:");
             for (String problem : problems.subList(0, Math.min(5, problems.size()))) {
                 out.append("\n- ").append(singleLine(problem));
             }
