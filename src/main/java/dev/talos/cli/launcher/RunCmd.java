@@ -13,10 +13,16 @@ import dev.talos.core.Config;
 import org.jline.reader.EndOfFileException;
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
+import org.jline.nativ.CLibrary;
+import org.jline.nativ.Kernel32;
+import org.jline.terminal.Attributes;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
+import org.jline.utils.OSUtils;
 import picocli.CommandLine;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -84,10 +90,13 @@ public class RunCmd implements Runnable, SessionState {
         // (same terminal input system as the REPL prompt — no competing Scanner on System.in).
         ReplRouter router = null;
         try {
-            Terminal term = TerminalBuilder.builder().system(true).jna(true).build();
-            LineReader reader = LineReaderBuilder.builder()
-                    .terminal(term)
-                    .build();
+            boolean useSystemTerminal = shouldUseSystemTerminal(
+                    System.console() != null,
+                    fileDescriptorIsTerminal(0),
+                    fileDescriptorIsTerminal(1),
+                    bufferedInputBytes(System.in));
+            Terminal term = buildTerminal(useSystemTerminal);
+            LineReader reader = baseLineReaderBuilder(term).build();
 
             // Create router with JLine-integrated approval gate
             router = TalosBootstrap.create(this, cfg, System.out, ws, reader);
@@ -95,8 +104,7 @@ public class RunCmd implements Runnable, SessionState {
 
             // Now that the router (and its command registry) exist, rebuild
             // the LineReader with tab-completion wired to the command registry
-            reader = LineReaderBuilder.builder()
-                    .terminal(term)
+            reader = baseLineReaderBuilder(term)
                     .completer(new SlashCommandCompleter(router.getRegistry()))
                     .build();
 
@@ -114,20 +122,21 @@ public class RunCmd implements Runnable, SessionState {
 
             // Set up prompt refresh callback for mode changes
             final AtomicReference<String> currentPrompt = new AtomicReference<>();
+            final boolean styledPrompt = useSystemTerminal;
             router.getModes().setPromptRefreshCallback(() -> {
                 String newMode = routerRef.getModes().getActiveName();
-                currentPrompt.set(buildPrompt(newMode));
+                currentPrompt.set(buildPrompt(newMode, styledPrompt));
             });
 
             // Initialize the prompt
             String initialMode = router.getModes().getActiveName();
-            currentPrompt.set(buildPrompt(initialMode));
+            currentPrompt.set(buildPrompt(initialMode, styledPrompt));
 
             boolean quit = false;
             while (!quit) {
                 String prompt = currentPrompt.get();
                 if (prompt == null) {
-                    prompt = buildPrompt(router.getModes().getActiveName());
+                    prompt = buildPrompt(router.getModes().getActiveName(), styledPrompt);
                 }
 
                 String line;
@@ -196,10 +205,64 @@ public class RunCmd implements Runnable, SessionState {
 
     /* ===== UI ===== */
 
-    private static String buildPrompt(String mode) {
+    private static String buildPrompt(String mode, boolean styled) {
+        if (!styled) {
+            return "talos [" + mode + "] > ";
+        }
         return AnsiColor.VIOLET + "talos " + AnsiColor.DIM + "["
                 + AnsiColor.BLUE + mode + AnsiColor.DIM + "]"
                 + AnsiColor.RESET + " > ";
+    }
+
+    static Terminal buildTerminal(boolean interactiveConsole) throws IOException {
+        TerminalBuilder builder = TerminalBuilder.builder();
+        if (interactiveConsole) {
+            return builder.system(true).jna(true).build();
+        }
+        Attributes attributes = new Attributes();
+        attributes.setLocalFlag(Attributes.LocalFlag.ECHO, false);
+        return builder
+                .system(false)
+                .dumb(true)
+                .attributes(attributes)
+                .streams(System.in, System.out)
+                .build();
+    }
+
+    private static LineReaderBuilder baseLineReaderBuilder(Terminal term) {
+        return LineReaderBuilder.builder()
+                .terminal(term)
+                .option(LineReader.Option.BRACKETED_PASTE, false);
+    }
+
+    static boolean shouldUseSystemTerminal(
+            boolean interactiveConsole,
+            boolean stdinTerminal,
+            boolean stdoutTerminal,
+            int stdinAvailableBytes) {
+        return interactiveConsole && stdinTerminal && stdoutTerminal && stdinAvailableBytes <= 0;
+    }
+
+    static int bufferedInputBytes(InputStream in) {
+        if (in == null) {
+            return 0;
+        }
+        try {
+            return in.available();
+        } catch (IOException ignored) {
+            return 0;
+        }
+    }
+
+    static boolean fileDescriptorIsTerminal(int fd) {
+        try {
+            if (OSUtils.IS_WINDOWS) {
+                return Kernel32.isatty(fd) != 0;
+            }
+            return CLibrary.isatty(fd) != 0;
+        } catch (Throwable ignored) {
+            return System.console() != null;
+        }
     }
 
     private static void printMan() {
