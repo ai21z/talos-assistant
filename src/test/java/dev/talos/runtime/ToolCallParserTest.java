@@ -753,6 +753,18 @@ class ToolCallParserTest {
     }
 
     @Test
+    void standaloneToolJsonRecognizerAcceptsRegistryToolAliases() {
+        assertTrue(ToolCallParser.looksLikeStandaloneToolJson(
+                "{\"name\": \"write_file\", \"arguments\": {\"path\": \"index.html\"}}"));
+        assertTrue(ToolCallParser.looksLikeStandaloneToolJson(
+                "{\"function\": \"talos.write_file\", \"arguments\": {\"path\": \"index.html\"}}"));
+        assertTrue(ToolCallParser.looksLikeStandaloneToolJson(
+                "{\"tool_name\": \"edit_file\", \"params\": {\"path\": \"index.html\"}}"));
+        assertFalse(ToolCallParser.looksLikeStandaloneToolJson(
+                "{\"name\": \"ordinary\", \"arguments\": {\"path\": \"index.html\"}}"));
+    }
+
+    @Test
     void parseCodeFencedJsonWithToolKey() {
         String response = """
                 ```json
