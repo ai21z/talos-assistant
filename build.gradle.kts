@@ -270,7 +270,6 @@ val candidateE2eTest by tasks.registering(Test::class) {
 application {
     mainClass.set("dev.talos.app.Main")
     applicationDefaultJvmArgs = listOf(
-        "--add-modules", "jdk.incubator.vector",
         "-Dfile.encoding=UTF-8",
         "-XX:+UseZGC"
     )
@@ -349,12 +348,10 @@ tasks.register<Exec>("jpackageApp") {
             "--main-jar", "talos.jar",
             "--main-class", "dev.talos.app.Main",
             // class-path wildcard so the launcher sees all libs in /lib
-            "--class-path", "*",
-            // Include the incubator Vector module in the runtime image...
-            "--add-modules", "jdk.incubator.vector",
-            // ...and pass it at launch time too
-            "--java-options", "--add-modules=jdk.incubator.vector"
+            "--class-path", "*"
         )
+        // Keep launcher startup quiet; Lucene falls back when the optional
+        // incubator Vector module is not enabled at application launch.
 
         // Optional extras if present
         val resDir = file("src/main/jpackage")
