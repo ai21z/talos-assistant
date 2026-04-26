@@ -181,6 +181,22 @@ class DevModeTest {
             assertTrue(((Result.Ok) r1.get()).text.contains("f.txt"));
             assertTrue(((Result.Ok) r2.get()).text.contains("f.txt"));
         }
+
+        @Test
+        void natural_list_files_here_lists_workspace_root() throws IOException {
+            Files.createFile(ws.resolve("index.html"));
+            Files.createFile(ws.resolve("style.css"));
+            Context ctx = ctxForWorkspace(ws);
+
+            Optional<Result> result = mode.handle("list the files here", ws, ctx);
+
+            assertTrue(result.isPresent());
+            assertInstanceOf(Result.Ok.class, result.get());
+            String text = ((Result.Ok) result.get()).text;
+            assertTrue(text.contains("[FILE] index.html"), text);
+            assertTrue(text.contains("[FILE] style.css"), text);
+            assertFalse(text.contains("Not found: the"), text);
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════

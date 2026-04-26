@@ -14,19 +14,19 @@ import java.time.Instant;
  *
  * <p>Modeled after Claude Code's FileEditTool: the caller provides the exact
  * text to find ({@code old_string}) and the replacement ({@code new_string}).
- * The match must be unique — if the old string appears zero or multiple times,
+ * The match must be unique - if the old string appears zero or multiple times,
  * the edit is rejected to prevent ambiguous changes.
  *
  * <p>Enforces sandbox policy: the target path must resolve inside the workspace.
  *
- * <p>Risk level: {@link ToolRiskLevel#WRITE} — requires user approval
+ * <p>Risk level: {@link ToolRiskLevel#WRITE} - requires user approval
  * via the {@link dev.talos.runtime.ApprovalGate}.
  *
  * <p>Parameters:
  * <ul>
- *   <li>{@code path} — relative path to the file (required)</li>
- *   <li>{@code old_string} — exact text to find (required, must appear exactly once)</li>
- *   <li>{@code new_string} — replacement text (required, may be empty for deletion)</li>
+ *   <li>{@code path} - relative path to the file (required)</li>
+ *   <li>{@code old_string} - exact text to find (required, must appear exactly once)</li>
+ *   <li>{@code new_string} - replacement text (required, may be empty for deletion)</li>
  * </ul>
  */
 public final class FileEditTool implements TalosTool {
@@ -44,7 +44,7 @@ public final class FileEditTool implements TalosTool {
     @Override public String description() {
         return "Replace a unique string in a workspace file. "
                 + "TIP: call talos.read_file first to see the exact content. "
-                + "old_string must match the file exactly — strip any line-number prefixes from read_file output before using.";
+                + "old_string must match the file exactly - strip any line-number prefixes from read_file output before using.";
     }
 
     @Override
@@ -53,7 +53,7 @@ public final class FileEditTool implements TalosTool {
                 """
                 {"type":"object","properties":{
                   "path":{"type":"string","description":"Relative path to the file in the workspace"},
-                  "old_string":{"type":"string","description":"Exact file content to find and replace, character-for-character including whitespace and newlines. NOTE: talos.read_file output includes line-number prefixes like '1 | ' — do NOT include those prefixes in old_string. Copy only the actual file content, not the display formatting. Must appear exactly once in the file."},
+                  "old_string":{"type":"string","description":"Exact file content to find and replace, character-for-character including whitespace and newlines. NOTE: talos.read_file output includes line-number prefixes like '1 | ' - do NOT include those prefixes in old_string. Copy only the actual file content, not the display formatting. Must appear exactly once in the file."},
                   "new_string":{"type":"string","description":"Replacement text (may be empty to delete the matched text)"}
                 },"required":["path","old_string","new_string"]}""",
                 ToolRiskLevel.WRITE);
@@ -92,7 +92,7 @@ public final class FileEditTool implements TalosTool {
         // Reject no-op edits (old_string == new_string)
         if (oldString.equals(newString)) {
             return ToolResult.fail(ToolError.invalidParams(
-                    "old_string and new_string are identical — no change would be made. "
+                    "old_string and new_string are identical - no change would be made. "
                     + "Verify the intended edit and provide different replacement text."));
         }
 
@@ -142,7 +142,7 @@ public final class FileEditTool implements TalosTool {
                         ". Provide more context to make the match unique."));
             }
 
-            // Exactly one match — safe to replace
+            // Exactly one match - safe to replace
             String updated = content.replace(oldString, newString);
 
             // Snapshot for undo before mutating
@@ -181,12 +181,12 @@ public final class FileEditTool implements TalosTool {
         String[] lines = content.split("\n", -1);
         int limit = Math.min(lines.length, maxLines);
         // NOTE in the snippet header: line-number prefixes are display-only.
-        var sb = new StringBuilder("(line numbers below are display-only — do NOT include '1 | ' prefixes in old_string)\n");
+        var sb = new StringBuilder("(line numbers below are display-only - do NOT include '1 | ' prefixes in old_string)\n");
         for (int i = 0; i < limit; i++) {
             sb.append(i + 1).append(" | ").append(lines[i]).append('\n');
         }
         if (lines.length > maxLines) {
-            sb.append("... (").append(lines.length - maxLines).append(" more lines — call talos.read_file to see all)");
+            sb.append("... (").append(lines.length - maxLines).append(" more lines - call talos.read_file to see all)");
         }
         return sb.toString();
     }

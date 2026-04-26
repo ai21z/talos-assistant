@@ -1,7 +1,7 @@
-# [open] Ticket: Dev Mode Natural File Listing Misroutes
+# [done] Ticket: Dev Mode Natural File Listing Misroutes
 Date: 2026-04-26
 Priority: medium
-Status: open
+Status: done
 Architecture references:
 - `work-cycle-docs/tickets/new-work.md`
 - `work-cycle-docs/work-test-cycle.md`
@@ -93,3 +93,15 @@ list the files here
 - Dev mode no longer returns `Not found: the` for natural file-list prompts.
 - The response either lists workspace files or gives a precise command hint.
 - Manual QA suite includes a dev-mode natural file-list prompt.
+
+## Resolution Notes
+
+Updated `DevMode` list parsing so natural root-listing prompts such as
+`list the files here` route to the workspace root instead of treating `the` as
+a path. Added QA-010 to the manual QA suite for this exact prompt shape.
+
+Coverage:
+
+```powershell
+./gradlew.bat test --tests "dev.talos.cli.modes.DevModeTest"
+```

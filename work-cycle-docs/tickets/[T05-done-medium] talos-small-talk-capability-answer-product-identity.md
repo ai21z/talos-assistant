@@ -1,7 +1,7 @@
-# [open] Ticket: Small-Talk Capability Answer Should Describe Talos
+# [done] Ticket: Small-Talk Capability Answer Should Describe Talos
 Date: 2026-04-26
 Priority: medium
-Status: open
+Status: done
 Architecture references:
 - `work-cycle-docs/tickets/new-work.md`
 - `docs/new-architecture/talos-harness-source-of-truth.md`
@@ -128,3 +128,20 @@ Nice what can you do for me? How can you assist me?
 - No tools are exposed or called for pure capability small talk.
 - The behavior is covered by deterministic tests and one scenario or manual QA
   prompt entry.
+
+## Resolution Notes
+
+Added a deterministic Talos capability answer for small-talk onboarding prompts
+such as "what can you do" and "how can you assist me". The response describes
+Talos as a local workspace assistant with read/search/retrieve tools,
+approval-gated writes, a local model, and current limitations.
+
+Coverage:
+
+```powershell
+./gradlew.bat test --tests "dev.talos.cli.modes.AssistantTurnExecutorTest" --tests "dev.talos.runtime.task.TaskContractResolverTest"
+./gradlew.bat e2eTest --tests "dev.talos.harness.JsonScenarioPackTest"
+```
+
+New scenario:
+`src/e2eTest/resources/scenarios/41-capability-small-talk-talos.json`.

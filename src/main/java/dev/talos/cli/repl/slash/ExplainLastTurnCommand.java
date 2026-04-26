@@ -22,11 +22,21 @@ public final class ExplainLastTurnCommand implements Command {
     private final Path workspace;
     private final SessionStore store;
     private final String sessionId;
+    private final java.time.Instant activeSessionStartedAt;
 
     public ExplainLastTurnCommand(Path workspace, SessionStore store) {
+        this(workspace, store, null);
+    }
+
+    public ExplainLastTurnCommand(
+            Path workspace,
+            SessionStore store,
+            java.time.Instant activeSessionStartedAt
+    ) {
         this.workspace = workspace == null ? Path.of(".") : workspace;
         this.store = store;
         this.sessionId = JsonSessionStore.sessionIdFor(this.workspace);
+        this.activeSessionStartedAt = activeSessionStartedAt;
     }
 
     @Override
@@ -52,7 +62,14 @@ public final class ExplainLastTurnCommand implements Command {
             return new Result.Info("No completed turn has been recorded for this workspace yet.");
         }
 
-        TurnRecord latest = turns.stream()
+        List<TurnRecord> activeTurns = filterActiveTurns(turns);
+        if (activeTurns.isEmpty() && activeSessionStartedAt != null && !turns.isEmpty()) {
+            return new Result.Info(
+                    "No completed turn has been recorded in this active process yet. "
+                    + "Saved turn history exists for this workspace, but it was not loaded.");
+        }
+
+        TurnRecord latest = activeTurns.stream()
                 .max(Comparator.comparing(TurnRecord::timestamp)
                         .thenComparingInt(TurnRecord::turnNumber))
                 .orElse(null);
@@ -60,6 +77,15 @@ public final class ExplainLastTurnCommand implements Command {
             return new Result.Info("No completed turn has been recorded for this workspace yet.");
         }
         return new Result.TrustedInfo(renderView(latest, view));
+    }
+
+    private List<TurnRecord> filterActiveTurns(List<TurnRecord> turns) {
+        if (turns == null || turns.isEmpty()) return List.of();
+        if (activeSessionStartedAt == null) return turns;
+        return turns.stream()
+                .filter(turn -> turn.timestamp() != null)
+                .filter(turn -> !turn.timestamp().isBefore(activeSessionStartedAt))
+                .toList();
     }
 
     private static String renderView(TurnRecord latest, String view) {

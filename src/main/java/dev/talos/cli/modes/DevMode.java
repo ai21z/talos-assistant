@@ -42,7 +42,7 @@ public final class DevMode implements Mode {
         Limits lim = ctx.limits();
 
         boolean isList = isListIntent(s);
-        Path target = extractPathArg(ws, s);
+        Path target = isList && isNaturalRootListRequest(s) ? null : extractPathArg(ws, s);
         if (isList) {
             Path dir = (target == null ? ws : target);
             if (!ctx.sandbox().allowedPath(dir)) {
@@ -121,7 +121,15 @@ public final class DevMode implements Mode {
         return lower.startsWith("ls") || lower.startsWith("list") || lower.startsWith("dir");
     }
 
-    private static final Pattern ARG = Pattern.compile("^[^\\s:]++\\s++(?:\"([^\"]++)\"|'([^']++)'|`([^`++]++)`|(\\S++))");
+    private static boolean isNaturalRootListRequest(String s) {
+        if (s == null || s.isBlank()) return false;
+        String lower = s.trim().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
+        return lower.matches("^(?:ls|list|dir) (?:the )?(?:files|folder|directory|workspace|contents)(?: here)?$")
+                || lower.matches("^(?:ls|list|dir) (?:the )?(?:files|contents) in (?:this|the current) (?:folder|directory|workspace)$")
+                || lower.matches("^(?:ls|list|dir) (?:this|the current) (?:folder|directory|workspace)$");
+    }
+
+    private static final Pattern ARG = Pattern.compile("^[^\\s:]++\\s++(?:\"([^\"]++)\"|'([^']++)'|`([^`]++)`|(\\S++))");
 
     private static Path extractPathArg(Path ws, String s) {
         Matcher m = ARG.matcher(s);

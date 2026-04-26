@@ -1,13 +1,13 @@
-# [open] Ticket: Deictic Workspace Follow-Up Loses Prior Intent
+# [done] Ticket: Deictic Workspace Follow-Up Loses Prior Intent
 Date: 2026-04-26
 Priority: medium
-Status: open
+Status: done
 Architecture references:
 - `work-cycle-docs/tickets/new-work.md`
 - `docs/new-architecture/talos-harness-source-of-truth.md`
 - `work-cycle-docs/work-test-cycle.md`
 - `work-cycle-docs/tickets/talos-minimal-task-contract.md`
-- `work-cycle-docs/tickets/[T03-open-high] talos-natural-workspace-explain-underinspection.md`
+- `work-cycle-docs/tickets/[T03-done-high] talos-natural-workspace-explain-underinspection.md`
 
 ## Why This Ticket Exists
 
@@ -111,3 +111,19 @@ this here
   what it is.
 - Vague follow-ups do not grant write permission.
 - The behavior is covered by a two-turn deterministic scenario.
+
+## Resolution Notes
+
+Added read-only deictic follow-up inheritance in `TaskContractResolver`.
+Short prompts such as `this here`, `this folder`, and `here` can inherit the
+previous read-only workspace explain/diagnose/verify contract while still
+refusing to inherit mutation permission.
+
+Coverage:
+
+```powershell
+./gradlew.bat test --tests "dev.talos.runtime.task.TaskContractResolverTest"
+```
+
+The inherited `WORKSPACE_EXPLAIN` contract uses the same evidence retry policy
+covered by scenario 39.

@@ -355,6 +355,19 @@ public final class ScenarioRunner {
             ScenarioDefinition scenario,
             String userPrompt,
             List<String> scriptedResponses) {
+        return runThroughExecutorWithHistory(scenario, List.of(), userPrompt, scriptedResponses);
+    }
+
+    /**
+     * Drive the executor with explicit prior conversation history before the
+     * current user prompt. Used for multi-turn scenario seeds where the runtime
+     * behavior depends on previous verified assistant text.
+     */
+    public static ExecutorScenarioResult runThroughExecutorWithHistory(
+            ScenarioDefinition scenario,
+            List<ChatMessage> history,
+            String userPrompt,
+            List<String> scriptedResponses) {
 
         // 1. Workspace fixture (same as run()).
         var workspace = ScenarioWorkspaceFixture.withFiles(scenario.initialFiles());
@@ -377,10 +390,16 @@ public final class ScenarioRunner {
         var loop = new ToolCallLoop(
                 processor, ToolCallLoop.DEFAULT_MAX_ITERATIONS, null, false);
 
-        // 5. Structured messages: system + verbatim user prompt.
+        // 5. Structured messages: system + optional history + verbatim user prompt.
         var messages = new ArrayList<ChatMessage>(List.of(
                 ChatMessage.system("harness (executor path)"),
                 ChatMessage.user(userPrompt)));
+        if (history != null && !history.isEmpty()) {
+            messages = new ArrayList<>();
+            messages.add(ChatMessage.system("harness (executor path)"));
+            messages.addAll(history);
+            messages.add(ChatMessage.user(userPrompt));
+        }
 
         // 6. Scripted LlmClient + Context wired with llm override,
         //    sandbox rooted at workspace, and the tool-call loop.

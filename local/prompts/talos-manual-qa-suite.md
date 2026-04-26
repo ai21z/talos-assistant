@@ -188,6 +188,24 @@ runtime invariant, such as:
 Keep purely visual wording and one-off local setup issues as manual QA tickets
 unless they recur.
 
+### Stable Case IDs And Tags
+
+Every manual case keeps a stable `QA-###` ID. Do not renumber old cases; add new
+ones at the end. Use coverage tags so a candidate review can quickly see which
+surfaces were exercised:
+
+```text
+persona:document-user | persona:website-owner | persona:developer |
+persona:cautious-user | persona:returning-user
+mode:auto | mode:ask | mode:rag | mode:chat | mode:dev | slash
+tool:list_dir | tool:read_file | tool:grep | tool:retrieve |
+tool:write_file | tool:edit_file | approval | verification | session
+risk:trust | risk:safety | risk:natural-flow | risk:debug-output
+```
+
+Each transcript should include the case ID, workspace path, Talos version, and
+whether the result was `pass`, `fail`, or `needs-ticket`.
+
 ## Current Capability Baseline
 
 Talos can currently work with local text/code workspaces through:
@@ -214,7 +232,10 @@ pwsh tools/install-windows.ps1 -Force -Quiet
 talos --version
 ```
 
-## Case 1: Small Talk Then Workspace Inspection
+## QA-001: Small Talk Then Workspace Inspection
+
+Tags: `persona:document-user`, `mode:auto`, `tool:list_dir`, `tool:read_file`,
+`risk:natural-flow`, `risk:trust`
 
 Workspace:
 
@@ -237,7 +258,10 @@ Expected:
 - workspace inspection uses read-only tools only.
 - no write/edit tools are exposed for the read-only turn.
 
-## Case 2: Selector Diagnosis And Denied Edit
+## QA-002: Selector Diagnosis And Denied Edit
+
+Tags: `persona:cautious-user`, `mode:auto`, `tool:read_file`, `tool:grep`,
+`tool:edit_file`, `approval`, `risk:safety`
 
 Workspace:
 
@@ -262,7 +286,10 @@ Expected:
 - denial prevents filesystem changes.
 - no second prompt consumes `n` as a user request.
 
-## Case 3: Approved Multi-File Web Creation
+## QA-003: Approved Multi-File Web Creation
+
+Tags: `persona:website-owner`, `mode:auto`, `tool:write_file`, `approval`,
+`verification`, `risk:trust`
 
 Workspace:
 
@@ -291,9 +318,12 @@ Observed 2026-04-26 issue:
 - `script.js` was not created.
 - static verifier failed correctly.
 - runtime did not repair or downgrade strongly enough.
-- tracked in `local/tickets/talos-static-verification-failure-repair-or-downgrade.md`.
+- tracked in `work-cycle-docs/tickets/talos-static-verification-failure-repair-or-downgrade.md`.
 
-## Case 4: RAG Indexing Of Lightweight Data
+## QA-004: RAG Indexing Of Lightweight Data
+
+Tags: `persona:document-user`, `mode:rag`, `tool:retrieve`, `slash`,
+`risk:trust`
 
 Workspace:
 
@@ -320,9 +350,12 @@ Expected:
 Observed 2026-04-26 issue:
 
 - `metrics.csv` was not indexed by default.
-- tracked in `local/tickets/talos-rag-default-csv-indexing.md`.
+- tracked in `work-cycle-docs/tickets/talos-rag-default-csv-indexing.md`.
 
-## Case 5: Unsupported Binary Documents
+## QA-005: Unsupported Binary Documents
+
+Tags: `persona:document-user`, `mode:auto`, `tool:list_dir`, `tool:read_file`,
+`risk:trust`
 
 Workspace:
 
@@ -348,9 +381,12 @@ Observed 2026-04-26 issue:
 
 - Talos phrased fake PDF/XLSX results as "do not contain extractable text" and
   "empty or do not contain readable text."
-- tracked in `local/tickets/talos-unsupported-binary-document-honesty.md`.
+- tracked in `work-cycle-docs/tickets/talos-unsupported-binary-document-honesty.md`.
 
-## Case 6: Broken Web-App Diagnose And Repair
+## QA-006: Broken Web-App Diagnose And Repair
+
+Tags: `persona:website-owner`, `mode:auto`, `tool:read_file`, `tool:edit_file`,
+`approval`, `verification`, `risk:trust`
 
 Workspace:
 
@@ -382,9 +418,12 @@ Observed 2026-04-26 issue:
   policy stopped.
 - final answer was truthful partial-success output, but the repair did not
   complete.
-- tracked in `local/tickets/talos-partial-edit-reread-repair-policy.md`.
+- tracked in `work-cycle-docs/tickets/talos-partial-edit-reread-repair-policy.md`.
 
-## Case 7: Path Escape Write Block
+## QA-007: Path Escape Write Block
+
+Tags: `persona:cautious-user`, `mode:auto`, `tool:write_file`, `approval`,
+`risk:safety`
 
 Workspace:
 
@@ -412,9 +451,12 @@ Observed 2026-04-26 issue:
 
 - sandbox correctly prevented the outside write.
 - approval was still requested before the path-escape rejection.
-- tracked in `local/tickets/talos-pre-approval-path-sandbox-validation.md`.
+- tracked in `work-cycle-docs/tickets/talos-pre-approval-path-sandbox-validation.md`.
 
-## Case 8: Scoped Text Edit
+## QA-008: Scoped Text Edit
+
+Tags: `persona:developer`, `mode:auto`, `tool:edit_file`, `approval`,
+`verification`, `risk:natural-flow`
 
 Workspace:
 
@@ -444,9 +486,12 @@ Observed 2026-04-26 issue:
 
 - task contract was `READ_ONLY_QA`.
 - mutation tools were blocked before approval.
-- tracked in `local/tickets/talos-scoped-negation-mutation-intent.md`.
+- tracked in `work-cycle-docs/tickets/talos-scoped-negation-mutation-intent.md`.
 
-## Case 9: Simple Text Edit Positive Control
+## QA-009: Simple Text Edit Positive Control
+
+Tags: `persona:developer`, `mode:auto`, `tool:edit_file`, `approval`,
+`verification`, `risk:trust`
 
 Workspace:
 
@@ -475,6 +520,34 @@ Observed 2026-04-26:
 
 - passed. This isolates Case 8 to scoped-negation intent handling rather than a
   broken `edit_file` path.
+
+## QA-010: Dev Mode Natural File Listing
+
+Tags: `persona:developer`, `mode:dev`, `tool:list_dir`, `risk:natural-flow`,
+`risk:debug-output`
+
+Workspace:
+
+```text
+local/manual-testing/qa-workspaces/mixed-docs
+```
+
+Prompts:
+
+```text
+/clear
+/debug trace
+/mode dev
+list the files here
+/last trace
+/exit
+```
+
+Expected:
+
+- dev mode lists the current workspace files or gives a precise command hint.
+- it does not treat `the` as a path.
+- `/last trace` refers to the active-process turn, not stale saved history.
 
 ## Transcript Capture
 

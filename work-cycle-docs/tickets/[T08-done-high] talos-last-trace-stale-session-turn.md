@@ -1,7 +1,7 @@
-# [open] Ticket: Last Trace Shows Stale Session Turn In Fresh Process
+# [done] Ticket: Last Trace Shows Stale Session Turn In Fresh Process
 Date: 2026-04-26
 Priority: high
-Status: open
+Status: done
 Architecture references:
 - `work-cycle-docs/work-test-cycle.md`
 - `work-cycle-docs/tickets/talos-cli-last-run-introspection.md`
@@ -114,3 +114,16 @@ with an existing saved session present but not loaded.
   turn completes.
 - If it uses persisted data, the output labels that fact.
 - Manual QA can trust `/last trace` without separately auditing session files.
+
+## Resolution Notes
+
+`ExplainLastTurnCommand` now receives the active process start time from
+`TalosBootstrap` and filters persisted turn records to the active process.
+If saved turns exist but none belong to the current process, `/last` reports
+that saved history exists but was not loaded instead of showing it as current.
+
+Coverage:
+
+```powershell
+./gradlew.bat test --tests "dev.talos.cli.repl.slash.ExplainLastTurnCommandTest" --tests "dev.talos.cli.repl.TalosBootstrapWiringTest"
+```

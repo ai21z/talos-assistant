@@ -1,7 +1,7 @@
-# [in-progress] Ticket: Follow-Up Summary Contradicts Partial Verification
+# [done] Ticket: Follow-Up Summary Contradicts Partial Verification
 Date: 2026-04-26
 Priority: high
-Status: in-progress
+Status: done
 Architecture references:
 - `work-cycle-docs/tickets/new-work.md`
 - `docs/new-architecture/talos-harness-source-of-truth.md`
@@ -114,18 +114,22 @@ Can you summarize what changed in plain English?
 - Talos does not claim a missing button was added.
 - Talos does not collapse a partial mutation into a completed task.
 
-## Progress Notes
+## Resolution Notes
 
 Added a deterministic follow-up guard in `AssistantTurnExecutor`: when the user
 asks "what changed?" and prior assistant history contains static/partial
 verification text, Talos summarizes that verified outcome instead of accepting a
 fresh unsupported model claim.
 
-Covered by `AssistantTurnExecutorTest`.
+Added JSON-backed multi-turn scenario harness support and a scenario for
+`partial mutation -> summarize what changed`.
 
-Remaining work before closing:
+Coverage:
 
-- Add a JSON-backed multi-turn scenario or equivalent harness support for
-  `partial mutation -> summarize what changed`.
-- Run an installed CLI partial-mutation transcript after the scenario is in
-  place.
+```powershell
+./gradlew.bat test --tests "dev.talos.cli.modes.AssistantTurnExecutorTest"
+./gradlew.bat e2eTest --tests "dev.talos.harness.JsonScenarioPackTest"
+```
+
+New scenario:
+`src/e2eTest/resources/scenarios/42-partial-followup-summary-uses-verified-history.json`.

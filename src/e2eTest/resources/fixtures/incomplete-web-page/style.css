@@ -1,0 +1,8 @@
+body {
+  font-family: sans-serif;
+}
+
+#bmi-form {
+  display: grid;
+  gap: 0.75rem;
+}

@@ -7,6 +7,7 @@ import dev.talos.spi.types.ChatMessage;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -53,13 +54,34 @@ public final class TaskContractResolver {
             "what is talos",
             "who is talos",
             "what can you do",
+            "how can you assist me",
+            "how can you help me",
+            "what can talos do",
             "tell me about yourself"
+    );
+
+    private static final Set<String> DEICTIC_FOLLOW_UPS = Set.of(
+            "this here",
+            "this folder",
+            "this directory",
+            "this one",
+            "yes this",
+            "yes, this",
+            "yes check it",
+            "here",
+            "this"
     );
 
     private TaskContractResolver() {}
 
     public static TaskContract fromMessages(List<ChatMessage> messages) {
-        return fromUserRequest(latestUserRequest(messages));
+        String latest = latestUserRequest(messages);
+        TaskContract current = fromUserRequest(latest);
+        if (looksLikeDeicticFollowUp(latest) && !current.mutationRequested()) {
+            TaskContract inherited = inheritedReadOnlyWorkspaceContract(messages, latest);
+            if (inherited != null) return inherited;
+        }
+        return current;
     }
 
     public static TaskContract fromUserRequest(String userRequest) {
@@ -124,6 +146,37 @@ public final class TaskContractResolver {
         return lower != null && containsAny(lower, ASSISTANT_IDENTITY_MARKERS);
     }
 
+    private static boolean looksLikeDeicticFollowUp(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return false;
+        String lower = userRequest.strip().toLowerCase(Locale.ROOT)
+                .replaceAll("\\s+", " ")
+                .replaceAll("[.!?]+$", "");
+        return DEICTIC_FOLLOW_UPS.contains(lower);
+    }
+
+    private static TaskContract inheritedReadOnlyWorkspaceContract(
+            List<ChatMessage> messages,
+            String latestUserRequest
+    ) {
+        String previous = previousUserRequest(messages, latestUserRequest);
+        if (previous == null || previous.isBlank()) return null;
+        TaskContract prior = fromUserRequest(previous);
+        if (prior.mutationRequested()) return null;
+        if (prior.type() != TaskType.WORKSPACE_EXPLAIN
+                && prior.type() != TaskType.DIAGNOSE_ONLY
+                && prior.type() != TaskType.VERIFY_ONLY) {
+            return null;
+        }
+        return new TaskContract(
+                prior.type(),
+                false,
+                false,
+                prior.type() == TaskType.VERIFY_ONLY,
+                Set.of(),
+                Set.of(),
+                latestUserRequest);
+    }
+
     private static boolean containsAny(String lower, Set<String> markers) {
         for (String marker : markers) {
             if (lower.contains(marker)) return true;
@@ -139,6 +192,24 @@ public final class TaskContractResolver {
             String content = message.content();
             if (ToolCallSupport.isSyntheticToolResultContent(content)) continue;
             return content == null || content.isBlank() ? null : content;
+        }
+        return null;
+    }
+
+    private static String previousUserRequest(List<ChatMessage> messages, String latestUserRequest) {
+        if (messages == null || messages.isEmpty()) return null;
+        boolean skippedLatest = false;
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            ChatMessage message = messages.get(i);
+            if (message == null || !"user".equals(message.role())) continue;
+            String content = message.content();
+            if (ToolCallSupport.isSyntheticToolResultContent(content)) continue;
+            if (content == null || content.isBlank()) continue;
+            if (!skippedLatest && Objects.equals(content, latestUserRequest)) {
+                skippedLatest = true;
+                continue;
+            }
+            return content;
         }
         return null;
     }

@@ -1,0 +1,18 @@
+{
+  "name": "workspace explain list-only underinspection retries with primary reads",
+  "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "workspace-explain-requires-local-evidence",
+    "list-only-underinspection-is-retried"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "I'm not a developer. What is this folder for? Please explain the website in plain English.",
+  "scriptedResponses": [
+    "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}",
+    "The folder contains index.html, style.css, and script.js, so it is a basic website.",
+    "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}\n{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"style.css\"}}\n{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"script.js\"}}",
+    "This is a Night Drive landing page. index.html defines the page content, style.css supplies the visual design, and script.js adds interactivity."
+  ]
+}

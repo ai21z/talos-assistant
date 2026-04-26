@@ -108,7 +108,11 @@ class TaskContractResolverTest {
                 "who are you?",
                 "what are you?",
                 "what is talos?",
-                "who is talos?")) {
+                "who is talos?",
+                "what can you do?",
+                "how can you assist me?",
+                "how can you help me?",
+                "what can Talos do?")) {
             TaskContract contract = TaskContractResolver.fromUserRequest(input);
 
             assertEquals(TaskType.SMALL_TALK, contract.type(), input);
@@ -239,6 +243,33 @@ class TaskContractResolverTest {
         assertEquals(TaskType.FILE_EDIT, contract.type());
         assertTrue(contract.mutationAllowed());
         assertEquals(Set.of("index.html"), contract.expectedTargets());
+    }
+
+    @Test
+    void deicticFollowUpInheritsReadOnlyWorkspaceExplainIntent() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.user("Can you check this folder here and tell me what is it?"));
+        messages.add(ChatMessage.assistant("Please provide the path."));
+        messages.add(ChatMessage.user("this here"));
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        assertEquals(TaskType.WORKSPACE_EXPLAIN, contract.type());
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
+    }
+
+    @Test
+    void deicticFollowUpDoesNotInheritMutationPermission() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.user("Edit index.html to add a button."));
+        messages.add(ChatMessage.assistant("Which button?"));
+        messages.add(ChatMessage.user("this here"));
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
     }
 
     @Test

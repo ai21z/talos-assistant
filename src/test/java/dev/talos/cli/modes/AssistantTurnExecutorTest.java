@@ -144,6 +144,190 @@ class AssistantTurnExecutorTest {
             assertTrue(out.text().contains("[Used 1 tool(s): talos.write_file"),
                     "retry tool execution summary should be visible");
         }
+
+        @Test
+        void workspaceExplainNoToolDeflectionRetriesWithReadTools(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("index.html"), """
+                    <!doctype html>
+                    <html>
+                      <head><link rel="stylesheet" href="style.css"></head>
+                      <body><h1>Night Drive</h1><script src="script.js"></script></body>
+                    </html>
+                    """);
+            Files.writeString(workspace.resolve("style.css"), "body { background: #111; }\n");
+            Files.writeString(workspace.resolve("script.js"), "console.log('ready');\n");
+
+            var chunks = new ArrayList<String>();
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ListDirTool());
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "Sure, please provide the path of the folder you want me to inspect.",
+                            "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}\n"
+                                    + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}\n"
+                                    + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"style.css\"}}\n"
+                                    + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"script.js\"}}",
+                            "This workspace is a small Night Drive web page. index.html loads style.css for styling and script.js for behavior.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .streamSink(chunks::add)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "I'm not a developer. What is this folder for? Please explain the website in plain English."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertFalse(out.streamed(),
+                    "workspace-evidence turns should stay buffered so no-tool deflections can be retried");
+            assertTrue(chunks.isEmpty(), "buffered retry path must not leak the initial deflection");
+            assertTrue(out.text().contains("[Used 4 tool(s): talos.list_dir, talos.read_file"),
+                    out.text());
+            assertTrue(out.text().contains("Night Drive web page"), out.text());
+            assertFalse(out.text().contains("provide the path"), out.text());
+        }
+
+        @Test
+        void workspaceExplainListOnlyUnderinspectionRetriesWithPrimaryReads(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("index.html"), """
+                    <!doctype html>
+                    <html>
+                      <head><link rel="stylesheet" href="style.css"></head>
+                      <body><h1>Night Drive</h1><a class="cta" href="#listen">Listen</a><script src="script.js"></script></body>
+                    </html>
+                    """);
+            Files.writeString(workspace.resolve("style.css"), ".cta { color: #ff4fd8; }\n");
+            Files.writeString(workspace.resolve("script.js"), "document.querySelector('.cta').dataset.ready = 'true';\n");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ListDirTool());
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}",
+                            "The folder contains index.html, style.css, and script.js, so it is a basic website.",
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}\n"
+                                    + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"style.css\"}}\n"
+                                    + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"script.js\"}}",
+                            "This is a Night Drive landing page. index.html defines the call-to-action link, style.css styles it, and script.js marks the CTA as ready.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "I'm not a developer. What is this folder for? Please explain the website in plain English."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains("[Used 1 tool(s): talos.list_dir"), out.text());
+            assertTrue(out.text().contains("[Used 3 tool(s): talos.read_file"), out.text());
+            assertTrue(out.text().contains("Night Drive landing page"), out.text());
+            assertTrue(out.text().contains("style.css styles it"), out.text());
+            assertFalse(out.text().contains("basic website"), out.text());
+        }
+
+        @Test
+        void verifyOnlyNoToolAnswerRetriesBeforeConfirming(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("index.html"), """
+                    <!doctype html>
+                    <html>
+                      <head><link rel="stylesheet" href="style.css"></head>
+                      <body><h1>BMI</h1><script src="script.js"></script></body>
+                    </html>
+                    """);
+            Files.writeString(workspace.resolve("style.css"), "body { font-family: sans-serif; }\n");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ListDirTool());
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "I can't provide a definitive answer without being able to see and analyze the files myself.",
+                            "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}\n"
+                                    + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}\n"
+                                    + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"style.css\"}}",
+                            "Confirmed from the files: the page is incomplete because index.html references script.js, but only index.html and style.css are present.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "It looks like it is a non-completed web page right? Can you confirm that?"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains("[Used 3 tool(s): talos.list_dir, talos.read_file"),
+                    out.text());
+            assertTrue(out.text().contains("Confirmed from the files"), out.text());
+            assertTrue(out.text().contains("references script.js"), out.text());
+            assertFalse(out.text().contains("without being able to see"), out.text());
+        }
+
+        @Test
+        void verifyOnlyWebCompletionUsesStaticDiagnostics(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("index.html"), """
+                    <!doctype html>
+                    <html>
+                      <head><link rel="stylesheet" href="style.css"></head>
+                      <body><h1>Horror Synthwave Band</h1><script src="script.js"></script></body>
+                    </html>
+                    """);
+            Files.writeString(workspace.resolve("style.css"), ".cta-button { color: #ff4fd8; }\n");
+            Files.writeString(workspace.resolve("script.js"), "document.querySelector('.cta-button').addEventListener('click', () => {});\n");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ListDirTool());
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}\n"
+                                    + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}\n"
+                                    + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"style.css\"}}\n"
+                                    + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"script.js\"}}",
+                            "The website appears complete and well structured.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "It looks like it is a web page right? Can you confirm if it is complete? Do not change anything."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains("Static web diagnostics found"), out.text());
+            assertTrue(out.text().contains(".cta-button"), out.text());
+            assertTrue(out.text().contains("No files were changed."), out.text());
+            assertFalse(out.text().contains("appears complete"), out.text());
+        }
     }
 
     @Nested
@@ -591,6 +775,25 @@ class AssistantTurnExecutorTest {
             assertTrue(out.text().contains("Talos"), out.text());
             assertFalse(out.text().toLowerCase().contains("qwen"), out.text());
             assertFalse(out.text().toLowerCase().contains("alibaba"), out.text());
+        }
+
+        @Test
+        void capabilityQuestionUsesTalosProductCapabilities() {
+            var ctx = scriptedContext(
+                    "As an AI language model, I can write poems and answer general questions.");
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("You are Talos."));
+            messages.add(ChatMessage.user("Nice what can you do for me? How can you assist me?"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, WS, ctx, new AssistantTurnExecutor.Options());
+
+            String lower = out.text().toLowerCase();
+            assertTrue(out.text().contains("Talos"), out.text());
+            assertTrue(lower.contains("local workspace"), out.text());
+            assertTrue(lower.contains("approval"), out.text());
+            assertFalse(lower.contains("as an ai language model"), out.text());
+            assertFalse(lower.contains("poems"), out.text());
         }
     }
 

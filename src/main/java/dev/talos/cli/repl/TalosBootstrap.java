@@ -311,7 +311,8 @@ public final class TalosBootstrap {
         // ── Commands ─────────────────────────────────────────────────────
         AtomicBoolean quit = new AtomicBoolean(false);
         CommandRegistry registry = new CommandRegistry();
-        registerCommands(registry, session, cfg, ctx, modes, workspace, quit, undoStack, sessionStore);
+        registerCommands(registry, session, cfg, ctx, modes, workspace, quit, undoStack,
+                sessionStore, runtimeSession.startedAt());
 
         // ── Assemble router ──────────────────────────────────────────────
         String startupNotice = restoreSummary.hasReplay()
@@ -344,7 +345,8 @@ public final class TalosBootstrap {
     private static void registerCommands(CommandRegistry registry, SessionState session,
                                          Config cfg, Context ctx, ModeController modes,
                                          Path workspace, AtomicBoolean quit,
-                                         FileUndoStack undoStack, SessionStore sessionStore) {
+                                         FileUndoStack undoStack, SessionStore sessionStore,
+                                         java.time.Instant activeSessionStartedAt) {
         CliRuntime rt = new CliRuntime() {
             @Override public int getK()                { return session.getK(); }
             @Override public void setK(int k)          { session.setK(k); }
@@ -365,7 +367,7 @@ public final class TalosBootstrap {
         registry.register(new SetModelCommand());
         registry.register(new ModeCommand(modes));
         registry.register(new StatusCommand(modes, workspace));
-        registry.register(new ExplainLastTurnCommand(workspace, sessionStore));
+        registry.register(new ExplainLastTurnCommand(workspace, sessionStore, activeSessionStartedAt));
         registry.register(new PromptCommand(modes, workspace));
         registry.register(new WorkspaceCommand(workspace));
         registry.register(new ReindexCommand(workspace, modes::invalidateSymbolCache));

@@ -1,0 +1,17 @@
+{
+  "name": "natural workspace explain no-tool deflection retries with read tools",
+  "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "workspace-explain-requires-local-evidence",
+    "no-tool-path-request-is-not-finalized"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "I'm not a developer. What is this folder for? Please explain the website in plain English.",
+  "scriptedResponses": [
+    "Sure, please provide the path of the folder you want me to inspect.",
+    "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}\n{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}\n{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"style.css\"}}\n{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"script.js\"}}",
+    "This workspace is a small Night Drive web page. index.html loads style.css for styling and script.js for behavior."
+  ]
+}
