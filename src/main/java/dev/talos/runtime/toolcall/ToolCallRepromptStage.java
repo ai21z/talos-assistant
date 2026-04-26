@@ -290,10 +290,22 @@ public final class ToolCallRepromptStage {
         if (state.mutatingToolSuccesses > 0 || outcome.mutationsThisIteration() > 0) return null;
 
         String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
+        if (userTask != null && userTask.contains("Task type: WORKSPACE_EXPLAIN")) return null;
+        if (declaresTaskType(state.messages, "WORKSPACE_EXPLAIN")) return null;
         if (!WebDiagnosticIntent.matchesReadOnlyRequest(userTask)) return null;
 
         String diagnostics = StaticTaskVerifier.renderWebDiagnostics(state.workspace);
         return diagnostics == null || diagnostics.isBlank() ? null : diagnostics;
+    }
+
+    private static boolean declaresTaskType(List<ChatMessage> messages, String taskType) {
+        if (messages == null || taskType == null || taskType.isBlank()) return false;
+        String marker = "Task type: " + taskType;
+        for (ChatMessage message : messages) {
+            if (message == null || message.content() == null) continue;
+            if (message.content().contains(marker)) return true;
+        }
+        return false;
     }
 
     record EmptyEditRepair(String path, String instruction) {}

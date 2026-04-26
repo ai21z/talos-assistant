@@ -7,7 +7,7 @@ Architecture references:
 - `docs/new-architecture/talos-harness-source-of-truth.md`
 - `work-cycle-docs/work-test-cycle.md`
 - `work-cycle-docs/tickets/talos-execution-outcome-centralization.md`
-- `work-cycle-docs/tickets/[T03-open-high] talos-natural-workspace-explain-underinspection.md`
+- `work-cycle-docs/tickets/[T03-done-high] talos-natural-workspace-explain-underinspection.md`
 
 ## Why This Ticket Exists
 

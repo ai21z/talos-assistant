@@ -1,0 +1,25 @@
+{
+  "name": "partial follow-up summary uses verified history",
+  "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "follow-up-summary-does-not-invent-completed-changes",
+    "partial-verification-history-is-authoritative"
+  ],
+  "runner": "executor-history",
+  "approvalPolicy": "APPROVE_ALL",
+  "history": [
+    {
+      "role": "user",
+      "content": "Fix the broken CTA on this page."
+    },
+    {
+      "role": "assistant",
+      "content": "Partial verification: static checks failed after the mutation.\nThe turn remains partial; the requested task is not verified complete.\n\nSucceeded:\n- talos.edit_file -> index.html\n\nRemaining static verification problems:\n- index.html: HTML references missing script.js.\n- index.html: `.cta-button` is still not present in the HTML."
+    }
+  ],
+  "userPrompt": "Can you summarize what changed?",
+  "scriptedResponses": [
+    "I added the Listen Now button and wired script.js."
+  ]
+}

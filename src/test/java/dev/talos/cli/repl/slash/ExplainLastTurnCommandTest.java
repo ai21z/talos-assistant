@@ -187,6 +187,69 @@ class ExplainLastTurnCommandTest {
     }
 
     @Test
+    void activeProcessCommandIgnoresSavedTurnsFromBeforeStartup() {
+        Path workspace = Path.of("/project/active-last").toAbsolutePath().normalize();
+        var store = new JsonSessionStore(tempDir);
+        String sessionId = JsonSessionStore.sessionIdFor(workspace);
+        store.appendTurn(sessionId, recordAt(
+                12,
+                Instant.parse("2026-04-26T08:00:00Z"),
+                "old saved request",
+                "old saved answer",
+                List.of(),
+                0,
+                0,
+                0,
+                "ok"));
+        store.appendTurn(sessionId, recordAt(
+                1,
+                Instant.parse("2026-04-26T12:05:00Z"),
+                "hello",
+                "Hi.",
+                List.of(),
+                0,
+                0,
+                0,
+                "ok"));
+        var cmd = new ExplainLastTurnCommand(
+                workspace, store, Instant.parse("2026-04-26T12:00:00Z"));
+
+        Result result = cmd.execute("trace", minimalCtx());
+
+        assertInstanceOf(Result.TrustedInfo.class, result);
+        String text = ((Result.TrustedInfo) result).text;
+        assertTrue(text.contains("hello"), text);
+        assertFalse(text.contains("old saved request"), text);
+    }
+
+    @Test
+    void activeProcessCommandLabelsOnlyPersistedSavedHistory() {
+        Path workspace = Path.of("/project/saved-only-last").toAbsolutePath().normalize();
+        var store = new JsonSessionStore(tempDir);
+        String sessionId = JsonSessionStore.sessionIdFor(workspace);
+        store.appendTurn(sessionId, recordAt(
+                12,
+                Instant.parse("2026-04-26T08:00:00Z"),
+                "old saved request",
+                "old saved answer",
+                List.of(),
+                0,
+                0,
+                0,
+                "ok"));
+        var cmd = new ExplainLastTurnCommand(
+                workspace, store, Instant.parse("2026-04-26T12:00:00Z"));
+
+        Result result = cmd.execute("trace", minimalCtx());
+
+        assertInstanceOf(Result.Info.class, result);
+        String text = ((Result.Info) result).text;
+        assertTrue(text.contains("active process"), text);
+        assertTrue(text.contains("not loaded"), text);
+        assertFalse(text.contains("old saved request"), text);
+    }
+
+    @Test
     void traceViewIncludesPolicyTraceAndBlockReasons() {
         TurnPolicyTrace policyTrace = new TurnPolicyTrace(
                 "FILE_CREATE",

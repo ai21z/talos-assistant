@@ -1,7 +1,7 @@
-# [open] Ticket: CLI Help And Tools Output Discoverability Regression
+# [done] Ticket: CLI Help And Tools Output Discoverability Regression
 Date: 2026-04-26
 Priority: medium
-Status: open
+Status: done
 Architecture references:
 - `docs/new-architecture/30-cli-ui-output-architecture-audit.md`
 - `work-cycle-docs/tickets/new-work.md`
@@ -117,3 +117,15 @@ Installed CLI manual check:
 - `/help all` keeps debug command summaries understandable.
 - `/tools` contains no replacement `?` caused by Unicode punctuation.
 - The transcript remains readable in normal PowerShell and redirected output.
+
+## Resolution Notes
+
+Increased `/help all` summary width enough to keep the mode list and debug
+summary readable in installed transcripts. Replaced user-visible Unicode dash
+punctuation in `FileEditTool` with ASCII hyphen text.
+
+Coverage:
+
+```powershell
+./gradlew.bat test --tests "dev.talos.cli.repl.slash.SimpleCommandsTest" --tests "dev.talos.cli.repl.slash.ToolsCommandTest"
+```

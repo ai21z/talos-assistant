@@ -7,6 +7,7 @@ import dev.talos.cli.repl.Result;
 import dev.talos.core.Config;
 import org.junit.jupiter.api.*;
 
+import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -372,6 +373,13 @@ class SimpleCommandsTest {
             return reg;
         }
 
+        private CommandRegistry fullRegistry() {
+            var reg = registry();
+            reg.register(new ModeCommand(ModeController.defaultController()));
+            reg.register(new ExplainLastTurnCommand(Path.of("."), new dev.talos.runtime.NoOpSessionStore()));
+            return reg;
+        }
+
         @Test void help_no_args_lists_commands() {
             var cmd = new HelpCommand(registry());
             Result r = cmd.execute("", ctx);
@@ -388,6 +396,18 @@ class SimpleCommandsTest {
             assertInstanceOf(Result.Ok.class, r);
             assertTrue(r.toString().contains("Session"), "Full help should include grouped inventory");
             assertTrue(r.toString().contains("Security"), "Full help should include security commands");
+        }
+
+        @Test void help_all_keeps_mode_and_last_summaries_readable() {
+            var cmd = new HelpCommand(fullRegistry());
+            Result r = cmd.execute("all", ctx);
+
+            assertInstanceOf(Result.Ok.class, r);
+            String text = r.toString();
+            assertTrue(text.contains("Available: auto, rag, chat, dev, ask, web (reserved)"), text);
+            assertFalse(text.contains("Available: auto, rag, c..."), text);
+            assertTrue(text.contains("Inspect the latest turn from structured audit data"), text);
+            assertFalse(text.contains("structured aud..."), text);
         }
 
         @Test void help_debug_topic() {

@@ -232,7 +232,7 @@ public final class HelpCommand implements Command {
     /** Keep command lists from wrapping in dumb/non-interactive transcripts. */
     private static String listSummary(String s) {
         String value = trimDot(Objects.toString(s, "")).replaceAll("\\s+", " ");
-        int max = 46;
+        int max = 80;
         return value.length() <= max ? value : value.substring(0, max - 3) + "...";
     }
 

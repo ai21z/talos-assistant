@@ -1,7 +1,7 @@
-# [open] Ticket: Natural Workspace Explain Underinspection
+# [done] Ticket: Natural Workspace Explain Underinspection
 Date: 2026-04-26
 Priority: high
-Status: open
+Status: done
 Architecture references:
 - `work-cycle-docs/tickets/new-work.md`
 - `docs/new-architecture/talos-harness-source-of-truth.md`
@@ -187,3 +187,26 @@ Technical analysis:
   `AssistantTurnExecutor.resolveNoToolAnswer` /
   `ExecutionOutcome.fromNoTool`, plus prompt/task-contract guidance for
   workspace explain turns.
+
+## Resolution Notes
+
+Implemented deterministic no-tool and list-only underinspection retry policy
+for workspace-evidence tasks: `WORKSPACE_EXPLAIN` turns are buffered, retried
+with read-only inspection, and anchored on the current workspace root for
+prompts such as "this folder", "here", and "this workspace".
+
+The retry starts with `talos.list_dir` and reads obvious primary files when
+present. The user-facing answer is only accepted after observed evidence or a
+truthful no-evidence fallback.
+
+Coverage:
+
+```powershell
+./gradlew.bat test --tests "dev.talos.cli.modes.AssistantTurnExecutorTest" --tests "dev.talos.runtime.task.TaskContractResolverTest"
+./gradlew.bat e2eTest --tests "dev.talos.harness.JsonScenarioPackTest"
+```
+
+New scenarios:
+
+- `src/e2eTest/resources/scenarios/39-natural-workspace-explain-no-tool-retry.json`
+- `src/e2eTest/resources/scenarios/43-workspace-explain-list-only-underinspection-retry.json`

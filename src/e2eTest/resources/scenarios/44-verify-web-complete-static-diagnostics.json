@@ -1,0 +1,16 @@
+{
+  "name": "verify web completion uses static diagnostics",
+  "fixture": "horror-synth-site",
+  "v1Pack": true,
+  "claims": [
+    "verify-only-web-completion-is-grounded",
+    "static-diagnostics-correct-false-complete-claims"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "It looks like it is a web page right? Can you confirm if it is complete? Do not change anything.",
+  "scriptedResponses": [
+    "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}\n{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}\n{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"style.css\"}}\n{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"script.js\"}}",
+    "The website appears complete and well structured."
+  ]
+}

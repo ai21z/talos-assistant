@@ -1,0 +1,17 @@
+{
+  "name": "verify-only confirmation retries before answering",
+  "fixture": "incomplete-web-page",
+  "v1Pack": true,
+  "claims": [
+    "verify-only-turns-require-evidence",
+    "workspace-confirmation-is-grounded"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "It looks like it is a non-completed web page right? Can you confirm that?",
+  "scriptedResponses": [
+    "I can't provide a definitive answer without being able to see and analyze the files myself.",
+    "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}\n{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}\n{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"style.css\"}}",
+    "Confirmed from the files: the page is incomplete because index.html references script.js, but only index.html and style.css are present."
+  ]
+}

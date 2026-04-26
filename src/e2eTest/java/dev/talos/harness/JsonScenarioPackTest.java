@@ -1,10 +1,15 @@
 package dev.talos.harness;
 
 import dev.talos.cli.modes.AssistantTurnExecutor;
+import dev.talos.spi.types.ChatMessage;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @DisplayName("JSON deterministic scenario pack")
@@ -539,11 +544,125 @@ class JsonScenarioPackTest {
                     .assertAnswerContains(AssistantTurnExecutor.LOCAL_ACCESS_CAPABILITY_CORRECTION)
                     .assertAnswerContains("I can read, list, and search files")
                     .assertAnswerNotContains("don't have direct access")
-                    .assertAnswerNotContains("As an AI language model")
-                    .assertStreamedTextContains(AssistantTurnExecutor.LOCAL_ACCESS_CAPABILITY_CORRECTION);
+                    .assertAnswerNotContains("As an AI language model");
 
-            assertTrue(result.streamed(),
-                    "runThroughExecutorStreaming should drive the streaming branch");
+            assertFalse(result.streamed(),
+                    "workspace-evidence turns are buffered so no-tool corrections happen before display");
+            assertTrue(result.streamedText().isEmpty(),
+                    "buffered workspace-evidence turn should not stream the bad first answer");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/39-natural-workspace-explain-no-tool-retry.json] 39: natural workspace explain retries with read tools")
+    void naturalWorkspaceExplainNoToolRetryUsesReadTools() {
+        var loaded = JsonScenarioLoader.load("scenarios/39-natural-workspace-explain-no-tool-retry.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("[Used 4 tool(s): talos.list_dir, talos.read_file")
+                    .assertAnswerContains("Night Drive web page")
+                    .assertAnswerContains("index.html loads style.css")
+                    .assertAnswerNotContains("provide the path");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/43-workspace-explain-list-only-underinspection-retry.json] 43: list-only workspace explain retries with primary reads")
+    void workspaceExplainListOnlyUnderinspectionRetriesWithPrimaryReads() {
+        var loaded = JsonScenarioLoader.load("scenarios/43-workspace-explain-list-only-underinspection-retry.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("[Used 1 tool(s): talos.list_dir")
+                    .assertAnswerContains("[Used 3 tool(s): talos.read_file")
+                    .assertAnswerContains("Night Drive landing page")
+                    .assertAnswerContains("style.css supplies the visual design")
+                    .assertAnswerNotContains("basic website");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/40-verify-confirm-no-tool-retry.json] 40: verify-only confirmation retries before answering")
+    void verifyOnlyConfirmNoToolRetryUsesReadTools() {
+        var loaded = JsonScenarioLoader.load("scenarios/40-verify-confirm-no-tool-retry.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("[Used 3 tool(s): talos.list_dir, talos.read_file")
+                    .assertAnswerContains("Confirmed from the files")
+                    .assertAnswerContains("references script.js")
+                    .assertAnswerNotContains("without being able to see");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/44-verify-web-complete-static-diagnostics.json] 44: verify web completion uses static diagnostics")
+    void verifyWebCompletionUsesStaticDiagnostics() {
+        var loaded = JsonScenarioLoader.load("scenarios/44-verify-web-complete-static-diagnostics.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("Static web diagnostics found")
+                    .assertAnswerContains(".cta-button")
+                    .assertAnswerContains("No files were changed.")
+                    .assertAnswerNotContains("appears complete");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/41-capability-small-talk-talos.json] 41: capability small talk answers as Talos")
+    void capabilitySmallTalkAnswersAsTalos() {
+        var loaded = JsonScenarioLoader.load("scenarios/41-capability-small-talk-talos.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("Talos")
+                    .assertAnswerContains("local workspace")
+                    .assertAnswerContains("approval")
+                    .assertAnswerNotContains("As an AI language model")
+                    .assertAnswerNotContains("poems");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/42-partial-followup-summary-uses-verified-history.json] 42: follow-up summary uses verified partial history")
+    void partialFollowupSummaryUsesVerifiedHistory() {
+        var loaded = JsonScenarioLoader.load("scenarios/42-partial-followup-summary-uses-verified-history.json");
+        List<ChatMessage> history = new ArrayList<>();
+        var historyNode = loaded.raw().path("history");
+        for (var node : historyNode) {
+            history.add(new ChatMessage(
+                    node.path("role").asText(),
+                    node.path("content").asText()));
+        }
+
+        try (var result = ScenarioRunner.runThroughExecutorWithHistory(
+                loaded.definition(),
+                history,
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("partial")
+                    .assertAnswerContains("not verified complete")
+                    .assertAnswerContains(".cta-button")
+                    .assertAnswerNotContains("I added the Listen Now button")
+                    .assertAnswerNotContains("wired script.js");
         }
     }
 
@@ -659,8 +778,10 @@ class JsonScenarioPackTest {
                     .assertAnswerContains("cta-button")
                     .assertFileContains("index.html", "<title>Horror Synthwave Band</title>");
 
-            assertTrue(result.streamed(),
-                    "runThroughExecutorStreaming should drive the streaming branch");
+            assertFalse(result.streamed(),
+                    "workspace-evidence turns are buffered before final truth shaping");
+            assertTrue(result.streamedText().isEmpty(),
+                    "buffered workspace-evidence turn should not stream the ungrounded first answer");
         }
     }
 }

@@ -1,7 +1,7 @@
-# [open] Ticket: Talos Manual QA Constitution
+# [done] Ticket: Talos Manual QA Constitution
 Date: 2026-04-26
 Priority: medium
-Status: open
+Status: done
 Architecture references:
 - `work-cycle-docs/tickets/new-work.md`
 - `work-cycle-docs/work-test-cycle.md`
@@ -132,3 +132,16 @@ No code test is required for the document itself. Verification is a dry run:
 - Every high-priority manual failure has a ticket and an E2E scenario plan.
 - The document explicitly distinguishes user-like testing from machine-like
   protocol probing.
+
+## Resolution Notes
+
+`local/prompts/talos-manual-qa-suite.md` now includes the manual QA
+constitution: personas, debug frame, per-turn review questions, severity
+taxonomy, finding intake template, promotion rule, stable `QA-###` case IDs,
+coverage tags, and a dev-mode natural-list case.
+
+Verification:
+
+```powershell
+rg "QA-[0-9]{3}|Severity Taxonomy|Finding Intake Template|Promotion Rule" local/prompts/talos-manual-qa-suite.md
+```

@@ -34,6 +34,9 @@ public final class WebDiagnosticIntent {
                 || lower.contains("troubleshoot")
                 || lower.contains("identify")
                 || lower.contains("check")
+                || lower.contains("confirm")
+                || lower.contains("complete")
+                || lower.contains("incomplete")
                 || lower.contains("why");
         return webSurface && diagnostic;
     }

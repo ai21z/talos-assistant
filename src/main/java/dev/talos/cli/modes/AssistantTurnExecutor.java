@@ -59,12 +59,24 @@ public final class AssistantTurnExecutor {
             "I am Talos, a local-first workspace assistant that can inspect files "
             + "and apply approved changes in this workspace.";
 
+    private static final String TALOS_CAPABILITY_ANSWER =
+            "Talos can inspect this local workspace, read and search files, retrieve indexed context, "
+            + "and apply file changes only after approval. It runs against your configured local model "
+            + "and cannot use browser, shell, or unsupported binary-document tools unless those capabilities are added.";
+
     private static final Set<String> ASSISTANT_IDENTITY_TURN_MARKERS = Set.of(
             "who are you",
             "what are you",
             "what is talos",
             "who is talos",
             "tell me about yourself"
+    );
+
+    private static final Set<String> ASSISTANT_CAPABILITY_TURN_MARKERS = Set.of(
+            "what can you do",
+            "how can you assist me",
+            "how can you help me",
+            "what can talos do"
     );
 
     private static final Set<String> CHANGE_SUMMARY_FOLLOW_UP_MARKERS = Set.of(
@@ -148,7 +160,7 @@ public final class AssistantTurnExecutor {
         if (directAnswer != null) {
             return directTurnOutput(directAnswer, ctx, opts);
         }
-        boolean useStreaming = ctx.streamSink() != null && !taskContract.mutationAllowed();
+        boolean useStreaming = shouldUseStreaming(ctx, taskContract);
 
         try {
             if (useStreaming) {
@@ -340,9 +352,92 @@ public final class AssistantTurnExecutor {
                             extraMutationSuccesses, opts),
                     mrr.extraSummary());
         }
+        ReadOnlyInspectionRetryResult inspectionRetry = readOnlyInspectionRetryIfNeeded(
+                mrr.answer(), messages, workspace, ctx);
+        if (inspectionRetry.loopResult() != null) {
+            return new ToolLoopAnswerResolution(
+                    shapeAnswerAfterToolLoop(
+                            inspectionRetry.answer(), messages, inspectionRetry.loopResult(),
+                            workspace, 0, opts),
+                    inspectionRetry.extraSummary());
+        }
         return new ToolLoopAnswerResolution(
-                shapeAnswerWithoutTools(mrr.answer(), messages, ctx, false, opts),
+                shapeAnswerWithoutTools(inspectionRetry.answer(), messages, ctx, false, opts),
                 null);
+    }
+
+    record ReadOnlyInspectionRetryResult(
+            String answer,
+            ToolCallLoop.LoopResult loopResult,
+            String extraSummary
+    ) {}
+
+    static ReadOnlyInspectionRetryResult readOnlyInspectionRetryIfNeeded(
+            String answer,
+            List<ChatMessage> messages,
+            Path workspace,
+            Context ctx
+    ) {
+        if (answer == null) answer = "";
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+        if (!requiresWorkspaceEvidence(contract)) {
+            return new ReadOnlyInspectionRetryResult(answer, null, null);
+        }
+        if (contract.mutationRequested()) {
+            return new ReadOnlyInspectionRetryResult(answer, null, null);
+        }
+        if (ctx == null || ctx.llm() == null || ctx.toolCallLoop() == null || workspace == null) {
+            return new ReadOnlyInspectionRetryResult(answer, null, null);
+        }
+
+        String userRequest = latestUserRequest(messages);
+        List<ChatMessage> retryMessages = new ArrayList<>(messages);
+        retryMessages.add(ChatMessage.assistant(answer.isBlank() ? "(no answer)" : answer));
+        retryMessages.add(ChatMessage.user(readOnlyInspectionRetryPrompt(contract, userRequest, workspace)));
+
+        try {
+            LlmClient.StreamResult retry = chatFull(ctx, retryMessages);
+            String retryText = retry.text() == null ? "" : retry.text();
+            if (retry.hasToolCalls() || ToolCallParser.containsToolCalls(retryText)) {
+                ToolCallLoop.LoopResult retryLoop = ctx.toolCallLoop().run(
+                        retryText, retry.toolCalls(), retryMessages, workspace, ctx);
+                String mergedAnswer = retryLoop.finalAnswer();
+                return new ReadOnlyInspectionRetryResult(
+                        mergedAnswer == null || mergedAnswer.isBlank() ? answer : mergedAnswer,
+                        retryLoop,
+                        retryLoop.summary());
+            }
+            if (!retryText.isBlank() && !retryText.equals(answer)) {
+                return new ReadOnlyInspectionRetryResult(
+                        ToolCallParser.stripToolCalls(retryText), null, null);
+            }
+        } catch (Exception e) {
+            LOG.warn("Read-only inspection retry failed: {}", e.getMessage());
+        }
+        return new ReadOnlyInspectionRetryResult(answer, null, null);
+    }
+
+    private static String readOnlyInspectionRetryPrompt(
+            TaskContract contract,
+            String userRequest,
+            Path workspace
+    ) {
+        String type = contract == null ? "READ_ONLY_QA" : contract.type().name();
+        String request = userRequest == null ? "" : userRequest.strip();
+        if (request.length() > 1000) {
+            request = request.substring(0, 1000) + "...";
+        }
+        String primaryFiles = String.join(", ", obviousPrimaryFiles(workspace));
+        if (primaryFiles.isBlank()) {
+            primaryFiles = "any obvious primary text files";
+        }
+        return """
+                The previous answer did not inspect the local workspace, but the current task contract requires evidence.
+
+                Task type: %s
+                User request: "%s"
+
+                Use read-only tools now. Start with talos.list_dir on "." for "this folder", "here", or "this workspace". Then read the obvious primary files if present: %s. Answer from observed file evidence only. If there are no readable relevant files, say that directly. Do not call write_file or edit_file.""".formatted(type, request, primaryFiles);
     }
 
     private static ToolCallLoop.LoopResult emptyNoToolLoopResult(
@@ -394,6 +489,43 @@ public final class AssistantTurnExecutor {
                 NativeToolSpecPolicy.select(contract, phase, ctx.toolRegistry()));
     }
 
+    private static boolean shouldUseStreaming(Context ctx, TaskContract taskContract) {
+        if (ctx == null || ctx.streamSink() == null) return false;
+        if (taskContract != null && taskContract.mutationAllowed()) return false;
+        return !requiresWorkspaceEvidence(taskContract);
+    }
+
+    private static boolean requiresWorkspaceEvidence(TaskContract taskContract) {
+        if (taskContract == null) return false;
+        return switch (taskContract.type()) {
+            case WORKSPACE_EXPLAIN, VERIFY_ONLY -> true;
+            case DIAGNOSE_ONLY -> looksLikeEvidenceRequest(taskContract.originalUserRequest())
+                    || containsWorkspaceEvidenceAnchor(taskContract.originalUserRequest());
+            default -> false;
+        };
+    }
+
+    private static boolean containsWorkspaceEvidenceAnchor(String value) {
+        if (value == null || value.isBlank()) return false;
+        String lower = value.toLowerCase(Locale.ROOT);
+        return lower.contains("workspace")
+                || lower.contains("folder")
+                || lower.contains("directory")
+                || lower.contains("project")
+                || lower.contains("repo")
+                || lower.contains("repository")
+                || lower.contains("here")
+                || lower.contains("this")
+                || lower.contains("website")
+                || lower.contains("web page")
+                || lower.contains("webpage")
+                || lower.contains("site")
+                || lower.contains("html")
+                || lower.contains("css")
+                || lower.contains("javascript")
+                || lower.contains("script");
+    }
+
     private static void recordPolicyTrace(TaskContract contract, Context ctx) {
         if (ctx == null || !TurnAuditCapture.isActive()) return;
         ExecutionPhase phase = ctx.executionPhaseState() == null
@@ -435,6 +567,7 @@ public final class AssistantTurnExecutor {
                 mutationAllowed: false
                 This turn is read-only or diagnostic. Do not call talos.write_file or talos.edit_file.
                 Use talos.list_dir, talos.read_file, talos.grep, or talos.retrieve as needed to inspect.
+                For WORKSPACE_EXPLAIN, DIAGNOSE_ONLY, and VERIFY_ONLY turns, start from the current workspace (`.`) unless the user named another in-workspace path. Do not ask for a path that is already implied by "this folder", "here", or "this workspace".
                 If you identify a possible fix, describe it and wait for an explicit change request before editing.""".formatted(contract.type());
 
         int insertAt = 0;
@@ -464,6 +597,11 @@ public final class AssistantTurnExecutor {
                 && looksLikeAssistantIdentityTurn(userRequest)) {
             return TALOS_IDENTITY_ANSWER;
         }
+        if (contract != null
+                && contract.type() == TaskType.SMALL_TALK
+                && looksLikeAssistantCapabilityTurn(userRequest)) {
+            return TALOS_CAPABILITY_ANSWER;
+        }
         return verifiedFollowUpSummaryIfNeeded(messages, userRequest);
     }
 
@@ -471,6 +609,15 @@ public final class AssistantTurnExecutor {
         if (userRequest == null || userRequest.isBlank()) return false;
         String lower = userRequest.toLowerCase(Locale.ROOT);
         for (String marker : ASSISTANT_IDENTITY_TURN_MARKERS) {
+            if (lower.contains(marker)) return true;
+        }
+        return false;
+    }
+
+    static boolean looksLikeAssistantCapabilityTurn(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return false;
+        String lower = userRequest.toLowerCase(Locale.ROOT);
+        for (String marker : ASSISTANT_CAPABILITY_TURN_MARKERS) {
             if (lower.contains(marker)) return true;
         }
         return false;
@@ -1313,7 +1460,9 @@ public final class AssistantTurnExecutor {
         if (loopResult == null || ctx == null || ctx.llm() == null || ctx.toolCallLoop() == null) {
             return new InspectRetryResult(answer, null);
         }
-        if (!looksLikeInspectFirstRequest(latestUserRequest(messages))) {
+        String userRequest = latestUserRequest(messages);
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+        if (!looksLikeInspectFirstRequest(userRequest) && !requiresWorkspaceEvidence(contract)) {
             return new InspectRetryResult(answer, null);
         }
         List<String> missing = missingPrimaryReads(workspace, loopResult);
@@ -1324,19 +1473,20 @@ public final class AssistantTurnExecutor {
         LOG.info("Inspect-completeness retry fired: tiny workspace, inspect-first request, "
                 + "missing reads for {}", missing);
 
-        messages.add(ChatMessage.assistant(answer));
-        messages.add(ChatMessage.user(
+        List<ChatMessage> retryMessages = new ArrayList<>(messages);
+        retryMessages.add(ChatMessage.assistant(answer));
+        retryMessages.add(ChatMessage.user(
                 "You started diagnosing the workspace before reading all of the obvious primary files. "
                         + "Read these files now before answering: "
                         + String.join(", ", missing)
                         + ". After reading them, answer concretely from the file contents. "
                         + "Do not speculate about files that do not exist."));
         try {
-            LlmClient.StreamResult retry = chatFull(ctx, messages);
+            LlmClient.StreamResult retry = chatFull(ctx, retryMessages);
             String retryText = retry.text() == null ? "" : retry.text();
-            if (retry.hasToolCalls()) {
+            if (retry.hasToolCalls() || ToolCallParser.containsToolCalls(retryText)) {
                 ToolCallLoop.LoopResult retryLoop = ctx.toolCallLoop().run(
-                        retryText, retry.toolCalls(), messages, workspace, ctx);
+                        retryText, retry.toolCalls(), retryMessages, workspace, ctx);
                 String mergedAnswer = retryLoop.finalAnswer();
                 return new InspectRetryResult(
                         mergedAnswer == null || mergedAnswer.isBlank() ? answer : mergedAnswer,
@@ -1473,6 +1623,7 @@ public final class AssistantTurnExecutor {
             Path workspace) {
         if (loopResult == null || workspace == null) return answer;
         if (loopResult.mutatingToolSuccesses() > 0) return answer;
+        if (declaresTaskType(messages, TaskType.WORKSPACE_EXPLAIN)) return answer;
         String userRequest = latestUserRequest(messages);
         if (!WebDiagnosticIntent.matchesReadOnlyRequest(userRequest)) return answer;
 
@@ -1491,6 +1642,16 @@ public final class AssistantTurnExecutor {
             if (lower.contains(marker)) return true;
         }
         return lower.contains("mismatch") && lower.contains("selector");
+    }
+
+    private static boolean declaresTaskType(List<ChatMessage> messages, TaskType taskType) {
+        if (messages == null || taskType == null) return false;
+        String marker = "Task type: " + taskType.name();
+        for (ChatMessage message : messages) {
+            if (message == null || message.content() == null) continue;
+            if (message.content().contains(marker)) return true;
+        }
+        return false;
     }
 
     /**

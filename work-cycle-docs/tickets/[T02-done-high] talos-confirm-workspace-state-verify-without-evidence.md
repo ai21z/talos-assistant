@@ -1,7 +1,7 @@
-# [open] Ticket: Confirm Workspace State Requires Evidence
+# [done] Ticket: Confirm Workspace State Requires Evidence
 Date: 2026-04-26
 Priority: high
-Status: open
+Status: done
 Architecture references:
 - `work-cycle-docs/tickets/new-work.md`
 - `docs/new-architecture/talos-harness-source-of-truth.md`
@@ -116,3 +116,23 @@ It looks like it is a non-completed web page, right? Can you confirm that?
 - `VERIFY_ONLY` no-tool answers are blocked, retried, or visibly downgraded.
 - Final wording is evidence-based and does not claim direct browser validation.
 - The behavior is covered by deterministic tests.
+
+## Resolution Notes
+
+Implemented a read-only evidence retry in `AssistantTurnExecutor` for
+verification-required workspace turns. `VERIFY_ONLY` no-tool answers are now
+buffered and retried with read-only tools before a final answer is accepted.
+Web completion/confirmation prompts also route through static web diagnostics,
+so false "complete" claims are corrected from HTML/CSS/JS linkage facts.
+
+Coverage:
+
+```powershell
+./gradlew.bat test --tests "dev.talos.cli.modes.AssistantTurnExecutorTest" --tests "dev.talos.runtime.task.TaskContractResolverTest"
+./gradlew.bat e2eTest --tests "dev.talos.harness.JsonScenarioPackTest"
+```
+
+New scenarios:
+
+- `src/e2eTest/resources/scenarios/40-verify-confirm-no-tool-retry.json`
+- `src/e2eTest/resources/scenarios/44-verify-web-complete-static-diagnostics.json`

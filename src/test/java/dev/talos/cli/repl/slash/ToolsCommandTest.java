@@ -5,6 +5,7 @@ import dev.talos.cli.repl.Result;
 import dev.talos.core.Config;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.impl.FileWriteTool;
+import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.GrepTool;
 import dev.talos.tools.impl.ReadFileTool;
 import org.junit.jupiter.api.Test;
@@ -88,6 +89,20 @@ class ToolsCommandTest {
 
         String text = cmd.execute("", ctx).toString();
         assertTrue(text.contains("write"), "Should show write badge for FileWriteTool: " + text);
+    }
+
+    @Test
+    void edit_tool_description_is_ascii_safe() {
+        var cmd = new ToolsCommand();
+        var registry = new ToolRegistry();
+        registry.register(new FileEditTool());
+        var ctx = Context.builder(new Config()).toolRegistry(registry).build();
+
+        String text = cmd.execute("", ctx).toString();
+        assertTrue(text.contains("old_string must match the file exactly - strip"), text);
+        assertFalse(text.contains("? strip"), text);
+        assertTrue(text.chars().allMatch(ch -> ch < 128),
+                "installed transcript path should not need replacement characters: " + text);
     }
 
     @Test

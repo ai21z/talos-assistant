@@ -1,0 +1,15 @@
+{
+  "name": "capability small talk answers as Talos",
+  "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "small-talk-contract-does-not-enter-tool-loop",
+    "capability-answer-uses-talos-product-identity"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Nice what can you do for me? How can you assist me?",
+  "scriptedResponses": [
+    "As an AI language model, I can assist with stories, poems, suggestions, and general questions."
+  ]
+}

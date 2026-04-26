@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.9.5] - 2026-04-27
+
+### Changed
+- [T02-done-high] Required read-only workspace evidence for `VERIFY_ONLY`
+  confirmation turns and grounded web completion checks with static diagnostics
+  before accepting final answers.
+- [T03-done-high] Buffered natural workspace-explain turns and retried no-tool
+  or list-only underinspection with read-only inspection from the current
+  workspace.
+- [T07-done-high] Added JSON-backed multi-turn coverage so follow-up change
+  summaries preserve partial/static verification truth.
+- [T08-done-high] Filtered `/last` output to active-process turns so unloaded
+  saved session history is not presented as the current trace.
+- [T04-done-medium] Added read-only deictic follow-up intent inheritance without
+  carrying mutation permission.
+- [T05-done-medium] Answered capability/onboarding small talk as Talos instead
+  of generic base-model boilerplate.
+- [T06-done-medium] Improved `/help all` discoverability and made `edit_file`
+  user-visible text ASCII-safe for transcript capture.
+- [T09-done-medium] Fixed dev-mode natural root listing prompts such as
+  `list the files here`.
+- [T10-done-medium] Expanded the manual QA constitution with stable case IDs,
+  coverage tags, severity taxonomy, and finding-to-ticket intake rules.
+
 ## [0.9.4] - 2026-04-26
 
 ### Changed
