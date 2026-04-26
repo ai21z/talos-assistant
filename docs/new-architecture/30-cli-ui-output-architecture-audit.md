@@ -17,7 +17,7 @@ trustworthy, line-based interface without destabilizing `v0.9.0-beta-dev`.
 
 Internal architecture and process sources:
 
-- `local/tickets/new-work.md`
+- `work-cycle-docs/tickets/new-work.md`
 - `docs/new-architecture/talos-harness-source-of-truth.md`
 - `docs/new-architecture/talos-harness-plan.md`
 - `local/docs/talos-source-pack-safe-local-alternative-2026-04-19.md`

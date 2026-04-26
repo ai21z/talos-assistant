@@ -65,7 +65,7 @@ entries.
 
 What the developer does:
 
-1. Create or update one ticket file under `local/tickets/`.
+1. Create or update one ticket file under `work-cycle-docs/tickets/`.
 2. Prefix the ticket filename with `[code-status-prio]`.
 3. Keep the ticket code stable for the life of the ticket.
 4. Update the status and priority in the filename when the ticket status or

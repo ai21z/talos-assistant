@@ -40,8 +40,8 @@ Current local evidence checked:
 - `src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java`
 - `src/main/java/dev/talos/cli/modes/ExecutionOutcome.java`
 - `local/manual-testing/test-output`
-- `local/tickets/talos-minimal-execution-phase-policy.md`
-- `local/tickets/talos-static-task-verifier.md`
+- `work-cycle-docs/tickets/talos-minimal-execution-phase-policy.md`
+- `work-cycle-docs/tickets/talos-static-task-verifier.md`
 - `local/docs/talos-source-pack-safe-local-alternative-2026-04-19.md`
 - `docs/new-architecture/talos-harness-source-of-truth.md`
 
@@ -514,7 +514,7 @@ Do improve it in place:
 After the minimal phase-policy slice, the next implementation ticket is:
 
 ```text
-local/tickets/talos-static-task-verifier.md
+work-cycle-docs/tickets/talos-static-task-verifier.md
 ```
 
 The scenario pack should grow immediately around those two tickets. Otherwise
