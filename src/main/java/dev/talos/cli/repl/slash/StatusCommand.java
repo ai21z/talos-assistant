@@ -52,7 +52,7 @@ public final class StatusCommand implements Command {
                     cfg,
                     modes.getActiveName(),
                     activeModel,
-                    ctx.session() != null && ctx.session().isDebug() ? "on" : "off",
+                    ctx.session() == null ? "off" : ctx.session().getDebugLevel().label(),
                     "/status --verbose for diagnostics");
             return new Result.TrustedInfo(CliStatusDashboard.render(snapshot));
         }

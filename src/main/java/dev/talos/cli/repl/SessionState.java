@@ -7,4 +7,12 @@ public interface SessionState {
 
     boolean isDebug();
     void setDebug(boolean on);
+
+    default DebugLevel getDebugLevel() {
+        return isDebug() ? DebugLevel.BRIEF : DebugLevel.OFF;
+    }
+
+    default void setDebugLevel(DebugLevel level) {
+        setDebug(level != null && level.enabled());
+    }
 }
