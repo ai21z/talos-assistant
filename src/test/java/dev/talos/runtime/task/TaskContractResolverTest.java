@@ -69,6 +69,27 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void repairRequestBecomesFileEditContract() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Repair this website with the smallest exact edits.");
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+    }
+
+    @Test
+    void advisoryRepairQuestionStaysReadOnly() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "What repair would you make?");
+
+        assertEquals(TaskType.READ_ONLY_QA, contract.type());
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
+    }
+
+    @Test
     void trivialGreetingBecomesSmallTalkContract() {
         for (String input : List.of("hello", "hey", "hi!", "good morning", "thanks")) {
             TaskContract contract = TaskContractResolver.fromUserRequest(input);
