@@ -35,6 +35,26 @@ class AssistantTurnExecutorTest {
                 .build();
     }
 
+    @Test
+    @DisplayName("truth and grounding annotations are ASCII-safe for redirected terminals")
+    void annotationsAreAsciiSafe() {
+        List<String> annotations = List.of(
+                AssistantTurnExecutor.FALSE_MUTATION_ANNOTATION,
+                AssistantTurnExecutor.PARTIAL_MUTATION_ANNOTATION,
+                AssistantTurnExecutor.DENIED_MUTATION_ANNOTATION,
+                AssistantTurnExecutor.INVALID_MUTATION_ANNOTATION,
+                AssistantTurnExecutor.UNDER_INSPECTION_ANNOTATION,
+                AssistantTurnExecutor.UNGROUNDED_ANNOTATION,
+                AssistantTurnExecutor.STREAMING_NO_TOOL_MUTATION_ANNOTATION,
+                AssistantTurnExecutor.STREAMING_NO_TOOL_MUTATION_REPLACEMENT
+        );
+
+        for (String annotation : annotations) {
+            assertTrue(annotation.chars().allMatch(ch -> ch < 128),
+                    "Terminal-facing annotation must remain ASCII-safe: " + annotation);
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     //  Non-streaming path (no streamSink)
     // ═══════════════════════════════════════════════════════════════════════

@@ -289,7 +289,9 @@ class ExecutionOutcomeTest {
 
             assertEquals(ExecutionOutcome.CompletionStatus.FAILED, outcome.completionStatus());
             assertEquals(ExecutionOutcome.VerificationStatus.FAILED, outcome.verificationStatus());
-            assertTrue(outcome.finalAnswer().startsWith("⚠ [Static verification failed:"));
+            assertTrue(outcome.finalAnswer().startsWith("[Static verification failed:"));
+            assertTrue(outcome.finalAnswer().chars().allMatch(ch -> ch < 128),
+                    "Static verifier annotation should be ASCII-safe in redirected output");
             assertTrue(outcome.finalAnswer().contains("`.cta-button`"));
             assertEquals(TaskCompletionStatus.FAILED, outcome.taskOutcome().completionStatus());
             assertEquals(TaskVerificationStatus.FAILED, outcome.taskOutcome().verificationResult().status());
