@@ -362,7 +362,24 @@ record ExecutionOutcome(
     }
 
     private static String staticVerificationFailedAnnotation(TaskVerificationResult result) {
-        return "[Static verification failed: " + verificationSummary(result) + "]\n\n";
+        StringBuilder out = new StringBuilder();
+        out.append("[Task incomplete: Static verification failed - ")
+                .append(verificationSummary(result))
+                .append("]\n\n")
+                .append("The requested task is not verified complete. ")
+                .append("Applied changes below are workspace changes only; unresolved static problems remain.");
+        List<String> problems = result == null ? List.of() : result.problems();
+        if (!problems.isEmpty()) {
+            out.append("\n\nUnresolved static verification problems:");
+            for (String problem : problems.subList(0, Math.min(5, problems.size()))) {
+                out.append("\n- ").append(singleLine(problem));
+            }
+            if (problems.size() > 5) {
+                out.append("\n- ... ").append(problems.size() - 5).append(" more");
+            }
+        }
+        out.append("\n\n");
+        return out.toString();
     }
 
     private static String staticVerificationUnavailableAnnotation(TaskVerificationResult result) {
@@ -375,5 +392,11 @@ record ExecutionOutcome(
         }
         String summary = result.summary().replace('\n', ' ').replace('\r', ' ').strip();
         return summary.length() <= 240 ? summary : summary.substring(0, 237) + "...";
+    }
+
+    private static String singleLine(String value) {
+        if (value == null || value.isBlank()) return "no additional detail";
+        String line = value.replace('\n', ' ').replace('\r', ' ').strip();
+        return line.length() <= 240 ? line : line.substring(0, 237) + "...";
     }
 }
