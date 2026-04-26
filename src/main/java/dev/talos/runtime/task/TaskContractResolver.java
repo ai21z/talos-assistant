@@ -37,6 +37,15 @@ public final class TaskContractResolver {
             "what is in this", "explain this"
     );
 
+    private static final Pattern SMALL_TALK_ONLY = Pattern.compile(
+            "(?i)^\\s*(?:"
+                    + "hi|hello|hey|hey there|hello there|yo|"
+                    + "good\\s+(?:morning|afternoon|evening)|"
+                    + "thanks|thank\\s+you|thx|"
+                    + "ok|okay|cool|nice|great|"
+                    + "hmm+|huh"
+                    + ")[\\s.!?]*$");
+
     private TaskContractResolver() {}
 
     public static TaskContract fromMessages(List<ChatMessage> messages) {
@@ -91,7 +100,14 @@ public final class TaskContractResolver {
         if (containsAny(lower, WORKSPACE_MARKERS)) {
             return TaskType.WORKSPACE_EXPLAIN;
         }
+        if (looksSmallTalkOnly(lower)) {
+            return TaskType.SMALL_TALK;
+        }
         return TaskType.READ_ONLY_QA;
+    }
+
+    private static boolean looksSmallTalkOnly(String lower) {
+        return lower != null && SMALL_TALK_ONLY.matcher(lower).matches();
     }
 
     private static boolean containsAny(String lower, Set<String> markers) {

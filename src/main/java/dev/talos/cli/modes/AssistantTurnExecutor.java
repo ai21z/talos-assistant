@@ -8,6 +8,7 @@ import dev.talos.runtime.ToolCallStreamFilter;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.verification.StaticTaskVerifier;
@@ -307,7 +308,14 @@ public final class AssistantTurnExecutor {
         TaskContract contract = TaskContractResolver.fromMessages(messages);
         if (contract.mutationAllowed()) return;
 
-        String instruction = """
+        String instruction = contract.type() == TaskType.SMALL_TALK
+                ? """
+                [TaskContract]
+                type: SMALL_TALK
+                mutationAllowed: false
+                This turn is conversational and does not ask about workspace files.
+                Answer directly in one short sentence. Do not call tools."""
+                : """
                 [TaskContract]
                 type: %s
                 mutationAllowed: false
