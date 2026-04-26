@@ -1,0 +1,3 @@
+Project notes:
+
+Talos should summarize supported text files and be explicit when binary document extraction is unavailable.

@@ -1,5 +1,6 @@
 package dev.talos.tools.impl;
 
+import dev.talos.core.ingest.UnsupportedDocumentFormats;
 import dev.talos.tools.*;
 
 import java.io.IOException;
@@ -90,6 +91,7 @@ public final class GrepTool implements TalosTool {
 
         Path root = ctx.workspace();
         List<String> matches = new ArrayList<>();
+        List<String> skippedUnsupportedDocuments = new ArrayList<>();
         final PathMatcher matcher = globMatcher;
 
         try {
@@ -121,6 +123,10 @@ public final class GrepTool implements TalosTool {
                         if (fileName == null || !matcher.matches(fileName)) {
                             return FileVisitResult.CONTINUE;
                         }
+                        if (UnsupportedDocumentFormats.isUnsupported(file)) {
+                            skippedUnsupportedDocuments.add(root.relativize(file).toString().replace('\\', '/'));
+                            return FileVisitResult.CONTINUE;
+                        }
                     }
 
                     // Skip binary-looking files (quick heuristic: check first bytes)
@@ -142,7 +148,8 @@ public final class GrepTool implements TalosTool {
         }
 
         if (matches.isEmpty()) {
-            return ToolResult.ok("No matches found for: " + patternStr);
+            return ToolResult.ok("No matches found for: " + patternStr
+                    + unsupportedDocumentNote(skippedUnsupportedDocuments));
         }
 
         var sb = new StringBuilder();
@@ -153,7 +160,21 @@ public final class GrepTool implements TalosTool {
         if (matches.size() >= maxResults) {
             sb.append("\n(results capped at ").append(maxResults).append(")\n");
         }
+        sb.append(unsupportedDocumentNote(skippedUnsupportedDocuments));
         return ToolResult.ok(sb.toString());
+    }
+
+    private static String unsupportedDocumentNote(List<String> skippedUnsupportedDocuments) {
+        if (skippedUnsupportedDocuments == null || skippedUnsupportedDocuments.isEmpty()) return "";
+        StringBuilder out = new StringBuilder();
+        out.append("\n\nSkipped unsupported binary document(s): ");
+        int limit = Math.min(5, skippedUnsupportedDocuments.size());
+        out.append(String.join(", ", skippedUnsupportedDocuments.subList(0, limit)));
+        if (skippedUnsupportedDocuments.size() > limit) {
+            out.append(", ... ").append(skippedUnsupportedDocuments.size() - limit).append(" more");
+        }
+        out.append(". Talos grep cannot extract PDF/Office binary contents with the current local text-tool surface.");
+        return out.toString();
     }
 
     private static void searchFile(Path file, Path root, Pattern pattern,

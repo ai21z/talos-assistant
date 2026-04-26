@@ -476,6 +476,26 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/32-unsupported-binary-document-honesty.json] 32: unsupported binary document reads are capability-limited")
+    void unsupportedBinaryDocumentHonesty() {
+        var loaded = JsonScenarioLoader.load("scenarios/32-unsupported-binary-document-honesty.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("[Document capability note:")
+                    .assertAnswerContains("sample.pdf")
+                    .assertAnswerContains("sample.xlsx")
+                    .assertAnswerContains("current local text-tool surface")
+                    .assertAnswerContains("notes.txt says Talos should summarize supported text files")
+                    .assertAnswerNotContains("do not contain any extractable text")
+                    .assertAnswerNotContains("These files are empty");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/11-partial-mutation-summary-truthful.json] 11: partial mutation summary reports only verified outcomes")
     void partialMutationSummaryIsTruthful() {
         var loaded = JsonScenarioLoader.load("scenarios/11-partial-mutation-summary-truthful.json");
