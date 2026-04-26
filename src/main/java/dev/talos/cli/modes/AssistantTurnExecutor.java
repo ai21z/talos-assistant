@@ -14,6 +14,7 @@ import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.verification.StaticTaskVerifier;
+import dev.talos.runtime.verification.WebDiagnosticIntent;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolError;
@@ -1235,38 +1236,14 @@ public final class AssistantTurnExecutor {
         if (loopResult == null || workspace == null) return answer;
         if (loopResult.mutatingToolSuccesses() > 0) return answer;
         String userRequest = latestUserRequest(messages);
-        TaskContract contract = TaskContractResolver.fromUserRequest(userRequest);
-        if (contract.mutationRequested()) return answer;
-        if (!looksLikeReadOnlyWebDiagnosticRequest(userRequest)) return answer;
+        if (!WebDiagnosticIntent.matchesReadOnlyRequest(userRequest)) return answer;
 
         String grounded = StaticTaskVerifier.renderWebDiagnostics(workspace);
         return grounded == null || grounded.isBlank() ? answer : grounded;
     }
 
     static boolean looksLikeReadOnlyWebDiagnosticRequest(String userRequest) {
-        if (userRequest == null || userRequest.isBlank()) return false;
-        String lower = userRequest.toLowerCase();
-        boolean webSurface = lower.contains("website")
-                || lower.contains("web site")
-                || lower.contains("web app")
-                || lower.contains("webpage")
-                || lower.contains("web page")
-                || lower.contains("html")
-                || lower.contains("css")
-                || lower.contains("javascript")
-                || lower.contains("script.js")
-                || lower.contains("bmi");
-        boolean diagnostic = lower.contains("not working")
-                || lower.contains("broken")
-                || lower.contains("issue")
-                || lower.contains("problem")
-                || lower.contains("inspect")
-                || lower.contains("diagnose")
-                || lower.contains("troubleshoot")
-                || lower.contains("identify")
-                || lower.contains("check")
-                || lower.contains("why");
-        return webSurface && diagnostic;
+        return WebDiagnosticIntent.matchesReadOnlyRequest(userRequest);
     }
 
     static boolean looksLikeSelectorMismatchRequest(String userRequest) {

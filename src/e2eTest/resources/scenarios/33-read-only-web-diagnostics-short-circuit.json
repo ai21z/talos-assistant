@@ -1,0 +1,19 @@
+{
+  "name": "read-only web diagnostics short-circuit",
+  "fixture": "broken-bmi-site",
+  "v1Pack": true,
+  "claims": [
+    "read-only-web-diagnostics-stop-before-iteration-cap",
+    "deterministic-static-diagnostics-terminate-loop"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Inspect this BMI website and identify why it is not working. Do not edit files yet.",
+  "scriptedResponses": [
+    "```json\n{\"name\":\"talos.list_dir\",\"parameters\":{\"path\":\".\"}}\n```",
+    "```json\n{\"name\":\"talos.grep\",\"parameters\":{\"pattern\":\"bmi\",\"include\":\"*.html\"}}\n```",
+    "```json\n{\"name\":\"talos.grep\",\"parameters\":{\"pattern\":\"form\",\"include\":\"*.html\"}}\n```",
+    "```json\n{\"name\":\"talos.grep\",\"parameters\":{\"pattern\":\"calculator\",\"include\":\"*.css\"}}\n```",
+    "This response should not be reached."
+  ]
+}

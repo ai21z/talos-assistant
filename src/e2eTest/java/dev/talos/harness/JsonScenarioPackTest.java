@@ -496,6 +496,27 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/33-read-only-web-diagnostics-short-circuit.json] 33: read-only web diagnostics stop before iteration cap")
+    void readOnlyWebDiagnosticsShortCircuit() {
+        var loaded = JsonScenarioLoader.load("scenarios/33-read-only-web-diagnostics-short-circuit.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("Static web diagnostics found:")
+                    .assertAnswerContains("index.html: malformed closing tag `</button>`")
+                    .assertAnswerContains("index.html: malformed closing tag `</script>`")
+                    .assertAnswerContains("1 iteration(s)")
+                    .assertAnswerNotContains("iteration limit reached")
+                    .assertAnswerNotContains("10 iteration(s)")
+                    .assertAnswerNotContains("failure policy stopped")
+                    .assertAnswerNotContains("This response should not be reached");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/11-partial-mutation-summary-truthful.json] 11: partial mutation summary reports only verified outcomes")
     void partialMutationSummaryIsTruthful() {
         var loaded = JsonScenarioLoader.load("scenarios/11-partial-mutation-summary-truthful.json");
