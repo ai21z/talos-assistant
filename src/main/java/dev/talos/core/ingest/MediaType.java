@@ -43,7 +43,7 @@ public enum MediaType {
                  GRADLE_KTS, GRADLE, DOCKERFILE, MAKEFILE -> TEXTUAL;
 
             // Data interchange formats are structured
-            case JSON, XML, YAML, CSV, MAVEN_POM -> STRUCTURED;
+            case JSON, XML, YAML, CSV, TSV, MAVEN_POM -> STRUCTURED;
 
             case UNKNOWN -> UNKNOWN;
         };

@@ -43,7 +43,7 @@ public final class SourceClassifier {
 
             case MARKDOWN, PLAIN_TEXT, RST, ADOC, HTML -> SourceType.DOCUMENT;
 
-            case YAML, JSON, XML, PROPERTIES, TOML, INI, ENV, CSV -> SourceType.CONFIG;
+            case YAML, JSON, XML, PROPERTIES, TOML, INI, ENV, CSV, TSV -> SourceType.CONFIG;
 
             case GRADLE_KTS, GRADLE, MAVEN_POM, DOCKERFILE, MAKEFILE -> SourceType.BUILD_FILE;
 

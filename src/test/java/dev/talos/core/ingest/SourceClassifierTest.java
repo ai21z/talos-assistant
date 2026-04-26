@@ -22,6 +22,8 @@ class SourceClassifierTest {
             "guide.rst,                     DOCUMENT",
             "config.yaml,                   CONFIG",
             "data.json,                     CONFIG",
+            "metrics.csv,                   CONFIG",
+            "metrics.tsv,                   CONFIG",
             "app.properties,               CONFIG",
             "build.gradle.kts,             BUILD_FILE",
             "Dockerfile,                    BUILD_FILE",
