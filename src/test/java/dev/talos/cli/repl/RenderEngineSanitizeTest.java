@@ -19,6 +19,16 @@ final class RenderEngineSanitizeTest {
         return new RenderEngine(new Config(), new Redactor(), new PrintStream(sink));
     }
 
+    private static RenderEngine plainAsciiRenderer(ByteArrayOutputStream sink, boolean interactive) {
+        var caps = new TerminalCapabilities(ColorPolicy.NEVER, interactive, false, false, true);
+        return new RenderEngine(
+                new Config(),
+                new Redactor(),
+                new PrintStream(sink),
+                interactive,
+                CliTheme.forCapabilities(caps));
+    }
+
     private static String out(ByteArrayOutputStream sink) {
         return sink.toString();
     }
@@ -30,6 +40,12 @@ final class RenderEngineSanitizeTest {
         // Think blocks
         assertFalse(s.contains("<think>"), "Think blocks should be removed");
         assertFalse(s.contains("</think>"), "Think blocks should be removed");
+    }
+
+    private static void assertAsciiOnly(String s) {
+        assertTrue(s.codePoints().allMatch(cp -> cp == '\n' || cp == '\r' || cp == '\t'
+                        || (cp >= 0x20 && cp <= 0x7E)),
+                "Expected ASCII-only terminal output, got: " + s);
     }
 
     @Test
@@ -145,5 +161,34 @@ final class RenderEngineSanitizeTest {
         re.render(new Result.Error("Boom", 500));
 
         assertFalse(out(sink).contains("\u001B"), "No-color renderer path must not emit ANSI");
+    }
+
+    @Test
+    void unsafeUnicodeTerminalDowngradesTrustedPromptOutput() {
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+        RenderEngine re = plainAsciiRenderer(sink, false);
+
+        re.render(new Result.TrustedInfo("You CAN create files — use tools → verify… ✓ ❌ ⚠"));
+
+        String output = out(sink);
+        assertAsciiOnly(output);
+        assertTrue(output.contains("You CAN create files - use tools -> verify..."));
+        assertTrue(output.contains("[ok]"));
+        assertTrue(output.contains("[error]"));
+        assertTrue(output.contains("[warning]"));
+    }
+
+    @Test
+    void unsafeUnicodeTerminalDowngradesNormalAndToolProgressOutput() {
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+        RenderEngine re = plainAsciiRenderer(sink, true);
+
+        re.render(new Result.Ok("Changed — verified…"));
+        re.printToolProgress("talos.write_file", "warning", "HTML issues — unclosed tag…");
+
+        String output = out(sink);
+        assertAsciiOnly(output);
+        assertTrue(output.contains("Changed - verified..."));
+        assertTrue(output.contains("HTML issues - unclosed tag..."));
     }
 }

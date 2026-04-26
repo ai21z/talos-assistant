@@ -76,6 +76,61 @@ public final class Sanitize {
     }
 
     /**
+     * Converts common UI punctuation and symbols to ASCII fallbacks for
+     * dumb terminals and redirected transcript capture.
+     *
+     * <p>This is deliberately not part of prompt sanitization. Model-facing
+     * prompts may keep their original punctuation; only terminal output should
+     * be downgraded when capabilities say Unicode is unsafe.
+     */
+    public static String toAsciiFallback(String s) {
+        if (s == null || s.isEmpty()) return "";
+        StringBuilder out = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); ) {
+            int cp = s.codePointAt(i);
+            i += Character.charCount(cp);
+
+            if (cp == '\n' || cp == '\r' || cp == '\t' || (cp >= 0x20 && cp <= 0x7E)) {
+                out.appendCodePoint(cp);
+                continue;
+            }
+
+            switch (cp) {
+                case 0x00A0 -> out.append(' ');       // non-breaking space
+                case 0x2018, 0x2019, 0x201B, 0x2032 -> out.append('\'');
+                case 0x201C, 0x201D, 0x201F, 0x2033 -> out.append('"');
+                case 0x2010, 0x2011, 0x2012, 0x2013, 0x2014, 0x2015, 0x2212 -> out.append('-');
+                case 0x2026 -> out.append("...");
+                case 0x2022, 0x25E6, 0x2043 -> out.append('*');
+                case 0x2190 -> out.append("<-");
+                case 0x2192, 0x21D2 -> out.append("->");
+                case 0x2194 -> out.append("<->");
+                case 0x2264 -> out.append("<=");
+                case 0x2265 -> out.append(">=");
+                case 0x2713, 0x2714, 0x2705 -> out.append("[ok]");
+                case 0x2717, 0x2718, 0x274C -> out.append("[error]");
+                case 0x26A0 -> out.append("[warning]");
+                case 0x2500, 0x2501, 0x2550 -> out.append('-');
+                case 0x2502, 0x2503, 0x2551 -> out.append('|');
+                case 0x250C, 0x2510, 0x2514, 0x2518,
+                     0x251C, 0x2524, 0x252C, 0x2534, 0x253C,
+                     0x2554, 0x2557, 0x255A, 0x255D -> out.append('+');
+                default -> out.append('?');
+            }
+        }
+        return out.toString();
+    }
+
+    /**
+     * Sanitizes terminal output and applies ASCII downgrade when Unicode is
+     * unsafe for the active terminal/capture path.
+     */
+    public static String sanitizeForTerminalOutput(String s, boolean unicodeSafe) {
+        String cleaned = sanitizeForOutput(s);
+        return unicodeSafe ? cleaned : toAsciiFallback(cleaned);
+    }
+
+    /**
      * Sanitizes streamed LLM output while preserving {@code <tool_call>} blocks intact.
      *
      * <p>Tool-call blocks contain JSON with raw file content (HTML, CSS, JS) as parameter
