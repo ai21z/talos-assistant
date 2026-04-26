@@ -159,6 +159,7 @@ class RenderEngineTest {
             re.render(new Result.Info("some info"));
 
             assertTrue(output().contains("some info"), "Should render Info text");
+            assertTrue(output().contains("i "), "Info result should have a distinct prefix");
         }
 
         @Test
@@ -175,6 +176,30 @@ class RenderEngineTest {
             re.render(null);
 
             assertTrue(output().contains("null"), "Should handle null result gracefully");
+        }
+
+        @Test
+        void rendersSourcesAsSeparateSectionForOkResult() {
+            var re = engine(false);
+            re.render(new Result.Ok("Answer body\n\n[Sources]\n - src/App.java#0\n - README.md#1\n"));
+
+            String text = output();
+            assertTrue(text.contains("Answer body"));
+            assertTrue(text.contains("Sources"));
+            assertTrue(text.contains("src/App.java#0"));
+            assertFalse(text.contains("[Sources]"), "Raw source marker should not be blended into answer body");
+        }
+
+        @Test
+        void rendersSourcesAsSeparateSectionForStreamedSuffix() {
+            var re = engine(false);
+            re.render(new Result.Streamed("Answer body\n\n[Sources]\n - src/App.java#0\n",
+                    "\n\n[Sources]\n - src/App.java#0\n"));
+
+            String text = output();
+            assertTrue(text.contains("Sources"));
+            assertTrue(text.contains("src/App.java#0"));
+            assertFalse(text.contains("[Sources]"), "Streamed source suffix should be normalized");
         }
     }
 }
