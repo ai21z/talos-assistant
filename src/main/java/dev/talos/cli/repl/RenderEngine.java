@@ -192,7 +192,7 @@ public final class RenderEngine {
             return;
         }
         if (r instanceof Result.Info info) {
-            println("  " + sro(info.text));
+            println("  " + theme.metadata("i") + " " + sro(info.text));
             return;
         }
         if (r instanceof Result.TrustedInfo trustedInfo) {
@@ -229,7 +229,7 @@ public final class RenderEngine {
         if (r instanceof Result.Streamed streamed) {
             // Body was already printed during streaming; only render the suffix
             if (!streamed.suffix.isEmpty()) {
-                println(sro(streamed.suffix));
+                printResponseSuffix(sro(streamed.suffix));
             }
             println("");
             return;
@@ -288,21 +288,78 @@ public final class RenderEngine {
             return;
         }
 
+        ResponseParts parts = splitSources(content);
+        String body = parts.body();
+
         final int MAX_WIDTH = 96;
         String border = theme.active("|");
-        String[] lines = content.split("\n");
+        String[] lines = body.split("\n");
 
         println("");  // breathing room before response
-        for (String line : lines) {
-            if (line.length() <= MAX_WIDTH) {
-                println("  " + border + " " + line);
-            } else {
-                for (String wl : wrapLine(line, MAX_WIDTH)) {
-                    println("  " + border + " " + wl);
+        if (!body.isBlank()) {
+            for (String line : lines) {
+                if (line.length() <= MAX_WIDTH) {
+                    println("  " + border + " " + line);
+                } else {
+                    for (String wl : wrapLine(line, MAX_WIDTH)) {
+                        println("  " + border + " " + wl);
+                    }
                 }
             }
         }
+        if (!parts.sources().isEmpty()) {
+            if (!body.isBlank()) println("");
+            printSources(parts.sources());
+        }
         println("");  // breathing room after response
+    }
+
+    private void printResponseSuffix(String suffix) {
+        ResponseParts parts = splitSources(suffix);
+        if (!parts.body().isBlank()) println(parts.body());
+        if (!parts.sources().isEmpty()) printSources(parts.sources());
+    }
+
+    private void printSources(List<String> sources) {
+        println("  " + theme.metadata("Sources"));
+        for (String source : sources) {
+            println("    " + theme.muted("- ") + source);
+        }
+    }
+
+    private record ResponseParts(String body, List<String> sources) {}
+
+    private static ResponseParts splitSources(String content) {
+        String safe = content == null ? "" : content;
+        String[] lines = safe.split("\\R", -1);
+        int sourcesAt = -1;
+        for (int i = 0; i < lines.length; i++) {
+            String trimmed = lines[i].trim();
+            if ("[sources]".equalsIgnoreCase(trimmed) || "sources".equalsIgnoreCase(trimmed)) {
+                sourcesAt = i;
+                break;
+            }
+        }
+        if (sourcesAt < 0) return new ResponseParts(safe, List.of());
+
+        StringBuilder body = new StringBuilder();
+        for (int i = 0; i < sourcesAt; i++) {
+            if (i > 0) body.append('\n');
+            body.append(lines[i]);
+        }
+
+        List<String> sources = new java.util.ArrayList<>();
+        for (int i = sourcesAt + 1; i < lines.length; i++) {
+            String source = lines[i].trim();
+            if (source.isBlank()) continue;
+            source = source.replaceFirst("^[-*]\\s*", "");
+            if (!source.isBlank()) sources.add(source);
+        }
+        return new ResponseParts(stripTrailingBlankLines(body.toString()), List.copyOf(sources));
+    }
+
+    private static String stripTrailingBlankLines(String text) {
+        return text == null ? "" : text.replaceFirst("\\s+$", "");
     }
 
     private List<String> wrapLine(String line, int maxWidth) {
