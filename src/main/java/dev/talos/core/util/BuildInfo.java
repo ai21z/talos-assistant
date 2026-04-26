@@ -4,23 +4,23 @@ import java.io.InputStream;
 import java.util.Properties;
 
 /**
- * Build-identity helper — surfaces which build produced a transcript.
+ * Build-identity helper - surfaces which build produced a transcript.
  *
  * <p>Sources (in priority order, with graceful {@code "unknown"} fallback):
  * <ul>
- *   <li>{@code version} — {@link Package#getImplementationVersion()} (from JAR manifest
+ *   <li>{@code version} - {@link Package#getImplementationVersion()} (from JAR manifest
  *       {@code Implementation-Version}); fallback generated classpath resource
  *       {@code META-INF/talos-version.properties}; final fallback {@code "unknown"}.</li>
- *   <li>{@code buildTimestamp} — {@link Package#getImplementationVendor()}, which the
+ *   <li>{@code buildTimestamp} - {@link Package#getImplementationVendor()}, which the
  *       Gradle build stores as a build-time millis string in {@code Implementation-Vendor}.
  *       Fallback {@code "unknown"}.</li>
- *   <li>{@code commitSha}, {@code branch} — optional classpath resource
+ *   <li>{@code commitSha}, {@code branch} - optional classpath resource
  *       {@code META-INF/talos-build.properties} with keys {@code git.commit} and
  *       {@code git.branch}. When the resource is absent (current default build),
  *       both return {@code "unknown"}.</li>
  * </ul>
  *
- * <p>R7 — this helper exists so runtime logs and the startup banner can record
+ * <p>R7 - this helper exists so runtime logs and the startup banner can record
  * which build was actually running, without requiring git to be installed at
  * runtime and without fabricating metadata when it is not present.
  *
@@ -74,14 +74,14 @@ public final class BuildInfo {
      * <p>Format (fields with value {@value #UNKNOWN} are still included so
      * callers can detect absence without string comparison gymnastics):
      * <pre>
-     *   talos v&lt;version&gt; · build &lt;timestamp&gt; · commit &lt;sha&gt; · branch &lt;branch&gt;
+     *   talos v&lt;version&gt; - build &lt;timestamp&gt; - commit &lt;sha&gt; - branch &lt;branch&gt;
      * </pre>
      */
     public static String summary() {
         return "talos v" + version()
-                + " · build " + buildTimestamp()
-                + " · commit " + commitSha()
-                + " · branch " + branch();
+                + " - build " + buildTimestamp()
+                + " - commit " + commitSha()
+                + " - branch " + branch();
     }
 
     // ── Internals (package-private for testing) ─────────────────────

@@ -2,6 +2,9 @@ package dev.talos.cli.repl;
 
 import dev.talos.core.Config;
 import dev.talos.core.security.Redactor;
+import dev.talos.cli.ui.CliTheme;
+import dev.talos.cli.ui.ColorPolicy;
+import dev.talos.cli.ui.TerminalCapabilities;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
@@ -106,5 +109,41 @@ final class RenderEngineSanitizeTest {
         assertNoAnsiOrThink(out);
         // By contract, a final newline is printed at StreamEnd
         assertTrue(out.endsWith(System.lineSeparator()), "StreamEnd should end with a newline");
+    }
+
+    @Test
+    void trustedRendererStyleIsAppliedAfterModelTextSanitization() {
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+        var caps = new TerminalCapabilities(ColorPolicy.ALWAYS, true, true, true, false);
+        RenderEngine re = new RenderEngine(
+                new Config(),
+                new Redactor(),
+                new PrintStream(sink),
+                true,
+                CliTheme.forCapabilities(caps));
+
+        re.render(new Result.Error("Boom \u001B[31m<think>x</think>", 500));
+        String out = out(sink);
+
+        assertTrue(out.contains("\u001B["), "Trusted renderer may apply ANSI styling");
+        assertFalse(out.contains("\u001B[31m"), "Model-controlled ANSI must be stripped first");
+        assertFalse(out.contains("<think>"), "Think blocks must be removed before display");
+        assertTrue(out.contains("Boom"), "Expected sanitized text should remain");
+    }
+
+    @Test
+    void noColorThemeKeepsRendererOutputPlain() {
+        ByteArrayOutputStream sink = new ByteArrayOutputStream();
+        var caps = new TerminalCapabilities(ColorPolicy.NEVER, true, false, false, false);
+        RenderEngine re = new RenderEngine(
+                new Config(),
+                new Redactor(),
+                new PrintStream(sink),
+                true,
+                CliTheme.forCapabilities(caps));
+
+        re.render(new Result.Error("Boom", 500));
+
+        assertFalse(out(sink).contains("\u001B"), "No-color renderer path must not emit ANSI");
     }
 }
