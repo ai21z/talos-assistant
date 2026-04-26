@@ -77,14 +77,21 @@ public final class ToolCallExecutionStage {
                     state.cushionFiresB3EditShortCircuit++;
                     failuresThisIter++;
                     recordFailure(state, effective.toolName(), pathHint);
+                    boolean emptyEditArguments = ToolCallSupport.hasEmptyEditArguments(effective);
+                    if (emptyEditArguments) {
+                        recordEmptyEditArgumentFailure(state, pathHint);
+                    }
+                    String diagnosticError = emptyEditArguments
+                            ? emptyEditArgumentDiagnostic(pathHint, wasPathReadThisTurn(state, pathHint))
+                            : "This exact edit was already attempted and failed. "
+                                    + "Call talos.read_file to see the file's current state, "
+                                    + "then provide the exact raw content (without line-number prefixes) in old_string. "
+                                    + "Alternatively, use talos.write_file to replace the entire file content.";
                     String diagnostic = "[tool_result: " + effective.toolName() + "]\n"
-                            + "[error] This exact edit was already attempted and failed. "
-                            + "Call talos.read_file to see the file's current state, "
-                            + "then provide the exact raw content (without line-number prefixes) in old_string. "
-                            + "Alternatively, use talos.write_file to replace the entire file content."
+                            + "[error] " + diagnosticError
                             + "\n[/tool_result]";
                     state.toolOutcomes.add(new dev.talos.runtime.ToolCallLoop.ToolOutcome(
-                            effective.toolName(), pathHint, false, true, false, "", diagnostic,
+                            effective.toolName(), pathHint, false, true, false, "", diagnosticError,
                             null, ToolError.INVALID_PARAMS));
                     appendResultMessage(state, parsed.useNativePath(), i, diagnostic);
                     LOG.debug("  Skipped duplicate failing edit_file call for path: {}", pathHint);
@@ -175,6 +182,9 @@ public final class ToolCallExecutionStage {
                 if (isEditFile) {
                     String callSig = ToolCallSupport.buildCallSignature(effective);
                     state.failedCallSignatures.add(callSig);
+                    if (ToolCallSupport.hasEmptyEditArguments(effective)) {
+                        recordEmptyEditArgumentFailure(state, pathHint);
+                    }
                     if (!strict && pathHint != null) {
                         int failCount = state.editFailuresByPath.merge(
                                 ToolCallSupport.normalizePath(pathHint), 1, Integer::sum);
@@ -217,6 +227,32 @@ public final class ToolCallExecutionStage {
         if (pathHint != null && !pathHint.isBlank()) {
             state.failureCountsByPath.merge(ToolCallSupport.normalizePath(pathHint), 1, Integer::sum);
         }
+    }
+
+    private static void recordEmptyEditArgumentFailure(LoopState state, String pathHint) {
+        if (state == null || pathHint == null || pathHint.isBlank()) return;
+        state.emptyEditArgumentFailuresByPath.merge(
+                ToolCallSupport.normalizePath(pathHint), 1, Integer::sum);
+    }
+
+    private static boolean wasPathReadThisTurn(LoopState state, String pathHint) {
+        return state != null
+                && pathHint != null
+                && state.pathsReadThisTurn.contains(ToolCallSupport.normalizePath(pathHint));
+    }
+
+    private static String emptyEditArgumentDiagnostic(String pathHint, boolean pathWasRead) {
+        String target = pathHint == null || pathHint.isBlank()
+                ? "the target file"
+                : "`" + pathHint + "`";
+        String prefix = pathWasRead
+                ? "Repeated empty talos.edit_file arguments for " + target + " after the file was read. "
+                : "Repeated empty talos.edit_file arguments for " + target + ". ";
+        return prefix
+                + "`old_string` and `new_string` were empty, so no approval was requested "
+                + "and no file was changed. Copy the exact `old_string` from the latest "
+                + "talos.read_file result and provide the intended `new_string`, or stop "
+                + "and explain why the edit cannot be formed.";
     }
 
     private static boolean isUserApprovalDenial(ToolResult result) {
