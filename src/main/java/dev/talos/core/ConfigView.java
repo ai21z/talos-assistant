@@ -113,6 +113,7 @@ public final class ConfigView {
 
     public record SessionConfig(Map<String, Object> m) {
         public boolean persistence() { return CfgUtil.boolAt(m, "persistence", true); }
+        public boolean autoLoad() { return CfgUtil.boolAt(m, "auto_load", false); }
     }
 
     // ── Internal ──────────────────────────────────────────────────────

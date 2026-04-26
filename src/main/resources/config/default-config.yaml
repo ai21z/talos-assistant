@@ -112,7 +112,8 @@ tools:
   native_calling: true   # Use Ollama's native tool API; set false to fall back to XML prompt injection
 
 session:
-  persistence: true      # Auto-save/load conversation across REPL restarts; set false for ephemeral sessions
+  persistence: true      # Persist session evidence and allow explicit /session load; set false for ephemeral sessions
+  auto_load: false       # Do not inject saved workspace history into prompts unless explicitly enabled
 
 ui:
   show_status_during_answer: true
