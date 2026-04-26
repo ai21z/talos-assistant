@@ -1,0 +1,17 @@
+{
+  "name": "mutation prompt empty edit args stops cleanly",
+  "fixture": "horror-synth-site",
+  "v1Pack": true,
+  "claims": [
+    "repeated-empty-edit-args-stop-without-approval-or-mutation"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Now apply the smallest fix by editing index.html so the CSS and JavaScript .cta-button selector has a matching element in the HTML. Use the file edit tool; do not just show code.",
+  "scriptedResponses": [
+    "```json\n{\"name\":\"talos.edit_file\",\"parameters\":{\"path\":\"index.html\",\"old_string\":\"\",\"new_string\":\"\"}}\n```",
+    "```json\n{\"name\":\"talos.read_file\",\"parameters\":{\"path\":\"index.html\"}}\n```",
+    "```json\n{\"name\":\"talos.edit_file\",\"parameters\":{\"path\":\"index.html\",\"old_string\":\"\",\"new_string\":\"\"}}\n```",
+    "This response should not be reached."
+  ]
+}

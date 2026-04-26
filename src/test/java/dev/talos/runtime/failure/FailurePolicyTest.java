@@ -54,6 +54,32 @@ class FailurePolicyTest {
     }
 
     @Test
+    void repeatedEmptyEditArgsAfterReadStopBeforeGenericPathThreshold() {
+        LoopState state = state();
+        state.pathsReadThisTurn.add("index.html");
+        state.emptyEditArgumentFailuresByPath.put("index.html", 2);
+        state.failureCountsByPath.put("index.html", 2);
+
+        FailureDecision decision = policy().afterIteration(state, failedIteration());
+
+        assertTrue(decision.shouldStop());
+        assertEquals(FailureAction.ASK_USER, decision.action());
+        assertTrue(decision.reason().contains("empty talos.edit_file argument"));
+        assertTrue(decision.reason().contains("No approval was requested"));
+    }
+
+    @Test
+    void emptyEditArgsDoNotSpecialStopBeforeFileWasRead() {
+        LoopState state = state();
+        state.emptyEditArgumentFailuresByPath.put("index.html", 2);
+        state.failureCountsByPath.put("index.html", 2);
+
+        FailureDecision decision = policy().afterIteration(state, failedIteration());
+
+        assertFalse(decision.shouldStop());
+    }
+
+    @Test
     void successfulIterationResetsNoProgressCounter() {
         LoopState state = state();
         FailurePolicy policy = policy();

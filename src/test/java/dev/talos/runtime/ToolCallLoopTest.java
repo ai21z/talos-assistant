@@ -4,12 +4,17 @@ import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
+import dev.talos.core.security.Sandbox;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.*;
+import dev.talos.tools.impl.FileEditTool;
+import dev.talos.tools.impl.ReadFileTool;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
@@ -507,6 +512,71 @@ class ToolCallLoopTest {
     }
 
     @Test
+    void repeatedEmptyEditArgsAfterReadStopsWithoutApprovalOrMutation() throws Exception {
+        Path ws = Files.createTempDirectory("talos-empty-edit-args-");
+        try {
+            Path index = ws.resolve("index.html");
+            String original = "<html><body><h1>Night Drive</h1></body></html>\n";
+            Files.writeString(index, original);
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileEditTool(new FileUndoStack()));
+
+            final int[] approvalRequests = {0};
+            var processor = new TurnProcessor(
+                    ModeController.defaultController(),
+                    (description, detail) -> {
+                        approvalRequests[0]++;
+                        return true;
+                    },
+                    registry);
+            var loop = new ToolCallLoop(processor, 10);
+
+            String emptyEdit = """
+                    {"name":"talos.edit_file","arguments":{"path":"index.html","old_string":"","new_string":""}}
+                    """;
+            String readFile = """
+                    {"name":"talos.read_file","arguments":{"path":"index.html"}}
+                    """;
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user("Now apply the smallest fix by editing index.html.")));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of(readFile, emptyEdit, "should not be called")))
+                    .build();
+
+            TurnUserRequestCapture.set("Now apply the smallest fix by editing index.html.");
+            ToolCallLoop.LoopResult result;
+            try {
+                result = loop.run(emptyEdit, messages, ws, ctx);
+            } finally {
+                TurnUserRequestCapture.clear();
+            }
+
+            assertEquals(3, result.iterations(),
+                    "The loop should stop after the repeated empty edit that follows a successful read");
+            assertEquals(2, result.toolsInvoked(),
+                    "The duplicate invalid edit is short-circuited, not executed as another tool");
+            assertEquals(2, result.failedCalls());
+            assertEquals(1, result.retriedCalls());
+            assertEquals(0, result.mutatingToolSuccesses());
+            assertEquals(0, approvalRequests[0],
+                    "Invalid edit arguments must not reach the approval gate");
+            assertFalse(result.hitIterLimit(),
+                    "The specialized failure policy should stop before the iteration cap");
+            assertTrue(result.failureDecision().shouldStop());
+            assertTrue(result.failureDecision().reason().contains("empty talos.edit_file argument"));
+            assertTrue(result.finalAnswer().contains("Tool loop stopped by failure policy"));
+            assertTrue(result.finalAnswer().contains("No approval was requested and no file was changed"));
+            assertEquals(original, Files.readString(index));
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
     void successfulCallNotCountedAsFailed() {
         var loop = createLoop(echoTool());
         var messages = new ArrayList<>(List.of(
@@ -774,6 +844,19 @@ class ToolCallLoopTest {
                 return ToolResult.ok("echo: " + call.param("input", ""));
             }
         };
+    }
+
+    private static void deleteRecursive(Path root) throws Exception {
+        if (root == null || !Files.exists(root)) return;
+        try (var walk = Files.walk(root)) {
+            walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                try {
+                    Files.deleteIfExists(path);
+                } catch (Exception ignored) {
+                    // Best-effort cleanup for test workspaces.
+                }
+            });
+        }
     }
 
     private static TalosTool listDirTool() {

@@ -266,6 +266,26 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/21-mutation-prompt-empty-edit-args-stops-cleanly.json] 21: repeated empty edit args stop without approval or mutation")
+    void mutationPromptEmptyEditArgsStopsCleanly() {
+        var loaded = JsonScenarioLoader.load("scenarios/21-mutation-prompt-empty-edit-args-stops-cleanly.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains(AssistantTurnExecutor.INVALID_MUTATION_ANNOTATION)
+                    .assertAnswerContains("No file changes were applied")
+                    .assertAnswerContains("Repeated empty talos.edit_file arguments")
+                    .assertAnswerNotContains("[iteration limit reached]")
+                    .assertAnswerNotContains("This response should not be reached")
+                    .assertFileContains("index.html", "<title>Horror Synthwave Band</title>")
+                    .assertFileNotContains("index.html", "class=\"cta-button\"");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/11-partial-mutation-summary-truthful.json] 11: partial mutation summary reports only verified outcomes")
     void partialMutationSummaryIsTruthful() {
         var loaded = JsonScenarioLoader.load("scenarios/11-partial-mutation-summary-truthful.json");

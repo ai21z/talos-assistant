@@ -40,6 +40,9 @@ public record FailurePolicy(
         updateNoProgress(state, outcome);
         if (outcome.failuresThisIteration() <= 0) return FailureDecision.continueLoop();
 
+        FailureDecision emptyEditArgs = repeatedEmptyEditArgumentDecision(state);
+        if (emptyEditArgs.shouldStop()) return withActionForProgress(state, emptyEditArgs.reason());
+
         FailureDecision samePath = repeatedFailureDecision(
                 state.failureCountsByPath,
                 maxSamePathFailures,
@@ -92,6 +95,26 @@ public record FailurePolicy(
                                 + " `"
                                 + entry.getKey()
                                 + "`."))
+                .orElseGet(FailureDecision::continueLoop);
+    }
+
+    private static FailureDecision repeatedEmptyEditArgumentDecision(LoopState state) {
+        if (state.emptyEditArgumentFailuresByPath == null
+                || state.emptyEditArgumentFailuresByPath.isEmpty()) {
+            return FailureDecision.continueLoop();
+        }
+        return state.emptyEditArgumentFailuresByPath.entrySet().stream()
+                .filter(entry -> entry.getValue() >= 2)
+                .filter(entry -> state.pathsReadThisTurn.contains(entry.getKey()))
+                .max(Comparator.comparingInt(Map.Entry::getValue))
+                .map(entry -> FailureDecision.stop(
+                        FailureAction.ASK_USER,
+                        "failure policy stopped the tool loop after "
+                                + entry.getValue()
+                                + " empty talos.edit_file argument failure(s) for path `"
+                                + entry.getKey()
+                                + "` after the file had already been read. "
+                                + "No approval was requested and no file was changed."))
                 .orElseGet(FailureDecision::continueLoop);
     }
 
