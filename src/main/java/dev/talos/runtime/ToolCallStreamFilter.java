@@ -55,7 +55,14 @@ public final class ToolCallStreamFilter implements Consumer<String> {
     /** Current suppression state.
      *  SUPPRESSING_XML is DEPRECATED compatibility-only (for models that emit XML from training).
      *  Scheduled for removal once native tool calling is stable across model versions. */
-    private enum State { PASSTHROUGH, SUPPRESSING_XML, BUFFERING_FENCE, SUPPRESSING_FENCE, BUFFERING_BARE_JSON }
+    private enum State {
+        PASSTHROUGH,
+        SUPPRESSING_XML,
+        BUFFERING_FENCE,
+        SUPPRESSING_FENCE,
+        BUFFERING_BARE_JSON,
+        BUFFERING_PROTOCOL_ARRAY
+    }
     private State state = State.PASSTHROUGH;
 
     /** Opening XML tags that start suppression.
@@ -91,6 +98,9 @@ public final class ToolCallStreamFilter implements Consumer<String> {
 
     /** Upper bound for speculative bare-JSON buffering in the display path. */
     private static final int MAX_BARE_JSON_BUFFER_CHARS = 2 * 1024 * 1024;
+
+    /** Upper bound for narrow malformed-array protocol-debris buffering. */
+    private static final int MAX_PROTOCOL_ARRAY_BUFFER_CHARS = 512;
 
     /** Incomplete bare JSON tool-call signature used only during flush. */
     private static final Pattern INCOMPLETE_BARE_TOOL_JSON = Pattern.compile(
@@ -158,6 +168,14 @@ public final class ToolCallStreamFilter implements Consumer<String> {
                         delegate.accept(buffer.toString());
                     }
                     break;
+                case BUFFERING_PROTOCOL_ARRAY:
+                    if (ToolCallParser.looksLikeMalformedProtocolArrayDebris(buffer.toString())) {
+                        emitPendingProtocolPrefix(true);
+                    } else {
+                        emitPendingProtocolPrefix(false);
+                        delegate.accept(buffer.toString());
+                    }
+                    break;
                 case SUPPRESSING_XML:
                 case SUPPRESSING_FENCE:
                     // Incomplete tool-call block — discard
@@ -191,6 +209,7 @@ public final class ToolCallStreamFilter implements Consumer<String> {
                 case SUPPRESSING_FENCE -> drainSuppressingFence();
                 case BUFFERING_FENCE -> drainBufferingFence();
                 case BUFFERING_BARE_JSON -> drainBufferingBareJson();
+                case BUFFERING_PROTOCOL_ARRAY -> drainBufferingProtocolArray();
                 case PASSTHROUGH -> drainPassthrough();
             };
             if (!progress) break;
@@ -216,6 +235,45 @@ public final class ToolCallStreamFilter implements Consumer<String> {
         }
         // Still inside block, wait for more chunks
         return false;
+    }
+
+    /**
+     * In malformed protocol-array buffering mode: suppress only the observed
+     * invalid empty-array debris shape ({@code [ , ]}). Ordinary arrays are
+     * emitted unchanged as soon as they no longer match that narrow prefix.
+     */
+    private boolean drainBufferingProtocolArray() {
+        String text = buffer.toString();
+        if (text.isEmpty()) return false;
+
+        ProtocolArrayDecision decision = classifyProtocolArrayPrefix(text);
+        if (decision.kind() == ProtocolArrayDecision.Kind.WAIT) {
+            if (buffer.length() > MAX_PROTOCOL_ARRAY_BUFFER_CHARS) {
+                emitPendingProtocolPrefix(false);
+                delegate.accept(buffer.toString());
+                buffer.setLength(0);
+                state = State.PASSTHROUGH;
+                return true;
+            }
+            return false;
+        }
+
+        if (decision.kind() == ProtocolArrayDecision.Kind.NOT_PROTOCOL) {
+            emitPendingProtocolPrefix(false);
+            delegate.accept(text);
+            buffer.setLength(0);
+            state = State.PASSTHROUGH;
+            return true;
+        }
+
+        emitPendingProtocolPrefix(true);
+        String remainder = text.substring(decision.endExclusive());
+        buffer.setLength(0);
+        if (!remainder.isBlank()) {
+            buffer.append(remainder);
+        }
+        state = State.PASSTHROUGH;
+        return true;
     }
 
     /**
@@ -336,8 +394,11 @@ public final class ToolCallStreamFilter implements Consumer<String> {
         // Check for bare standalone JSON object opening
         int jsonStart = findBareJsonStart(text);
 
+        // Check for narrow malformed JSON-array protocol debris.
+        int arrayStart = findProtocolArrayStart(text);
+
         // None found — try to emit safe prefix
-        if (xmlStart < 0 && fenceStart < 0 && jsonStart < 0) {
+        if (xmlStart < 0 && fenceStart < 0 && jsonStart < 0 && arrayStart < 0) {
             int safeEnd = findSafeEmitEnd(text);
             if (safeEnd > 0) {
                 delegate.accept(text.substring(0, safeEnd));
@@ -352,15 +413,21 @@ public final class ToolCallStreamFilter implements Consumer<String> {
         int firstPos;
         MatchKind kind;
         if (xmlStart >= 0 && (fenceStart < 0 || xmlStart <= fenceStart)
-                && (jsonStart < 0 || xmlStart <= jsonStart)) {
+                && (jsonStart < 0 || xmlStart <= jsonStart)
+                && (arrayStart < 0 || xmlStart <= arrayStart)) {
             firstPos = xmlStart;
             kind = MatchKind.XML;
-        } else if (fenceStart >= 0 && (jsonStart < 0 || fenceStart <= jsonStart)) {
+        } else if (fenceStart >= 0
+                && (jsonStart < 0 || fenceStart <= jsonStart)
+                && (arrayStart < 0 || fenceStart <= arrayStart)) {
             firstPos = fenceStart;
             kind = MatchKind.FENCE;
-        } else {
+        } else if (jsonStart >= 0 && (arrayStart < 0 || jsonStart <= arrayStart)) {
             firstPos = jsonStart;
             kind = MatchKind.BARE_JSON;
+        } else {
+            firstPos = arrayStart;
+            kind = MatchKind.PROTOCOL_ARRAY;
         }
 
         // Emit everything before the first match
@@ -395,6 +462,12 @@ public final class ToolCallStreamFilter implements Consumer<String> {
                 buffer.setLength(0);
                 buffer.append(remainder);
                 state = State.BUFFERING_BARE_JSON;
+            }
+            case PROTOCOL_ARRAY -> {
+                String remainder = text.substring(firstPos);
+                buffer.setLength(0);
+                buffer.append(remainder);
+                state = State.BUFFERING_PROTOCOL_ARRAY;
             }
         }
         return true;
@@ -434,10 +507,19 @@ public final class ToolCallStreamFilter implements Consumer<String> {
             }
         }
 
+        for (int i = scanFrom; i < len; i++) {
+            if (text.charAt(i) != '[') continue;
+            if (!isStandaloneLineBoundary(text, i)) continue;
+            if (couldBeginProtocolArray(text, i)) {
+                safeEnd = Math.min(safeEnd, i);
+                break;
+            }
+        }
+
         return safeEnd;
     }
 
-    private enum MatchKind { XML, FENCE, BARE_JSON }
+    private enum MatchKind { XML, FENCE, BARE_JSON, PROTOCOL_ARRAY }
 
     private static int findBareJsonStart(String text) {
         for (int i = 0; i < text.length(); i++) {
@@ -448,10 +530,29 @@ public final class ToolCallStreamFilter implements Consumer<String> {
         return -1;
     }
 
+    private static int findProtocolArrayStart(String text) {
+        for (int i = 0; i < text.length(); i++) {
+            if (text.charAt(i) != '[') continue;
+            if (!isStandaloneLineBoundary(text, i)) continue;
+            if (couldBeginProtocolArray(text, i)) return i;
+        }
+        return -1;
+    }
+
     private static boolean isStandaloneBoundary(String text, int braceIndex) {
         if (braceIndex <= 0) return true;
         char prev = text.charAt(braceIndex - 1);
         return Character.isWhitespace(prev);
+    }
+
+    private static boolean isStandaloneLineBoundary(String text, int index) {
+        if (index <= 0) return true;
+        for (int i = index - 1; i >= 0; i--) {
+            char c = text.charAt(i);
+            if (c == '\n' || c == '\r') return true;
+            if (!Character.isWhitespace(c)) return false;
+        }
+        return true;
     }
 
     private static boolean couldBeginJsonObject(String text, int braceIndex) {
@@ -462,6 +563,16 @@ public final class ToolCallStreamFilter implements Consumer<String> {
         if (i >= text.length()) return true;
         char c = text.charAt(i);
         return c == '"' || c == '}';
+    }
+
+    private static boolean couldBeginProtocolArray(String text, int bracketIndex) {
+        int i = bracketIndex + 1;
+        while (i < text.length() && Character.isWhitespace(text.charAt(i))) {
+            i++;
+        }
+        if (i >= text.length()) return true;
+        char c = text.charAt(i);
+        return c == ',' || c == ']';
     }
 
     private static boolean couldStillBeJsonObject(String text) {
@@ -498,6 +609,43 @@ public final class ToolCallStreamFilter implements Consumer<String> {
             }
         }
         return -1;
+    }
+
+    private static ProtocolArrayDecision classifyProtocolArrayPrefix(String text) {
+        if (text == null || text.isEmpty() || text.charAt(0) != '[') {
+            return ProtocolArrayDecision.notProtocol();
+        }
+        boolean sawComma = false;
+        for (int i = 1; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == ']') {
+                return sawComma
+                        ? ProtocolArrayDecision.suppress(i + 1)
+                        : ProtocolArrayDecision.notProtocol();
+            }
+            if (c == ',') {
+                sawComma = true;
+            } else if (!Character.isWhitespace(c)) {
+                return ProtocolArrayDecision.notProtocol();
+            }
+        }
+        return ProtocolArrayDecision.waitForMore();
+    }
+
+    private record ProtocolArrayDecision(Kind kind, int endExclusive) {
+        enum Kind { WAIT, NOT_PROTOCOL, SUPPRESS }
+
+        static ProtocolArrayDecision waitForMore() {
+            return new ProtocolArrayDecision(Kind.WAIT, -1);
+        }
+
+        static ProtocolArrayDecision notProtocol() {
+            return new ProtocolArrayDecision(Kind.NOT_PROTOCOL, -1);
+        }
+
+        static ProtocolArrayDecision suppress(int endExclusive) {
+            return new ProtocolArrayDecision(Kind.SUPPRESS, endExclusive);
+        }
     }
 
     private static boolean looksLikeIncompleteBareToolJson(String text) {
