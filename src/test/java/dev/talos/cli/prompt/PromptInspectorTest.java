@@ -2,12 +2,17 @@ package dev.talos.cli.prompt;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
+import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ToolSpec;
+import dev.talos.tools.FileUndoStack;
 import dev.talos.tools.impl.ReadFileTool;
+import dev.talos.tools.impl.FileWriteTool;
 import dev.talos.tools.ToolRegistry;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -89,6 +94,29 @@ class PromptInspectorTest {
         assertTrue(LastPromptCapture.latest().isPresent());
         assertEquals("hello", LastPromptCapture.latest().orElseThrow()
                 .messages().getLast().content());
+    }
+
+    @Test
+    void fromMessagesReportsPerTurnNativeToolSurfaceWhenPresent() {
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new ReadFileTool());
+        registry.register(new FileWriteTool(new FileUndoStack()));
+        Context ctx = Context.builder(new Config())
+                .toolRegistry(registry)
+                .nativeToolSpecs(List.of(new ToolSpec("talos.read_file", "Read", "{}")))
+                .build();
+
+        PromptRender render = PromptInspector.fromMessages(
+                "auto",
+                "unified",
+                Path.of(".").toAbsolutePath().normalize(),
+                ctx,
+                true,
+                0,
+                List.of(ChatMessage.system("system"), ChatMessage.user("hello")));
+
+        assertTrue(render.tools().contains("talos.read_file"));
+        assertFalse(render.tools().contains("talos.write_file"));
     }
 
     private static Context context(Config cfg) {

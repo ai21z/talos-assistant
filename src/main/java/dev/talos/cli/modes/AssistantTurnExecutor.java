@@ -8,6 +8,7 @@ import dev.talos.runtime.ToolCallStreamFilter;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.verification.StaticTaskVerifier;
 import dev.talos.spi.EngineException;
@@ -110,13 +111,16 @@ public final class AssistantTurnExecutor {
                               Context ctx, Options opts) {
         StringBuilder out = new StringBuilder();
         boolean streamed = false;
-        initializeExecutionPhaseForTurn(messages, ctx);
+        TaskContract taskContract = TaskContractResolver.fromMessages(messages);
+        initializeExecutionPhaseForTurn(taskContract, ctx);
+        ctx = withNativeToolSurface(ctx, taskContract);
         injectTaskContractInstruction(messages);
+        Context turnContext = ctx;
 
         try {
             if (ctx.streamSink() != null) {
                 // ── Streaming path ──────────────────────────────────────────
-                LlmClient.StreamResult streamResult = ctx.llm().chatStreamFull(messages, ctx.streamSink());
+                LlmClient.StreamResult streamResult = chatStreamFull(ctx, messages);
                 String answer = streamResult.text();
 
                 // Flush the stream filter so any pending non-tool text is emitted
@@ -165,7 +169,7 @@ public final class AssistantTurnExecutor {
                 // Use chatFull() so native tool calls are captured too
                 // (chat() returns only String, losing native tool calls).
                 CompletableFuture<LlmClient.StreamResult> fut = CompletableFuture.supplyAsync(
-                        () -> ctx.llm().chatFull(messages));
+                        () -> chatFull(turnContext, messages));
                 LlmClient.StreamResult streamResult = fut.get(opts.llmTimeoutMs, TimeUnit.MILLISECONDS);
                 String answer = streamResult.text();
                 if (answer != null) {
@@ -271,12 +275,29 @@ public final class AssistantTurnExecutor {
         return first + "\n\n" + second;
     }
 
-    private static void initializeExecutionPhaseForTurn(List<ChatMessage> messages, Context ctx) {
+    private static void initializeExecutionPhaseForTurn(TaskContract contract, Context ctx) {
         if (ctx == null || ctx.executionPhaseState() == null) return;
-        ExecutionPhase initial = TaskContractResolver.fromMessages(messages).mutationAllowed()
+        ExecutionPhase initial = contract != null && contract.mutationAllowed()
                 ? ExecutionPhase.APPLY
                 : ExecutionPhase.INSPECT;
         ctx.executionPhaseState().moveTo(initial);
+    }
+
+    private static Context withNativeToolSurface(Context ctx, TaskContract contract) {
+        if (ctx == null || ctx.hasNativeToolSpecOverride()) return ctx;
+        ExecutionPhase phase = ctx.executionPhaseState() == null
+                ? ExecutionPhase.APPLY
+                : ctx.executionPhaseState().phase();
+        return ctx.withNativeToolSpecs(
+                NativeToolSpecPolicy.select(contract, phase, ctx.toolRegistry()));
+    }
+
+    private static LlmClient.StreamResult chatStreamFull(Context ctx, List<ChatMessage> messages) {
+        return ctx.llm().chatStreamFull(messages, ctx.streamSink(), ctx.nativeToolSpecs());
+    }
+
+    private static LlmClient.StreamResult chatFull(Context ctx, List<ChatMessage> messages) {
+        return ctx.llm().chatFull(messages, ctx.nativeToolSpecs());
     }
 
     static void injectTaskContractInstruction(List<ChatMessage> messages) {
@@ -490,7 +511,7 @@ public final class AssistantTurnExecutor {
         messages.add(ChatMessage.user(retryPrompt));
 
         try {
-            LlmClient.StreamResult retry = ctx.llm().chatFull(messages);
+            LlmClient.StreamResult retry = chatFull(ctx, messages);
             String retryText = retry.text();
             if (retryText != null && !retryText.isBlank() && !isDeflection(retryText)) {
                 LOG.info("Synthesis retry produced substantive answer ({} chars)", retryText.length());
@@ -827,7 +848,7 @@ public final class AssistantTurnExecutor {
                 + "in one sentence. Do not ask further questions — act."));
 
         try {
-            LlmClient.StreamResult retry = ctx.llm().chatFull(messages);
+            LlmClient.StreamResult retry = chatFull(ctx, messages);
             String retryText = retry.text() == null ? "" : retry.text();
 
             if (retry.hasToolCalls() || ToolCallParser.containsToolCalls(retryText)) {
@@ -1031,7 +1052,7 @@ public final class AssistantTurnExecutor {
                         + ". After reading them, answer concretely from the file contents. "
                         + "Do not speculate about files that do not exist."));
         try {
-            LlmClient.StreamResult retry = ctx.llm().chatFull(messages);
+            LlmClient.StreamResult retry = chatFull(ctx, messages);
             String retryText = retry.text() == null ? "" : retry.text();
             if (retry.hasToolCalls()) {
                 ToolCallLoop.LoopResult retryLoop = ctx.toolCallLoop().run(
@@ -1366,7 +1387,7 @@ public final class AssistantTurnExecutor {
                 + "contents. Do not describe files you have not read."));
 
         try {
-            LlmClient.StreamResult retry = ctx.llm().chatFull(messages);
+            LlmClient.StreamResult retry = chatFull(ctx, messages);
             String retryText = retry.text();
             if (retryText != null && !retryText.isBlank() && !retryText.equals(answer)) {
                 LOG.info("Grounding retry produced a different answer ({} → {} chars)",

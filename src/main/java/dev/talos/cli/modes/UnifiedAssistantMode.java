@@ -6,8 +6,10 @@ import dev.talos.cli.prompt.LastPromptCapture;
 import dev.talos.cli.prompt.PromptInspector;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.llm.SystemPromptBuilder;
+import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
 import dev.talos.spi.types.ChatMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -89,11 +91,16 @@ public final class UnifiedAssistantMode implements Mode {
         // Build structured conversation messages: system + history + user
         List<ChatMessage> messages = buildMessages(system, rawLine, history);
         AssistantTurnExecutor.injectTaskContractInstruction(messages);
+        ExecutionPhase initialPhase = taskContract.mutationAllowed()
+                ? ExecutionPhase.APPLY
+                : ExecutionPhase.INSPECT;
+        Context turnCtx = ctx.withNativeToolSpecs(
+                NativeToolSpecPolicy.select(taskContract, initialPhase, ctx.toolRegistry()));
         LastPromptCapture.record(PromptInspector.fromMessages(
                 "auto",
                 "unified",
                 workspace,
-                ctx,
+                turnCtx,
                 nativeTools,
                 history.size(),
                 messages));
@@ -104,7 +111,7 @@ public final class UnifiedAssistantMode implements Mode {
                 .responseMaxChars(responseMaxChars);
 
         AssistantTurnExecutor.TurnOutput turnOut =
-                AssistantTurnExecutor.execute(messages, workspace, ctx, opts);
+                AssistantTurnExecutor.execute(messages, workspace, turnCtx, opts);
 
         String body = "\n" + turnOut.text() + "\n\n";
 
