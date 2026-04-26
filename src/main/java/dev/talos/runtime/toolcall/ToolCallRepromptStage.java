@@ -5,6 +5,8 @@ import dev.talos.runtime.failure.FailureAction;
 import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.failure.FailurePolicy;
 import dev.talos.runtime.ToolCallParser;
+import dev.talos.runtime.verification.StaticTaskVerifier;
+import dev.talos.runtime.verification.WebDiagnosticIntent;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import org.slf4j.Logger;
@@ -51,6 +53,14 @@ public final class ToolCallRepromptStage {
             state.currentNativeCalls = List.of();
             LOG.debug("Stopping tool-call loop after stale edit retry ignored reread requirement for {}",
                     state.staleEditRereadIgnoredPath);
+            return false;
+        }
+
+        String webDiagnostics = readOnlyWebDiagnosticStopAnswer(state, outcome);
+        if (webDiagnostics != null) {
+            state.currentText = webDiagnostics;
+            state.currentNativeCalls = List.of();
+            LOG.debug("Stopping read-only web diagnostic loop with deterministic static diagnostics.");
             return false;
         }
 
@@ -268,6 +278,22 @@ public final class ToolCallRepromptStage {
 
     private static String deniedMutationStopMessage() {
         return "[Tool loop stopped because a mutating tool was not allowed for this turn.]";
+    }
+
+    private static String readOnlyWebDiagnosticStopAnswer(
+            LoopState state,
+            ToolCallExecutionStage.IterationOutcome outcome
+    ) {
+        if (state == null || outcome == null) return null;
+        if (state.workspace == null) return null;
+        if (state.totalToolsInvoked <= 0) return null;
+        if (state.mutatingToolSuccesses > 0 || outcome.mutationsThisIteration() > 0) return null;
+
+        String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
+        if (!WebDiagnosticIntent.matchesReadOnlyRequest(userTask)) return null;
+
+        String diagnostics = StaticTaskVerifier.renderWebDiagnostics(state.workspace);
+        return diagnostics == null || diagnostics.isBlank() ? null : diagnostics;
     }
 
     record EmptyEditRepair(String path, String instruction) {}
