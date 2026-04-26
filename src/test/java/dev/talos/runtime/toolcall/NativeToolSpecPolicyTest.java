@@ -29,6 +29,16 @@ class NativeToolSpecPolicyTest {
     }
 
     @Test
+    void smallTalkContractExposesNoNativeTools() {
+        var contract = TaskContractResolver.fromUserRequest("hello");
+
+        List<String> names = NativeToolSpecPolicy.names(
+                NativeToolSpecPolicy.select(contract, ExecutionPhase.INSPECT, registry()));
+
+        assertTrue(names.isEmpty());
+    }
+
+    @Test
     void mutationContractInApplyIncludesWriteAndEditNativeSpecs() {
         var contract = TaskContractResolver.fromUserRequest("Create a README.md file.");
 

@@ -31,7 +31,7 @@ class AssistantTurnExecutorNativeToolSurfaceTest {
         Context ctx = context(resolver);
 
         AssistantTurnExecutor.execute(
-                messages("hello"),
+                messages("What is in this workspace?"),
                 Path.of("."),
                 ctx,
                 new AssistantTurnExecutor.Options());
@@ -40,6 +40,21 @@ class AssistantTurnExecutorNativeToolSurfaceTest {
         assertTrue(names.contains("talos.read_file"));
         assertFalse(names.contains("talos.write_file"));
         assertFalse(names.contains("talos.edit_file"));
+    }
+
+    @Test
+    void smallTalkTurnSendsNoNativeToolSpecs() {
+        RecordingResolver resolver = new RecordingResolver();
+        Context ctx = context(resolver);
+
+        AssistantTurnExecutor.execute(
+                messages("hello"),
+                Path.of("."),
+                ctx,
+                new AssistantTurnExecutor.Options());
+
+        List<String> names = toolNames(resolver.lastRequest);
+        assertTrue(names.isEmpty());
     }
 
     @Test

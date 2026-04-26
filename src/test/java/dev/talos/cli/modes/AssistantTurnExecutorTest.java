@@ -122,6 +122,22 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void smallTalkTurnGetsDirectAnswerInstruction() {
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("hello"));
+
+            AssistantTurnExecutor.injectTaskContractInstruction(messages);
+
+            assertEquals(3, messages.size());
+            String instruction = messages.get(1).content();
+            assertTrue(instruction.contains("type: SMALL_TALK"));
+            assertTrue(instruction.contains("Answer directly"));
+            assertTrue(instruction.contains("Do not call tools"));
+            assertFalse(instruction.contains("Use talos.list_dir"));
+        }
+
+        @Test
         void taskContractInstructionIsIdempotent() {
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
