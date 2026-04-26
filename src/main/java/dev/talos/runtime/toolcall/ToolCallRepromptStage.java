@@ -1,6 +1,7 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.core.llm.LlmClient;
+import dev.talos.runtime.failure.FailureAction;
 import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.failure.FailurePolicy;
 import dev.talos.runtime.ToolCallParser;
@@ -36,6 +37,20 @@ public final class ToolCallRepromptStage {
             state.currentText = "[Tool loop stopped because a mutating path was blocked by workspace policy before approval.]";
             state.currentNativeCalls = List.of();
             LOG.debug("Stopping tool-call loop after pre-approval path policy block; not re-prompting.");
+            return false;
+        }
+
+        if (state.staleEditRereadIgnoredPath != null && !state.staleEditRereadIgnoredPath.isBlank()) {
+            state.failureDecision = FailureDecision.stop(
+                    FailureAction.ASK_USER,
+                    "failure policy stopped the tool loop because talos.edit_file was retried for path `"
+                            + state.staleEditRereadIgnoredPath
+                            + "` before rereading the file after a same-turn mutation changed it. "
+                            + "No approval was requested for the stale retry and no additional file change was made.");
+            state.currentText = failurePolicyStopMessage(state.failureDecision);
+            state.currentNativeCalls = List.of();
+            LOG.debug("Stopping tool-call loop after stale edit retry ignored reread requirement for {}",
+                    state.staleEditRereadIgnoredPath);
             return false;
         }
 
@@ -80,12 +95,20 @@ public final class ToolCallRepromptStage {
             ToolCallSupport.compactOlderToolResultsInPlace(state.messages);
         }
 
-        int repairIndex = -1;
+        int staleRepairIndex = -1;
+        Optional<StaleEditRepair> staleRepair = nextStaleEditRepair(state);
+        if (staleRepair.isPresent()) {
+            state.messages.add(ChatMessage.system(staleRepair.get().instruction()));
+            state.staleEditRepairPromptedPaths.add(staleRepair.get().path());
+            staleRepairIndex = state.messages.size() - 1;
+        }
+
+        int emptyRepairIndex = -1;
         Optional<EmptyEditRepair> repair = nextEmptyEditRepair(state);
         if (repair.isPresent()) {
             state.messages.add(ChatMessage.system(repair.get().instruction()));
             state.emptyEditRepairPromptedPaths.add(repair.get().path());
-            repairIndex = state.messages.size() - 1;
+            emptyRepairIndex = state.messages.size() - 1;
         }
 
         int anchorIndex = -1;
@@ -170,12 +193,20 @@ public final class ToolCallRepromptStage {
                     state.messages.remove(anchorIndex);
                 }
             }
-            if (repairIndex >= 0 && repairIndex < state.messages.size()) {
-                ChatMessage m = state.messages.get(repairIndex);
+            if (emptyRepairIndex >= 0 && emptyRepairIndex < state.messages.size()) {
+                ChatMessage m = state.messages.get(emptyRepairIndex);
                 if ("system".equals(m.role())
                         && m.content() != null
                         && m.content().startsWith("[Edit repair required]")) {
-                    state.messages.remove(repairIndex);
+                    state.messages.remove(emptyRepairIndex);
+                }
+            }
+            if (staleRepairIndex >= 0 && staleRepairIndex < state.messages.size()) {
+                ChatMessage m = state.messages.get(staleRepairIndex);
+                if ("system".equals(m.role())
+                        && m.content() != null
+                        && m.content().startsWith("[Stale edit repair required]")) {
+                    state.messages.remove(staleRepairIndex);
                 }
             }
         }
@@ -240,6 +271,38 @@ public final class ToolCallRepromptStage {
     }
 
     record EmptyEditRepair(String path, String instruction) {}
+
+    record StaleEditRepair(String path, String instruction) {}
+
+    static Optional<StaleEditRepair> nextStaleEditRepair(LoopState state) {
+        if (state == null
+                || state.staleEditFailuresByPath == null
+                || state.staleEditFailuresByPath.isEmpty()
+                || state.pathsMutatedSinceRead == null
+                || state.pathsMutatedSinceRead.isEmpty()) {
+            return Optional.empty();
+        }
+
+        return state.staleEditFailuresByPath.entrySet().stream()
+                .filter(entry -> entry.getValue() != null && entry.getValue() >= 1)
+                .filter(entry -> state.pathsMutatedSinceRead.contains(entry.getKey()))
+                .filter(entry -> !state.staleEditRepairPromptedPaths.contains(entry.getKey()))
+                .max(Comparator
+                        .<java.util.Map.Entry<String, Integer>>comparingInt(java.util.Map.Entry::getValue)
+                        .thenComparing(java.util.Map.Entry::getKey))
+                .map(entry -> new StaleEditRepair(entry.getKey(), staleEditRepairInstruction(entry.getKey())));
+    }
+
+    static String staleEditRepairInstruction(String path) {
+        String target = path == null || path.isBlank() ? "the target file" : "`" + path + "`";
+        return "[Stale edit repair required] You edited " + target
+                + " earlier in this turn, and a later talos.edit_file call for the same file failed "
+                + "because old_string was not found. The file contents have changed. Your next step "
+                + "for this file must be talos.read_file on " + target
+                + " only; do not call talos.edit_file for this path again until after that read_file "
+                + "result has been returned in a separate follow-up. If you cannot reread the file, "
+                + "stop and say the remaining edit was not applied.";
+    }
 
     static Optional<EmptyEditRepair> nextEmptyEditRepair(LoopState state) {
         if (state == null
