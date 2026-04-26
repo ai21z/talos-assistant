@@ -288,6 +288,43 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void readOnlyWebDiagnosticsReportMalformedHtmlAndCssClassTypo() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!DOCTYPE html>
+                <html lang="en">
+                <head>
+                  <meta charset="UTF-8">
+                  <title>BMI Calculator</title>
+                  <link rel="stylesheet" href="styles.css">
+                </head>
+                <body>
+                  <div class="calculator-container">
+                    <form id="bmi-form">
+                      <button type="submit">Calculate BMI</button
+                    </form>
+                  </div>
+                  <script src="script.js"></script
+                </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), """
+                body { font-family: Arial, sans-serif; }
+                calculator-container { max-width: 420px; }
+                """);
+        Files.writeString(workspace.resolve("script.js"), """
+                document.getElementById('bmi-form');
+                """);
+
+        String rendered = StaticTaskVerifier.renderWebDiagnostics(workspace);
+
+        assertTrue(rendered.contains("Static web diagnostics found:"), rendered);
+        assertTrue(rendered.contains("index.html: malformed closing tag `</button>` is missing `>`."), rendered);
+        assertTrue(rendered.contains("index.html: malformed closing tag `</script>` is missing `>`."), rendered);
+        assertTrue(rendered.contains("`calculator-container` should probably be `.calculator-container`"), rendered);
+        assertTrue(rendered.contains("No files were changed."), rendered);
+    }
+
+    @Test
     void expectedTargetFromContractMustBeMutated() throws Exception {
         Files.writeString(workspace.resolve("index.html"), "<html><body><main></main></body></html>");
         Files.writeString(workspace.resolve("style.css"), "body { color: white; }");
