@@ -117,13 +117,13 @@ Expected result:
 - You do not bump the version in this loop.
 - You do not run Qodana after every small edit.
 
-## Step 3: Run The Hard Local Gate
+## Step 3: Run A Pre-Candidate Readiness Check
 
 Goal: catch broad unit-test, deterministic E2E, and coverage problems before declaring a candidate.
 
 What the developer does:
 
-1. Run the normal verification gate.
+1. Optionally run the normal verification gate before bumping the version.
 2. Fix failures before bumping the version.
 
 Command:
@@ -139,6 +139,11 @@ Expected result:
 - JaCoCo coverage verification passes.
 
 If this fails, stay in the inner loop. Do not create a candidate yet.
+
+Important: this is a pre-candidate readiness check only. It is allowed and
+useful, but it is not candidate evidence because it ran before the reviewable
+version was declared. A passing pre-bump `./gradlew.bat check` never replaces
+the mandatory post-bump candidate `./gradlew.bat check` in Step 6.
 
 ## Step 4: Declare A Candidate
 
@@ -194,7 +199,34 @@ Expected result:
 - `build/libs/talos.jar` exists.
 - The build uses the version from `gradle.properties`.
 
-## Step 6: Run Qodana Community Locally
+## Step 6: Run The Mandatory Candidate Check
+
+Goal: prove the named candidate version passes the hard local gate.
+
+What the developer does:
+
+1. Run the normal verification gate after the patch bump and changelog update.
+2. Treat this run as candidate evidence.
+3. Fix failures before collecting the rest of the candidate packet.
+
+Command:
+
+```powershell
+./gradlew.bat check
+```
+
+Expected result:
+
+- Unit tests pass for the named candidate version.
+- Deterministic E2E tests pass for the named candidate version.
+- JaCoCo coverage verification passes for the named candidate version.
+
+Important: this step is mandatory for candidate review, even if Step 3 already
+passed before the bump. Evidence must belong to the version declared in
+`gradle.properties` and described in `CHANGELOG.md`; do not present a pre-bump
+`check` run as sufficient review evidence.
+
+## Step 7: Run Qodana Community Locally
 
 Goal: run static analysis without paid Qodana services.
 
@@ -241,7 +273,7 @@ fails on Windows with a Gradle `Input/output error`, install Qodana CLI and run:
 ./gradlew.bat qodanaNativeLocal
 ```
 
-## Step 7: Generate The Candidate Summaries
+## Step 8: Generate The Candidate Summaries
 
 Goal: produce one machine-readable packet for review.
 
@@ -267,7 +299,7 @@ Expected result:
 The candidate test lanes are fail-soft. They preserve evidence even when tests
 fail, so the summary can say what failed instead of hiding the result.
 
-## Step 8: Review The Packet
+## Step 9: Review The Packet
 
 Goal: decide whether the candidate is good enough.
 
@@ -297,7 +329,7 @@ Expected result:
 - Qodana provenance is not stale.
 - The candidate can be reviewed as one unit.
 
-## Step 9: If The Candidate Fails
+## Step 10: If The Candidate Fails
 
 Goal: fix the code, not the evidence.
 
@@ -307,14 +339,15 @@ What the developer does:
 2. Fix the problem.
 3. Run focused tests.
 4. Decide whether the fix needs a new patch bump.
-5. Re-run the candidate evidence steps.
+5. Re-run the candidate evidence steps, including the mandatory post-bump
+   candidate `./gradlew.bat check`.
 
 Rule of thumb:
 
 - If the candidate was already shared for review, create a new patch candidate.
 - If this was still private local prep, it is acceptable to fix and rerun before sharing.
 
-## Step 10: Commit Or Hand Off
+## Step 11: Commit Or Hand Off
 
 Goal: leave a reviewer with clear evidence.
 

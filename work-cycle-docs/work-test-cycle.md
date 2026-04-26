@@ -172,6 +172,9 @@ Notes:
 
 - `./scripts/bump-patch.ps1` updates `gradle.properties` and `CHANGELOG.md`
 - `./gradlew.bat check` is the hard local gate: unit tests, deterministic `e2eTest`, and coverage baseline must pass
+- a pre-bump `./gradlew.bat check` is allowed as a readiness check, but it is not candidate evidence
+- the candidate `./gradlew.bat check` run is mandatory after the patch version and changelog entry are declared, even if the same command passed before the bump
+- review evidence must belong to the named candidate version in `gradle.properties` and `CHANGELOG.md`
 - `./gradlew.bat qodanaLocal` is optional but highly recommended; it runs the free local Qodana Community JVM image
 - `qodanaLocal` mounts persistent Docker volumes for Qodana and Gradle caches to reduce Windows bind-mount file-lock and I/O problems
 - `version-summary.json` records jar artifact identity from the built jar itself plus the jar task state observed in the current Gradle invocation
@@ -208,6 +211,7 @@ This cycle is not:
 - a requirement to bump patch version after every tiny edit
 - a requirement to run Qodana after every tiny edit
 - a flat checklist with no distinction between development and candidate review
+- permission to use a pre-bump `check` run as the only proof for a named candidate
 - a way to generate pretty JSON files without checking freshness and provenance
 
 ## Bottom Line
@@ -217,6 +221,7 @@ The rigorous conclusion is:
 - Talos needs two loops, not one
 - patch versioning belongs at the start of candidate review, not at the end
 - `test`, `e2eTest`, JaCoCo, Qodana, and summary generation are evidence-producing steps for a named candidate
+- `./gradlew.bat check` may run before the bump as a readiness check, but must run again after the bump as candidate evidence
 - if the candidate fails review, you change code and create a new patch candidate
 
 That is the correct Talos work-test cycle.
