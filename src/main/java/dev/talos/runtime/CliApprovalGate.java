@@ -98,10 +98,16 @@ public final class CliApprovalGate implements ApprovalGate {
         }
 
         out.println();
-        out.println("  ⚠ Approval required: " + (description != null ? description : "unknown operation"));
+        out.println("  ! Approval required");
+        out.println("    Action: " + (description != null ? description : "unknown operation"));
+        out.println("    Risk:   " + inferRisk(description, detail));
         if (detail != null && !detail.isBlank()) {
-            out.println("    " + detail);
+            out.println("    Details:");
+            for (String line : detail.lines().toList()) {
+                out.println("      " + line);
+            }
         }
+        out.println("    Choices: y=yes, a=yes for this session, Enter/no=deny");
         out.flush();
 
         String response;
@@ -124,5 +130,17 @@ public final class CliApprovalGate implements ApprovalGate {
             return ApprovalResponse.APPROVED;
         }
         return ApprovalResponse.DENIED;
+    }
+
+    private static String inferRisk(String description, String detail) {
+        String text = ((description == null ? "" : description) + "\n" + (detail == null ? "" : detail))
+                .toLowerCase(java.util.Locale.ROOT);
+        if (text.contains("delete") || text.contains("destructive") || text.contains("remove")) {
+            return "destructive";
+        }
+        if (text.contains("write") || text.contains("edit") || text.contains("modify") || text.contains("target:")) {
+            return "write";
+        }
+        return "sensitive";
     }
 }
