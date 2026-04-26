@@ -1,18 +1,18 @@
 package dev.talos.cli.ui;
 
-import java.nio.charset.Charset;
-
 /**
  * ANSI 256-color utility with runtime detection and safe fallback.
  * <p>
  * Respects the {@code NO_COLOR} convention (<a href="https://no-color.org/">no-color.org</a>),
- * {@code TALOS_COLOR} override, and piped-output detection.
+ * {@code TALOS_COLOR} override, {@code TERM=dumb}, and piped-output detection.
  */
 public final class AnsiColor {
 
     // ── detection (evaluated once at class load) ──────────────────────────
-    private static final boolean COLOR_ENABLED  = detectColorSupport();
-    private static final boolean UNICODE_SAFE   = detectUnicodeSupport();
+    private static final TerminalCapabilities CAPABILITIES = TerminalCapabilities.detectDefault();
+    private static final boolean COLOR_ENABLED  = CAPABILITIES.colorEnabled();
+    private static final boolean UNICODE_SAFE   = CAPABILITIES.unicodeSafe();
+    private static final CliTheme THEME = CliTheme.forCapabilities(CAPABILITIES);
 
     // ── brand gradient (left → right across logo) ─────────────────────────
     public static final String PURPLE  = esc("38;5;99");   // deep purple
@@ -49,6 +49,7 @@ public final class AnsiColor {
 
     public static boolean isEnabled()      { return COLOR_ENABLED; }
     public static boolean isUnicodeSafe()   { return UNICODE_SAFE; }
+    public static TerminalCapabilities capabilities() { return CAPABILITIES; }
 
     // ── convenience wrappers ──────────────────────────────────────────────
 
@@ -64,50 +65,6 @@ public final class AnsiColor {
     public static String bold(String s)   { return BOLD   + s + RESET; }
 
     /** Brand-colored bold text ("talos" in accent violet). */
-    public static String brand(String s)  { return BOLD + VIOLET + s + RESET; }
-
-    // ── detection logic ───────────────────────────────────────────────────
-
-    private static boolean detectColorSupport() {
-        // NO_COLOR convention
-        if (System.getenv("NO_COLOR") != null) return false;
-
-        // Explicit override
-        String override = System.getenv("TALOS_COLOR");
-        if ("false".equalsIgnoreCase(override) || "0".equals(override)) return false;
-        if ("true".equalsIgnoreCase(override)  || "1".equals(override)) return true;
-
-        // Piped / redirected output
-        if (System.console() == null) return false;
-
-        // Modern terminal indicators
-        if (System.getenv("WT_SESSION")   != null) return true;  // Windows Terminal
-        if (System.getenv("COLORTERM")    != null) return true;
-        if (System.getenv("TERM_PROGRAM") != null) return true;
-
-        String term = System.getenv("TERM");
-        if (term != null && (term.contains("color") || term.contains("xterm") || term.contains("256")))
-            return true;
-
-        // Default: assume modern terminal
-        return true;
-    }
-
-    private static boolean detectUnicodeSupport() {
-        // Windows Terminal always supports Unicode
-        if (System.getenv("WT_SESSION") != null) return true;
-        if (System.getenv("TERM_PROGRAM") != null) return true;
-
-        String os = System.getProperty("os.name", "").toLowerCase();
-        if (!os.contains("win")) return true; // Unix/macOS: always safe
-
-        // Windows: check console charset
-        try {
-            Charset cs = Charset.defaultCharset();
-            return "UTF-8".equalsIgnoreCase(cs.name());
-        } catch (Exception e) {
-            return false;
-        }
-    }
+    public static String brand(String s)  { return THEME.brand(s); }
 }
 
