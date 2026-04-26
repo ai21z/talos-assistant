@@ -2,6 +2,7 @@ package dev.talos.cli.launcher;
 
 import dev.talos.cli.repl.Limits;
 import dev.talos.cli.repl.ReplRouter;
+import dev.talos.cli.repl.DebugLevel;
 import dev.talos.cli.repl.SessionState;
 import dev.talos.cli.repl.SlashCommandCompleter;
 import dev.talos.cli.repl.TalosBootstrap;
@@ -39,7 +40,7 @@ public class RunCmd implements Runnable, SessionState {
 
     // Minimal session state for commands
     private int k = 8;
-    private boolean debug = false;
+    private DebugLevel debugLevel = DebugLevel.OFF;
 
     // Simple 1s token bucket - FIXED VERSION
     private long rlWindowStartMs = System.currentTimeMillis();
@@ -49,8 +50,10 @@ public class RunCmd implements Runnable, SessionState {
     // ---- SessionState impl ----
     @Override public int getK() { return k; }
     @Override public void setK(int k) { this.k = Math.max(1, k); }
-    @Override public boolean isDebug() { return debug; }
-    @Override public void setDebug(boolean on) { this.debug = on; }
+    @Override public boolean isDebug() { return debugLevel.enabled(); }
+    @Override public void setDebug(boolean on) { this.debugLevel = on ? DebugLevel.BRIEF : DebugLevel.OFF; }
+    @Override public DebugLevel getDebugLevel() { return debugLevel; }
+    @Override public void setDebugLevel(DebugLevel level) { this.debugLevel = level == null ? DebugLevel.OFF : level; }
 
     @Override
     public void run() {
@@ -100,7 +103,7 @@ public class RunCmd implements Runnable, SessionState {
             // Show banner unless --no-logo
             String activeMode = router.getModes().getActiveName();
             if (!noLogo) {
-                TalosBanner.print(ws, cfg, activeMode, debug, System.out);
+                TalosBanner.print(ws, cfg, activeMode, getDebugLevel().label(), System.out);
             } else {
                 TalosBanner.printCompact(ws, cfg, activeMode, System.out);
             }

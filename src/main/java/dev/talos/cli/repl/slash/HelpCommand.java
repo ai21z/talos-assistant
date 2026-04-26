@@ -50,7 +50,8 @@ public final class HelpCommand implements Command {
                     "Normal mode keeps internals quiet. Use these commands when you need diagnostics.",
                     CommandGroup.DEBUG,
                     List.of(
-                            "/debug on|off enables compatible debug hints.",
+                            "/debug brief keeps compatible debug hints on.",
+                            "/debug rag, /debug tools, and /debug trace reserve deeper diagnostic intent.",
                             "/explain-last-turn shows the last recorded turn facts when available.",
                             "/help all lists every registered command.")));
             case "security", "safety", "approval" -> new Result.Ok(topicHelp(

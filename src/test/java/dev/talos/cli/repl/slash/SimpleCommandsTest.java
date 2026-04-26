@@ -2,6 +2,7 @@ package dev.talos.cli.repl.slash;
 
 import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
+import dev.talos.cli.repl.DebugLevel;
 import dev.talos.cli.repl.Result;
 import dev.talos.core.Config;
 import org.junit.jupiter.api.*;
@@ -66,12 +67,14 @@ class SimpleCommandsTest {
         @Test void on_enables_debug() {
             cmd.execute("on", ctx);
             assertTrue(rt.isDebug());
+            assertEquals(DebugLevel.BRIEF, rt.getDebugLevel());
         }
 
         @Test void off_disables_debug() {
             rt.setDebug(true);
             cmd.execute("off", ctx);
             assertFalse(rt.isDebug());
+            assertEquals(DebugLevel.OFF, rt.getDebugLevel());
         }
 
         @Test void true_alias() {
@@ -96,6 +99,23 @@ class SimpleCommandsTest {
             assertFalse(rt.isDebug());
         }
 
+        @Test void rag_level_sets_retrieval_debug_intent() {
+            Result r = cmd.execute("rag", ctx);
+            assertInstanceOf(Result.Info.class, r);
+            assertEquals(DebugLevel.RAG, rt.getDebugLevel());
+            assertTrue(r.toString().contains("rag"));
+        }
+
+        @Test void tools_level_sets_tool_debug_intent() {
+            cmd.execute("tools", ctx);
+            assertEquals(DebugLevel.TOOLS, rt.getDebugLevel());
+        }
+
+        @Test void trace_level_sets_trace_debug_intent() {
+            cmd.execute("trace", ctx);
+            assertEquals(DebugLevel.TRACE, rt.getDebugLevel());
+        }
+
         @Test void no_args_shows_current() {
             Result r = cmd.execute("", ctx);
             assertInstanceOf(Result.Info.class, r);
@@ -114,6 +134,7 @@ class SimpleCommandsTest {
 
         @Test void spec_name() {
             assertEquals("debug", cmd.spec().name());
+            assertTrue(cmd.spec().usage().contains("trace"));
         }
     }
 
@@ -509,12 +530,14 @@ class SimpleCommandsTest {
 
     private static class StubRuntime implements CliRuntime {
         private int k = 6;
-        private boolean debug = false;
+        private DebugLevel debugLevel = DebugLevel.OFF;
 
         @Override public int getK() { return k; }
         @Override public void setK(int k) { this.k = k; }
-        @Override public boolean isDebug() { return debug; }
-        @Override public void setDebug(boolean on) { this.debug = on; }
+        @Override public boolean isDebug() { return debugLevel.enabled(); }
+        @Override public void setDebug(boolean on) { this.debugLevel = on ? DebugLevel.BRIEF : DebugLevel.OFF; }
+        @Override public DebugLevel getDebugLevel() { return debugLevel; }
+        @Override public void setDebugLevel(DebugLevel level) { this.debugLevel = level == null ? DebugLevel.OFF : level; }
     }
 }
 
