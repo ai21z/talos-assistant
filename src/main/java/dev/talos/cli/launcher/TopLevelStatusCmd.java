@@ -2,6 +2,7 @@ package dev.talos.cli.launcher;
 
 import dev.talos.core.Config;
 import dev.talos.core.CfgUtil;
+import dev.talos.cli.ui.CliStatusDashboard;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
@@ -56,6 +57,18 @@ public class TopLevelStatusCmd implements Runnable {
     }
 
     private void printStatus(Path workspace, Config cfg) {
+        if (!verbose) {
+            var snapshot = CliStatusDashboard.snapshot(
+                    workspace,
+                    cfg,
+                    "auto",
+                    CliStatusDashboard.resolveModel(cfg),
+                    "off",
+                    "Use talos run, or talos status --verbose");
+            System.out.print(CliStatusDashboard.render(snapshot));
+            return;
+        }
+
         System.out.println("Talos Status:");
 
         // Workspace and index directory
