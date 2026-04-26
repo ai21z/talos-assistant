@@ -32,7 +32,10 @@ class StaticTaskVerifierTest {
     void selectorRepairFailsWhenMutationLeavesReferencedClassMissing() throws Exception {
         writeWebFiles("""
                 <!DOCTYPE html>
-                <html><body><main id="hero"><p>No CTA yet</p></main></body></html>
+                <html>
+                  <head><link rel="stylesheet" href="style.css"></head>
+                  <body><main id="hero"><p>No CTA yet</p></main><script src="script.js"></script></body>
+                </html>
                 """);
 
         TaskVerificationResult result = StaticTaskVerifier.verify(
@@ -49,7 +52,10 @@ class StaticTaskVerifierTest {
     void selectorRepairPassesWhenHtmlProvidesReferencedClass() throws Exception {
         writeWebFiles("""
                 <!DOCTYPE html>
-                <html><body><main id="hero"><a class="cta-button">Listen</a></main></body></html>
+                <html>
+                  <head><link rel="stylesheet" href="style.css"></head>
+                  <body><main id="hero"><a class="cta-button">Listen</a></main><script src="script.js"></script></body>
+                </html>
                 """);
 
         TaskVerificationResult result = StaticTaskVerifier.verify(
@@ -63,10 +69,165 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void broadWebAppBuildFailsWhenJavaScriptReferencesMissingHtmlIds() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!DOCTYPE html>
+                <html>
+                  <head>
+                    <link rel="stylesheet" href="styles.css">
+                  </head>
+                  <body>
+                    <main class="calculator">
+                      <h1>BMI Calculator</h1>
+                      <p>No form exists yet.</p>
+                    </main>
+                    <script src="script.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), """
+                .calculator { max-width: 28rem; }
+                .result { font-weight: 700; }
+                """);
+        Files.writeString(workspace.resolve("script.js"), """
+                document.getElementById('bmi-form').addEventListener('submit', event => event.preventDefault());
+                document.getElementById('weight');
+                document.getElementById('height');
+                document.getElementById('result');
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Can you build a small BMI calculator website here with separate CSS and JavaScript files?",
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("styles.css", VerificationStatus.PASS),
+                        successfulWrite("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.problems().stream().anyMatch(p -> p.contains("JavaScript references missing IDs")));
+        assertTrue(result.problems().stream().anyMatch(p -> p.contains("`#bmi-form`")));
+    }
+
+    @Test
+    void broadWebAppBuildPassesWhenHtmlCssAndJavaScriptAreLinked() throws Exception {
+        writeValidBmiWebFiles();
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Can you build a small BMI calculator website here with separate CSS and JavaScript files?",
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("styles.css", VerificationStatus.PASS),
+                        successfulWrite("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status());
+        assertTrue(result.summary().contains("Static web coherence checks passed"));
+        assertTrue(result.facts().stream().anyMatch(f -> f.contains("HTML/CSS/JS selector coherence passed")));
+    }
+
+    @Test
+    void broadWebAppBuildRequiresSeparateCssAndJavaScriptMutations() throws Exception {
+        writeValidBmiWebFiles();
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Build a BMI calculator website with separate CSS and JavaScript files.",
+                loopResult(List.of(successfulWrite("index.html", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("Expected web-app build to successfully mutate a CSS file")));
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("Expected web-app build to successfully mutate a JavaScript file")));
+    }
+
+    @Test
+    void genericMakeItFollowUpRunsWebCoherenceWhenMutatingSmallWebSurface() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!DOCTYPE html>
+                <html>
+                  <head><link rel="stylesheet" href="styles.css"></head>
+                  <body><main class="calculator"><h1>BMI</h1></main><script src="script.js"></script></body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), ".calculator { max-width: 28rem; }");
+        Files.writeString(workspace.resolve("script.js"), "document.getElementById('bmi-form');");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Can you make it?",
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("styles.css", VerificationStatus.PASS),
+                        successfulWrite("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.problems().stream().anyMatch(p -> p.contains("`#bmi-form`")));
+    }
+
+    @Test
+    void htmlMustLinkPrimaryCssAndJavaScriptForWebCoherence() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!DOCTYPE html>
+                <html><body><main class="calculator"><p id="result"></p></main></body></html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), ".calculator { max-width: 28rem; }");
+        Files.writeString(workspace.resolve("script.js"), "document.getElementById('result');");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Build a BMI calculator website with separate CSS and JavaScript files.",
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("styles.css", VerificationStatus.PASS),
+                        successfulWrite("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("HTML does not link CSS file: `styles.css`")));
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("HTML does not link JavaScript file: `script.js`")));
+    }
+
+    @Test
+    void linkedCssFileIsPreferredOverLegacyCssNeighbor() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!DOCTYPE html>
+                <html>
+                  <head><link rel="stylesheet" href="styles.css"></head>
+                  <body><main class="calculator"></main><script src="script.js"></script></body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("style.css"), ".legacy-missing { color: red; }");
+        Files.writeString(workspace.resolve("styles.css"), ".calculator { max-width: 28rem; }");
+        Files.writeString(workspace.resolve("script.js"), "document.querySelector('.calculator');");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Build a BMI calculator website with separate CSS and JavaScript files.",
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("styles.css", VerificationStatus.PASS),
+                        successfulWrite("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status());
+    }
+
+    @Test
     void cssHexColorsAreNotTreatedAsIdSelectors() throws Exception {
         writeWebFiles("""
                 <!DOCTYPE html>
-                <html><body><main id="hero"><a class="cta-button">Listen</a></main></body></html>
+                <html>
+                  <head><link rel="stylesheet" href="style.css"></head>
+                  <body><main id="hero"><a class="cta-button">Listen</a></main><script src="script.js"></script></body>
+                </html>
                 """);
         Files.writeString(workspace.resolve("style.css"), """
                 body { background: #140014; color: #f8eaff; }
@@ -112,6 +273,21 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void nonWebMutationUsesNarrowTargetReadbackWording() throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "# Talos\n");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Update README.md.",
+                loopResult(List.of(successfulEdit("README.md", VerificationStatus.UNKNOWN))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status());
+        assertTrue(result.summary().contains("Target/readback checks passed"));
+        assertTrue(result.summary().contains("no task-specific static verifier was applicable"));
+    }
+
+    @Test
     void expectedTargetFromContractMustBeMutated() throws Exception {
         Files.writeString(workspace.resolve("index.html"), "<html><body><main></main></body></html>");
         Files.writeString(workspace.resolve("style.css"), "body { color: white; }");
@@ -139,10 +315,49 @@ class StaticTaskVerifierTest {
                 """);
     }
 
+    private void writeValidBmiWebFiles() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!DOCTYPE html>
+                <html>
+                  <head>
+                    <link rel="stylesheet" href="styles.css">
+                  </head>
+                  <body>
+                    <main class="calculator">
+                      <h1>BMI Calculator</h1>
+                      <form id="bmi-form">
+                        <input id="weight" type="number">
+                        <input id="height" type="number">
+                        <button type="submit">Calculate</button>
+                      </form>
+                      <p id="result" class="result"></p>
+                    </main>
+                    <script src="script.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), """
+                .calculator { max-width: 28rem; }
+                .result { font-weight: 700; }
+                """);
+        Files.writeString(workspace.resolve("script.js"), """
+                document.getElementById('bmi-form').addEventListener('submit', event => event.preventDefault());
+                document.getElementById('weight');
+                document.getElementById('height');
+                document.getElementById('result');
+                """);
+    }
+
     private static ToolCallLoop.ToolOutcome successfulEdit(String path, VerificationStatus verificationStatus) {
         return new ToolCallLoop.ToolOutcome(
                 "talos.edit_file", path, true, true, false,
                 "edited " + path, "", verificationStatus);
+    }
+
+    private static ToolCallLoop.ToolOutcome successfulWrite(String path, VerificationStatus verificationStatus) {
+        return new ToolCallLoop.ToolOutcome(
+                "talos.write_file", path, true, true, false,
+                "wrote " + path, "", verificationStatus);
     }
 
     private static ToolCallLoop.LoopResult loopResult(List<ToolCallLoop.ToolOutcome> outcomes) {

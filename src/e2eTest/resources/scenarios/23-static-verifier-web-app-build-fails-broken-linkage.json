@@ -1,0 +1,16 @@
+{
+  "name": "static verifier fails broken web app build linkage",
+  "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "post-apply-static-verifier-checks-broad-web-app-linkage",
+    "static-verifier-does-not-bless-broken-generated-web-app"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_REMEMBER_WRITES",
+  "userPrompt": "Can you build a small BMI calculator website here with separate CSS and JavaScript files? Use the file tools if you can; do not just show code.",
+  "scriptedResponses": [
+    "```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"index.html\",\"content\":\"<!doctype html>\\n<html lang=\\\"en\\\">\\n<head>\\n  <meta charset=\\\"utf-8\\\">\\n  <title>BMI Calculator</title>\\n  <link rel=\\\"stylesheet\\\" href=\\\"styles.css\\\">\\n</head>\\n<body>\\n  <main class=\\\"calculator\\\">\\n    <h1>BMI Calculator</h1>\\n    <p>No form was added.</p>\\n  </main>\\n  <script src=\\\"script.js\\\"></script>\\n</body>\\n</html>\"}}\n```\n```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"styles.css\",\"content\":\"body { font-family: Arial, sans-serif; margin: 2rem; }\\n.calculator { max-width: 420px; }\\n.result { font-weight: 700; }\"}}\n```\n```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"script.js\",\"content\":\"document.getElementById('bmi-form').addEventListener('submit', event => event.preventDefault());\\ndocument.getElementById('weight');\\ndocument.getElementById('height');\\ndocument.getElementById('result');\"}}\n```",
+    "Created the BMI calculator website files."
+  ]
+}
