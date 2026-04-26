@@ -139,12 +139,14 @@ public final class JsonSessionStore implements SessionStore {
             row.put("approvalsDenied", record.approvalsDenied());
             row.put("retrievalTraceSummary", record.retrievalTraceSummary());
             row.put("status", record.status());
+            row.put("policyTrace", policyTraceToMap(record.policyTrace()));
             List<Map<String, Object>> calls = new java.util.ArrayList<>();
             for (TurnRecord.ToolCallSummary s : record.toolCalls()) {
                 Map<String, Object> c = new LinkedHashMap<>();
                 c.put("name", s.name());
                 c.put("pathHint", s.pathHint());
                 c.put("success", s.success());
+                c.put("reason", s.reason());
                 calls.add(c);
             }
             row.put("toolCalls", calls);
@@ -206,6 +208,7 @@ public final class JsonSessionStore implements SessionStore {
         int deny = intVal(row, "approvalsDenied");
         String traceSummary = str(row, "retrievalTraceSummary");
         String status = str(row, "status");
+        TurnPolicyTrace policyTrace = policyTraceFrom(row.get("policyTrace"));
 
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> rawCalls =
@@ -215,10 +218,60 @@ public final class JsonSessionStore implements SessionStore {
             String name = c.get("name") == null ? "" : String.valueOf(c.get("name"));
             String pathHint = c.get("pathHint") == null ? "" : String.valueOf(c.get("pathHint"));
             boolean success = c.get("success") instanceof Boolean b && b;
-            calls.add(new TurnRecord.ToolCallSummary(name, pathHint, success));
+            String reason = c.get("reason") == null ? "" : String.valueOf(c.get("reason"));
+            calls.add(new TurnRecord.ToolCallSummary(name, pathHint, success, reason));
         }
         return new TurnRecord(turnNumber, ts, durationMs, userInput, assistantText,
-                calls, reqd, grnt, deny, traceSummary, status);
+                calls, reqd, grnt, deny, traceSummary, status, policyTrace);
+    }
+
+    private static Map<String, Object> policyTraceToMap(TurnPolicyTrace trace) {
+        TurnPolicyTrace safe = trace == null ? TurnPolicyTrace.empty() : trace;
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("taskType", safe.taskType());
+        out.put("mutationAllowed", safe.mutationAllowed());
+        out.put("verificationRequired", safe.verificationRequired());
+        out.put("expectedTargets", safe.expectedTargets());
+        out.put("forbiddenTargets", safe.forbiddenTargets());
+        out.put("initialPhase", safe.initialPhase());
+        out.put("finalPhase", safe.finalPhase());
+        out.put("nativeTools", safe.nativeTools());
+        out.put("promptTools", safe.promptTools());
+        out.put("blocks", safe.blocks());
+        return out;
+    }
+
+    private static TurnPolicyTrace policyTraceFrom(Object raw) {
+        if (!(raw instanceof Map<?, ?> map)) return TurnPolicyTrace.empty();
+        return new TurnPolicyTrace(
+                stringVal(map, "taskType", "UNKNOWN"),
+                boolVal(map, "mutationAllowed"),
+                boolVal(map, "verificationRequired"),
+                stringList(map.get("expectedTargets")),
+                stringList(map.get("forbiddenTargets")),
+                stringVal(map, "initialPhase", "unknown"),
+                stringVal(map, "finalPhase", "unknown"),
+                stringList(map.get("nativeTools")),
+                stringList(map.get("promptTools")),
+                stringList(map.get("blocks")));
+    }
+
+    private static String stringVal(Map<?, ?> map, String key, String fallback) {
+        Object value = map.get(key);
+        return value == null || String.valueOf(value).isBlank() ? fallback : String.valueOf(value);
+    }
+
+    private static boolean boolVal(Map<?, ?> map, String key) {
+        Object value = map.get(key);
+        return value instanceof Boolean b && b;
+    }
+
+    private static List<String> stringList(Object raw) {
+        if (!(raw instanceof List<?> list)) return List.of();
+        return list.stream()
+                .map(value -> value == null ? "" : String.valueOf(value))
+                .filter(value -> !value.isBlank())
+                .toList();
     }
 
     // ── Utility ───────────────────────────────────────────────────────

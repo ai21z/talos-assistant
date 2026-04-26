@@ -4,6 +4,7 @@ import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
 import dev.talos.core.Config;
 import dev.talos.runtime.JsonSessionStore;
+import dev.talos.runtime.TurnPolicyTrace;
 import dev.talos.runtime.TurnRecord;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -124,6 +125,47 @@ class ExplainLastTurnCommandTest {
         assertTrue(text.contains("Last Turn"));
         assertTrue(text.contains("Trace Detail"));
         assertTrue(text.contains("Tool calls: 1"));
+    }
+
+    @Test
+    void traceViewIncludesPolicyTraceAndBlockReasons() {
+        TurnPolicyTrace policyTrace = new TurnPolicyTrace(
+                "FILE_CREATE",
+                true,
+                true,
+                List.of("index.html"),
+                List.of(),
+                "APPLY",
+                "APPLY",
+                List.of("talos.read_file", "talos.write_file"),
+                List.of("talos.read_file", "talos.write_file"),
+                List.of("approval denied by user for talos.write_file"));
+        TurnRecord turn = new TurnRecord(
+                8,
+                Instant.parse("2026-04-26T00:00:00Z"),
+                1234,
+                "Create index.html",
+                "No file changed.",
+                List.of(new TurnRecord.ToolCallSummary(
+                        "talos.write_file",
+                        "index.html",
+                        false,
+                        "approval denied by user for talos.write_file")),
+                1,
+                0,
+                1,
+                "",
+                "ok",
+                policyTrace);
+
+        String text = ExplainLastTurnCommand.renderTrace(turn);
+
+        assertTrue(text.contains("Contract: FILE_CREATE mutationAllowed=true verificationRequired=true"));
+        assertTrue(text.contains("Expected targets: index.html"));
+        assertTrue(text.contains("Phase: initial=APPLY final=APPLY"));
+        assertTrue(text.contains("Native tools: talos.read_file, talos.write_file"));
+        assertTrue(text.contains("Blocked: approval denied by user for talos.write_file"));
+        assertTrue(text.contains("reason: approval denied by user for talos.write_file"));
     }
 
     @Test
