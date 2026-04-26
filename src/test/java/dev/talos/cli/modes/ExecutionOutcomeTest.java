@@ -187,6 +187,65 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void partialMutationRunsStaticVerificationButRemainsPartial() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-partial-static-");
+        try {
+            Files.writeString(ws.resolve("index.html"), """
+                    <!DOCTYPE html>
+                    <html>
+                      <head><link rel="stylesheet" href="style.css"></head>
+                      <body><main class="calculator"><h1>BMI</h1></main><script src="script.js"></script></body>
+                    </html>
+                    """);
+            Files.writeString(ws.resolve("style.css"), "calculator { max-width: 420px; }");
+            Files.writeString(ws.resolve("script.js"), "document.getElementById('bmi-form');");
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "This BMI website is not working correctly. Apply the smallest edits needed to make it valid and functioning."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "[ok] Edited index.html\n[failed] index.html", 2, 2,
+                    List.of("talos.edit_file", "talos.edit_file"), List.of(),
+                    1, 0, false, 1, List.of(),
+                    0, 0, 0, 0,
+                    List.of(
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.edit_file", "index.html", true, true, false,
+                                    "Edited index.html", "", dev.talos.tools.VerificationStatus.WARN),
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.edit_file", "index.html", false, true, false,
+                                    "", "Invalid talos.edit_file call: missing required parameter `new_string`. "
+                                    + "No approval was requested and no file was changed.",
+                                    null, ToolError.INVALID_PARAMS)
+                    ));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "[ok] Edited index.html\n[failed] index.html", messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.PARTIAL, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.FAILED, outcome.verificationStatus());
+            assertTrue(outcome.finalAnswer().startsWith("[Partial verification: static checks failed -"),
+                    outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("The turn remains partial."));
+            assertTrue(outcome.finalAnswer().contains("Remaining static verification problems:"));
+            assertTrue(outcome.finalAnswer().contains("file-level verification reported warning"));
+            assertTrue(outcome.finalAnswer().contains("some requested file changes succeeded and some failed"));
+            assertEquals(TaskCompletionStatus.PARTIAL, outcome.taskOutcome().completionStatus());
+            assertEquals(TaskVerificationStatus.FAILED, outcome.taskOutcome().verificationResult().status());
+            assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.PARTIAL_MUTATION));
+            assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.STATIC_VERIFICATION_FAILED));
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void recoveredEmptyEditArgumentFailureDoesNotPoisonCompletion() throws Exception {
         Path ws = Files.createTempDirectory("talos-recovered-empty-edit-outcome-");
         try {
