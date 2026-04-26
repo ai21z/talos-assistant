@@ -359,6 +359,22 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/26-scoped-negation-allows-edit.json] 26: scoped no-other-files language still allows explicit edit")
+    void scopedNegationAllowsExplicitEdit() {
+        var loaded = JsonScenarioLoader.load("scenarios/26-scoped-negation-allows-edit.json");
+
+        try (var result = ScenarioRunner.run(loaded.definition())) {
+            result.assertUsedTool("talos.read_file")
+                    .assertUsedTool("talos.edit_file")
+                    .assertApprovalCounts(1, 1, 0, 0)
+                    .assertNoFailedCalls()
+                    .assertFileContains("index.html", "<title>Night Signal</title>")
+                    .assertFileNotContains("index.html", "<title>Night Drive</title>")
+                    .assertFileContains("style.css", "background");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/11-partial-mutation-summary-truthful.json] 11: partial mutation summary reports only verified outcomes")
     void partialMutationSummaryIsTruthful() {
         var loaded = JsonScenarioLoader.load("scenarios/11-partial-mutation-summary-truthful.json");
