@@ -733,4 +733,25 @@ class ExecutionOutcomeTest {
         assertEquals(MutationOutcomeStatus.NOT_ATTEMPTED, outcome.taskOutcome().mutationOutcome().status());
         assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.STREAMING_NO_TOOL_MUTATION_REPLACED));
     }
+
+    @Test
+    void malformedProtocolArrayNoToolAnswerIsFailedAndReplaced() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Make the edits please."));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromNoTool("""
+                [
+                    ,
+
+                ]
+                """, messages, null, true);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.FAILED, outcome.completionStatus());
+        assertTrue(outcome.malformedProtocolDebrisReplaced());
+        assertEquals(AssistantTurnExecutor.MALFORMED_TOOL_PROTOCOL_REPLACEMENT, outcome.finalAnswer());
+        assertEquals(TaskCompletionStatus.FAILED, outcome.taskOutcome().completionStatus());
+        assertTrue(outcome.taskOutcome().hasWarning(
+                TruthWarningType.MALFORMED_TOOL_PROTOCOL_DEBRIS_REPLACED));
+    }
 }
