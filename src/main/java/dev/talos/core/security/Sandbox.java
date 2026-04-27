@@ -81,7 +81,7 @@ public final class Sandbox {
         try {
             if (Files.exists(p)) {
                 // first, avoid link trickery; then resolve fully
-                real = p.toRealPath(LinkOption.NOFOLLOW_LINKS);
+                p.toRealPath(LinkOption.NOFOLLOW_LINKS);
                 real = p.toRealPath();
             } else {
                 Path parent = p.toAbsolutePath().normalize().getParent();

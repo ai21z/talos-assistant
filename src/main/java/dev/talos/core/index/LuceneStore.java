@@ -124,7 +124,7 @@ public class LuceneStore implements AutoCloseable, CorpusStore {
                     doc.add(new KnnFloatVectorField(F_VEC, vec));
                 } else {
                     LOG.debug("Skip vector for {} (have={}, expected={})", path,
-                            (vec == null ? -1 : vec.length), vectorDim);
+                            vec.length, vectorDim);
                 }
             }
 

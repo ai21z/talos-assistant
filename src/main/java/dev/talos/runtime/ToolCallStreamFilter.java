@@ -350,30 +350,27 @@ public final class ToolCallStreamFilter implements Consumer<String> {
             boolean toolCallFence = ToolCallParser.looksLikeStandaloneToolJson(fenceContent)
                     || looksLikeIncompleteBareToolJson(fenceContent);
             boolean emptyJsonFence = isJsonFenceOpening(fenceOpening) && fenceContent.isBlank();
-            if (toolCallFence || emptyJsonFence) {
-                // Tool-call or empty JSON protocol debris — suppress the fence.
-                emitPendingProtocolPrefix(true);
-                String remainder = text.substring(cm.end());
-                buffer.setLength(0);
-                buffer.append(remainder);
-                fenceOpening = "";
-                state = State.PASSTHROUGH;
-                return true;
-            } else {
-                // Not a tool call — emit the opening fence + content + closing fence
+            if (!toolCallFence && !emptyJsonFence) {
+                // Not a tool call — emit the opening fence + content + closing fence.
                 emitPendingProtocolPrefix(false);
                 String full = fenceOpening + text.substring(0, cm.end());
-                String remainder = text.substring(cm.end());
                 delegate.accept(full);
-                buffer.setLength(0);
-                buffer.append(remainder);
-                fenceOpening = "";
-                state = State.PASSTHROUGH;
-                return true;
+            } else {
+                // Tool-call or empty JSON protocol debris — suppress the fence.
+                emitPendingProtocolPrefix(true);
             }
+            finishFenceBuffer(text.substring(cm.end()));
+            return true;
         }
         // Still waiting for closing fence
         return false;
+    }
+
+    private void finishFenceBuffer(String remainder) {
+        buffer.setLength(0);
+        buffer.append(remainder);
+        fenceOpening = "";
+        state = State.PASSTHROUGH;
     }
 
     /**

@@ -51,6 +51,7 @@ import java.util.function.UnaryOperator;
  * a scripted {@link dev.talos.core.llm.LlmClient}. The package-private
  * helpers (gate predicates, annotators) remain test-only.
  */
+@SuppressWarnings("resource") // Context-owned LlmClient is borrowed throughout the turn executor.
 public final class AssistantTurnExecutor {
 
     private static final Logger LOG = LoggerFactory.getLogger(AssistantTurnExecutor.class);
@@ -190,7 +191,7 @@ public final class AssistantTurnExecutor {
                         ToolCallLoop.LoopResult loopResult = ctx.toolCallLoop().run(
                                 answer, streamResult.toolCalls(), messages, workspace, ctx);
                         answer = loopResult.finalAnswer();
-                        LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked",
+                        LOG.debug("Streaming tool-call loop complete: {} iterations, {} tools invoked",
                                 loopResult.iterations(), loopResult.toolsInvoked());
                         appendSummary(out, loopResult);
                         ToolLoopAnswerResolution resolution = resolveToolLoopAnswer(
@@ -230,7 +231,7 @@ public final class AssistantTurnExecutor {
                         ToolCallLoop.LoopResult loopResult = ctx.toolCallLoop().run(
                                 answer, streamResult.toolCalls(), messages, workspace, ctx);
                         answer = loopResult.finalAnswer();
-                        LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked",
+                        LOG.debug("Buffered tool-call loop complete: {} iterations, {} tools invoked",
                                 loopResult.iterations(), loopResult.toolsInvoked());
                         appendSummary(out, loopResult);
                         ToolLoopAnswerResolution resolution = resolveToolLoopAnswer(
@@ -1075,7 +1076,7 @@ public final class AssistantTurnExecutor {
         if (failure == null || orderedMutatingOutcomes == null || orderedMutatingOutcomes.isEmpty()) return false;
         if (!failure.invalidEmptyEditArguments()) return false;
         String failedPath = ToolCallSupport.normalizePath(failure.pathHint());
-        if (failedPath == null || failedPath.isBlank()) return false;
+        if (failedPath.isBlank()) return false;
         boolean sawFailure = false;
         for (ToolCallLoop.ToolOutcome outcome : orderedMutatingOutcomes) {
             if (outcome == failure) {

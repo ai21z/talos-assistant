@@ -33,6 +33,7 @@ public final class StatusCommand implements Command {
     }
 
     @Override
+    @SuppressWarnings("resource") // ctx.llm() is borrowed from the active REPL context.
     public Result execute(String args, Context ctx) {
         boolean verbose = false;
         if (args != null && !args.isBlank()) {
@@ -93,11 +94,9 @@ public final class StatusCommand implements Command {
         sb.append(AnsiColor.grey("  Scope     ")).append(workspace.getFileName()).append("\n");
         sb.append(AnsiColor.grey("  Vectors   ")).append(vectors ? AnsiColor.green("ON") : AnsiColor.yellow("OFF")).append("\n");
 
-        if (verbose) {
-            sb.append(AnsiColor.grey("  Host      ")).append(host).append("\n");
-            sb.append(AnsiColor.grey("  Embed     ")).append(embedModel).append("\n");
-            sb.append(AnsiColor.grey("  Concurr.  ")).append(CfgUtil.intAt(rag, "embed_concurrency", 4)).append("\n");
-        }
+        sb.append(AnsiColor.grey("  Host      ")).append(host).append("\n");
+        sb.append(AnsiColor.grey("  Embed     ")).append(embedModel).append("\n");
+        sb.append(AnsiColor.grey("  Concurr.  ")).append(CfgUtil.intAt(rag, "embed_concurrency", 4)).append("\n");
 
         sb.append("\n").append(AnsiColor.grey("  Limits")).append("\n");
         sb.append(AnsiColor.dim(String.format("    top_k_max=%d  response_max=%d\n", topKMax, responseMax)));
@@ -112,49 +111,46 @@ public final class StatusCommand implements Command {
         sb.append(AnsiColor.dim("    from=")).append(AnsiColor.dim(String.valueOf(cfg.getReport().loadedFrom)));
         sb.append(AnsiColor.dim("  strict=")).append(AnsiColor.dim(String.valueOf(cfg.getReport().strictMode)));
         sb.append(AnsiColor.dim("  defaults=")).append(AnsiColor.dim(String.valueOf(cfg.getReport().defaultedKeys.size())));
-        if (!verbose) sb.append(AnsiColor.grey("  (/status --verbose)"));
         sb.append("\n");
 
-        if (verbose) {
-            try {
-                var indexer = ctx.rag().getIndexer();
-                var stats = indexer.getLastRunStats();
-                if (stats != null) {
-                    sb.append("\n").append(AnsiColor.grey("  Last Index Run")).append("\n");
-                    sb.append(AnsiColor.dim("    " + stats.getSummary())).append("\n");
-                    sb.append(AnsiColor.dim("    " + stats.getDetailedTimings())).append("\n");
-                }
-            } catch (Exception ignore) {}
+        try {
+            var indexer = ctx.rag().getIndexer();
+            var stats = indexer.getLastRunStats();
+            if (stats != null) {
+                sb.append("\n").append(AnsiColor.grey("  Last Index Run")).append("\n");
+                sb.append(AnsiColor.dim("    " + stats.getSummary())).append("\n");
+                sb.append(AnsiColor.dim("    " + stats.getDetailedTimings())).append("\n");
+            }
+        } catch (Exception ignore) {}
 
-            try (var cache = new dev.talos.core.cache.CacheDb()) {
-                var cacheStats = cache.getStats();
-                sb.append("\n").append(AnsiColor.grey("  Cache")).append("\n");
-                sb.append(AnsiColor.dim("    " + cacheStats.summary())).append("\n");
-            } catch (Exception ignore) {
-                sb.append(AnsiColor.dim("  Cache: unavailable")).append("\n");
-            }
+        try (var cache = new dev.talos.core.cache.CacheDb()) {
+            var cacheStats = cache.getStats();
+            sb.append("\n").append(AnsiColor.grey("  Cache")).append("\n");
+            sb.append(AnsiColor.dim("    " + cacheStats.summary())).append("\n");
+        } catch (Exception ignore) {
+            sb.append(AnsiColor.dim("  Cache: unavailable")).append("\n");
+        }
 
-            if (!cfg.getReport().defaultedKeys.isEmpty()) {
-                sb.append(AnsiColor.dim("  Defaulted: " + String.join(", ", cfg.getReport().defaultedKeys))).append("\n");
-            }
+        if (!cfg.getReport().defaultedKeys.isEmpty()) {
+            sb.append(AnsiColor.dim("  Defaulted: " + String.join(", ", cfg.getReport().defaultedKeys))).append("\n");
+        }
 
-            var xmlCompat = XmlCompatTelemetry.snapshot();
-            sb.append("\n").append(AnsiColor.grey("  XML Compat")).append("\n");
-            sb.append(AnsiColor.dim("    parser_activations=" + xmlCompat.parserFallbackActivations()
-                    + "  parser_calls=" + xmlCompat.parserFallbackCalls()
-                    + "  stream_suppressed=" + xmlCompat.streamSuppressedBlocks())).append("\n");
-            if (xmlCompat.lastParserFallbackAt() != null) {
-                sb.append(AnsiColor.dim("    last_parser_at=" + xmlCompat.lastParserFallbackAt())).append("\n");
-            }
-            if (xmlCompat.lastStreamSuppressedAt() != null) {
-                sb.append(AnsiColor.dim("    last_stream_at=" + xmlCompat.lastStreamSuppressedAt())).append("\n");
-            }
-            if (xmlCompat.lastParserToolNames() != null && !xmlCompat.lastParserToolNames().isBlank()) {
-                sb.append(AnsiColor.dim("    last_tools=" + xmlCompat.lastParserToolNames())).append("\n");
-            }
-            if (!xmlCompat.hasAnySignal()) {
-                sb.append(AnsiColor.dim("    no XML compatibility usage observed in this process")).append("\n");
-            }
+        var xmlCompat = XmlCompatTelemetry.snapshot();
+        sb.append("\n").append(AnsiColor.grey("  XML Compat")).append("\n");
+        sb.append(AnsiColor.dim("    parser_activations=" + xmlCompat.parserFallbackActivations()
+                + "  parser_calls=" + xmlCompat.parserFallbackCalls()
+                + "  stream_suppressed=" + xmlCompat.streamSuppressedBlocks())).append("\n");
+        if (xmlCompat.lastParserFallbackAt() != null) {
+            sb.append(AnsiColor.dim("    last_parser_at=" + xmlCompat.lastParserFallbackAt())).append("\n");
+        }
+        if (xmlCompat.lastStreamSuppressedAt() != null) {
+            sb.append(AnsiColor.dim("    last_stream_at=" + xmlCompat.lastStreamSuppressedAt())).append("\n");
+        }
+        if (xmlCompat.lastParserToolNames() != null && !xmlCompat.lastParserToolNames().isBlank()) {
+            sb.append(AnsiColor.dim("    last_tools=" + xmlCompat.lastParserToolNames())).append("\n");
+        }
+        if (!xmlCompat.hasAnySignal()) {
+            sb.append(AnsiColor.dim("    no XML compatibility usage observed in this process")).append("\n");
         }
 
         sb.append("\n");

@@ -50,10 +50,9 @@ public final class SecretCommand implements Command {
         switch (op) {
             case "set" -> {
                 char[] value = promptSecret("Enter value: ");
-                if (value == null || value.length == 0) return new Result.Error("Aborted (no value).", 200);
+                if (value.length == 0) return new Result.Error("Aborted (no value).", 200);
                 try {
                     char[] confirm = promptSecret("Confirm value: ");
-                    if (confirm == null) return new Result.Error("Aborted.", 200);
                     if (!equals(value, confirm)) {
                         wipe(confirm);
                         wipe(value);

@@ -260,7 +260,7 @@ public final class ToolCallExecutionStage {
     }
 
     private static Set<String> staleRereadRequiredPaths(LoopState state) {
-        if (state == null || state.staleEditFailuresByPath == null || state.staleEditFailuresByPath.isEmpty()) {
+        if (state == null || state.staleEditFailuresByPath.isEmpty()) {
             return Set.of();
         }
         Set<String> paths = new HashSet<>();

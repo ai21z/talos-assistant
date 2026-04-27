@@ -3,7 +3,6 @@ package dev.talos.core.index;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
 import dev.talos.core.cache.CacheDb;
-import dev.talos.core.embed.BatchEmbeddings;
 import dev.talos.core.embed.CachingEmbeddings;
 import dev.talos.core.embed.EmbeddingProfile;
 import dev.talos.core.embed.EmbeddingsFactory;
@@ -135,7 +134,7 @@ public class Indexer {
             final int vectorDim = useVectors ? dim : 0;
 
             // Effectively-final reference for lambdas
-            final Embeddings embForTasks = useVectors ? cachedEmb : null;
+            final CachingEmbeddings embForTasks = useVectors ? cachedEmb : null;
 
             try (var store = new LuceneStore(indexDirFor(rootPath), vectorDim)) {
                 int chunkChars = CfgUtil.intAt(rag, "chunk_chars", 1200);
@@ -173,7 +172,7 @@ public class Indexer {
                             List<ParsedChunk> chunks = Chunker.chunk(rel, text, chunkChars, overlap);
 
                             // Batch process embeddings for better performance
-                            if (embForTasks != null && embForTasks instanceof BatchEmbeddings batchEmb) {
+                            if (embForTasks != null) {
                                 // Extract texts for batch processing
                                 List<String> chunkTexts = chunks.stream()
                                     .map(ParsedChunk::text)
@@ -182,7 +181,7 @@ public class Indexer {
                                 long embedStart = System.currentTimeMillis();
                                 List<float[]> vectors;
                                 try {
-                                    vectors = batchEmb.embedBatch(chunkTexts);
+                                    vectors = embForTasks.embedBatch(chunkTexts);
                                 } catch (Exception ex) {
                                     LOG.debug("Batch embedding failed for {}: {} (falling back to individual)", rel, ex.toString());
                                     // Fallback to individual processing
@@ -216,27 +215,11 @@ public class Indexer {
                                     stats.addLuceneTime(System.currentTimeMillis() - luceneStart);
                                 }
                             } else {
-                                // Fallback to individual processing for non-batch embeddings
+                                // BM25-only processing when vectors are disabled or unavailable.
                                 for (ParsedChunk c : chunks) {
-                                    float[] vec = null;
-                                    if (embForTasks != null) {
-                                        long embedStart = System.currentTimeMillis();
-                                        try {
-                                            vec = embForTasks.embed(c.text());
-                                            if (vec == null || vec.length == 0) {
-                                                LOG.debug("Empty embedding for {}, BM25-only for this chunk", c.id());
-                                                vec = null;
-                                            }
-                                        } catch (Exception ex) {
-                                            LOG.debug("Embedding failed for {}: {} (BM25-only this chunk)", c.id(), ex.toString());
-                                            vec = null;
-                                        }
-                                        stats.addEmbedTime(System.currentTimeMillis() - embedStart);
-                                    }
-
                                     long luceneStart = System.currentTimeMillis();
                                     String currentHash = skipHashing ? null : Hash.sha256Hex(Files.readAllBytes(p));
-                                    store.add(c.id(), c.text(), vec, currentHash, c.chunkId(), c.metadata());
+                                    store.add(c.id(), c.text(), null, currentHash, c.chunkId(), c.metadata());
                                     stats.incrementChunksWritten();
                                     stats.addLuceneTime(System.currentTimeMillis() - luceneStart);
                                 }
@@ -288,8 +271,8 @@ public class Indexer {
                 this.lastRunStats = stats;
 
                 // Log cache metrics if using CachingEmbeddings
-                if (embForTasks instanceof CachingEmbeddings ce) {
-                    LOG.info("Embedding cache: hits={}, misses={}", ce.cacheHits(), ce.cacheMisses());
+                if (embForTasks != null) {
+                    LOG.info("Embedding cache: hits={}, misses={}", embForTasks.cacheHits(), embForTasks.cacheMisses());
                 }
 
                 // Log summary and detailed timings

@@ -34,6 +34,7 @@ public final class AskMode implements Mode {
                     Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
 
     @Override
+    @SuppressWarnings("resource") // ctx.llm() is a borrowed REPL-scoped client, not owned by this mode.
     public Optional<Result> handle(String rawLine, Path workspace, Context ctx) throws Exception {
         if (rawLine == null || rawLine.isBlank() || ctx == null || ctx.llm() == null) return Optional.empty();
 

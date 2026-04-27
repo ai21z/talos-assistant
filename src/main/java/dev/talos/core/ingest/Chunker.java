@@ -74,7 +74,7 @@ public class Chunker {
             }
         }
         if (!buf.isEmpty()) {
-            emit(relPath, fileHash, cid++, buf.toString(), language, lastHeading,
+            emit(relPath, fileHash, cid, buf.toString(), language, lastHeading,
                     bufStartChar, bufStartChar + buf.length(), lineOffsets, sourceId, out);
         }
 

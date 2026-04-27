@@ -133,7 +133,6 @@ public final class ReplRouter {
                 ctx, "(prompt)"
         );
 
-        if (r == null) return false;
         render.render(r);
 
         // Show turn stats (timing) after the answer

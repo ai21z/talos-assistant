@@ -218,6 +218,9 @@ public final class TurnProcessor {
         if (call == null) {
             return ToolResult.fail(ToolError.invalidParams("Tool call is null"));
         }
+        if (session == null || ctx == null) {
+            return ToolResult.fail(ToolError.invalidParams("Tool execution context is unavailable"));
+        }
 
         // Check if the tool exists
         TalosTool tool = toolRegistry.get(call.toolName());
@@ -244,7 +247,7 @@ public final class TurnProcessor {
                             + "or wait for an explicit change request in a later turn."));
         }
 
-        if (ctx != null && ctx.executionPhaseState() != null) {
+        if (ctx.executionPhaseState() != null) {
             ToolResult phaseRejection = PhasePolicy.rejectIfDisallowed(
                     ctx.executionPhaseState().phase(), tool.name(), risk);
             if (phaseRejection != null) {
@@ -268,7 +271,7 @@ public final class TurnProcessor {
         // error so the model retries with the actual workspace path.
         for (String k : List.of("path", "file_path", "filepath", "file", "filename", "from", "to")) {
             String v = call.param(k);
-            if (v != null && TemplatePlaceholderGuard.looksLikeTemplatePlaceholder(v)) {
+            if (TemplatePlaceholderGuard.looksLikeTemplatePlaceholder(v)) {
                 String msg = TemplatePlaceholderGuard.rejectionMessage(call.toolName(), k, v);
                 TurnAuditCapture.recordToolCall(
                         call.toolName(), path == null ? "" : path, false,
@@ -294,7 +297,7 @@ public final class TurnProcessor {
             // write_file-family: content / text / body / file_content
             for (String k : List.of("content", "text", "body", "file_content", "data")) {
                 String v = call.param(k);
-                if (v != null && TemplatePlaceholderGuard.looksLikeTemplatePlaceholder(v)) {
+                if (TemplatePlaceholderGuard.looksLikeTemplatePlaceholder(v)) {
                     placeholderParam = k;
                     placeholderValue = v;
                     break;
@@ -303,7 +306,7 @@ public final class TurnProcessor {
             // edit_file: new_string
             if (placeholderParam == null) {
                 String v = call.param("new_string");
-                if (v != null && TemplatePlaceholderGuard.looksLikeTemplatePlaceholder(v)) {
+                if (TemplatePlaceholderGuard.looksLikeTemplatePlaceholder(v)) {
                     placeholderParam = "new_string";
                     placeholderValue = v;
                 }
@@ -338,7 +341,6 @@ public final class TurnProcessor {
         // the user through the approval detail (see buildApprovalDetail).
         String scopeWarning = null;
         if (risk.requiresApproval()
-                && path != null
                 && ScopeGuard.looksLikeOffScopeMutationTarget(userRequest, path)) {
             scopeWarning = ScopeGuard.warningMessage(userRequest, path);
         }
@@ -348,7 +350,7 @@ public final class TurnProcessor {
 
             // Policy classification. AUTO_APPROVE skips the gate; DENY refuses
             // without prompting; ASK falls through to the gate as before.
-            Path workspace = session != null ? session.workspace() : null;
+            Path workspace = session.workspace();
             ApprovalPolicy.Decision decision = approvalPolicy.decide(workspace, call, risk);
 
             // Scope-guard override: if the target looks off-scope, the user

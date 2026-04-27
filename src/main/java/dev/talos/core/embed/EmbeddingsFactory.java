@@ -58,7 +58,7 @@ public final class EmbeddingsFactory {
         String defaultQInstr = builtIn != null ? builtIn.queryInstruction()     : null;
         String defaultDInstr = builtIn != null ? builtIn.documentInstruction()  : null;
         int defaultMaxInput  = builtIn != null ? builtIn.maxInputTokens()       : 8192;
-        boolean defaultNorm  = builtIn != null ? builtIn.normalize()            : true;
+        boolean defaultNorm  = builtIn == null || builtIn.normalize();
 
         int dims         = CfgUtil.intAt(embedCfg, "dimensions", defaultDims);
         // Instruction prefixes may intentionally have trailing whitespace — do NOT trim.

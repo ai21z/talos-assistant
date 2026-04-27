@@ -21,15 +21,15 @@ public final class MutationIntent {
                     + "cool|hey|hi|hello|hmm+),?\\s+)*";
 
     private static final String CORE_MUTATION_VERBS =
-            "(?:edit|modify|change|update|fix|repair|rewrite|replace|redesign|"
+            "(edit|modify|change|update|fix|repair|rewrite|replace|redesign|"
                     + "restyle|re-style|re-design|write|create|save|"
                     + "apply|add|remove|delete|refactor|put|implement)";
 
     private static final String BUILD_ARTIFACT_VERBS =
-            "(?:make|build|generate|set\\s+up|setup|scaffold)";
+            "(make|build|generate|set\\s+up|setup|scaffold)";
 
     private static final String ARTIFACT_NOUNS =
-            "(?:website|site|web\\s*app|app|application|page|calculator|"
+            "(website|site|web\\s*app|app|application|page|calculator|"
                     + "component|file|project|tool|ui|interface|stylesheet|"
                     + "style\\s*sheet|script)";
 

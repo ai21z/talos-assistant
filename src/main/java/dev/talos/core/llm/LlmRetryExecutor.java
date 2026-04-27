@@ -25,7 +25,9 @@ final class LlmRetryExecutor {
                 throw new EngineException.ResponseError(0, e.getMessage(), e);
             }
         }
-        throw lastTransient;
+        throw lastTransient == null
+                ? new EngineException.Transient("Transient LLM failure after retry budget was exhausted.", 0)
+                : lastTransient;
     }
 
     private static void backoff(int tryNumber) {

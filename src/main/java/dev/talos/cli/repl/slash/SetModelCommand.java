@@ -12,7 +12,9 @@ public final class SetModelCommand implements Command {
                 CommandGroup.MODELS);
     }
 
-    @Override public Result execute(String args, Context ctx) throws Exception {
+    @Override
+    @SuppressWarnings("resource") // ctx.llm() is borrowed from the active REPL context.
+    public Result execute(String args, Context ctx) throws Exception {
         String a = args == null ? "" : args.trim();
         if (!a.toLowerCase().startsWith("model")) return new Result.Error("Usage: /set model <name>", 200);
         String name = a.substring("model".length()).trim();
@@ -23,7 +25,7 @@ public final class SetModelCommand implements Command {
 
         try (var reg = new EngineRegistry(ctx.cfg())) {
             var cat = reg.compositeCatalog();
-            var mref = cat.find(sanitized.contains("/") ? sanitized : sanitized); // search either way
+            var mref = cat.find(sanitized);
             if (mref.isEmpty()) return new Result.Error("Model not found: " + sanitized + "\nTip: /models", 404);
             var chosen = mref.get();
             ctx.llm().setModel(chosen.backend() + "/" + chosen.name());

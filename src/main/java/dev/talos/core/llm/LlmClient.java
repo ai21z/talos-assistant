@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -99,7 +100,7 @@ public final class LlmClient implements AutoCloseable {
     private volatile List<ToolSpec> toolSpecs = List.of();
 
     // Telemetry: track truncation events
-    private volatile int truncationCount = 0;
+    private final AtomicInteger truncationCount = new AtomicInteger();
 
     // ── N4 scripted-LLM test seam ────────────────────────────────────
     //
@@ -195,12 +196,12 @@ public final class LlmClient implements AutoCloseable {
 
     /** Get number of truncation events that occurred (for telemetry/status reporting). */
     public int getTruncationCount() {
-        return truncationCount;
+        return truncationCount.get();
     }
 
     /** Reset telemetry counters. */
     public void resetTelemetry() {
-        truncationCount = 0;
+        truncationCount.set(0);
     }
 
     // ── N4 scripted-LLM test seam (factories + helper) ────────────────
@@ -435,7 +436,7 @@ public final class LlmClient implements AutoCloseable {
         // output sanitation mirrors RenderEngine (strip ANSI/control + think tags) + hard cap
         String cleaned = Sanitize.stripThinkTags(raw);
         cleaned = Sanitize.sanitizeForOutput(cleaned);
-        cleaned = Sanitize.hardTruncate(cleaned, safeCap(), () -> truncationCount++);
+        cleaned = Sanitize.hardTruncate(cleaned, safeCap(), truncationCount::incrementAndGet);
         return cleaned;
     }
 

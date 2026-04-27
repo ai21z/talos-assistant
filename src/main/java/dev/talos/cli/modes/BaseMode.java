@@ -17,7 +17,7 @@ abstract class BaseMode {
     );
 
     protected static final Pattern FIRST_PATH_PATTERN = Pattern.compile(
-            "^[^\\s:]++\\s++(?:\"([^\"]++)\"|'([^']++)'|`([^`++]++)`|(\\S++))",
+            "^[^\\s:]++\\s++(?:\"([^\"]++)\"|'([^']++)'|`([^`]++)`|(\\S++))",
             Pattern.UNICODE_CHARACTER_CLASS
     );
 

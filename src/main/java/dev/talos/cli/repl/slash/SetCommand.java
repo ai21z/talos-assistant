@@ -14,6 +14,7 @@ public final class SetCommand implements Command {
     }
 
     @Override
+    @SuppressWarnings("resource") // ctx.llm() is borrowed from the active REPL context.
     public Result execute(String args, Context ctx) throws Exception {
         String a = args == null ? "" : args.trim();
         if (a.isEmpty() || !a.toLowerCase(Locale.ROOT).startsWith("model")) {

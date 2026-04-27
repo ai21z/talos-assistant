@@ -17,6 +17,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 
+@SuppressWarnings("resource") // LoopState.ctx owns the shared LlmClient for the active REPL session.
 public final class ToolCallRepromptStage {
     private static final Logger LOG = LoggerFactory.getLogger(ToolCallRepromptStage.class);
 
@@ -241,13 +242,12 @@ public final class ToolCallRepromptStage {
             return deniedMutationStopMessage();
         }
 
-        int anchorIndex = -1;
         state.messages.add(ChatMessage.system(
                 "[Tool policy stop] The latest mutating tool call was rejected by Talos policy. "
                         + "Do not call any more tools in this turn. Answer the user's request using only "
                         + "the tool results already gathered. If the gathered evidence is insufficient, "
                         + "say exactly what was inspected and what remains unknown."));
-        anchorIndex = state.messages.size() - 1;
+        int anchorIndex = state.messages.size() - 1;
 
         try {
             LlmClient.StreamResult terminal =
@@ -265,7 +265,7 @@ public final class ToolCallRepromptStage {
             LOG.warn("Response-only synthesis after denied mutation failed: {}", e.getMessage());
             return deniedMutationStopMessage();
         } finally {
-            if (anchorIndex >= 0 && anchorIndex < state.messages.size()) {
+            if (anchorIndex < state.messages.size()) {
                 ChatMessage m = state.messages.get(anchorIndex);
                 if ("system".equals(m.role())
                         && m.content() != null
@@ -314,9 +314,7 @@ public final class ToolCallRepromptStage {
 
     static Optional<StaleEditRepair> nextStaleEditRepair(LoopState state) {
         if (state == null
-                || state.staleEditFailuresByPath == null
                 || state.staleEditFailuresByPath.isEmpty()
-                || state.pathsMutatedSinceRead == null
                 || state.pathsMutatedSinceRead.isEmpty()) {
             return Optional.empty();
         }
@@ -344,9 +342,7 @@ public final class ToolCallRepromptStage {
 
     static Optional<EmptyEditRepair> nextEmptyEditRepair(LoopState state) {
         if (state == null
-                || state.emptyEditArgumentFailuresByPath == null
                 || state.emptyEditArgumentFailuresByPath.isEmpty()
-                || state.pathsReadThisTurn == null
                 || state.pathsReadThisTurn.isEmpty()) {
             return Optional.empty();
         }
