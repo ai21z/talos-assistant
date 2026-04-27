@@ -150,7 +150,13 @@ class TaskContractResolverTest {
     void statusQuestionsAboutPriorChangesBecomeVerifyOnlyAndNeverMutationCapable() {
         List<String> inputs = List.of(
                 "did you make the changes?",
+                "did you make the change?",
                 "did you update the files?",
+                "did you fix it?",
+                "did it work?",
+                "is it done?",
+                "are the changes applied?",
+                "did you apply the changes?",
                 "what did you change?",
                 "why did nothing change?",
                 "Why did you not make changes?");

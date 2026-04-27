@@ -766,6 +766,33 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/53-status-followup-preserves-partial-outcome.json] 53: status follow-up preserves previous partial outcome")
+    void statusFollowupPreservesPartialOutcome() {
+        var loaded = JsonScenarioLoader.load("scenarios/53-status-followup-preserves-partial-outcome.json");
+        List<ChatMessage> history = new ArrayList<>();
+        var historyNode = loaded.raw().path("history");
+        for (var node : historyNode) {
+            history.add(new ChatMessage(
+                    node.path("role").asText(),
+                    node.path("content").asText()));
+        }
+
+        try (var result = ScenarioRunner.runThroughExecutorWithHistory(
+                loaded.definition(),
+                history,
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("partial")
+                    .assertAnswerContains("not complete")
+                    .assertAnswerContains("HTML does not link JavaScript file")
+                    .assertAnswerContains("submit/calculate button")
+                    .assertAnswerNotContains("functional 3-file BMI calculator")
+                    .assertAnswerNotContains("changes applied successfully");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/50-static-verifier-placeholder-web-app-fails.json] 50: placeholder JavaScript prevents web app verification")
     void staticVerifierPlaceholderWebAppFails() {
         var loaded = JsonScenarioLoader.load("scenarios/50-static-verifier-placeholder-web-app-fails.json");
