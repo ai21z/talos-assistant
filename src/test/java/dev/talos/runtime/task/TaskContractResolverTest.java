@@ -305,6 +305,51 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void repairFollowUpAfterIncompleteMutationInheritsApplyCapableContract() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.user(
+                "Create index.html, styles.css, and scripts.js for a BMI calculator."));
+        messages.add(ChatMessage.assistant("""
+                [Task incomplete: Static verification failed - Expected targets were not all mutated.]
+
+                The requested task is not verified complete.
+                Remaining static verification problems:
+                - scripts.js was expected but was not created.
+                """));
+        messages.add(ChatMessage.user("nothing changed, try one more time"));
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        assertEquals(TaskType.FILE_CREATE, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("index.html", "styles.css", "scripts.js"), contract.expectedTargets());
+    }
+
+    @Test
+    void statusQuestionAfterIncompleteMutationRemainsVerifyOnly() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.user(
+                "Create index.html, styles.css, and scripts.js for a BMI calculator."));
+        messages.add(ChatMessage.assistant("""
+                [Task incomplete: Static verification failed - Expected targets were not all mutated.]
+
+                The requested task is not verified complete.
+                Remaining static verification problems:
+                - scripts.js was expected but was not created.
+                """));
+        messages.add(ChatMessage.user("did you make the changes?"));
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        assertEquals(TaskType.VERIFY_ONLY, contract.type());
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+    }
+
+    @Test
     void nullOrBlankInputIsUnknown() {
         List<String> inputs = List.of("", "   ");
         for (String input : inputs) {

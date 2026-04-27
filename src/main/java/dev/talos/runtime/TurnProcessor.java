@@ -232,7 +232,10 @@ public final class TurnProcessor {
         ToolRiskLevel risk = tool.descriptor().riskLevel();
         String path = resolvePathParam(call);
         String userRequest = TurnUserRequestCapture.get();
-        TaskContract taskContract = TaskContractResolver.fromUserRequest(userRequest);
+        TaskContract taskContract = TurnTaskContractCapture.get();
+        if (taskContract == null) {
+            taskContract = TaskContractResolver.fromUserRequest(userRequest);
+        }
 
         if (ToolCallSupport.isMutatingTool(call.toolName())
                 && userRequest != null
