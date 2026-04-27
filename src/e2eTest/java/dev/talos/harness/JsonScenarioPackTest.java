@@ -716,6 +716,52 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/48-repair-followup-after-incomplete-outcome-applies.json] 48: repair follow-up after incomplete outcome is apply capable")
+    void repairFollowupAfterIncompleteOutcomeApplies() {
+        var loaded = JsonScenarioLoader.load("scenarios/48-repair-followup-after-incomplete-outcome-applies.json");
+        List<ChatMessage> history = new ArrayList<>();
+        var historyNode = loaded.raw().path("history");
+        for (var node : historyNode) {
+            history.add(new ChatMessage(
+                    node.path("role").asText(),
+                    node.path("content").asText()));
+        }
+
+        try (var result = ScenarioRunner.runThroughExecutorWithHistory(
+                loaded.definition(),
+                history,
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(1, 1, 0, 0)
+                    .assertFileContains("scripts.js", "BMI repaired")
+                    .assertAnswerContains("Created scripts.js");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/49-status-question-after-incomplete-outcome-stays-verify-only.json] 49: status question after incomplete outcome stays verify only")
+    void statusQuestionAfterIncompleteOutcomeStaysVerifyOnly() {
+        var loaded = JsonScenarioLoader.load("scenarios/49-status-question-after-incomplete-outcome-stays-verify-only.json");
+        List<ChatMessage> history = new ArrayList<>();
+        var historyNode = loaded.raw().path("history");
+        for (var node : historyNode) {
+            history.add(new ChatMessage(
+                    node.path("role").asText(),
+                    node.path("content").asText()));
+        }
+
+        try (var result = ScenarioRunner.runThroughExecutorWithHistory(
+                loaded.definition(),
+                history,
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertFileAbsent("scripts.js")
+                    .assertAnswerNotContains("Created scripts.js");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/32-unsupported-binary-document-honesty.json] 32: unsupported binary document reads are capability-limited")
     void unsupportedBinaryDocumentHonesty() {
         var loaded = JsonScenarioLoader.load("scenarios/32-unsupported-binary-document-honesty.json");

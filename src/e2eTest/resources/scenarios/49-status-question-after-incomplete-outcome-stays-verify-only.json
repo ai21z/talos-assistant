@@ -1,0 +1,24 @@
+{
+  "name": "status question after incomplete outcome stays verify only",
+  "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "status-question-after-incomplete-outcome-is-not-repair-apply"
+  ],
+  "runner": "executor-history",
+  "approvalPolicy": "APPROVE_ALL",
+  "history": [
+    {
+      "role": "user",
+      "content": "Create index.html, styles.css, and scripts.js for a BMI calculator."
+    },
+    {
+      "role": "assistant",
+      "content": "[Task incomplete: Static verification failed - Expected targets were not all mutated.]\n\nThe requested task is not verified complete.\n\nRemaining static verification problems:\n- scripts.js was expected but was not created."
+    }
+  ],
+  "userPrompt": "did you make the changes?",
+  "scriptedResponses": [
+    "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"scripts.js\",\"content\":\"const result = 'should not apply';\"}}"
+  ]
+}

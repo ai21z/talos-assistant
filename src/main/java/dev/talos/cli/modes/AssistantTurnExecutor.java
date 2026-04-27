@@ -7,6 +7,7 @@ import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.ToolCallStreamFilter;
 import dev.talos.runtime.TurnAuditCapture;
 import dev.talos.runtime.TurnPolicyTrace;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -163,6 +164,7 @@ public final class AssistantTurnExecutor {
         }
         boolean useStreaming = shouldUseStreaming(ctx, taskContract);
 
+        TurnTaskContractCapture.set(taskContract);
         try {
             if (useStreaming) {
                 // ── Streaming path ──────────────────────────────────────────
@@ -274,6 +276,8 @@ public final class AssistantTurnExecutor {
             out.append("\n[Error during LLM call")
                .append(detail != null && !detail.isBlank() ? ": " + detail : "")
                .append("]\n");
+        } finally {
+            TurnTaskContractCapture.clear();
         }
 
         return new TurnOutput(out.toString(), streamed);

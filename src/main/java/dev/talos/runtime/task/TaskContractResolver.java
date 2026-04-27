@@ -77,6 +77,14 @@ public final class TaskContractResolver {
     public static TaskContract fromMessages(List<ChatMessage> messages) {
         String latest = latestUserRequest(messages);
         TaskContract current = fromUserRequest(latest);
+        if (current.type() == TaskType.VERIFY_ONLY
+                || MutationIntent.looksPriorChangeStatusQuestion(latest)) {
+            return current;
+        }
+        if (looksLikeRepairFollowUp(latest)) {
+            TaskContract inherited = inheritedRepairContract(messages, latest, current);
+            if (inherited != null) return inherited;
+        }
         if (looksLikeDeicticFollowUp(latest) && !current.mutationRequested()) {
             TaskContract inherited = inheritedReadOnlyWorkspaceContract(messages, latest);
             if (inherited != null) return inherited;
@@ -158,6 +166,70 @@ public final class TaskContractResolver {
         return DEICTIC_FOLLOW_UPS.contains(lower);
     }
 
+    private static boolean looksLikeRepairFollowUp(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return false;
+        String lower = userRequest.strip().toLowerCase(Locale.ROOT)
+                .replaceAll("\\s+", " ")
+                .replaceAll("[.!?]+$", "");
+        return lower.contains("nothing changed")
+                || lower.contains("nothing happened")
+                || lower.contains("no changes happened")
+                || lower.contains("try again")
+                || lower.contains("try one more time")
+                || lower.contains("try once more")
+                || lower.contains("fix it")
+                || lower.contains("fix this")
+                || lower.contains("repair it")
+                || lower.contains("repair this")
+                || lower.contains("still does not work")
+                || lower.contains("still doesn't work")
+                || lower.contains("it does not work")
+                || lower.contains("it doesn't work")
+                || lower.contains("not working")
+                || lower.contains("didn't work")
+                || lower.contains("did not work")
+                || lower.contains("incomplete");
+    }
+
+    private static TaskContract inheritedRepairContract(
+            List<ChatMessage> messages,
+            String latestUserRequest,
+            TaskContract current
+    ) {
+        if (messages == null || messages.isEmpty()) return null;
+        String previousAssistant = previousAssistantResponse(messages, latestUserRequest);
+        if (!looksLikeIncompleteOutcome(previousAssistant)) return null;
+        String previousUser = previousUserRequest(messages, latestUserRequest);
+        if (previousUser == null || previousUser.isBlank()) return null;
+
+        TaskContract prior = fromUserRequest(previousUser);
+        if (!prior.mutationRequested() || !prior.mutationAllowed()) return null;
+        if (current != null && current.mutationRequested() && !current.expectedTargets().isEmpty()) {
+            return current;
+        }
+        return new TaskContract(
+                prior.type(),
+                true,
+                true,
+                true,
+                prior.expectedTargets(),
+                prior.forbiddenTargets(),
+                latestUserRequest);
+    }
+
+    private static boolean looksLikeIncompleteOutcome(String assistantResponse) {
+        if (assistantResponse == null || assistantResponse.isBlank()) return false;
+        String lower = assistantResponse.toLowerCase(Locale.ROOT);
+        return lower.contains("task incomplete")
+                || lower.contains("not verified complete")
+                || lower.contains("partial verification")
+                || lower.contains("the turn remains partial")
+                || lower.contains("static verification failed")
+                || lower.contains("remaining static verification problems")
+                || lower.contains("no file changes were applied")
+                || lower.contains("no files were changed");
+    }
+
     private static TaskContract inheritedReadOnlyWorkspaceContract(
             List<ChatMessage> messages,
             String latestUserRequest
@@ -214,6 +286,26 @@ public final class TaskContractResolver {
                 continue;
             }
             return content;
+        }
+        return null;
+    }
+
+    private static String previousAssistantResponse(List<ChatMessage> messages, String latestUserRequest) {
+        if (messages == null || messages.isEmpty()) return null;
+        boolean skippedLatest = false;
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            ChatMessage message = messages.get(i);
+            if (message == null) continue;
+            String content = message.content();
+            if ("user".equals(message.role())) {
+                if (!skippedLatest && Objects.equals(content, latestUserRequest)) {
+                    skippedLatest = true;
+                }
+                continue;
+            }
+            if (skippedLatest && "assistant".equals(message.role())) {
+                return content == null || content.isBlank() ? null : content;
+            }
         }
         return null;
     }
