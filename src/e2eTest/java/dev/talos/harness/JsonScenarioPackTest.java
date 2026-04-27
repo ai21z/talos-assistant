@@ -309,6 +309,21 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/47-fenced-write-json-with-backticks-executes.json] 47: fenced write_file JSON with backticks executes")
+    void fencedWriteJsonWithBackticksExecutes() {
+        var loaded = JsonScenarioLoader.load("scenarios/47-fenced-write-json-with-backticks-executes.json");
+
+        try (var result = ScenarioRunner.run(loaded.definition())) {
+            result.assertUsedTool("talos.write_file")
+                    .assertNoFailedCalls()
+                    .assertApprovalCounts(1, 1, 0, 0)
+                    .assertFileContains("scripts.js", "`Your BMI is ${bmi.toFixed(2)}`")
+                    .assertAnswerNotContains("talos.write_file")
+                    .assertAnswerNotContains("```json");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/22-build-website-prompt-allows-apply.json] 22: build website prompt is apply-capable")
     void buildWebsitePromptAllowsApply() {
         var loaded = JsonScenarioLoader.load("scenarios/22-build-website-prompt-allows-apply.json");

@@ -124,8 +124,7 @@ public final class ToolCallParser {
      *  alias-aware extractor. Without this, a model emitting {@code ```json { "tool_name": ... }```}
      *  has its fallback tool call silently dropped before extraction. */
     private static final Pattern CODE_FENCE_PATTERN = Pattern.compile(
-            "```(?:json)?\\s*\\n(\\{[^`]*\"(?:name|function|function_name|tool_name|tool)\"[^`]*\\})\\s*\\n?```",
-            Pattern.DOTALL
+            "```(?:json)?[ \\t]*\\R([\\s\\S]*?\"(?:name|function|function_name|tool_name|tool)\"[\\s\\S]*?)\\R?```"
     );
 
     /** Bare JSON at line boundaries with "talos." prefix (model forgot XML wrapper). */

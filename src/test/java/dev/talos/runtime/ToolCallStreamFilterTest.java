@@ -371,6 +371,18 @@ class ToolCallStreamFilterTest {
         }
 
         @Test
+        @DisplayName("JSON code-fenced write_file with backticks in content is suppressed")
+        void json_fence_write_file_with_backticks_in_content_suppressed() {
+            String input = """
+                    ```json
+                    {"name": "talos.write_file", "arguments": {"path": "scripts.js", "content": "const message = `BMI ${bmi.toFixed(2)}`;"}}
+                    ```
+                    """;
+            String result = joined(f -> f.accept(input));
+            assertEquals("", result);
+        }
+
+        @Test
         @DisplayName("JSON code-fenced bare write_file alias is suppressed")
         void json_fence_bare_write_file_alias_suppressed() {
             String input = "```json\n{\"name\": \"write_file\", \"arguments\": {\"path\": \"index.html\"}}\n```";
