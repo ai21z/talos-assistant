@@ -137,7 +137,7 @@ public final class StaticTaskVerifier {
                     "Static web coherence checks passed for " + mutatedPaths.size() + " mutated target(s).",
                     facts);
         }
-        return TaskVerificationResult.passed(
+        return TaskVerificationResult.readbackOnly(
                 "Target/readback checks passed for " + mutatedPaths.size()
                         + " mutated target(s); no task-specific static verifier was applicable.",
                 facts);

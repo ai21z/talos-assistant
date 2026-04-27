@@ -282,7 +282,7 @@ class StaticTaskVerifierTest {
                 loopResult(List.of(successfulEdit("README.md", VerificationStatus.UNKNOWN))),
                 0);
 
-        assertEquals(TaskVerificationStatus.PASSED, result.status());
+        assertEquals(TaskVerificationStatus.READBACK_ONLY, result.status());
         assertTrue(result.summary().contains("Target/readback checks passed"));
         assertTrue(result.summary().contains("no task-specific static verifier was applicable"));
     }
