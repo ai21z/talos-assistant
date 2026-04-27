@@ -111,6 +111,135 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void broadWebAppBuildFailsWhenLinkedAssetsAreDuplicated() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!DOCTYPE html>
+                <html>
+                  <head>
+                    <link rel="stylesheet" href="styles.css">
+                    <link rel="stylesheet" href="styles.css">
+                  </head>
+                  <body>
+                    <main class="calculator">
+                      <h1>BMI Calculator</h1>
+                      <form id="bmi-form">
+                        <input id="weight" type="number">
+                        <input id="height" type="number">
+                        <button type="submit">Calculate</button>
+                      </form>
+                      <p id="result"></p>
+                    </main>
+                    <script src="script.js"></script>
+                    <script src="script.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), ".calculator { max-width: 28rem; }");
+        Files.writeString(workspace.resolve("script.js"), """
+                document.getElementById('bmi-form').addEventListener('submit', event => event.preventDefault());
+                document.getElementById('weight');
+                document.getElementById('height');
+                document.getElementById('result');
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Can you build a small BMI calculator website here with separate CSS and JavaScript files?",
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("styles.css", VerificationStatus.PASS),
+                        successfulWrite("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("HTML links CSS file more than once: `styles.css`")));
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("HTML links JavaScript file more than once: `script.js`")));
+    }
+
+    @Test
+    void broadWebAppBuildFailsWhenJavaScriptIsPlaceholder() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!DOCTYPE html>
+                <html>
+                  <head>
+                    <link rel="stylesheet" href="styles.css">
+                  </head>
+                  <body>
+                    <main class="calculator">
+                      <h1>BMI Calculator</h1>
+                      <form id="bmi-form">
+                        <input id="weight" type="number">
+                        <input id="height" type="number">
+                        <button type="submit">Calculate</button>
+                      </form>
+                      <p id="result"></p>
+                    </main>
+                    <script src="scripts.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), ".calculator { max-width: 28rem; }");
+        Files.writeString(workspace.resolve("scripts.js"), "// Your JavaScript logic here");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Build a functioning BMI calculator website with separate CSS and JavaScript files.",
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("styles.css", VerificationStatus.PASS),
+                        successfulWrite("scripts.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("scripts.js: JavaScript file appears to be placeholder content")));
+    }
+
+    @Test
+    void calculatorWebTaskRequiresFormControlsButtonAndResult() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!DOCTYPE html>
+                <html>
+                  <head>
+                    <link rel="stylesheet" href="styles.css">
+                  </head>
+                  <body>
+                    <main class="calculator">
+                      <h1>BMI Calculator</h1>
+                      <p>No interactive form exists yet.</p>
+                    </main>
+                    <script src="script.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), ".calculator { max-width: 28rem; }");
+        Files.writeString(workspace.resolve("script.js"), "document.body.dataset.ready = 'true';");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Build a functioning BMI calculator website with separate CSS and JavaScript files.",
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("styles.css", VerificationStatus.PASS),
+                        successfulWrite("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("Calculator/form task is missing a form")));
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("weight input")));
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("height input")));
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("submit/calculate button")));
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("result output")));
+    }
+
+    @Test
     void broadWebAppBuildPassesWhenHtmlCssAndJavaScriptAreLinked() throws Exception {
         writeValidBmiWebFiles();
 
@@ -201,12 +330,27 @@ class StaticTaskVerifierTest {
                 <!DOCTYPE html>
                 <html>
                   <head><link rel="stylesheet" href="styles.css"></head>
-                  <body><main class="calculator"></main><script src="script.js"></script></body>
+                  <body>
+                    <main class="calculator">
+                      <form id="bmi-form">
+                        <input id="weight" type="number">
+                        <input id="height" type="number">
+                        <button type="submit">Calculate</button>
+                      </form>
+                      <p id="result"></p>
+                    </main>
+                    <script src="script.js"></script>
+                  </body>
                 </html>
                 """);
         Files.writeString(workspace.resolve("style.css"), ".legacy-missing { color: red; }");
         Files.writeString(workspace.resolve("styles.css"), ".calculator { max-width: 28rem; }");
-        Files.writeString(workspace.resolve("script.js"), "document.querySelector('.calculator');");
+        Files.writeString(workspace.resolve("script.js"), """
+                document.getElementById('bmi-form').addEventListener('submit', event => event.preventDefault());
+                document.getElementById('weight');
+                document.getElementById('height');
+                document.getElementById('result');
+                """);
 
         TaskVerificationResult result = StaticTaskVerifier.verify(
                 workspace,
