@@ -380,6 +380,27 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void statusQuestionAfterApprovalDeniedMutationRemainsVerifyOnly() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.user(
+                "Create scripts.js with exactly this text: console.log(\"repair ok\");"));
+        messages.add(ChatMessage.assistant("""
+                [Mutation not applied: approval was denied.]
+
+                No file changes were applied because approval was denied.
+                scripts.js: approval denied.
+                """));
+        messages.add(ChatMessage.user("did you make the changes?"));
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        assertEquals(TaskType.VERIFY_ONLY, contract.type());
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+    }
+
+    @Test
     void nullOrBlankInputIsUnknown() {
         List<String> inputs = List.of("", "   ");
         for (String input : inputs) {

@@ -146,6 +146,50 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void postDenialRepairFollowUpNoToolAnswerRetriesAndExecutesPriorWrite(@TempDir Path workspace)
+                throws Exception {
+            var registry = new dev.talos.tools.ToolRegistry();
+            var undoStack = new dev.talos.tools.FileUndoStack();
+            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "I'm sorry, but I cannot assist with that request.",
+                            "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"scripts.js\","
+                                    + "\"content\":\"console.log(\\\"repair ok\\\");\"}}",
+                            "Created scripts.js.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Create scripts.js with exactly this text: console.log(\"repair ok\"); "
+                            + "Use file tools; do not just show code."));
+            messages.add(ChatMessage.assistant("""
+                    [Mutation not applied: approval was denied.]
+
+                    No file changes were applied because approval was denied.
+                    scripts.js: approval denied.
+                    """));
+            messages.add(ChatMessage.user("nothing changed, try one more time"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(Files.exists(workspace.resolve("scripts.js")),
+                    "post-denial retry must reissue the prior write through tools");
+            assertEquals("console.log(\"repair ok\");",
+                    Files.readString(workspace.resolve("scripts.js")));
+            assertTrue(out.text().contains("[Used 1 tool(s): talos.write_file"),
+                    "retry tool execution summary should be visible");
+            assertFalse(out.text().contains("cannot assist"), out.text());
+        }
+
+        @Test
         void workspaceExplainNoToolDeflectionRetriesWithReadTools(@TempDir Path workspace)
                 throws Exception {
             Files.writeString(workspace.resolve("index.html"), """

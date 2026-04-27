@@ -27,6 +27,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -1264,7 +1265,11 @@ public final class AssistantTurnExecutor {
         if (hasInvalidMutatingFailure(loopResult)) return new MutationRetryResult(answer, 0, null);
 
         String userRequest = latestUserRequest(messages);
-        if (!looksLikeMutationRequest(userRequest)) return new MutationRetryResult(answer, 0, null);
+        TaskContract retryContract = TaskContractResolver.fromMessages(messages);
+        if (retryContract == null || !retryContract.mutationAllowed()) {
+            return new MutationRetryResult(answer, 0, null);
+        }
+        String priorMutationRequest = previousMutationUserRequest(messages, userRequest);
 
         LOG.info("Missing-mutation retry fired: user asked for a change but 0 mutating "
                 + "tool calls succeeded. Re-prompting with an explicit write nudge.");
@@ -1272,11 +1277,8 @@ public final class AssistantTurnExecutor {
         messages.add(ChatMessage.assistant(answer.isBlank() ? "(no answer)" : answer));
         messages.add(ChatMessage.user(
                 "You were asked to modify a file but you did not call talos.write_file "
-                + "or talos.edit_file in this turn. The user's request was:\n\n«"
-                + (userRequest == null ? "" :
-                        (userRequest.length() <= 1000 ? userRequest
-                                : userRequest.substring(0, 1000) + "…"))
-                + "»\n\n"
+                + "or talos.edit_file in this turn. "
+                + mutationRetryRequestContext(userRequest, priorMutationRequest)
                 + "Call the appropriate write/edit tool NOW to perform the change. "
                 + "If you truly cannot (e.g., you do not know which file, or the "
                 + "content is impossible to produce), state exactly which file and why "
@@ -1318,6 +1320,47 @@ public final class AssistantTurnExecutor {
             LOG.warn("Missing-mutation retry failed: {}", e.getMessage());
         }
         return new MutationRetryResult(answer, 0, null);
+    }
+
+    private static String mutationRetryRequestContext(String userRequest, String priorMutationRequest) {
+        if (priorMutationRequest != null && !priorMutationRequest.isBlank()
+                && !Objects.equals(priorMutationRequest, userRequest)) {
+            return "The current user message is a retry/repair follow-up:\n\n«"
+                    + pinForRetryPrompt(userRequest)
+                    + "»\n\n"
+                    + "The previous mutation request to reissue is:\n\n«"
+                    + pinForRetryPrompt(priorMutationRequest)
+                    + "»\n\n";
+        }
+        return "The user's request was:\n\n«"
+                + pinForRetryPrompt(userRequest)
+                + "»\n\n";
+    }
+
+    private static String previousMutationUserRequest(List<ChatMessage> messages, String latestUserRequest) {
+        if (messages == null || messages.isEmpty()) return null;
+        boolean skippedLatest = false;
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            ChatMessage message = messages.get(i);
+            if (message == null || !"user".equals(message.role())) continue;
+            String content = message.content();
+            if (ToolCallSupport.isSyntheticToolResultContent(content)) continue;
+            if (content == null || content.isBlank()) continue;
+            if (!skippedLatest && Objects.equals(content, latestUserRequest)) {
+                skippedLatest = true;
+                continue;
+            }
+            TaskContract prior = TaskContractResolver.fromUserRequest(content);
+            if (prior.mutationAllowed()) {
+                return content;
+            }
+        }
+        return null;
+    }
+
+    private static String pinForRetryPrompt(String text) {
+        if (text == null) return "";
+        return text.length() <= 1000 ? text : text.substring(0, 1000) + "…";
     }
 
     private static boolean hasInvalidMutatingFailure(ToolCallLoop.LoopResult loopResult) {
