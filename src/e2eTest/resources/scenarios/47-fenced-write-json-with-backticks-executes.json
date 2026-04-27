@@ -1,0 +1,12 @@
+{
+  "name": "fenced write json with backticks executes",
+  "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "fenced-write-json-with-backticks-does-not-leak"
+  ],
+  "runner": "loop",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Create scripts.js with BMI result JavaScript.",
+  "scriptedResponse": "```json\n{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"scripts.js\",\"content\":\"const result = document.getElementById('result');\\nconst bmi = 23.4;\\nresult.textContent = `Your BMI is ${bmi.toFixed(2)}`;\"}}\n```"
+}

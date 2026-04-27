@@ -847,6 +847,40 @@ class ToolCallParserTest {
     }
 
     @Test
+    void parseCodeFencedWriteFileWithBackticksInContent() {
+        String response = """
+                ```json
+                {"name": "talos.write_file", "arguments": {"path": "scripts.js", "content": "const message = `BMI ${bmi.toFixed(2)}`;"}}
+                ```
+                """;
+
+        List<ToolCall> calls = ToolCallParser.parse(response);
+        assertEquals(1, calls.size(),
+                "Fenced tool JSON must parse even when file content contains JavaScript backticks");
+        assertEquals("talos.write_file", calls.get(0).toolName());
+        assertEquals("scripts.js", calls.get(0).param("path"));
+        assertEquals("const message = `BMI ${bmi.toFixed(2)}`;", calls.get(0).param("content"));
+    }
+
+    @Test
+    void stripToolCallsRemovesCodeFencedWriteFileWithBackticksInContent() {
+        String response = """
+                Before.
+                ```json
+                {"name": "talos.write_file", "arguments": {"path": "scripts.js", "content": "const message = `BMI ${bmi.toFixed(2)}`;"}}
+                ```
+                After.
+                """;
+
+        String stripped = ToolCallParser.stripToolCalls(response);
+
+        assertTrue(stripped.contains("Before."));
+        assertTrue(stripped.contains("After."));
+        assertFalse(stripped.contains("talos.write_file"), stripped);
+        assertFalse(stripped.contains("`BMI"), stripped);
+    }
+
+    @Test
     void plainFencedCodeWithoutAliasKeyIsNotMisdetectedAsToolCall() {
         // Guard against the gate over-matching: a fenced code block that is not
         // a tool-call must still be treated as prose. None of the alias keys
