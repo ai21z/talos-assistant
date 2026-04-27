@@ -1,7 +1,7 @@
-# [T20-open-high] Ticket: Scoped Target Limiter Mutation Intent
+# [T20-done-high] Ticket: Scoped Target Limiter Mutation Intent
 Date: 2026-04-27
 Priority: high
-Status: open
+Status: done
 Architecture references:
 - `work-cycle-docs/new-work.md`
 - `docs/new-architecture/talos-harness-source-of-truth.md`
@@ -205,3 +205,123 @@ Expected:
 - Tests cover positive scoped limiter and negative global read-only cases.
 - Focused tests, `e2eTest`, `check`, and installed manual verification pass
   before marking done.
+
+## Current Code Read
+
+- `src/main/java/dev/talos/runtime/MutationIntent.java`
+- `src/main/java/dev/talos/runtime/task/TaskContractResolver.java`
+- `src/main/java/dev/talos/runtime/task/TaskContract.java`
+- `src/main/java/dev/talos/runtime/ScopeGuard.java`
+- `src/main/java/dev/talos/runtime/TurnProcessor.java`
+- `src/main/java/dev/talos/runtime/toolcall/NativeToolSpecPolicy.java`
+- `src/main/java/dev/talos/runtime/TurnTaskContractCapture.java`
+- `src/test/java/dev/talos/runtime/MutationIntentTest.java`
+- `src/test/java/dev/talos/runtime/task/TaskContractResolverTest.java`
+- `src/test/java/dev/talos/runtime/TurnProcessorTest.java`
+- `src/test/java/dev/talos/runtime/TurnProcessorScopeGuardTest.java`
+- `src/test/java/dev/talos/runtime/ScopeGuardTest.java`
+- `src/test/java/dev/talos/runtime/toolcall/NativeToolSpecPolicyTest.java`
+- `src/e2eTest/java/dev/talos/harness/JsonScenarioPackTest.java`
+- `src/e2eTest/resources/scenarios/26-scoped-negation-allows-edit.json`
+- `src/e2eTest/resources/scenarios/45-status-question-blocks-mutation.json`
+- `src/e2eTest/resources/scenarios/46-write-file-missing-content-before-approval.json`
+- `src/e2eTest/resources/scenarios/48-repair-followup-after-incomplete-outcome-applies.json`
+
+## Planned Tests
+
+- Add mutation-intent coverage proving named-file negation is a scoped limiter, while global no-mutation language remains read-only.
+- Add task-contract coverage proving `styles.css` remains an expected target and `index.html` / `scripts.js` become forbidden targets.
+- Add native-tool-surface coverage proving scoped limiter contracts expose mutating tools in APPLY.
+- Add TurnProcessor coverage proving forbidden-target writes are blocked before approval and allowed-target writes still reach approval.
+- Add a JSON e2e scenario for `Fix only styles.css. Do not change index.html or scripts.js.`.
+
+## Implementation Summary
+
+- Extended `MutationIntent` so named-file negations after phrases such as `do not change` and `don't touch` are treated as scoped limiters instead of global read-only cancellation.
+- Extended `TaskContractResolver` to extract forbidden target hints from named-file negations and remove those forbidden targets from expected mutation targets for scoped mutation contracts.
+- Added pre-approval forbidden-target enforcement in `TurnProcessor`; mutating calls to forbidden targets fail before approval with a correctable invalid-params result.
+- Preserved allowed-target behavior: the same scoped contract still exposes mutating native tools in APPLY and allows approval for `styles.css`.
+- Added deterministic unit and JSON e2e coverage for scoped limiter classification, target modeling, native tool exposure, forbidden-target blocking, and allowed-target approval.
+
+## Tests Run
+
+Initial TDD red run:
+
+- `./gradlew.bat test --tests "dev.talos.runtime.MutationIntentTest"`: failed because parallel Gradle runs shared output files; rerun serially after implementation.
+- `./gradlew.bat test --tests "dev.talos.runtime.task.TaskContractResolverTest"`: failed as expected on new scoped-target assertions before implementation.
+- `./gradlew.bat test --tests "dev.talos.runtime.toolcall.NativeToolSpecPolicyTest"`: failed because parallel Gradle runs shared output files; rerun serially after implementation.
+- `./gradlew.bat test --tests "dev.talos.runtime.TurnProcessorTest"`: failed because parallel Gradle runs shared output files; rerun serially after implementation.
+
+Focused tests:
+
+- `./gradlew.bat test --tests "dev.talos.runtime.MutationIntentTest" --no-daemon`: PASS
+- `./gradlew.bat test --tests "dev.talos.runtime.task.TaskContractResolverTest" --no-daemon`: PASS
+- `./gradlew.bat test --tests "dev.talos.runtime.toolcall.NativeToolSpecPolicyTest" --no-daemon`: PASS
+- `./gradlew.bat test --tests "dev.talos.runtime.TurnProcessorTest" --no-daemon`: PASS
+- `./gradlew.bat e2eTest --tests "dev.talos.harness.JsonScenarioPackTest.scopedTargetLimiterBlocksForbiddenTarget" --no-daemon`: PASS
+- `./gradlew.bat test --tests "dev.talos.runtime.MutationIntentTest" --tests "dev.talos.runtime.task.TaskContractResolverTest" --tests "dev.talos.runtime.toolcall.NativeToolSpecPolicyTest" --tests "dev.talos.runtime.TurnProcessorTest" --no-daemon`: PASS
+
+Broader runtime checks:
+
+- `./gradlew.bat e2eTest --no-daemon`: PASS
+- `./gradlew.bat check --no-daemon`: PASS
+
+## Work-Test-Cycle Loop Used
+
+Inner dev loop. No candidate version was declared and no changelog entry was added for this per-ticket commit.
+
+## Manual Talos Check Result
+
+Command:
+
+```powershell
+pwsh .\tools\uninstall-windows.ps1 -Quiet
+./gradlew.bat clean installDist --no-daemon
+pwsh .\tools\install-windows.ps1 -Force -Quiet
+cd local/manual-workspaces/T20
+@('/session clear','/debug trace','Fix only styles.css. Do not change index.html or scripts.js.','a','/q') | talos 2>&1 | Tee-Object -FilePath ..\..\manual-testing\T20-output.txt
+```
+
+Workspace:
+
+- `local/manual-workspaces/T20/`
+
+Model:
+
+- `qwen2.5-coder:14b`
+
+Prompt:
+
+- `Fix only styles.css. Do not change index.html or scripts.js.`
+
+Approval choice:
+
+- `a` for the `styles.css` edit approval.
+
+Observed tools:
+
+- `talos.read_file`
+- `talos.edit_file`
+
+Files changed:
+
+- `styles.css` only
+
+Output file:
+
+- `local/manual-testing/T20-output.txt`
+
+Pass/fail:
+
+- PASS
+
+Notes:
+
+- Trace reported `contract: FILE_EDIT mutationAllowed=true verificationRequired=true`.
+- Native and prompt tools included `talos.edit_file` and `talos.write_file`.
+- Approval target was `styles.css`.
+- `index.html` and `scripts.js` remained unchanged.
+
+## Known Follow-Ups
+
+- The manual model made a small CSS-only change and static web coherence passed. This validates scoped target handling, not broad quality of CSS repair.

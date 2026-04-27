@@ -96,6 +96,12 @@ public final class MutationIntent {
             "no file changes", "without changing"
     );
 
+    private static final Pattern NAMED_FILE_TARGET = Pattern.compile(
+            "(?i)(?<![A-Za-z0-9_./\\\\-])([A-Za-z0-9_.\\\\/-]+\\."
+                    + "(?:html|htm|css|js|jsx|ts|tsx|java|md|txt|json|yaml|yml|xml|"
+                    + "properties|gradle|kts|toml|ini|env|csv))"
+                    + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
+
     private MutationIntent() {}
 
     public static boolean looksExplicitMutationRequest(String userRequest) {
@@ -162,6 +168,13 @@ public final class MutationIntent {
                 || tail.startsWith("other files")
                 || tail.startsWith("other parts")
                 || tail.startsWith("other things")
-                || tail.startsWith("else");
+                || tail.startsWith("else")
+                || startsWithNamedFileTarget(tail);
+    }
+
+    private static boolean startsWithNamedFileTarget(String tail) {
+        if (tail == null || tail.isBlank()) return false;
+        var matcher = NAMED_FILE_TARGET.matcher(tail);
+        return matcher.find() && matcher.start() <= 4;
     }
 }

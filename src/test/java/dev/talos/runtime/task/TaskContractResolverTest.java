@@ -204,6 +204,30 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void namedTargetLimiterKeepsMutationIntentAndCapturesForbiddenTargets() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Fix only styles.css. Do not change index.html or scripts.js.");
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("styles.css"), contract.expectedTargets());
+        assertEquals(Set.of("index.html", "scripts.js"), contract.forbiddenTargets());
+    }
+
+    @Test
+    void dontTouchNamedTargetLimiterKeepsAllowedTargetSeparate() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Edit only index.html; don't touch styles.css.");
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationAllowed());
+        assertEquals(Set.of("index.html"), contract.expectedTargets());
+        assertEquals(Set.of("styles.css"), contract.forbiddenTargets());
+    }
+
+    @Test
     void globalNoMutationLanguageStillSuppressesEditIntent() {
         List<String> inputs = List.of(
                 "Check notes.txt. Do not modify anything.",

@@ -793,6 +793,29 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/54-scoped-target-limiter-blocks-forbidden-target.json] 54: scoped target limiter blocks forbidden target")
+    void scopedTargetLimiterBlocksForbiddenTarget() {
+        var loaded = JsonScenarioLoader.load("scenarios/54-scoped-target-limiter-blocks-forbidden-target.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(1, 1, 0, 0)
+                    .assertAnswerContains("Succeeded:")
+                    .assertAnswerContains("styles.css")
+                    .assertAnswerContains("Failed:")
+                    .assertAnswerContains("index.html")
+                    .assertAnswerContains("forbidden")
+                    .assertFileContains("styles.css", "background: #101820")
+                    .assertFileContains("styles.css", "border: 1px solid #f2aa4c")
+                    .assertFileContains("index.html", "<title>Scoped Check</title>")
+                    .assertFileNotContains("index.html", "forbidden mutation")
+                    .assertFileContains("scripts.js", "scoped check");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/50-static-verifier-placeholder-web-app-fails.json] 50: placeholder JavaScript prevents web app verification")
     void staticVerifierPlaceholderWebAppFails() {
         var loaded = JsonScenarioLoader.load("scenarios/50-static-verifier-placeholder-web-app-fails.json");
