@@ -816,6 +816,30 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/55-post-denial-retry-reissues-write.json] 55: post-denial retry reissues write")
+    void postDenialRetryReissuesWrite() {
+        var loaded = JsonScenarioLoader.load("scenarios/55-post-denial-retry-reissues-write.json");
+        List<ChatMessage> history = new ArrayList<>();
+        var historyNode = loaded.raw().path("history");
+        for (var node : historyNode) {
+            history.add(new ChatMessage(
+                    node.path("role").asText(),
+                    node.path("content").asText()));
+        }
+
+        try (var result = ScenarioRunner.runThroughExecutorWithHistory(
+                loaded.definition(),
+                history,
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(1, 1, 0, 0)
+                    .assertFileContains("scripts.js", "console.log(\"repair ok\");")
+                    .assertAnswerContains("[Used 1 tool(s): talos.write_file")
+                    .assertAnswerNotContains("cannot assist");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/50-static-verifier-placeholder-web-app-fails.json] 50: placeholder JavaScript prevents web app verification")
     void staticVerifierPlaceholderWebAppFails() {
         var loaded = JsonScenarioLoader.load("scenarios/50-static-verifier-placeholder-web-app-fails.json");

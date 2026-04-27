@@ -1,7 +1,7 @@
-# [T21-open-high] Ticket: Post-Denial Retry Must Reissue Action
+# [T21-done-high] Ticket: Post-Denial Retry Must Reissue Action
 Date: 2026-04-27
 Priority: high
-Status: open
+Status: done
 Architecture references:
 - `work-cycle-docs/new-work.md`
 - `docs/new-architecture/talos-harness-source-of-truth.md`
@@ -217,3 +217,111 @@ Expected:
 - Manual retry with `console.log("repair ok");` passes.
 - Focused tests, `e2eTest`, `check`, and installed manual verification pass
   before marking done.
+
+## Current Code Read
+
+- `src/main/java/dev/talos/runtime/task/TaskContractResolver.java`
+- `src/main/java/dev/talos/cli/modes/AssistantTurnExecutor.java`
+- `src/main/java/dev/talos/runtime/ToolCallLoop.java`
+- `src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java`
+- `src/main/java/dev/talos/runtime/toolcall/ToolCallExecutionStage.java`
+- `src/main/java/dev/talos/cli/modes/UnifiedAssistantMode.java`
+- `src/main/java/dev/talos/core/llm/LlmClient.java`
+- `src/test/java/dev/talos/cli/modes/AssistantTurnExecutorTest.java`
+- `src/test/java/dev/talos/runtime/task/TaskContractResolverTest.java`
+- `src/e2eTest/java/dev/talos/harness/JsonScenarioPackTest.java`
+- `src/e2eTest/resources/scenarios/14-approval-denial-stops-loop.json`
+- `src/e2eTest/resources/scenarios/48-repair-followup-after-incomplete-outcome-applies.json`
+
+## Planned Tests
+
+- Add focused `AssistantTurnExecutorTest` coverage where a post-denial retry initially receives a no-tool refusal, then the deterministic retry prompt causes a `write_file` call to execute.
+- Add/confirm task-contract coverage that a status question after denial remains `VERIFY_ONLY`.
+- Add a JSON e2e scenario with prior denied mutation history, current retry phrase, no-tool refusal, then a reissued `write_file`.
+
+## Implementation Summary
+
+- Updated the no-tool mutation retry gate in `AssistantTurnExecutor` to use the full history-aware `TaskContract` instead of latest-message-only mutation detection.
+- Added retry prompt context that pins the previous mutation request when the current user message is a retry/repair follow-up.
+- Preserved approval safety: denied mutations are not auto-applied, and retry execution still goes through normal `write_file` approval.
+- Preserved status safety: status questions after denied mutations remain `VERIFY_ONLY` and do not trigger mutation retry.
+- Added deterministic unit and JSON e2e coverage for no-tool post-denial retry recovery.
+
+## Tests Run
+
+Initial TDD red run:
+
+- `./gradlew.bat test --tests "dev.talos.cli.modes.AssistantTurnExecutorTest" --tests "dev.talos.runtime.task.TaskContractResolverTest" --no-daemon`: FAIL as expected on `postDenialRepairFollowUpNoToolAnswerRetriesAndExecutesPriorWrite`.
+
+Focused tests:
+
+- `./gradlew.bat test --tests "dev.talos.cli.modes.AssistantTurnExecutorTest" --tests "dev.talos.runtime.task.TaskContractResolverTest" --no-daemon`: PASS
+- `./gradlew.bat e2eTest --tests "dev.talos.harness.JsonScenarioPackTest.postDenialRetryReissuesWrite" --no-daemon`: PASS
+
+Broader runtime checks:
+
+- `./gradlew.bat e2eTest --no-daemon`: PASS
+- `./gradlew.bat check --no-daemon`: PASS
+
+## Work-Test-Cycle Loop Used
+
+Inner dev loop. No candidate version was declared and no changelog entry was added for this per-ticket commit.
+
+## Manual Talos Check Result
+
+Command:
+
+```powershell
+pwsh .\tools\uninstall-windows.ps1 -Quiet
+./gradlew.bat clean installDist --no-daemon
+pwsh .\tools\install-windows.ps1 -Force -Quiet
+cd local/manual-workspaces/T21
+@('/session clear','/debug trace','Create scripts.js with exactly this text: console.log("repair ok"); Use file tools; do not just show code.','n','nothing changed, try one more time','a','did you make the changes?','/q') | talos 2>&1 | Tee-Object -FilePath ..\..\manual-testing\T21-output.txt
+```
+
+Workspace:
+
+- `local/manual-workspaces/T21/`
+
+Model:
+
+- `qwen2.5-coder:14b`
+
+Prompts:
+
+- `Create scripts.js with exactly this text: console.log("repair ok"); Use file tools; do not just show code.`
+- `nothing changed, try one more time`
+- `did you make the changes?`
+
+Approval choice:
+
+- First approval: `n`
+- Retry approval: `a`
+
+Observed tools:
+
+- First turn: `talos.write_file` attempted and denied.
+- Retry turn: `talos.write_file` reissued and approved.
+- Status turn: `talos.list_dir`, `talos.read_file`.
+
+Files changed:
+
+- `scripts.js` created only after the approved retry.
+
+Output file:
+
+- `local/manual-testing/T21-output.txt`
+
+Pass/fail:
+
+- PASS
+
+Notes:
+
+- First turn trace: `contract: FILE_CREATE mutationAllowed=true`; blocked by user approval denial.
+- Retry turn trace: `contract: FILE_CREATE mutationAllowed=true`; approval was requested again and `scripts.js` was created.
+- Status turn trace: `contract: VERIFY_ONLY mutationAllowed=false`; native tools were read-only only and no mutation occurred.
+
+## Known Follow-Ups
+
+- The retry prompt now pins the previous mutation request for repair follow-ups. It still does not auto-replay stale tool calls, which remains intentional.
