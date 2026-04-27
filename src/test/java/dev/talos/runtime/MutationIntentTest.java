@@ -21,6 +21,14 @@ class MutationIntentTest {
     }
 
     @Test
+    void priorChangeStatusQuestionsAreNotMutationIntent() {
+        assertFalse(MutationIntent.looksExplicitMutationRequest("did you make the changes?"));
+        assertFalse(MutationIntent.looksExplicitMutationRequest("did you update the files?"));
+        assertFalse(MutationIntent.looksExplicitMutationRequest("what did you change?"));
+        assertFalse(MutationIntent.looksExplicitMutationRequest("why did nothing change?"));
+    }
+
+    @Test
     void readOnlyNegationStillWinsForRepair() {
         assertFalse(MutationIntent.looksExplicitMutationRequest(
                 "Repair this file but do not change anything."));

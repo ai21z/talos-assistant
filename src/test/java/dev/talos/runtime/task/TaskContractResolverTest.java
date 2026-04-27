@@ -136,7 +136,6 @@ class TaskContractResolverTest {
                 "What can you build?",
                 "Can you explain how to build a BMI calculator?",
                 "Can you make sense of this code?",
-                "Why did you not make changes?",
                 "Show me how to make one, do not edit files.");
 
         for (String input : inputs) {
@@ -144,6 +143,39 @@ class TaskContractResolverTest {
             assertEquals(TaskType.READ_ONLY_QA, contract.type(), input);
             assertFalse(contract.mutationRequested(), input);
             assertFalse(contract.mutationAllowed(), input);
+        }
+    }
+
+    @Test
+    void statusQuestionsAboutPriorChangesBecomeVerifyOnlyAndNeverMutationCapable() {
+        List<String> inputs = List.of(
+                "did you make the changes?",
+                "did you update the files?",
+                "what did you change?",
+                "why did nothing change?",
+                "Why did you not make changes?");
+
+        for (String input : inputs) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+            assertEquals(TaskType.VERIFY_ONLY, contract.type(), input);
+            assertFalse(contract.mutationRequested(), input);
+            assertFalse(contract.mutationAllowed(), input);
+            assertTrue(contract.verificationRequired(), input);
+        }
+    }
+
+    @Test
+    void repairImperativesAfterNoChangeRemainMutationCapable() {
+        List<String> inputs = List.of(
+                "nothing changed, fix it now",
+                "it still does not work, update the files");
+
+        for (String input : inputs) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+            assertEquals(TaskType.FILE_EDIT, contract.type(), input);
+            assertTrue(contract.mutationRequested(), input);
+            assertTrue(contract.mutationAllowed(), input);
+            assertTrue(contract.verificationRequired(), input);
         }
     }
 

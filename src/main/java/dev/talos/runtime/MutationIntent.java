@@ -55,6 +55,14 @@ public final class MutationIntent {
             Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:let's|lets)\\s+" + MAKE_REFERENCE_REQUEST)
     );
 
+    private static final List<Pattern> PRIOR_CHANGE_STATUS_PATTERNS = List.of(
+            Pattern.compile("^" + PREFIX + "did\\s+you\\s+(?:make|apply|do|finish|complete|update|change|edit|write|create|save)\\b"),
+            Pattern.compile("^" + PREFIX + "have\\s+you\\s+(?:made|applied|done|finished|completed|updated|changed|edited|written|created|saved)\\b"),
+            Pattern.compile("^" + PREFIX + "what\\s+(?:did|have)\\s+you\\s+(?:make|made|do|done|change|changed|update|updated|edit|edited|write|written|create|created)\\b"),
+            Pattern.compile("^" + PREFIX + "why\\s+did\\s+(?:nothing|not\\s+.*|.*\\s+not\\s+)\\s+(?:change|update|happen|apply)\\b"),
+            Pattern.compile("^" + PREFIX + "why\\s+did\\s+you\\s+not\\s+(?:make|apply|do|update|change|edit|write|create|save)\\b")
+    );
+
     private static final Set<String> MARKERS = Set.of(
             "edit it", "edit the", "edit this", "edit that",
             "modify it", "modify the", "modify this", "modify that",
@@ -92,6 +100,7 @@ public final class MutationIntent {
         if (ToolCallSupport.isSyntheticToolResultContent(userRequest)) return false;
         String lower = userRequest.toLowerCase().trim();
         if (containsGlobalReadOnlyNegation(lower)) return false;
+        if (looksPriorChangeStatusQuestion(lower)) return false;
         for (Pattern pattern : REQUEST_PATTERNS) {
             if (pattern.matcher(lower).find()) return true;
         }
@@ -99,6 +108,22 @@ public final class MutationIntent {
             if (lower.contains(marker)) return true;
         }
         return false;
+    }
+
+    public static boolean looksPriorChangeStatusQuestion(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return false;
+        if (ToolCallSupport.isSyntheticToolResultContent(userRequest)) return false;
+        String lower = userRequest.toLowerCase().trim();
+        if (containsConditionalApplyClause(lower)) return false;
+        for (Pattern pattern : PRIOR_CHANGE_STATUS_PATTERNS) {
+            if (pattern.matcher(lower).find()) return true;
+        }
+        return false;
+    }
+
+    private static boolean containsConditionalApplyClause(String lower) {
+        return Pattern.compile("\\b(?:if\\s+not|otherwise|then)\\b.{0,80}\\b"
+                + "(?:fix|repair|update|change|edit|make|create|write|apply)\\b").matcher(lower).find();
     }
 
     private static boolean containsGlobalReadOnlyNegation(String lower) {

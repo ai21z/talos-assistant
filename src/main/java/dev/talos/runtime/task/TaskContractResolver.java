@@ -92,8 +92,12 @@ public final class TaskContractResolver {
 
         String original = userRequest.strip();
         String lower = original.toLowerCase(Locale.ROOT);
-        boolean mutationRequested = MutationIntent.looksExplicitMutationRequest(original);
-        TaskType type = classify(lower, mutationRequested);
+        boolean priorChangeStatusQuestion = MutationIntent.looksPriorChangeStatusQuestion(original);
+        boolean mutationRequested = !priorChangeStatusQuestion
+                && MutationIntent.looksExplicitMutationRequest(original);
+        TaskType type = priorChangeStatusQuestion
+                ? TaskType.VERIFY_ONLY
+                : classify(lower, mutationRequested);
         boolean mutationAllowed = mutationRequested
                 && (type == TaskType.FILE_EDIT || type == TaskType.FILE_CREATE);
         boolean verificationRequired = mutationAllowed || type == TaskType.VERIFY_ONLY;
