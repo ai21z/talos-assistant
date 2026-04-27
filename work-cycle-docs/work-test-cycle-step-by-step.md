@@ -65,7 +65,7 @@ entries.
 
 What the developer does:
 
-1. Create or update one ticket file under `work-cycle-docs/tickets/`.
+1. Create or update one ticket file under `work-cycle-docs/tickets/open/`.
 2. Prefix the ticket filename with `[code-status-prio]`.
 3. Keep the ticket code stable for the life of the ticket.
 4. Update the status and priority in the filename when the ticket status or
@@ -84,12 +84,18 @@ Rules:
 - `prio` mirrors the ticket body priority: `high`, `medium`, or `low`.
 - The descriptive filename after the prefix stays short and kebab-case.
 - When a ticket is completed, rename it from `[T01-open-high] ...` or
-  `[T01-in-progress-high] ...` to `[T01-done-high] ...`.
+  `[T01-in-progress-high] ...` to `[T01-done-high] ...` and move it from
+  `work-cycle-docs/tickets/open/` to `work-cycle-docs/tickets/done/`.
+- Keep open and in-progress tickets in `work-cycle-docs/tickets/open/`.
+- Keep completed tickets in `work-cycle-docs/tickets/done/`.
+- Keep `work-cycle-docs/tickets/new-work.md` at the ticket root; it is source
+  doctrine, not an active ticket.
 
 Expected result:
 
 - Ticket order is visible in file listings.
-- Status and priority are visible without opening the file.
+- Current work is visible in `open/`; completed history is visible in `done/`.
+- Status and priority are visible without opening each ticket file.
 - Changelog entries can point to the exact ticket prefix.
 
 ## Step 2: Inner Development Loop
