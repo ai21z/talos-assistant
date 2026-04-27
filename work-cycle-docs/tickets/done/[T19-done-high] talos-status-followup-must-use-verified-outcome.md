@@ -1,7 +1,7 @@
-# [T19-open-high] Ticket: Status Follow-up Must Use Verified Outcome
+# [T19-done-high] Ticket: Status Follow-up Must Use Verified Outcome
 Date: 2026-04-27
 Priority: high
-Status: open
+Status: done
 Architecture references:
 - `work-cycle-docs/new-work.md`
 - `docs/new-architecture/talos-harness-source-of-truth.md`
@@ -176,3 +176,132 @@ Expected:
 - Existing T11/T14/T15/T16/T18 tests still pass.
 - Focused tests, `e2eTest`, `check`, and installed manual verification pass
   before moving the ticket to done.
+
+## Current Code Read
+
+- `src/main/java/dev/talos/cli/modes/AssistantTurnExecutor.java`
+- `src/main/java/dev/talos/cli/modes/ExecutionOutcome.java`
+- `src/main/java/dev/talos/runtime/MutationIntent.java`
+- `src/main/java/dev/talos/runtime/task/TaskContractResolver.java`
+- `src/main/java/dev/talos/runtime/task/TaskContract.java`
+- `src/main/java/dev/talos/runtime/task/TaskType.java`
+- `src/main/java/dev/talos/runtime/verification/TaskVerificationResult.java`
+- `src/main/java/dev/talos/runtime/verification/TaskVerificationStatus.java`
+- `src/test/java/dev/talos/cli/modes/AssistantTurnExecutorTest.java`
+- `src/test/java/dev/talos/runtime/task/TaskContractResolverTest.java`
+- `src/e2eTest/java/dev/talos/harness/JsonScenarioPackTest.java`
+- `src/e2eTest/resources/scenarios/42-partial-followup-summary-uses-verified-history.json`
+- `src/e2eTest/resources/scenarios/49-status-question-after-incomplete-outcome-stays-verify-only.json`
+
+## Planned Tests
+
+- Add focused `TaskContractResolverTest` coverage for common prior-change
+  status questions.
+- Add focused `AssistantTurnExecutorTest` coverage proving status follow-ups
+  use previous partial verification instead of a fresh unsupported completion
+  claim.
+- Add JSON-backed e2e coverage for a status follow-up after a partial outcome.
+- Run focused unit tests, focused e2e, full `e2eTest`, hard gate `check`, and
+  installed manual Talos verification.
+
+## Implementation Summary
+
+- Extended prior-change status question detection to include common status
+  prompts such as `did you fix it?`, `did it work?`, `is it done?`, and
+  `are the changes applied?`.
+- Reused the existing deterministic verified-follow-up summary path for
+  prior-change status questions, not only `what changed?` style summaries.
+- Preserved the T11/T14 safety boundary: pure status questions stay
+  `VERIFY_ONLY`, `mutationAllowed=false`, and read-only in the native tool
+  surface.
+- Added deterministic unit and JSON-backed e2e coverage proving a status
+  follow-up after a partial static verification outcome does not accept a fresh
+  unsupported completion claim from the model.
+
+## Tests Run
+
+- RED before implementation:
+  `./gradlew.bat test --tests "dev.talos.cli.modes.AssistantTurnExecutorTest"`
+  -> FAIL as expected in
+  `statusFollowUpUsesPreviousPartialVerificationInsteadOfNewCompletionClaim`
+  because the unsupported `functional 3-file BMI calculator` answer was still
+  accepted.
+- RED before implementation:
+  `./gradlew.bat test --tests "dev.talos.runtime.task.TaskContractResolverTest"`
+  -> first parallel run failed on a Windows Gradle test-results cleanup file
+  lock; rerun sequentially failed as expected in
+  `statusQuestionsAboutPriorChangesBecomeVerifyOnlyAndNeverMutationCapable`.
+- GREEN after implementation:
+  `./gradlew.bat test --tests "dev.talos.runtime.task.TaskContractResolverTest"`
+  -> PASS.
+- GREEN after implementation:
+  `./gradlew.bat test --tests "dev.talos.cli.modes.AssistantTurnExecutorTest"`
+  -> PASS.
+- `./gradlew.bat e2eTest --tests "dev.talos.harness.JsonScenarioPackTest.statusFollowupPreservesPartialOutcome"`
+  -> PASS.
+- `./gradlew.bat e2eTest`
+  -> PASS.
+- `./gradlew.bat check`
+  -> PASS.
+
+## Work-Test-Cycle Loop Used
+
+Inner dev loop. This ticket changed final-answer truthfulness and
+status-follow-up runtime behavior, so focused unit tests, focused deterministic
+e2e, full `e2eTest`, hard gate `check`, and installed manual Talos
+verification were run. Candidate loop was not run because this was one ticket
+inside the open-ticket branch, not a declared versioned candidate release.
+
+## Manual Talos Check Result
+
+Command:
+`pwsh .\tools\uninstall-windows.ps1 -Quiet`
+`./gradlew.bat clean installDist --no-daemon`
+`pwsh .\tools\install-windows.ps1 -Force -Quiet`
+Then piped `/session clear`, `/debug trace`, the prompts, approval `a`, and
+`/q` into the installed Talos CLI.
+
+Workspace:
+`local/manual-workspaces/T19/`
+
+Model:
+`qwen2.5-coder:14b`
+
+Prompt:
+```text
+No no I want a functioning 3-file BMI calculator. Update index.html and styles.css and create scripts.js. Make it modern and responsive. Use file tools; do not just show code.
+a
+did you make the changes?
+```
+
+Approval choice:
+`a`
+
+Observed tools:
+Turn 1: `talos.edit_file`, `talos.read_file`, `talos.write_file`
+Turn 2: no tool calls; deterministic prior-outcome summary returned before the
+model path.
+
+Files changed:
+`scripts.js` was created during the partial mutation turn. `index.html` and
+`styles.css` were not successfully mutated.
+
+Output file:
+`local/manual-testing/T19-output.txt`
+
+Pass/fail:
+PASS
+
+Notes:
+The mutation turn produced partial static verification failure. The follow-up
+`did you make the changes?` returned:
+`The previous verified result says the last change is partial, not complete.`
+The trace showed `contract: VERIFY_ONLY mutationAllowed=false`, read-only
+native tools only, no write/edit approval, and no completion/functional claim.
+
+## Known Follow-Ups
+
+- T20 should handle scoped mutation limiters such as `Fix only styles.css. Do
+  not change index.html or scripts.js.`
+- T21 should make post-denial retry behavior less dependent on live-model
+  reconstruction of the previous denied action.

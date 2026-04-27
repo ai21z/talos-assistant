@@ -2,6 +2,7 @@ package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.core.llm.LlmClient;
+import dev.talos.runtime.MutationIntent;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.ToolCallStreamFilter;
@@ -632,7 +633,10 @@ public final class AssistantTurnExecutor {
             List<ChatMessage> messages,
             String userRequest
     ) {
-        if (!looksLikeChangeSummaryFollowUp(userRequest)) return null;
+        if (!looksLikeChangeSummaryFollowUp(userRequest)
+                && !MutationIntent.looksPriorChangeStatusQuestion(userRequest)) {
+            return null;
+        }
         if (messages == null || messages.isEmpty()) return null;
 
         for (int i = messages.size() - 1; i >= 0; i--) {

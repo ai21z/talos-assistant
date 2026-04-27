@@ -2543,6 +2543,37 @@ class AssistantTurnExecutorTest {
             assertFalse(out.text().contains("I added the Listen Now button"), out.text());
             assertFalse(out.text().contains("wired script.js"), out.text());
         }
+
+        @Test
+        void statusFollowUpUsesPreviousPartialVerificationInsteadOfNewCompletionClaim() {
+            var ctx = scriptedContext("The workspace now appears to have a functional 3-file BMI calculator.");
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "No no I want a functioning 3-file BMI calculator. Update index.html and styles.css "
+                            + "and create scripts.js. Make it modern and responsive."));
+            messages.add(ChatMessage.assistant("""
+                    [Partial verification: static checks failed - HTML does not link JavaScript file: `scripts.js`]
+
+                    The turn remains partial. Some changes were applied, but unresolved static problems remain.
+
+                    Remaining static verification problems:
+                    - styles.css: expected target was not successfully mutated.
+                    - HTML does not link JavaScript file: `scripts.js`
+                    - HTML defines duplicate IDs: `#result`
+                    - Calculator/form task is missing a submit/calculate button.
+                    """));
+            messages.add(ChatMessage.user("did you make the changes?"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, WS, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains("partial"), out.text());
+            assertTrue(out.text().contains("not complete"), out.text());
+            assertTrue(out.text().contains("HTML does not link JavaScript file"), out.text());
+            assertTrue(out.text().contains("submit/calculate button"), out.text());
+            assertFalse(out.text().contains("functional 3-file BMI calculator"), out.text());
+        }
     }
 }
 

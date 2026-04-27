@@ -56,7 +56,10 @@ public final class MutationIntent {
     );
 
     private static final List<Pattern> PRIOR_CHANGE_STATUS_PATTERNS = List.of(
-            Pattern.compile("^" + PREFIX + "did\\s+you\\s+(?:make|apply|do|finish|complete|update|change|edit|write|create|save)\\b"),
+            Pattern.compile("^" + PREFIX + "did\\s+you\\s+(?:make|apply|do|finish|complete|update|change|edit|fix|repair|write|create|save)\\b"),
+            Pattern.compile("^" + PREFIX + "did\\s+(?:it|this|that|the\\s+(?:change|changes|edit|edits|fix|repair|update|updates))\\s+(?:work|apply|finish|complete)\\b"),
+            Pattern.compile("^" + PREFIX + "is\\s+(?:it|this|that|the\\s+(?:change|changes|edit|edits|fix|repair|update|updates)|.{1,80})\\s+(?:done|finished|complete|completed|working)\\b"),
+            Pattern.compile("^" + PREFIX + "are\\s+(?:the\\s+)?(?:change|changes|edit|edits|fix|fixes|update|updates)\\s+(?:applied|done|finished|complete|completed|working)\\b"),
             Pattern.compile("^" + PREFIX + "have\\s+you\\s+(?:made|applied|done|finished|completed|updated|changed|edited|written|created|saved)\\b"),
             Pattern.compile("^" + PREFIX + "what\\s+(?:did|have)\\s+you\\s+(?:make|made|do|done|change|changed|update|updated|edit|edited|write|written|create|created)\\b"),
             Pattern.compile("^" + PREFIX + "why\\s+did\\s+(?:nothing|not\\s+.*|.*\\s+not\\s+)\\s+(?:change|update|happen|apply)\\b"),
