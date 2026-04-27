@@ -764,6 +764,25 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/50-static-verifier-placeholder-web-app-fails.json] 50: placeholder JavaScript prevents web app verification")
+    void staticVerifierPlaceholderWebAppFails() {
+        var loaded = JsonScenarioLoader.load("scenarios/50-static-verifier-placeholder-web-app-fails.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(3, 3, 0, 3)
+                    .assertAnswerContains("Static verification failed")
+                    .assertAnswerContains("scripts.js: JavaScript file appears to be placeholder content")
+                    .assertAnswerContains("The requested task is not verified complete.")
+                    .assertAnswerNotContains("Static verification: passed")
+                    .assertFileContains("index.html", "<script src=\"scripts.js\"></script>")
+                    .assertFileContains("scripts.js", "// Your JavaScript logic here");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/32-unsupported-binary-document-honesty.json] 32: unsupported binary document reads are capability-limited")
     void unsupportedBinaryDocumentHonesty() {
         var loaded = JsonScenarioLoader.load("scenarios/32-unsupported-binary-document-honesty.json");
