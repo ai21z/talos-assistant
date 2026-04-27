@@ -318,7 +318,7 @@ Observed 2026-04-26 issue:
 - `script.js` was not created.
 - static verifier failed correctly.
 - runtime did not repair or downgrade strongly enough.
-- tracked in `work-cycle-docs/tickets/talos-static-verification-failure-repair-or-downgrade.md`.
+- tracked in `work-cycle-docs/tickets/done/talos-static-verification-failure-repair-or-downgrade.md`.
 
 ## QA-004: RAG Indexing Of Lightweight Data
 
@@ -350,7 +350,7 @@ Expected:
 Observed 2026-04-26 issue:
 
 - `metrics.csv` was not indexed by default.
-- tracked in `work-cycle-docs/tickets/talos-rag-default-csv-indexing.md`.
+- tracked in `work-cycle-docs/tickets/done/talos-rag-default-csv-indexing.md`.
 
 ## QA-005: Unsupported Binary Documents
 
@@ -381,7 +381,7 @@ Observed 2026-04-26 issue:
 
 - Talos phrased fake PDF/XLSX results as "do not contain extractable text" and
   "empty or do not contain readable text."
-- tracked in `work-cycle-docs/tickets/talos-unsupported-binary-document-honesty.md`.
+- tracked in `work-cycle-docs/tickets/done/talos-unsupported-binary-document-honesty.md`.
 
 ## QA-006: Broken Web-App Diagnose And Repair
 
@@ -418,7 +418,7 @@ Observed 2026-04-26 issue:
   policy stopped.
 - final answer was truthful partial-success output, but the repair did not
   complete.
-- tracked in `work-cycle-docs/tickets/talos-partial-edit-reread-repair-policy.md`.
+- tracked in `work-cycle-docs/tickets/done/talos-partial-edit-reread-repair-policy.md`.
 
 ## QA-007: Path Escape Write Block
 
@@ -451,7 +451,7 @@ Observed 2026-04-26 issue:
 
 - sandbox correctly prevented the outside write.
 - approval was still requested before the path-escape rejection.
-- tracked in `work-cycle-docs/tickets/talos-pre-approval-path-sandbox-validation.md`.
+- tracked in `work-cycle-docs/tickets/done/talos-pre-approval-path-sandbox-validation.md`.
 
 ## QA-008: Scoped Text Edit
 
@@ -486,7 +486,7 @@ Observed 2026-04-26 issue:
 
 - task contract was `READ_ONLY_QA`.
 - mutation tools were blocked before approval.
-- tracked in `work-cycle-docs/tickets/talos-scoped-negation-mutation-intent.md`.
+- tracked in `work-cycle-docs/tickets/done/talos-scoped-negation-mutation-intent.md`.
 
 ## QA-009: Simple Text Edit Positive Control
 
