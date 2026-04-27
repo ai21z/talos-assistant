@@ -89,3 +89,13 @@ Out of scope:
 Manual deep-review result on 2026-04-28:
 
 - Repeated status follow-ups after partial BMI failure produced duplicated `The previous verified result says...` lines.
+
+Additional non-technical phrasing evidence on 2026-04-28:
+
+- `local/manual-testing/deep-review-2/nondev-bmi-title-only-transcript.txt`
+  - Prompt: `Is it working now?`
+  - Talos correctly stayed `VERIFY_ONLY` and preserved the partial verified outcome.
+  - The answer was truthful but not user-friendly for a non-technical user. It repeated the internal verified summary rather than starting with a simple answer such as:
+    - `No. Some HTML changed, but the BMI calculator is still not verified complete.`
+
+T26 should optimize for a regular user's status question, not just architecture correctness.

@@ -98,3 +98,14 @@ Out of scope:
 Manual deep-review result on 2026-04-28:
 
 - `bmi-broken-a-transcript.txt` shows blocked mutating tool JSON leaked into the final answer.
+
+Additional non-technical phrasing evidence on 2026-04-28:
+
+- `local/manual-testing/deep-review-2/nondev-bmi-empty-transcript.txt`
+  - Regular-user prompt `Can you make me a simple BMI calculator webpage here?` was classified read-only.
+  - The model attempted `write_file`; Talos blocked it as read-only.
+  - The visible answer then claimed the assistant cannot create/modify files and printed broken copy/paste HTML.
+
+Related but separate protocol leak:
+
+- `local/manual-testing/deep-review-2/nondev-button-broken-transcript.txt` shows malformed JSON-like `edit_file` protocol text leaking on a mutation-allowed turn. That shape is tracked separately in T27 because the tool call was not merely blocked by read-only policy; it was never parsed/executed/rejected as protocol.
