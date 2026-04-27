@@ -1,0 +1,16 @@
+{
+  "name": "repeated stylesheet insertion fails verification",
+  "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "duplicate-stylesheet-links-fail-static-verification",
+    "idempotent-web-asset-edit-problems-are-user-visible"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Update index.html so the HTML, CSS, and JavaScript web assets are wired cleanly. Use the file edit tool; do not just show code.",
+  "scriptedResponses": [
+    "```json\n{\"name\":\"talos.edit_file\",\"parameters\":{\"path\":\"index.html\",\"old_string\":\"    <link rel=\\\"stylesheet\\\" href=\\\"style.css\\\">\",\"new_string\":\"    <link rel=\\\"stylesheet\\\" href=\\\"style.css\\\">\\n    <link rel=\\\"stylesheet\\\" href=\\\"style.css\\\">\"}}\n```",
+    "Updated index.html so the web assets are wired."
+  ]
+}
