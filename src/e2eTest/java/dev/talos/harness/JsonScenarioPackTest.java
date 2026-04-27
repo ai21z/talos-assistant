@@ -805,6 +805,23 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/52-repeated-stylesheet-insertion-fails-verification.json] 52: repeated stylesheet insertion fails static verification")
+    void repeatedStylesheetInsertionFailsVerification() {
+        var loaded = JsonScenarioLoader.load("scenarios/52-repeated-stylesheet-insertion-fails-verification.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(1, 1, 0, 0)
+                    .assertAnswerContains("Static verification failed")
+                    .assertAnswerContains("HTML links CSS file more than once: `style.css`")
+                    .assertAnswerNotContains("Static verification: passed")
+                    .assertFileContains("index.html", "<link rel=\"stylesheet\" href=\"style.css\">\n    <link rel=\"stylesheet\" href=\"style.css\">");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/32-unsupported-binary-document-honesty.json] 32: unsupported binary document reads are capability-limited")
     void unsupportedBinaryDocumentHonesty() {
         var loaded = JsonScenarioLoader.load("scenarios/32-unsupported-binary-document-honesty.json");

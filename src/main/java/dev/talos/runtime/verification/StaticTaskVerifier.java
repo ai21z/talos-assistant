@@ -503,7 +503,8 @@ public final class StaticTaskVerifier {
             if (htmlFile == null) return null;
             String html = Files.readString(root.resolve(htmlFile));
             Set<String> htmlClasses = extractMatches(html, HTML_CLASS_ATTR, true);
-            Set<String> htmlIds = extractMatches(html, HTML_ID_ATTR, false);
+            List<String> htmlIdOccurrences = extractMatchOccurrences(html, HTML_ID_ATTR, false);
+            Set<String> htmlIds = new LinkedHashSet<>(htmlIdOccurrences);
             List<String> linkedCssOccurrences = extractLinkedAssetOccurrences(html, HTML_LINK_HREF, ".css");
             List<String> linkedJsOccurrences = extractLinkedAssetOccurrences(html, HTML_SCRIPT_SRC, ".js");
             Set<String> linkedCssFiles = new LinkedHashSet<>(linkedCssOccurrences);
@@ -519,6 +520,7 @@ public final class StaticTaskVerifier {
                     jsFile,
                     htmlClasses,
                     htmlIds,
+                    htmlIdOccurrences,
                     extractCssSelectors(css, CSS_CLASS_SELECTOR),
                     extractCssSelectors(css, CSS_ID_SELECTOR),
                     extractBareClassSelectors(css, htmlClasses),
@@ -543,6 +545,7 @@ public final class StaticTaskVerifier {
             String jsFile,
             Set<String> htmlClasses,
             Set<String> htmlIds,
+            List<String> htmlIdOccurrences,
             Set<String> cssClasses,
             Set<String> cssIds,
             Set<String> cssBareClassSelectors,
@@ -573,6 +576,9 @@ public final class StaticTaskVerifier {
 
         List<String> selectorProblems() {
             List<String> out = new ArrayList<>();
+            for (String id : duplicateValues(htmlIdOccurrences)) {
+                out.add("HTML defines duplicate IDs: `#" + id + "`");
+            }
             Set<String> cssMissingClasses = new LinkedHashSet<>(cssClasses);
             cssMissingClasses.removeAll(htmlClasses);
             Set<String> jsMissingClasses = new LinkedHashSet<>(jsClasses);
@@ -749,7 +755,11 @@ public final class StaticTaskVerifier {
     }
 
     private static Set<String> extractMatches(String text, Pattern pattern, boolean splitOnWhitespace) {
-        Set<String> out = new LinkedHashSet<>();
+        return new LinkedHashSet<>(extractMatchOccurrences(text, pattern, splitOnWhitespace));
+    }
+
+    private static List<String> extractMatchOccurrences(String text, Pattern pattern, boolean splitOnWhitespace) {
+        List<String> out = new ArrayList<>();
         if (text == null || text.isBlank()) return out;
         Matcher matcher = pattern.matcher(text);
         while (matcher.find()) {

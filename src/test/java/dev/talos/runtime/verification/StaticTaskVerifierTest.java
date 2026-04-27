@@ -161,6 +161,51 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void broadWebAppBuildFailsWhenHtmlIdsAreDuplicated() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!DOCTYPE html>
+                <html>
+                  <head>
+                    <link rel="stylesheet" href="styles.css">
+                  </head>
+                  <body>
+                    <main class="calculator">
+                      <h1>BMI Calculator</h1>
+                      <form id="bmi-form">
+                        <input id="weight" type="number">
+                        <input id="height" type="number">
+                        <button type="submit">Calculate</button>
+                      </form>
+                      <p id="result"></p>
+                      <div id="result"></div>
+                    </main>
+                    <script src="script.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), ".calculator { max-width: 28rem; }");
+        Files.writeString(workspace.resolve("script.js"), """
+                document.getElementById('bmi-form').addEventListener('submit', event => event.preventDefault());
+                document.getElementById('weight');
+                document.getElementById('height');
+                document.getElementById('result');
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Can you build a small BMI calculator website here with separate CSS and JavaScript files?",
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("styles.css", VerificationStatus.PASS),
+                        successfulWrite("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("HTML defines duplicate IDs: `#result`")));
+    }
+
+    @Test
     void broadWebAppBuildFailsWhenJavaScriptIsPlaceholder() throws Exception {
         Files.writeString(workspace.resolve("index.html"), """
                 <!DOCTYPE html>
