@@ -606,6 +606,22 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/45-status-question-blocks-mutation.json] 45: status question blocks mutation before approval")
+    void statusQuestionBlocksMutationBeforeApproval() {
+        var loaded = JsonScenarioLoader.load("scenarios/45-status-question-blocks-mutation.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("blocked")
+                    .assertFileContains("index.html", "<title>Night Drive</title>")
+                    .assertFileNotContains("index.html", "Status Question Regression");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/44-verify-web-complete-static-diagnostics.json] 44: verify web completion uses static diagnostics")
     void verifyWebCompletionUsesStaticDiagnostics() {
         var loaded = JsonScenarioLoader.load("scenarios/44-verify-web-complete-static-diagnostics.json");
