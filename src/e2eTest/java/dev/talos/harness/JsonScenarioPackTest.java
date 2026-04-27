@@ -291,6 +291,24 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/46-write-file-missing-content-before-approval.json] 46: missing write_file content is blocked before approval")
+    void writeFileMissingContentBlocksBeforeApproval() {
+        var loaded = JsonScenarioLoader.load("scenarios/46-write-file-missing-content-before-approval.json");
+
+        try (var result = ScenarioRunner.run(loaded.definition())) {
+            result.assertUsedTool("talos.write_file")
+                    .assertFailedCalls(1)
+                    .assertApprovalCounts(0, 0, 0, 0)
+                    .assertFileContains("style.css", "background: #111")
+                    .assertFileNotContains("style.css", "brighter");
+
+            assertTrue(result.anyToolResultContains("Invalid talos.write_file call"));
+            assertTrue(result.anyToolResultContains("missing required parameter `content`"));
+            assertTrue(result.anyToolResultContains("No approval was requested"));
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/22-build-website-prompt-allows-apply.json] 22: build website prompt is apply-capable")
     void buildWebsitePromptAllowsApply() {
         var loaded = JsonScenarioLoader.load("scenarios/22-build-website-prompt-allows-apply.json");
