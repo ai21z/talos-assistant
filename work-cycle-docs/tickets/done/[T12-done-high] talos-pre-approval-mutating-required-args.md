@@ -116,6 +116,15 @@ tool loop as structured `INVALID_PARAMS` failures.
 - `./gradlew.bat e2eTest` — passed
 - `./gradlew.bat check` — passed
 
+## Work-Test-Cycle Loop Used
+
+- Inner dev loop.
+- Candidate loop was not run because this was one ticket inside the open-ticket batch, not a declared versioned candidate.
+
+## Commit
+
+- Implementation commit: `6947595 T12: validate mutating required args before approval`
+
 ## Manual Talos Check Result
 
 Command:
@@ -156,6 +165,10 @@ Pass/fail:
 
 Notes:
 - Manual testing also surfaced a separate intent-classification gap: `Use the file edit tool to change...` was treated as `READ_ONLY_QA` and blocked before approval. That is outside T12's required-argument validation scope and should be handled as a follow-up intent ticket if not covered by the upcoming repair/intent work.
+
+## Known Follow-Ups
+
+- Add or fold in intent handling for prompts like `Use the file edit tool to change...` if the upcoming repair/intent tickets do not already cover it.
 
 ## Acceptance Criteria
 

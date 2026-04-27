@@ -144,6 +144,15 @@ behavior:
 - `./gradlew.bat e2eTest` — passed
 - `./gradlew.bat check` — passed
 
+## Work-Test-Cycle Loop Used
+
+- Inner dev loop.
+- Candidate loop was not run because this was one ticket inside the open-ticket batch, not a declared versioned candidate.
+
+## Commit
+
+- Implementation commit: `d473784 T11: enforce verify-only status question behavior`
+
 ## Manual Talos Check Result
 
 Command:
@@ -179,6 +188,10 @@ Pass/fail:
 
 Notes:
 - The exact no-history prompt `did you make the changes?` produced a weak final answer from the live model, but it remained read-only. Prior-outcome answer quality is covered by the follow-up outcome/repair tickets.
+
+## Known Follow-Ups
+
+- Improve prior-outcome answer quality for no-history/status prompts where Talos has no saved turn outcome loaded.
 
 ## Acceptance Criteria
 
