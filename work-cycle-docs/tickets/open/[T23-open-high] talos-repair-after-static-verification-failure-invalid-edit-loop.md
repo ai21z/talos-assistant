@@ -104,3 +104,19 @@ Out of scope:
 Manual deep-review result on 2026-04-28:
 
 - `bmi-empty-c-repair-transcript.txt` shows a mutation-allowed repair turn stopped after invalid `edit_file` calls for `index.html`, despite static verifier giving concrete missing items.
+
+Additional non-technical phrasing evidence on 2026-04-28:
+
+- `local/manual-testing/deep-review-2/nondev-bmi-title-only-transcript.txt`
+  - After the user said `I'm sorry, maybe I'm saying this wrong. I need this folder to become a BMI calculator page. You can change whatever files are needed. Please make it work.`
+  - Talos edited `index.html`, then repeated an edit whose `old_string` no longer matched.
+  - Final result was partial:
+    - duplicate `id="weight"` inputs,
+    - duplicate `id="height"` inputs,
+    - duplicate `id="result"` elements,
+    - no calculate button,
+    - no `scripts.js`,
+    - no JavaScript link.
+  - Trace correctly showed `FILE_EDIT mutationAllowed=true`, but repair strategy did not converge.
+
+This strengthens the acceptance criterion: repair recovery must account for successful-but-incomplete edits as well as failed invalid edit loops. After an edit changes the anchor text, Talos should re-read before attempting another edit or switch to `write_file` for the target file.

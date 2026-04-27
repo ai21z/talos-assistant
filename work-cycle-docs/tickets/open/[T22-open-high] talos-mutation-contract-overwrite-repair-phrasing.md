@@ -104,3 +104,20 @@ Manual deep-review result on 2026-04-28:
 
 - `bmi-broken-b-transcript.txt`: explicit `Overwrite these three files... Use talos.write_file for all three` was read-only and blocked write calls.
 - `bmi-empty-c-writefile-repair-transcript.txt`: explicit `Overwrite index.html... Use write_file for index.html` was diagnostic/read-only and blocked write calls.
+
+Additional non-technical phrasing evidence on 2026-04-28:
+
+- `local/manual-testing/deep-review-2/nondev-bmi-empty-transcript.txt`
+  - Prompt: `I have an empty folder. Can you make me a simple BMI calculator webpage here? I am not technical, I just want a page I can open and use.`
+  - Observed: model attempted `write_file`, but trace was `contract: READ_ONLY_QA mutationAllowed=false`.
+  - Blocked reason: `task-contract read-only denied talos.write_file`.
+  - User-visible answer then claimed Talos could not create/modify files and gave copy/paste instructions.
+- `local/manual-testing/deep-review-2/nondev-bmi-title-only-transcript.txt`
+  - Prompt: `Hi, I don't really know coding. I have this little BMI page here and it only shows a title. Can you look at it and make it actually work for me?`
+  - Observed: trace was correctly `FILE_EDIT mutationAllowed=true`, but the model asked the non-technical user to provide the HTML path instead of using workspace tools to locate `index.html`.
+  - Follow-up `I opened it and it still does not feel like a working calculator... Can you fix the files in this folder for me?` drifted to `READ_ONLY_QA` and again asked for project structure.
+
+These examples show two related intent issues:
+
+- Some regular-user creation phrasing (`make me a ... webpage`) is not mutation-positive enough.
+- Even when the contract is mutation-positive, Talos may accept a no-tool path/context request instead of forcing local workspace inspection.
