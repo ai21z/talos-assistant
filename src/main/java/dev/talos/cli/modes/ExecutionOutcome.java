@@ -64,6 +64,7 @@ record ExecutionOutcome(
 
     enum VerificationStatus {
         NOT_RUN,
+        READBACK_ONLY,
         PASSED,
         FAILED,
         UNAVAILABLE
@@ -149,6 +150,10 @@ record ExecutionOutcome(
             }
         } else if (verificationStatus == VerificationStatus.UNAVAILABLE) {
             current = staticVerificationUnavailableAnnotation(taskVerification) + current;
+        } else if (verificationStatus == VerificationStatus.READBACK_ONLY) {
+            if (completionStatus == CompletionStatus.COMPLETE) {
+                current = readbackOnlyVerificationAnnotation(taskVerification) + current;
+            }
         } else if (verificationStatus == VerificationStatus.PASSED) {
             if (completionStatus == CompletionStatus.COMPLETE) {
                 current = staticVerificationPassedAnnotation(taskVerification) + current;
@@ -307,6 +312,7 @@ record ExecutionOutcome(
         if (status == null) return VerificationStatus.NOT_RUN;
         return switch (status) {
             case NOT_RUN -> VerificationStatus.NOT_RUN;
+            case READBACK_ONLY -> VerificationStatus.READBACK_ONLY;
             case PASSED -> VerificationStatus.PASSED;
             case FAILED -> VerificationStatus.FAILED;
             case UNAVAILABLE -> VerificationStatus.UNAVAILABLE;
@@ -432,6 +438,12 @@ record ExecutionOutcome(
 
     private static String staticVerificationPassedAnnotation(TaskVerificationResult result) {
         return "[Static verification: passed - " + verificationSummary(result) + "]\n\n";
+    }
+
+    private static String readbackOnlyVerificationAnnotation(TaskVerificationResult result) {
+        return "[File write/readback passed. No task-specific verifier was applicable, "
+                + "so task completion was not verified. "
+                + verificationSummary(result) + "]\n\n";
     }
 
     private static String staticVerificationFailedAnnotation(TaskVerificationResult result) {

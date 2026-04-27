@@ -24,6 +24,10 @@ public record TaskVerificationResult(
         return new TaskVerificationResult(TaskVerificationStatus.PASSED, summary, facts, List.of());
     }
 
+    public static TaskVerificationResult readbackOnly(String summary, List<String> facts) {
+        return new TaskVerificationResult(TaskVerificationStatus.READBACK_ONLY, summary, facts, List.of());
+    }
+
     public static TaskVerificationResult failed(String summary, List<String> facts, List<String> problems) {
         return new TaskVerificationResult(TaskVerificationStatus.FAILED, summary, facts, problems);
     }

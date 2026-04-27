@@ -318,9 +318,10 @@ class ExecutionOutcomeTest {
 
             assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
             assertFalse(outcome.partialMutation());
-            assertEquals(ExecutionOutcome.VerificationStatus.PASSED, outcome.verificationStatus());
-            assertTrue(outcome.finalAnswer().startsWith("[Static verification: passed"));
+            assertEquals(ExecutionOutcome.VerificationStatus.READBACK_ONLY, outcome.verificationStatus());
+            assertTrue(outcome.finalAnswer().startsWith("[File write/readback passed."));
             assertEquals(MutationOutcomeStatus.SUCCEEDED, outcome.taskOutcome().mutationOutcome().status());
+            assertEquals(TaskCompletionStatus.COMPLETED_UNVERIFIED, outcome.taskOutcome().completionStatus());
             assertEquals(0, outcome.taskOutcome().mutationOutcome().failed().size());
             assertFalse(outcome.taskOutcome().hasWarning(TruthWarningType.PARTIAL_MUTATION));
         } finally {
@@ -651,7 +652,7 @@ class ExecutionOutcomeTest {
     }
 
     @Test
-    void postApplyNonWebTargetOnlyPassUsesNarrowVerificationSummary() throws Exception {
+    void postApplyNonWebTargetOnlyReadbackDoesNotClaimTaskVerified() throws Exception {
         Path ws = Files.createTempDirectory("talos-execution-outcome-target-readback-");
         try {
             Files.writeString(ws.resolve("README.md"), "# Talos\n");
@@ -674,9 +675,13 @@ class ExecutionOutcomeTest {
                     "Updated README.md.", messages, loopResult, ws, 0);
 
             assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
-            assertEquals(ExecutionOutcome.VerificationStatus.PASSED, outcome.verificationStatus());
-            assertTrue(outcome.finalAnswer().startsWith("[Static verification: passed - Target/readback checks passed"));
-            assertTrue(outcome.finalAnswer().contains("no task-specific static verifier was applicable"));
+            assertEquals(ExecutionOutcome.VerificationStatus.READBACK_ONLY, outcome.verificationStatus());
+            assertTrue(outcome.finalAnswer().startsWith("[File write/readback passed."));
+            assertTrue(outcome.finalAnswer().contains("No task-specific verifier was applicable"));
+            assertTrue(outcome.finalAnswer().contains("task completion was not verified"));
+            assertFalse(outcome.finalAnswer().contains("Static verification: passed"));
+            assertEquals(TaskCompletionStatus.COMPLETED_UNVERIFIED, outcome.taskOutcome().completionStatus());
+            assertEquals(TaskVerificationStatus.READBACK_ONLY, outcome.taskOutcome().verificationResult().status());
         } finally {
             try (var walk = Files.walk(ws)) {
                 walk.sorted(Comparator.reverseOrder()).forEach(path -> {

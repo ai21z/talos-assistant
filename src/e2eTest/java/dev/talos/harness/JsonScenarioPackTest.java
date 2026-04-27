@@ -388,7 +388,9 @@ class JsonScenarioPackTest {
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
             result.assertApprovalCounts(1, 1, 0, 0)
-                    .assertAnswerContains("Static verification: passed")
+                    .assertAnswerContains("File write/readback passed")
+                    .assertAnswerContains("task completion was not verified")
+                    .assertAnswerNotContains("Static verification: passed")
                     .assertAnswerContains("script.js")
                     .assertFileContains("script.js", "retry-create-file-alias");
         }
