@@ -9,6 +9,7 @@ import dev.talos.core.context.ConversationManager;
 import dev.talos.core.context.TokenBudget;
 import dev.talos.core.retrieval.RetrievalTrace;
 import dev.talos.core.security.Sandbox;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.tools.*;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
@@ -32,6 +33,9 @@ class TurnProcessorTest {
     void cleanupTrace() {
         // Clear any leftover trace from tests
         TurnTraceCapture.consume();
+        TurnUserRequestCapture.clear();
+        TurnTaskContractCapture.clear();
+        if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
     }
 
     @Test void nullInputReturnsNull() throws Exception {
@@ -237,6 +241,51 @@ class TurnProcessorTest {
 
         assertTrue(result.success(), result.errorMessage());
         assertEquals(1, approvals.get());
+    }
+
+    @Test
+    void forbiddenTargetFromTaskContractFailsBeforeApproval(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("index.html"), "<h1>original</h1>");
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+        String request = "Fix only styles.css. Do not change index.html or scripts.js.";
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.write_file", Map.of(
+                        "path", "index.html",
+                        "content", "<h1>forbidden</h1>")), ctx);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.INVALID_PARAMS, result.error().code());
+        assertTrue(result.errorMessage().contains("forbidden"), result.errorMessage());
+        assertTrue(result.errorMessage().contains("index.html"), result.errorMessage());
+        assertTrue(result.errorMessage().contains("No approval was requested"), result.errorMessage());
+        assertEquals(0, approvals.get());
+        assertEquals("<h1>original</h1>", Files.readString(workspace.resolve("index.html")));
+    }
+
+    @Test
+    void allowedTargetFromScopedContractStillRequestsApproval(@TempDir Path workspace) {
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+        String request = "Fix only styles.css. Do not change index.html or scripts.js.";
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.write_file", Map.of(
+                        "path", "styles.css",
+                        "content", "body { color: white; }")), ctx);
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(1, approvals.get());
+        assertTrue(Files.exists(workspace.resolve("styles.css")));
     }
 
     @Test void toolReceivesWorkspaceFromSession() {

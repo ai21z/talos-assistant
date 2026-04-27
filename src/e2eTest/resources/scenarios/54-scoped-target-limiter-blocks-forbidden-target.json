@@ -1,0 +1,18 @@
+{
+  "name": "scoped target limiter blocks forbidden target",
+  "fixture": "t20-scoped-target-limiter",
+  "v1Pack": true,
+  "claims": [
+    "named-target-negation-preserves-mutation-intent",
+    "forbidden-target-mutation-is-blocked-before-approval",
+    "allowed-target-mutation-still-reaches-approval"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Fix only styles.css. Do not change index.html or scripts.js.",
+  "scriptedResponses": [
+    "```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"index.html\",\"content\":\"<h1>forbidden mutation</h1>\"}}\n```",
+    "```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"styles.css\",\"content\":\"body {\\n  background: #101820;\\n  color: #f7f7f7;\\n}\\n.card {\\n  border: 1px solid #f2aa4c;\\n}\\n\"}}\n```",
+    "Updated styles.css only."
+  ]
+}

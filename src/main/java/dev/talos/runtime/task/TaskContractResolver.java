@@ -21,6 +21,11 @@ public final class TaskContractResolver {
                     + "properties|gradle|kts|toml|ini|env|csv))"
                     + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
 
+    private static final Pattern NEGATED_TARGET_SPAN = Pattern.compile(
+            "(?i)(?:\\b(?:do\\s+not|don't|dont)\\s+"
+                    + "(?:change|edit|modify|write|create|save|apply|touch|mutate)"
+                    + "|\\bwithout\\s+changing)\\s+(.{0,240})");
+
     private static final Set<String> CREATE_MARKERS = Set.of(
             "create", "write a", "write the", "save as", "add a", "add the",
             "new file", "build", "generate", "scaffold", "set up", "setup",
@@ -109,14 +114,19 @@ public final class TaskContractResolver {
         boolean mutationAllowed = mutationRequested
                 && (type == TaskType.FILE_EDIT || type == TaskType.FILE_CREATE);
         boolean verificationRequired = mutationAllowed || type == TaskType.VERIFY_ONLY;
+        Set<String> forbiddenTargets = extractForbiddenTargets(original);
+        Set<String> expectedTargets = extractExpectedTargets(original);
+        if (mutationAllowed && !forbiddenTargets.isEmpty()) {
+            expectedTargets = withoutForbiddenTargets(expectedTargets, forbiddenTargets);
+        }
 
         return new TaskContract(
                 type,
                 mutationRequested,
                 mutationAllowed,
                 verificationRequired,
-                extractExpectedTargets(original),
-                Set.of(),
+                expectedTargets,
+                forbiddenTargets,
                 original);
     }
 
@@ -127,6 +137,21 @@ public final class TaskContractResolver {
         while (matcher.find()) {
             String target = normalizeTarget(matcher.group(1));
             if (!target.isBlank()) out.add(target);
+        }
+        return Set.copyOf(out);
+    }
+
+    public static Set<String> extractForbiddenTargets(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return Set.of();
+        Matcher spanMatcher = NEGATED_TARGET_SPAN.matcher(userRequest);
+        Set<String> out = new LinkedHashSet<>();
+        while (spanMatcher.find()) {
+            String span = firstSentenceFragment(spanMatcher.group(1));
+            Matcher targetMatcher = TARGET_FILE.matcher(span);
+            while (targetMatcher.find()) {
+                String target = normalizeTarget(targetMatcher.group(1));
+                if (!target.isBlank()) out.add(target);
+            }
         }
         return Set.copyOf(out);
     }
@@ -260,6 +285,31 @@ public final class TaskContractResolver {
         return false;
     }
 
+    private static Set<String> withoutForbiddenTargets(Set<String> expectedTargets, Set<String> forbiddenTargets) {
+        if (expectedTargets == null || expectedTargets.isEmpty()
+                || forbiddenTargets == null || forbiddenTargets.isEmpty()) {
+            return expectedTargets == null ? Set.of() : expectedTargets;
+        }
+        Set<String> forbidden = new LinkedHashSet<>();
+        for (String target : forbiddenTargets) {
+            forbidden.add(normalizeTargetForComparison(target));
+        }
+        Set<String> out = new LinkedHashSet<>();
+        for (String target : expectedTargets) {
+            if (!forbidden.contains(normalizeTargetForComparison(target))) {
+                out.add(target);
+            }
+        }
+        return Set.copyOf(out);
+    }
+
+    private static String firstSentenceFragment(String span) {
+        if (span == null || span.isBlank()) return "";
+        String normalized = span.stripLeading();
+        String[] pieces = normalized.split("(?<=[.!?;])\\s+", 2);
+        return pieces.length == 0 ? normalized : pieces[0];
+    }
+
     private static String latestUserRequest(List<ChatMessage> messages) {
         if (messages == null || messages.isEmpty()) return null;
         for (int i = messages.size() - 1; i >= 0; i--) {
@@ -320,5 +370,9 @@ public final class TaskContractResolver {
             normalized = normalized.substring(2);
         }
         return normalized;
+    }
+
+    private static String normalizeTargetForComparison(String raw) {
+        return normalizeTarget(raw).toLowerCase(Locale.ROOT);
     }
 }

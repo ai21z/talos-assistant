@@ -33,4 +33,20 @@ class MutationIntentTest {
         assertFalse(MutationIntent.looksExplicitMutationRequest(
                 "Repair this file but do not change anything."));
     }
+
+    @Test
+    void namedFileScopedNegationDoesNotCancelMutationIntent() {
+        assertTrue(MutationIntent.looksExplicitMutationRequest(
+                "Fix only styles.css. Do not change index.html or scripts.js."));
+        assertTrue(MutationIntent.looksExplicitMutationRequest(
+                "Edit only index.html; don't touch styles.css."));
+    }
+
+    @Test
+    void globalReadOnlyNegationStillCancelsMutationIntent() {
+        assertFalse(MutationIntent.looksExplicitMutationRequest(
+                "Do not change anything. Just inspect."));
+        assertFalse(MutationIntent.looksExplicitMutationRequest(
+                "Diagnose this, do not change files."));
+    }
 }

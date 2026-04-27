@@ -329,7 +329,7 @@ public final class TurnProcessor {
         }
 
         if (risk.requiresApproval()) {
-            ToolResult preApprovalValidation = validateBeforeApproval(call, session, ctx);
+            ToolResult preApprovalValidation = validateBeforeApproval(call, session, ctx, taskContract);
             if (preApprovalValidation != null) {
                 TurnAuditCapture.recordToolCall(
                         call.toolName(), path == null ? "" : path, false,
@@ -466,10 +466,20 @@ public final class TurnProcessor {
         return null;
     }
 
-    private static ToolResult validateBeforeApproval(ToolCall call, Session session, Context ctx) {
+    private static ToolResult validateBeforeApproval(
+            ToolCall call,
+            Session session,
+            Context ctx,
+            TaskContract taskContract
+    ) {
         ToolResult sandboxPathValidation = validateSandboxPathBeforeApproval(call, session, ctx);
         if (sandboxPathValidation != null) {
             return sandboxPathValidation;
+        }
+
+        ToolResult forbiddenTargetValidation = validateForbiddenTargetBeforeApproval(call, taskContract);
+        if (forbiddenTargetValidation != null) {
+            return forbiddenTargetValidation;
         }
 
         if (isWriteFileTool(call.toolName())) {
@@ -552,6 +562,28 @@ public final class TurnProcessor {
         return null;
     }
 
+    private static ToolResult validateForbiddenTargetBeforeApproval(ToolCall call, TaskContract taskContract) {
+        if (call == null || taskContract == null || taskContract.forbiddenTargets().isEmpty()) {
+            return null;
+        }
+        if (!ToolCallSupport.isMutatingTool(call.toolName())) {
+            return null;
+        }
+        String path = resolveParam(call, "path", "file_path", "filepath", "file", "filename");
+        if (path == null || path.isBlank()) {
+            return null;
+        }
+        for (String forbidden : taskContract.forbiddenTargets()) {
+            if (sameScopedTarget(path, forbidden)) {
+                return ToolResult.fail(ToolError.invalidParams(
+                        "Target forbidden before approval: `" + path
+                                + "` was explicitly excluded by the user's current request. "
+                                + "No approval was requested and no file was changed."));
+            }
+        }
+        return null;
+    }
+
     private static List<PathParam> pathParams(ToolCall call) {
         var params = new java.util.ArrayList<PathParam>();
         for (String key : List.of("path", "file_path", "filepath", "file", "filename", "from", "to")) {
@@ -572,6 +604,10 @@ public final class TurnProcessor {
         }
         if (message != null && message.startsWith("Invalid path before approval")) {
             return "invalid path before approval"
+                    + (message.isBlank() ? "" : ": " + shortReason(message));
+        }
+        if (message != null && message.startsWith("Target forbidden before approval")) {
+            return "forbidden target before approval"
                     + (message.isBlank() ? "" : ": " + shortReason(message));
         }
         if (isEditFileTool(name)) {
@@ -638,6 +674,27 @@ public final class TurnProcessor {
             normalized = normalized.substring("talos.".length());
         }
         return normalized;
+    }
+
+    private static boolean sameScopedTarget(String candidate, String forbidden) {
+        String c = normalizeScopedTarget(candidate);
+        String f = normalizeScopedTarget(forbidden);
+        if (c.isBlank() || f.isBlank()) return false;
+        return c.equals(f) || c.endsWith("/" + f);
+    }
+
+    private static String normalizeScopedTarget(String path) {
+        if (path == null) return "";
+        String normalized = ToolCallSupport.normalizePath(path)
+                .strip()
+                .replaceAll("[`'\"),.;:!?\\]]+$", "");
+        while (normalized.startsWith("./")) {
+            normalized = normalized.substring(2);
+        }
+        while (normalized.contains("//")) {
+            normalized = normalized.replace("//", "/");
+        }
+        return normalized.toLowerCase(java.util.Locale.ROOT);
     }
 
     /**
