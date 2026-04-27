@@ -223,15 +223,15 @@ public final class RagMode implements Mode {
 
         // Add current user message
         messages.add(ChatMessage.user(userMessage));
+        int historySize = history == null ? 0 : history.size();
         LOG.debug("buildMessages: total {} messages (1 system + {} history + {} context + 1 current)",
-                messages.size(), history.size(),
+                messages.size(), historySize,
                 (ctxMaps != null && !ctxMaps.isEmpty()) ? 1 : 0);
         return messages;
     }
 
     /** Matches file references in user queries (quoted paths, extensions, dotfiles, extensionless names). */
     private static final Pattern FILE_TOKEN = Pattern.compile(
-        "(?:" +
             // Branch 1: Quoted path (with spaces allowed)
             "\"((?:[A-Za-z]:)?[/\\\\]?[^\"]+)\"" +
             "|" +
@@ -252,8 +252,7 @@ public final class RagMode implements Mode {
             "\\b(LICENSE|README|NOTICE|COPYRIGHT|AUTHORS|CHANGELOG|CONTRIBUTING|MAKEFILE|Dockerfile)\\b" +
             "|" +
             // Branch 4: Dotfiles (e.g., .editorconfig, .env, .npmrc)
-            "(\\.[A-Za-z0-9_][A-Za-z0-9_.\\-]{1,})" +
-        ")",
+            "(\\.[A-Za-z0-9_][A-Za-z0-9_.\\-]{1,})",
         Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CHARACTER_CLASS
     );
 
@@ -350,7 +349,7 @@ public final class RagMode implements Mode {
         // Strip preambles at the start
         answer = answer.replaceFirst(
             "(?is)^\\s*(" +
-            "okay|sure|let me|i (?:will|can)|here['']?s|" +
+            "okay|sure|let me|i (?:will|can)|here'?s|" +
             "looking at the|now,|starting with|comparing the two|" +
             "the user is asking|first, i need to|" +
             "i couldn't find that here\\. the context|wait," +

@@ -190,7 +190,7 @@ public final class ToolRegistry {
             tool = tools.get(lowered);
             if (tool != null) {
                 aliasRescueCount.incrementAndGet();
-                LOG.debug("Case-normalized tool match: '{}' → '{}'", name, tool.name());
+                LOG.debug("Case-normalized exact tool match: '{}' → '{}'", name, tool.name());
                 return tool;
             }
             // Try talos. prefix with lowered name
@@ -198,7 +198,7 @@ public final class ToolRegistry {
                 tool = tools.get("talos." + lowered);
                 if (tool != null) {
                     aliasRescueCount.incrementAndGet();
-                    LOG.debug("Case-normalized tool match: '{}' → '{}'", name, tool.name());
+                    LOG.debug("Case-normalized prefixed tool match: '{}' → '{}'", name, tool.name());
                     return tool;
                 }
             }

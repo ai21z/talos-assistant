@@ -74,7 +74,7 @@ public final class JsonTurnLogAppender implements SessionListener {
     static String summarize(RetrievalTrace trace) {
         if (trace == null) return "";
         List<RetrievalTrace.Entry> entries = trace.entries();
-        if (entries == null || entries.isEmpty()) return "";
+        if (entries.isEmpty()) return "";
         StringBuilder sb = new StringBuilder();
         sb.append(entries.size()).append(" stages, ")
                 .append(String.format("%.1fms", trace.totalMs()));

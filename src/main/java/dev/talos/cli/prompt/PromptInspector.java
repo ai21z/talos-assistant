@@ -219,6 +219,7 @@ public final class PromptInspector {
         return List.of();
     }
 
+    @SuppressWarnings("resource") // ctx.llm() is a borrowed REPL-scoped client.
     private static String modelName(Context ctx) {
         if (ctx == null || ctx.llm() == null) return "unknown";
         return ctx.llm().getModel();

@@ -110,7 +110,7 @@ public final class PromptClassifier {
             "api|cli|repl|engine|stage|mode|router|factory|" +
             "error|exception|bug|test(?:s|ing)?|" +
             "directory|folder|file|page|component|view|template|layout|" +
-            "stylesheet|style(?:s)?|script|markup|element|section|form|" +
+            "stylesheet|styles?|script|markup|element|section|form|" +
             "header|footer|sidebar|container|wrapper|route|" +
             "plugin|middleware|filter|listener|observer|" +
             "model|entity|dto|dao|repository|store|" +
@@ -356,8 +356,7 @@ public final class PromptClassifier {
             || stripped.startsWith("show me ") || stripped.startsWith("tell me about ")
             || stripped.startsWith("tell me ")
             || stripped.startsWith("what's ")  || stripped.startsWith("where's ")
-            || stripped.startsWith("how's ")   || stripped.startsWith("who's ")
-            || stripped.startsWith("which ");
+            || stripped.startsWith("how's ")   || stripped.startsWith("who's ");
     }
 
     /**

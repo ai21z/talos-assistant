@@ -99,8 +99,7 @@ public record FailurePolicy(
     }
 
     private static FailureDecision repeatedEmptyEditArgumentDecision(LoopState state) {
-        if (state.emptyEditArgumentFailuresByPath == null
-                || state.emptyEditArgumentFailuresByPath.isEmpty()) {
+        if (state.emptyEditArgumentFailuresByPath.isEmpty()) {
             return FailureDecision.continueLoop();
         }
         return state.emptyEditArgumentFailuresByPath.entrySet().stream()

@@ -170,6 +170,7 @@ final class ContentSanitizer {
                 foundMarkdown = true;
             } else if (foundMarkdown && PLAIN_PROSE.matcher(trimmed).find()) {
                 // Plain English after confirmed markdown — continuation text, OK
+                continue;
             } else if (!foundMarkdown) {
                 // First non-blank line isn't markdown — not a commentary block
                 return false;

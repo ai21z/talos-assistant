@@ -25,7 +25,7 @@ public class Audit {
     private final ObjectMapper mapper =
             new ObjectMapper().disable(SerializationFeature.FAIL_ON_EMPTY_BEANS);
 
-    private volatile boolean enabled = false;
+    private volatile boolean enabled;
     private final boolean redactOn;
     private final Redactor redactor;
 
@@ -42,7 +42,7 @@ public class Audit {
             Config cfg = new Config();
             @SuppressWarnings("unchecked")
             Map<String, Object> data = (Map<String, Object>) cfg.data;
-            Object auditObj = (data == null) ? null : data.get("audit");
+            Object auditObj = data.get("audit");
             @SuppressWarnings("unchecked")
             Map<String, Object> audit = (auditObj instanceof Map<?,?>) ? (Map<String, Object>) auditObj : Map.of();
             cfgEnabled = asBool(audit.get("enabled"), false);

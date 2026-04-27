@@ -23,6 +23,7 @@ import java.util.List;
  *   <li>{@code /session clear} - delete the saved session file</li>
  * </ul>
  */
+@SuppressWarnings("resource") // ctx.llm() is borrowed from the active REPL context.
 public final class SessionCommand implements Command {
     private final Path workspace;
     private final SessionStore store;

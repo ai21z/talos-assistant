@@ -35,7 +35,7 @@ public final class Redactor {
     // and (2) at least one internal '/' to avoid matching REPL commands like /help.
     private static final Pattern ABS_PATH = Pattern.compile(
             // Windows: C:\... or C:/...
-            "(?i)(?:\\b[A-Z]:[\\\\/](?:[^\\s\"'<>|]{1,200}[\\\\/])*[^\\s\"'<>|]{1,200})" +
+            "(?i)\\b[A-Z]:[\\\\/](?:[^\\s\"'<>|]{1,200}[\\\\/])*[^\\s\"'<>|]{1,200}" +
                     // OR POSIX: /usr/bin/... (must start after whitespace/SOL, must have 2+ segments)
                     "|(?:(?<=\\s)|(?<=^))(/[^\\s\"'<>|/]{1,200}(?:/[^\\s\"'<>|]{1,200})+)"
     );

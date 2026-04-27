@@ -144,7 +144,7 @@ public final class BenchCommand implements Command {
                 AtomicInteger embedCount = new AtomicInteger();
 
                 // Simple parallel processing to test concurrency
-                parsedTexts.parallelStream().limit(concurrency * 2).forEach(text -> {
+                parsedTexts.parallelStream().limit((long) concurrency * 2L).forEach(text -> {
                     try {
                         if (text.length() > 100) { // Only embed non-trivial texts
                             String sample = text.length() > 1000 ? text.substring(0, 1000) : text;
@@ -178,11 +178,12 @@ public final class BenchCommand implements Command {
             // Cleanup temp directory
             try {
                 if (Files.exists(tempIndexDir)) {
-                    Files.walk(tempIndexDir)
-                        .sorted(Comparator.reverseOrder())
-                        .forEach(p -> {
-                            try { Files.deleteIfExists(p); } catch (Exception ignore) {}
-                        });
+                    try (var walk = Files.walk(tempIndexDir)) {
+                        walk.sorted(Comparator.reverseOrder())
+                            .forEach(p -> {
+                                try { Files.deleteIfExists(p); } catch (Exception ignore) {}
+                            });
+                    }
                 }
             } catch (Exception ignore) {}
         }

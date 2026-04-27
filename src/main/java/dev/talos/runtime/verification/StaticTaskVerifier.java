@@ -415,7 +415,7 @@ public final class StaticTaskVerifier {
     }
 
     private static boolean shouldRequireSeparateWebAssetMutations(TaskContract contract) {
-        if (contract == null || !looksBroadWebTask(contract)) return false;
+        if (!looksBroadWebTask(contract)) return false;
         String lower = contract.originalUserRequest().toLowerCase(Locale.ROOT);
         boolean createLike = contract.type() == TaskType.FILE_CREATE
                 || lower.contains("build")

@@ -33,6 +33,7 @@ public final class RenderEngine {
     // Spinner state
     private final AtomicBoolean spinnerActive = new AtomicBoolean(false);
     private final AtomicInteger spinnerFrame = new AtomicInteger(0);
+    private final Object spinnerMonitor = new Object();
     private Thread spinnerThread;
     private Instant spinnerStartTime;
 
@@ -155,7 +156,9 @@ public final class RenderEngine {
                         + "  " + theme.muted(elapsed) + "   ");
                 out.flush();
                 try {
-                    Thread.sleep(120);
+                    synchronized (spinnerMonitor) {
+                        spinnerMonitor.wait(120);
+                    }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     break;
@@ -173,6 +176,9 @@ public final class RenderEngine {
      */
     public void stopSpinner() {
         if (!spinnerActive.compareAndSet(true, false)) return;
+        synchronized (spinnerMonitor) {
+            spinnerMonitor.notifyAll();
+        }
         if (spinnerThread != null) {
             try { spinnerThread.join(200); }
             catch (InterruptedException e) { Thread.currentThread().interrupt(); }

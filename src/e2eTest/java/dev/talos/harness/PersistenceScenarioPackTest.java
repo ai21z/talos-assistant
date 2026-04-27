@@ -64,7 +64,7 @@ class PersistenceScenarioPackTest {
                     "Snapshot should contain the user turn and the stripped assistant turn");
             assertEquals(expectedAssistant, result.snapshot().turns().get(1).content());
             assertEquals("ok", result.snapshot().turns().get(1).status());
-            assertTrue(result.turnLog().get(0).assistantText().equals(expectedAssistant),
+            assertEquals(expectedAssistant, result.turnLog().get(0).assistantText(),
                     "Turn log should persist the same stripped assistant text");
         }
     }
