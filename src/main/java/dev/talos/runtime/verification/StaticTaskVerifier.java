@@ -155,10 +155,13 @@ public final class StaticTaskVerifier {
             String normalized = normalizePath(path);
             if (!normalized.isBlank()) normalizedMutations.add(normalized);
         }
+        boolean caseInsensitive = expectedTargetMatchingIsCaseInsensitive();
         for (String target : contract.expectedTargets()) {
             String expected = normalizePath(target);
             if (expected.isBlank()) continue;
-            if (!normalizedMutations.contains(expected)) {
+            boolean matched = normalizedMutations.stream()
+                    .anyMatch(mutated -> expectedTargetMatches(expected, mutated, caseInsensitive));
+            if (!matched) {
                 problems.add(expected + ": expected target was not successfully mutated.");
             }
         }
@@ -959,6 +962,20 @@ public final class StaticTaskVerifier {
             normalized = normalized.substring(2);
         }
         return normalized;
+    }
+
+    static boolean expectedTargetMatches(String expectedTarget, String mutatedPath, boolean caseInsensitive) {
+        String expected = normalizePath(expectedTarget);
+        String mutated = normalizePath(mutatedPath);
+        if (expected.isBlank() || mutated.isBlank()) return false;
+        if (caseInsensitive) {
+            return expected.equalsIgnoreCase(mutated);
+        }
+        return expected.equals(mutated);
+    }
+
+    private static boolean expectedTargetMatchingIsCaseInsensitive() {
+        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
     }
 
     private static String firstProblemSummary(List<String> problems) {

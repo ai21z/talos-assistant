@@ -4,6 +4,8 @@ import dev.talos.cli.modes.AssistantTurnExecutor;
 import dev.talos.spi.types.ChatMessage;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -777,6 +779,26 @@ class JsonScenarioPackTest {
                     .assertAnswerContains("scripts.js: JavaScript file appears to be placeholder content")
                     .assertAnswerContains("The requested task is not verified complete.")
                     .assertAnswerNotContains("Static verification: passed")
+                    .assertFileContains("index.html", "<script src=\"scripts.js\"></script>")
+                    .assertFileContains("scripts.js", "// Your JavaScript logic here");
+        }
+    }
+
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    @DisplayName("[json-scenario:scenarios/51-windows-expected-target-case-normalization.json] 51: Windows expected target matching ignores case-only differences")
+    void windowsExpectedTargetCaseNormalization() {
+        var loaded = JsonScenarioLoader.load("scenarios/51-windows-expected-target-case-normalization.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(3, 3, 0, 3)
+                    .assertAnswerContains("Static verification failed")
+                    .assertAnswerContains("scripts.js: JavaScript file appears to be placeholder content")
+                    .assertAnswerNotContains("Index.html: expected target was not successfully mutated.")
+                    .assertAnswerNotContains("index.html: expected target was not successfully mutated.")
                     .assertFileContains("index.html", "<script src=\"scripts.js\"></script>")
                     .assertFileContains("scripts.js", "// Your JavaScript logic here");
         }

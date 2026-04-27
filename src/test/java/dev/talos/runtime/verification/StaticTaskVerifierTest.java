@@ -11,7 +11,9 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class StaticTaskVerifierTest {
 
@@ -432,6 +434,30 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void expectedTargetMatchingCanUseWindowsCaseInsensitiveSemantics() {
+        assertTrue(StaticTaskVerifier.expectedTargetMatches("Index.html", "index.html", true));
+        assertTrue(StaticTaskVerifier.expectedTargetMatches(".\\Index.html", "./index.html", true));
+        assertFalse(StaticTaskVerifier.expectedTargetMatches("scripts.js", "script.js", true));
+        assertFalse(StaticTaskVerifier.expectedTargetMatches("Index.html", "index.html", false));
+    }
+
+    @Test
+    void expectedTargetFromContractMatchesCaseDifferenceOnWindows() throws Exception {
+        assumeTrue(isWindows(), "Windows-specific verifier behavior is asserted only on Windows hosts.");
+        Files.writeString(workspace.resolve("index.html"), "<html><body><main></main></body></html>");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                TaskContractResolver.fromUserRequest("Edit Index.html so the title changes."),
+                loopResult(List.of(successfulEdit("index.html", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.READBACK_ONLY, result.status());
+        assertTrue(result.facts().stream()
+                .anyMatch(f -> f.contains("Expected mutation target(s) were updated")));
+    }
+
+    @Test
     void readOnlyWebDiagnosticsReportMalformedHtmlAndCssClassTypo() throws Exception {
         Files.writeString(workspace.resolve("index.html"), """
                 <!DOCTYPE html>
@@ -482,6 +508,10 @@ class StaticTaskVerifierTest {
         assertEquals(TaskVerificationStatus.FAILED, result.status());
         assertTrue(result.problems().stream()
                 .anyMatch(p -> p.contains("index.html: expected target was not successfully mutated")));
+    }
+
+    private static boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase().contains("win");
     }
 
     private void writeWebFiles(String html) throws Exception {
