@@ -1,7 +1,11 @@
 package dev.talos.runtime;
 
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.tools.ToolCall;
+
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Thread-local collector for the current turn's tool/approval activity.
@@ -56,6 +60,12 @@ public final class TurnAuditCapture {
         if (b != null) {
             String normalizedReason = reason == null ? "" : reason.strip();
             b.toolCalls.add(new TurnRecord.ToolCallSummary(name, pathHint, success, normalizedReason));
+            ToolCall synthetic = syntheticCall(name, pathHint);
+            if (success) {
+                LocalTurnTraceCapture.recordToolExecuted("", synthetic, true, "");
+            } else {
+                LocalTurnTraceCapture.recordToolCallBlocked("", synthetic, normalizedReason);
+            }
             if (!success && !normalizedReason.isBlank()) {
                 b.policyBlocks.add(normalizedReason);
             }
@@ -67,6 +77,7 @@ public final class TurnAuditCapture {
         Bag b = HOLDER.get();
         if (b != null && trace != null) {
             b.policyTrace = trace;
+            LocalTurnTraceCapture.recordPolicyTrace(trace);
         }
     }
 
@@ -112,6 +123,13 @@ public final class TurnAuditCapture {
                 b.approvalsDenied,
                 trace
         );
+    }
+
+    private static ToolCall syntheticCall(String name, String pathHint) {
+        if (pathHint == null || pathHint.isBlank()) {
+            return new ToolCall(name == null ? "" : name, Map.of());
+        }
+        return new ToolCall(name == null ? "" : name, Map.of("path", pathHint));
     }
 }
 

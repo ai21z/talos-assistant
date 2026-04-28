@@ -6,6 +6,7 @@ import dev.talos.core.Config;
 import dev.talos.runtime.JsonSessionStore;
 import dev.talos.runtime.TurnPolicyTrace;
 import dev.talos.runtime.TurnRecord;
+import dev.talos.runtime.trace.LocalTurnTrace;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -288,6 +289,55 @@ class ExplainLastTurnCommandTest {
         assertTrue(text.contains("Native tools: talos.read_file, talos.write_file"));
         assertTrue(text.contains("Blocked: approval denied by user for talos.write_file"));
         assertTrue(text.contains("reason: approval denied by user for talos.write_file"));
+    }
+
+    @Test
+    void traceViewIncludesLocalTraceWhenTurnHasTraceId() {
+        Path workspace = Path.of("/project/local-trace").toAbsolutePath().normalize();
+        var store = new JsonSessionStore(tempDir);
+        var cmd = new ExplainLastTurnCommand(workspace, store);
+        String sessionId = JsonSessionStore.sessionIdFor(workspace);
+        LocalTurnTrace trace = LocalTurnTrace.builder(
+                        "trc-local",
+                        sessionId,
+                        1,
+                        "2026-04-28T12:00:00Z")
+                .workspaceHash("workspace-hash")
+                .mode("auto")
+                .model("ollama", "qwen2.5-coder:14b")
+                .toolSurface(
+                        List.of("talos.read_file", "talos.write_file"),
+                        List.of("talos.read_file", "talos.write_file"),
+                        "mutation task")
+                .verification("FAILED", "Static verification failed", List.of("scripts.js missing"))
+                .outcome("FAILED", "FAILED", "UNKNOWN", "PARTIAL", "TASK_INCOMPLETE")
+                .build();
+        store.saveTrace(sessionId, trace);
+        store.appendTurn(sessionId, new TurnRecord(
+                1,
+                Instant.parse("2026-04-28T12:00:01Z"),
+                1200,
+                "create bmi app",
+                "Static verification failed.",
+                List.of(new TurnRecord.ToolCallSummary("talos.write_file", "index.html", true)),
+                1,
+                1,
+                0,
+                "",
+                "ok",
+                TurnPolicyTrace.empty(),
+                "trc-local"));
+
+        Result result = cmd.execute("trace", minimalCtx());
+
+        assertInstanceOf(Result.TrustedInfo.class, result);
+        String text = ((Result.TrustedInfo) result).text;
+        assertTrue(text.contains("Local trace: trc-local"), text);
+        assertTrue(text.contains("Schema: 1"), text);
+        assertTrue(text.contains("Redaction: DEFAULT"), text);
+        assertTrue(text.contains("Verification: FAILED - Static verification failed"), text);
+        assertTrue(text.contains("scripts.js missing"), text);
+        assertTrue(text.contains("Outcome: FAILED"), text);
     }
 
     @Test

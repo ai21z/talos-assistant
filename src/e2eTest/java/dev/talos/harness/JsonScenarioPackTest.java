@@ -29,6 +29,7 @@ class JsonScenarioPackTest {
             result.assertAnswerContains("README.md")
                     .assertAnswerContains("src/Main.java")
                     .assertAnswerContains("local-first knowledge engine")
+                    .assertLocalTraceRecorded()
                     .assertFileContains("README.md", "Talos")
                     .assertFileContains("src/Main.java", "class Main")
                     .assertFileNotContains("README.md", "mutated by test");
