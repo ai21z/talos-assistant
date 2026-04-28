@@ -7,6 +7,8 @@ import dev.talos.core.retrieval.RetrievalTrace;
 import dev.talos.runtime.phase.PhasePolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.trace.LocalTurnTrace;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.tools.*;
 import org.slf4j.Logger;
@@ -142,6 +144,19 @@ public final class TurnProcessor {
         // activity without threading extra arguments through every call.
         TurnUserRequestCapture.set(userInput);
         TurnAuditCapture.begin();
+        String traceId = LocalTurnTraceCapture.newTraceId();
+        String sessionId = JsonSessionStore.sessionIdFor(session.workspace());
+        String model = ctx != null && ctx.llm() != null ? ctx.llm().getModel() : "";
+        LocalTurnTraceCapture.begin(
+                traceId,
+                sessionId,
+                turn,
+                java.time.Instant.now().toString(),
+                sessionId,
+                "unknown",
+                modelBackend(model),
+                modelName(model),
+                userInput);
         TurnResult turnResult;
         try {
             Path ws = session.workspace();
@@ -159,16 +174,27 @@ public final class TurnProcessor {
             if (ctx != null && ctx.executionPhaseState() != null) {
                 TurnAuditCapture.updateFinalPhase(ctx.executionPhaseState().phase().name());
             }
+            String assistantText = MemoryUpdateListener.extractText(result.get());
+            LocalTurnTraceCapture.recordModelResponseReceived(assistantText);
+            LocalTurnTraceCapture.recordOutcomeIfAbsent(
+                    JsonTurnLogAppender.statusOf(result.get()).toUpperCase(java.util.Locale.ROOT),
+                    "NOT_RUN",
+                    "UNKNOWN",
+                    "UNKNOWN",
+                    "TURN_RECORDED");
+            LocalTurnTrace localTrace = LocalTurnTraceCapture.complete();
+            TurnAudit audit = TurnAuditCapture.end().withLocalTrace(localTrace);
 
             turnResult = new TurnResult(
                     result.get(),
                     trace,
                     turn,
                     Duration.ofNanos(elapsedNanos),
-                    TurnAuditCapture.end()
+                    audit
             );
         } finally {
             TurnUserRequestCapture.clear();
+            LocalTurnTraceCapture.clear();
             // Defensive: if we hit a return/throw above before end() fired,
             // ensure the thread-local bag is cleaned up.
             if (TurnAuditCapture.isActive()) {
@@ -186,6 +212,24 @@ public final class TurnProcessor {
         }
 
         return turnResult;
+    }
+
+    private static String modelBackend(String model) {
+        if (model == null || model.isBlank()) return "";
+        int slash = model.indexOf('/');
+        return slash > 0 ? model.substring(0, slash) : "";
+    }
+
+    private static String modelName(String model) {
+        if (model == null) return "";
+        int slash = model.indexOf('/');
+        return slash >= 0 && slash + 1 < model.length() ? model.substring(slash + 1) : model;
+    }
+
+    private static String tracePhase(Context ctx) {
+        return ctx != null && ctx.executionPhaseState() != null && ctx.executionPhaseState().phase() != null
+                ? ctx.executionPhaseState().phase().name()
+                : "";
     }
 
     /**
@@ -221,6 +265,8 @@ public final class TurnProcessor {
         if (session == null || ctx == null) {
             return ToolResult.fail(ToolError.invalidParams("Tool execution context is unavailable"));
         }
+        String tracePhase = tracePhase(ctx);
+        LocalTurnTraceCapture.recordToolCallParsed(tracePhase, call);
 
         // Check if the tool exists
         TalosTool tool = toolRegistry.get(call.toolName());
@@ -350,6 +396,7 @@ public final class TurnProcessor {
 
         if (risk.requiresApproval()) {
             TurnAuditCapture.recordApprovalRequired();
+            LocalTurnTraceCapture.recordApprovalRequired(tracePhase, call);
 
             // Policy classification. AUTO_APPROVE skips the gate; DENY refuses
             // without prompting; ASK falls through to the gate as before.
@@ -370,6 +417,7 @@ public final class TurnProcessor {
 
             if (decision == ApprovalPolicy.Decision.DENY) {
                 TurnAuditCapture.recordApprovalDenied();
+                LocalTurnTraceCapture.recordApprovalDenied(tracePhase, call);
                 TurnAuditCapture.recordToolCall(
                         call.toolName(), path == null ? "" : path, false,
                         "approval policy denied " + call.toolName());
@@ -387,6 +435,7 @@ public final class TurnProcessor {
 
                 if (response == ApprovalResponse.DENIED) {
                     TurnAuditCapture.recordApprovalDenied();
+                    LocalTurnTraceCapture.recordApprovalDenied(tracePhase, call);
                     TurnAuditCapture.recordToolCall(
                             call.toolName(), path == null ? "" : path, false,
                             "approval denied by user for " + call.toolName());
@@ -404,12 +453,14 @@ public final class TurnProcessor {
 
                 // Approved — record and optionally propagate the remember choice.
                 TurnAuditCapture.recordApprovalGranted();
+                LocalTurnTraceCapture.recordApprovalGranted(tracePhase, call);
                 if (response == ApprovalResponse.APPROVED_REMEMBER) {
                     approvalPolicy.rememberApproval(workspace, call, risk);
                 }
             } else {
                 // AUTO_APPROVE by policy
                 TurnAuditCapture.recordApprovalGranted();
+                LocalTurnTraceCapture.recordApprovalGranted(tracePhase, call);
             }
         }
 

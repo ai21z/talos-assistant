@@ -3,6 +3,7 @@ package dev.talos.runtime;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.core.util.Hash;
+import dev.talos.runtime.trace.LocalTurnTrace;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -10,6 +11,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -115,7 +117,8 @@ public final class JsonSessionStore implements SessionStore {
             boolean snap = Files.deleteIfExists(fileFor(sessionId));
             // Also remove the companion per-turn log, if any.
             boolean turns = Files.deleteIfExists(turnsFileFor(sessionId));
-            return snap || turns;
+            boolean traces = deleteTraceDirectory(sessionId);
+            return snap || turns || traces;
         } catch (IOException e) {
             LOG.warn("Failed to delete session {}: {}", sessionId, e.getMessage());
             return false;
@@ -139,6 +142,7 @@ public final class JsonSessionStore implements SessionStore {
             row.put("approvalsDenied", record.approvalsDenied());
             row.put("retrievalTraceSummary", record.retrievalTraceSummary());
             row.put("status", record.status());
+            row.put("traceId", record.traceId());
             row.put("policyTrace", policyTraceToMap(record.policyTrace()));
             List<Map<String, Object>> calls = new java.util.ArrayList<>();
             for (TurnRecord.ToolCallSummary s : record.toolCalls()) {
@@ -209,6 +213,7 @@ public final class JsonSessionStore implements SessionStore {
         String traceSummary = str(row, "retrievalTraceSummary");
         String status = str(row, "status");
         TurnPolicyTrace policyTrace = policyTraceFrom(row.get("policyTrace"));
+        String traceId = str(row, "traceId");
 
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> rawCalls =
@@ -222,7 +227,71 @@ public final class JsonSessionStore implements SessionStore {
             calls.add(new TurnRecord.ToolCallSummary(name, pathHint, success, reason));
         }
         return new TurnRecord(turnNumber, ts, durationMs, userInput, assistantText,
-                calls, reqd, grnt, deny, traceSummary, status, policyTrace);
+                calls, reqd, grnt, deny, traceSummary, status, policyTrace, traceId);
+    }
+
+    // ── Local turn trace v1 artifacts ─────────────────────────────────
+
+    @Override
+    public void saveTrace(String sessionId, LocalTurnTrace trace) {
+        if (sessionId == null || sessionId.isBlank() || trace == null || trace.traceId().isBlank()) return;
+        try {
+            Path dir = traceDirFor(sessionId);
+            Files.createDirectories(dir);
+            String json = MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(trace);
+            Files.writeString(dir.resolve(traceFileName(trace)), json);
+        } catch (Exception e) {
+            LOG.warn("Failed to save local turn trace for {}: {}", sessionId, e.getMessage());
+        }
+    }
+
+    @Override
+    public Optional<LocalTurnTrace> loadTrace(String sessionId, String traceId) {
+        if (sessionId == null || sessionId.isBlank() || traceId == null || traceId.isBlank()) {
+            return Optional.empty();
+        }
+        Path dir = traceDirFor(sessionId);
+        if (!Files.isDirectory(dir)) return Optional.empty();
+        try (var stream = Files.list(dir)) {
+            return stream
+                    .filter(path -> path.getFileName().toString().endsWith("-" + sanitizeTraceId(traceId) + ".json"))
+                    .sorted()
+                    .map(this::readTrace)
+                    .filter(Optional::isPresent)
+                    .map(Optional::get)
+                    .findFirst();
+        } catch (Exception e) {
+            LOG.warn("Failed to load local turn trace {} for {}: {}", traceId, sessionId, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    @Override
+    public Optional<LocalTurnTrace> loadLatestTrace(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) return Optional.empty();
+        Path dir = traceDirFor(sessionId);
+        if (!Files.isDirectory(dir)) return Optional.empty();
+        try (var stream = Files.list(dir)) {
+            return stream
+                    .filter(path -> path.getFileName().toString().endsWith(".json"))
+                    .sorted(Comparator.comparing((Path path) -> path.getFileName().toString()).reversed())
+                    .map(this::readTrace)
+                    .filter(Optional::isPresent)
+                    .map(Optional::get)
+                    .findFirst();
+        } catch (Exception e) {
+            LOG.warn("Failed to load latest local turn trace for {}: {}", sessionId, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    private Optional<LocalTurnTrace> readTrace(Path path) {
+        try {
+            return Optional.of(MAPPER.readValue(Files.readString(path), LocalTurnTrace.class));
+        } catch (Exception e) {
+            LOG.warn("Skipping malformed local trace {}: {}", path.getFileName(), e.getMessage());
+            return Optional.empty();
+        }
     }
 
     private static Map<String, Object> policyTraceToMap(TurnPolicyTrace trace) {
@@ -298,6 +367,34 @@ public final class JsonSessionStore implements SessionStore {
     /** Companion JSONL file for per-turn append-only durability. */
     private Path turnsFileFor(String sessionId) {
         return sessionsDir.resolve(sessionId + ".turns.jsonl");
+    }
+
+    private Path traceDirFor(String sessionId) {
+        return sessionsDir.resolve("traces").resolve(sessionId);
+    }
+
+    private String traceFileName(LocalTurnTrace trace) {
+        return "%06d-%s.json".formatted(trace.turnNumber(), sanitizeTraceId(trace.traceId()));
+    }
+
+    private static String sanitizeTraceId(String traceId) {
+        if (traceId == null || traceId.isBlank()) return "trace";
+        return traceId.replaceAll("[^A-Za-z0-9._-]", "_");
+    }
+
+    private boolean deleteTraceDirectory(String sessionId) throws IOException {
+        Path dir = traceDirFor(sessionId);
+        if (!Files.exists(dir)) return false;
+        try (var paths = Files.walk(dir)) {
+            paths.sorted(Comparator.reverseOrder()).forEach(path -> {
+                try {
+                    Files.deleteIfExists(path);
+                } catch (IOException e) {
+                    LOG.warn("Failed to delete trace artifact {}: {}", path, e.getMessage());
+                }
+            });
+        }
+        return true;
     }
 
     private static String str(Map<String, Object> map, String key) {

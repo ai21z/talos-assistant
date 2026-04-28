@@ -1,5 +1,7 @@
 package dev.talos.runtime;
 
+import dev.talos.runtime.trace.LocalTurnTrace;
+
 import java.util.List;
 import java.util.Optional;
 
@@ -48,5 +50,20 @@ public interface SessionStore {
      */
     default List<TurnRecord> loadTurns(String sessionId) {
         return List.of();
+    }
+
+    /** Persist the redacted local trace artifact for a completed turn. */
+    default void saveTrace(String sessionId, LocalTurnTrace trace) {
+        // no-op by default
+    }
+
+    /** Load one local trace artifact by id, if available. */
+    default Optional<LocalTurnTrace> loadTrace(String sessionId, String traceId) {
+        return Optional.empty();
+    }
+
+    /** Load the newest local trace artifact for a session, if available. */
+    default Optional<LocalTurnTrace> loadLatestTrace(String sessionId) {
+        return Optional.empty();
     }
 }
