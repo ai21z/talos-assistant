@@ -186,10 +186,15 @@ these fallbacks:
 
 ```powershell
 winget install -e --id JetBrains.QodanaCLI
-./gradlew.bat qodanaNativeLocal
+./gradlew.bat qodanaNativeFreshLocal
 ```
 
 Or run Qodana locally from IntelliJ IDEA's Qodana/Problems tool window.
+
+Use `qodanaNativeFreshLocal` for candidate evidence. It deletes stale local
+Qodana outputs and writes fresh SARIF to `.qodana/report/results`, the path
+read by `talosQualitySummaries`. `qodanaNativeLocal` may print findings without
+refreshing that summary-compatible output path.
 
 ## 7. Run Optional Security Scans
 
@@ -311,7 +316,7 @@ Optional Qodana:
 
 ```powershell
 ./gradlew.bat qodanaLocal
-./gradlew.bat qodanaNativeLocal
+./gradlew.bat qodanaNativeFreshLocal
 ```
 
 Optional security:

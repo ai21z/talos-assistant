@@ -276,8 +276,13 @@ repeatable and keeps analysis environment differences smaller. If Docker mode
 fails on Windows with a Gradle `Input/output error`, install Qodana CLI and run:
 
 ```powershell
-./gradlew.bat qodanaNativeLocal
+./gradlew.bat qodanaNativeFreshLocal
 ```
+
+Use `qodanaNativeFreshLocal` for candidate evidence because it deletes stale
+local Qodana outputs and writes fresh SARIF to `.qodana/report/results`, the
+path consumed by `talosQualitySummaries`. `qodanaNativeLocal` can still print
+findings, but it may not refresh the summary-compatible output path.
 
 ## Step 8: Generate The Candidate Summaries
 

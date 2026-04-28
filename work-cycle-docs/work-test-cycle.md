@@ -177,6 +177,7 @@ Notes:
 - review evidence must belong to the named candidate version in `gradle.properties` and `CHANGELOG.md`
 - `./gradlew.bat qodanaLocal` is optional but highly recommended; it runs the free local Qodana Community JVM image
 - `qodanaLocal` mounts persistent Docker volumes for Qodana and Gradle caches to reduce Windows bind-mount file-lock and I/O problems
+- if Docker mode is unavailable and native Qodana is used for candidate evidence, run `./gradlew.bat qodanaNativeFreshLocal` before `./gradlew.bat talosQualitySummaries`; `qodanaNativeLocal` may print findings without refreshing the summary-compatible `.qodana/report/results` path
 - `version-summary.json` records jar artifact identity from the built jar itself plus the jar task state observed in the current Gradle invocation
 - `talosQualitySummaries` runs candidate evidence lanes that preserve test and E2E results even when those lanes fail, so a failed candidate still produces a packet
 - summary tasks declare their source artifacts as inputs, so Gradle re-runs them when the underlying evidence changes; `coverage-summary.json`, `qodana-summary.json`, and `e2e-summary.json` are deliberately content-reproducible (no wall-clock `generatedAt` inside the payload), while `version-summary.json` intentionally records current-invocation jar task state and therefore is not byte-identical across repeated runs
