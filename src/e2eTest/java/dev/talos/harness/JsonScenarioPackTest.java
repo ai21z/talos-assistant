@@ -782,6 +782,27 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/61-blocked-readonly-tool-json-no-leak.json] 61: blocked read-only mutating protocol does not leak")
+    void blockedReadonlyToolJsonDoesNotLeak() {
+        var loaded = JsonScenarioLoader.load("scenarios/61-blocked-readonly-tool-json-no-leak.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("read-only")
+                    .assertAnswerContains("No file changes were applied")
+                    .assertAnswerNotContains("\"name\"")
+                    .assertAnswerNotContains("\"arguments\"")
+                    .assertAnswerNotContains("Do you approve these changes")
+                    .assertAnswerNotContains("I prepared the update")
+                    .assertFileContains("index.html", "<title>Night Drive</title>")
+                    .assertFileNotContains("index.html", "Changed without permission");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/42-partial-followup-summary-uses-verified-history.json] 42: follow-up summary uses verified partial history")
     void partialFollowupSummaryUsesVerifiedHistory() {
         var loaded = JsonScenarioLoader.load("scenarios/42-partial-followup-summary-uses-verified-history.json");

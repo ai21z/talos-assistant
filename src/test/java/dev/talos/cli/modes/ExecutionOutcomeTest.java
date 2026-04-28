@@ -51,6 +51,37 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void readOnlyDeniedMutationIsClassifiedAsPolicyBlockedAndSanitized() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Can you diagnose this page without changing files?"));
+
+        var loopResult = new ToolCallLoop.LoopResult(
+                "Please approve these changes so I can apply them.", 1, 1,
+                List.of("talos.edit_file"), List.of(),
+                1, 0, false, 0, List.of(),
+                0, 0, 0, 0,
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.edit_file", "index.html", false, true, true,
+                        "", "The user did not ask to modify files on this turn, "
+                        + "so do not call talos.edit_file for a read-only request.",
+                        null, ToolError.DENIED
+                )));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                "Please approve these changes so I can apply them.", messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.BLOCKED, outcome.completionStatus());
+        assertTrue(outcome.deniedMutation());
+        assertTrue(outcome.finalAnswer().startsWith(
+                AssistantTurnExecutor.READ_ONLY_DENIED_MUTATION_REPLACEMENT));
+        assertFalse(outcome.finalAnswer().contains("Please approve these changes"));
+        assertEquals(TaskCompletionStatus.BLOCKED_BY_POLICY, outcome.taskOutcome().completionStatus());
+        assertEquals(MutationOutcomeStatus.DENIED, outcome.taskOutcome().mutationOutcome().status());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.DENIED_MUTATION));
+    }
+
+    @Test
     void deniedMutationDominatesMixedInvalidAndDeniedNoSuccessTurn() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));
