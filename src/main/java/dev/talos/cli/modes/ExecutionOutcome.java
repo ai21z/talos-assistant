@@ -96,9 +96,14 @@ record ExecutionOutcome(
         boolean selectorGroundedOverride = !Objects.equals(current, shaped);
         current = shaped;
 
+        shaped = AssistantTurnExecutor.summarizeReadOnlyDeniedMutationOutcomesIfNeeded(
+                current, messages, loopResult, extraMutationSuccesses);
+        boolean readOnlyDeniedMutation = !Objects.equals(current, shaped);
+        current = shaped;
+
         shaped = AssistantTurnExecutor.summarizeDeniedMutationOutcomesIfNeeded(
                 current, messages, loopResult, extraMutationSuccesses);
-        boolean deniedMutation = !Objects.equals(current, shaped);
+        boolean deniedMutation = readOnlyDeniedMutation || !Objects.equals(current, shaped);
         current = shaped;
 
         shaped = AssistantTurnExecutor.summarizeInvalidMutationOutcomesIfNeeded(
@@ -162,11 +167,12 @@ record ExecutionOutcome(
 
         TaskOutcome taskOutcome = new TaskOutcome(
                 contract,
-                toTaskCompletionStatus(completionStatus, verificationStatus, contract, false),
+                toTaskCompletionStatus(completionStatus, verificationStatus, contract, readOnlyDeniedMutation),
                 MutationOutcome.from(contract, loopResult, extraMutationSuccesses),
                 taskVerification,
                 toolLoopWarnings(
                         deniedMutation,
+                        readOnlyDeniedMutation,
                         invalidMutation,
                         partialMutation,
                         falseMutationClaim,
@@ -345,6 +351,7 @@ record ExecutionOutcome(
 
     private static List<TruthWarning> toolLoopWarnings(
             boolean deniedMutation,
+            boolean readOnlyDeniedMutation,
             boolean invalidMutation,
             boolean partialMutation,
             boolean falseMutationClaim,
@@ -358,7 +365,9 @@ record ExecutionOutcome(
         if (deniedMutation) {
             warnings.add(TruthWarning.of(
                     TruthWarningType.DENIED_MUTATION,
-                    "A mutating tool call was denied by approval."));
+                    readOnlyDeniedMutation
+                            ? "A mutating tool call was blocked by the read-only task contract."
+                            : "A mutating tool call was denied by approval."));
         }
         if (invalidMutation) {
             warnings.add(TruthWarning.of(

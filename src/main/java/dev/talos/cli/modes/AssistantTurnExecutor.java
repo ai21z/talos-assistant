@@ -1206,6 +1206,65 @@ public final class AssistantTurnExecutor {
         return out.toString().stripTrailing();
     }
 
+    static String summarizeReadOnlyDeniedMutationOutcomesIfNeeded(String answer,
+                                                                  List<ChatMessage> messages,
+                                                                  ToolCallLoop.LoopResult loopResult,
+                                                                  int extraMutationSuccesses) {
+        if (loopResult == null) return answer;
+        if (extraMutationSuccesses > 0) return answer;
+        if (loopResult.mutatingToolSuccesses() > 0) return answer;
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+        if (contract == null || contract.mutationAllowed()) return answer;
+
+        List<ToolCallLoop.ToolOutcome> readOnlyBlockedMutations = loopResult.toolOutcomes().stream()
+                .filter(ToolCallLoop.ToolOutcome::mutating)
+                .filter(outcome -> !outcome.success())
+                .toList();
+        if (readOnlyBlockedMutations.isEmpty()) return answer;
+
+        String cleanReadOnlyAnswer = readOnlyDeniedCleanAnswer(answer);
+        if (cleanReadOnlyAnswer.isBlank()) {
+            return READ_ONLY_DENIED_MUTATION_REPLACEMENT;
+        }
+        return READ_ONLY_DENIED_MUTATION_REPLACEMENT
+                + "\n\nRead-only answer from inspected evidence:\n"
+                + cleanReadOnlyAnswer;
+    }
+
+    private static String readOnlyDeniedCleanAnswer(String answer) {
+        String stripped = ToolCallParser.stripToolCalls(answer == null ? "" : answer).strip();
+        if (stripped.isBlank()) return "";
+
+        List<String> kept = new ArrayList<>();
+        for (String line : stripped.lines().toList()) {
+            if (looksLikeFakeApprovalLine(line)) continue;
+            kept.add(line);
+        }
+        String cleaned = String.join("\n", kept).strip();
+        if (cleaned.isBlank()) return "";
+        if (looksLikeOnlyMutationPreparation(cleaned)) return "";
+        return cleaned;
+    }
+
+    private static boolean looksLikeFakeApprovalLine(String line) {
+        if (line == null || line.isBlank()) return false;
+        String lower = line.toLowerCase(Locale.ROOT).strip();
+        return lower.contains("do you approve these changes")
+                || lower.contains("please approve these changes")
+                || lower.contains("allow these changes")
+                || lower.contains("would you like me to apply these changes");
+    }
+
+    private static boolean looksLikeOnlyMutationPreparation(String text) {
+        if (text == null || text.isBlank()) return false;
+        String lower = text.toLowerCase(Locale.ROOT).strip();
+        return lower.equals("i prepared the update.")
+                || lower.equals("i prepared the update")
+                || lower.equals("i prepared these changes.")
+                || lower.equals("i prepared these changes");
+    }
+
     static String summarizeInvalidMutationOutcomesIfNeeded(String answer,
                                                            List<ChatMessage> messages,
                                                            ToolCallLoop.LoopResult loopResult,
@@ -1886,6 +1945,13 @@ public final class AssistantTurnExecutor {
     public static final String MALFORMED_TOOL_PROTOCOL_REPLACEMENT =
             "[Truth check: the model produced an invalid tool-call payload, so no action was taken.]\n\n"
             + "No file changes were applied. Please retry the request.";
+
+    public static final String READ_ONLY_DENIED_MUTATION_REPLACEMENT =
+            "[Truth check: no file was changed in this turn. The model attempted "
+            + "to call mutating tools, but this turn was classified as read-only, "
+            + "so those calls were blocked.]\n\n"
+            + "No file changes were applied. Ask explicitly to edit, update, or "
+            + "create files if you want Talos to modify the workspace.";
 
     public static final String LOCAL_ACCESS_CAPABILITY_CORRECTION =
             "[Capability correction: Talos can inspect files in the current workspace "

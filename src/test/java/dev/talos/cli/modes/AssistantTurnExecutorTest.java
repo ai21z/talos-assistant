@@ -315,6 +315,106 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void readOnlyDeniedWriteFileProtocolIsSanitizedWithoutFakeApproval(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("index.html"), "<h1>Current</h1>\n");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            var undoStack = new dev.talos.tools.FileUndoStack();
+            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            String prompt = "Can you look at this page and tell me what is wrong? Do not edit files yet.";
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            """
+                            ```json
+                            {"name":"talos.write_file","arguments":{"path":"index.html","content":"<h1>Changed</h1>"}}
+                            ```
+                            Do you approve these changes?
+                            """,
+                            """
+                            I prepared the update.
+
+                            ```json
+                            {"name":"talos.write_file","arguments":{"path":"index.html","content":"<h1>Changed</h1>"}}
+                            ```
+
+                            Do you approve these changes?
+                            """)))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(prompt));
+
+            dev.talos.runtime.TurnUserRequestCapture.set(prompt);
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+                assertTrue(out.text().contains("read-only"), out.text());
+                assertTrue(out.text().contains("No file changes were applied"), out.text());
+                assertFalse(out.text().contains("\"name\""), out.text());
+                assertFalse(out.text().contains("\"arguments\""), out.text());
+                assertFalse(out.text().contains("Do you approve these changes"), out.text());
+                assertFalse(out.text().contains("I prepared the update"), out.text());
+                assertEquals("<h1>Current</h1>\n", Files.readString(workspace.resolve("index.html")));
+            } finally {
+                dev.talos.runtime.TurnUserRequestCapture.clear();
+            }
+        }
+
+        @Test
+        void readOnlyDeniedEditFileProtocolIsSanitizedWithoutFakeApproval(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("index.html"), "<h1>Current</h1>\n");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            var undoStack = new dev.talos.tools.FileUndoStack();
+            registry.register(new dev.talos.tools.impl.FileEditTool(undoStack));
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            String prompt = "Can you diagnose this page without changing files?";
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            """
+                            ```json
+                            {"name":"talos.edit_file","arguments":{"path":"index.html","old_string":"<h1>Current</h1>","new_string":"<h1>Changed</h1>"}}
+                            ```
+                            Would you like me to apply these changes?
+                            """,
+                            "Please approve these changes so I can apply them.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(prompt));
+
+            dev.talos.runtime.TurnUserRequestCapture.set(prompt);
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+                assertTrue(out.text().contains("read-only"), out.text());
+                assertTrue(out.text().contains("No file changes were applied"), out.text());
+                assertFalse(out.text().contains("\"name\""), out.text());
+                assertFalse(out.text().contains("\"arguments\""), out.text());
+                assertFalse(out.text().contains("Please approve these changes"), out.text());
+                assertFalse(out.text().contains("Would you like me to apply"), out.text());
+                assertEquals("<h1>Current</h1>\n", Files.readString(workspace.resolve("index.html")));
+            } finally {
+                dev.talos.runtime.TurnUserRequestCapture.clear();
+            }
+        }
+
+        @Test
         void workspaceExplainListOnlyUnderinspectionRetriesWithPrimaryReads(@TempDir Path workspace)
                 throws Exception {
             Files.writeString(workspace.resolve("index.html"), """
