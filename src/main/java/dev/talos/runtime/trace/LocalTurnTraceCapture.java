@@ -15,10 +15,14 @@ public final class LocalTurnTraceCapture {
 
     static final class Bag {
         final LocalTurnTrace.Builder builder;
+        final String traceId;
+        final int turnNumber;
         boolean outcomeRecorded;
 
-        Bag(LocalTurnTrace.Builder builder) {
+        Bag(LocalTurnTrace.Builder builder, String traceId, int turnNumber) {
             this.builder = builder;
+            this.traceId = traceId == null ? "" : traceId;
+            this.turnNumber = turnNumber;
         }
     }
 
@@ -47,11 +51,21 @@ public final class LocalTurnTraceCapture {
                 .event(TurnTraceEvent.simple("TRACE_STARTED", timestamp, Map.of(
                         "turnNumber", turnNumber,
                         "redactionMode", TraceRedactionMode.DEFAULT.name())));
-        HOLDER.set(new Bag(builder));
+        HOLDER.set(new Bag(builder, traceId, turnNumber));
     }
 
     public static boolean isActive() {
         return HOLDER.get() != null;
+    }
+
+    public static String currentTraceId() {
+        Bag bag = HOLDER.get();
+        return bag == null ? "" : bag.traceId;
+    }
+
+    public static int currentTurnNumber() {
+        Bag bag = HOLDER.get();
+        return bag == null ? 0 : bag.turnNumber;
     }
 
     public static void recordPolicyTrace(TurnPolicyTrace trace) {
@@ -153,6 +167,24 @@ public final class LocalTurnTraceCapture {
                 now(),
                 phase == null ? "" : phase,
                 call == null ? "" : call.toolName(),
+                data));
+    }
+
+    public static void recordCheckpoint(String status, String checkpointId, String reason, int capturedFiles) {
+        Bag bag = HOLDER.get();
+        if (bag == null) return;
+        String safeStatus = safe(status);
+        String safeId = safe(checkpointId);
+        bag.builder.checkpoint(safeStatus, safeId);
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("status", safeStatus);
+        data.put("checkpointId", safeId);
+        data.put("capturedFiles", capturedFiles);
+        if (reason != null && !reason.isBlank()) {
+            data.put("reason", reason.strip());
+        }
+        bag.builder.event(TurnTraceEvent.simple("CHECKPOINT_" + (safeStatus.isBlank() ? "RECORDED" : safeStatus),
+                now(),
                 data));
     }
 

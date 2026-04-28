@@ -5,6 +5,8 @@ import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
 import dev.talos.core.retrieval.RetrievalTrace;
 import dev.talos.runtime.phase.PhasePolicy;
+import dev.talos.runtime.checkpoint.CheckpointCaptureResult;
+import dev.talos.runtime.checkpoint.CheckpointService;
 import dev.talos.runtime.policy.DeclarativePermissionPolicy;
 import dev.talos.runtime.policy.PermissionAction;
 import dev.talos.runtime.policy.PermissionDecision;
@@ -50,6 +52,7 @@ public final class TurnProcessor {
     private final ApprovalGate approvalGate;
     private final ApprovalPolicy approvalPolicy;
     private final dev.talos.runtime.policy.PermissionPolicy permissionPolicy;
+    private final CheckpointService checkpointService;
     private final ToolRegistry toolRegistry;
     private final List<SessionListener> listeners = new CopyOnWriteArrayList<>();
 
@@ -68,6 +71,12 @@ public final class TurnProcessor {
      */
     public TurnProcessor(ModeController modes, ApprovalGate approvalGate,
                          ToolRegistry toolRegistry, ApprovalPolicy approvalPolicy) {
+        this(modes, approvalGate, toolRegistry, approvalPolicy, new CheckpointService());
+    }
+
+    public TurnProcessor(ModeController modes, ApprovalGate approvalGate,
+                         ToolRegistry toolRegistry, ApprovalPolicy approvalPolicy,
+                         CheckpointService checkpointService) {
         this.modes = modes;
         this.approvalGate = Objects.requireNonNull(approvalGate,
                 "approvalGate must not be null — pass NoOpApprovalGate() explicitly "
@@ -77,6 +86,8 @@ public final class TurnProcessor {
         this.approvalPolicy = Objects.requireNonNull(approvalPolicy,
                 "approvalPolicy must not be null — pass ApprovalPolicy.ALWAYS_ASK explicitly");
         this.permissionPolicy = new DeclarativePermissionPolicy(this.approvalPolicy);
+        this.checkpointService = Objects.requireNonNull(checkpointService,
+                "checkpointService must not be null");
     }
 
     public TurnProcessor(ModeController modes, ApprovalGate approvalGate, ToolRegistry toolRegistry) {
@@ -478,6 +489,27 @@ public final class TurnProcessor {
             // AUTO_ALLOW by policy for a mutating call.
             TurnAuditCapture.recordApprovalGranted();
             LocalTurnTraceCapture.recordApprovalGranted(tracePhase, call);
+        }
+
+        if (ToolCallSupport.isMutatingTool(call.toolName())) {
+            CheckpointCaptureResult checkpoint = checkpointService.captureBeforeMutation(
+                    session.workspace(),
+                    session.config(),
+                    call,
+                    LocalTurnTraceCapture.currentTraceId(),
+                    LocalTurnTraceCapture.currentTurnNumber());
+            LocalTurnTraceCapture.recordCheckpoint(
+                    checkpoint.status(),
+                    checkpoint.checkpointId(),
+                    checkpoint.message(),
+                    checkpoint.capturedFiles());
+            if (!checkpoint.success()) {
+                TurnAuditCapture.recordToolCall(
+                        call.toolName(), path == null ? "" : path, false,
+                        "checkpoint failed before " + call.toolName());
+                return ToolResult.fail(ToolError.internal(
+                        "Required checkpoint failed before mutation: " + checkpoint.message()));
+            }
         }
 
         ToolContext toolCtx = new ToolContext(
