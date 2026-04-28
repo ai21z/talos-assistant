@@ -763,6 +763,25 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/60-malformed-toolcall-json-like-output-no-leak.json] 60: malformed toolcall JSON-like output does not leak or mutate")
+    void malformedToolcallJsonLikeOutputDoesNotLeakOrMutate() {
+        var loaded = JsonScenarioLoader.load("scenarios/60-malformed-toolcall-json-like-output-no-leak.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("invalid tool-call payload")
+                    .assertAnswerContains("No file changes were applied")
+                    .assertAnswerNotContains("talos.edit_file")
+                    .assertAnswerNotContains("old_string")
+                    .assertFileContains("script.js", "document.getElementById('bmi-form')")
+                    .assertFileNotContains("script.js", "document.querySelector(\"button\")");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/42-partial-followup-summary-uses-verified-history.json] 42: follow-up summary uses verified partial history")
     void partialFollowupSummaryUsesVerifiedHistory() {
         var loaded = JsonScenarioLoader.load("scenarios/42-partial-followup-summary-uses-verified-history.json");

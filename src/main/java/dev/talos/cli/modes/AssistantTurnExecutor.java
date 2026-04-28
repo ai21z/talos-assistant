@@ -106,7 +106,8 @@ public final class AssistantTurnExecutor {
      * tool-loop entry gate would be misleading.
      */
     private static boolean hasAnyTextToolCalls(String answer) {
-        return ToolCallParser.containsToolCalls(answer);
+        return !ToolCallParser.looksLikeMalformedToolProtocol(answer)
+                && ToolCallParser.containsToolCalls(answer);
     }
 
     /** Returns true if native tool calls or text-based tool calls are present. */
@@ -356,6 +357,12 @@ public final class AssistantTurnExecutor {
             Context ctx,
             Options opts
     ) {
+        if (ToolCallParser.looksLikeMalformedProtocolArrayDebris(answer)
+                || ToolCallParser.looksLikeMalformedToolProtocol(answer)) {
+            return new ToolLoopAnswerResolution(
+                    shapeAnswerWithoutTools(answer, messages, ctx, false, opts),
+                    null);
+        }
         ToolCallLoop.LoopResult noToolLoopResult = emptyNoToolLoopResult(answer, messages);
         MutationRetryResult mrr = mutationRequestRetryIfNeeded(
                 answer, messages, noToolLoopResult, workspace, ctx);
@@ -417,7 +424,7 @@ public final class AssistantTurnExecutor {
         try {
             LlmClient.StreamResult retry = chatFull(ctx, retryMessages);
             String retryText = retry.text() == null ? "" : retry.text();
-            if (retry.hasToolCalls() || ToolCallParser.containsToolCalls(retryText)) {
+            if (retry.hasToolCalls() || hasAnyTextToolCalls(retryText)) {
                 ToolCallLoop.LoopResult retryLoop = ctx.toolCallLoop().run(
                         retryText, retry.toolCalls(), retryMessages, workspace, ctx);
                 String mergedAnswer = retryLoop.finalAnswer();
@@ -757,7 +764,8 @@ public final class AssistantTurnExecutor {
             String shapedAnswer,
             Context ctx
     ) {
-        if (!ToolCallParser.looksLikeMalformedProtocolArrayDebris(rawAnswer)) return;
+        if (!ToolCallParser.looksLikeMalformedProtocolArrayDebris(rawAnswer)
+                && !ToolCallParser.looksLikeMalformedToolProtocol(rawAnswer)) return;
         if (ctx == null) return;
         if (!(ctx.streamSink() instanceof ToolCallStreamFilter filter)) return;
         if (shapedAnswer == null || shapedAnswer.isBlank()) return;
@@ -1331,7 +1339,7 @@ public final class AssistantTurnExecutor {
             LlmClient.StreamResult retry = chatFull(ctx, messages);
             String retryText = retry.text() == null ? "" : retry.text();
 
-            if (retry.hasToolCalls() || ToolCallParser.containsToolCalls(retryText)) {
+            if (retry.hasToolCalls() || hasAnyTextToolCalls(retryText)) {
                 // Re-enter the tool loop so the mutating call actually executes.
                 ToolCallLoop.LoopResult retryLoop = ctx.toolCallLoop().run(
                         retryText, retry.toolCalls(), messages, workspace, ctx);
@@ -1579,7 +1587,7 @@ public final class AssistantTurnExecutor {
         try {
             LlmClient.StreamResult retry = chatFull(ctx, retryMessages);
             String retryText = retry.text() == null ? "" : retry.text();
-            if (retry.hasToolCalls() || ToolCallParser.containsToolCalls(retryText)) {
+            if (retry.hasToolCalls() || hasAnyTextToolCalls(retryText)) {
                 ToolCallLoop.LoopResult retryLoop = ctx.toolCallLoop().run(
                         retryText, retry.toolCalls(), retryMessages, workspace, ctx);
                 String mergedAnswer = retryLoop.finalAnswer();

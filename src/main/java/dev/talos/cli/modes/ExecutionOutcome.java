@@ -215,7 +215,8 @@ record ExecutionOutcome(
         boolean malformedProtocolDebrisReplaced = false;
         boolean localAccessCapabilityCorrected = false;
 
-        if (ToolCallParser.looksLikeMalformedProtocolArrayDebris(shaped)) {
+        if (ToolCallParser.looksLikeMalformedProtocolArrayDebris(shaped)
+                || ToolCallParser.looksLikeMalformedToolProtocol(shaped)) {
             shaped = AssistantTurnExecutor.MALFORMED_TOOL_PROTOCOL_REPLACEMENT;
             malformedProtocolDebrisReplaced = true;
         } else {
