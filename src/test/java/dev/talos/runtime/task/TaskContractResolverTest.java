@@ -86,6 +86,25 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void formattingNegationDoesNotSuppressOverwriteIntent() {
+        for (String input : List.of(
+                "Use talos.write_file to overwrite index.html. "
+                        + "Set the content argument to the exact five letters AFTER. "
+                        + "Do not use angle brackets. Do not use placeholders. "
+                        + "The entire file should be AFTER.",
+                "Use write_file to overwrite index.html. Do not use placeholders.",
+                "Overwrite index.html. Do not use angle brackets.")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertEquals(TaskType.FILE_EDIT, contract.type(), input);
+            assertTrue(contract.mutationRequested(), input);
+            assertTrue(contract.mutationAllowed(), input);
+            assertTrue(contract.verificationRequired(), input);
+            assertEquals(Set.of("index.html"), contract.expectedTargets(), input);
+        }
+    }
+
+    @Test
     void rewriteAndReplaceRepairPhrasingBecomesMutationAllowedContract() {
         for (String input : List.of(
                 "Replace index.html with a corrected complete version.",
