@@ -5,6 +5,8 @@ import dev.talos.runtime.failure.FailureAction;
 import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.failure.FailurePolicy;
 import dev.talos.runtime.ToolCallParser;
+import dev.talos.runtime.repair.RepairInstruction;
+import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.runtime.verification.StaticTaskVerifier;
 import dev.talos.runtime.verification.WebDiagnosticIntent;
 import dev.talos.spi.EngineException;
@@ -13,7 +15,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 
@@ -107,7 +108,7 @@ public final class ToolCallRepromptStage {
         }
 
         int staleRepairIndex = -1;
-        Optional<StaleEditRepair> staleRepair = nextStaleEditRepair(state);
+        Optional<RepairInstruction> staleRepair = nextStaleEditRepair(state);
         if (staleRepair.isPresent()) {
             state.messages.add(ChatMessage.system(staleRepair.get().instruction()));
             state.staleEditRepairPromptedPaths.add(staleRepair.get().path());
@@ -115,7 +116,7 @@ public final class ToolCallRepromptStage {
         }
 
         int emptyRepairIndex = -1;
-        Optional<EmptyEditRepair> repair = nextEmptyEditRepair(state);
+        Optional<RepairInstruction> repair = nextEmptyEditRepair(state);
         if (repair.isPresent()) {
             state.messages.add(ChatMessage.system(repair.get().instruction()));
             state.emptyEditRepairPromptedPaths.add(repair.get().path());
@@ -308,74 +309,19 @@ public final class ToolCallRepromptStage {
         return false;
     }
 
-    record EmptyEditRepair(String path, String instruction) {}
-
-    record StaleEditRepair(String path, String instruction) {}
-
-    static Optional<StaleEditRepair> nextStaleEditRepair(LoopState state) {
-        if (state == null
-                || state.staleEditFailuresByPath.isEmpty()
-                || state.pathsMutatedSinceRead.isEmpty()) {
-            return Optional.empty();
-        }
-
-        return state.staleEditFailuresByPath.entrySet().stream()
-                .filter(entry -> entry.getValue() != null && entry.getValue() >= 1)
-                .filter(entry -> state.pathsMutatedSinceRead.contains(entry.getKey()))
-                .filter(entry -> !state.staleEditRepairPromptedPaths.contains(entry.getKey()))
-                .max(Comparator
-                        .<java.util.Map.Entry<String, Integer>>comparingInt(java.util.Map.Entry::getValue)
-                        .thenComparing(java.util.Map.Entry::getKey))
-                .map(entry -> new StaleEditRepair(entry.getKey(), staleEditRepairInstruction(entry.getKey())));
+    static Optional<RepairInstruction> nextStaleEditRepair(LoopState state) {
+        return RepairPolicy.nextStaleEditRepair(state);
     }
 
     static String staleEditRepairInstruction(String path) {
-        String target = path == null || path.isBlank() ? "the target file" : "`" + path + "`";
-        return "[Stale edit repair required] You edited " + target
-                + " earlier in this turn, and a later talos.edit_file call for the same file failed "
-                + "because old_string was not found. The file contents have changed. Your next step "
-                + "for this file must be talos.read_file on " + target
-                + " only; do not call talos.edit_file for this path again until after that read_file "
-                + "result has been returned in a separate follow-up. If you cannot reread the file, "
-                + "stop and say the remaining edit was not applied.";
+        return RepairPolicy.staleEditRepairInstruction(path);
     }
 
-    static Optional<EmptyEditRepair> nextEmptyEditRepair(LoopState state) {
-        if (state == null
-                || state.emptyEditArgumentFailuresByPath.isEmpty()
-                || state.pathsReadThisTurn.isEmpty()) {
-            return Optional.empty();
-        }
-
-        return state.emptyEditArgumentFailuresByPath.entrySet().stream()
-                .filter(entry -> entry.getValue() != null && entry.getValue() >= 1)
-                .filter(entry -> state.pathsReadThisTurn.contains(entry.getKey()))
-                .filter(entry -> !state.emptyEditRepairPromptedPaths.contains(entry.getKey()))
-                .max(Comparator
-                        .<java.util.Map.Entry<String, Integer>>comparingInt(java.util.Map.Entry::getValue)
-                        .thenComparing(java.util.Map.Entry::getKey))
-                .map(entry -> new EmptyEditRepair(entry.getKey(), emptyEditRepairInstruction(entry.getKey())));
+    static Optional<RepairInstruction> nextEmptyEditRepair(LoopState state) {
+        return RepairPolicy.nextEmptyEditRepair(state);
     }
 
     static String emptyEditRepairInstruction(String path) {
-        String target = path == null || path.isBlank() ? "the target file" : "`" + path + "`";
-        return "[Edit repair required] You previously called talos.edit_file for "
-                + target
-                + " with empty old_string/new_string, and the file has now been read. "
-                + "Your next talos.edit_file call for this file must include a non-empty "
-                + "old_string copied exactly from the latest talos.read_file result, without "
-                + "line-number prefixes, and a new_string parameter containing the intended "
-                + "replacement. new_string may be empty only for an explicit deletion task. "
-                + "Use this key layout: {\"name\":\"talos.edit_file\","
-                + "\"arguments\":{\"path\":\"" + targetPathForJson(path) + "\","
-                + "\"old_string\":\"...\",\"new_string\":\"...\"}}. "
-                + "Fill old_string and new_string with real file text, not placeholders. "
-                + "Do not call talos.edit_file with empty old_string again. If you "
-                + "cannot form the exact edit, stop and say no edit was applied.";
-    }
-
-    private static String targetPathForJson(String path) {
-        if (path == null || path.isBlank()) return "<target path>";
-        return path.replace("\\", "\\\\").replace("\"", "\\\"");
+        return RepairPolicy.emptyEditRepairInstruction(path);
     }
 }
