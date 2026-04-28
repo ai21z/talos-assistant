@@ -24,6 +24,7 @@ import dev.talos.runtime.SessionStore;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallStreamFilter;
 import dev.talos.runtime.TurnProcessor;
+import dev.talos.runtime.checkpoint.CheckpointService;
 import dev.talos.tools.FileUndoStack;
 import dev.talos.tools.ToolProgressSink;
 import dev.talos.tools.ToolRegistry;
@@ -200,8 +201,9 @@ public final class TalosBootstrap {
         // ApprovalPolicy.ALWAYS_ASK.rememberApproval is a no-op.
         dev.talos.runtime.SessionApprovalPolicy approvalPolicy =
                 new dev.talos.runtime.SessionApprovalPolicy();
+        CheckpointService checkpointService = new CheckpointService();
         TurnProcessor  turnProcessor  = new TurnProcessor(
-                modes, approvalGate, toolRegistry, approvalPolicy);
+                modes, approvalGate, toolRegistry, approvalPolicy, checkpointService);
 
         // Tool progress sink: renders lightweight status lines via RenderEngine.
         // Connected before ToolCallLoop so progress events flow during tool execution.
@@ -312,7 +314,7 @@ public final class TalosBootstrap {
         AtomicBoolean quit = new AtomicBoolean(false);
         CommandRegistry registry = new CommandRegistry();
         registerCommands(registry, session, cfg, ctx, modes, workspace, quit, undoStack,
-                sessionStore, runtimeSession.startedAt());
+                sessionStore, checkpointService, runtimeSession.startedAt());
 
         // ── Assemble router ──────────────────────────────────────────────
         String startupNotice = restoreSummary.hasReplay()
@@ -343,10 +345,11 @@ public final class TalosBootstrap {
      * Extracted as a static method for readability — each command is a one-liner.
      */
     private static void registerCommands(CommandRegistry registry, SessionState session,
-                                         Config cfg, Context ctx, ModeController modes,
-                                         Path workspace, AtomicBoolean quit,
-                                         FileUndoStack undoStack, SessionStore sessionStore,
-                                         java.time.Instant activeSessionStartedAt) {
+                                          Config cfg, Context ctx, ModeController modes,
+                                          Path workspace, AtomicBoolean quit,
+                                          FileUndoStack undoStack, SessionStore sessionStore,
+                                          CheckpointService checkpointService,
+                                          java.time.Instant activeSessionStartedAt) {
         CliRuntime rt = new CliRuntime() {
             @Override public int getK()                { return session.getK(); }
             @Override public void setK(int k)          { session.setK(k); }
@@ -385,6 +388,7 @@ public final class TalosBootstrap {
         registry.register(new ToolsCommand());
         // File undo
         registry.register(new UndoCommand(undoStack));
+        registry.register(new CheckpointCommand(workspace, checkpointService));
         // Session persistence
         registry.register(new SessionCommand(workspace, sessionStore));
     }

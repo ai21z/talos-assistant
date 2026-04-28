@@ -309,6 +309,7 @@ class ExplainLastTurnCommandTest {
                         List.of("talos.read_file", "talos.write_file"),
                         List.of("talos.read_file", "talos.write_file"),
                         "mutation task")
+                .checkpoint("CREATED", "chk-local")
                 .verification("FAILED", "Static verification failed", List.of("scripts.js missing"))
                 .outcome("FAILED", "FAILED", "UNKNOWN", "PARTIAL", "TASK_INCOMPLETE")
                 .build();
@@ -335,6 +336,7 @@ class ExplainLastTurnCommandTest {
         assertTrue(text.contains("Local trace: trc-local"), text);
         assertTrue(text.contains("Schema: 1"), text);
         assertTrue(text.contains("Redaction: DEFAULT"), text);
+        assertTrue(text.contains("Checkpoint: CREATED chk-local"), text);
         assertTrue(text.contains("Verification: FAILED - Static verification failed"), text);
         assertTrue(text.contains("scripts.js missing"), text);
         assertTrue(text.contains("Outcome: FAILED"), text);
