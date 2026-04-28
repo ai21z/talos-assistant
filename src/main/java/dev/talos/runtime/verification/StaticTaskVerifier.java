@@ -44,6 +44,8 @@ public final class StaticTaskVerifier {
             "<link\\b[^>]*\\bhref\\s*=\\s*(['\"])(.*?)\\1", Pattern.CASE_INSENSITIVE);
     private static final Pattern HTML_SCRIPT_SRC = Pattern.compile(
             "<script\\b[^>]*\\bsrc\\s*=\\s*(['\"])(.*?)\\1", Pattern.CASE_INSENSITIVE);
+    private static final Pattern HTML_INLINE_SCRIPT = Pattern.compile(
+            "(?is)<script\\b(?![^>]*\\bsrc\\s*=)[^>]*>(.*?)</script>");
     private static final Pattern CSS_CLASS_SELECTOR = Pattern.compile("\\.([A-Za-z_][A-Za-z0-9_-]*)");
     private static final Pattern CSS_ID_SELECTOR = Pattern.compile("#([A-Za-z_][A-Za-z0-9_-]*)");
     private static final Pattern CSS_SELECTOR_PRELUDE = Pattern.compile("(?s)([^{}]+)\\{");
@@ -245,10 +247,18 @@ public final class StaticTaskVerifier {
     ) {
         List<String> primary = obviousPrimaryFiles(root);
         if (primary.size() < 3) {
+            if (looksFunctionalWebTask(contract)) {
+                verifyPartialFunctionalWebWorkspace(root, contract, primary, facts, problems);
+                if (!problems.isEmpty()) return;
+            }
             problems.add("web coherence could not be checked because the workspace does not expose a small HTML/CSS/JS surface.");
             return;
         }
         if (!hasPrimaryWebSurface(primary)) {
+            if (looksFunctionalWebTask(contract)) {
+                verifyPartialFunctionalWebWorkspace(root, contract, primary, facts, problems);
+                if (!problems.isEmpty()) return;
+            }
             problems.add("web coherence could not be checked because HTML, CSS, and JavaScript primary files were not all present.");
             return;
         }
@@ -432,13 +442,18 @@ public final class StaticTaskVerifier {
                 || lower.contains("working")
                 || lower.contains("interactive")
                 || lower.contains("calculator")
+                || lower.contains("bmi")
+                || lower.contains("make it work")
+                || lower.contains("actually work")
+                || lower.contains("does not work")
+                || lower.contains("doesn't work")
                 || lower.contains("form");
         return mutatingTask && mentionsWebSurface
                 && ((mentionsStyle && mentionsScript) || asksFunctional);
     }
 
     private static boolean looksCalculatorOrFormTask(TaskContract contract) {
-        if (!looksBroadWebTask(contract)) return false;
+        if (!looksFunctionalWebTask(contract)) return false;
         String request = contract.originalUserRequest();
         if (request == null || request.isBlank()) return false;
         String lower = request.toLowerCase(Locale.ROOT);
@@ -449,6 +464,24 @@ public final class StaticTaskVerifier {
                 || lower.contains("interactive")
                 || lower.contains("functioning")
                 || lower.contains("functional");
+    }
+
+    private static boolean looksFunctionalWebTask(TaskContract contract) {
+        if (!looksBroadWebTask(contract)) return false;
+        String request = contract.originalUserRequest();
+        if (request == null || request.isBlank()) return false;
+        String lower = request.toLowerCase(Locale.ROOT);
+        return lower.contains("functioning")
+                || lower.contains("functional")
+                || lower.contains("working")
+                || lower.contains("interactive")
+                || lower.contains("calculator")
+                || lower.contains("bmi")
+                || lower.contains("make it work")
+                || lower.contains("actually work")
+                || lower.contains("does not work")
+                || lower.contains("doesn't work")
+                || lower.contains("form");
     }
 
     private static boolean shouldRequireSeparateWebAssetMutations(TaskContract contract) {
@@ -495,6 +528,56 @@ public final class StaticTaskVerifier {
         return pickPrimary(files, ".html", ".htm") != null
                 && pickPrimary(files, ".css") != null
                 && pickPrimary(files, ".js") != null;
+    }
+
+    private static void verifyPartialFunctionalWebWorkspace(
+            Path root,
+            TaskContract contract,
+            List<String> primaryFiles,
+            List<String> facts,
+            List<String> problems
+    ) {
+        if (root == null || primaryFiles == null || primaryFiles.isEmpty()) return;
+        String htmlFile = pickPrimary(primaryFiles, ".html", ".htm");
+        if (htmlFile == null) {
+            problems.add("Functional web task is missing a primary HTML file.");
+            return;
+        }
+
+        String html;
+        try {
+            html = Files.readString(root.resolve(htmlFile));
+        } catch (Exception e) {
+            problems.add(htmlFile + ": could not be read for functional web verification.");
+            return;
+        }
+
+        String jsFile = pickPrimary(primaryFiles, ".js");
+        List<String> linkedJsOccurrences = extractLinkedAssetOccurrences(html, HTML_SCRIPT_SRC, ".js");
+        Set<String> linkedJsFiles = new LinkedHashSet<>(linkedJsOccurrences);
+        Set<String> existingFileNames = existingFileNames(root);
+        boolean hasInlineScript = hasNonBlankInlineScript(html);
+        if (jsFile == null && linkedJsFiles.isEmpty() && !hasInlineScript) {
+            problems.add("Functional web task is missing JavaScript behavior: no JavaScript file or inline script was found.");
+            problems.add("HTML does not link a JavaScript file for functional behavior.");
+        }
+        for (String linked : linkedJsFiles) {
+            if (!existingFileNames.contains(linked)) {
+                problems.add("HTML references missing JavaScript file: `" + linked + "`");
+            }
+        }
+
+        List<String> htmlIdOccurrences = extractMatchOccurrences(html, HTML_ID_ATTR, false);
+        for (String id : duplicateValues(htmlIdOccurrences)) {
+            problems.add("HTML defines duplicate IDs: `#" + id + "`");
+        }
+        if (looksCalculatorOrFormTask(contract)) {
+            List<String> formProblems = calculatorFormProblems(contract.originalUserRequest(), html);
+            problems.addAll(formProblems);
+            if (formProblems.isEmpty()) {
+                facts.add("Calculator/form static structure checks passed.");
+            }
+        }
     }
 
     private static SelectorFacts selectorFacts(Path root, List<String> primaryFiles) {
@@ -635,27 +718,7 @@ public final class StaticTaskVerifier {
         }
 
         List<String> calculatorFormProblems(String request) {
-            String lowerHtml = html == null ? "" : html.toLowerCase(Locale.ROOT);
-            List<String> out = new ArrayList<>();
-            if (!containsTag(lowerHtml, "form") && !containsTag(lowerHtml, "input")) {
-                out.add("Calculator/form task is missing a form or input container.");
-            }
-            if (shouldExpectWeightHeightControls(request)) {
-                if (!hasInputFor(lowerHtml, "weight")) {
-                    out.add("Calculator/form task is missing a weight input.");
-                }
-                if (!hasInputFor(lowerHtml, "height")) {
-                    out.add("Calculator/form task is missing a height input.");
-                }
-            }
-            if (!containsTag(lowerHtml, "button") && !lowerHtml.contains("type=\"submit\"")
-                    && !lowerHtml.contains("type='submit'")) {
-                out.add("Calculator/form task is missing a submit/calculate button.");
-            }
-            if (!hasResultOutput(lowerHtml)) {
-                out.add("Calculator/form task is missing a result output element.");
-            }
-            return out;
+            return StaticTaskVerifier.calculatorFormProblems(request, html);
         }
 
         String renderInspection() {
@@ -815,6 +878,40 @@ public final class StaticTaskVerifier {
         return lower.contains("bmi")
                 || lower.contains("weight")
                 || lower.contains("height");
+    }
+
+    private static boolean hasNonBlankInlineScript(String html) {
+        if (html == null || html.isBlank()) return false;
+        Matcher matcher = HTML_INLINE_SCRIPT.matcher(html);
+        while (matcher.find()) {
+            String content = matcher.group(1);
+            if (content != null && !content.strip().isBlank()) return true;
+        }
+        return false;
+    }
+
+    private static List<String> calculatorFormProblems(String request, String html) {
+        String lowerHtml = html == null ? "" : html.toLowerCase(Locale.ROOT);
+        List<String> out = new ArrayList<>();
+        if (!containsTag(lowerHtml, "form") && !containsTag(lowerHtml, "input")) {
+            out.add("Calculator/form task is missing a form or input container.");
+        }
+        if (shouldExpectWeightHeightControls(request)) {
+            if (!hasInputFor(lowerHtml, "weight")) {
+                out.add("Calculator/form task is missing a weight input.");
+            }
+            if (!hasInputFor(lowerHtml, "height")) {
+                out.add("Calculator/form task is missing a height input.");
+            }
+        }
+        if (!containsTag(lowerHtml, "button") && !lowerHtml.contains("type=\"submit\"")
+                && !lowerHtml.contains("type='submit'")) {
+            out.add("Calculator/form task is missing a submit/calculate button.");
+        }
+        if (!hasResultOutput(lowerHtml)) {
+            out.add("Calculator/form task is missing a result output element.");
+        }
+        return out;
     }
 
     private static boolean containsTag(String lowerHtml, String tag) {
