@@ -12,6 +12,8 @@ import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.*;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.phase.ExecutionPhaseState;
+import dev.talos.runtime.trace.LocalTurnTrace;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.*;
 import dev.talos.tools.impl.*;
@@ -415,17 +417,26 @@ public final class ScenarioRunner {
         // 7. Drive the executor end-to-end.
         var opts = new AssistantTurnExecutor.Options();
         AssistantTurnExecutor.TurnOutput turnOut;
+        LocalTurnTrace localTrace;
         TurnUserRequestCapture.set(userPrompt);
+        beginExecutorHarnessTrace(scenario, workspace, userPrompt);
         try {
             turnOut = AssistantTurnExecutor.execute(messages, workspace.path(), ctx, opts);
+            LocalTurnTraceCapture.recordModelResponseReceived(turnOut.text());
+            LocalTurnTraceCapture.recordOutcomeIfAbsent("OK", "NOT_RUN", "UNKNOWN", "UNKNOWN", "EXECUTOR_SCENARIO");
+            localTrace = LocalTurnTraceCapture.complete();
+            TurnAuditCapture.end();
         } finally {
             TurnUserRequestCapture.clear();
+            LocalTurnTraceCapture.clear();
+            if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
         }
 
         return new ExecutorScenarioResult(
                 scenario, turnOut, workspace, scriptedLlm,
                 "",
-                gate.asked, gate.granted, gate.denied, gate.remembered);
+                gate.asked, gate.granted, gate.denied, gate.remembered,
+                localTrace);
     }
 
     /**
@@ -474,17 +485,46 @@ public final class ScenarioRunner {
 
         var opts = new AssistantTurnExecutor.Options();
         AssistantTurnExecutor.TurnOutput turnOut;
+        LocalTurnTrace localTrace;
         TurnUserRequestCapture.set(userPrompt);
+        beginExecutorHarnessTrace(scenario, workspace, userPrompt);
         try {
             turnOut = AssistantTurnExecutor.execute(messages, workspace.path(), ctx, opts);
+            LocalTurnTraceCapture.recordModelResponseReceived(turnOut.text());
+            LocalTurnTraceCapture.recordOutcomeIfAbsent("OK", "NOT_RUN", "UNKNOWN", "UNKNOWN", "EXECUTOR_SCENARIO");
+            localTrace = LocalTurnTraceCapture.complete();
+            TurnAuditCapture.end();
         } finally {
             TurnUserRequestCapture.clear();
+            LocalTurnTraceCapture.clear();
+            if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
         }
 
         return new ExecutorScenarioResult(
                 scenario, turnOut, workspace, scriptedLlm,
                 streamedChunks.toString(),
-                gate.asked, gate.granted, gate.denied, gate.remembered);
+                gate.asked, gate.granted, gate.denied, gate.remembered,
+                localTrace);
+    }
+
+    private static void beginExecutorHarnessTrace(
+            ScenarioDefinition scenario,
+            ScenarioWorkspaceFixture workspace,
+            String userPrompt
+    ) {
+        TurnAuditCapture.begin();
+        String name = scenario == null || scenario.name() == null ? "scenario" : scenario.name();
+        String traceId = "trc-scenario-" + name.replaceAll("[^A-Za-z0-9._-]", "_");
+        LocalTurnTraceCapture.begin(
+                traceId,
+                "scenario-session",
+                1,
+                "2026-04-28T00:00:00Z",
+                "workspace:" + Integer.toHexString(workspace.path().toString().hashCode()),
+                "harness",
+                "scripted",
+                "scripted",
+                userPrompt);
     }
 
     private static final class GateRecorder implements ApprovalGate {

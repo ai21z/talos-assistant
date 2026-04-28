@@ -1,6 +1,7 @@
 package dev.talos.runtime;
 
 import dev.talos.cli.repl.Result;
+import dev.talos.runtime.trace.LocalTurnTrace;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -50,6 +51,33 @@ class JsonTurnLogAppenderTest {
         assertEquals("talos.edit_file", rec.toolCalls().get(0).name());
         assertTrue(rec.toolCalls().get(0).success());
         assertEquals("ok", rec.status(), "Streamed result → status=ok");
+    }
+
+    @Test
+    void writesLocalTraceArtifactAndTraceIdWithTurnRecord(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "sess-trace-listener";
+        JsonTurnLogAppender appender = new JsonTurnLogAppender(store, sid);
+        LocalTurnTrace trace = LocalTurnTrace.builder(
+                        "trc-listener",
+                        sid,
+                        1,
+                        "2026-04-28T12:00:00Z")
+                .workspaceHash("workspace-hash")
+                .mode("auto")
+                .model("ollama", "qwen2.5-coder:14b")
+                .outcome("OK", "NOT_RUN", "NONE", "NONE", "NO_TOOL_RESPONSE")
+                .build();
+        TurnAudit audit = TurnAudit.empty().withLocalTrace(trace);
+
+        appender.onTurnComplete(
+                new TurnResult(new Result.Ok("done"), null, 1, Duration.ofMillis(100), audit),
+                "hello");
+
+        List<TurnRecord> loaded = store.loadTurns(sid);
+        assertEquals(1, loaded.size());
+        assertEquals("trc-listener", loaded.get(0).traceId());
+        assertTrue(store.loadTrace(sid, "trc-listener").isPresent());
     }
 
     @Test

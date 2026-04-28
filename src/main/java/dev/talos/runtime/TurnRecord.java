@@ -31,6 +31,7 @@ import java.util.List;
  *                                (unknown / not-applicable). Makes errored turns
  *                                distinguishable from silent turns on audit.
  * @param policyTrace             compact task contract / phase / tool-surface trace
+ * @param traceId                 optional id of the richer local turn trace artifact
  */
 public record TurnRecord(
         int turnNumber,
@@ -44,7 +45,8 @@ public record TurnRecord(
         int approvalsDenied,
         String retrievalTraceSummary,
         String status,
-        TurnPolicyTrace policyTrace
+        TurnPolicyTrace policyTrace,
+        String traceId
 ) {
 
     /** Defensive copy + null normalization. */
@@ -56,6 +58,7 @@ public record TurnRecord(
         retrievalTraceSummary = (retrievalTraceSummary == null) ? "" : retrievalTraceSummary;
         status                = (status == null) ? "" : status;
         policyTrace           = (policyTrace == null) ? TurnPolicyTrace.empty() : policyTrace;
+        traceId               = (traceId == null) ? "" : traceId;
     }
 
     /**
@@ -75,7 +78,7 @@ public record TurnRecord(
                       String retrievalTraceSummary) {
         this(turnNumber, timestamp, durationMs, userInput, assistantText,
                 toolCalls, approvalsRequired, approvalsGranted, approvalsDenied,
-                retrievalTraceSummary, "", TurnPolicyTrace.empty());
+                retrievalTraceSummary, "", TurnPolicyTrace.empty(), "");
     }
 
     public TurnRecord(int turnNumber,
@@ -91,7 +94,24 @@ public record TurnRecord(
                       String status) {
         this(turnNumber, timestamp, durationMs, userInput, assistantText,
                 toolCalls, approvalsRequired, approvalsGranted, approvalsDenied,
-                retrievalTraceSummary, status, TurnPolicyTrace.empty());
+                retrievalTraceSummary, status, TurnPolicyTrace.empty(), "");
+    }
+
+    public TurnRecord(int turnNumber,
+                      Instant timestamp,
+                      long durationMs,
+                      String userInput,
+                      String assistantText,
+                      List<ToolCallSummary> toolCalls,
+                      int approvalsRequired,
+                      int approvalsGranted,
+                      int approvalsDenied,
+                      String retrievalTraceSummary,
+                      String status,
+                      TurnPolicyTrace policyTrace) {
+        this(turnNumber, timestamp, durationMs, userInput, assistantText,
+                toolCalls, approvalsRequired, approvalsGranted, approvalsDenied,
+                retrievalTraceSummary, status, policyTrace, "");
     }
 
     /**

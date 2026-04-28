@@ -5,12 +5,14 @@ import dev.talos.cli.repl.Result;
 import dev.talos.runtime.JsonSessionStore;
 import dev.talos.runtime.SessionStore;
 import dev.talos.runtime.TurnRecord;
+import dev.talos.runtime.trace.LocalTurnTrace;
 
 import java.nio.file.Path;
 import java.util.LinkedHashSet;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -76,7 +78,7 @@ public final class ExplainLastTurnCommand implements Command {
         if (latest == null) {
             return new Result.Info("No completed turn has been recorded for this workspace yet.");
         }
-        return new Result.TrustedInfo(renderView(latest, view));
+        return new Result.TrustedInfo(renderView(latest, view, store, sessionId));
     }
 
     private List<TurnRecord> filterActiveTurns(List<TurnRecord> turns) {
@@ -88,11 +90,11 @@ public final class ExplainLastTurnCommand implements Command {
                 .toList();
     }
 
-    private static String renderView(TurnRecord latest, String view) {
+    private static String renderView(TurnRecord latest, String view, SessionStore store, String sessionId) {
         return switch (view) {
             case "tools" -> renderTools(latest);
             case "sources" -> renderSources(latest);
-            case "trace" -> renderTrace(latest);
+            case "trace" -> renderTrace(latest, loadLocalTrace(store, sessionId, latest));
             default -> render(latest);
         };
     }
@@ -190,6 +192,10 @@ public final class ExplainLastTurnCommand implements Command {
     }
 
     static String renderTrace(TurnRecord turn) {
+        return renderTrace(turn, Optional.empty());
+    }
+
+    static String renderTrace(TurnRecord turn, Optional<LocalTurnTrace> localTrace) {
         StringBuilder sb = new StringBuilder();
         sb.append(render(turn));
         sb.append("\nTrace Detail\n");
@@ -197,7 +203,49 @@ public final class ExplainLastTurnCommand implements Command {
         sb.append("  Retrieval: ").append(blankDefault(turn.retrievalTraceSummary(), "none recorded")).append('\n');
         sb.append("  Tool calls: ").append(turn.toolCalls().size()).append('\n');
         sb.append("  Status tag: ").append(blankDefault(turn.status(), "unknown")).append('\n');
+        localTrace.ifPresent(trace -> appendLocalTrace(sb, trace));
         return sb.toString();
+    }
+
+    private static Optional<LocalTurnTrace> loadLocalTrace(SessionStore store, String sessionId, TurnRecord turn) {
+        if (store == null || sessionId == null || sessionId.isBlank() || turn == null || turn.traceId().isBlank()) {
+            return Optional.empty();
+        }
+        return store.loadTrace(sessionId, turn.traceId());
+    }
+
+    private static void appendLocalTrace(StringBuilder sb, LocalTurnTrace trace) {
+        sb.append("\nLocal Trace\n");
+        sb.append("  Local trace: ").append(trace.traceId()).append('\n');
+        sb.append("  Schema: ").append(trace.schemaVersion()).append('\n');
+        sb.append("  Redaction: ").append(trace.redaction().mode()).append('\n');
+        if (trace.taskContract() != null && !trace.taskContract().type().isBlank()) {
+            sb.append("  Task contract: ").append(trace.taskContract().type())
+                    .append(" mutationAllowed=").append(trace.taskContract().mutationAllowed())
+                    .append(" verificationRequired=").append(trace.taskContract().verificationRequired())
+                    .append('\n');
+        }
+        if (trace.toolSurface() != null) {
+            sb.append("  Visible tools: ").append(listOrNone(trace.toolSurface().nativeTools())).append('\n');
+        }
+        sb.append("  Events: ").append(trace.events().size()).append('\n');
+        if (trace.verification() != null && !trace.verification().status().isBlank()) {
+            sb.append("  Verification: ").append(trace.verification().status());
+            if (!trace.verification().summary().isBlank()) {
+                sb.append(" - ").append(trace.verification().summary());
+            }
+            sb.append('\n');
+            for (String problem : trace.verification().problems()) {
+                sb.append("    - ").append(problem).append('\n');
+            }
+        }
+        if (trace.outcome() != null && !trace.outcome().status().isBlank()) {
+            sb.append("  Outcome: ").append(trace.outcome().status());
+            if (!trace.outcome().classification().isBlank()) {
+                sb.append(" (").append(trace.outcome().classification()).append(')');
+            }
+            sb.append('\n');
+        }
     }
 
     private static void appendPolicyTrace(StringBuilder sb, dev.talos.runtime.TurnPolicyTrace trace) {
