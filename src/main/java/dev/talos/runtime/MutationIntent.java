@@ -21,7 +21,7 @@ public final class MutationIntent {
                     + "cool|hey|hi|hello|hmm+),?\\s+)*";
 
     private static final String CORE_MUTATION_VERBS =
-            "(edit|modify|change|update|fix|repair|rewrite|replace|redesign|"
+            "(edit|modify|change|update|fix|repair|overwrite|rewrite|replace|redesign|"
                     + "restyle|re-style|re-design|write|create|save|"
                     + "apply|add|remove|delete|refactor|put|implement)";
 
@@ -52,7 +52,9 @@ public final class MutationIntent {
             Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:please\\s+)?" + MAKE_REFERENCE_REQUEST),
             Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:please\\s+)?(?:can|could|would|will)\\s+you\\s+(?:please\\s+)?" + MAKE_REFERENCE_REQUEST),
             Pattern.compile("^" + PREFIX + "i\\s+(?:want|need)\\s+you\\s+to\\s+" + MAKE_REFERENCE_REQUEST),
-            Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:let's|lets)\\s+" + MAKE_REFERENCE_REQUEST)
+            Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:let's|lets)\\s+" + MAKE_REFERENCE_REQUEST),
+            Pattern.compile("\\b(?:can|could|would|will)\\s+you\\s+(?:please\\s+)?"
+                    + BUILD_ARTIFACT_VERBS + "\\s+me\\s+(?:\\S+\\s+){0,10}" + ARTIFACT_NOUNS + "\\b")
     );
 
     private static final List<Pattern> PRIOR_CHANGE_STATUS_PATTERNS = List.of(
@@ -73,6 +75,7 @@ public final class MutationIntent {
             "change everything", "change all",
             "update it", "update the", "update this", "update that",
             "fix it", "fix the", "fix this", "fix that",
+            "overwrite it", "overwrite the", "overwrite this",
             "rewrite it", "rewrite the", "rewrite this",
             "replace it", "replace the", "replace this",
             "redesign", "restyle", "re-style", "re-design",
@@ -113,6 +116,7 @@ public final class MutationIntent {
         for (Pattern pattern : REQUEST_PATTERNS) {
             if (pattern.matcher(lower).find()) return true;
         }
+        if (looksNaturalMakeItArtifactRequest(lower)) return true;
         for (String marker : MARKERS) {
             if (lower.contains(marker)) return true;
         }
@@ -133,6 +137,21 @@ public final class MutationIntent {
     private static boolean containsConditionalApplyClause(String lower) {
         return Pattern.compile("\\b(?:if\\s+not|otherwise|then)\\b.{0,80}\\b"
                 + "(?:fix|repair|update|change|edit|make|create|write|apply)\\b").matcher(lower).find();
+    }
+
+    private static boolean looksNaturalMakeItArtifactRequest(String lower) {
+        if (!lower.contains("can you make it")
+                && !lower.contains("could you make it")
+                && !lower.contains("would you make it")
+                && !lower.contains("will you make it")) {
+            return false;
+        }
+        return Pattern.compile("\\b" + ARTIFACT_NOUNS + "\\b").matcher(lower).find()
+                && (lower.contains(" here")
+                || lower.contains("folder")
+                || lower.contains("file")
+                || lower.contains("open and use")
+                || lower.contains("i just want"));
     }
 
     private static boolean containsGlobalReadOnlyNegation(String lower) {

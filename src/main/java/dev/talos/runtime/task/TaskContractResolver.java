@@ -29,7 +29,7 @@ public final class TaskContractResolver {
     private static final Set<String> CREATE_MARKERS = Set.of(
             "create", "write a", "write the", "save as", "add a", "add the",
             "new file", "build", "generate", "scaffold", "set up", "setup",
-            "make a", "make an"
+            "make a", "make an", "make me"
     );
 
     private static final Set<String> DIAGNOSE_MARKERS = Set.of(
