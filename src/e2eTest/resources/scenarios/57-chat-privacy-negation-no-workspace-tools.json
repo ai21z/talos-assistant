@@ -1,0 +1,15 @@
+{
+  "name": "chat privacy negation does not execute workspace tools",
+  "fixture": "chat-privacy",
+  "v1Pack": true,
+  "claims": [
+    "privacy-negation-wins-over-inspect-workspace-words",
+    "privacy-negated-chat-exposes-no-workspace-tools"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Sorry, maybe I was unclear. Just say one friendly sentence and don't use the workspace.",
+  "scriptedResponses": [
+    "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}\n{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"notes.md\"}}"
+  ]
+}

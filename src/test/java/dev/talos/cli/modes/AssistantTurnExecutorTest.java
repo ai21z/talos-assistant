@@ -240,6 +240,35 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void smallTalkTextFallbackToolCallIsNotExecuted(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("notes.md"), "Hidden project token: ALPHA-742\n");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"notes.md\"}}")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("hello, answer briefly as Talos"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertFalse(out.text().contains("talos.read_file"), out.text());
+            assertFalse(out.text().contains("ALPHA-742"), out.text());
+            assertFalse(out.text().contains("Used 1 tool"), out.text());
+        }
+
+        @Test
         void workspaceExplainListOnlyUnderinspectionRetriesWithPrimaryReads(@TempDir Path workspace)
                 throws Exception {
             Files.writeString(workspace.resolve("index.html"), """

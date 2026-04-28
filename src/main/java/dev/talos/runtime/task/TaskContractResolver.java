@@ -44,6 +44,45 @@ public final class TaskContractResolver {
             "this site"
     );
 
+    private static final Set<String> PRIVACY_NO_WORKSPACE_MARKERS = Set.of(
+            "only chatting",
+            "just chat",
+            "don't inspect my files",
+            "dont inspect my files",
+            "do not inspect my files",
+            "don't inspect the files",
+            "dont inspect the files",
+            "do not inspect the files",
+            "don't use the workspace",
+            "dont use the workspace",
+            "do not use the workspace",
+            "don't use workspace",
+            "dont use workspace",
+            "do not use workspace",
+            "don't read my files",
+            "dont read my files",
+            "do not read my files",
+            "don't search my files",
+            "dont search my files",
+            "do not search my files",
+            "just answer, no workspace",
+            "no workspace",
+            "without checking files",
+            "without reading files",
+            "without searching files"
+    );
+
+    private static final Set<String> CHAT_ONLY_HINTS = Set.of(
+            "answer briefly",
+            "just say hello",
+            "just say hi",
+            "say hello",
+            "say hi",
+            "are you awake",
+            "normal assistant",
+            "friendly sentence"
+    );
+
     private static final Pattern SMALL_TALK_ONLY = Pattern.compile(
             "(?i)^\\s*(?:"
                     + "hi|hello|hey|hey there|hello there|yo|"
@@ -59,9 +98,11 @@ public final class TaskContractResolver {
             "what is talos",
             "who is talos",
             "what can you do",
+            "what can you do for me",
             "how can you assist me",
             "how can you help me",
             "what can talos do",
+            "tell me what you are",
             "tell me about yourself"
     );
 
@@ -160,6 +201,11 @@ public final class TaskContractResolver {
         if (mutationRequested) {
             return containsAny(lower, CREATE_MARKERS) ? TaskType.FILE_CREATE : TaskType.FILE_EDIT;
         }
+        if (looksPrivacyNoWorkspaceRequest(lower)
+                || looksConversationalGreetingRequest(lower)
+                || looksAssistantIdentityQuestion(lower)) {
+            return TaskType.SMALL_TALK;
+        }
         if (lower.contains("verify") || lower.contains("confirm")) {
             return TaskType.VERIFY_ONLY;
         }
@@ -169,7 +215,7 @@ public final class TaskContractResolver {
         if (containsAny(lower, WORKSPACE_MARKERS)) {
             return TaskType.WORKSPACE_EXPLAIN;
         }
-        if (looksSmallTalkOnly(lower) || looksAssistantIdentityQuestion(lower)) {
+        if (looksSmallTalkOnly(lower)) {
             return TaskType.SMALL_TALK;
         }
         return TaskType.READ_ONLY_QA;
@@ -181,6 +227,26 @@ public final class TaskContractResolver {
 
     private static boolean looksAssistantIdentityQuestion(String lower) {
         return lower != null && containsAny(lower, ASSISTANT_IDENTITY_MARKERS);
+    }
+
+    private static boolean looksPrivacyNoWorkspaceRequest(String lower) {
+        return lower != null && containsAny(lower, PRIVACY_NO_WORKSPACE_MARKERS);
+    }
+
+    private static boolean looksConversationalGreetingRequest(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        if (!lower.matches("^\\s*(?:hi|hello|hey|hey there|yo)\\b.*")) return false;
+        if (containsAny(lower, WORKSPACE_MARKERS)
+                || containsAny(lower, DIAGNOSE_MARKERS)
+                || lower.contains("read ")
+                || lower.contains("search ")
+                || lower.contains("grep ")
+                || lower.contains("file")
+                || lower.contains("folder")
+                || lower.contains("directory")) {
+            return false;
+        }
+        return containsAny(lower, CHAT_ONLY_HINTS);
     }
 
     private static boolean looksLikeDeicticFollowUp(String userRequest) {

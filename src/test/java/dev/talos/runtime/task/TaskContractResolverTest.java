@@ -102,6 +102,21 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void naturalGreetingWithChatOnlyPhrasingBecomesSmallTalkContract() {
+        for (String input : List.of(
+                "hello, answer briefly as Talos",
+                "hi, just say hello",
+                "hey there, are you awake? just say hi like a normal assistant")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertEquals(TaskType.SMALL_TALK, contract.type(), input);
+            assertFalse(contract.mutationRequested(), input);
+            assertFalse(contract.mutationAllowed(), input);
+            assertFalse(contract.verificationRequired(), input);
+        }
+    }
+
+    @Test
     void assistantIdentityQuestionsBecomeSmallTalkContract() {
         for (String input : List.of(
                 "hello who are you?",
@@ -110,9 +125,30 @@ class TaskContractResolverTest {
                 "what is talos?",
                 "who is talos?",
                 "what can you do?",
+                "what can you do for me?",
                 "how can you assist me?",
                 "how can you help me?",
-                "what can Talos do?")) {
+                "what can Talos do?",
+                "tell me what you are")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertEquals(TaskType.SMALL_TALK, contract.type(), input);
+            assertFalse(contract.mutationRequested(), input);
+            assertFalse(contract.mutationAllowed(), input);
+            assertFalse(contract.verificationRequired(), input);
+        }
+    }
+
+    @Test
+    void privacyNegatedChatPromptsSuppressWorkspaceInspectionIntent() {
+        for (String input : List.of(
+                "I am only chatting, please don't inspect my files. What can you do for me?",
+                "don't use the workspace, just say one friendly sentence",
+                "please do not read my files",
+                "just chat with me, no workspace",
+                "please don't search my files",
+                "just answer, no workspace",
+                "without checking files, say hi")) {
             TaskContract contract = TaskContractResolver.fromUserRequest(input);
 
             assertEquals(TaskType.SMALL_TALK, contract.type(), input);
@@ -260,6 +296,24 @@ class TaskContractResolverTest {
 
         assertEquals(TaskType.WORKSPACE_EXPLAIN, contract.type());
         assertFalse(contract.mutationAllowed());
+    }
+
+    @Test
+    void explicitWorkspaceRequestsStillExposeReadOnlyWorkspaceContracts() {
+        for (String input : List.of(
+                "what files are in this workspace?",
+                "read README.md",
+                "search my files for ALPHA-742")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertFalse(contract.mutationRequested(), input);
+            assertFalse(contract.mutationAllowed(), input);
+            assertTrue(
+                    contract.type() == TaskType.WORKSPACE_EXPLAIN
+                            || contract.type() == TaskType.READ_ONLY_QA
+                            || contract.type() == TaskType.DIAGNOSE_ONLY,
+                    input + " -> " + contract.type());
+        }
     }
 
     @Test
