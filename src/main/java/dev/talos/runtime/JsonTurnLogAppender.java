@@ -47,6 +47,13 @@ public final class JsonTurnLogAppender implements SessionListener {
 
         TurnAudit audit = result.audit() == null ? TurnAudit.empty() : result.audit();
         long durationMs = result.elapsed() == null ? 0L : result.elapsed().toMillis();
+        if (audit.localTrace() != null) {
+            try {
+                store.saveTrace(sessionId, audit.localTrace());
+            } catch (Exception e) {
+                LOG.warn("Failed to persist local turn trace: {}", e.getMessage());
+            }
+        }
 
         TurnRecord record = new TurnRecord(
                 result.turnNumber(),
@@ -58,9 +65,10 @@ public final class JsonTurnLogAppender implements SessionListener {
                 audit.approvalsRequired(),
                 audit.approvalsGranted(),
                 audit.approvalsDenied(),
-                 summarize(result.trace()),
+                summarize(result.trace()),
                 statusOf(result.result()),
-                audit.policyTrace()
+                audit.policyTrace(),
+                audit.localTrace() == null ? "" : audit.localTrace().traceId()
         );
 
         try {

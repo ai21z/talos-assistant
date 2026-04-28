@@ -1,6 +1,7 @@
 package dev.talos.harness;
 
 import dev.talos.cli.modes.AssistantTurnExecutor;
+import dev.talos.runtime.trace.LocalTurnTrace;
 
 import java.util.function.Consumer;
 
@@ -36,6 +37,7 @@ public final class ExecutorScenarioResult implements AutoCloseable {
     private final int approvalsGranted;
     private final int approvalsDenied;
     private final int approvalsRemembered;
+    private final LocalTurnTrace localTrace;
 
     ExecutorScenarioResult(
             ScenarioDefinition definition,
@@ -47,6 +49,21 @@ public final class ExecutorScenarioResult implements AutoCloseable {
             int approvalsGranted,
             int approvalsDenied,
             int approvalsRemembered) {
+        this(definition, turnOutput, workspace, resourceToClose, streamedText,
+                approvalsAsked, approvalsGranted, approvalsDenied, approvalsRemembered, null);
+    }
+
+    ExecutorScenarioResult(
+            ScenarioDefinition definition,
+            AssistantTurnExecutor.TurnOutput turnOutput,
+            ScenarioWorkspaceFixture workspace,
+            AutoCloseable resourceToClose,
+            String streamedText,
+            int approvalsAsked,
+            int approvalsGranted,
+            int approvalsDenied,
+            int approvalsRemembered,
+            LocalTurnTrace localTrace) {
         this.definition = definition;
         this.turnOutput = turnOutput;
         this.workspace = workspace;
@@ -56,6 +73,7 @@ public final class ExecutorScenarioResult implements AutoCloseable {
         this.approvalsGranted = approvalsGranted;
         this.approvalsDenied = approvalsDenied;
         this.approvalsRemembered = approvalsRemembered;
+        this.localTrace = localTrace;
     }
 
     public ScenarioDefinition definition() { return definition; }
@@ -70,6 +88,24 @@ public final class ExecutorScenarioResult implements AutoCloseable {
 
     /** Text emitted to the stream sink during execution. Empty for non-streaming runs. */
     public String streamedText() { return streamedText; }
+
+    /** Redacted local trace summary attached by the executor scenario harness, if available. */
+    public LocalTurnTrace localTrace() { return localTrace; }
+
+    public String traceSummary() {
+        if (localTrace == null) return "";
+        return localTrace.traceId()
+                + " events=" + localTrace.events().size()
+                + " outcome=" + localTrace.outcome().status()
+                + " verification=" + localTrace.verification().status();
+    }
+
+    public ExecutorScenarioResult assertLocalTraceRecorded() {
+        if (localTrace == null || localTrace.traceId().isBlank()) {
+            throw new AssertionError("Scenario '" + definition.name() + "': expected a local trace to be attached");
+        }
+        return this;
+    }
 
     public ExecutorScenarioResult assertApprovalCounts(int asked, int granted, int denied, int remembered) {
         if (approvalsAsked != asked || approvalsGranted != granted

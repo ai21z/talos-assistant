@@ -9,6 +9,9 @@ import dev.talos.core.context.ConversationManager;
 import dev.talos.core.context.TokenBudget;
 import dev.talos.core.retrieval.RetrievalTrace;
 import dev.talos.core.security.Sandbox;
+import dev.talos.runtime.trace.LocalTurnTrace;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.tools.*;
 import dev.talos.tools.impl.FileEditTool;
@@ -28,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class TurnProcessorTest {
 
     private static final Path WS = Path.of(".").toAbsolutePath().normalize();
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @AfterEach
     void cleanupTrace() {
@@ -35,6 +39,7 @@ class TurnProcessorTest {
         TurnTraceCapture.consume();
         TurnUserRequestCapture.clear();
         TurnTaskContractCapture.clear();
+        LocalTurnTraceCapture.clear();
         if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
     }
 
@@ -390,6 +395,76 @@ class TurnProcessorTest {
         TurnResult r = tp.process(session, "hello", ctx);
         assertNotNull(r);
         assertNull(r.trace(), "Non-RAG modes should produce null trace");
+    }
+
+    @Test
+    void localTurnTraceIsAttachedToTurnResultWithoutRawPromptOrAnswer() throws Exception {
+        var modes = new ModeController();
+        modes.add(new StubMode("ask", true) {
+            @Override public Optional<Result> handle(String raw, Path ws, Context ctx) {
+                return Optional.of(new Result.Ok("Answer mentions SECRET=abc."));
+            }
+        });
+        var tp = new TurnProcessor(modes);
+        var session = new Session(WS, new Config());
+        var ctx = Context.builder(new Config()).build();
+
+        TurnResult result = tp.process(session, "hello SECRET=abc", ctx);
+
+        assertNotNull(result.audit().localTrace());
+        LocalTurnTrace trace = result.audit().localTrace();
+        assertEquals(1, trace.schemaVersion());
+        assertFalse(trace.traceId().isBlank());
+        assertTrue(trace.events().stream().anyMatch(event -> "TRACE_STARTED".equals(event.type())));
+        assertTrue(trace.events().stream().anyMatch(event -> "MODEL_RESPONSE_RECEIVED".equals(event.type())));
+        assertTrue(trace.events().stream().anyMatch(event -> "OUTCOME_RENDERED".equals(event.type())));
+        assertFalse(trace.redaction().promptHash().isBlank());
+        assertFalse(trace.redaction().assistantHash().isBlank());
+
+        String json = MAPPER.writeValueAsString(trace);
+        assertFalse(json.contains("SECRET=abc"), "local trace must not store raw prompt or answer by default");
+    }
+
+    @Test
+    void localTurnTraceCapturesToolApprovalAndResultEventsWithoutRawWritePayload(@TempDir Path workspace)
+            throws Exception {
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+        String request = "write index.html";
+        ToolCall call = new ToolCall("talos.write_file", Map.of(
+                "path", "index.html",
+                "content", "SECRET=abc\n<h1>ok</h1>"));
+
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+        TurnAuditCapture.begin();
+        LocalTurnTraceCapture.begin(
+                "trc-tool",
+                JsonSessionStore.sessionIdFor(workspace),
+                1,
+                "2026-04-28T12:00:00Z",
+                "workspace-hash",
+                "auto",
+                "ollama",
+                "qwen2.5-coder:14b",
+                request);
+
+        ToolResult toolResult = tp.executeTool(session, call, ctx);
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+        TurnAuditCapture.end();
+
+        assertTrue(toolResult.success(), toolResult.errorMessage());
+        assertTrue(trace.events().stream().anyMatch(event -> "TOOL_CALL_PARSED".equals(event.type())));
+        assertTrue(trace.events().stream().anyMatch(event -> "APPROVAL_REQUIRED".equals(event.type())));
+        assertTrue(trace.events().stream().anyMatch(event -> "APPROVAL_GRANTED".equals(event.type())));
+        assertTrue(trace.events().stream().anyMatch(event -> "TOOL_EXECUTED".equals(event.type())));
+
+        String json = MAPPER.writeValueAsString(trace);
+        assertTrue(json.contains("\"contentHash\""), json);
+        assertFalse(json.contains("SECRET=abc"), "write payload must be hashed, not stored raw");
+        assertFalse(json.contains("<h1>ok</h1>"), "write payload must be hashed, not stored raw");
     }
 
     @Test void traceIsClearedBetweenTurns() throws Exception {

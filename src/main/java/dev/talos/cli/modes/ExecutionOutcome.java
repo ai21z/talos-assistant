@@ -10,6 +10,7 @@ import dev.talos.runtime.outcome.TruthWarning;
 import dev.talos.runtime.outcome.TruthWarningType;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.verification.StaticTaskVerifier;
 import dev.talos.runtime.verification.TaskVerificationResult;
 import dev.talos.runtime.verification.TaskVerificationStatus;
@@ -187,6 +188,15 @@ record ExecutionOutcome(
         GroundingStatus groundingStatus = selectorGroundedOverride || webDiagnosticGroundedOverride
                 ? GroundingStatus.GROUNDED
                 : GroundingStatus.UNKNOWN;
+        if (readOnlyDeniedMutation) {
+            LocalTurnTraceCapture.recordProtocolSanitized(
+                    "mutating tool protocol blocked by read-only task contract");
+        }
+        recordLocalTraceOutcome(
+                completionStatus,
+                verificationStatus,
+                taskOutcome,
+                taskVerification);
 
         return new ExecutionOutcome(
                 current,
@@ -265,6 +275,15 @@ record ExecutionOutcome(
                 warnings,
                 List.of()
         );
+        if (malformedProtocolDebrisReplaced) {
+            LocalTurnTraceCapture.recordProtocolSanitized(
+                    "malformed tool protocol debris was replaced with a no-action notice");
+        }
+        recordLocalTraceOutcome(
+                completionStatus,
+                VerificationStatus.NOT_RUN,
+                taskOutcome,
+                verification);
 
         return new ExecutionOutcome(
                 shaped,
@@ -513,5 +532,36 @@ record ExecutionOutcome(
         if (value == null || value.isBlank()) return "no additional detail";
         String line = value.replace('\n', ' ').replace('\r', ' ').strip();
         return line.length() <= 240 ? line : line.substring(0, 237) + "...";
+    }
+
+    private static void recordLocalTraceOutcome(
+            CompletionStatus completionStatus,
+            VerificationStatus verificationStatus,
+            TaskOutcome taskOutcome,
+            TaskVerificationResult verification
+    ) {
+        if (verification != null) {
+            LocalTurnTraceCapture.recordVerification(
+                    verification.status().name(),
+                    verification.summary(),
+                    verification.problems());
+        }
+        if (taskOutcome != null) {
+            taskOutcome.warnings().forEach(warning ->
+                    LocalTurnTraceCapture.warning(warning.type().name(), warning.message()));
+            LocalTurnTraceCapture.recordOutcome(
+                    completionStatus == null ? "" : completionStatus.name(),
+                    verificationStatus == null ? "" : verificationStatus.name(),
+                    approvalStatus(taskOutcome),
+                    taskOutcome.mutationOutcome().status().name(),
+                    taskOutcome.completionStatus().name());
+        }
+    }
+
+    private static String approvalStatus(TaskOutcome outcome) {
+        if (outcome == null || outcome.mutationOutcome() == null) return "UNKNOWN";
+        if (!outcome.mutationOutcome().denied().isEmpty()) return "DENIED";
+        if (outcome.mutationOutcome().successCount() > 0) return "GRANTED_OR_NOT_REQUIRED";
+        return "NONE";
     }
 }
