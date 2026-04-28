@@ -1,5 +1,12 @@
 # This new-work ticket is my Talos vision
 
+> Historical context after 0.9.6: this document was an earlier architecture
+> vision. After 0.9.6, TaskContract and phase machinery exist on the active
+> branch. The canonical post-0.9.6 milestone plan is now
+> `docs/architecture/01-execution-discipline-and-local-trust.md`. Keep this
+> document as historical context, but do not treat stale
+> missing-TaskContract/missing-phase statements as current branch truth.
+
 **Talos can become a reference architecture, but it is not there yet.**
 It is currently a **strong prototype with promising architecture**, not yet a “study this as the clean pattern” system.
 

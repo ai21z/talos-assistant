@@ -237,6 +237,9 @@ The full work-cycle writeup lives here:
 - [work-cycle-docs/work-test-cycle-setup.md](work-cycle-docs/work-test-cycle-setup.md)
 - [work-cycle-docs/work-test-cycle-step-by-step.md](work-cycle-docs/work-test-cycle-step-by-step.md)
 
+Post-0.9.6 architecture direction is documented in
+[docs/architecture/01-execution-discipline-and-local-trust.md](docs/architecture/01-execution-discipline-and-local-trust.md).
+
 ## What You Need To Run Talos Well
 
 ### Hardware
