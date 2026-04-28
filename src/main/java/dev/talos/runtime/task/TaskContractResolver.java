@@ -268,6 +268,12 @@ public final class TaskContractResolver {
                 || lower.contains("try again")
                 || lower.contains("try one more time")
                 || lower.contains("try once more")
+                || lower.contains("fix the remaining")
+                || lower.contains("remaining static verification problems")
+                || lower.contains("static verification problems")
+                || lower.contains("complete it")
+                || lower.contains("finish it")
+                || lower.contains("make it work")
                 || lower.contains("fix it")
                 || lower.contains("fix this")
                 || lower.contains("repair it")
@@ -305,7 +311,15 @@ public final class TaskContractResolver {
                 true,
                 prior.expectedTargets(),
                 prior.forbiddenTargets(),
-                latestUserRequest);
+                inheritedRepairOriginalRequest(previousUser, latestUserRequest));
+    }
+
+    private static String inheritedRepairOriginalRequest(String previousUser, String latestUserRequest) {
+        String previous = previousUser == null ? "" : previousUser.strip();
+        String latest = latestUserRequest == null ? "" : latestUserRequest.strip();
+        if (previous.isBlank()) return latest;
+        if (latest.isBlank() || Objects.equals(previous, latest)) return previous;
+        return previous + "\n\nRepair follow-up: " + latest;
     }
 
     private static boolean looksLikeIncompleteOutcome(String assistantResponse) {

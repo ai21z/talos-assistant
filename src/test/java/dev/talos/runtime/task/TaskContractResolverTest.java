@@ -468,6 +468,31 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void repairFollowUpAfterStaticVerificationFailureInheritsExpectedTargets() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.user(
+                "Create index.html, styles.css, and scripts.js for a BMI calculator."));
+        messages.add(ChatMessage.assistant("""
+                [Task incomplete: Static verification failed - HTML does not link JavaScript file: `scripts.js`]
+
+                The requested task is not verified complete.
+                Remaining static verification problems:
+                - styles.css: expected target was not successfully mutated.
+                - HTML does not link JavaScript file: `scripts.js`
+                - Calculator/form task is missing a submit/calculate button.
+                """));
+        messages.add(ChatMessage.user("Fix the remaining static verification problems now."));
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        assertEquals(TaskType.FILE_CREATE, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("index.html", "styles.css", "scripts.js"), contract.expectedTargets());
+    }
+
+    @Test
     void statusQuestionAfterIncompleteMutationRemainsVerifyOnly() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.user(

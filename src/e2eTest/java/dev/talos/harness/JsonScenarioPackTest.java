@@ -803,6 +803,34 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/62-repair-after-static-verification-failure-uses-verifier-context.json] 62: repair after static verification failure uses verifier context")
+    void repairAfterStaticVerificationFailureUsesVerifierContext() {
+        var loaded = JsonScenarioLoader.load("scenarios/62-repair-after-static-verification-failure-uses-verifier-context.json");
+        List<ChatMessage> history = new ArrayList<>();
+        var historyNode = loaded.raw().path("history");
+        for (var node : historyNode) {
+            history.add(new ChatMessage(
+                    node.path("role").asText(),
+                    node.path("content").asText()));
+        }
+
+        try (var result = ScenarioRunner.runThroughExecutorWithHistory(
+                loaded.definition(),
+                history,
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(3, 3, 0, 0)
+                    .assertAnswerContains("Static verification: passed")
+                    .assertAnswerNotContains("Static verification failed")
+                    .assertFileContains("index.html", "<script src=\"scripts.js\"></script>")
+                    .assertFileContains("index.html", "id=\"bmiForm\"")
+                    .assertFileContains("styles.css", ".calculator")
+                    .assertFileContains("scripts.js", "getElementById('bmiForm')")
+                    .assertFileContains("scripts.js", "Your BMI is");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/42-partial-followup-summary-uses-verified-history.json] 42: follow-up summary uses verified partial history")
     void partialFollowupSummaryUsesVerifiedHistory() {
         var loaded = JsonScenarioLoader.load("scenarios/42-partial-followup-summary-uses-verified-history.json");

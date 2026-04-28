@@ -103,6 +103,7 @@ public final class UnifiedAssistantMode implements Mode {
         // Build structured conversation messages: system + history + user
         List<ChatMessage> messages = buildMessages(system, rawLine, history);
         AssistantTurnExecutor.injectTaskContractInstruction(messages);
+        AssistantTurnExecutor.injectStaticVerificationRepairInstruction(messages, taskContract);
         ExecutionPhase initialPhase = taskContract.mutationAllowed()
                 ? ExecutionPhase.APPLY
                 : ExecutionPhase.INSPECT;
