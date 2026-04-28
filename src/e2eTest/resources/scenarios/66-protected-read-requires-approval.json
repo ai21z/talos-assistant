@@ -1,0 +1,13 @@
+{
+  "name": "protected read requires approval",
+  "fixture": "protected-path",
+  "v1Pack": true,
+  "claims": [
+    "protected-read-requires-approval",
+    "read-only-tools-remain-usable-after-approval"
+  ],
+  "runner": "loop",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Read .env for me.",
+  "scriptedResponse": "```json\n{\"name\":\"talos.read_file\",\"parameters\":{\"path\":\".env\"}}\n```"
+}

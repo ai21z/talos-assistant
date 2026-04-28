@@ -5,6 +5,10 @@ import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
 import dev.talos.core.retrieval.RetrievalTrace;
 import dev.talos.runtime.phase.PhasePolicy;
+import dev.talos.runtime.policy.DeclarativePermissionPolicy;
+import dev.talos.runtime.policy.PermissionAction;
+import dev.talos.runtime.policy.PermissionDecision;
+import dev.talos.runtime.policy.PermissionRequest;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.trace.LocalTurnTrace;
@@ -45,6 +49,7 @@ public final class TurnProcessor {
     private final ModeController modes;
     private final ApprovalGate approvalGate;
     private final ApprovalPolicy approvalPolicy;
+    private final dev.talos.runtime.policy.PermissionPolicy permissionPolicy;
     private final ToolRegistry toolRegistry;
     private final List<SessionListener> listeners = new CopyOnWriteArrayList<>();
 
@@ -71,6 +76,7 @@ public final class TurnProcessor {
                 "toolRegistry must not be null — pass a new ToolRegistry() explicitly");
         this.approvalPolicy = Objects.requireNonNull(approvalPolicy,
                 "approvalPolicy must not be null — pass ApprovalPolicy.ALWAYS_ASK explicitly");
+        this.permissionPolicy = new DeclarativePermissionPolicy(this.approvalPolicy);
     }
 
     public TurnProcessor(ModeController modes, ApprovalGate approvalGate, ToolRegistry toolRegistry) {
@@ -394,74 +400,84 @@ public final class TurnProcessor {
             scopeWarning = ScopeGuard.warningMessage(userRequest, path);
         }
 
-        if (risk.requiresApproval()) {
+        PermissionDecision permissionDecision = permissionPolicy.decide(new PermissionRequest(
+                session.workspace(),
+                session.config(),
+                call,
+                risk,
+                ctx.executionPhaseState() == null ? null : ctx.executionPhaseState().phase()));
+
+        // Scope-guard override: if the target looks off-scope, the user
+        // MUST see the warning before the call runs. A remembered or configured
+        // ALLOW would otherwise silently bypass the warning — exactly the failure
+        // class the guard exists to catch.
+        if (scopeWarning != null && permissionDecision.action() == PermissionAction.ALLOW) {
+            permissionDecision = permissionDecision.forceAsk(
+                    "SCOPE_WARNING_ASK",
+                    "Scope warning requires approval before running " + call.toolName() + ".");
+        }
+
+        LocalTurnTraceCapture.recordPermissionDecision(
+                tracePhase,
+                call,
+                permissionDecision.action().name(),
+                permissionDecision.reasonCode(),
+                permissionDecision.relativePath(),
+                permissionDecision.protectedPath(),
+                permissionDecision.rememberEligible());
+
+        if (permissionDecision.action() == PermissionAction.DENY) {
+            if (risk.requiresApproval()) {
+                TurnAuditCapture.recordApprovalDenied();
+                LocalTurnTraceCapture.recordApprovalDenied(tracePhase, call);
+            }
+            TurnAuditCapture.recordToolCall(
+                    call.toolName(), path == null ? "" : path, false,
+                    "permission policy denied " + call.toolName()
+                            + " (" + permissionDecision.reasonCode() + ")");
+            return ToolResult.fail(ToolError.denied(
+                    "Permission policy denied the " + call.toolName()
+                            + " call. " + permissionDecision.userMessage()));
+        }
+
+        if (permissionDecision.action() == PermissionAction.ASK) {
             TurnAuditCapture.recordApprovalRequired();
             LocalTurnTraceCapture.recordApprovalRequired(tracePhase, call);
 
-            // Policy classification. AUTO_APPROVE skips the gate; DENY refuses
-            // without prompting; ASK falls through to the gate as before.
-            Path workspace = session.workspace();
-            ApprovalPolicy.Decision decision = approvalPolicy.decide(workspace, call, risk);
+            String desc = risk.name().toLowerCase().replace('_', ' ')
+                    + " operation: " + call.toolName();
+            String detail = buildApprovalDetail(call, path, scopeWarning, permissionDecision.userMessage());
+            ApprovalResponse response = approvalGate.approveFull(desc, detail);
 
-            // Scope-guard override: if the target looks off-scope, the user
-            // MUST see the warning before the call runs. A remembered
-            // AUTO_APPROVE would otherwise silently bypass the warning —
-            // exactly the failure class the guard exists to catch (the
-            // transcript-observed drift from `index.html` to
-            // `math_operations.py` mid-session). Forcing ASK here preserves
-            // the guard's "warn, do not block" posture while ensuring the
-            // warning never reaches a silent-bypass path.
-            if (scopeWarning != null && decision == ApprovalPolicy.Decision.AUTO_APPROVE) {
-                decision = ApprovalPolicy.Decision.ASK;
-            }
-
-            if (decision == ApprovalPolicy.Decision.DENY) {
+            if (response == ApprovalResponse.DENIED) {
                 TurnAuditCapture.recordApprovalDenied();
                 LocalTurnTraceCapture.recordApprovalDenied(tracePhase, call);
                 TurnAuditCapture.recordToolCall(
                         call.toolName(), path == null ? "" : path, false,
-                        "approval policy denied " + call.toolName());
+                        "approval denied by user for " + call.toolName());
+                // Phrasing matters: previously "Operation denied by user" caused
+                // qwen2.5-coder to hallucinate a "permissions" excuse and tell
+                // the user to "ensure you have the necessary permissions" — the
+                // word "denied" anchored the wrong narrative. Reshape the error
+                // so the model interprets it as user intent, not auth failure.
                 return ToolResult.fail(ToolError.denied(
-                        "Policy denied the " + call.toolName()
-                                + " call. The session's approval policy prohibits this operation; "
-                                + "choose a different action or ask the user to relax policy."));
+                        "User did not approve the " + call.toolName()
+                                + " call. The user is in control of the workspace; "
+                                + "ask what they want to do differently before retrying, "
+                                + "or take a different action that does not need approval."));
             }
 
-            if (decision == ApprovalPolicy.Decision.ASK) {
-                String desc = risk.name().toLowerCase().replace('_', ' ')
-                        + " operation: " + call.toolName();
-                String detail = buildApprovalDetail(call, path, scopeWarning);
-                ApprovalResponse response = approvalGate.approveFull(desc, detail);
-
-                if (response == ApprovalResponse.DENIED) {
-                    TurnAuditCapture.recordApprovalDenied();
-                    LocalTurnTraceCapture.recordApprovalDenied(tracePhase, call);
-                    TurnAuditCapture.recordToolCall(
-                            call.toolName(), path == null ? "" : path, false,
-                            "approval denied by user for " + call.toolName());
-                    // Phrasing matters: previously "Operation denied by user" caused
-                    // qwen2.5-coder to hallucinate a "permissions" excuse and tell
-                    // the user to "ensure you have the necessary permissions" — the
-                    // word "denied" anchored the wrong narrative. Reshape the error
-                    // so the model interprets it as user intent, not auth failure.
-                    return ToolResult.fail(ToolError.denied(
-                            "User did not approve the " + call.toolName()
-                                    + " call. The user is in control of the workspace; "
-                                    + "ask what they want to do differently before retrying, "
-                                    + "or take a different action that does not need approval."));
-                }
-
-                // Approved — record and optionally propagate the remember choice.
-                TurnAuditCapture.recordApprovalGranted();
-                LocalTurnTraceCapture.recordApprovalGranted(tracePhase, call);
-                if (response == ApprovalResponse.APPROVED_REMEMBER) {
-                    approvalPolicy.rememberApproval(workspace, call, risk);
-                }
-            } else {
-                // AUTO_APPROVE by policy
-                TurnAuditCapture.recordApprovalGranted();
-                LocalTurnTraceCapture.recordApprovalGranted(tracePhase, call);
+            // Approved — record and optionally propagate the remember choice.
+            TurnAuditCapture.recordApprovalGranted();
+            LocalTurnTraceCapture.recordApprovalGranted(tracePhase, call);
+            if (response == ApprovalResponse.APPROVED_REMEMBER
+                    && permissionDecision.rememberEligible()) {
+                approvalPolicy.rememberApproval(session.workspace(), call, risk);
             }
+        } else if (risk.requiresApproval()) {
+            // AUTO_ALLOW by policy for a mutating call.
+            TurnAuditCapture.recordApprovalGranted();
+            LocalTurnTraceCapture.recordApprovalGranted(tracePhase, call);
         }
 
         ToolContext toolCtx = new ToolContext(
@@ -756,8 +772,18 @@ public final class TurnProcessor {
      * <p>If a {@code scopeWarning} is present, it is prepended on its own
      * line so the user sees the scope concern before the approval choice.
      */
-    private static String buildApprovalDetail(ToolCall call, String path, String scopeWarning) {
+    private static String buildApprovalDetail(
+            ToolCall call,
+            String path,
+            String scopeWarning,
+            String permissionMessage
+    ) {
         var sb = new StringBuilder();
+
+        if (permissionMessage != null && !permissionMessage.isBlank()) {
+            sb.append("permission: ").append(permissionMessage.strip()).append('\n');
+            sb.append("    ");
+        }
 
         if (scopeWarning != null && !scopeWarning.isBlank()) {
             sb.append("warning: ").append(scopeWarning).append('\n');

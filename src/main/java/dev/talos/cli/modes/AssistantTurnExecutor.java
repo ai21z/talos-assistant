@@ -1102,6 +1102,14 @@ public final class AssistantTurnExecutor {
             "[Truth check: no file was changed in this turn because the requested "
             + "write was not approved.]\n\n";
 
+    public static final String POLICY_DENIED_MUTATION_ANNOTATION =
+            "[Truth check: no file was changed in this turn because permission "
+            + "policy denied or blocked the requested write.]\n\n";
+
+    public static final String MIXED_DENIED_MUTATION_ANNOTATION =
+            "[Truth check: no file was changed in this turn because all requested "
+            + "writes were denied or blocked.]\n\n";
+
     public static final String INVALID_MUTATION_ANNOTATION =
             "[Truth check: no file was changed in this turn because the requested "
             + "write tool call was invalid.]\n\n";
@@ -1259,12 +1267,34 @@ public final class AssistantTurnExecutor {
                 .toList();
         if (deniedMutations.isEmpty()) return answer;
 
-        StringBuilder out = new StringBuilder(DENIED_MUTATION_ANNOTATION);
-        out.append("No file changes were applied because approval was denied for:\n");
-        for (ToolCallLoop.ToolOutcome outcome : deniedMutations) {
-            out.append("- ")
-                    .append(outcome.pathHint().isBlank() ? outcome.toolName() : outcome.pathHint())
-                    .append(": approval denied\n");
+        List<ToolCallLoop.ToolOutcome> approvalDeniedMutations = deniedMutations.stream()
+                .filter(AssistantTurnExecutor::isUserApprovalDeniedOutcome)
+                .toList();
+        List<ToolCallLoop.ToolOutcome> policyDeniedMutations = deniedMutations.stream()
+                .filter(outcome -> !isUserApprovalDeniedOutcome(outcome))
+                .toList();
+
+        StringBuilder out = new StringBuilder(deniedMutationAnnotation(
+                policyDeniedMutations,
+                approvalDeniedMutations));
+        if (!policyDeniedMutations.isEmpty()) {
+            out.append("No file changes were applied because permission policy denied or blocked:\n");
+            for (ToolCallLoop.ToolOutcome outcome : policyDeniedMutations) {
+                out.append("- ")
+                        .append(outcome.pathHint().isBlank() ? outcome.toolName() : outcome.pathHint())
+                        .append(": ")
+                        .append(trimFailureMessage(outcome.errorMessage()))
+                        .append('\n');
+            }
+        }
+        if (!approvalDeniedMutations.isEmpty()) {
+            if (!policyDeniedMutations.isEmpty()) out.append('\n');
+            out.append("No file changes were applied because approval was denied for:\n");
+            for (ToolCallLoop.ToolOutcome outcome : approvalDeniedMutations) {
+                out.append("- ")
+                        .append(outcome.pathHint().isBlank() ? outcome.toolName() : outcome.pathHint())
+                        .append(": approval denied\n");
+            }
         }
         List<ToolCallLoop.ToolOutcome> invalidMutations = outcomes.stream()
                 .filter(ToolCallLoop.ToolOutcome::mutating)
@@ -1284,6 +1314,22 @@ public final class AssistantTurnExecutor {
         }
         out.append("\nTalos can still help in a later turn if you want to retry the edit or take a read-only approach.");
         return out.toString().stripTrailing();
+    }
+
+    private static String deniedMutationAnnotation(List<ToolCallLoop.ToolOutcome> policyDeniedMutations,
+                                                   List<ToolCallLoop.ToolOutcome> approvalDeniedMutations) {
+        if (!policyDeniedMutations.isEmpty() && approvalDeniedMutations.isEmpty()) {
+            return POLICY_DENIED_MUTATION_ANNOTATION;
+        }
+        if (!policyDeniedMutations.isEmpty()) {
+            return MIXED_DENIED_MUTATION_ANNOTATION;
+        }
+        return DENIED_MUTATION_ANNOTATION;
+    }
+
+    private static boolean isUserApprovalDeniedOutcome(ToolCallLoop.ToolOutcome outcome) {
+        if (outcome == null || outcome.errorMessage() == null) return false;
+        return outcome.errorMessage().startsWith("User did not approve ");
     }
 
     static String summarizeReadOnlyDeniedMutationOutcomesIfNeeded(String answer,
