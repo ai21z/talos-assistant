@@ -1,0 +1,27 @@
+{
+  "name": "post denial retry reissues write",
+  "fixture": "",
+  "v1Pack": true,
+  "claims": [
+    "post-denial-retry-uses-prior-mutation-context",
+    "post-denial-retry-still-requires-approval"
+  ],
+  "runner": "executor-history",
+  "approvalPolicy": "APPROVE_ALL",
+  "history": [
+    {
+      "role": "user",
+      "content": "Create scripts.js with exactly this text: console.log(\"repair ok\"); Use file tools; do not just show code."
+    },
+    {
+      "role": "assistant",
+      "content": "[Mutation not applied: approval was denied.]\n\nNo file changes were applied because approval was denied.\nscripts.js: approval denied."
+    }
+  ],
+  "userPrompt": "nothing changed, try one more time",
+  "scriptedResponses": [
+    "I'm sorry, but I cannot assist with that request.",
+    "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"scripts.js\",\"content\":\"console.log(\\\"repair ok\\\");\"}}",
+    "Created scripts.js."
+  ]
+}

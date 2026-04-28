@@ -232,7 +232,10 @@ public final class TurnProcessor {
         ToolRiskLevel risk = tool.descriptor().riskLevel();
         String path = resolvePathParam(call);
         String userRequest = TurnUserRequestCapture.get();
-        TaskContract taskContract = TaskContractResolver.fromUserRequest(userRequest);
+        TaskContract taskContract = TurnTaskContractCapture.get();
+        if (taskContract == null) {
+            taskContract = TaskContractResolver.fromUserRequest(userRequest);
+        }
 
         if (ToolCallSupport.isMutatingTool(call.toolName())
                 && userRequest != null
@@ -326,7 +329,7 @@ public final class TurnProcessor {
         }
 
         if (risk.requiresApproval()) {
-            ToolResult preApprovalValidation = validateBeforeApproval(call, session, ctx);
+            ToolResult preApprovalValidation = validateBeforeApproval(call, session, ctx, taskContract);
             if (preApprovalValidation != null) {
                 TurnAuditCapture.recordToolCall(
                         call.toolName(), path == null ? "" : path, false,
@@ -463,13 +466,41 @@ public final class TurnProcessor {
         return null;
     }
 
-    private static ToolResult validateBeforeApproval(ToolCall call, Session session, Context ctx) {
+    private static ToolResult validateBeforeApproval(
+            ToolCall call,
+            Session session,
+            Context ctx,
+            TaskContract taskContract
+    ) {
         ToolResult sandboxPathValidation = validateSandboxPathBeforeApproval(call, session, ctx);
         if (sandboxPathValidation != null) {
             return sandboxPathValidation;
         }
 
-        if (!"talos.edit_file".equals(call.toolName())) {
+        ToolResult forbiddenTargetValidation = validateForbiddenTargetBeforeApproval(call, taskContract);
+        if (forbiddenTargetValidation != null) {
+            return forbiddenTargetValidation;
+        }
+
+        if (isWriteFileTool(call.toolName())) {
+            String path = resolveParam(call, "path", "file_path", "filepath", "file", "filename");
+            if (path == null || path.isBlank()) {
+                return ToolResult.fail(ToolError.invalidParams(
+                        "Invalid talos.write_file call: missing required parameter `path`. "
+                                + "No approval was requested and no file was changed."));
+            }
+
+            String content = resolveParam(call, "content", "text", "body", "data", "file_content");
+            if (content == null) {
+                return ToolResult.fail(ToolError.invalidParams(
+                        "Invalid talos.write_file call: missing required parameter `content`. "
+                                + "No approval was requested and no file was changed."));
+            }
+
+            return null;
+        }
+
+        if (!isEditFileTool(call.toolName())) {
             return null;
         }
 
@@ -531,6 +562,28 @@ public final class TurnProcessor {
         return null;
     }
 
+    private static ToolResult validateForbiddenTargetBeforeApproval(ToolCall call, TaskContract taskContract) {
+        if (call == null || taskContract == null || taskContract.forbiddenTargets().isEmpty()) {
+            return null;
+        }
+        if (!ToolCallSupport.isMutatingTool(call.toolName())) {
+            return null;
+        }
+        String path = resolveParam(call, "path", "file_path", "filepath", "file", "filename");
+        if (path == null || path.isBlank()) {
+            return null;
+        }
+        for (String forbidden : taskContract.forbiddenTargets()) {
+            if (sameScopedTarget(path, forbidden)) {
+                return ToolResult.fail(ToolError.invalidParams(
+                        "Target forbidden before approval: `" + path
+                                + "` was explicitly excluded by the user's current request. "
+                                + "No approval was requested and no file was changed."));
+            }
+        }
+        return null;
+    }
+
     private static List<PathParam> pathParams(ToolCall call) {
         var params = new java.util.ArrayList<PathParam>();
         for (String key : List.of("path", "file_path", "filepath", "file", "filename", "from", "to")) {
@@ -553,8 +606,16 @@ public final class TurnProcessor {
             return "invalid path before approval"
                     + (message.isBlank() ? "" : ": " + shortReason(message));
         }
-        if ("talos.edit_file".equals(name)) {
+        if (message != null && message.startsWith("Target forbidden before approval")) {
+            return "forbidden target before approval"
+                    + (message.isBlank() ? "" : ": " + shortReason(message));
+        }
+        if (isEditFileTool(name)) {
             return "invalid edit args before approval"
+                    + (message == null || message.isBlank() ? "" : ": " + shortReason(message));
+        }
+        if (isWriteFileTool(name)) {
+            return "invalid write args before approval"
                     + (message == null || message.isBlank() ? "" : ": " + shortReason(message));
         }
         return "invalid tool args before approval"
@@ -581,6 +642,59 @@ public final class TurnProcessor {
             if (value != null) return value;
         }
         return null;
+    }
+
+    private static boolean isWriteFileTool(String toolName) {
+        String normalized = normalizeToolName(toolName);
+        return "write_file".equals(normalized)
+                || "file_write".equals(normalized)
+                || "writefile".equals(normalized)
+                || "create_file".equals(normalized)
+                || "file_create".equals(normalized)
+                || "createfile".equals(normalized);
+    }
+
+    private static boolean isEditFileTool(String toolName) {
+        String normalized = normalizeToolName(toolName);
+        return "edit_file".equals(normalized)
+                || "file_edit".equals(normalized)
+                || "editfile".equals(normalized);
+    }
+
+    private static String normalizeToolName(String toolName) {
+        if (toolName == null) return "";
+        String normalized = toolName.strip().toLowerCase(java.util.Locale.ROOT);
+        if (normalized.length() > 5 && normalized.regionMatches(true, 0, "talos", 0, 5)) {
+            char c = normalized.charAt(5);
+            if (c == ':' || c == '/' || c == '-' || c == '_') {
+                normalized = "talos." + normalized.substring(6);
+            }
+        }
+        if (normalized.startsWith("talos.")) {
+            normalized = normalized.substring("talos.".length());
+        }
+        return normalized;
+    }
+
+    private static boolean sameScopedTarget(String candidate, String forbidden) {
+        String c = normalizeScopedTarget(candidate);
+        String f = normalizeScopedTarget(forbidden);
+        if (c.isBlank() || f.isBlank()) return false;
+        return c.equals(f) || c.endsWith("/" + f);
+    }
+
+    private static String normalizeScopedTarget(String path) {
+        if (path == null) return "";
+        String normalized = ToolCallSupport.normalizePath(path)
+                .strip()
+                .replaceAll("[`'\"),.;:!?\\]]+$", "");
+        while (normalized.startsWith("./")) {
+            normalized = normalized.substring(2);
+        }
+        while (normalized.contains("//")) {
+            normalized = normalized.replace("//", "/");
+        }
+        return normalized.toLowerCase(java.util.Locale.ROOT);
     }
 
     /**

@@ -1,0 +1,320 @@
+# [T22-done-high] Ticket: Mutation Contract Must Recognize Overwrite / Repair Phrasing
+Date: 2026-04-28
+Priority: high
+Status: done
+Architecture references:
+- work-cycle-docs/new-work.md
+- docs/new-architecture/talos-harness-source-of-truth.md
+- docs/new-architecture/talos-harness-plan.md
+- work-cycle-docs/tickets/done/[T14-done-high] talos-repair-followup-after-incomplete-outcome.md
+- work-cycle-docs/tickets/done/[T20-done-high] talos-scoped-target-limiter-mutation-intent.md
+
+## Why This Ticket Exists
+
+Manual Talos testing with qwen2.5-coder:14b showed that the live model can understand a user request as a file mutation and emit `write_file`, while Talos classifies the same turn as read-only/diagnostic and blocks the writes.
+
+This violates the task-contract discipline: a natural explicit local-operator request should not expose a read-only contract when the user is clearly asking Talos to overwrite or repair files.
+
+## Problem
+
+Reproduced transcripts:
+
+- `local/manual-testing/deep-review/bmi-broken-b-transcript.txt`
+- `local/manual-testing/deep-review/bmi-empty-c-writefile-repair-transcript.txt`
+- `local/manual-testing/deep-review/route-mutation-phrasing-transcript.txt`
+
+Observed examples:
+
+- Prompt: `Overwrite these three files to make a working BMI calculator: index.html, styles.css, scripts.js. Use talos.write_file for all three.`
+  - Model attempted `write_file`.
+  - Trace: `contract: READ_ONLY_QA mutationAllowed=false`.
+  - Writes were blocked by `task-contract read-only denied talos.write_file`.
+
+- Prompt: `Overwrite index.html with a corrected complete version instead of using edit_file... Use write_file for index.html.`
+  - Model attempted `write_file`.
+  - Trace: `contract: DIAGNOSE_ONLY mutationAllowed=false`.
+  - Writes were blocked by read-only policy.
+
+Source inspection suggests a likely gap:
+
+- `MutationIntent.CORE_MUTATION_VERBS` includes `rewrite` and `replace` but not `overwrite`.
+- `TaskContractResolver.CREATE_MARKERS` includes `create`, `write`, `build`, `generate`, etc., but not `overwrite`, `rewrite`, or `replace`.
+- Some repair prompts containing diagnostic words can still collapse to `DIAGNOSE_ONLY` despite explicit file write intent.
+
+## Goal
+
+Natural mutation requests using `overwrite`, `rewrite`, `replace`, and explicit `use write_file` repair language should resolve to a mutation-allowed `TaskContract` when scoped to workspace files.
+
+## Scope
+
+In scope:
+- Extend deterministic mutation intent coverage for common local-operator repair verbs.
+- Ensure explicit target-file overwrite/replace/rewrite requests become `FILE_EDIT` or `FILE_CREATE` with `mutationAllowed=true`.
+- Add focused unit tests for the reproduced phrasings.
+- Add at least one transcript-shaped e2e scenario where the model emits write tools and Talos must not block them as read-only.
+
+Out of scope:
+- Browser/runtime execution.
+- Broad natural-language intent rewrite.
+- Weakening scoped negation protections from T20.
+- Allowing mutation for pure status questions such as `did you make the changes?`.
+
+## Proposed Work
+
+- Update `MutationIntent` and/or `TaskContractResolver` so `overwrite`, `rewrite`, `replace`, and explicit write-file repair requests are mutation-positive.
+- Keep status-question protections from T11/T19 intact.
+- Keep scoped target limiters from T20 intact.
+- Add tests proving:
+  - `Overwrite index.html... Use write_file` is mutation-allowed.
+  - `Overwrite these three files...` is mutation-allowed.
+  - `Replace index.html with a corrected complete version` is mutation-allowed.
+  - `did you make the changes?` remains verify-only.
+  - `do not change anything` remains read-only.
+
+## Likely Files / Areas
+
+- `src/main/java/dev/talos/runtime/MutationIntent.java`
+- `src/main/java/dev/talos/runtime/task/TaskContractResolver.java`
+- `src/test/java/dev/talos/runtime/task/TaskContractResolverTest.java`
+- `src/test/java/dev/talos/runtime/MutationIntentTest.java`
+- `src/e2eTest/resources/scenarios/`
+
+## Test / Verification Plan
+
+- Focused unit tests for `MutationIntent` and `TaskContractResolver`.
+- Focused e2e scenario for overwrite/repair phrasing with mutating tools.
+- Full `./gradlew.bat e2eTest`.
+- Manual Talos check in a small web workspace:
+  - Prompt with `overwrite`.
+  - Confirm trace is mutation-allowed.
+  - Confirm write approval appears.
+  - Confirm no read-only tool block happens.
+
+## Acceptance Criteria
+
+- Reproduced overwrite/repair prompts classify as mutation-allowed.
+- Mutating tool calls are not blocked by read-only contract for those prompts.
+- Pure status questions remain verify-only/read-only.
+- Scoped negation still limits targets without cancelling the allowed target.
+- Focused tests and e2e pass.
+
+## Evidence
+
+Manual deep-review result on 2026-04-28:
+
+- `bmi-broken-b-transcript.txt`: explicit `Overwrite these three files... Use talos.write_file for all three` was read-only and blocked write calls.
+- `bmi-empty-c-writefile-repair-transcript.txt`: explicit `Overwrite index.html... Use write_file for index.html` was diagnostic/read-only and blocked write calls.
+
+Additional non-technical phrasing evidence on 2026-04-28:
+
+- `local/manual-testing/deep-review-2/nondev-bmi-empty-transcript.txt`
+  - Prompt: `I have an empty folder. Can you make me a simple BMI calculator webpage here? I am not technical, I just want a page I can open and use.`
+  - Observed: model attempted `write_file`, but trace was `contract: READ_ONLY_QA mutationAllowed=false`.
+  - Blocked reason: `task-contract read-only denied talos.write_file`.
+  - User-visible answer then claimed Talos could not create/modify files and gave copy/paste instructions.
+- `local/manual-testing/deep-review-2/nondev-bmi-title-only-transcript.txt`
+  - Prompt: `Hi, I don't really know coding. I have this little BMI page here and it only shows a title. Can you look at it and make it actually work for me?`
+  - Observed: trace was correctly `FILE_EDIT mutationAllowed=true`, but the model asked the non-technical user to provide the HTML path instead of using workspace tools to locate `index.html`.
+  - Follow-up `I opened it and it still does not feel like a working calculator... Can you fix the files in this folder for me?` drifted to `READ_ONLY_QA` and again asked for project structure.
+
+These examples show two related intent issues:
+
+- Some regular-user creation phrasing (`make me a ... webpage`) is not mutation-positive enough.
+- Even when the contract is mutation-positive, Talos may accept a no-tool path/context request instead of forcing local workspace inspection.
+
+## Current Code Read
+
+Inspected before implementation:
+
+- `work-cycle-docs/work-test-cycle.md`
+- `work-cycle-docs/work-test-cycle-step-by-step.md`
+- `work-cycle-docs/work-test-cycle-setup.md`
+- `src/main/java/dev/talos/runtime/MutationIntent.java`
+- `src/main/java/dev/talos/runtime/task/TaskContractResolver.java`
+- `src/main/java/dev/talos/runtime/task/TaskContract.java`
+- `src/main/java/dev/talos/runtime/toolcall/NativeToolSpecPolicy.java`
+- `src/main/java/dev/talos/cli/modes/UnifiedAssistantMode.java`
+- `src/test/java/dev/talos/runtime/MutationIntentTest.java`
+- `src/test/java/dev/talos/runtime/task/TaskContractResolverTest.java`
+- `src/test/java/dev/talos/cli/modes/UnifiedAssistantModeTest.java`
+- `src/e2eTest/java/dev/talos/harness/JsonScenarioPackTest.java`
+- nearby JSON scenarios and fixtures under `src/e2eTest/resources/`
+
+Current diagnosis:
+
+- `MutationIntent.CORE_MUTATION_VERBS` includes `rewrite` and `replace`, but not `overwrite`.
+- `MutationIntent` already has guarded artifact creation handling for `make/build/generate/...` plus artifact nouns, but current coverage does not include the non-technical phrasing from manual review.
+- `TaskContractResolver` classifies mutation-positive requests before diagnose/workspace markers, so the correct small fix is to make the mutation predicate catch explicit overwrite/repair artifact requests without weakening status questions, global no-mutation negation, scoped target limiters, or T25 privacy boundaries.
+
+Planned tests:
+
+- Focused red tests in `MutationIntentTest`.
+- Focused red tests in `TaskContractResolverTest`.
+- Focused red test in `UnifiedAssistantModeTest` for mutating native tool surface.
+- One deterministic JSON e2e scenario for overwrite/write_file repair phrasing.
+
+## Implementation Summary
+
+- Added `overwrite` to the deterministic mutation verb set.
+- Added bounded non-technical artifact phrasing support for prompts like `Can you make me a simple BMI calculator webpage here?`.
+- Added a focused guard for conversational `Can you make it?` follow-ups when the same prompt contains a local artifact shape such as a page/file/folder/open-and-use request.
+- Added `make me` to create-style contract classification so natural local artifact requests become apply-capable rather than read-only.
+- Preserved status-question precedence, global no-mutation negation, scoped target limiters, and T25 privacy/small-talk behavior.
+- Added a deterministic JSON e2e scenario proving overwrite/write_file repair phrasing executes mutating tools instead of being blocked as read-only.
+
+## Work-Test Cycle Loop Used
+
+Inner dev loop. This ticket did not declare a versioned candidate and did not update `CHANGELOG.md`.
+
+## Tests Run
+
+Red checks observed before implementation:
+
+```powershell
+./gradlew.bat test --tests "dev.talos.runtime.MutationIntentTest" --no-daemon
+```
+
+Result: FAIL as expected on new overwrite/nontechnical mutation-intent coverage.
+
+```powershell
+./gradlew.bat test --tests "dev.talos.runtime.task.TaskContractResolverTest" --no-daemon
+```
+
+Result: FAIL as expected on overwrite and nontechnical local-artifact contract coverage.
+
+```powershell
+./gradlew.bat test --tests "dev.talos.cli.modes.UnifiedAssistantModeTest" --no-daemon
+```
+
+Result: FAIL as expected; overwrite repair prompt exposed a read-only tool surface before the fix.
+
+Green checks:
+
+```powershell
+./gradlew.bat test --tests "dev.talos.runtime.MutationIntentTest" --no-daemon
+```
+
+Result: PASS.
+
+```powershell
+./gradlew.bat test --tests "dev.talos.runtime.task.TaskContractResolverTest" --no-daemon
+```
+
+Result: PASS.
+
+```powershell
+./gradlew.bat test --tests "dev.talos.cli.modes.UnifiedAssistantModeTest" --no-daemon
+```
+
+Result: PASS.
+
+```powershell
+./gradlew.bat e2eTest --tests "dev.talos.harness.JsonScenarioPackTest.overwriteRepairPhrasingAllowsMutation" --no-daemon
+```
+
+Result: PASS.
+
+```powershell
+./gradlew.bat e2eTest --no-daemon
+```
+
+Result: PASS.
+
+```powershell
+./gradlew.bat check --no-daemon
+```
+
+Result: PASS.
+
+## Manual Talos Check Result
+
+Command:
+
+```powershell
+pwsh .\tools\uninstall-windows.ps1 -Quiet
+./gradlew.bat clean installDist --no-daemon
+pwsh .\tools\install-windows.ps1 -Force -Quiet
+```
+
+Workspace:
+
+```text
+local/manual-workspaces/T22-empty/
+local/manual-workspaces/T22-broken/
+```
+
+Model:
+
+```text
+qwen2.5-coder:14b
+```
+
+Prompt:
+
+```text
+/session clear
+/debug trace
+I have an empty folder. Can you make me a simple BMI calculator webpage here? I am not technical, I just want a page I can open and use.
+
+/session clear
+/debug trace
+Overwrite these three files to make a working BMI calculator: index.html, styles.css, scripts.js. Use talos.write_file for all three.
+did you make the changes?
+I am only chatting, please don't inspect my files. What can you do for me?
+```
+
+Approval choice:
+
+```text
+a when write approval appeared.
+```
+
+Observed tools:
+
+```text
+Natural creation prompt: talos.list_dir, talos.write_file.
+Overwrite repair prompt: talos.write_file.
+Status question: read-only tools only.
+T25 privacy regression prompt: no tools.
+```
+
+Files changed:
+
+```text
+local/manual-workspaces/T22-empty/index.html
+local/manual-workspaces/T22-empty/styles.css
+local/manual-workspaces/T22-empty/script.js
+local/manual-workspaces/T22-broken/index.html
+```
+
+Output file:
+
+```text
+local/manual-testing/T22-output.txt
+```
+
+Pass/fail:
+
+```text
+PASS
+```
+
+Notes:
+
+- Natural empty-folder creation traced as `contract: FILE_CREATE mutationAllowed=true verificationRequired=true`.
+- Overwrite repair traced as `contract: FILE_CREATE mutationAllowed=true verificationRequired=true`.
+- Mutating native tool surface included `talos.write_file` and `talos.edit_file`.
+- No `task-contract read-only denied` block appeared.
+- Status follow-up traced as `VERIFY_ONLY mutationAllowed=false` with read-only native tools.
+- T25 privacy regression prompt traced as `SMALL_TALK mutationAllowed=false` with `nativeTools: none`.
+- The live model only overwrote `index.html` in the overwrite case; static verification correctly reported the task incomplete rather than claiming success. That is not a T22 blocker because T22 is the mutation-contract/tool-surface ticket.
+
+## Known Follow-Ups
+
+- The live model may still under-complete multi-file repair tasks after receiving the correct mutating tool surface. That belongs to repair controller/task-completion follow-up work, not this mutation-contract ticket.
+
+## Commit
+
+```text
+T22: recognize overwrite and natural repair mutation phrasing
+```

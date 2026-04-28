@@ -60,6 +60,62 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void overwriteRepairPhrasingBecomesMutationAllowedContract() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Overwrite index.html with a corrected complete version instead of using edit_file. "
+                        + "Use write_file for index.html.");
+
+        assertTrue(contract.type() == TaskType.FILE_EDIT || contract.type() == TaskType.FILE_CREATE);
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("index.html"), contract.expectedTargets());
+    }
+
+    @Test
+    void overwriteMultipleTargetsCapturesExpectedTargets() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Overwrite these three files to make a working BMI calculator: index.html, styles.css, scripts.js. "
+                        + "Use talos.write_file for all three.");
+
+        assertTrue(contract.type() == TaskType.FILE_EDIT || contract.type() == TaskType.FILE_CREATE);
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("index.html", "styles.css", "scripts.js"), contract.expectedTargets());
+    }
+
+    @Test
+    void rewriteAndReplaceRepairPhrasingBecomesMutationAllowedContract() {
+        for (String input : List.of(
+                "Replace index.html with a corrected complete version.",
+                "Rewrite scripts.js so the button works.")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertEquals(TaskType.FILE_EDIT, contract.type(), input);
+            assertTrue(contract.mutationRequested(), input);
+            assertTrue(contract.mutationAllowed(), input);
+            assertTrue(contract.verificationRequired(), input);
+        }
+    }
+
+    @Test
+    void nonTechnicalLocalArtifactRequestsBecomeMutationAllowedContracts() {
+        for (String input : List.of(
+                "Can you make me a simple BMI calculator webpage here?",
+                "I am not technical, I just want a page I can open and use. Can you make it?",
+                "Can you fix the files in this folder for me?")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertTrue(contract.type() == TaskType.FILE_EDIT || contract.type() == TaskType.FILE_CREATE,
+                    input + " -> " + contract.type());
+            assertTrue(contract.mutationRequested(), input);
+            assertTrue(contract.mutationAllowed(), input);
+            assertTrue(contract.verificationRequired(), input);
+        }
+    }
+
+    @Test
     void makeItRequestRemainsMutationCapableForFollowUpTurns() {
         TaskContract contract = TaskContractResolver.fromUserRequest("Can you make it?");
 
@@ -102,6 +158,21 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void naturalGreetingWithChatOnlyPhrasingBecomesSmallTalkContract() {
+        for (String input : List.of(
+                "hello, answer briefly as Talos",
+                "hi, just say hello",
+                "hey there, are you awake? just say hi like a normal assistant")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertEquals(TaskType.SMALL_TALK, contract.type(), input);
+            assertFalse(contract.mutationRequested(), input);
+            assertFalse(contract.mutationAllowed(), input);
+            assertFalse(contract.verificationRequired(), input);
+        }
+    }
+
+    @Test
     void assistantIdentityQuestionsBecomeSmallTalkContract() {
         for (String input : List.of(
                 "hello who are you?",
@@ -110,9 +181,30 @@ class TaskContractResolverTest {
                 "what is talos?",
                 "who is talos?",
                 "what can you do?",
+                "what can you do for me?",
                 "how can you assist me?",
                 "how can you help me?",
-                "what can Talos do?")) {
+                "what can Talos do?",
+                "tell me what you are")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertEquals(TaskType.SMALL_TALK, contract.type(), input);
+            assertFalse(contract.mutationRequested(), input);
+            assertFalse(contract.mutationAllowed(), input);
+            assertFalse(contract.verificationRequired(), input);
+        }
+    }
+
+    @Test
+    void privacyNegatedChatPromptsSuppressWorkspaceInspectionIntent() {
+        for (String input : List.of(
+                "I am only chatting, please don't inspect my files. What can you do for me?",
+                "don't use the workspace, just say one friendly sentence",
+                "please do not read my files",
+                "just chat with me, no workspace",
+                "please don't search my files",
+                "just answer, no workspace",
+                "without checking files, say hi")) {
             TaskContract contract = TaskContractResolver.fromUserRequest(input);
 
             assertEquals(TaskType.SMALL_TALK, contract.type(), input);
@@ -136,7 +228,6 @@ class TaskContractResolverTest {
                 "What can you build?",
                 "Can you explain how to build a BMI calculator?",
                 "Can you make sense of this code?",
-                "Why did you not make changes?",
                 "Show me how to make one, do not edit files.");
 
         for (String input : inputs) {
@@ -144,6 +235,45 @@ class TaskContractResolverTest {
             assertEquals(TaskType.READ_ONLY_QA, contract.type(), input);
             assertFalse(contract.mutationRequested(), input);
             assertFalse(contract.mutationAllowed(), input);
+        }
+    }
+
+    @Test
+    void statusQuestionsAboutPriorChangesBecomeVerifyOnlyAndNeverMutationCapable() {
+        List<String> inputs = List.of(
+                "did you make the changes?",
+                "did you make the change?",
+                "did you update the files?",
+                "did you fix it?",
+                "did it work?",
+                "is it done?",
+                "are the changes applied?",
+                "did you apply the changes?",
+                "what did you change?",
+                "why did nothing change?",
+                "Why did you not make changes?");
+
+        for (String input : inputs) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+            assertEquals(TaskType.VERIFY_ONLY, contract.type(), input);
+            assertFalse(contract.mutationRequested(), input);
+            assertFalse(contract.mutationAllowed(), input);
+            assertTrue(contract.verificationRequired(), input);
+        }
+    }
+
+    @Test
+    void repairImperativesAfterNoChangeRemainMutationCapable() {
+        List<String> inputs = List.of(
+                "nothing changed, fix it now",
+                "it still does not work, update the files");
+
+        for (String input : inputs) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+            assertEquals(TaskType.FILE_EDIT, contract.type(), input);
+            assertTrue(contract.mutationRequested(), input);
+            assertTrue(contract.mutationAllowed(), input);
+            assertTrue(contract.verificationRequired(), input);
         }
     }
 
@@ -163,6 +293,30 @@ class TaskContractResolverTest {
             assertTrue(contract.verificationRequired(), input);
             assertTrue(contract.expectedTargets().contains("notes.txt"), input);
         }
+    }
+
+    @Test
+    void namedTargetLimiterKeepsMutationIntentAndCapturesForbiddenTargets() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Fix only styles.css. Do not change index.html or scripts.js.");
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("styles.css"), contract.expectedTargets());
+        assertEquals(Set.of("index.html", "scripts.js"), contract.forbiddenTargets());
+    }
+
+    @Test
+    void dontTouchNamedTargetLimiterKeepsAllowedTargetSeparate() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Edit only index.html; don't touch styles.css.");
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationAllowed());
+        assertEquals(Set.of("index.html"), contract.expectedTargets());
+        assertEquals(Set.of("styles.css"), contract.forbiddenTargets());
     }
 
     @Test
@@ -198,6 +352,24 @@ class TaskContractResolverTest {
 
         assertEquals(TaskType.WORKSPACE_EXPLAIN, contract.type());
         assertFalse(contract.mutationAllowed());
+    }
+
+    @Test
+    void explicitWorkspaceRequestsStillExposeReadOnlyWorkspaceContracts() {
+        for (String input : List.of(
+                "what files are in this workspace?",
+                "read README.md",
+                "search my files for ALPHA-742")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertFalse(contract.mutationRequested(), input);
+            assertFalse(contract.mutationAllowed(), input);
+            assertTrue(
+                    contract.type() == TaskType.WORKSPACE_EXPLAIN
+                            || contract.type() == TaskType.READ_ONLY_QA
+                            || contract.type() == TaskType.DIAGNOSE_ONLY,
+                    input + " -> " + contract.type());
+        }
     }
 
     @Test
@@ -270,6 +442,97 @@ class TaskContractResolverTest {
 
         assertFalse(contract.mutationRequested());
         assertFalse(contract.mutationAllowed());
+    }
+
+    @Test
+    void repairFollowUpAfterIncompleteMutationInheritsApplyCapableContract() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.user(
+                "Create index.html, styles.css, and scripts.js for a BMI calculator."));
+        messages.add(ChatMessage.assistant("""
+                [Task incomplete: Static verification failed - Expected targets were not all mutated.]
+
+                The requested task is not verified complete.
+                Remaining static verification problems:
+                - scripts.js was expected but was not created.
+                """));
+        messages.add(ChatMessage.user("nothing changed, try one more time"));
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        assertEquals(TaskType.FILE_CREATE, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("index.html", "styles.css", "scripts.js"), contract.expectedTargets());
+    }
+
+    @Test
+    void repairFollowUpAfterStaticVerificationFailureInheritsExpectedTargets() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.user(
+                "Create index.html, styles.css, and scripts.js for a BMI calculator."));
+        messages.add(ChatMessage.assistant("""
+                [Task incomplete: Static verification failed - HTML does not link JavaScript file: `scripts.js`]
+
+                The requested task is not verified complete.
+                Remaining static verification problems:
+                - styles.css: expected target was not successfully mutated.
+                - HTML does not link JavaScript file: `scripts.js`
+                - Calculator/form task is missing a submit/calculate button.
+                """));
+        messages.add(ChatMessage.user("Fix the remaining static verification problems now."));
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        assertEquals(TaskType.FILE_CREATE, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("index.html", "styles.css", "scripts.js"), contract.expectedTargets());
+    }
+
+    @Test
+    void statusQuestionAfterIncompleteMutationRemainsVerifyOnly() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.user(
+                "Create index.html, styles.css, and scripts.js for a BMI calculator."));
+        messages.add(ChatMessage.assistant("""
+                [Task incomplete: Static verification failed - Expected targets were not all mutated.]
+
+                The requested task is not verified complete.
+                Remaining static verification problems:
+                - scripts.js was expected but was not created.
+                """));
+        messages.add(ChatMessage.user("did you make the changes?"));
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        assertEquals(TaskType.VERIFY_ONLY, contract.type());
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+    }
+
+    @Test
+    void statusQuestionAfterApprovalDeniedMutationRemainsVerifyOnly() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.user(
+                "Create scripts.js with exactly this text: console.log(\"repair ok\");"));
+        messages.add(ChatMessage.assistant("""
+                [Mutation not applied: approval was denied.]
+
+                No file changes were applied because approval was denied.
+                scripts.js: approval denied.
+                """));
+        messages.add(ChatMessage.user("did you make the changes?"));
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        assertEquals(TaskType.VERIFY_ONLY, contract.type());
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
     }
 
     @Test

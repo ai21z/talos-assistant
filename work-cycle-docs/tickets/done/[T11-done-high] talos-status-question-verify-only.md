@@ -1,7 +1,7 @@
-# [open] Ticket: Status Questions Must Verify, Not Mutate
+# [done] Ticket: Status Questions Must Verify, Not Mutate
 Date: 2026-04-27
 Priority: high
-Status: open
+Status: done
 Architecture references:
 - `work-cycle-docs/tickets/new-work.md`
 - `work-cycle-docs/tickets/done/talos-minimal-task-contract.md`
@@ -110,6 +110,88 @@ behavior:
 - Run the new JSON-backed scenario.
 - Run `./gradlew.bat e2eTest` before marking done.
 - Manual retest the transcript slice with `/debug trace`.
+
+## Current Code Read
+
+- `src/main/java/dev/talos/runtime/MutationIntent.java`
+- `src/main/java/dev/talos/runtime/task/TaskContractResolver.java`
+- `src/main/java/dev/talos/cli/modes/AssistantTurnExecutor.java`
+- `src/main/java/dev/talos/runtime/TurnProcessor.java`
+- `src/test/java/dev/talos/runtime/task/TaskContractResolverTest.java`
+- `src/test/java/dev/talos/cli/modes/AssistantTurnExecutorPhasePolicyTest.java`
+- `src/e2eTest/java/dev/talos/harness/JsonScenarioPackTest.java`
+- `src/e2eTest/resources/scenarios/15-inspect-phase-blocks-mutation.json`
+- `src/e2eTest/resources/scenarios/16-verify-phase-blocks-mutation.json`
+
+## Planned Tests
+
+- `./gradlew.bat test --tests "dev.talos.runtime.task.TaskContractResolverTest"`
+- `./gradlew.bat e2eTest`
+- Manual installed Talos check in `local/manual-workspaces/T11/`
+
+## Implementation Summary
+
+- Added deterministic prior-change status question detection before broad mutation markers.
+- Classified plain prior-change status questions as `VERIFY_ONLY` with `mutationAllowed=false`.
+- Preserved explicit repair imperative behavior for prompts such as `nothing changed, fix it now`.
+- Added a JSON-backed e2e regression where a model-emitted write on a status question is blocked before approval.
+
+## Tests Run
+
+- `./gradlew.bat test --tests "dev.talos.runtime.MutationIntentTest.priorChangeStatusQuestionsAreNotMutationIntent" --tests "dev.talos.runtime.task.TaskContractResolverTest.statusQuestionsAboutPriorChangesBecomeVerifyOnlyAndNeverMutationCapable"` — passed after implementation
+- `./gradlew.bat test --tests "dev.talos.runtime.MutationIntentTest" --tests "dev.talos.runtime.task.TaskContractResolverTest"` — passed
+- `./gradlew.bat e2eTest --tests "dev.talos.harness.JsonScenarioPackTest.statusQuestionBlocksMutationBeforeApproval"` — passed
+- `./gradlew.bat e2eTest` — passed
+- `./gradlew.bat check` — passed
+
+## Work-Test-Cycle Loop Used
+
+- Inner dev loop.
+- Candidate loop was not run because this was one ticket inside the open-ticket batch, not a declared versioned candidate.
+
+## Commit
+
+- Implementation commit: `d473784 T11: enforce verify-only status question behavior`
+
+## Manual Talos Check Result
+
+Command:
+- `pwsh .\tools\uninstall-windows.ps1 -Quiet`
+- `./gradlew.bat clean installDist --no-daemon`
+- `pwsh .\tools\install-windows.ps1 -Force -Quiet`
+- Piped `/session clear`, `/debug trace`, manual prompts, and `/q` into installed `talos.bat`
+
+Workspace:
+- `local/manual-workspaces/T11/`
+
+Model:
+- `qwen2.5-coder:14b`
+
+Prompts:
+- `What is the status of this workspace? Verify what files exist, but do not change anything.`
+- `did you make the changes?`
+
+Approval choice:
+- No approval prompt appeared.
+
+Observed tools:
+- Read-only tools only: `talos.list_dir`, `talos.read_file`, `talos.retrieve`, `talos.grep`.
+
+Files changed:
+- None. Workspace still contained only `index.html` and `style.css`.
+
+Output file:
+- `local/manual-testing/T11-output.txt`
+
+Pass/fail:
+- Pass for T11 safety behavior: trace showed `contract: VERIFY_ONLY mutationAllowed=false verificationRequired=true`, write tools were not exposed, and no mutation occurred.
+
+Notes:
+- The exact no-history prompt `did you make the changes?` produced a weak final answer from the live model, but it remained read-only. Prior-outcome answer quality is covered by the follow-up outcome/repair tickets.
+
+## Known Follow-Ups
+
+- Improve prior-outcome answer quality for no-history/status prompts where Talos has no saved turn outcome loaded.
 
 ## Acceptance Criteria
 

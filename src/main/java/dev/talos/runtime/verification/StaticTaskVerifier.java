@@ -44,6 +44,8 @@ public final class StaticTaskVerifier {
             "<link\\b[^>]*\\bhref\\s*=\\s*(['\"])(.*?)\\1", Pattern.CASE_INSENSITIVE);
     private static final Pattern HTML_SCRIPT_SRC = Pattern.compile(
             "<script\\b[^>]*\\bsrc\\s*=\\s*(['\"])(.*?)\\1", Pattern.CASE_INSENSITIVE);
+    private static final Pattern HTML_INLINE_SCRIPT = Pattern.compile(
+            "(?is)<script\\b(?![^>]*\\bsrc\\s*=)[^>]*>(.*?)</script>");
     private static final Pattern CSS_CLASS_SELECTOR = Pattern.compile("\\.([A-Za-z_][A-Za-z0-9_-]*)");
     private static final Pattern CSS_ID_SELECTOR = Pattern.compile("#([A-Za-z_][A-Za-z0-9_-]*)");
     private static final Pattern CSS_SELECTOR_PRELUDE = Pattern.compile("(?s)([^{}]+)\\{");
@@ -126,7 +128,7 @@ public final class StaticTaskVerifier {
             verifyPrimaryWebMutationCoverage(mutatedPaths, facts, problems);
         }
         if (webCoherenceRequired) {
-            verifySmallWebWorkspace(root, facts, problems);
+            verifySmallWebWorkspace(root, contract, facts, problems);
         }
 
         if (!problems.isEmpty()) {
@@ -137,7 +139,7 @@ public final class StaticTaskVerifier {
                     "Static web coherence checks passed for " + mutatedPaths.size() + " mutated target(s).",
                     facts);
         }
-        return TaskVerificationResult.passed(
+        return TaskVerificationResult.readbackOnly(
                 "Target/readback checks passed for " + mutatedPaths.size()
                         + " mutated target(s); no task-specific static verifier was applicable.",
                 facts);
@@ -155,10 +157,13 @@ public final class StaticTaskVerifier {
             String normalized = normalizePath(path);
             if (!normalized.isBlank()) normalizedMutations.add(normalized);
         }
+        boolean caseInsensitive = expectedTargetMatchingIsCaseInsensitive();
         for (String target : contract.expectedTargets()) {
             String expected = normalizePath(target);
             if (expected.isBlank()) continue;
-            if (!normalizedMutations.contains(expected)) {
+            boolean matched = normalizedMutations.stream()
+                    .anyMatch(mutated -> expectedTargetMatches(expected, mutated, caseInsensitive));
+            if (!matched) {
                 problems.add(expected + ": expected target was not successfully mutated.");
             }
         }
@@ -234,13 +239,26 @@ public final class StaticTaskVerifier {
         }
     }
 
-    private static void verifySmallWebWorkspace(Path root, List<String> facts, List<String> problems) {
+    private static void verifySmallWebWorkspace(
+            Path root,
+            TaskContract contract,
+            List<String> facts,
+            List<String> problems
+    ) {
         List<String> primary = obviousPrimaryFiles(root);
         if (primary.size() < 3) {
+            if (looksFunctionalWebTask(contract)) {
+                verifyPartialFunctionalWebWorkspace(root, contract, primary, facts, problems);
+                if (!problems.isEmpty()) return;
+            }
             problems.add("web coherence could not be checked because the workspace does not expose a small HTML/CSS/JS surface.");
             return;
         }
         if (!hasPrimaryWebSurface(primary)) {
+            if (looksFunctionalWebTask(contract)) {
+                verifyPartialFunctionalWebWorkspace(root, contract, primary, facts, problems);
+                if (!problems.isEmpty()) return;
+            }
             problems.add("web coherence could not be checked because HTML, CSS, and JavaScript primary files were not all present.");
             return;
         }
@@ -252,8 +270,18 @@ public final class StaticTaskVerifier {
         }
 
         problems.addAll(selectors.linkageProblems());
+        problems.addAll(selectors.contentProblems());
         problems.addAll(selectors.selectorProblems());
-        if (selectors.linkageProblems().isEmpty() && selectors.selectorProblems().isEmpty()) {
+        if (looksCalculatorOrFormTask(contract)) {
+            List<String> formProblems = selectors.calculatorFormProblems(contract.originalUserRequest());
+            problems.addAll(formProblems);
+            if (formProblems.isEmpty()) {
+                facts.add("Calculator/form static structure checks passed.");
+            }
+        }
+        if (selectors.linkageProblems().isEmpty()
+                && selectors.contentProblems().isEmpty()
+                && selectors.selectorProblems().isEmpty()) {
             facts.add("HTML/CSS/JS selector coherence passed for "
                     + selectors.htmlFile() + ", " + selectors.cssFile() + ", and " + selectors.jsFile() + ".");
         }
@@ -389,17 +417,22 @@ public final class StaticTaskVerifier {
                 || lower.contains("web app")
                 || lower.contains("webpage")
                 || lower.contains("web page")
+                || lower.contains("index.html")
+                || lower.contains(".html")
                 || lower.contains(" html")
                 || lower.startsWith("html")
                 || lower.contains(" site")
                 || lower.contains(" page");
         boolean mentionsStyle = lower.contains("css")
+                || lower.contains(".css")
                 || lower.contains("stylesheet")
                 || lower.contains("style.css")
                 || lower.contains("styles.css")
                 || lower.contains("styling");
         boolean mentionsScript = lower.contains("javascript")
+                || lower.contains(".js")
                 || lower.contains("script.js")
+                || lower.contains("scripts.js")
                 || lower.contains("scripting")
                 || lower.contains(" js ")
                 || lower.endsWith(" js")
@@ -409,9 +442,46 @@ public final class StaticTaskVerifier {
                 || lower.contains("working")
                 || lower.contains("interactive")
                 || lower.contains("calculator")
+                || lower.contains("bmi")
+                || lower.contains("make it work")
+                || lower.contains("actually work")
+                || lower.contains("does not work")
+                || lower.contains("doesn't work")
                 || lower.contains("form");
         return mutatingTask && mentionsWebSurface
                 && ((mentionsStyle && mentionsScript) || asksFunctional);
+    }
+
+    private static boolean looksCalculatorOrFormTask(TaskContract contract) {
+        if (!looksFunctionalWebTask(contract)) return false;
+        String request = contract.originalUserRequest();
+        if (request == null || request.isBlank()) return false;
+        String lower = request.toLowerCase(Locale.ROOT);
+        return lower.contains("calculator")
+                || lower.contains("bmi")
+                || lower.contains("form")
+                || lower.contains("input")
+                || lower.contains("interactive")
+                || lower.contains("functioning")
+                || lower.contains("functional");
+    }
+
+    private static boolean looksFunctionalWebTask(TaskContract contract) {
+        if (!looksBroadWebTask(contract)) return false;
+        String request = contract.originalUserRequest();
+        if (request == null || request.isBlank()) return false;
+        String lower = request.toLowerCase(Locale.ROOT);
+        return lower.contains("functioning")
+                || lower.contains("functional")
+                || lower.contains("working")
+                || lower.contains("interactive")
+                || lower.contains("calculator")
+                || lower.contains("bmi")
+                || lower.contains("make it work")
+                || lower.contains("actually work")
+                || lower.contains("does not work")
+                || lower.contains("doesn't work")
+                || lower.contains("form");
     }
 
     private static boolean shouldRequireSeparateWebAssetMutations(TaskContract contract) {
@@ -460,15 +530,68 @@ public final class StaticTaskVerifier {
                 && pickPrimary(files, ".js") != null;
     }
 
+    private static void verifyPartialFunctionalWebWorkspace(
+            Path root,
+            TaskContract contract,
+            List<String> primaryFiles,
+            List<String> facts,
+            List<String> problems
+    ) {
+        if (root == null || primaryFiles == null || primaryFiles.isEmpty()) return;
+        String htmlFile = pickPrimary(primaryFiles, ".html", ".htm");
+        if (htmlFile == null) {
+            problems.add("Functional web task is missing a primary HTML file.");
+            return;
+        }
+
+        String html;
+        try {
+            html = Files.readString(root.resolve(htmlFile));
+        } catch (Exception e) {
+            problems.add(htmlFile + ": could not be read for functional web verification.");
+            return;
+        }
+
+        String jsFile = pickPrimary(primaryFiles, ".js");
+        List<String> linkedJsOccurrences = extractLinkedAssetOccurrences(html, HTML_SCRIPT_SRC, ".js");
+        Set<String> linkedJsFiles = new LinkedHashSet<>(linkedJsOccurrences);
+        Set<String> existingFileNames = existingFileNames(root);
+        boolean hasInlineScript = hasNonBlankInlineScript(html);
+        if (jsFile == null && linkedJsFiles.isEmpty() && !hasInlineScript) {
+            problems.add("Functional web task is missing JavaScript behavior: no JavaScript file or inline script was found.");
+            problems.add("HTML does not link a JavaScript file for functional behavior.");
+        }
+        for (String linked : linkedJsFiles) {
+            if (!existingFileNames.contains(linked)) {
+                problems.add("HTML references missing JavaScript file: `" + linked + "`");
+            }
+        }
+
+        List<String> htmlIdOccurrences = extractMatchOccurrences(html, HTML_ID_ATTR, false);
+        for (String id : duplicateValues(htmlIdOccurrences)) {
+            problems.add("HTML defines duplicate IDs: `#" + id + "`");
+        }
+        if (looksCalculatorOrFormTask(contract)) {
+            List<String> formProblems = calculatorFormProblems(contract.originalUserRequest(), html);
+            problems.addAll(formProblems);
+            if (formProblems.isEmpty()) {
+                facts.add("Calculator/form static structure checks passed.");
+            }
+        }
+    }
+
     private static SelectorFacts selectorFacts(Path root, List<String> primaryFiles) {
         try {
             String htmlFile = pickPrimary(primaryFiles, ".html", ".htm");
             if (htmlFile == null) return null;
             String html = Files.readString(root.resolve(htmlFile));
             Set<String> htmlClasses = extractMatches(html, HTML_CLASS_ATTR, true);
-            Set<String> htmlIds = extractMatches(html, HTML_ID_ATTR, false);
-            Set<String> linkedCssFiles = extractLinkedAssets(html, HTML_LINK_HREF, ".css");
-            Set<String> linkedJsFiles = extractLinkedAssets(html, HTML_SCRIPT_SRC, ".js");
+            List<String> htmlIdOccurrences = extractMatchOccurrences(html, HTML_ID_ATTR, false);
+            Set<String> htmlIds = new LinkedHashSet<>(htmlIdOccurrences);
+            List<String> linkedCssOccurrences = extractLinkedAssetOccurrences(html, HTML_LINK_HREF, ".css");
+            List<String> linkedJsOccurrences = extractLinkedAssetOccurrences(html, HTML_SCRIPT_SRC, ".js");
+            Set<String> linkedCssFiles = new LinkedHashSet<>(linkedCssOccurrences);
+            Set<String> linkedJsFiles = new LinkedHashSet<>(linkedJsOccurrences);
             String cssFile = pickLinkedOrPrimary(primaryFiles, linkedCssFiles, ".css");
             String jsFile = pickLinkedOrPrimary(primaryFiles, linkedJsFiles, ".js");
             if (cssFile == null || jsFile == null) return null;
@@ -480,6 +603,7 @@ public final class StaticTaskVerifier {
                     jsFile,
                     htmlClasses,
                     htmlIds,
+                    htmlIdOccurrences,
                     extractCssSelectors(css, CSS_CLASS_SELECTOR),
                     extractCssSelectors(css, CSS_ID_SELECTOR),
                     extractBareClassSelectors(css, htmlClasses),
@@ -487,6 +611,11 @@ public final class StaticTaskVerifier {
                     extractJsIds(js),
                     linkedCssFiles,
                     linkedJsFiles,
+                    linkedCssOccurrences,
+                    linkedJsOccurrences,
+                    html,
+                    css,
+                    js,
                     existingFileNames(root));
         } catch (Exception e) {
             return null;
@@ -499,6 +628,7 @@ public final class StaticTaskVerifier {
             String jsFile,
             Set<String> htmlClasses,
             Set<String> htmlIds,
+            List<String> htmlIdOccurrences,
             Set<String> cssClasses,
             Set<String> cssIds,
             Set<String> cssBareClassSelectors,
@@ -506,10 +636,32 @@ public final class StaticTaskVerifier {
             Set<String> jsIds,
             Set<String> linkedCssFiles,
             Set<String> linkedJsFiles,
+            List<String> linkedCssOccurrences,
+            List<String> linkedJsOccurrences,
+            String html,
+            String css,
+            String js,
             Set<String> existingFileNames
     ) {
+        List<String> contentProblems() {
+            List<String> out = new ArrayList<>();
+            if (looksLikeNearPlaceholder(html, "html")) {
+                out.add(htmlFile + ": HTML file appears to be placeholder content.");
+            }
+            if (looksLikeNearPlaceholder(css, "css")) {
+                out.add(cssFile + ": CSS file appears to be placeholder content.");
+            }
+            if (looksLikeNearPlaceholder(js, "javascript")) {
+                out.add(jsFile + ": JavaScript file appears to be placeholder content.");
+            }
+            return out;
+        }
+
         List<String> selectorProblems() {
             List<String> out = new ArrayList<>();
+            for (String id : duplicateValues(htmlIdOccurrences)) {
+                out.add("HTML defines duplicate IDs: `#" + id + "`");
+            }
             Set<String> cssMissingClasses = new LinkedHashSet<>(cssClasses);
             cssMissingClasses.removeAll(htmlClasses);
             Set<String> jsMissingClasses = new LinkedHashSet<>(jsClasses);
@@ -540,6 +692,12 @@ public final class StaticTaskVerifier {
 
         List<String> linkageProblems() {
             List<String> out = new ArrayList<>();
+            for (String css : duplicateValues(linkedCssOccurrences)) {
+                out.add("HTML links CSS file more than once: `" + css + "`");
+            }
+            for (String js : duplicateValues(linkedJsOccurrences)) {
+                out.add("HTML links JavaScript file more than once: `" + js + "`");
+            }
             if (!linkedCssFiles.contains(cssFile)) {
                 out.add("HTML does not link CSS file: `" + cssFile + "`");
             }
@@ -557,6 +715,10 @@ public final class StaticTaskVerifier {
                 }
             }
             return out;
+        }
+
+        List<String> calculatorFormProblems(String request) {
+            return StaticTaskVerifier.calculatorFormProblems(request, html);
         }
 
         String renderInspection() {
@@ -656,7 +818,11 @@ public final class StaticTaskVerifier {
     }
 
     private static Set<String> extractMatches(String text, Pattern pattern, boolean splitOnWhitespace) {
-        Set<String> out = new LinkedHashSet<>();
+        return new LinkedHashSet<>(extractMatchOccurrences(text, pattern, splitOnWhitespace));
+    }
+
+    private static List<String> extractMatchOccurrences(String text, Pattern pattern, boolean splitOnWhitespace) {
+        List<String> out = new ArrayList<>();
         if (text == null || text.isBlank()) return out;
         Matcher matcher = pattern.matcher(text);
         while (matcher.find()) {
@@ -706,6 +872,88 @@ public final class StaticTaskVerifier {
         return out;
     }
 
+    private static boolean shouldExpectWeightHeightControls(String request) {
+        if (request == null || request.isBlank()) return false;
+        String lower = request.toLowerCase(Locale.ROOT);
+        return lower.contains("bmi")
+                || lower.contains("weight")
+                || lower.contains("height");
+    }
+
+    private static boolean hasNonBlankInlineScript(String html) {
+        if (html == null || html.isBlank()) return false;
+        Matcher matcher = HTML_INLINE_SCRIPT.matcher(html);
+        while (matcher.find()) {
+            String content = matcher.group(1);
+            if (content != null && !content.strip().isBlank()) return true;
+        }
+        return false;
+    }
+
+    private static List<String> calculatorFormProblems(String request, String html) {
+        String lowerHtml = html == null ? "" : html.toLowerCase(Locale.ROOT);
+        List<String> out = new ArrayList<>();
+        if (!containsTag(lowerHtml, "form") && !containsTag(lowerHtml, "input")) {
+            out.add("Calculator/form task is missing a form or input container.");
+        }
+        if (shouldExpectWeightHeightControls(request)) {
+            if (!hasInputFor(lowerHtml, "weight")) {
+                out.add("Calculator/form task is missing a weight input.");
+            }
+            if (!hasInputFor(lowerHtml, "height")) {
+                out.add("Calculator/form task is missing a height input.");
+            }
+        }
+        if (!containsTag(lowerHtml, "button") && !lowerHtml.contains("type=\"submit\"")
+                && !lowerHtml.contains("type='submit'")) {
+            out.add("Calculator/form task is missing a submit/calculate button.");
+        }
+        if (!hasResultOutput(lowerHtml)) {
+            out.add("Calculator/form task is missing a result output element.");
+        }
+        return out;
+    }
+
+    private static boolean containsTag(String lowerHtml, String tag) {
+        return lowerHtml != null && lowerHtml.contains("<" + tag);
+    }
+
+    private static boolean hasInputFor(String lowerHtml, String name) {
+        if (lowerHtml == null || lowerHtml.isBlank()) return false;
+        Pattern pattern = Pattern.compile("<input\\b[^>]*(id|name|placeholder|aria-label)\\s*=\\s*(['\"])[^'\"]*"
+                + Pattern.quote(name.toLowerCase(Locale.ROOT))
+                + "[^'\"]*\\2", Pattern.CASE_INSENSITIVE);
+        return pattern.matcher(lowerHtml).find();
+    }
+
+    private static boolean hasResultOutput(String lowerHtml) {
+        if (lowerHtml == null || lowerHtml.isBlank()) return false;
+        return lowerHtml.contains("<output")
+                || lowerHtml.contains("id=\"result\"")
+                || lowerHtml.contains("id='result'")
+                || lowerHtml.contains("class=\"result\"")
+                || lowerHtml.contains("class='result'");
+    }
+
+    private static boolean looksLikeNearPlaceholder(String content, String kind) {
+        if (content == null) return false;
+        String trimmed = content.strip();
+        if (trimmed.isEmpty()) return true;
+        String lower = trimmed.toLowerCase(Locale.ROOT);
+        String commentless = lower
+                .replaceAll("(?s)<!--.*?-->", " ")
+                .replaceAll("(?s)/\\*.*?\\*/", " ")
+                .replaceAll("(?m)^\\s*//.*$", " ")
+                .strip();
+        if (commentless.isBlank()) return true;
+        String normalized = lower.replaceAll("\\s+", " ");
+        return normalized.contains("your " + kind + " logic here")
+                || normalized.contains("your " + kind + " code here")
+                || normalized.contains(kind + " logic here")
+                || normalized.contains(kind + " code here")
+                || normalized.contains("add " + kind + " here");
+    }
+
     private static Set<String> extractJsClasses(String js) {
         Set<String> out = new LinkedHashSet<>();
         if (js == null || js.isBlank()) return out;
@@ -738,8 +986,8 @@ public final class StaticTaskVerifier {
         return out;
     }
 
-    private static Set<String> extractLinkedAssets(String html, Pattern pattern, String extension) {
-        Set<String> out = new LinkedHashSet<>();
+    private static List<String> extractLinkedAssetOccurrences(String html, Pattern pattern, String extension) {
+        List<String> out = new ArrayList<>();
         if (html == null || html.isBlank()) return out;
         Matcher matcher = pattern.matcher(html);
         while (matcher.find()) {
@@ -755,6 +1003,16 @@ public final class StaticTaskVerifier {
             out.add(slash >= 0 ? normalized.substring(slash + 1) : normalized);
         }
         return out;
+    }
+
+    private static Set<String> duplicateValues(List<String> values) {
+        Set<String> seen = new LinkedHashSet<>();
+        Set<String> duplicates = new LinkedHashSet<>();
+        if (values == null) return duplicates;
+        for (String value : values) {
+            if (!seen.add(value)) duplicates.add(value);
+        }
+        return duplicates;
     }
 
     private static Set<String> existingFileNames(Path root) {
@@ -811,6 +1069,20 @@ public final class StaticTaskVerifier {
             normalized = normalized.substring(2);
         }
         return normalized;
+    }
+
+    static boolean expectedTargetMatches(String expectedTarget, String mutatedPath, boolean caseInsensitive) {
+        String expected = normalizePath(expectedTarget);
+        String mutated = normalizePath(mutatedPath);
+        if (expected.isBlank() || mutated.isBlank()) return false;
+        if (caseInsensitive) {
+            return expected.equalsIgnoreCase(mutated);
+        }
+        return expected.equals(mutated);
+    }
+
+    private static boolean expectedTargetMatchingIsCaseInsensitive() {
+        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
     }
 
     private static String firstProblemSummary(List<String> problems) {

@@ -53,6 +53,19 @@ class NativeToolSpecPolicyTest {
     }
 
     @Test
+    void scopedTargetLimiterContractInApplyIncludesWriteAndEditNativeSpecs() {
+        var contract = TaskContractResolver.fromUserRequest(
+                "Fix only styles.css. Do not change index.html or scripts.js.");
+
+        List<String> names = NativeToolSpecPolicy.names(
+                NativeToolSpecPolicy.select(contract, ExecutionPhase.APPLY, registry()));
+
+        assertTrue(names.contains("talos.read_file"));
+        assertTrue(names.contains("talos.write_file"));
+        assertTrue(names.contains("talos.edit_file"));
+    }
+
+    @Test
     void verifyPhaseDowngradesMutationContractToReadOnlyNativeSpecs() {
         var contract = TaskContractResolver.fromUserRequest("Edit index.html.");
 

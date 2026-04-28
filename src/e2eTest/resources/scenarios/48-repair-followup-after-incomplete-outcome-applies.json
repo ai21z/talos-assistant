@@ -1,0 +1,25 @@
+{
+  "name": "repair follow-up after incomplete outcome applies",
+  "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "repair-followup-after-incomplete-outcome-is-apply-capable",
+    "repair-followup-still-requires-approval"
+  ],
+  "runner": "executor-history",
+  "approvalPolicy": "APPROVE_ALL",
+  "history": [
+    {
+      "role": "user",
+      "content": "Create index.html, styles.css, and scripts.js for a BMI calculator."
+    },
+    {
+      "role": "assistant",
+      "content": "[Task incomplete: Static verification failed - Expected targets were not all mutated.]\n\nThe requested task is not verified complete.\n\nRemaining static verification problems:\n- scripts.js was expected but was not created."
+    }
+  ],
+  "userPrompt": "nothing changed, try one more time",
+  "scriptedResponses": [
+    "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"scripts.js\",\"content\":\"const result = 'BMI repaired';\"}}"
+  ]
+}

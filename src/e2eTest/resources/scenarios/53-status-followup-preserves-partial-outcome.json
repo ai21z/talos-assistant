@@ -1,0 +1,25 @@
+{
+  "name": "status follow-up preserves partial outcome",
+  "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "status-followup-uses-previous-verified-outcome",
+    "status-followup-does-not-overclaim-completion"
+  ],
+  "runner": "executor-history",
+  "approvalPolicy": "APPROVE_ALL",
+  "history": [
+    {
+      "role": "user",
+      "content": "No no I want a functioning 3-file BMI calculator. Update index.html and styles.css and create scripts.js. Make it modern and responsive. Use file tools; do not just show code."
+    },
+    {
+      "role": "assistant",
+      "content": "[Partial verification: static checks failed - HTML does not link JavaScript file: `scripts.js`]\n\nThe turn remains partial. Some changes were applied, but unresolved static problems remain.\n\nRemaining static verification problems:\n- styles.css: expected target was not successfully mutated.\n- HTML does not link JavaScript file: `scripts.js`\n- HTML defines duplicate IDs: `#result`\n- Calculator/form task is missing a submit/calculate button."
+    }
+  ],
+  "userPrompt": "did you make the changes?",
+  "scriptedResponses": [
+    "The workspace now appears to have a functional 3-file BMI calculator."
+  ]
+}

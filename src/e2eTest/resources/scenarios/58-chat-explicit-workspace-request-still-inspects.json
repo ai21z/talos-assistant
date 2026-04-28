@@ -1,0 +1,16 @@
+{
+  "name": "chat explicit workspace request still inspects",
+  "fixture": "chat-privacy",
+  "v1Pack": true,
+  "claims": [
+    "explicit-workspace-request-allows-read-tools",
+    "token-may-be-reported-when-user-asks-for-it"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Search my files for ALPHA-742.",
+  "scriptedResponses": [
+    "{\"name\":\"talos.grep\",\"arguments\":{\"pattern\":\"ALPHA-742\",\"include\":\"*\",\"max_results\":10}}",
+    "I found ALPHA-742 in the workspace files."
+  ]
+}
