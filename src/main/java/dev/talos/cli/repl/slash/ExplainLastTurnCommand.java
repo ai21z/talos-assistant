@@ -229,6 +229,13 @@ public final class ExplainLastTurnCommand implements Command {
             sb.append("  Visible tools: ").append(listOrNone(trace.toolSurface().nativeTools())).append('\n');
         }
         sb.append("  Events: ").append(trace.events().size()).append('\n');
+        if (trace.checkpoint() != null && !trace.checkpoint().status().isBlank()) {
+            sb.append("  Checkpoint: ").append(trace.checkpoint().status());
+            if (!trace.checkpoint().checkpointId().isBlank()) {
+                sb.append(' ').append(trace.checkpoint().checkpointId());
+            }
+            sb.append('\n');
+        }
         if (trace.verification() != null && !trace.verification().status().isBlank()) {
             sb.append("  Verification: ").append(trace.verification().status());
             if (!trace.verification().summary().isBlank()) {
