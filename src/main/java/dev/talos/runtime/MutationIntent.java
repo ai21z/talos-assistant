@@ -21,7 +21,7 @@ public final class MutationIntent {
                     + "cool|hey|hi|hello|hmm+),?\\s+)*";
 
     private static final String CORE_MUTATION_VERBS =
-            "(edit|modify|change|update|fix|repair|rewrite|replace|redesign|"
+            "(edit|modify|change|update|fix|repair|overwrite|rewrite|replace|redesign|"
                     + "restyle|re-style|re-design|write|create|save|"
                     + "apply|add|remove|delete|refactor|put|implement)";
 
@@ -52,7 +52,20 @@ public final class MutationIntent {
             Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:please\\s+)?" + MAKE_REFERENCE_REQUEST),
             Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:please\\s+)?(?:can|could|would|will)\\s+you\\s+(?:please\\s+)?" + MAKE_REFERENCE_REQUEST),
             Pattern.compile("^" + PREFIX + "i\\s+(?:want|need)\\s+you\\s+to\\s+" + MAKE_REFERENCE_REQUEST),
-            Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:let's|lets)\\s+" + MAKE_REFERENCE_REQUEST)
+            Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:let's|lets)\\s+" + MAKE_REFERENCE_REQUEST),
+            Pattern.compile("\\b(?:can|could|would|will)\\s+you\\s+(?:please\\s+)?"
+                    + BUILD_ARTIFACT_VERBS + "\\s+me\\s+(?:\\S+\\s+){0,10}" + ARTIFACT_NOUNS + "\\b")
+    );
+
+    private static final List<Pattern> PRIOR_CHANGE_STATUS_PATTERNS = List.of(
+            Pattern.compile("^" + PREFIX + "did\\s+you\\s+(?:make|apply|do|finish|complete|update|change|edit|fix|repair|write|create|save)\\b"),
+            Pattern.compile("^" + PREFIX + "did\\s+(?:it|this|that|the\\s+(?:change|changes|edit|edits|fix|repair|update|updates))\\s+(?:work|apply|finish|complete)\\b"),
+            Pattern.compile("^" + PREFIX + "is\\s+(?:it|this|that|the\\s+(?:change|changes|edit|edits|fix|repair|update|updates)|.{1,80})\\s+(?:done|finished|complete|completed|working)\\b"),
+            Pattern.compile("^" + PREFIX + "are\\s+(?:the\\s+)?(?:change|changes|edit|edits|fix|fixes|update|updates)\\s+(?:applied|done|finished|complete|completed|working)\\b"),
+            Pattern.compile("^" + PREFIX + "have\\s+you\\s+(?:made|applied|done|finished|completed|updated|changed|edited|written|created|saved)\\b"),
+            Pattern.compile("^" + PREFIX + "what\\s+(?:did|have)\\s+you\\s+(?:make|made|do|done|change|changed|update|updated|edit|edited|write|written|create|created)\\b"),
+            Pattern.compile("^" + PREFIX + "why\\s+did\\s+(?:nothing|not\\s+.*|.*\\s+not\\s+)\\s+(?:change|update|happen|apply)\\b"),
+            Pattern.compile("^" + PREFIX + "why\\s+did\\s+you\\s+not\\s+(?:make|apply|do|update|change|edit|write|create|save)\\b")
     );
 
     private static final Set<String> MARKERS = Set.of(
@@ -62,6 +75,7 @@ public final class MutationIntent {
             "change everything", "change all",
             "update it", "update the", "update this", "update that",
             "fix it", "fix the", "fix this", "fix that",
+            "overwrite it", "overwrite the", "overwrite this",
             "rewrite it", "rewrite the", "rewrite this",
             "replace it", "replace the", "replace this",
             "redesign", "restyle", "re-style", "re-design",
@@ -85,6 +99,12 @@ public final class MutationIntent {
             "no file changes", "without changing"
     );
 
+    private static final Pattern NAMED_FILE_TARGET = Pattern.compile(
+            "(?i)(?<![A-Za-z0-9_./\\\\-])([A-Za-z0-9_.\\\\/-]+\\."
+                    + "(?:html|htm|css|js|jsx|ts|tsx|java|md|txt|json|yaml|yml|xml|"
+                    + "properties|gradle|kts|toml|ini|env|csv))"
+                    + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
+
     private MutationIntent() {}
 
     public static boolean looksExplicitMutationRequest(String userRequest) {
@@ -92,13 +112,46 @@ public final class MutationIntent {
         if (ToolCallSupport.isSyntheticToolResultContent(userRequest)) return false;
         String lower = userRequest.toLowerCase().trim();
         if (containsGlobalReadOnlyNegation(lower)) return false;
+        if (looksPriorChangeStatusQuestion(lower)) return false;
         for (Pattern pattern : REQUEST_PATTERNS) {
             if (pattern.matcher(lower).find()) return true;
         }
+        if (looksNaturalMakeItArtifactRequest(lower)) return true;
         for (String marker : MARKERS) {
             if (lower.contains(marker)) return true;
         }
         return false;
+    }
+
+    public static boolean looksPriorChangeStatusQuestion(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return false;
+        if (ToolCallSupport.isSyntheticToolResultContent(userRequest)) return false;
+        String lower = userRequest.toLowerCase().trim();
+        if (containsConditionalApplyClause(lower)) return false;
+        for (Pattern pattern : PRIOR_CHANGE_STATUS_PATTERNS) {
+            if (pattern.matcher(lower).find()) return true;
+        }
+        return false;
+    }
+
+    private static boolean containsConditionalApplyClause(String lower) {
+        return Pattern.compile("\\b(?:if\\s+not|otherwise|then)\\b.{0,80}\\b"
+                + "(?:fix|repair|update|change|edit|make|create|write|apply)\\b").matcher(lower).find();
+    }
+
+    private static boolean looksNaturalMakeItArtifactRequest(String lower) {
+        if (!lower.contains("can you make it")
+                && !lower.contains("could you make it")
+                && !lower.contains("would you make it")
+                && !lower.contains("will you make it")) {
+            return false;
+        }
+        return Pattern.compile("\\b" + ARTIFACT_NOUNS + "\\b").matcher(lower).find()
+                && (lower.contains(" here")
+                || lower.contains("folder")
+                || lower.contains("file")
+                || lower.contains("open and use")
+                || lower.contains("i just want"));
     }
 
     private static boolean containsGlobalReadOnlyNegation(String lower) {
@@ -134,6 +187,13 @@ public final class MutationIntent {
                 || tail.startsWith("other files")
                 || tail.startsWith("other parts")
                 || tail.startsWith("other things")
-                || tail.startsWith("else");
+                || tail.startsWith("else")
+                || startsWithNamedFileTarget(tail);
+    }
+
+    private static boolean startsWithNamedFileTarget(String tail) {
+        if (tail == null || tail.isBlank()) return false;
+        var matcher = NAMED_FILE_TARGET.matcher(tail);
+        return matcher.find() && matcher.start() <= 4;
     }
 }

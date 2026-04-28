@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.9.6] - 2026-04-28
+
+### Changed
+- [T11-done-high] Status questions such as `did you make the changes?`
+  now resolve as verify-only/read-only turns instead of mutation turns.
+- [T12-done-high] Mutating tool calls missing required arguments are rejected
+  before approval, so users are not asked to approve invalid writes or edits.
+- [T13-done-high] Tool-call JSON protocol text is kept out of final visible
+  answers when the protocol path handles or rejects it.
+- [T14-done-high] Repair follow-ups now use one shared task contract for trace,
+  prompt read-only mode, native tool selection, and execution policy.
+- [T15-done-high] Verification wording now distinguishes file write/readback
+  checks from task-specific completion verification.
+- [T16-done-high] Added static web-app verification for linked assets,
+  placeholders, duplicate asset references, expected DOM elements, and
+  JavaScript selector coherence.
+- [T17-done-medium] Expected target matching now normalizes paths for Windows
+  casing and separator behavior.
+- [T18-done-medium] Added idempotent web asset checks so repeated stylesheet or
+  script insertions do not look verified.
+- [T19-done-high] Prior-change status follow-ups now preserve the latest
+  verified outcome instead of overclaiming completion.
+- [T20-done-high] Scoped mutation limiters such as `fix only styles.css` now
+  allow the intended target while blocking forbidden targets.
+- [T21-done-high] Post-denial retry turns reissue the previously denied action
+  through approval instead of drifting into no-op answers.
+- [T22-done-high] Overwrite, rewrite, replace, repair, and natural
+  non-technical artifact requests now classify as mutation-capable when they
+  ask Talos to modify local files.
+- [T23-done-high] Repair retries after static verification failure now include
+  verifier findings and steer small web-file repair toward bounded full-file
+  replacement when edit anchors are brittle.
+- [T24-done-high] Mutating tool protocol blocked by read-only policy is now
+  sanitized with truthful no-action wording instead of leaking raw JSON or fake
+  approval prose.
+- [T25-done-high] Chat-mode small talk, capability prompts, and explicit
+  privacy-negated prompts no longer expose or call workspace tools.
+- [T26-done-medium] Repeated status follow-ups now return direct,
+  deduplicated verified-outcome summaries.
+- [T27-done-high] Malformed Talos tool-call-like output is sanitized and
+  reported without leaking protocol text or stalling the turn.
+- [T28-done-high] Functional web verification now fails when a scripted web
+  task has no JavaScript behavior, even if HTML and CSS were written.
 ## [0.9.5] - 2026-04-27
 
 ### Changed

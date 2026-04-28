@@ -68,11 +68,26 @@ public final class UnifiedAssistantMode implements Mode {
         long responseMaxChars = CfgUtil.longAt(lim, "response_max_chars", 10 * 1024 * 1024L);
         long llmTimeoutMs     = CfgUtil.longAt(lim, "llm_timeout_ms", 300_000L);
 
+        // Build conversation history before resolving the contract. Repair
+        // follow-ups depend on prior verified/incomplete outcomes, so the
+        // native tool surface and trace must use the full-history contract.
+        List<ChatMessage> history = List.of();
+        if (ctx.conversationManager() != null) {
+            history = ctx.conversationManager().buildHistoryForAssist();
+        } else if (ctx.memory() != null) {
+            history = ctx.memory().getTurns();
+        }
+
+        List<ChatMessage> contractMessages = new ArrayList<>();
+        if (history != null && !history.isEmpty()) {
+            contractMessages.addAll(history);
+        }
+        contractMessages.add(ChatMessage.user(rawLine));
+
         // System prompt — unified mode: tools + workspace + retrieval guidance
-        boolean hasHistory = (ctx.conversationManager() != null && ctx.conversationManager().hasHistory())
-                || (ctx.memory() != null && ctx.memory().hasContent());
+        boolean hasHistory = history != null && !history.isEmpty();
         boolean nativeTools = CfgUtil.boolAt(CfgUtil.map(ctx.cfg().data.get("tools")), "native_calling", true);
-        TaskContract taskContract = TaskContractResolver.fromUserRequest(rawLine);
+        TaskContract taskContract = TaskContractResolver.fromMessages(contractMessages);
         boolean smallTalk = taskContract.type() == TaskType.SMALL_TALK;
         SystemPromptBuilder promptBuilder = SystemPromptBuilder.forUnified()
                 .withNativeTools(nativeTools)
@@ -85,18 +100,10 @@ public final class UnifiedAssistantMode implements Mode {
         }
         String system = promptBuilder.build();
 
-        // Build conversation history — unified mode uses the larger assist budget (55%)
-        // since there are no pre-injected RAG snippets competing for context space.
-        List<ChatMessage> history = List.of();
-        if (ctx.conversationManager() != null) {
-            history = ctx.conversationManager().buildHistoryForAssist();
-        } else if (ctx.memory() != null) {
-            history = ctx.memory().getTurns();
-        }
-
         // Build structured conversation messages: system + history + user
         List<ChatMessage> messages = buildMessages(system, rawLine, history);
         AssistantTurnExecutor.injectTaskContractInstruction(messages);
+        AssistantTurnExecutor.injectStaticVerificationRepairInstruction(messages, taskContract);
         ExecutionPhase initialPhase = taskContract.mutationAllowed()
                 ? ExecutionPhase.APPLY
                 : ExecutionPhase.INSPECT;

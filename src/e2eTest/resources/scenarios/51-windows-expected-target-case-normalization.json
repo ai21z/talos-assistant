@@ -1,0 +1,16 @@
+{
+  "name": "windows expected target case normalization",
+  "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "windows-expected-target-matching-is-case-insensitive",
+    "case-only-target-differences-do-not-hide-real-static-verifier-problems"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_REMEMBER_WRITES",
+  "userPrompt": "No no I want to create a 3 files BMI calculator. Index.html, styles.css and scripts.js so I can have some functionality. scripts.js is missing and the other 2 files are not well working. Make it look modern please. Use file tools; do not just show code.",
+  "scriptedResponses": [
+    "```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"index.html\",\"content\":\"<!doctype html>\\n<html lang=\\\"en\\\">\\n<head>\\n  <meta charset=\\\"utf-8\\\">\\n  <title>BMI Calculator</title>\\n  <link rel=\\\"stylesheet\\\" href=\\\"styles.css\\\">\\n</head>\\n<body>\\n  <main class=\\\"calculator\\\">\\n    <h1>BMI Calculator</h1>\\n    <form id=\\\"bmi-form\\\">\\n      <label>Weight <input id=\\\"weight\\\" type=\\\"number\\\"></label>\\n      <label>Height <input id=\\\"height\\\" type=\\\"number\\\"></label>\\n      <button type=\\\"submit\\\">Calculate</button>\\n    </form>\\n    <p id=\\\"result\\\"></p>\\n  </main>\\n  <script src=\\\"scripts.js\\\"></script>\\n</body>\\n</html>\"}}\n```\n```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"styles.css\",\"content\":\"body { font-family: Arial, sans-serif; margin: 2rem; }\\n.calculator { max-width: 420px; }\\nbutton { cursor: pointer; }\"}}\n```\n```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"scripts.js\",\"content\":\"// Your JavaScript logic here\"}}\n```",
+    "Created the BMI calculator website files."
+  ]
+}

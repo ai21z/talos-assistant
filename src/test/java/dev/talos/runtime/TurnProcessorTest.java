@@ -8,13 +8,20 @@ import dev.talos.core.Config;
 import dev.talos.core.context.ConversationManager;
 import dev.talos.core.context.TokenBudget;
 import dev.talos.core.retrieval.RetrievalTrace;
+import dev.talos.core.security.Sandbox;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.tools.*;
+import dev.talos.tools.impl.FileEditTool;
+import dev.talos.tools.impl.FileWriteTool;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -26,6 +33,9 @@ class TurnProcessorTest {
     void cleanupTrace() {
         // Clear any leftover trace from tests
         TurnTraceCapture.consume();
+        TurnUserRequestCapture.clear();
+        TurnTaskContractCapture.clear();
+        if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
     }
 
     @Test void nullInputReturnsNull() throws Exception {
@@ -157,6 +167,127 @@ class TurnProcessorTest {
         assertSame(registry, tp.toolRegistry());
     }
 
+    @Test
+    void writeFileMissingContentFailsBeforeApproval(@TempDir Path workspace) {
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.write_file", Map.of("path", "styles.css")), ctx);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.INVALID_PARAMS, result.error().code());
+        assertTrue(result.errorMessage().contains("content"), result.errorMessage());
+        assertTrue(result.errorMessage().contains("No approval was requested"), result.errorMessage());
+        assertEquals(0, approvals.get());
+        assertFalse(Files.exists(workspace.resolve("styles.css")));
+    }
+
+    @Test
+    void writeFileMissingPathFailsBeforeApproval(@TempDir Path workspace) {
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.write_file", Map.of("content", "body { color: red; }")), ctx);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.INVALID_PARAMS, result.error().code());
+        assertTrue(result.errorMessage().contains("path"), result.errorMessage());
+        assertTrue(result.errorMessage().contains("No approval was requested"), result.errorMessage());
+        assertEquals(0, approvals.get());
+    }
+
+    @Test
+    void editFileMissingRequiredArgsFailBeforeApproval(@TempDir Path workspace) {
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+
+        assertInvalidBeforeApproval(tp, session, ctx, approvals,
+                new ToolCall("talos.edit_file", Map.of(
+                        "path", "index.html",
+                        "old_string", "",
+                        "new_string", "replacement")),
+                "old_string");
+        assertInvalidBeforeApproval(tp, session, ctx, approvals,
+                new ToolCall("talos.edit_file", Map.of(
+                        "path", "index.html",
+                        "old_string", "original")),
+                "new_string");
+        assertInvalidBeforeApproval(tp, session, ctx, approvals,
+                new ToolCall("talos.edit_file", Map.of(
+                        "old_string", "original",
+                        "new_string", "replacement")),
+                "path");
+    }
+
+    @Test
+    void validWriteFileStillRequestsApproval(@TempDir Path workspace) {
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.write_file", Map.of(
+                        "path", "index.html",
+                        "content", "<h1>ok</h1>")), ctx);
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(1, approvals.get());
+    }
+
+    @Test
+    void forbiddenTargetFromTaskContractFailsBeforeApproval(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("index.html"), "<h1>original</h1>");
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+        String request = "Fix only styles.css. Do not change index.html or scripts.js.";
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.write_file", Map.of(
+                        "path", "index.html",
+                        "content", "<h1>forbidden</h1>")), ctx);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.INVALID_PARAMS, result.error().code());
+        assertTrue(result.errorMessage().contains("forbidden"), result.errorMessage());
+        assertTrue(result.errorMessage().contains("index.html"), result.errorMessage());
+        assertTrue(result.errorMessage().contains("No approval was requested"), result.errorMessage());
+        assertEquals(0, approvals.get());
+        assertEquals("<h1>original</h1>", Files.readString(workspace.resolve("index.html")));
+    }
+
+    @Test
+    void allowedTargetFromScopedContractStillRequestsApproval(@TempDir Path workspace) {
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+        String request = "Fix only styles.css. Do not change index.html or scripts.js.";
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.write_file", Map.of(
+                        "path", "styles.css",
+                        "content", "body { color: white; }")), ctx);
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(1, approvals.get());
+        assertTrue(Files.exists(workspace.resolve("styles.css")));
+    }
+
     @Test void toolReceivesWorkspaceFromSession() {
         ToolRegistry registry = new ToolRegistry();
         // Tool that records the workspace it received
@@ -187,6 +318,40 @@ class TurnProcessorTest {
         @Override public ToolResult execute(ToolCall call, ToolContext ctx) {
             return ToolResult.ok("Echo: " + call.param("input", "(empty)"));
         }
+    }
+
+    private static TurnProcessor processorWithFileToolsAndApprovalCounter(AtomicInteger approvals) {
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new FileWriteTool());
+        registry.register(new FileEditTool());
+        ApprovalGate gate = (description, detail) -> {
+            approvals.incrementAndGet();
+            return true;
+        };
+        return new TurnProcessor(ModeController.defaultController(), gate, registry);
+    }
+
+    private static Context contextForWorkspace(Path workspace) {
+        return Context.builder(new Config())
+                .sandbox(new Sandbox(workspace, null))
+                .build();
+    }
+
+    private static void assertInvalidBeforeApproval(
+            TurnProcessor tp,
+            Session session,
+            Context ctx,
+            AtomicInteger approvals,
+            ToolCall call,
+            String expectedParam
+    ) {
+        ToolResult result = tp.executeTool(session, call, ctx);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.INVALID_PARAMS, result.error().code());
+        assertTrue(result.errorMessage().contains(expectedParam), result.errorMessage());
+        assertTrue(result.errorMessage().contains("No approval was requested"), result.errorMessage());
+        assertEquals(0, approvals.get());
     }
 
     // ---- Trace capture tests ----

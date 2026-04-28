@@ -1,0 +1,12 @@
+{
+  "name": "write file missing content before approval",
+  "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "missing-write-content-blocks-before-approval"
+  ],
+  "runner": "loop",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Update style.css to make the page brighter.",
+  "scriptedResponse": "```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"style.css\"}}\n```"
+}

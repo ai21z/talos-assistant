@@ -146,6 +146,104 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void postDenialRepairFollowUpNoToolAnswerRetriesAndExecutesPriorWrite(@TempDir Path workspace)
+                throws Exception {
+            var registry = new dev.talos.tools.ToolRegistry();
+            var undoStack = new dev.talos.tools.FileUndoStack();
+            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "I'm sorry, but I cannot assist with that request.",
+                            "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"scripts.js\","
+                                    + "\"content\":\"console.log(\\\"repair ok\\\");\"}}",
+                            "Created scripts.js.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Create scripts.js with exactly this text: console.log(\"repair ok\"); "
+                            + "Use file tools; do not just show code."));
+            messages.add(ChatMessage.assistant("""
+                    [Mutation not applied: approval was denied.]
+
+                    No file changes were applied because approval was denied.
+                    scripts.js: approval denied.
+                    """));
+            messages.add(ChatMessage.user("nothing changed, try one more time"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(Files.exists(workspace.resolve("scripts.js")),
+                    "post-denial retry must reissue the prior write through tools");
+            assertEquals("console.log(\"repair ok\");",
+                    Files.readString(workspace.resolve("scripts.js")));
+            assertTrue(out.text().contains("[Used 1 tool(s): talos.write_file"),
+                    "retry tool execution summary should be visible");
+            assertFalse(out.text().contains("cannot assist"), out.text());
+        }
+
+        @Test
+        void staticVerificationRepairRetryPromptIncludesVerifierFindings(@TempDir Path workspace)
+                throws Exception {
+            var registry = new dev.talos.tools.ToolRegistry();
+            var undoStack = new dev.talos.tools.FileUndoStack();
+            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            registry.register(new dev.talos.tools.impl.FileEditTool(undoStack));
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "I can help with the repair.",
+                            "I still need to know what to change.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Create index.html, styles.css, and scripts.js for a BMI calculator."));
+            messages.add(ChatMessage.assistant("""
+                    [Task incomplete: Static verification failed - HTML does not link JavaScript file: `scripts.js`]
+
+                    The requested task is not verified complete.
+                    Remaining static verification problems:
+                    - styles.css: expected target was not successfully mutated.
+                    - HTML does not link JavaScript file: `scripts.js`
+                    - Calculator/form task is missing a submit/calculate button.
+                    """));
+            messages.add(ChatMessage.user("Fix the remaining static verification problems now."));
+
+            AssistantTurnExecutor.execute(messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            String repairInstruction = messages.stream()
+                    .map(message -> message.content() == null ? "" : message.content())
+                    .filter(content -> content.contains("[Static verification repair context]"))
+                    .findFirst()
+                    .orElse("");
+            assertFalse(repairInstruction.isBlank(),
+                    "repair turn must inject prior verifier findings before retrying");
+            assertTrue(repairInstruction.contains("HTML does not link JavaScript file"),
+                    repairInstruction);
+            assertTrue(repairInstruction.contains("submit/calculate button"),
+                    repairInstruction);
+            assertTrue(repairInstruction.contains("Expected targets:"),
+                    repairInstruction);
+            assertTrue(repairInstruction.contains("talos.write_file with complete corrected file content"),
+                    repairInstruction);
+            assertTrue(repairInstruction.contains("Do not repeat an edit_file old_string that already failed"),
+                    repairInstruction);
+        }
+
+        @Test
         void workspaceExplainNoToolDeflectionRetriesWithReadTools(@TempDir Path workspace)
                 throws Exception {
             Files.writeString(workspace.resolve("index.html"), """
@@ -193,6 +291,181 @@ class AssistantTurnExecutorTest {
                     out.text());
             assertTrue(out.text().contains("Night Drive web page"), out.text());
             assertFalse(out.text().contains("provide the path"), out.text());
+        }
+
+        @Test
+        void smallTalkTextFallbackToolCallIsNotExecuted(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("notes.md"), "Hidden project token: ALPHA-742\n");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"notes.md\"}}")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("hello, answer briefly as Talos"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertFalse(out.text().contains("talos.read_file"), out.text());
+            assertFalse(out.text().contains("ALPHA-742"), out.text());
+            assertFalse(out.text().contains("Used 1 tool"), out.text());
+        }
+
+        @Test
+        void malformedSingleQuotedToolProtocolIsReplacedWithoutMutation(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("scripts.js"), """
+                    document.querySelector("#wrongButton").addEventListener("click", () => {
+                      console.log("wrong");
+                    });
+                    """);
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            var undoStack = new dev.talos.tools.FileUndoStack();
+            registry.register(new dev.talos.tools.impl.FileEditTool(undoStack));
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of("""
+                            {
+                              "name": "talos.edit_file",
+                              "arguments": {
+                                "path": "scripts.js",
+                                "old_string": 'document.querySelector("#wrongButton").addEventListener("click", () => {',
+                                "new_string": 'document.querySelector("button").addEventListener("click", () => {'
+                              }
+                            }
+                            """)))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "My BMI page is almost there, but when I press the button nothing happens. "
+                            + "Please keep the look the same and just make the button work."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertEquals(AssistantTurnExecutor.MALFORMED_TOOL_PROTOCOL_REPLACEMENT, out.text());
+            assertFalse(out.text().contains("talos.edit_file"), out.text());
+            assertFalse(out.text().contains("old_string"), out.text());
+            assertTrue(Files.readString(workspace.resolve("scripts.js")).contains("#wrongButton"),
+                    "malformed protocol must not mutate files");
+        }
+
+        @Test
+        void readOnlyDeniedWriteFileProtocolIsSanitizedWithoutFakeApproval(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("index.html"), "<h1>Current</h1>\n");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            var undoStack = new dev.talos.tools.FileUndoStack();
+            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            String prompt = "Can you look at this page and tell me what is wrong? Do not edit files yet.";
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            """
+                            ```json
+                            {"name":"talos.write_file","arguments":{"path":"index.html","content":"<h1>Changed</h1>"}}
+                            ```
+                            Do you approve these changes?
+                            """,
+                            """
+                            I prepared the update.
+
+                            ```json
+                            {"name":"talos.write_file","arguments":{"path":"index.html","content":"<h1>Changed</h1>"}}
+                            ```
+
+                            Do you approve these changes?
+                            """)))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(prompt));
+
+            dev.talos.runtime.TurnUserRequestCapture.set(prompt);
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+                assertTrue(out.text().contains("read-only"), out.text());
+                assertTrue(out.text().contains("No file changes were applied"), out.text());
+                assertFalse(out.text().contains("\"name\""), out.text());
+                assertFalse(out.text().contains("\"arguments\""), out.text());
+                assertFalse(out.text().contains("Do you approve these changes"), out.text());
+                assertFalse(out.text().contains("I prepared the update"), out.text());
+                assertEquals("<h1>Current</h1>\n", Files.readString(workspace.resolve("index.html")));
+            } finally {
+                dev.talos.runtime.TurnUserRequestCapture.clear();
+            }
+        }
+
+        @Test
+        void readOnlyDeniedEditFileProtocolIsSanitizedWithoutFakeApproval(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("index.html"), "<h1>Current</h1>\n");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            var undoStack = new dev.talos.tools.FileUndoStack();
+            registry.register(new dev.talos.tools.impl.FileEditTool(undoStack));
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            String prompt = "Can you diagnose this page without changing files?";
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            """
+                            ```json
+                            {"name":"talos.edit_file","arguments":{"path":"index.html","old_string":"<h1>Current</h1>","new_string":"<h1>Changed</h1>"}}
+                            ```
+                            Would you like me to apply these changes?
+                            """,
+                            "Please approve these changes so I can apply them.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(prompt));
+
+            dev.talos.runtime.TurnUserRequestCapture.set(prompt);
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+                assertTrue(out.text().contains("read-only"), out.text());
+                assertTrue(out.text().contains("No file changes were applied"), out.text());
+                assertFalse(out.text().contains("\"name\""), out.text());
+                assertFalse(out.text().contains("\"arguments\""), out.text());
+                assertFalse(out.text().contains("Please approve these changes"), out.text());
+                assertFalse(out.text().contains("Would you like me to apply"), out.text());
+                assertEquals("<h1>Current</h1>\n", Files.readString(workspace.resolve("index.html")));
+            } finally {
+                dev.talos.runtime.TurnUserRequestCapture.clear();
+            }
         }
 
         @Test
@@ -2542,6 +2815,94 @@ class AssistantTurnExecutorTest {
             assertTrue(out.text().contains(".cta-button"), out.text());
             assertFalse(out.text().contains("I added the Listen Now button"), out.text());
             assertFalse(out.text().contains("wired script.js"), out.text());
+        }
+
+        @Test
+        void statusFollowUpUsesPreviousPartialVerificationInsteadOfNewCompletionClaim() {
+            var ctx = scriptedContext("The workspace now appears to have a functional 3-file BMI calculator.");
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "No no I want a functioning 3-file BMI calculator. Update index.html and styles.css "
+                            + "and create scripts.js. Make it modern and responsive."));
+            messages.add(ChatMessage.assistant("""
+                    [Partial verification: static checks failed - HTML does not link JavaScript file: `scripts.js`]
+
+                    The turn remains partial. Some changes were applied, but unresolved static problems remain.
+
+                    Remaining static verification problems:
+                    - styles.css: expected target was not successfully mutated.
+                    - HTML does not link JavaScript file: `scripts.js`
+                    - HTML defines duplicate IDs: `#result`
+                    - Calculator/form task is missing a submit/calculate button.
+                    """));
+            messages.add(ChatMessage.user("did you make the changes?"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, WS, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().startsWith("Partially."), out.text());
+            assertTrue(out.text().contains("partial"), out.text());
+            assertTrue(out.text().contains("not complete"), out.text());
+            assertTrue(out.text().contains("HTML does not link JavaScript file"), out.text());
+            assertTrue(out.text().contains("submit/calculate button"), out.text());
+            assertFalse(out.text().contains("functional 3-file BMI calculator"), out.text());
+        }
+
+        @Test
+        void repeatedStatusFollowUpDoesNotDuplicatePreviousVerifiedPreamble() {
+            var ctx = scriptedContext("Yes, it is done now.");
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "No no I want a functioning 3-file BMI calculator. Update index.html and styles.css "
+                            + "and create scripts.js. Make it modern and responsive."));
+            messages.add(ChatMessage.assistant("""
+                    [Partial verification: static checks failed - HTML does not link JavaScript file: `scripts.js`]
+
+                    The turn remains partial. Some changes were applied, but unresolved static problems remain.
+
+                    Remaining static verification problems:
+                    - styles.css: expected target was not successfully mutated.
+                    - HTML does not link JavaScript file: `scripts.js`
+                    - Calculator/form task is missing a submit/calculate button.
+                    """));
+            messages.add(ChatMessage.user("did you make the changes?"));
+            messages.add(ChatMessage.assistant("""
+                    The previous verified result says the last change is not complete.
+
+                    The previous verified result says the last change is not complete.
+
+                    [Partial verification: static checks failed - HTML does not link JavaScript file: `scripts.js`]
+
+                    The turn remains partial. Some changes were applied, but unresolved static problems remain.
+
+                    Remaining static verification problems:
+                    - styles.css: expected target was not successfully mutated.
+                    - HTML does not link JavaScript file: `scripts.js`
+                    - Calculator/form task is missing a submit/calculate button.
+                    """));
+            messages.add(ChatMessage.user("is it working now?"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, WS, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().startsWith("Partially."), out.text());
+            assertEquals(0, occurrences(out.text(), "The previous verified result says"), out.text());
+            assertEquals(1, occurrences(out.text(), "HTML does not link JavaScript file"), out.text());
+            assertEquals(1, occurrences(out.text(), "submit/calculate button"), out.text());
+            assertFalse(out.text().contains("Yes, it is done now."), out.text());
+        }
+
+        private int occurrences(String text, String needle) {
+            if (text == null || needle == null || needle.isEmpty()) return 0;
+            int count = 0;
+            int index = 0;
+            while ((index = text.indexOf(needle, index)) >= 0) {
+                count++;
+                index += needle.length();
+            }
+            return count;
         }
     }
 }

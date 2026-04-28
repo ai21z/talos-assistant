@@ -819,6 +819,47 @@ class ToolCallParserTest {
     }
 
     @Test
+    void detectsMalformedSingleQuotedToolProtocolObject() {
+        String response = """
+                {
+                  "name": "talos.edit_file",
+                  "arguments": {
+                    "path": "scripts.js",
+                    "old_string": 'document.querySelector("#wrongButton").addEventListener("click", () => {',
+                    "new_string": 'document.querySelector("button").addEventListener("click", () => {'
+                  }
+                }
+                """;
+
+        assertTrue(ToolCallParser.looksLikeMalformedToolProtocol(response),
+                "single-quoted JSON-like Talos tool protocol must be detected as malformed protocol");
+        assertTrue(ToolCallParser.parse(response).isEmpty(),
+                "malformed protocol must not be executed as a parsed tool call");
+    }
+
+    @Test
+    void stripToolCallsRemovesMalformedSingleQuotedToolProtocolObject() {
+        String response = """
+                I will apply this edit:
+                {
+                  "name": "talos.edit_file",
+                  "arguments": {
+                    "path": "scripts.js",
+                    "old_string": 'before',
+                    "new_string": 'after'
+                  }
+                }
+                """;
+
+        String stripped = ToolCallParser.stripToolCalls(response);
+
+        assertTrue(stripped.contains("I will apply this edit:"));
+        assertFalse(stripped.contains("talos.edit_file"), stripped);
+        assertFalse(stripped.contains("old_string"), stripped);
+        assertFalse(stripped.contains("'before'"), stripped);
+    }
+
+    @Test
     void parseCodeFencedJsonWithToolKey() {
         String response = """
                 ```json
@@ -844,6 +885,40 @@ class ToolCallParserTest {
         assertEquals(1, calls.size());
         assertEquals("talos.read_file", calls.get(0).toolName());
         assertEquals("README.md", calls.get(0).param("path"));
+    }
+
+    @Test
+    void parseCodeFencedWriteFileWithBackticksInContent() {
+        String response = """
+                ```json
+                {"name": "talos.write_file", "arguments": {"path": "scripts.js", "content": "const message = `BMI ${bmi.toFixed(2)}`;"}}
+                ```
+                """;
+
+        List<ToolCall> calls = ToolCallParser.parse(response);
+        assertEquals(1, calls.size(),
+                "Fenced tool JSON must parse even when file content contains JavaScript backticks");
+        assertEquals("talos.write_file", calls.get(0).toolName());
+        assertEquals("scripts.js", calls.get(0).param("path"));
+        assertEquals("const message = `BMI ${bmi.toFixed(2)}`;", calls.get(0).param("content"));
+    }
+
+    @Test
+    void stripToolCallsRemovesCodeFencedWriteFileWithBackticksInContent() {
+        String response = """
+                Before.
+                ```json
+                {"name": "talos.write_file", "arguments": {"path": "scripts.js", "content": "const message = `BMI ${bmi.toFixed(2)}`;"}}
+                ```
+                After.
+                """;
+
+        String stripped = ToolCallParser.stripToolCalls(response);
+
+        assertTrue(stripped.contains("Before."));
+        assertTrue(stripped.contains("After."));
+        assertFalse(stripped.contains("talos.write_file"), stripped);
+        assertFalse(stripped.contains("`BMI"), stripped);
     }
 
     @Test

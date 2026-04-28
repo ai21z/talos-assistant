@@ -4,6 +4,8 @@ import dev.talos.cli.modes.AssistantTurnExecutor;
 import dev.talos.spi.types.ChatMessage;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -291,6 +293,39 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/46-write-file-missing-content-before-approval.json] 46: missing write_file content is blocked before approval")
+    void writeFileMissingContentBlocksBeforeApproval() {
+        var loaded = JsonScenarioLoader.load("scenarios/46-write-file-missing-content-before-approval.json");
+
+        try (var result = ScenarioRunner.run(loaded.definition())) {
+            result.assertUsedTool("talos.write_file")
+                    .assertFailedCalls(1)
+                    .assertApprovalCounts(0, 0, 0, 0)
+                    .assertFileContains("style.css", "background: #111")
+                    .assertFileNotContains("style.css", "brighter");
+
+            assertTrue(result.anyToolResultContains("Invalid talos.write_file call"));
+            assertTrue(result.anyToolResultContains("missing required parameter `content`"));
+            assertTrue(result.anyToolResultContains("No approval was requested"));
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/47-fenced-write-json-with-backticks-executes.json] 47: fenced write_file JSON with backticks executes")
+    void fencedWriteJsonWithBackticksExecutes() {
+        var loaded = JsonScenarioLoader.load("scenarios/47-fenced-write-json-with-backticks-executes.json");
+
+        try (var result = ScenarioRunner.run(loaded.definition())) {
+            result.assertUsedTool("talos.write_file")
+                    .assertNoFailedCalls()
+                    .assertApprovalCounts(1, 1, 0, 0)
+                    .assertFileContains("scripts.js", "`Your BMI is ${bmi.toFixed(2)}`")
+                    .assertAnswerNotContains("talos.write_file")
+                    .assertAnswerNotContains("```json");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/22-build-website-prompt-allows-apply.json] 22: build website prompt is apply-capable")
     void buildWebsitePromptAllowsApply() {
         var loaded = JsonScenarioLoader.load("scenarios/22-build-website-prompt-allows-apply.json");
@@ -355,7 +390,9 @@ class JsonScenarioPackTest {
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
             result.assertApprovalCounts(1, 1, 0, 0)
-                    .assertAnswerContains("Static verification: passed")
+                    .assertAnswerContains("File write/readback passed")
+                    .assertAnswerContains("task completion was not verified")
+                    .assertAnswerNotContains("Static verification: passed")
                     .assertAnswerContains("script.js")
                     .assertFileContains("script.js", "retry-create-file-alias");
         }
@@ -606,6 +643,22 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/45-status-question-blocks-mutation.json] 45: status question blocks mutation before approval")
+    void statusQuestionBlocksMutationBeforeApproval() {
+        var loaded = JsonScenarioLoader.load("scenarios/45-status-question-blocks-mutation.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("blocked")
+                    .assertFileContains("index.html", "<title>Night Drive</title>")
+                    .assertFileNotContains("index.html", "Status Question Regression");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/44-verify-web-complete-static-diagnostics.json] 44: verify web completion uses static diagnostics")
     void verifyWebCompletionUsesStaticDiagnostics() {
         var loaded = JsonScenarioLoader.load("scenarios/44-verify-web-complete-static-diagnostics.json");
@@ -641,6 +694,194 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/56-chat-small-talk-no-workspace-tools.json] 56: chat small talk does not execute workspace tools")
+    void chatSmallTalkDoesNotExecuteWorkspaceTools() {
+        var loaded = JsonScenarioLoader.load("scenarios/56-chat-small-talk-no-workspace-tools.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("Talos")
+                    .assertAnswerNotContains("ALPHA-742")
+                    .assertAnswerNotContains("talos.read_file")
+                    .assertAnswerNotContains("Used ");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/57-chat-privacy-negation-no-workspace-tools.json] 57: chat privacy negation does not execute workspace tools")
+    void chatPrivacyNegationDoesNotExecuteWorkspaceTools() {
+        var loaded = JsonScenarioLoader.load("scenarios/57-chat-privacy-negation-no-workspace-tools.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerNotContains("ALPHA-742")
+                    .assertAnswerNotContains("talos.list_dir")
+                    .assertAnswerNotContains("talos.read_file")
+                    .assertAnswerNotContains("Used ");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/58-chat-explicit-workspace-request-still-inspects.json] 58: chat explicit workspace request still inspects")
+    void chatExplicitWorkspaceRequestStillInspects() {
+        var loaded = JsonScenarioLoader.load("scenarios/58-chat-explicit-workspace-request-still-inspects.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("[Used 1 tool(s): talos.grep")
+                    .assertAnswerContains("ALPHA-742");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/59-overwrite-repair-phrasing-allows-mutation.json] 59: overwrite repair phrasing allows mutation")
+    void overwriteRepairPhrasingAllowsMutation() {
+        var loaded = JsonScenarioLoader.load("scenarios/59-overwrite-repair-phrasing-allows-mutation.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(3, 3, 0, 0)
+                    .assertAnswerNotContains("task-contract read-only denied")
+                    .assertAnswerNotContains("cannot create or modify files")
+                    .assertFileContains("index.html", "<script src=\"scripts.js\"></script>")
+                    .assertFileContains("index.html", "id=\"bmiForm\"")
+                    .assertFileContains("styles.css", ".calculator")
+                    .assertFileContains("scripts.js", "getElementById('bmiForm')")
+                    .assertFileContains("scripts.js", "Your BMI is");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/60-malformed-toolcall-json-like-output-no-leak.json] 60: malformed toolcall JSON-like output does not leak or mutate")
+    void malformedToolcallJsonLikeOutputDoesNotLeakOrMutate() {
+        var loaded = JsonScenarioLoader.load("scenarios/60-malformed-toolcall-json-like-output-no-leak.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("invalid tool-call payload")
+                    .assertAnswerContains("No file changes were applied")
+                    .assertAnswerNotContains("talos.edit_file")
+                    .assertAnswerNotContains("old_string")
+                    .assertFileContains("script.js", "document.getElementById('bmi-form')")
+                    .assertFileNotContains("script.js", "document.querySelector(\"button\")");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/61-blocked-readonly-tool-json-no-leak.json] 61: blocked read-only mutating protocol does not leak")
+    void blockedReadonlyToolJsonDoesNotLeak() {
+        var loaded = JsonScenarioLoader.load("scenarios/61-blocked-readonly-tool-json-no-leak.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("read-only")
+                    .assertAnswerContains("No file changes were applied")
+                    .assertAnswerNotContains("\"name\"")
+                    .assertAnswerNotContains("\"arguments\"")
+                    .assertAnswerNotContains("Do you approve these changes")
+                    .assertAnswerNotContains("I prepared the update")
+                    .assertFileContains("index.html", "<title>Night Drive</title>")
+                    .assertFileNotContains("index.html", "Changed without permission");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/62-repair-after-static-verification-failure-uses-verifier-context.json] 62: repair after static verification failure uses verifier context")
+    void repairAfterStaticVerificationFailureUsesVerifierContext() {
+        var loaded = JsonScenarioLoader.load("scenarios/62-repair-after-static-verification-failure-uses-verifier-context.json");
+        List<ChatMessage> history = new ArrayList<>();
+        var historyNode = loaded.raw().path("history");
+        for (var node : historyNode) {
+            history.add(new ChatMessage(
+                    node.path("role").asText(),
+                    node.path("content").asText()));
+        }
+
+        try (var result = ScenarioRunner.runThroughExecutorWithHistory(
+                loaded.definition(),
+                history,
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(3, 3, 0, 0)
+                    .assertAnswerContains("Static verification: passed")
+                    .assertAnswerNotContains("Static verification failed")
+                    .assertFileContains("index.html", "<script src=\"scripts.js\"></script>")
+                    .assertFileContains("index.html", "id=\"bmiForm\"")
+                    .assertFileContains("styles.css", ".calculator")
+                    .assertFileContains("scripts.js", "getElementById('bmiForm')")
+                    .assertFileContains("scripts.js", "Your BMI is");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/63-functional-web-task-missing-js-fails-verification.json] 63: functional web task missing JavaScript fails verification")
+    void functionalWebTaskMissingJavascriptFailsVerification() {
+        var loaded = JsonScenarioLoader.load("scenarios/63-functional-web-task-missing-js-fails-verification.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(1, 1, 0, 0)
+                    .assertAnswerContains("Static verification failed")
+                    .assertAnswerContains("missing JavaScript behavior")
+                    .assertAnswerContains("HTML does not link a JavaScript file")
+                    .assertAnswerContains("HTML defines duplicate IDs: `#result`")
+                    .assertAnswerContains("submit/calculate button")
+                    .assertAnswerNotContains("no task-specific static verifier was applicable")
+                    .assertAnswerNotContains("web coherence could not be checked")
+                    .assertAnswerNotContains("Static verification: passed")
+                    .assertFileAbsent("script.js")
+                    .assertFileContains("index.html", "<div id=\"result\"></div>");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/64-repeated-status-followup-direct-unduplicated.json] 64: repeated status follow-up is direct and unduplicated")
+    void repeatedStatusFollowupDirectUnduplicated() {
+        var loaded = JsonScenarioLoader.load("scenarios/64-repeated-status-followup-direct-unduplicated.json");
+        List<ChatMessage> history = new ArrayList<>();
+        var historyNode = loaded.raw().path("history");
+        for (var node : historyNode) {
+            history.add(new ChatMessage(
+                    node.path("role").asText(),
+                    node.path("content").asText()));
+        }
+
+        try (var result = ScenarioRunner.runThroughExecutorWithHistory(
+                loaded.definition(),
+                history,
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("Partially.")
+                    .assertAnswerContains("HTML does not link JavaScript file")
+                    .assertAnswerContains("submit/calculate button")
+                    .assertAnswerNotContains("The previous verified result says")
+                    .assertAnswerNotContains("Yes, it is done now.");
+
+            assertTrue(result.finalAnswer().startsWith("Partially."), result.finalAnswer());
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/42-partial-followup-summary-uses-verified-history.json] 42: follow-up summary uses verified partial history")
     void partialFollowupSummaryUsesVerifiedHistory() {
         var loaded = JsonScenarioLoader.load("scenarios/42-partial-followup-summary-uses-verified-history.json");
@@ -663,6 +904,182 @@ class JsonScenarioPackTest {
                     .assertAnswerContains(".cta-button")
                     .assertAnswerNotContains("I added the Listen Now button")
                     .assertAnswerNotContains("wired script.js");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/48-repair-followup-after-incomplete-outcome-applies.json] 48: repair follow-up after incomplete outcome is apply capable")
+    void repairFollowupAfterIncompleteOutcomeApplies() {
+        var loaded = JsonScenarioLoader.load("scenarios/48-repair-followup-after-incomplete-outcome-applies.json");
+        List<ChatMessage> history = new ArrayList<>();
+        var historyNode = loaded.raw().path("history");
+        for (var node : historyNode) {
+            history.add(new ChatMessage(
+                    node.path("role").asText(),
+                    node.path("content").asText()));
+        }
+
+        try (var result = ScenarioRunner.runThroughExecutorWithHistory(
+                loaded.definition(),
+                history,
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(1, 1, 0, 0)
+                    .assertFileContains("scripts.js", "BMI repaired")
+                    .assertAnswerContains("Created scripts.js");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/49-status-question-after-incomplete-outcome-stays-verify-only.json] 49: status question after incomplete outcome stays verify only")
+    void statusQuestionAfterIncompleteOutcomeStaysVerifyOnly() {
+        var loaded = JsonScenarioLoader.load("scenarios/49-status-question-after-incomplete-outcome-stays-verify-only.json");
+        List<ChatMessage> history = new ArrayList<>();
+        var historyNode = loaded.raw().path("history");
+        for (var node : historyNode) {
+            history.add(new ChatMessage(
+                    node.path("role").asText(),
+                    node.path("content").asText()));
+        }
+
+        try (var result = ScenarioRunner.runThroughExecutorWithHistory(
+                loaded.definition(),
+                history,
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertFileAbsent("scripts.js")
+                    .assertAnswerNotContains("Created scripts.js");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/53-status-followup-preserves-partial-outcome.json] 53: status follow-up preserves previous partial outcome")
+    void statusFollowupPreservesPartialOutcome() {
+        var loaded = JsonScenarioLoader.load("scenarios/53-status-followup-preserves-partial-outcome.json");
+        List<ChatMessage> history = new ArrayList<>();
+        var historyNode = loaded.raw().path("history");
+        for (var node : historyNode) {
+            history.add(new ChatMessage(
+                    node.path("role").asText(),
+                    node.path("content").asText()));
+        }
+
+        try (var result = ScenarioRunner.runThroughExecutorWithHistory(
+                loaded.definition(),
+                history,
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("partial")
+                    .assertAnswerContains("not complete")
+                    .assertAnswerContains("HTML does not link JavaScript file")
+                    .assertAnswerContains("submit/calculate button")
+                    .assertAnswerNotContains("functional 3-file BMI calculator")
+                    .assertAnswerNotContains("changes applied successfully");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/54-scoped-target-limiter-blocks-forbidden-target.json] 54: scoped target limiter blocks forbidden target")
+    void scopedTargetLimiterBlocksForbiddenTarget() {
+        var loaded = JsonScenarioLoader.load("scenarios/54-scoped-target-limiter-blocks-forbidden-target.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(1, 1, 0, 0)
+                    .assertAnswerContains("Succeeded:")
+                    .assertAnswerContains("styles.css")
+                    .assertAnswerContains("Failed:")
+                    .assertAnswerContains("index.html")
+                    .assertAnswerContains("forbidden")
+                    .assertFileContains("styles.css", "background: #101820")
+                    .assertFileContains("styles.css", "border: 1px solid #f2aa4c")
+                    .assertFileContains("index.html", "<title>Scoped Check</title>")
+                    .assertFileNotContains("index.html", "forbidden mutation")
+                    .assertFileContains("scripts.js", "scoped check");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/55-post-denial-retry-reissues-write.json] 55: post-denial retry reissues write")
+    void postDenialRetryReissuesWrite() {
+        var loaded = JsonScenarioLoader.load("scenarios/55-post-denial-retry-reissues-write.json");
+        List<ChatMessage> history = new ArrayList<>();
+        var historyNode = loaded.raw().path("history");
+        for (var node : historyNode) {
+            history.add(new ChatMessage(
+                    node.path("role").asText(),
+                    node.path("content").asText()));
+        }
+
+        try (var result = ScenarioRunner.runThroughExecutorWithHistory(
+                loaded.definition(),
+                history,
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(1, 1, 0, 0)
+                    .assertFileContains("scripts.js", "console.log(\"repair ok\");")
+                    .assertAnswerContains("[Used 1 tool(s): talos.write_file")
+                    .assertAnswerNotContains("cannot assist");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/50-static-verifier-placeholder-web-app-fails.json] 50: placeholder JavaScript prevents web app verification")
+    void staticVerifierPlaceholderWebAppFails() {
+        var loaded = JsonScenarioLoader.load("scenarios/50-static-verifier-placeholder-web-app-fails.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(3, 3, 0, 3)
+                    .assertAnswerContains("Static verification failed")
+                    .assertAnswerContains("scripts.js: JavaScript file appears to be placeholder content")
+                    .assertAnswerContains("The requested task is not verified complete.")
+                    .assertAnswerNotContains("Static verification: passed")
+                    .assertFileContains("index.html", "<script src=\"scripts.js\"></script>")
+                    .assertFileContains("scripts.js", "// Your JavaScript logic here");
+        }
+    }
+
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    @DisplayName("[json-scenario:scenarios/51-windows-expected-target-case-normalization.json] 51: Windows expected target matching ignores case-only differences")
+    void windowsExpectedTargetCaseNormalization() {
+        var loaded = JsonScenarioLoader.load("scenarios/51-windows-expected-target-case-normalization.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(3, 3, 0, 3)
+                    .assertAnswerContains("Static verification failed")
+                    .assertAnswerContains("scripts.js: JavaScript file appears to be placeholder content")
+                    .assertAnswerNotContains("Index.html: expected target was not successfully mutated.")
+                    .assertAnswerNotContains("index.html: expected target was not successfully mutated.")
+                    .assertFileContains("index.html", "<script src=\"scripts.js\"></script>")
+                    .assertFileContains("scripts.js", "// Your JavaScript logic here");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/52-repeated-stylesheet-insertion-fails-verification.json] 52: repeated stylesheet insertion fails static verification")
+    void repeatedStylesheetInsertionFailsVerification() {
+        var loaded = JsonScenarioLoader.load("scenarios/52-repeated-stylesheet-insertion-fails-verification.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(1, 1, 0, 0)
+                    .assertAnswerContains("Static verification failed")
+                    .assertAnswerContains("HTML links CSS file more than once: `style.css`")
+                    .assertAnswerNotContains("Static verification: passed")
+                    .assertFileContains("index.html", "<link rel=\"stylesheet\" href=\"style.css\">\n    <link rel=\"stylesheet\" href=\"style.css\">");
         }
     }
 

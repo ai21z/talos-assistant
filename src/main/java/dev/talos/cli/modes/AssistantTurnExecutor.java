@@ -2,11 +2,13 @@ package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.core.llm.LlmClient;
+import dev.talos.runtime.MutationIntent;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.ToolCallStreamFilter;
 import dev.talos.runtime.TurnAuditCapture;
 import dev.talos.runtime.TurnPolicyTrace;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -14,6 +16,7 @@ import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.verification.StaticTaskVerifier;
+import dev.talos.runtime.verification.StaticVerificationRepairContext;
 import dev.talos.runtime.verification.WebDiagnosticIntent;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
@@ -23,8 +26,10 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -70,11 +75,13 @@ public final class AssistantTurnExecutor {
             "what are you",
             "what is talos",
             "who is talos",
+            "tell me what you are",
             "tell me about yourself"
     );
 
     private static final Set<String> ASSISTANT_CAPABILITY_TURN_MARKERS = Set.of(
             "what can you do",
+            "what can you do for me",
             "how can you assist me",
             "how can you help me",
             "what can talos do"
@@ -101,7 +108,8 @@ public final class AssistantTurnExecutor {
      * tool-loop entry gate would be misleading.
      */
     private static boolean hasAnyTextToolCalls(String answer) {
-        return ToolCallParser.containsToolCalls(answer);
+        return !ToolCallParser.looksLikeMalformedToolProtocol(answer)
+                && ToolCallParser.containsToolCalls(answer);
     }
 
     /** Returns true if native tool calls or text-based tool calls are present. */
@@ -156,6 +164,7 @@ public final class AssistantTurnExecutor {
         ctx = withNativeToolSurface(ctx, taskContract);
         recordPolicyTrace(taskContract, ctx);
         injectTaskContractInstruction(messages);
+        injectStaticVerificationRepairInstruction(messages, taskContract);
         Context turnContext = ctx;
         String directAnswer = deterministicDirectAnswerIfNeeded(messages, taskContract);
         if (directAnswer != null) {
@@ -163,6 +172,7 @@ public final class AssistantTurnExecutor {
         }
         boolean useStreaming = shouldUseStreaming(ctx, taskContract);
 
+        TurnTaskContractCapture.set(taskContract);
         try {
             if (useStreaming) {
                 // ── Streaming path ──────────────────────────────────────────
@@ -186,18 +196,24 @@ public final class AssistantTurnExecutor {
 
                 if (answer != null) {
                     if (ctx.toolCallLoop() != null && hasAnyToolCalls(streamResult)) {
-                        LOG.debug("Tool calls detected in streamed response (native: {}), entering tool-call loop",
-                                streamResult.hasToolCalls());
-                        ToolCallLoop.LoopResult loopResult = ctx.toolCallLoop().run(
-                                answer, streamResult.toolCalls(), messages, workspace, ctx);
-                        answer = loopResult.finalAnswer();
-                        LOG.debug("Streaming tool-call loop complete: {} iterations, {} tools invoked",
-                                loopResult.iterations(), loopResult.toolsInvoked());
-                        appendSummary(out, loopResult);
-                        ToolLoopAnswerResolution resolution = resolveToolLoopAnswer(
-                                answer, messages, loopResult, workspace, ctx, opts);
-                        appendExtraSummary(out, resolution.extraSummary());
-                        out.append(resolution.answer());
+                        if (blocksToolCallsForContract(taskContract)) {
+                            answer = answerForBlockedSmallTalkToolCalls(answer, messages, opts);
+                            emitBlockedSmallTalkToolCallAnswer(answer, ctx);
+                            out.append(answer);
+                        } else {
+                            LOG.debug("Tool calls detected in streamed response (native: {}), entering tool-call loop",
+                                    streamResult.hasToolCalls());
+                            ToolCallLoop.LoopResult loopResult = ctx.toolCallLoop().run(
+                                    answer, streamResult.toolCalls(), messages, workspace, ctx);
+                            answer = loopResult.finalAnswer();
+                            LOG.debug("Streaming tool-call loop complete: {} iterations, {} tools invoked",
+                                    loopResult.iterations(), loopResult.toolsInvoked());
+                            appendSummary(out, loopResult);
+                            ToolLoopAnswerResolution resolution = resolveToolLoopAnswer(
+                                    answer, messages, loopResult, workspace, ctx, opts);
+                            appendExtraSummary(out, resolution.extraSummary());
+                            out.append(resolution.answer());
+                        }
                     } else {
                         // No tool calls — content was streamed; record full text for memory.
                         // Streaming no-tool branch. We cannot silently retry here
@@ -226,18 +242,22 @@ public final class AssistantTurnExecutor {
                 String answer = streamResult.text();
                 if (answer != null) {
                     if (ctx.toolCallLoop() != null && hasAnyToolCalls(streamResult)) {
-                        LOG.debug("Tool calls detected in LLM response (native: {}), entering tool-call loop",
-                                streamResult.hasToolCalls());
-                        ToolCallLoop.LoopResult loopResult = ctx.toolCallLoop().run(
-                                answer, streamResult.toolCalls(), messages, workspace, ctx);
-                        answer = loopResult.finalAnswer();
-                        LOG.debug("Buffered tool-call loop complete: {} iterations, {} tools invoked",
-                                loopResult.iterations(), loopResult.toolsInvoked());
-                        appendSummary(out, loopResult);
-                        ToolLoopAnswerResolution resolution = resolveToolLoopAnswer(
-                                answer, messages, loopResult, workspace, ctx, opts);
-                        appendExtraSummary(out, resolution.extraSummary());
-                        answer = resolution.answer();
+                        if (blocksToolCallsForContract(taskContract)) {
+                            answer = answerForBlockedSmallTalkToolCalls(answer, messages, opts);
+                        } else {
+                            LOG.debug("Tool calls detected in LLM response (native: {}), entering tool-call loop",
+                                    streamResult.hasToolCalls());
+                            ToolCallLoop.LoopResult loopResult = ctx.toolCallLoop().run(
+                                    answer, streamResult.toolCalls(), messages, workspace, ctx);
+                            answer = loopResult.finalAnswer();
+                            LOG.debug("Buffered tool-call loop complete: {} iterations, {} tools invoked",
+                                    loopResult.iterations(), loopResult.toolsInvoked());
+                            appendSummary(out, loopResult);
+                            ToolLoopAnswerResolution resolution = resolveToolLoopAnswer(
+                                    answer, messages, loopResult, workspace, ctx, opts);
+                            appendExtraSummary(out, resolution.extraSummary());
+                            answer = resolution.answer();
+                        }
                     } else {
                         // No-tool-call path. Zero tools were invoked this turn.
                         // Grounding retry gate: if the user explicitly asked for evidence
@@ -274,6 +294,8 @@ public final class AssistantTurnExecutor {
             out.append("\n[Error during LLM call")
                .append(detail != null && !detail.isBlank() ? ": " + detail : "")
                .append("]\n");
+        } finally {
+            TurnTaskContractCapture.clear();
         }
 
         return new TurnOutput(out.toString(), streamed);
@@ -338,6 +360,12 @@ public final class AssistantTurnExecutor {
             Context ctx,
             Options opts
     ) {
+        if (ToolCallParser.looksLikeMalformedProtocolArrayDebris(answer)
+                || ToolCallParser.looksLikeMalformedToolProtocol(answer)) {
+            return new ToolLoopAnswerResolution(
+                    shapeAnswerWithoutTools(answer, messages, ctx, false, opts),
+                    null);
+        }
         ToolCallLoop.LoopResult noToolLoopResult = emptyNoToolLoopResult(answer, messages);
         MutationRetryResult mrr = mutationRequestRetryIfNeeded(
                 answer, messages, noToolLoopResult, workspace, ctx);
@@ -399,7 +427,7 @@ public final class AssistantTurnExecutor {
         try {
             LlmClient.StreamResult retry = chatFull(ctx, retryMessages);
             String retryText = retry.text() == null ? "" : retry.text();
-            if (retry.hasToolCalls() || ToolCallParser.containsToolCalls(retryText)) {
+            if (retry.hasToolCalls() || hasAnyTextToolCalls(retryText)) {
                 ToolCallLoop.LoopResult retryLoop = ctx.toolCallLoop().run(
                         retryText, retry.toolCalls(), retryMessages, workspace, ctx);
                 String mergedAnswer = retryLoop.finalAnswer();
@@ -496,6 +524,37 @@ public final class AssistantTurnExecutor {
         return !requiresWorkspaceEvidence(taskContract);
     }
 
+    private static boolean blocksToolCallsForContract(TaskContract taskContract) {
+        return taskContract != null && taskContract.type() == TaskType.SMALL_TALK;
+    }
+
+    private static String answerForBlockedSmallTalkToolCalls(
+            String answer,
+            List<ChatMessage> messages,
+            Options opts
+    ) {
+        String stripped = ToolCallParser.stripToolCalls(answer == null ? "" : answer).strip();
+        if (!stripped.isBlank()) {
+            return sanitizeAndTruncate(stripped, opts);
+        }
+        String userRequest = latestUserRequest(messages);
+        if (looksLikeAssistantIdentityTurn(userRequest)) {
+            return sanitizeAndTruncate(TALOS_IDENTITY_ANSWER, opts);
+        }
+        if (looksLikeAssistantCapabilityTurn(userRequest)) {
+            return sanitizeAndTruncate(TALOS_CAPABILITY_ANSWER, opts);
+        }
+        return sanitizeAndTruncate("Hi, I am Talos.", opts);
+    }
+
+    private static void emitBlockedSmallTalkToolCallAnswer(String answer, Context ctx) {
+        if (ctx == null || ctx.streamSink() == null || answer == null || answer.isBlank()) return;
+        ctx.streamSink().accept(answer);
+        if (ctx.streamSink() instanceof ToolCallStreamFilter filter) {
+            filter.flush();
+        }
+    }
+
     private static boolean requiresWorkspaceEvidence(TaskContract taskContract) {
         if (taskContract == null) return false;
         return switch (taskContract.type()) {
@@ -581,11 +640,42 @@ public final class AssistantTurnExecutor {
         messages.add(insertAt, ChatMessage.system(instruction));
     }
 
+    static void injectStaticVerificationRepairInstruction(
+            List<ChatMessage> messages,
+            TaskContract taskContract
+    ) {
+        if (messages == null || messages.isEmpty()) return;
+        if (messages.stream().anyMatch(AssistantTurnExecutor::isStaticVerificationRepairInstruction)) {
+            return;
+        }
+        StaticVerificationRepairContext.instructionFor(messages, taskContract)
+                .ifPresent(instruction -> {
+                    int insertAt = 0;
+                    for (int i = 0; i < messages.size(); i++) {
+                        ChatMessage message = messages.get(i);
+                        if ("system".equals(message.role())) {
+                            insertAt = i + 1;
+                            if (isTaskContractInstruction(message)) {
+                                break;
+                            }
+                        }
+                    }
+                    messages.add(insertAt, ChatMessage.system(instruction));
+                });
+    }
+
     private static boolean isTaskContractInstruction(ChatMessage message) {
         return message != null
                 && "system".equals(message.role())
                 && message.content() != null
                 && message.content().startsWith("[TaskContract]");
+    }
+
+    private static boolean isStaticVerificationRepairInstruction(ChatMessage message) {
+        return message != null
+                && "system".equals(message.role())
+                && message.content() != null
+                && message.content().startsWith("[Static verification repair context]");
     }
 
     private static String deterministicDirectAnswerIfNeeded(
@@ -628,7 +718,10 @@ public final class AssistantTurnExecutor {
             List<ChatMessage> messages,
             String userRequest
     ) {
-        if (!looksLikeChangeSummaryFollowUp(userRequest)) return null;
+        if (!looksLikeChangeSummaryFollowUp(userRequest)
+                && !MutationIntent.looksPriorChangeStatusQuestion(userRequest)) {
+            return null;
+        }
         if (messages == null || messages.isEmpty()) return null;
 
         for (int i = messages.size() - 1; i >= 0; i--) {
@@ -660,22 +753,68 @@ public final class AssistantTurnExecutor {
     }
 
     private static String renderVerifiedFollowUpSummary(String previousAssistantText) {
-        String excerpt = previousAssistantText == null ? "" : previousAssistantText.strip();
+        String excerpt = verifiedOutcomeExcerpt(previousAssistantText);
         String lower = excerpt.toLowerCase(Locale.ROOT);
         String status;
         if (lower.contains("partial verification") || lower.contains("the turn remains partial")) {
-            status = "The previous verified result says the last change is partial, not complete.";
+            status = "Partially. The task remains partial: some files changed, but the previous verified outcome says it is not complete (not verified complete).";
         } else if (lower.contains("task incomplete") || lower.contains("static verification failed")) {
-            status = "The previous verified result says the last change is not complete.";
+            status = "No. The previous verified outcome says the task is not complete.";
         } else if (lower.contains("static verification: passed")) {
-            status = "The previous verified result says the last change passed static verification.";
+            status = "Yes. Static verification passed in the previous outcome.";
         } else {
-            status = "The previous turn included a verified result.";
+            status = "The previous turn included a verified outcome.";
         }
+        String details = verifiedOutcomeDetails(excerpt);
+        return details.isBlank() ? status : status + "\n\n" + details;
+    }
+
+    private static String verifiedOutcomeExcerpt(String previousAssistantText) {
+        if (previousAssistantText == null || previousAssistantText.isBlank()) return "";
+        List<String> lines = new ArrayList<>();
+        for (String rawLine : previousAssistantText.strip().lines().toList()) {
+            String line = rawLine.strip();
+            if (line.isBlank() || isPriorVerifiedSummaryLine(line)) continue;
+            lines.add(rawLine);
+        }
+        String excerpt = String.join("\n", lines).strip();
         if (excerpt.length() > 1500) {
-            excerpt = excerpt.substring(0, 1500) + "\n\n[summary truncated]";
+            return excerpt.substring(0, 1500) + "\n\n[summary truncated]";
         }
-        return status + "\n\n" + excerpt;
+        return excerpt;
+    }
+
+    private static boolean isPriorVerifiedSummaryLine(String line) {
+        if (line == null || line.isBlank()) return true;
+        String lower = line.toLowerCase(Locale.ROOT);
+        return lower.startsWith("the previous verified result says")
+                || lower.startsWith("partially. some files changed")
+                || lower.startsWith("no. the previous verified outcome says")
+                || lower.startsWith("yes. static verification passed")
+                || lower.equals("verified details:");
+    }
+
+    private static String verifiedOutcomeDetails(String excerpt) {
+        if (excerpt == null || excerpt.isBlank()) return "";
+        List<String> details = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (String rawLine : excerpt.lines().toList()) {
+            String line = rawLine.strip();
+            if (line.isBlank() || isPriorVerifiedSummaryLine(line)) continue;
+            if (!isVerifiedDetailLine(line)) continue;
+            if (seen.add(line)) details.add(line);
+            if (details.size() >= 12) break;
+        }
+        if (details.isEmpty()) return "";
+        return "Verified details:\n" + String.join("\n", details);
+    }
+
+    private static boolean isVerifiedDetailLine(String line) {
+        if (line == null || line.isBlank()) return false;
+        return line.equals("Succeeded:")
+                || line.equals("Failed:")
+                || line.equals("Remaining static verification problems:")
+                || line.startsWith("- ");
     }
 
     private static void moveToVerifyAfterSuccessfulMutation(
@@ -705,7 +844,8 @@ public final class AssistantTurnExecutor {
             String shapedAnswer,
             Context ctx
     ) {
-        if (!ToolCallParser.looksLikeMalformedProtocolArrayDebris(rawAnswer)) return;
+        if (!ToolCallParser.looksLikeMalformedProtocolArrayDebris(rawAnswer)
+                && !ToolCallParser.looksLikeMalformedToolProtocol(rawAnswer)) return;
         if (ctx == null) return;
         if (!(ctx.streamSink() instanceof ToolCallStreamFilter filter)) return;
         if (shapedAnswer == null || shapedAnswer.isBlank()) return;
@@ -1146,6 +1286,65 @@ public final class AssistantTurnExecutor {
         return out.toString().stripTrailing();
     }
 
+    static String summarizeReadOnlyDeniedMutationOutcomesIfNeeded(String answer,
+                                                                  List<ChatMessage> messages,
+                                                                  ToolCallLoop.LoopResult loopResult,
+                                                                  int extraMutationSuccesses) {
+        if (loopResult == null) return answer;
+        if (extraMutationSuccesses > 0) return answer;
+        if (loopResult.mutatingToolSuccesses() > 0) return answer;
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+        if (contract == null || contract.mutationAllowed()) return answer;
+
+        List<ToolCallLoop.ToolOutcome> readOnlyBlockedMutations = loopResult.toolOutcomes().stream()
+                .filter(ToolCallLoop.ToolOutcome::mutating)
+                .filter(outcome -> !outcome.success())
+                .toList();
+        if (readOnlyBlockedMutations.isEmpty()) return answer;
+
+        String cleanReadOnlyAnswer = readOnlyDeniedCleanAnswer(answer);
+        if (cleanReadOnlyAnswer.isBlank()) {
+            return READ_ONLY_DENIED_MUTATION_REPLACEMENT;
+        }
+        return READ_ONLY_DENIED_MUTATION_REPLACEMENT
+                + "\n\nRead-only answer from inspected evidence:\n"
+                + cleanReadOnlyAnswer;
+    }
+
+    private static String readOnlyDeniedCleanAnswer(String answer) {
+        String stripped = ToolCallParser.stripToolCalls(answer == null ? "" : answer).strip();
+        if (stripped.isBlank()) return "";
+
+        List<String> kept = new ArrayList<>();
+        for (String line : stripped.lines().toList()) {
+            if (looksLikeFakeApprovalLine(line)) continue;
+            kept.add(line);
+        }
+        String cleaned = String.join("\n", kept).strip();
+        if (cleaned.isBlank()) return "";
+        if (looksLikeOnlyMutationPreparation(cleaned)) return "";
+        return cleaned;
+    }
+
+    private static boolean looksLikeFakeApprovalLine(String line) {
+        if (line == null || line.isBlank()) return false;
+        String lower = line.toLowerCase(Locale.ROOT).strip();
+        return lower.contains("do you approve these changes")
+                || lower.contains("please approve these changes")
+                || lower.contains("allow these changes")
+                || lower.contains("would you like me to apply these changes");
+    }
+
+    private static boolean looksLikeOnlyMutationPreparation(String text) {
+        if (text == null || text.isBlank()) return false;
+        String lower = text.toLowerCase(Locale.ROOT).strip();
+        return lower.equals("i prepared the update.")
+                || lower.equals("i prepared the update")
+                || lower.equals("i prepared these changes.")
+                || lower.equals("i prepared these changes");
+    }
+
     static String summarizeInvalidMutationOutcomesIfNeeded(String answer,
                                                            List<ChatMessage> messages,
                                                            ToolCallLoop.LoopResult loopResult,
@@ -1256,7 +1455,11 @@ public final class AssistantTurnExecutor {
         if (hasInvalidMutatingFailure(loopResult)) return new MutationRetryResult(answer, 0, null);
 
         String userRequest = latestUserRequest(messages);
-        if (!looksLikeMutationRequest(userRequest)) return new MutationRetryResult(answer, 0, null);
+        TaskContract retryContract = TaskContractResolver.fromMessages(messages);
+        if (retryContract == null || !retryContract.mutationAllowed()) {
+            return new MutationRetryResult(answer, 0, null);
+        }
+        String priorMutationRequest = previousMutationUserRequest(messages, userRequest);
 
         LOG.info("Missing-mutation retry fired: user asked for a change but 0 mutating "
                 + "tool calls succeeded. Re-prompting with an explicit write nudge.");
@@ -1264,11 +1467,8 @@ public final class AssistantTurnExecutor {
         messages.add(ChatMessage.assistant(answer.isBlank() ? "(no answer)" : answer));
         messages.add(ChatMessage.user(
                 "You were asked to modify a file but you did not call talos.write_file "
-                + "or talos.edit_file in this turn. The user's request was:\n\n«"
-                + (userRequest == null ? "" :
-                        (userRequest.length() <= 1000 ? userRequest
-                                : userRequest.substring(0, 1000) + "…"))
-                + "»\n\n"
+                + "or talos.edit_file in this turn. "
+                + mutationRetryRequestContext(userRequest, priorMutationRequest)
                 + "Call the appropriate write/edit tool NOW to perform the change. "
                 + "If you truly cannot (e.g., you do not know which file, or the "
                 + "content is impossible to produce), state exactly which file and why "
@@ -1278,7 +1478,7 @@ public final class AssistantTurnExecutor {
             LlmClient.StreamResult retry = chatFull(ctx, messages);
             String retryText = retry.text() == null ? "" : retry.text();
 
-            if (retry.hasToolCalls() || ToolCallParser.containsToolCalls(retryText)) {
+            if (retry.hasToolCalls() || hasAnyTextToolCalls(retryText)) {
                 // Re-enter the tool loop so the mutating call actually executes.
                 ToolCallLoop.LoopResult retryLoop = ctx.toolCallLoop().run(
                         retryText, retry.toolCalls(), messages, workspace, ctx);
@@ -1310,6 +1510,47 @@ public final class AssistantTurnExecutor {
             LOG.warn("Missing-mutation retry failed: {}", e.getMessage());
         }
         return new MutationRetryResult(answer, 0, null);
+    }
+
+    private static String mutationRetryRequestContext(String userRequest, String priorMutationRequest) {
+        if (priorMutationRequest != null && !priorMutationRequest.isBlank()
+                && !Objects.equals(priorMutationRequest, userRequest)) {
+            return "The current user message is a retry/repair follow-up:\n\n«"
+                    + pinForRetryPrompt(userRequest)
+                    + "»\n\n"
+                    + "The previous mutation request to reissue is:\n\n«"
+                    + pinForRetryPrompt(priorMutationRequest)
+                    + "»\n\n";
+        }
+        return "The user's request was:\n\n«"
+                + pinForRetryPrompt(userRequest)
+                + "»\n\n";
+    }
+
+    private static String previousMutationUserRequest(List<ChatMessage> messages, String latestUserRequest) {
+        if (messages == null || messages.isEmpty()) return null;
+        boolean skippedLatest = false;
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            ChatMessage message = messages.get(i);
+            if (message == null || !"user".equals(message.role())) continue;
+            String content = message.content();
+            if (ToolCallSupport.isSyntheticToolResultContent(content)) continue;
+            if (content == null || content.isBlank()) continue;
+            if (!skippedLatest && Objects.equals(content, latestUserRequest)) {
+                skippedLatest = true;
+                continue;
+            }
+            TaskContract prior = TaskContractResolver.fromUserRequest(content);
+            if (prior.mutationAllowed()) {
+                return content;
+            }
+        }
+        return null;
+    }
+
+    private static String pinForRetryPrompt(String text) {
+        if (text == null) return "";
+        return text.length() <= 1000 ? text : text.substring(0, 1000) + "…";
     }
 
     private static boolean hasInvalidMutatingFailure(ToolCallLoop.LoopResult loopResult) {
@@ -1485,7 +1726,7 @@ public final class AssistantTurnExecutor {
         try {
             LlmClient.StreamResult retry = chatFull(ctx, retryMessages);
             String retryText = retry.text() == null ? "" : retry.text();
-            if (retry.hasToolCalls() || ToolCallParser.containsToolCalls(retryText)) {
+            if (retry.hasToolCalls() || hasAnyTextToolCalls(retryText)) {
                 ToolCallLoop.LoopResult retryLoop = ctx.toolCallLoop().run(
                         retryText, retry.toolCalls(), retryMessages, workspace, ctx);
                 String mergedAnswer = retryLoop.finalAnswer();
@@ -1784,6 +2025,13 @@ public final class AssistantTurnExecutor {
     public static final String MALFORMED_TOOL_PROTOCOL_REPLACEMENT =
             "[Truth check: the model produced an invalid tool-call payload, so no action was taken.]\n\n"
             + "No file changes were applied. Please retry the request.";
+
+    public static final String READ_ONLY_DENIED_MUTATION_REPLACEMENT =
+            "[Truth check: no file was changed in this turn. The model attempted "
+            + "to call mutating tools, but this turn was classified as read-only, "
+            + "so those calls were blocked.]\n\n"
+            + "No file changes were applied. Ask explicitly to edit, update, or "
+            + "create files if you want Talos to modify the workspace.";
 
     public static final String LOCAL_ACCESS_CAPABILITY_CORRECTION =
             "[Capability correction: Talos can inspect files in the current workspace "
