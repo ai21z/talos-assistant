@@ -287,6 +287,80 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void functionalCalculatorTaskFailsWithConcreteProblemsWhenJavaScriptIsMissing() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!DOCTYPE html>
+                <html>
+                  <head>
+                    <link rel="stylesheet" href="styles.css">
+                  </head>
+                  <body>
+                    <main class="calculator">
+                      <h1>BMI Calculator</h1>
+                      <label>Weight <input id="weight" type="number"></label>
+                      <label>Height <input id="height" type="number"></label>
+                    </main>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), ".calculator { max-width: 28rem; }");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Hi, I don't really know coding. I have this little BMI page here and it only shows a title. Can you make it actually work for me?",
+                loopResult(List.of(successfulWrite("index.html", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("missing JavaScript behavior")), result.problems().toString());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("HTML does not link a JavaScript file")), result.problems().toString());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("submit/calculate button")), result.problems().toString());
+        assertTrue(result.problems().stream()
+                .noneMatch(p -> p.contains("web coherence could not be checked")), result.problems().toString());
+    }
+
+    @Test
+    void functionalCalculatorTaskDetectsDuplicateIdsWithoutJavaScriptFile() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!DOCTYPE html>
+                <html>
+                  <head>
+                    <link rel="stylesheet" href="styles.css">
+                  </head>
+                  <body>
+                    <main class="calculator">
+                      <h1>BMI Calculator</h1>
+                      <form id="bmi-form">
+                        <input id="weight" type="number">
+                        <input id="height" type="number">
+                        <button type="submit">Calculate</button>
+                      </form>
+                      <p id="result"></p>
+                      <div id="result"></div>
+                    </main>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), ".calculator { max-width: 28rem; }");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Can you make me a working BMI calculator webpage here?",
+                loopResult(List.of(successfulWrite("index.html", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("HTML defines duplicate IDs: `#result`")),
+                result.problems().toString());
+        assertTrue(result.problems().stream()
+                .noneMatch(p -> p.contains("web coherence could not be checked")), result.problems().toString());
+    }
+
+    @Test
     void broadWebAppBuildPassesWhenHtmlCssAndJavaScriptAreLinked() throws Exception {
         writeValidBmiWebFiles();
 

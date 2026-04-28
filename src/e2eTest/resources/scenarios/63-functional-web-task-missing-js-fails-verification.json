@@ -1,0 +1,16 @@
+{
+  "name": "functional web task missing javascript fails verification",
+  "fixture": "incomplete-web-page",
+  "v1Pack": true,
+  "claims": [
+    "functional-web-task-missing-javascript-fails-static-verification",
+    "partial-functional-web-workspace-reports-actionable-problems"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Hi, I don't really know coding. I have this little BMI page here and it only shows a title. Can you make it actually work for me? Please update the local files.",
+  "scriptedResponses": [
+    "```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"index.html\",\"content\":\"<!doctype html>\\n<html lang=\\\"en\\\">\\n<head>\\n  <meta charset=\\\"utf-8\\\">\\n  <title>BMI Calculator</title>\\n  <link rel=\\\"stylesheet\\\" href=\\\"style.css\\\">\\n</head>\\n<body>\\n  <main class=\\\"calculator\\\">\\n    <h1>BMI Calculator</h1>\\n    <label>Weight <input id=\\\"weight\\\" type=\\\"number\\\"></label>\\n    <label>Height <input id=\\\"height\\\" type=\\\"number\\\"></label>\\n    <p id=\\\"result\\\"></p>\\n    <div id=\\\"result\\\"></div>\\n  </main>\\n</body>\\n</html>\"}}\n```",
+    "Updated the BMI page."
+  ]
+}

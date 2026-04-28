@@ -831,6 +831,29 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/63-functional-web-task-missing-js-fails-verification.json] 63: functional web task missing JavaScript fails verification")
+    void functionalWebTaskMissingJavascriptFailsVerification() {
+        var loaded = JsonScenarioLoader.load("scenarios/63-functional-web-task-missing-js-fails-verification.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(1, 1, 0, 0)
+                    .assertAnswerContains("Static verification failed")
+                    .assertAnswerContains("missing JavaScript behavior")
+                    .assertAnswerContains("HTML does not link a JavaScript file")
+                    .assertAnswerContains("HTML defines duplicate IDs: `#result`")
+                    .assertAnswerContains("submit/calculate button")
+                    .assertAnswerNotContains("no task-specific static verifier was applicable")
+                    .assertAnswerNotContains("web coherence could not be checked")
+                    .assertAnswerNotContains("Static verification: passed")
+                    .assertFileAbsent("script.js")
+                    .assertFileContains("index.html", "<div id=\"result\"></div>");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/42-partial-followup-summary-uses-verified-history.json] 42: follow-up summary uses verified partial history")
     void partialFollowupSummaryUsesVerifiedHistory() {
         var loaded = JsonScenarioLoader.load("scenarios/42-partial-followup-summary-uses-verified-history.json");
