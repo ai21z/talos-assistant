@@ -883,6 +883,37 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/65-protected-path-mutation-denied-before-approval.json] 65: protected path mutation is denied before approval")
+    void protectedPathMutationDeniedBeforeApproval() {
+        var loaded = JsonScenarioLoader.load("scenarios/65-protected-path-mutation-denied-before-approval.json");
+
+        try (var result = ScenarioRunner.run(loaded.definition())) {
+            result.assertUsedTool("talos.write_file")
+                    .assertFailedCalls(1)
+                    .assertApprovalCounts(0, 0, 0, 0)
+                    .assertFileContains(".env", "SECRET=original")
+                    .assertFileNotContains(".env", "SECRET=changed");
+
+            assertTrue(result.anyToolResultContains("Permission policy denied"));
+            assertTrue(result.anyToolResultContains("protected path"));
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/66-protected-read-requires-approval.json] 66: protected read requires approval")
+    void protectedReadRequiresApproval() {
+        var loaded = JsonScenarioLoader.load("scenarios/66-protected-read-requires-approval.json");
+
+        try (var result = ScenarioRunner.run(loaded.definition())) {
+            result.assertUsedTool("talos.read_file")
+                    .assertNoFailedCalls()
+                    .assertApprovalCounts(1, 1, 0, 0);
+
+            assertTrue(result.anyToolResultContains("SECRET=original"));
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/42-partial-followup-summary-uses-verified-history.json] 42: follow-up summary uses verified partial history")
     void partialFollowupSummaryUsesVerifiedHistory() {
         var loaded = JsonScenarioLoader.load("scenarios/42-partial-followup-summary-uses-verified-history.json");

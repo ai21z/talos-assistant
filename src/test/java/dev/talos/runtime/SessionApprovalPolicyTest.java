@@ -255,7 +255,7 @@ class SessionApprovalPolicyTest {
     }
 
     @Test
-    void turnProcessorStillAsksForOutOfWorkspaceAfterRemember(@TempDir Path ws, @TempDir Path other) {
+    void turnProcessorDeniesOutOfWorkspaceBeforeApprovalAfterRemember(@TempDir Path ws, @TempDir Path other) {
         AtomicInteger gateCalls = new AtomicInteger(0);
         ApprovalGate gate = new ApprovalGate() {
             @Override public boolean approve(String d, String x) { return true; }
@@ -282,11 +282,15 @@ class SessionApprovalPolicyTest {
                 Map.of("path", ws.resolve("a.txt").toString(), "content", "1")), ctx);
         assertTrue(policy.rememberInWorkspaceWritesEnabled());
 
-        // Out-of-workspace write: gate MUST still be called despite remember.
-        tp.executeTool(s, new ToolCall("test.w",
+        // Out-of-workspace write: the declarative permission layer denies
+        // workspace escapes before approval. Remembered approval must not
+        // convert an escaped path into another prompt.
+        ToolResult escaped = tp.executeTool(s, new ToolCall("test.w",
                 Map.of("path", other.resolve("evil.txt").toString(), "content", "x")), ctx);
-        assertEquals(2, gateCalls.get(),
-                "out-of-workspace write must not use the remembered approval");
+        assertFalse(escaped.success());
+        assertEquals(ToolError.DENIED, escaped.error().code());
+        assertEquals(1, gateCalls.get(),
+                "out-of-workspace write must be denied before another approval prompt");
     }
 
     @Test

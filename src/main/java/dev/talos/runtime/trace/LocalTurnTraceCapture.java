@@ -129,6 +129,33 @@ public final class LocalTurnTraceCapture {
         }
     }
 
+    public static void recordPermissionDecision(
+            String phase,
+            ToolCall call,
+            String action,
+            String reasonCode,
+            String relativePath,
+            boolean protectedPath,
+            boolean rememberEligible
+    ) {
+        Bag bag = HOLDER.get();
+        if (bag == null) return;
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("action", safe(action));
+        data.put("reasonCode", safe(reasonCode));
+        data.put("rememberEligible", rememberEligible);
+        data.put("protectedPath", protectedPath);
+        if (relativePath != null && !relativePath.isBlank()) {
+            data.put("pathHint", TraceRedactor.pathHint(relativePath));
+        }
+        bag.builder.event(new TurnTraceEvent(
+                "PERMISSION_DECISION",
+                now(),
+                phase == null ? "" : phase,
+                call == null ? "" : call.toolName(),
+                data));
+    }
+
     public static void recordPolicyBlock(String reason) {
         Bag bag = HOLDER.get();
         if (bag == null || reason == null || reason.isBlank()) return;
