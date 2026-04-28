@@ -34,7 +34,7 @@ class ExecutionOutcomeTest {
                 0, 0, 0, 0,
                 List.of(new ToolCallLoop.ToolOutcome(
                         "talos.edit_file", "index.html", false, true, true,
-                        "", "approval denied"
+                        "", "User did not approve the talos.edit_file call."
                 )));
 
         ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(

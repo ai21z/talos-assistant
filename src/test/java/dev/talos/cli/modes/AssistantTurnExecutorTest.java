@@ -1384,6 +1384,36 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void policyDeniedMutationSummaryDoesNotClaimUserApprovalWasDenied() {
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Overwrite .env with SECRET=changed."));
+            var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                    "raw answer", 1, 1,
+                    List.of("talos.write_file"),
+                    messages, 1, 0, false, 0, List.of(".env"),
+                    0, 0, 0, 0,
+                    List.of(new dev.talos.runtime.ToolCallLoop.ToolOutcome(
+                            "talos.write_file", ".env", false, true, true,
+                            "", "Permission policy denied the talos.write_file call. "
+                            + "Permission policy denied mutation of protected path `.env`. "
+                            + "No approval was requested and no file was changed.",
+                            null, dev.talos.tools.ToolError.DENIED
+                    )));
+
+            String answer = AssistantTurnExecutor.summarizeDeniedMutationOutcomesIfNeeded(
+                    "raw answer", messages, loopResult, 0);
+
+            assertTrue(answer.startsWith(AssistantTurnExecutor.POLICY_DENIED_MUTATION_ANNOTATION));
+            assertTrue(answer.contains("No file changes were applied because permission policy denied"));
+            assertTrue(answer.contains(".env"));
+            assertTrue(answer.contains("protected path"));
+            assertFalse(answer.contains("not approved"));
+            assertFalse(answer.contains("approval was denied"));
+            assertFalse(answer.contains(".env: approval denied"));
+        }
+
+        @Test
         void mutationRetryDoesNotFireAfterInvalidMutatingArgs() {
             var registry = new dev.talos.tools.ToolRegistry();
             var processor = new dev.talos.runtime.TurnProcessor(
