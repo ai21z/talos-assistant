@@ -26,6 +26,7 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -752,22 +753,68 @@ public final class AssistantTurnExecutor {
     }
 
     private static String renderVerifiedFollowUpSummary(String previousAssistantText) {
-        String excerpt = previousAssistantText == null ? "" : previousAssistantText.strip();
+        String excerpt = verifiedOutcomeExcerpt(previousAssistantText);
         String lower = excerpt.toLowerCase(Locale.ROOT);
         String status;
         if (lower.contains("partial verification") || lower.contains("the turn remains partial")) {
-            status = "The previous verified result says the last change is partial, not complete.";
+            status = "Partially. The task remains partial: some files changed, but the previous verified outcome says it is not complete (not verified complete).";
         } else if (lower.contains("task incomplete") || lower.contains("static verification failed")) {
-            status = "The previous verified result says the last change is not complete.";
+            status = "No. The previous verified outcome says the task is not complete.";
         } else if (lower.contains("static verification: passed")) {
-            status = "The previous verified result says the last change passed static verification.";
+            status = "Yes. Static verification passed in the previous outcome.";
         } else {
-            status = "The previous turn included a verified result.";
+            status = "The previous turn included a verified outcome.";
         }
+        String details = verifiedOutcomeDetails(excerpt);
+        return details.isBlank() ? status : status + "\n\n" + details;
+    }
+
+    private static String verifiedOutcomeExcerpt(String previousAssistantText) {
+        if (previousAssistantText == null || previousAssistantText.isBlank()) return "";
+        List<String> lines = new ArrayList<>();
+        for (String rawLine : previousAssistantText.strip().lines().toList()) {
+            String line = rawLine.strip();
+            if (line.isBlank() || isPriorVerifiedSummaryLine(line)) continue;
+            lines.add(rawLine);
+        }
+        String excerpt = String.join("\n", lines).strip();
         if (excerpt.length() > 1500) {
-            excerpt = excerpt.substring(0, 1500) + "\n\n[summary truncated]";
+            return excerpt.substring(0, 1500) + "\n\n[summary truncated]";
         }
-        return status + "\n\n" + excerpt;
+        return excerpt;
+    }
+
+    private static boolean isPriorVerifiedSummaryLine(String line) {
+        if (line == null || line.isBlank()) return true;
+        String lower = line.toLowerCase(Locale.ROOT);
+        return lower.startsWith("the previous verified result says")
+                || lower.startsWith("partially. some files changed")
+                || lower.startsWith("no. the previous verified outcome says")
+                || lower.startsWith("yes. static verification passed")
+                || lower.equals("verified details:");
+    }
+
+    private static String verifiedOutcomeDetails(String excerpt) {
+        if (excerpt == null || excerpt.isBlank()) return "";
+        List<String> details = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (String rawLine : excerpt.lines().toList()) {
+            String line = rawLine.strip();
+            if (line.isBlank() || isPriorVerifiedSummaryLine(line)) continue;
+            if (!isVerifiedDetailLine(line)) continue;
+            if (seen.add(line)) details.add(line);
+            if (details.size() >= 12) break;
+        }
+        if (details.isEmpty()) return "";
+        return "Verified details:\n" + String.join("\n", details);
+    }
+
+    private static boolean isVerifiedDetailLine(String line) {
+        if (line == null || line.isBlank()) return false;
+        return line.equals("Succeeded:")
+                || line.equals("Failed:")
+                || line.equals("Remaining static verification problems:")
+                || line.startsWith("- ");
     }
 
     private static void moveToVerifyAfterSuccessfulMutation(

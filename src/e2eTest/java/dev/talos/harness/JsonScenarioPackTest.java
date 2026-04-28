@@ -854,6 +854,34 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/64-repeated-status-followup-direct-unduplicated.json] 64: repeated status follow-up is direct and unduplicated")
+    void repeatedStatusFollowupDirectUnduplicated() {
+        var loaded = JsonScenarioLoader.load("scenarios/64-repeated-status-followup-direct-unduplicated.json");
+        List<ChatMessage> history = new ArrayList<>();
+        var historyNode = loaded.raw().path("history");
+        for (var node : historyNode) {
+            history.add(new ChatMessage(
+                    node.path("role").asText(),
+                    node.path("content").asText()));
+        }
+
+        try (var result = ScenarioRunner.runThroughExecutorWithHistory(
+                loaded.definition(),
+                history,
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("Partially.")
+                    .assertAnswerContains("HTML does not link JavaScript file")
+                    .assertAnswerContains("submit/calculate button")
+                    .assertAnswerNotContains("The previous verified result says")
+                    .assertAnswerNotContains("Yes, it is done now.");
+
+            assertTrue(result.finalAnswer().startsWith("Partially."), result.finalAnswer());
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/42-partial-followup-summary-uses-verified-history.json] 42: follow-up summary uses verified partial history")
     void partialFollowupSummaryUsesVerifiedHistory() {
         var loaded = JsonScenarioLoader.load("scenarios/42-partial-followup-summary-uses-verified-history.json");
