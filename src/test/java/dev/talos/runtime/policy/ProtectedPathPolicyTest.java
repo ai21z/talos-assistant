@@ -1,0 +1,65 @@
+package dev.talos.runtime.policy;
+
+import dev.talos.tools.ToolCall;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.file.Path;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+class ProtectedPathPolicyTest {
+
+    @TempDir
+    Path workspace;
+
+    @Test
+    void classifiesSecretLikePathsWithWindowsSafeNormalization() {
+        assertProtected(".env", "SECRET");
+        assertProtected(".env.local", "SECRET");
+        assertProtected("app/.env.production", "SECRET");
+        assertProtected("config/secrets/api.txt", "SECRET");
+        assertProtected("src/project-token.txt", "SECRET");
+        assertProtected("src/serviceCredential.json", "SECRET");
+        assertProtected("keys/private.pem", "SECRET");
+        assertProtected(".ssh/id_ed25519", "SECRET");
+        assertProtected(".AWS/credentials", "SECRET");
+        assertProtected(".config/gcloud/application_default_credentials.json", "SECRET");
+        assertProtected("Secrets\\TOKEN.txt", "SECRET");
+    }
+
+    @Test
+    void classifiesControlPlanePaths() {
+        assertProtected(".git/config", "CONTROL");
+        assertProtected(".github/workflows/ci.yml", "CONTROL");
+        assertProtected(".gnupg/trustdb.gpg", "CONTROL");
+    }
+
+    @Test
+    void doesNotOverTriggerNormalEnvironmentFiles() {
+        ResourceDecision decision = ProtectedPathPolicy.classify(workspace, "docs/environment.md");
+
+        assertTrue(decision.insideWorkspace());
+        assertEquals("docs/environment.md", decision.relativePath());
+        assertFalse(decision.protectedPath());
+    }
+
+    @Test
+    void rejectsEscapingPathsBeforeRulesCanAllowThem() {
+        ResourceDecision decision = ProtectedPathPolicy.classify(workspace, "../outside/.env");
+
+        assertFalse(decision.insideWorkspace());
+        assertTrue(decision.workspaceEscape());
+        assertFalse(decision.protectedPath(), "workspace escape is its own hard denial reason");
+    }
+
+    private void assertProtected(String path, String expectedKind) {
+        ResourceDecision decision = ProtectedPathPolicy.classify(workspace,
+                new ToolCall("talos.write_file", Map.of("path", path, "content", "x")));
+
+        assertTrue(decision.insideWorkspace(), path);
+        assertTrue(decision.protectedPath(), path);
+        assertEquals(expectedKind, decision.protectedKind(), path);
+    }
+}

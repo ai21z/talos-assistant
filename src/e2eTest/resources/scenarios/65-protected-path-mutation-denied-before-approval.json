@@ -1,0 +1,13 @@
+{
+  "name": "protected path mutation denied before approval",
+  "fixture": "protected-path",
+  "v1Pack": true,
+  "claims": [
+    "protected-path-mutation-denied-before-approval",
+    "approval-prompt-not-shown-for-protected-deny"
+  ],
+  "runner": "loop",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Update .env with SECRET=changed.",
+  "scriptedResponse": "```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\".env\",\"content\":\"SECRET=changed\"}}\n```"
+}
