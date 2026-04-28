@@ -2841,11 +2841,68 @@ class AssistantTurnExecutorTest {
             AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
                     messages, WS, ctx, new AssistantTurnExecutor.Options());
 
+            assertTrue(out.text().startsWith("Partially."), out.text());
             assertTrue(out.text().contains("partial"), out.text());
             assertTrue(out.text().contains("not complete"), out.text());
             assertTrue(out.text().contains("HTML does not link JavaScript file"), out.text());
             assertTrue(out.text().contains("submit/calculate button"), out.text());
             assertFalse(out.text().contains("functional 3-file BMI calculator"), out.text());
+        }
+
+        @Test
+        void repeatedStatusFollowUpDoesNotDuplicatePreviousVerifiedPreamble() {
+            var ctx = scriptedContext("Yes, it is done now.");
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "No no I want a functioning 3-file BMI calculator. Update index.html and styles.css "
+                            + "and create scripts.js. Make it modern and responsive."));
+            messages.add(ChatMessage.assistant("""
+                    [Partial verification: static checks failed - HTML does not link JavaScript file: `scripts.js`]
+
+                    The turn remains partial. Some changes were applied, but unresolved static problems remain.
+
+                    Remaining static verification problems:
+                    - styles.css: expected target was not successfully mutated.
+                    - HTML does not link JavaScript file: `scripts.js`
+                    - Calculator/form task is missing a submit/calculate button.
+                    """));
+            messages.add(ChatMessage.user("did you make the changes?"));
+            messages.add(ChatMessage.assistant("""
+                    The previous verified result says the last change is not complete.
+
+                    The previous verified result says the last change is not complete.
+
+                    [Partial verification: static checks failed - HTML does not link JavaScript file: `scripts.js`]
+
+                    The turn remains partial. Some changes were applied, but unresolved static problems remain.
+
+                    Remaining static verification problems:
+                    - styles.css: expected target was not successfully mutated.
+                    - HTML does not link JavaScript file: `scripts.js`
+                    - Calculator/form task is missing a submit/calculate button.
+                    """));
+            messages.add(ChatMessage.user("is it working now?"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, WS, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().startsWith("Partially."), out.text());
+            assertEquals(0, occurrences(out.text(), "The previous verified result says"), out.text());
+            assertEquals(1, occurrences(out.text(), "HTML does not link JavaScript file"), out.text());
+            assertEquals(1, occurrences(out.text(), "submit/calculate button"), out.text());
+            assertFalse(out.text().contains("Yes, it is done now."), out.text());
+        }
+
+        private int occurrences(String text, String needle) {
+            if (text == null || needle == null || needle.isEmpty()) return 0;
+            int count = 0;
+            int index = 0;
+            while ((index = text.indexOf(needle, index)) >= 0) {
+                count++;
+                index += needle.length();
+            }
+            return count;
         }
     }
 }
