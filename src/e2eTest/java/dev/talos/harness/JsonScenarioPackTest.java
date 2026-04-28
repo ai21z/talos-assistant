@@ -743,6 +743,26 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/59-overwrite-repair-phrasing-allows-mutation.json] 59: overwrite repair phrasing allows mutation")
+    void overwriteRepairPhrasingAllowsMutation() {
+        var loaded = JsonScenarioLoader.load("scenarios/59-overwrite-repair-phrasing-allows-mutation.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(3, 3, 0, 0)
+                    .assertAnswerNotContains("task-contract read-only denied")
+                    .assertAnswerNotContains("cannot create or modify files")
+                    .assertFileContains("index.html", "<script src=\"scripts.js\"></script>")
+                    .assertFileContains("index.html", "id=\"bmiForm\"")
+                    .assertFileContains("styles.css", ".calculator")
+                    .assertFileContains("scripts.js", "getElementById('bmiForm')")
+                    .assertFileContains("scripts.js", "Your BMI is");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/42-partial-followup-summary-uses-verified-history.json] 42: follow-up summary uses verified partial history")
     void partialFollowupSummaryUsesVerifiedHistory() {
         var loaded = JsonScenarioLoader.load("scenarios/42-partial-followup-summary-uses-verified-history.json");

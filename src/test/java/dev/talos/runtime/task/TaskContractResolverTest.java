@@ -60,6 +60,62 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void overwriteRepairPhrasingBecomesMutationAllowedContract() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Overwrite index.html with a corrected complete version instead of using edit_file. "
+                        + "Use write_file for index.html.");
+
+        assertTrue(contract.type() == TaskType.FILE_EDIT || contract.type() == TaskType.FILE_CREATE);
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("index.html"), contract.expectedTargets());
+    }
+
+    @Test
+    void overwriteMultipleTargetsCapturesExpectedTargets() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Overwrite these three files to make a working BMI calculator: index.html, styles.css, scripts.js. "
+                        + "Use talos.write_file for all three.");
+
+        assertTrue(contract.type() == TaskType.FILE_EDIT || contract.type() == TaskType.FILE_CREATE);
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("index.html", "styles.css", "scripts.js"), contract.expectedTargets());
+    }
+
+    @Test
+    void rewriteAndReplaceRepairPhrasingBecomesMutationAllowedContract() {
+        for (String input : List.of(
+                "Replace index.html with a corrected complete version.",
+                "Rewrite scripts.js so the button works.")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertEquals(TaskType.FILE_EDIT, contract.type(), input);
+            assertTrue(contract.mutationRequested(), input);
+            assertTrue(contract.mutationAllowed(), input);
+            assertTrue(contract.verificationRequired(), input);
+        }
+    }
+
+    @Test
+    void nonTechnicalLocalArtifactRequestsBecomeMutationAllowedContracts() {
+        for (String input : List.of(
+                "Can you make me a simple BMI calculator webpage here?",
+                "I am not technical, I just want a page I can open and use. Can you make it?",
+                "Can you fix the files in this folder for me?")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertTrue(contract.type() == TaskType.FILE_EDIT || contract.type() == TaskType.FILE_CREATE,
+                    input + " -> " + contract.type());
+            assertTrue(contract.mutationRequested(), input);
+            assertTrue(contract.mutationAllowed(), input);
+            assertTrue(contract.verificationRequired(), input);
+        }
+    }
+
+    @Test
     void makeItRequestRemainsMutationCapableForFollowUpTurns() {
         TaskContract contract = TaskContractResolver.fromUserRequest("Can you make it?");
 

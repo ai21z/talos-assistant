@@ -104,6 +104,30 @@ class UnifiedAssistantModeTest {
     }
 
     @Test
+    void overwriteRepairPromptRecordsMutatingToolSurface() throws Exception {
+        LastPromptCapture.clear();
+        var mode = new UnifiedAssistantMode();
+
+        var result = mode.handle(
+                "Overwrite these three files to make a working BMI calculator: index.html, styles.css, scripts.js. "
+                        + "Use talos.write_file for all three.",
+                Path.of(".").toAbsolutePath().normalize(),
+                context("I will update the requested files."));
+
+        assertTrue(result.isPresent());
+        var render = LastPromptCapture.latest().orElseThrow();
+
+        assertTrue("FILE_EDIT".equals(render.taskType()) || "FILE_CREATE".equals(render.taskType()),
+                render.taskType());
+        assertTrue(render.mutationAllowed());
+        assertTrue(render.tools().contains("talos.write_file"), render.tools().toString());
+        assertTrue(render.tools().contains("talos.edit_file"), render.tools().toString());
+        assertTrue(render.systemPrompt().contains("You CAN create files"), render.systemPrompt());
+        assertFalse(render.systemPrompt().contains("This specific user turn is read-only"),
+                render.systemPrompt());
+    }
+
+    @Test
     void repairFollowUpUsesHistoryAwareContractForNativeToolSurface() throws Exception {
         LastPromptCapture.clear();
         var mode = new UnifiedAssistantMode();
