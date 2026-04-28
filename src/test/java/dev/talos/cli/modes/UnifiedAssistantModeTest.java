@@ -128,6 +128,31 @@ class UnifiedAssistantModeTest {
     }
 
     @Test
+    void formattingNegationOverwritePromptRecordsMutatingToolSurface() throws Exception {
+        LastPromptCapture.clear();
+        var mode = new UnifiedAssistantMode();
+
+        var result = mode.handle(
+                "Use talos.write_file to overwrite index.html. "
+                        + "Set the content argument to the exact five letters AFTER. "
+                        + "Do not use angle brackets. Do not use placeholders. "
+                        + "The entire file should be AFTER.",
+                Path.of(".").toAbsolutePath().normalize(),
+                context("I will update index.html."));
+
+        assertTrue(result.isPresent());
+        var render = LastPromptCapture.latest().orElseThrow();
+
+        assertEquals("FILE_EDIT", render.taskType());
+        assertTrue(render.mutationAllowed());
+        assertTrue(render.tools().contains("talos.write_file"), render.tools().toString());
+        assertTrue(render.tools().contains("talos.edit_file"), render.tools().toString());
+        assertTrue(render.systemPrompt().contains("You CAN create files"), render.systemPrompt());
+        assertFalse(render.systemPrompt().contains("This specific user turn is read-only"),
+                render.systemPrompt());
+    }
+
+    @Test
     void repairFollowUpUsesHistoryAwareContractForNativeToolSurface() throws Exception {
         LastPromptCapture.clear();
         var mode = new UnifiedAssistantMode();

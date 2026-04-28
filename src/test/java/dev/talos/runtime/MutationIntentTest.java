@@ -69,4 +69,22 @@ class MutationIntentTest {
         assertFalse(MutationIntent.looksExplicitMutationRequest(
                 "Can you explain how to build a BMI calculator?"));
     }
+
+    @Test
+    void formattingNegationDoesNotCancelExplicitMutationIntent() {
+        assertTrue(MutationIntent.looksExplicitMutationRequest(
+                "Use talos.write_file to overwrite index.html. "
+                        + "Set the content argument to the exact five letters AFTER. "
+                        + "Do not use angle brackets. Do not use placeholders. "
+                        + "The entire file should be AFTER."));
+        assertTrue(MutationIntent.looksExplicitMutationRequest(
+                "Use write_file to overwrite index.html. Do not use placeholders."));
+        assertTrue(MutationIntent.looksExplicitMutationRequest(
+                "Overwrite index.html. Do not use angle brackets."));
+
+        assertFalse(MutationIntent.looksExplicitMutationRequest(
+                "Do not edit files. Explain what you would change."));
+        assertFalse(MutationIntent.looksExplicitMutationRequest(
+                "I am only chatting, please don't inspect my files. What can you do for me?"));
+    }
 }
