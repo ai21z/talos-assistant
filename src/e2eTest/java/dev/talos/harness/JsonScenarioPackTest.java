@@ -694,6 +694,55 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/56-chat-small-talk-no-workspace-tools.json] 56: chat small talk does not execute workspace tools")
+    void chatSmallTalkDoesNotExecuteWorkspaceTools() {
+        var loaded = JsonScenarioLoader.load("scenarios/56-chat-small-talk-no-workspace-tools.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("Talos")
+                    .assertAnswerNotContains("ALPHA-742")
+                    .assertAnswerNotContains("talos.read_file")
+                    .assertAnswerNotContains("Used ");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/57-chat-privacy-negation-no-workspace-tools.json] 57: chat privacy negation does not execute workspace tools")
+    void chatPrivacyNegationDoesNotExecuteWorkspaceTools() {
+        var loaded = JsonScenarioLoader.load("scenarios/57-chat-privacy-negation-no-workspace-tools.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerNotContains("ALPHA-742")
+                    .assertAnswerNotContains("talos.list_dir")
+                    .assertAnswerNotContains("talos.read_file")
+                    .assertAnswerNotContains("Used ");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/58-chat-explicit-workspace-request-still-inspects.json] 58: chat explicit workspace request still inspects")
+    void chatExplicitWorkspaceRequestStillInspects() {
+        var loaded = JsonScenarioLoader.load("scenarios/58-chat-explicit-workspace-request-still-inspects.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("[Used 1 tool(s): talos.grep")
+                    .assertAnswerContains("ALPHA-742");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/42-partial-followup-summary-uses-verified-history.json] 42: follow-up summary uses verified partial history")
     void partialFollowupSummaryUsesVerifiedHistory() {
         var loaded = JsonScenarioLoader.load("scenarios/42-partial-followup-summary-uses-verified-history.json");

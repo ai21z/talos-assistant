@@ -73,11 +73,13 @@ public final class AssistantTurnExecutor {
             "what are you",
             "what is talos",
             "who is talos",
+            "tell me what you are",
             "tell me about yourself"
     );
 
     private static final Set<String> ASSISTANT_CAPABILITY_TURN_MARKERS = Set.of(
             "what can you do",
+            "what can you do for me",
             "how can you assist me",
             "how can you help me",
             "what can talos do"
@@ -190,18 +192,24 @@ public final class AssistantTurnExecutor {
 
                 if (answer != null) {
                     if (ctx.toolCallLoop() != null && hasAnyToolCalls(streamResult)) {
-                        LOG.debug("Tool calls detected in streamed response (native: {}), entering tool-call loop",
-                                streamResult.hasToolCalls());
-                        ToolCallLoop.LoopResult loopResult = ctx.toolCallLoop().run(
-                                answer, streamResult.toolCalls(), messages, workspace, ctx);
-                        answer = loopResult.finalAnswer();
-                        LOG.debug("Streaming tool-call loop complete: {} iterations, {} tools invoked",
-                                loopResult.iterations(), loopResult.toolsInvoked());
-                        appendSummary(out, loopResult);
-                        ToolLoopAnswerResolution resolution = resolveToolLoopAnswer(
-                                answer, messages, loopResult, workspace, ctx, opts);
-                        appendExtraSummary(out, resolution.extraSummary());
-                        out.append(resolution.answer());
+                        if (blocksToolCallsForContract(taskContract)) {
+                            answer = answerForBlockedSmallTalkToolCalls(answer, messages, opts);
+                            emitBlockedSmallTalkToolCallAnswer(answer, ctx);
+                            out.append(answer);
+                        } else {
+                            LOG.debug("Tool calls detected in streamed response (native: {}), entering tool-call loop",
+                                    streamResult.hasToolCalls());
+                            ToolCallLoop.LoopResult loopResult = ctx.toolCallLoop().run(
+                                    answer, streamResult.toolCalls(), messages, workspace, ctx);
+                            answer = loopResult.finalAnswer();
+                            LOG.debug("Streaming tool-call loop complete: {} iterations, {} tools invoked",
+                                    loopResult.iterations(), loopResult.toolsInvoked());
+                            appendSummary(out, loopResult);
+                            ToolLoopAnswerResolution resolution = resolveToolLoopAnswer(
+                                    answer, messages, loopResult, workspace, ctx, opts);
+                            appendExtraSummary(out, resolution.extraSummary());
+                            out.append(resolution.answer());
+                        }
                     } else {
                         // No tool calls — content was streamed; record full text for memory.
                         // Streaming no-tool branch. We cannot silently retry here
@@ -230,18 +238,22 @@ public final class AssistantTurnExecutor {
                 String answer = streamResult.text();
                 if (answer != null) {
                     if (ctx.toolCallLoop() != null && hasAnyToolCalls(streamResult)) {
-                        LOG.debug("Tool calls detected in LLM response (native: {}), entering tool-call loop",
-                                streamResult.hasToolCalls());
-                        ToolCallLoop.LoopResult loopResult = ctx.toolCallLoop().run(
-                                answer, streamResult.toolCalls(), messages, workspace, ctx);
-                        answer = loopResult.finalAnswer();
-                        LOG.debug("Buffered tool-call loop complete: {} iterations, {} tools invoked",
-                                loopResult.iterations(), loopResult.toolsInvoked());
-                        appendSummary(out, loopResult);
-                        ToolLoopAnswerResolution resolution = resolveToolLoopAnswer(
-                                answer, messages, loopResult, workspace, ctx, opts);
-                        appendExtraSummary(out, resolution.extraSummary());
-                        answer = resolution.answer();
+                        if (blocksToolCallsForContract(taskContract)) {
+                            answer = answerForBlockedSmallTalkToolCalls(answer, messages, opts);
+                        } else {
+                            LOG.debug("Tool calls detected in LLM response (native: {}), entering tool-call loop",
+                                    streamResult.hasToolCalls());
+                            ToolCallLoop.LoopResult loopResult = ctx.toolCallLoop().run(
+                                    answer, streamResult.toolCalls(), messages, workspace, ctx);
+                            answer = loopResult.finalAnswer();
+                            LOG.debug("Buffered tool-call loop complete: {} iterations, {} tools invoked",
+                                    loopResult.iterations(), loopResult.toolsInvoked());
+                            appendSummary(out, loopResult);
+                            ToolLoopAnswerResolution resolution = resolveToolLoopAnswer(
+                                    answer, messages, loopResult, workspace, ctx, opts);
+                            appendExtraSummary(out, resolution.extraSummary());
+                            answer = resolution.answer();
+                        }
                     } else {
                         // No-tool-call path. Zero tools were invoked this turn.
                         // Grounding retry gate: if the user explicitly asked for evidence
@@ -500,6 +512,37 @@ public final class AssistantTurnExecutor {
         if (ctx == null || ctx.streamSink() == null) return false;
         if (taskContract != null && taskContract.mutationAllowed()) return false;
         return !requiresWorkspaceEvidence(taskContract);
+    }
+
+    private static boolean blocksToolCallsForContract(TaskContract taskContract) {
+        return taskContract != null && taskContract.type() == TaskType.SMALL_TALK;
+    }
+
+    private static String answerForBlockedSmallTalkToolCalls(
+            String answer,
+            List<ChatMessage> messages,
+            Options opts
+    ) {
+        String stripped = ToolCallParser.stripToolCalls(answer == null ? "" : answer).strip();
+        if (!stripped.isBlank()) {
+            return sanitizeAndTruncate(stripped, opts);
+        }
+        String userRequest = latestUserRequest(messages);
+        if (looksLikeAssistantIdentityTurn(userRequest)) {
+            return sanitizeAndTruncate(TALOS_IDENTITY_ANSWER, opts);
+        }
+        if (looksLikeAssistantCapabilityTurn(userRequest)) {
+            return sanitizeAndTruncate(TALOS_CAPABILITY_ANSWER, opts);
+        }
+        return sanitizeAndTruncate("Hi, I am Talos.", opts);
+    }
+
+    private static void emitBlockedSmallTalkToolCallAnswer(String answer, Context ctx) {
+        if (ctx == null || ctx.streamSink() == null || answer == null || answer.isBlank()) return;
+        ctx.streamSink().accept(answer);
+        if (ctx.streamSink() instanceof ToolCallStreamFilter filter) {
+            filter.flush();
+        }
     }
 
     private static boolean requiresWorkspaceEvidence(TaskContract taskContract) {
