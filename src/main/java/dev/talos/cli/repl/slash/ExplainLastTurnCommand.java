@@ -236,6 +236,13 @@ public final class ExplainLastTurnCommand implements Command {
             }
             sb.append('\n');
         }
+        if (trace.repair() != null && !trace.repair().status().isBlank()) {
+            sb.append("  Repair: ").append(trace.repair().status());
+            if (!trace.repair().summary().isBlank()) {
+                sb.append(" - ").append(trace.repair().summary());
+            }
+            sb.append('\n');
+        }
         if (trace.verification() != null && !trace.verification().status().isBlank()) {
             sb.append("  Verification: ").append(trace.verification().status());
             if (!trace.verification().summary().isBlank()) {

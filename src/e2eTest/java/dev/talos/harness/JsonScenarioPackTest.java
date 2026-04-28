@@ -828,6 +828,8 @@ class JsonScenarioPackTest {
                     .assertFileContains("styles.css", ".calculator")
                     .assertFileContains("scripts.js", "getElementById('bmiForm')")
                     .assertFileContains("scripts.js", "Your BMI is");
+            assertEquals("PLANNED", result.localTrace().repair().status());
+            assertTrue(result.localTrace().repair().summary().contains("STATIC_VERIFICATION_REPAIR"));
         }
     }
 

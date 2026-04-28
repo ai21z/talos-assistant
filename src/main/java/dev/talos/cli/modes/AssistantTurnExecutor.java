@@ -15,8 +15,9 @@ import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
 import dev.talos.runtime.toolcall.ToolCallSupport;
+import dev.talos.runtime.repair.RepairPolicy;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.verification.StaticTaskVerifier;
-import dev.talos.runtime.verification.StaticVerificationRepairContext;
 import dev.talos.runtime.verification.WebDiagnosticIntent;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
@@ -648,8 +649,12 @@ public final class AssistantTurnExecutor {
         if (messages.stream().anyMatch(AssistantTurnExecutor::isStaticVerificationRepairInstruction)) {
             return;
         }
-        StaticVerificationRepairContext.instructionFor(messages, taskContract)
-                .ifPresent(instruction -> {
+        RepairPolicy.planForStaticVerification(messages, taskContract)
+                .plan()
+                .ifPresent(plan -> {
+                    String instruction = plan.instruction();
+                    if (instruction.isBlank()) return;
+                    LocalTurnTraceCapture.recordRepair("PLANNED", plan.traceSummary());
                     int insertAt = 0;
                     for (int i = 0; i < messages.size(); i++) {
                         ChatMessage message = messages.get(i);
