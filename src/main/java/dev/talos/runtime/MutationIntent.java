@@ -45,6 +45,8 @@ public final class MutationIntent {
             Pattern.compile("^" + PREFIX + "i\\s+(?:want|need)\\s+you\\s+to\\s+" + CORE_MUTATION_VERBS + "\\b"),
             Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:let's|lets)\\s+" + CORE_MUTATION_VERBS + "\\b"),
             Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:please\\s+)?only\\s+" + CORE_MUTATION_VERBS + "\\b"),
+            Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:please\\s+)?use\\s+(?:talos\\.)?"
+                    + "(?:write_file|edit_file)\\s+to\\s+" + CORE_MUTATION_VERBS + "\\b"),
             Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:please\\s+)?" + BUILD_ARTIFACT_REQUEST),
             Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:please\\s+)?(?:can|could|would|will)\\s+you\\s+(?:please\\s+)?" + BUILD_ARTIFACT_REQUEST),
             Pattern.compile("^" + PREFIX + "i\\s+(?:want|need)\\s+you\\s+to\\s+" + BUILD_ARTIFACT_REQUEST),
