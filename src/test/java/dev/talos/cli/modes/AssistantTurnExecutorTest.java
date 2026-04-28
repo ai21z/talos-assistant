@@ -269,6 +269,52 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void malformedSingleQuotedToolProtocolIsReplacedWithoutMutation(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("scripts.js"), """
+                    document.querySelector("#wrongButton").addEventListener("click", () => {
+                      console.log("wrong");
+                    });
+                    """);
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            var undoStack = new dev.talos.tools.FileUndoStack();
+            registry.register(new dev.talos.tools.impl.FileEditTool(undoStack));
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of("""
+                            {
+                              "name": "talos.edit_file",
+                              "arguments": {
+                                "path": "scripts.js",
+                                "old_string": 'document.querySelector("#wrongButton").addEventListener("click", () => {',
+                                "new_string": 'document.querySelector("button").addEventListener("click", () => {'
+                              }
+                            }
+                            """)))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "My BMI page is almost there, but when I press the button nothing happens. "
+                            + "Please keep the look the same and just make the button work."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertEquals(AssistantTurnExecutor.MALFORMED_TOOL_PROTOCOL_REPLACEMENT, out.text());
+            assertFalse(out.text().contains("talos.edit_file"), out.text());
+            assertFalse(out.text().contains("old_string"), out.text());
+            assertTrue(Files.readString(workspace.resolve("scripts.js")).contains("#wrongButton"),
+                    "malformed protocol must not mutate files");
+        }
+
+        @Test
         void workspaceExplainListOnlyUnderinspectionRetriesWithPrimaryReads(@TempDir Path workspace)
                 throws Exception {
             Files.writeString(workspace.resolve("index.html"), """

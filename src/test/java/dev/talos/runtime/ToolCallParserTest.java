@@ -819,6 +819,47 @@ class ToolCallParserTest {
     }
 
     @Test
+    void detectsMalformedSingleQuotedToolProtocolObject() {
+        String response = """
+                {
+                  "name": "talos.edit_file",
+                  "arguments": {
+                    "path": "scripts.js",
+                    "old_string": 'document.querySelector("#wrongButton").addEventListener("click", () => {',
+                    "new_string": 'document.querySelector("button").addEventListener("click", () => {'
+                  }
+                }
+                """;
+
+        assertTrue(ToolCallParser.looksLikeMalformedToolProtocol(response),
+                "single-quoted JSON-like Talos tool protocol must be detected as malformed protocol");
+        assertTrue(ToolCallParser.parse(response).isEmpty(),
+                "malformed protocol must not be executed as a parsed tool call");
+    }
+
+    @Test
+    void stripToolCallsRemovesMalformedSingleQuotedToolProtocolObject() {
+        String response = """
+                I will apply this edit:
+                {
+                  "name": "talos.edit_file",
+                  "arguments": {
+                    "path": "scripts.js",
+                    "old_string": 'before',
+                    "new_string": 'after'
+                  }
+                }
+                """;
+
+        String stripped = ToolCallParser.stripToolCalls(response);
+
+        assertTrue(stripped.contains("I will apply this edit:"));
+        assertFalse(stripped.contains("talos.edit_file"), stripped);
+        assertFalse(stripped.contains("old_string"), stripped);
+        assertFalse(stripped.contains("'before'"), stripped);
+    }
+
+    @Test
     void parseCodeFencedJsonWithToolKey() {
         String response = """
                 ```json

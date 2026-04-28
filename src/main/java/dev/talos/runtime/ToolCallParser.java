@@ -133,6 +133,11 @@ public final class ToolCallParser {
             Pattern.DOTALL
     );
 
+    private static final Pattern TOOL_NAME_FIELD_PATTERN = Pattern.compile(
+            "\"(?:name|function|function_name|tool_name|tool)\"\\s*:\\s*['\"]([^'\"]+)['\"]",
+            Pattern.DOTALL | Pattern.CASE_INSENSITIVE
+    );
+
     /** Combined pattern for stripping all recognized tool-call block formats.
      *  Includes XML tags (DEPRECATED compatibility) and code-fenced/bare JSON. */
     private static final Pattern STRIP_PATTERN = Pattern.compile(
@@ -224,6 +229,9 @@ public final class ToolCallParser {
         stripped = CODE_FENCE_PATTERN.matcher(stripped).replaceAll("");
         // Also strip bare JSON tool calls
         stripped = BARE_JSON_PATTERN.matcher(stripped).replaceAll("");
+        // Also strip malformed JSON-like tool protocol objects that are not
+        // executable JSON but still look like Talos tool-call protocol.
+        stripped = stripMalformedToolProtocolBlocks(stripped);
         // Collapse excessive blank lines left by removed blocks
         stripped = stripped.replaceAll("\\n{3,}", "\n\n");
         return stripped.strip();
@@ -286,6 +294,31 @@ public final class ToolCallParser {
     }
 
     /**
+     * Returns true for a JSON-like Talos tool-call object that cannot be parsed
+     * as executable JSON protocol.
+     *
+     * <p>Observed local models sometimes emit objects like:
+     *
+     * <pre>
+     * {
+     *   "name": "talos.edit_file",
+     *   "arguments": {
+     *     "old_string": 'single-quoted value'
+     *   }
+     * }
+     * </pre>
+     *
+     * <p>This is not a format Talos should execute, but it is clearly protocol
+     * text and should not be displayed as ordinary assistant prose. Detection is
+     * deliberately narrow: the candidate must be a brace-balanced object with a
+     * recognized Talos tool-name field. Valid JSON tool calls return false here
+     * because they belong on the normal parser/execution path.
+     */
+    public static boolean looksLikeMalformedToolProtocol(String text) {
+        return !malformedToolProtocolSpans(text).isEmpty();
+    }
+
+    /**
      * Returns true when {@code text} is exactly one standalone JSON object that
      * parses as a Talos tool call.
      *
@@ -328,6 +361,101 @@ public final class ToolCallParser {
     }
 
     // ── Internal extraction helpers ──────────────────────────────────
+
+    private static String stripMalformedToolProtocolBlocks(String text) {
+        List<int[]> spans = malformedToolProtocolSpans(text);
+        if (spans.isEmpty()) return text;
+
+        StringBuilder out = new StringBuilder(text.length());
+        int cursor = 0;
+        for (int[] span : spans) {
+            if (span[0] > cursor) {
+                out.append(text, cursor, span[0]);
+            }
+            cursor = Math.max(cursor, span[1]);
+        }
+        if (cursor < text.length()) {
+            out.append(text, cursor, text.length());
+        }
+        return out.toString();
+    }
+
+    private static List<int[]> malformedToolProtocolSpans(String text) {
+        String value = text == null ? "" : text;
+        if (value.isBlank()) return List.of();
+
+        List<int[]> spans = new ArrayList<>();
+        int searchFrom = 0;
+        while (searchFrom < value.length()) {
+            int start = value.indexOf('{', searchFrom);
+            if (start < 0) break;
+            int end = findJsonLikeObjectEnd(value, start);
+            if (end < 0) break;
+
+            String candidate = value.substring(start, end + 1);
+            if (isMalformedToolProtocolCandidate(candidate)) {
+                spans.add(new int[] { start, end + 1 });
+                searchFrom = end + 1;
+            } else {
+                searchFrom = start + 1;
+            }
+        }
+        return spans;
+    }
+
+    private static boolean isMalformedToolProtocolCandidate(String candidate) {
+        Matcher nameMatcher = TOOL_NAME_FIELD_PATTERN.matcher(candidate);
+        String toolName = null;
+        while (nameMatcher.find()) {
+            String raw = nameMatcher.group(1);
+            if (isRecognizedToolName(raw)) {
+                toolName = raw;
+                break;
+            }
+        }
+        if (toolName == null) return false;
+
+        try {
+            JsonNode root = MAPPER.readTree(candidate);
+            ToolCall call = parseJsonNode(root);
+            return call == null
+                    || call.toolName() == null
+                    || !isRecognizedToolName(call.toolName());
+        } catch (Exception ignored) {
+            return true;
+        }
+    }
+
+    private static int findJsonLikeObjectEnd(String text, int start) {
+        int depth = 0;
+        char quote = 0;
+        boolean escaped = false;
+
+        for (int i = start; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (quote != 0) {
+                if (escaped) {
+                    escaped = false;
+                } else if (c == '\\') {
+                    escaped = true;
+                } else if (c == quote) {
+                    quote = 0;
+                }
+                continue;
+            }
+
+            if (c == '"' || c == '\'') {
+                quote = c;
+            } else if (c == '{') {
+                depth++;
+            } else if (c == '}') {
+                depth--;
+                if (depth == 0) return i;
+                if (depth < 0) return -1;
+            }
+        }
+        return -1;
+    }
 
     /**
      * Pass 2b: Jackson streaming extractor for adjacent standalone raw JSON tool objects.

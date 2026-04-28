@@ -1,0 +1,15 @@
+{
+  "name": "malformed toolcall json-like output no leak",
+  "fixture": "broken-bmi-site",
+  "v1Pack": true,
+  "claims": [
+    "malformed-tool-protocol-does-not-leak",
+    "malformed-tool-protocol-does-not-mutate"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "My BMI page is almost there, but when I press the button nothing happens. Please keep the look the same and just make the button work.",
+  "scriptedResponses": [
+    "{\n  \"name\": \"talos.edit_file\",\n  \"arguments\": {\n    \"path\": \"script.js\",\n    \"old_string\": 'document.querySelector(\"#wrongButton\").addEventListener(\"click\", () => {',\n    \"new_string\": 'document.querySelector(\"button\").addEventListener(\"click\", () => {'\n  }\n}"
+  ]
+}
