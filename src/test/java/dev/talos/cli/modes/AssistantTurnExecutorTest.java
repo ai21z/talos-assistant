@@ -190,6 +190,60 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void staticVerificationRepairRetryPromptIncludesVerifierFindings(@TempDir Path workspace)
+                throws Exception {
+            var registry = new dev.talos.tools.ToolRegistry();
+            var undoStack = new dev.talos.tools.FileUndoStack();
+            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            registry.register(new dev.talos.tools.impl.FileEditTool(undoStack));
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "I can help with the repair.",
+                            "I still need to know what to change.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Create index.html, styles.css, and scripts.js for a BMI calculator."));
+            messages.add(ChatMessage.assistant("""
+                    [Task incomplete: Static verification failed - HTML does not link JavaScript file: `scripts.js`]
+
+                    The requested task is not verified complete.
+                    Remaining static verification problems:
+                    - styles.css: expected target was not successfully mutated.
+                    - HTML does not link JavaScript file: `scripts.js`
+                    - Calculator/form task is missing a submit/calculate button.
+                    """));
+            messages.add(ChatMessage.user("Fix the remaining static verification problems now."));
+
+            AssistantTurnExecutor.execute(messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            String repairInstruction = messages.stream()
+                    .map(message -> message.content() == null ? "" : message.content())
+                    .filter(content -> content.contains("[Static verification repair context]"))
+                    .findFirst()
+                    .orElse("");
+            assertFalse(repairInstruction.isBlank(),
+                    "repair turn must inject prior verifier findings before retrying");
+            assertTrue(repairInstruction.contains("HTML does not link JavaScript file"),
+                    repairInstruction);
+            assertTrue(repairInstruction.contains("submit/calculate button"),
+                    repairInstruction);
+            assertTrue(repairInstruction.contains("Expected targets:"),
+                    repairInstruction);
+            assertTrue(repairInstruction.contains("talos.write_file with complete corrected file content"),
+                    repairInstruction);
+            assertTrue(repairInstruction.contains("Do not repeat an edit_file old_string that already failed"),
+                    repairInstruction);
+        }
+
+        @Test
         void workspaceExplainNoToolDeflectionRetriesWithReadTools(@TempDir Path workspace)
                 throws Exception {
             Files.writeString(workspace.resolve("index.html"), """

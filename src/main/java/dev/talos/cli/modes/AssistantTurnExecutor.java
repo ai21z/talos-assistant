@@ -16,6 +16,7 @@ import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.verification.StaticTaskVerifier;
+import dev.talos.runtime.verification.StaticVerificationRepairContext;
 import dev.talos.runtime.verification.WebDiagnosticIntent;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
@@ -162,6 +163,7 @@ public final class AssistantTurnExecutor {
         ctx = withNativeToolSurface(ctx, taskContract);
         recordPolicyTrace(taskContract, ctx);
         injectTaskContractInstruction(messages);
+        injectStaticVerificationRepairInstruction(messages, taskContract);
         Context turnContext = ctx;
         String directAnswer = deterministicDirectAnswerIfNeeded(messages, taskContract);
         if (directAnswer != null) {
@@ -637,11 +639,42 @@ public final class AssistantTurnExecutor {
         messages.add(insertAt, ChatMessage.system(instruction));
     }
 
+    static void injectStaticVerificationRepairInstruction(
+            List<ChatMessage> messages,
+            TaskContract taskContract
+    ) {
+        if (messages == null || messages.isEmpty()) return;
+        if (messages.stream().anyMatch(AssistantTurnExecutor::isStaticVerificationRepairInstruction)) {
+            return;
+        }
+        StaticVerificationRepairContext.instructionFor(messages, taskContract)
+                .ifPresent(instruction -> {
+                    int insertAt = 0;
+                    for (int i = 0; i < messages.size(); i++) {
+                        ChatMessage message = messages.get(i);
+                        if ("system".equals(message.role())) {
+                            insertAt = i + 1;
+                            if (isTaskContractInstruction(message)) {
+                                break;
+                            }
+                        }
+                    }
+                    messages.add(insertAt, ChatMessage.system(instruction));
+                });
+    }
+
     private static boolean isTaskContractInstruction(ChatMessage message) {
         return message != null
                 && "system".equals(message.role())
                 && message.content() != null
                 && message.content().startsWith("[TaskContract]");
+    }
+
+    private static boolean isStaticVerificationRepairInstruction(ChatMessage message) {
+        return message != null
+                && "system".equals(message.role())
+                && message.content() != null
+                && message.content().startsWith("[Static verification repair context]");
     }
 
     private static String deterministicDirectAnswerIfNeeded(
