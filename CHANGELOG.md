@@ -16,6 +16,18 @@
 - [T46-done-medium] `/last` and `/last trace` now redact secret-like
   `KEY=value` values from the human-readable user request preview while
   preserving path, tool, and policy metadata.
+- [T48-done-high] Added current-turn capability frames and action-obligation
+  enforcement so mutation-capable turns cannot final-answer with false
+  no-filesystem or no-modification denials.
+- [T49-done-high] Added the TalosBench live prompt matrix and failure
+  taxonomy.
+- [T50-done-high] Added the TalosBench live prompt runner and starter prompt
+  cases.
+- [T51-done-high] Added TalosBench `/last trace` assertion support.
+- [T52-done-high] Documented Terminal-Bench 2 compatibility and task
+  classification for Talos.
+- [T53-done-high] Added the evaluation failure intake workflow and reusable
+  evaluation-derived ticket template.
 
 ## [0.9.7] - 2026-04-29
 
