@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.9.7] - 2026-04-29
+
+### Changed
+- [T29-done-medium] Cleaned current native Qodana high findings and restored
+  fresh local Qodana evidence to 0 high and 0 critical applied-profile issues.
+- [T30-done-high] Added the post-0.9.6 execution-discipline and local-trust
+  architecture spine.
+- [T31-done-high] Mapped runtime policy ownership before policy extraction so
+  future refactors have a tested responsibility map.
+- [T32-done-high] Designed local turn trace model v1, including redaction,
+  event shape, storage direction, and T33 implementation criteria.
+- [T33-done-high] Implemented local turn trace v1 for task contracts, tool
+  surfaces, approvals, blocks, checkpoints, verification, and outcomes.
+- [T34-done-high] Designed declarative allow/ask/deny permissions with
+  deny-first precedence and protected path defaults.
+- [T35-done-high] Implemented declarative local permissions for tools, paths,
+  protected resources, approvals, and trace-visible decisions.
+- [T36-done-high] Designed local checkpoint/restore as the trust layer before
+  approved mutations.
+- [T37-done-high] Implemented local checkpoint creation before approved
+  mutations and restore support.
+- [T38-done-high] Designed bounded repair controller behavior for
+  post-verification failures and invalid edit loops.
+- [T39-done-high] Implemented bounded repair planning using static verifier
+  findings without weakening approval, permission, or stop policies.
+- [T40-done-high] Fixed formatting-negation prompts so `do not use angle
+  brackets/placeholders` no longer cancels explicit mutation intent.
+- [T41-done-high] Ran the installed Talos manual prompt evaluation before the
+  0.9.7 candidate and recorded blockers/follow-ups.
+- [T42-done-high] Added deterministic exact full-file content expectations so
+  literal overwrite requests verify the final file content instead of relying
+  on write/readback alone.
 ## [0.9.6] - 2026-04-28
 
 ### Changed
