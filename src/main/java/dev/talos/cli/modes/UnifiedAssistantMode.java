@@ -77,15 +77,18 @@ public final class UnifiedAssistantMode implements Mode {
         } else if (ctx.memory() != null) {
             history = ctx.memory().getTurns();
         }
+        if (history == null) {
+            history = List.of();
+        }
 
         List<ChatMessage> contractMessages = new ArrayList<>();
-        if (history != null && !history.isEmpty()) {
+        if (!history.isEmpty()) {
             contractMessages.addAll(history);
         }
         contractMessages.add(ChatMessage.user(rawLine));
 
         // System prompt — unified mode: tools + workspace + retrieval guidance
-        boolean hasHistory = history != null && !history.isEmpty();
+        boolean hasHistory = !history.isEmpty();
         boolean nativeTools = CfgUtil.boolAt(CfgUtil.map(ctx.cfg().data.get("tools")), "native_calling", true);
         TaskContract taskContract = TaskContractResolver.fromMessages(contractMessages);
         boolean smallTalk = taskContract.type() == TaskType.SMALL_TALK;

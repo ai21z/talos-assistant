@@ -94,7 +94,7 @@ public final class ExplainLastTurnCommand implements Command {
         return switch (view) {
             case "tools" -> renderTools(latest);
             case "sources" -> renderSources(latest);
-            case "trace" -> renderTrace(latest, loadLocalTrace(store, sessionId, latest));
+            case "trace" -> renderTrace(latest, loadLocalTrace(store, sessionId, latest).orElse(null));
             default -> render(latest);
         };
     }
@@ -192,10 +192,10 @@ public final class ExplainLastTurnCommand implements Command {
     }
 
     static String renderTrace(TurnRecord turn) {
-        return renderTrace(turn, Optional.empty());
+        return renderTrace(turn, null);
     }
 
-    static String renderTrace(TurnRecord turn, Optional<LocalTurnTrace> localTrace) {
+    static String renderTrace(TurnRecord turn, LocalTurnTrace localTrace) {
         StringBuilder sb = new StringBuilder();
         sb.append(render(turn));
         sb.append("\nTrace Detail\n");
@@ -203,7 +203,9 @@ public final class ExplainLastTurnCommand implements Command {
         sb.append("  Retrieval: ").append(blankDefault(turn.retrievalTraceSummary(), "none recorded")).append('\n');
         sb.append("  Tool calls: ").append(turn.toolCalls().size()).append('\n');
         sb.append("  Status tag: ").append(blankDefault(turn.status(), "unknown")).append('\n');
-        localTrace.ifPresent(trace -> appendLocalTrace(sb, trace));
+        if (localTrace != null) {
+            appendLocalTrace(sb, localTrace);
+        }
         return sb.toString();
     }
 
