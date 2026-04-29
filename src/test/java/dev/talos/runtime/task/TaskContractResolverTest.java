@@ -365,9 +365,25 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void simpleFolderListingBecomesDirectoryListingContract() {
+        for (String input : List.of(
+                "What files are in this folder?",
+                "List the files here.",
+                "Show me the files in this directory.",
+                "What files are in this workspace?")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertEquals("DIRECTORY_LISTING", contract.type().name(), input);
+            assertFalse(contract.mutationRequested(), input);
+            assertFalse(contract.mutationAllowed(), input);
+            assertFalse(contract.verificationRequired(), input);
+        }
+    }
+
+    @Test
     void workspaceQuestionBecomesWorkspaceExplainContract() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
-                "What files are in this workspace?");
+                "What is this project?");
 
         assertEquals(TaskType.WORKSPACE_EXPLAIN, contract.type());
         assertFalse(contract.mutationAllowed());
@@ -376,7 +392,7 @@ class TaskContractResolverTest {
     @Test
     void explicitWorkspaceRequestsStillExposeReadOnlyWorkspaceContracts() {
         for (String input : List.of(
-                "what files are in this workspace?",
+                "inspect this workspace and summarize it",
                 "read README.md",
                 "search my files for ALPHA-742")) {
             TaskContract contract = TaskContractResolver.fromUserRequest(input);

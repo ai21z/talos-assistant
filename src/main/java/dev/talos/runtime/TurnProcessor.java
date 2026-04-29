@@ -13,6 +13,7 @@ import dev.talos.runtime.policy.PermissionDecision;
 import dev.talos.runtime.policy.PermissionRequest;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.toolcall.ToolCallSupport;
@@ -299,6 +300,18 @@ public final class TurnProcessor {
         TaskContract taskContract = TurnTaskContractCapture.get();
         if (taskContract == null) {
             taskContract = TaskContractResolver.fromUserRequest(userRequest);
+        }
+
+        if (taskContract.type() == TaskType.DIRECTORY_LISTING && !isListDirTool(call.toolName())) {
+            TurnAuditCapture.recordToolCall(
+                    call.toolName(), path == null ? "" : path, false,
+                    "directory-listing contract denied " + call.toolName());
+            LocalTurnTraceCapture.recordToolCallBlocked(tracePhase, call,
+                    "directory-listing contract allows only talos.list_dir");
+            return ToolResult.fail(ToolError.denied(
+                    "The user only asked to list directory entries on this turn, so do not call "
+                            + call.toolName()
+                            + ". Use talos.list_dir only and answer with file and directory names."));
         }
 
         if (ToolCallSupport.isMutatingTool(call.toolName())
@@ -759,6 +772,16 @@ public final class TurnProcessor {
         return "edit_file".equals(normalized)
                 || "file_edit".equals(normalized)
                 || "editfile".equals(normalized);
+    }
+
+    private static boolean isListDirTool(String toolName) {
+        String normalized = normalizeToolName(toolName);
+        return "list_dir".equals(normalized)
+                || "list_directory".equals(normalized)
+                || "dir_list".equals(normalized)
+                || "ls".equals(normalized)
+                || "listdir".equals(normalized)
+                || "listdirectory".equals(normalized);
     }
 
     private static String normalizeToolName(String toolName) {

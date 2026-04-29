@@ -461,6 +461,15 @@ public final class AssistantTurnExecutor {
         if (primaryFiles.isBlank()) {
             primaryFiles = "any obvious primary text files";
         }
+        if (contract != null && contract.type() == TaskType.DIRECTORY_LISTING) {
+            return """
+                The previous answer did not inspect the local workspace, but the current task asks only for directory entries.
+
+                Task type: DIRECTORY_LISTING
+                User request: "%s"
+
+                Use talos.list_dir on "." unless the user named another in-workspace directory. Do not inspect, search, retrieve, summarize, infer, write, or edit file contents. Answer with file and directory names only.""".formatted(request);
+        }
         return """
                 The previous answer did not inspect the local workspace, but the current task contract requires evidence.
 
@@ -559,7 +568,7 @@ public final class AssistantTurnExecutor {
     private static boolean requiresWorkspaceEvidence(TaskContract taskContract) {
         if (taskContract == null) return false;
         return switch (taskContract.type()) {
-            case WORKSPACE_EXPLAIN, VERIFY_ONLY -> true;
+            case DIRECTORY_LISTING, WORKSPACE_EXPLAIN, VERIFY_ONLY -> true;
             case DIAGNOSE_ONLY -> looksLikeEvidenceRequest(taskContract.originalUserRequest())
                     || containsWorkspaceEvidenceAnchor(taskContract.originalUserRequest());
             default -> false;
@@ -615,14 +624,25 @@ public final class AssistantTurnExecutor {
         TaskContract contract = TaskContractResolver.fromMessages(messages);
         if (contract.mutationAllowed()) return;
 
-        String instruction = contract.type() == TaskType.SMALL_TALK
-                ? """
+        String instruction;
+        if (contract.type() == TaskType.SMALL_TALK) {
+            instruction = """
                 [TaskContract]
                 type: SMALL_TALK
                 mutationAllowed: false
                 This turn is conversational and does not ask about workspace files.
-                Answer directly in one short sentence. Do not call tools."""
-                : """
+                Answer directly in one short sentence. Do not call tools.""";
+        } else if (contract.type() == TaskType.DIRECTORY_LISTING) {
+            instruction = """
+                [TaskContract]
+                type: DIRECTORY_LISTING
+                mutationAllowed: false
+                This turn asks only for file or directory names.
+                Call talos.list_dir on "." unless the user named another in-workspace directory.
+                Do not inspect, search, retrieve, summarize, infer, write, or edit file contents.
+                Answer with directory entries only.""";
+        } else {
+            instruction = """
                 [TaskContract]
                 type: %s
                 mutationAllowed: false
@@ -630,6 +650,7 @@ public final class AssistantTurnExecutor {
                 Use talos.list_dir, talos.read_file, talos.grep, or talos.retrieve as needed to inspect.
                 For WORKSPACE_EXPLAIN, DIAGNOSE_ONLY, and VERIFY_ONLY turns, start from the current workspace (`.`) unless the user named another in-workspace path. Do not ask for a path that is already implied by "this folder", "here", or "this workspace".
                 If you identify a possible fix, describe it and wait for an explicit change request before editing.""".formatted(contract.type());
+        }
 
         int insertAt = 0;
         for (int i = 0; i < messages.size(); i++) {
@@ -839,9 +860,54 @@ public final class AssistantTurnExecutor {
             int extraMutationSuccesses,
             Options opts
     ) {
+        String directoryListingAnswer = directoryListingAnswerIfApplicable(messages, loopResult);
+        if (!directoryListingAnswer.isBlank()) {
+            return sanitizeAndTruncate(directoryListingAnswer, opts);
+        }
         ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
                 answer, messages, loopResult, workspace, extraMutationSuccesses);
         return sanitizeAndTruncate(outcome.finalAnswer(), opts);
+    }
+
+    private static String directoryListingAnswerIfApplicable(
+            List<ChatMessage> messages,
+            ToolCallLoop.LoopResult loopResult
+    ) {
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+        if (contract.type() != TaskType.DIRECTORY_LISTING || loopResult == null) return "";
+        String body = latestToolResultBody(loopResult.messages(), "talos.list_dir");
+        if (body.isBlank() || body.contains("[error]")) return "";
+        List<String> entries = body.lines()
+                .map(String::strip)
+                .filter(line -> !line.isBlank())
+                .filter(line -> !line.startsWith("[verification_status:"))
+                .filter(line -> !line.startsWith("[/tool_result]"))
+                .limit(200)
+                .toList();
+        if (entries.isEmpty()) return "";
+        return "Directory entries:\n- " + String.join("\n- ", entries);
+    }
+
+    private static String latestToolResultBody(List<ChatMessage> messages, String toolName) {
+        if (messages == null || messages.isEmpty()) return "";
+        String prefix = "[tool_result: " + toolName + "]";
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            ChatMessage message = messages.get(i);
+            if (message == null || message.content() == null) continue;
+            String content = message.content().strip();
+            if (!content.startsWith(prefix)) continue;
+            int start = content.indexOf('\n');
+            if (start < 0) return "";
+            int end = content.lastIndexOf("\n[/tool_result]");
+            if (end < 0) end = content.length();
+            String body = content.substring(start + 1, end).strip();
+            if (body.contains("[error]")
+                    || body.startsWith("You already gathered this information")) {
+                continue;
+            }
+            return body;
+        }
+        return "";
     }
 
     private static void emitMalformedProtocolReplacementIfNeeded(
@@ -2185,7 +2251,8 @@ public final class AssistantTurnExecutor {
         if (contract.mutationRequested()) return false;
 
         TaskType type = contract.type();
-        if (type == TaskType.WORKSPACE_EXPLAIN
+        if (type == TaskType.DIRECTORY_LISTING
+                || type == TaskType.WORKSPACE_EXPLAIN
                 || type == TaskType.DIAGNOSE_ONLY
                 || type == TaskType.VERIFY_ONLY) {
             return true;

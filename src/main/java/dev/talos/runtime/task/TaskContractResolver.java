@@ -44,6 +44,23 @@ public final class TaskContractResolver {
             "this site"
     );
 
+    private static final Pattern SIMPLE_DIRECTORY_LISTING = Pattern.compile(
+            "(?i)^\\s*(?:"
+                    + "(?:what|which)\\s+(?:files|folders|directories|items|entries)\\s+"
+                    + "(?:are|exist|do\\s+we\\s+have)?\\s*(?:in|inside)?\\s*"
+                    + "(?:this|the|current|here)?\\s*(?:folder|directory|workspace|repo|repository)?"
+                    + "|list\\s+(?:the\\s+)?(?:files|folders|directories|items|entries)\\s*"
+                    + "(?:here|in\\s+(?:this|the|current)\\s+(?:folder|directory|workspace|repo|repository))?"
+                    + "|show\\s+me\\s+(?:the\\s+)?(?:files|folders|directories|items|entries)\\s*"
+                    + "(?:here|in\\s+(?:this|the|current)\\s+(?:folder|directory|workspace|repo|repository))?"
+                    + ")[\\s.!?]*$");
+
+    private static final Set<String> SIMPLE_LISTING_EXCLUSION_MARKERS = Set.of(
+            "read", "explain", "summarize", "summary", "inspect", "diagnose",
+            "search", "grep", "find ", "content", "contents", "inside the files",
+            "what does", "what is this project", "what is this folder for"
+    );
+
     private static final Set<String> PRIVACY_NO_WORKSPACE_MARKERS = Set.of(
             "only chatting",
             "just chat",
@@ -206,6 +223,9 @@ public final class TaskContractResolver {
                 || looksAssistantIdentityQuestion(lower)) {
             return TaskType.SMALL_TALK;
         }
+        if (looksSimpleDirectoryListingRequest(lower)) {
+            return TaskType.DIRECTORY_LISTING;
+        }
         if (lower.contains("verify") || lower.contains("confirm")) {
             return TaskType.VERIFY_ONLY;
         }
@@ -231,6 +251,12 @@ public final class TaskContractResolver {
 
     private static boolean looksPrivacyNoWorkspaceRequest(String lower) {
         return lower != null && containsAny(lower, PRIVACY_NO_WORKSPACE_MARKERS);
+    }
+
+    private static boolean looksSimpleDirectoryListingRequest(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        if (containsAny(lower, SIMPLE_LISTING_EXCLUSION_MARKERS)) return false;
+        return SIMPLE_DIRECTORY_LISTING.matcher(lower).matches();
     }
 
     private static boolean looksConversationalGreetingRequest(String lower) {

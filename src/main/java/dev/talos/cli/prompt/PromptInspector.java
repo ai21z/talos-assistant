@@ -42,10 +42,13 @@ public final class PromptInspector {
                 : TaskContract.unknown(input);
         boolean smallTalk = "unified".equals(resolvedMode)
                 && contract.type() == TaskType.SMALL_TALK;
+        boolean directoryListing = "unified".equals(resolvedMode)
+                && contract.type() == TaskType.DIRECTORY_LISTING;
 
         SystemPromptBuilder builder = builderFor(resolvedMode)
                 .withNativeTools(nativeTools)
-                .withHistory(hasHistory);
+                .withHistory(hasHistory)
+                .withDirectoryListingToolMode(directoryListing);
         if ("unified".equals(resolvedMode)) {
             if (!smallTalk) {
                 builder

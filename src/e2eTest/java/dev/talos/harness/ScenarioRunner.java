@@ -409,6 +409,7 @@ public final class ScenarioRunner {
         var scriptedLlm = LlmClient.scripted(scriptedResponses);
         var ctx = Context.builder(new Config())
                 .sandbox(new Sandbox(workspace.path(), Map.of()))
+                .toolRegistry(registry)
                 .toolCallLoop(loop)
                 .llm(scriptedLlm)
                 .executionPhaseState(new ExecutionPhaseState(scenarioPhaseOrApply(scenario)))
@@ -477,6 +478,7 @@ public final class ScenarioRunner {
         var scriptedLlm = LlmClient.scripted(scriptedResponses);
         var ctx = Context.builder(new Config())
                 .sandbox(new Sandbox(workspace.path(), Map.of()))
+                .toolRegistry(registry)
                 .toolCallLoop(loop)
                 .llm(scriptedLlm)
                 .streamSink(streamedChunks::append)

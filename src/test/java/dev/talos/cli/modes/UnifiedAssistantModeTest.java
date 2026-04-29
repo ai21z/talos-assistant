@@ -88,7 +88,7 @@ class UnifiedAssistantModeTest {
         var mode = new UnifiedAssistantMode();
 
         var result = mode.handle(
-                "What files are in this workspace?",
+                "What is this project?",
                 Path.of(".").toAbsolutePath().normalize(),
                 context("I will inspect the workspace."));
 
@@ -101,6 +101,32 @@ class UnifiedAssistantModeTest {
         assertTrue(render.tools().contains("talos.read_file"), render.tools().toString());
         assertFalse(render.tools().contains("talos.write_file"), render.tools().toString());
         assertFalse(render.tools().contains("talos.edit_file"), render.tools().toString());
+    }
+
+    @Test
+    void simpleFolderListingRecordsListDirOnlyToolSurface() throws Exception {
+        LastPromptCapture.clear();
+        var mode = new UnifiedAssistantMode();
+
+        var result = mode.handle(
+                "What files are in this folder?",
+                Path.of(".").toAbsolutePath().normalize(),
+                context("I will list the folder."));
+
+        assertTrue(result.isPresent());
+        var render = LastPromptCapture.latest().orElseThrow();
+
+        assertEquals("DIRECTORY_LISTING", render.taskType());
+        assertFalse(render.mutationAllowed());
+        assertTrue(render.tools().contains("talos.list_dir"), render.tools().toString());
+        assertFalse(render.tools().contains("talos.read_file"), render.tools().toString());
+        assertFalse(render.tools().contains("talos.grep"), render.tools().toString());
+        assertFalse(render.tools().contains("talos.retrieve"), render.tools().toString());
+        assertFalse(render.systemPrompt().contains("talos.read_file"), render.systemPrompt());
+        assertFalse(render.systemPrompt().contains("talos.grep"), render.systemPrompt());
+        assertFalse(render.systemPrompt().contains("talos.retrieve"), render.systemPrompt());
+        assertFalse(render.systemPrompt().contains("File structure:"), render.systemPrompt());
+        assertFalse(render.systemPrompt().contains("README (excerpt):"), render.systemPrompt());
     }
 
     @Test

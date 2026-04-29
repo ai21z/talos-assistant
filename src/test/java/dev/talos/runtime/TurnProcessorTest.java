@@ -16,6 +16,7 @@ import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.tools.*;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
+import dev.talos.tools.impl.ReadFileTool;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -291,6 +292,28 @@ class TurnProcessorTest {
         assertTrue(result.success(), result.errorMessage());
         assertEquals(1, approvals.get());
         assertTrue(Files.exists(workspace.resolve("styles.css")));
+    }
+
+    @Test
+    void directoryListingContractBlocksContentInspectionTools(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("notes.md"), "Hidden project token: ALPHA-742");
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new ReadFileTool());
+        var tp = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+        String request = "What files are in this folder?";
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.read_file", Map.of("path", "notes.md")), ctx);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.DENIED, result.error().code());
+        assertTrue(result.errorMessage().contains("directory entries"), result.errorMessage());
+        assertTrue(result.errorMessage().contains("talos.list_dir"), result.errorMessage());
+        assertFalse(result.errorMessage().contains("ALPHA-742"), result.errorMessage());
     }
 
     @Test void toolReceivesWorkspaceFromSession() {
