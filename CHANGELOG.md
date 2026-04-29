@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.9.8] - 2026-04-29
+
+### Changed
+- [T43-done-medium] Protected reads now display as sensitive/protected reads,
+  and denied protected reads are classified as blocked by approval instead of
+  completed read-only answers.
+- [T44-done-medium] Bounded small-web repair now requires complete
+  `write_file` replacements for structural HTML/CSS/JS repair targets, rejects
+  brittle `edit_file` attempts for those targets before approval, and continues
+  through planned full-write repair targets.
+- [T45-done-medium] Simple folder-listing prompts now use `list_dir` only,
+  suppress content tools and generic workspace context, and shape filename
+  answers from actual directory listing results.
+- [T46-done-medium] `/last` and `/last trace` now redact secret-like
+  `KEY=value` values from the human-readable user request preview while
+  preserving path, tool, and policy metadata.
+
 ## [0.9.7] - 2026-04-29
 
 ### Changed
