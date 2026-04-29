@@ -1,7 +1,7 @@
-# [T29-open-medium] Ticket: Clean Current Native Qodana High Findings
+# [T29-done-medium] Ticket: Clean Current Native Qodana High Findings
 Date: 2026-04-28
 Priority: medium
-Status: open
+Status: done
 Architecture references:
 - `docs/architecture/01-execution-discipline-and-local-trust.md`
 - `work-cycle-docs/work-test-cycle.md`
@@ -83,6 +83,93 @@ Get-Content build/reports/talos/qodana-summary.json
 
 Use the inner dev loop. Do not declare a versioned candidate for this cleanup
 unless explicitly requested.
+
+## Current Code Read
+
+- `src/main/java/dev/talos/cli/modes/AssistantTurnExecutor.java`
+- `src/main/java/dev/talos/cli/modes/UnifiedAssistantMode.java`
+- `src/main/java/dev/talos/runtime/verification/StaticVerificationRepairContext.java`
+
+Initial read on 2026-04-29 shows the old `StaticVerificationRepairContext`
+`rawLine == null` finding is likely stale after T39 because repair context now
+delegates to `RepairPolicy` and no longer accepts `rawLine`.
+
+## Planned Evidence
+
+```powershell
+./gradlew.bat test --no-daemon
+./gradlew.bat qodanaNativeFreshLocal --no-daemon
+./gradlew.bat talosQualitySummaries --no-daemon
+```
+
+## Implementation Summary
+
+- Removed dead null checks that Qodana proved unreachable in
+  `AssistantTurnExecutor`, checkpoint config parsing, permission config
+  parsing, checkpoint target extraction, and repair problem extraction.
+- Normalized `UnifiedAssistantMode` history to a non-null list before prompt
+  capture, removing the possible `history.size()` null dereference.
+- Replaced an `Optional<LocalTurnTrace>` parameter in
+  `ExplainLastTurnCommand.renderTrace` with a nullable internal argument while
+  keeping `loadLocalTrace` as the optional-returning seam.
+- Simplified permission remember eligibility after the destructive-risk branch
+  already handled destructive calls.
+- Added a narrow resource suppression in `TurnProcessor.process` because the
+  context-owned `LlmClient` is borrowed for model metadata and must not be
+  closed per turn.
+
+## Work-Test Cycle Loop Used
+
+Inner dev loop. This ticket did not declare a versioned candidate and did not
+update `CHANGELOG.md`.
+
+## Tests / Evidence Run
+
+```powershell
+./gradlew.bat test --no-daemon
+```
+
+Result: PASS.
+
+```powershell
+./gradlew.bat qodanaNativeFreshLocal --no-daemon
+```
+
+Result: PASS. Fresh enabled-profile Qodana findings decreased from 11 high
+findings to 0 applied-profile findings.
+
+```powershell
+./gradlew.bat talosQualitySummaries --no-daemon
+```
+
+Result: PASS. `build/reports/talos/qodana-summary.json` reported:
+
+- `summaryStatus`: `qodana-results-match-current-candidate`
+- `totalIssues`: 0
+- `highIssues`: 0
+- `criticalIssues`: 0
+
+Qodana still printed suggested inspections and JetBrains IDE diagnostic noise
+outside the enabled profile, but those were not counted in the SARIF-backed
+Talos Qodana summary.
+
+```powershell
+./gradlew.bat check --no-daemon
+```
+
+Result: PASS. Run as an extra safety gate because the cleanup touched runtime
+classes across trace, permission, checkpoint, and repair code.
+
+## Manual Talos Check Result
+
+Not required. T29 is static-analysis cleanup with no intended runtime behavior
+change.
+
+## Known Follow-Ups
+
+- None for the enabled Qodana profile. Future candidates should continue using
+  `qodanaNativeFreshLocal` followed by `talosQualitySummaries` to avoid stale
+  Qodana evidence.
 
 ## Known Risks
 

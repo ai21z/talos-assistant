@@ -78,7 +78,7 @@ public final class DeclarativePermissionPolicy implements PermissionPolicy {
         return PermissionDecision.ask(reason,
                 "Permission policy requires approval before running " + request.call().toolName() + ".",
                 resource,
-                rememberEligible && risk != ToolRiskLevel.DESTRUCTIVE);
+                rememberEligible);
     }
 
     private static PermissionDecision explicitDecision(

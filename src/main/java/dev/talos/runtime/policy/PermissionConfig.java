@@ -13,7 +13,7 @@ public record PermissionConfig(List<PermissionRule> rules) {
     }
 
     public static PermissionConfig from(Config config) {
-        if (config == null || config.data == null) return new PermissionConfig(List.of());
+        if (config == null) return new PermissionConfig(List.of());
         Object permissionsObj = config.data.get("permissions");
         if (!(permissionsObj instanceof Map<?, ?> permissions)) {
             return new PermissionConfig(List.of());
