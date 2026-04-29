@@ -41,7 +41,7 @@ public record CheckpointConfig(
 
     @SuppressWarnings("unchecked")
     private static Map<String, Object> checkpointMap(Config config) {
-        if (config == null || config.data == null) return Map.of();
+        if (config == null) return Map.of();
         Object raw = config.data.get("checkpoint");
         if (raw instanceof Map<?, ?> map) {
             return new LinkedHashMap<>((Map<String, Object>) (Map<?, ?>) map);

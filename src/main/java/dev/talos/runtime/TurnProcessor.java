@@ -147,6 +147,7 @@ public final class TurnProcessor {
      * @return a TurnResult, or null if no mode handled the input
      * @throws Exception if mode dispatch fails (propagated for envelope handling)
      */
+    @SuppressWarnings("resource") // Context-owned LlmClient is borrowed for metadata, not closed per turn.
     public TurnResult process(Session session, String userInput, Context ctx) throws Exception {
         if (userInput == null || userInput.isBlank()) {
             return null;

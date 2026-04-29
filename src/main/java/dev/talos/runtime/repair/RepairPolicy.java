@@ -263,7 +263,7 @@ public final class RepairPolicy {
         List<String> out = new ArrayList<>();
         boolean inProblems = false;
         for (String rawLine : previous.split("\\R")) {
-            String line = rawLine == null ? "" : rawLine.strip();
+            String line = rawLine.strip();
             String lower = line.toLowerCase(Locale.ROOT);
             if (lower.contains("remaining static verification problems")
                     || lower.contains("unresolved static verification problems")) {

@@ -1346,7 +1346,7 @@ public final class AssistantTurnExecutor {
         if (loopResult.mutatingToolSuccesses() > 0) return answer;
 
         TaskContract contract = TaskContractResolver.fromMessages(messages);
-        if (contract == null || contract.mutationAllowed()) return answer;
+        if (contract.mutationAllowed()) return answer;
 
         List<ToolCallLoop.ToolOutcome> readOnlyBlockedMutations = loopResult.toolOutcomes().stream()
                 .filter(ToolCallLoop.ToolOutcome::mutating)
@@ -1507,7 +1507,7 @@ public final class AssistantTurnExecutor {
 
         String userRequest = latestUserRequest(messages);
         TaskContract retryContract = TaskContractResolver.fromMessages(messages);
-        if (retryContract == null || !retryContract.mutationAllowed()) {
+        if (!retryContract.mutationAllowed()) {
             return new MutationRetryResult(answer, 0, null);
         }
         String priorMutationRequest = previousMutationUserRequest(messages, userRequest);

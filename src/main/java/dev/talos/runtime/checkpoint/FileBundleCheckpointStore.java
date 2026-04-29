@@ -40,7 +40,7 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
         }
         CheckpointConfig cfg = CheckpointConfig.from(config);
         String pathParam = pathParam(call);
-        if (pathParam == null || pathParam.isBlank()) {
+        if (pathParam.isBlank()) {
             return CheckpointCaptureResult.failure("Checkpoint requires a target path.");
         }
 
