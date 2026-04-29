@@ -297,6 +297,7 @@ tasks.withType<Jar>().configureEach {
 val generateBuildVersionResource by tasks.registering {
     val outputDir = layout.buildDirectory.dir("generated/resources/buildVersion")
     outputs.dir(outputDir)
+    inputs.property("projectVersion", project.version.toString())
 
     doLast {
         val metaInfDir = outputDir.get().file("META-INF").asFile
