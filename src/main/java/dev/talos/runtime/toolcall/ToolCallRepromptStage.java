@@ -17,6 +17,7 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 @SuppressWarnings("resource") // LoopState.ctx owns the shared LlmClient for the active REPL session.
 public final class ToolCallRepromptStage {
@@ -79,11 +80,16 @@ public final class ToolCallRepromptStage {
         // for all-success iterations — that path still avoids the 5-15
         // minute post-mutation bloviation observed on local 31B Q4 models.
         if (outcome.mutationsThisIteration() > 0 && outcome.failuresThisIteration() == 0) {
-            state.currentText = String.join("\n", outcome.mutationSummaries());
-            state.currentNativeCalls = List.of();
-            LOG.debug("P0: skipping re-prompt after {} successful mutation(s) this iteration",
-                    outcome.mutationsThisIteration());
-            return false;
+            List<String> remainingRepairTargets = remainingFullRewriteRepairTargets(state);
+            if (remainingRepairTargets.isEmpty()) {
+                state.currentText = String.join("\n", outcome.mutationSummaries());
+                state.currentNativeCalls = List.of();
+                LOG.debug("P0: skipping re-prompt after {} successful mutation(s) this iteration",
+                        outcome.mutationsThisIteration());
+                return false;
+            }
+            LOG.debug("Continuing static repair after {} successful mutation(s); remaining full-write targets: {}",
+                    outcome.mutationsThisIteration(), remainingRepairTargets);
         }
 
         if (outcome.mutationsThisIteration() > 0 && outcome.failuresThisIteration() > 0) {
@@ -121,6 +127,17 @@ public final class ToolCallRepromptStage {
             state.messages.add(ChatMessage.system(repair.get().instruction()));
             state.emptyEditRepairPromptedPaths.add(repair.get().path());
             emptyRepairIndex = state.messages.size() - 1;
+        }
+
+        int repairProgressIndex = -1;
+        List<String> remainingRepairTargets = remainingFullRewriteRepairTargets(state);
+        if (!remainingRepairTargets.isEmpty()) {
+            state.messages.add(ChatMessage.system(
+                    "[Static repair progress] Continue the bounded repair. Remaining full-file "
+                            + "replacement targets: " + String.join(", ", remainingRepairTargets)
+                            + ". Use talos.write_file with complete corrected file content for each remaining target. "
+                            + "Do not claim completion until static verification passes."));
+            repairProgressIndex = state.messages.size() - 1;
         }
 
         int anchorIndex = -1;
@@ -203,6 +220,14 @@ public final class ToolCallRepromptStage {
                         && m.content() != null
                         && m.content().startsWith("[Current task")) {
                     state.messages.remove(anchorIndex);
+                }
+            }
+            if (repairProgressIndex >= 0 && repairProgressIndex < state.messages.size()) {
+                ChatMessage m = state.messages.get(repairProgressIndex);
+                if ("system".equals(m.role())
+                        && m.content() != null
+                        && m.content().startsWith("[Static repair progress]")) {
+                    state.messages.remove(repairProgressIndex);
                 }
             }
             if (emptyRepairIndex >= 0 && emptyRepairIndex < state.messages.size()) {
@@ -323,5 +348,23 @@ public final class ToolCallRepromptStage {
 
     static String emptyEditRepairInstruction(String path) {
         return RepairPolicy.emptyEditRepairInstruction(path);
+    }
+
+    private static List<String> remainingFullRewriteRepairTargets(LoopState state) {
+        if (state == null) return List.of();
+        Set<String> required = RepairPolicy.fullRewriteTargetsFromRepairContext(state.messages);
+        if (required.isEmpty()) return List.of();
+        Set<String> successfullyMutated = new java.util.HashSet<>();
+        for (dev.talos.runtime.ToolCallLoop.ToolOutcome outcome : state.toolOutcomes) {
+            if (outcome == null || !outcome.success() || !outcome.mutating()) continue;
+            String path = ToolCallSupport.normalizePath(outcome.pathHint());
+            if (!path.isBlank()) successfullyMutated.add(path);
+        }
+        return required.stream()
+                .map(ToolCallSupport::normalizePath)
+                .filter(path -> !path.isBlank())
+                .filter(path -> !successfullyMutated.contains(path))
+                .sorted()
+                .toList();
     }
 }
