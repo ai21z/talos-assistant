@@ -1070,6 +1070,51 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/73-mutation-create-no-tool-deflection-retries.json] 73: mutation create no-tool deflection retries")
+    void mutationCreateNoToolDeflectionRetries() {
+        var loaded = JsonScenarioLoader.load("scenarios/73-mutation-create-no-tool-deflection-retries.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(3, 3, 0, 0)
+                    .assertAnswerContains("Static verification: passed")
+                    .assertAnswerNotContains("unable to create or modify files")
+                    .assertAnswerNotContains("underlying file system")
+                    .assertFileContains("index.html", "bmiForm")
+                    .assertFileContains("styles.css", ".calculator")
+                    .assertFileContains("scripts.js", "getElementById('bmiForm')");
+            assertTrue(result.localTrace().events().stream()
+                    .anyMatch(event -> "ACTION_OBLIGATION_EVALUATED".equals(event.type())
+                            && "UNSATISFIED".equals(event.data().get("status"))));
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/74-mutation-create-no-tool-deflection-fails-closed.json] 74: mutation create no-tool deflection fails closed")
+    void mutationCreateNoToolDeflectionFailsClosed() {
+        var loaded = JsonScenarioLoader.load("scenarios/74-mutation-create-no-tool-deflection-fails-closed.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("Talos can apply approved file changes in this workspace")
+                    .assertAnswerContains("no files were changed")
+                    .assertAnswerNotContains("unable to create or modify files")
+                    .assertAnswerNotContains("underlying file system")
+                    .assertFileAbsent("index.html")
+                    .assertFileAbsent("styles.css")
+                    .assertFileAbsent("scripts.js");
+            assertTrue(result.localTrace().events().stream()
+                    .anyMatch(event -> "ACTION_OBLIGATION_EVALUATED".equals(event.type())
+                            && "FAILED".equals(event.data().get("status"))));
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/42-partial-followup-summary-uses-verified-history.json] 42: follow-up summary uses verified partial history")
     void partialFollowupSummaryUsesVerifiedHistory() {
         var loaded = JsonScenarioLoader.load("scenarios/42-partial-followup-summary-uses-verified-history.json");

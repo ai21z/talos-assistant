@@ -146,6 +146,76 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void explicitMutationNoToolCapabilityDenialRetriesAndExecutesWrite(@TempDir Path workspace)
+                throws Exception {
+            var registry = new dev.talos.tools.ToolRegistry();
+            var undoStack = new dev.talos.tools.FileUndoStack();
+            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "I am unable to create or modify files within your workspace directly "
+                                    + "as I do not have access to the underlying file system. "
+                                    + "However, I can provide code snippets.",
+                            "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"index.html\","
+                                    + "\"content\":\"<!doctype html><title>BMI</title>\"}}",
+                            "Created index.html.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "I want to create a modern BMI calculator website to use! Can you make it?"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(Files.exists(workspace.resolve("index.html")),
+                    "no-tool capability denial must be retried through mutating tools");
+            assertTrue(out.text().contains("[Used 1 tool(s): talos.write_file"),
+                    "retry tool execution summary should be visible");
+            assertFalse(out.text().contains("unable to create or modify files"), out.text());
+            assertFalse(out.text().contains("underlying file system"), out.text());
+        }
+
+        @Test
+        void explicitMutationRetryStillRefusesReturnsDeterministicNoActionAnswer(@TempDir Path workspace)
+                throws Exception {
+            var registry = new dev.talos.tools.ToolRegistry();
+            var undoStack = new dev.talos.tools.FileUndoStack();
+            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "I am unable to create or modify files within your workspace directly.",
+                            "I still do not have access to the underlying file system.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "I want to create a modern BMI calculator website to use! Can you make it?"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertFalse(Files.exists(workspace.resolve("index.html")));
+            assertTrue(out.text().contains("Talos can apply approved file changes in this workspace"),
+                    out.text());
+            assertTrue(out.text().contains("no files were changed"), out.text());
+            assertFalse(out.text().contains("unable to create or modify files"), out.text());
+            assertFalse(out.text().contains("underlying file system"), out.text());
+        }
+
+        @Test
         void postDenialRepairFollowUpNoToolAnswerRetriesAndExecutesPriorWrite(@TempDir Path workspace)
                 throws Exception {
             var registry = new dev.talos.tools.ToolRegistry();
@@ -626,14 +696,33 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
-        void mutationTurnDoesNotGetReadOnlyInstruction() {
+        void mutationTurnGetsCurrentTurnCapabilityFrame() {
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
-            messages.add(ChatMessage.user("Edit index.html to add the CTA button."));
+            messages.add(ChatMessage.user("Who are you?"));
+            messages.add(ChatMessage.assistant("I am Talos."));
+            messages.add(ChatMessage.user(
+                    "I want to create a modern BMI calculator website to use! Can you make it?"));
 
             AssistantTurnExecutor.injectTaskContractInstruction(messages);
 
-            assertEquals(2, messages.size());
+            int currentUserIndex = -1;
+            for (int i = messages.size() - 1; i >= 0; i--) {
+                if ("user".equals(messages.get(i).role())) {
+                    currentUserIndex = i;
+                    break;
+                }
+            }
+            assertTrue(currentUserIndex > 0);
+            ChatMessage frame = messages.get(currentUserIndex - 1);
+            assertEquals("system", frame.role());
+            assertTrue(frame.content().contains("[CurrentTurnCapability]"), frame.content());
+            assertTrue(frame.content().contains("type: FILE_CREATE"), frame.content());
+            assertTrue(frame.content().contains("mutationAllowed: true"), frame.content());
+            assertTrue(frame.content().contains("obligation: MUTATING_TOOL_REQUIRED"), frame.content());
+            assertTrue(frame.content().contains("talos.write_file"), frame.content());
+            assertTrue(frame.content().contains("talos.edit_file"), frame.content());
+            assertTrue(frame.content().contains("Do not say you lack filesystem"), frame.content());
         }
 
         @Test
@@ -664,7 +753,7 @@ class AssistantTurnExecutorTest {
             long count = messages.stream()
                     .filter(message -> "system".equals(message.role()))
                     .filter(message -> message.content() != null)
-                    .filter(message -> message.content().startsWith("[TaskContract]"))
+                    .filter(message -> message.content().startsWith("[CurrentTurnCapability]"))
                     .count();
             assertEquals(1, count);
         }

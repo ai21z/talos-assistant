@@ -149,9 +149,12 @@ class PromptInspectorTest {
         assertTrue(render.tools().contains("talos.read_file"));
         assertTrue(render.tools().contains("talos.write_file"));
         assertTrue(render.tools().contains("talos.edit_file"));
-        assertFalse(render.messages().stream()
+        assertTrue(render.messages().stream()
                 .anyMatch(message -> message.content() != null
-                        && message.content().contains("[TaskContract]")));
+                        && message.content().contains("[CurrentTurnCapability]")
+                        && message.content().contains("obligation: MUTATING_TOOL_REQUIRED")
+                        && message.content().contains("talos.write_file")
+                        && message.content().contains("talos.edit_file")));
     }
 
     @Test

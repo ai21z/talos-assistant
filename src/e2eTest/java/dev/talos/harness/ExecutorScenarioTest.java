@@ -80,14 +80,16 @@ class ExecutorScenarioTest {
                 "Change the CTA button text to 'Let's Get Healthy' in index.html",
                 List.of(readFileCall, falseMutationClaim))) {
 
-            // ── R2 annotation must be present ──────────────────────
+            // ── T48 obligation failure must replace the false claim ─────────
             //
-            // The executor's full pipeline ran: tool loop executed
-            // read_file (0 mutating successes), scripted turn 1
-            // returned the false claim, annotateIfFalseMutationClaim
-            // prepended FALSE_MUTATION_ANNOTATION.
-            result.assertAnswerContains(AssistantTurnExecutor.FALSE_MUTATION_ANNOTATION)
-                  .assertAnswerContains("changes have been applied");
+            // The executor's full pipeline ran: tool loop executed read_file
+            // (0 mutating successes), the scripted model returned a false
+            // mutation claim, and the retry still emitted no write/edit call.
+            // The current-turn mutating-tool obligation now fails closed
+            // instead of surfacing the false "changes applied" prose.
+            result.assertAnswerContains("Talos can apply approved file changes in this workspace")
+                  .assertAnswerContains("no files were changed")
+                  .assertAnswerNotContains("changes have been applied");
 
             // ── N3 must NOT fire here ──────────────────────────────
             //
@@ -116,13 +118,11 @@ class ExecutorScenarioTest {
             assertFalse(result.streamed(),
                     "runThroughExecutor should drive the non-streaming branch");
 
-            // Answer text must actually contain the model's verbatim
-            // claim after the annotation (annotate-first: never
-            // silently rewrite).
-            assertTrue(result.finalAnswer().contains(falseMutationClaim),
-                    "R2 must preserve the original claim verbatim "
-                  + "inside the annotated output (annotate-first "
-                  + "posture). Actual:\n" + result.finalAnswer());
+            // T48 intentionally does not preserve the model-authored false
+            // claim on an unsatisfied mutating-tool obligation.
+            assertFalse(result.finalAnswer().contains(falseMutationClaim),
+                    "False mutation prose must not survive obligation failure. Actual:\n"
+                            + result.finalAnswer());
         }
     }
 }

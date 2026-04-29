@@ -10,6 +10,11 @@ import dev.talos.runtime.TurnAuditCapture;
 import dev.talos.runtime.TurnPolicyTrace;
 import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.policy.ActionObligation;
+import dev.talos.runtime.policy.ActionObligationPolicy;
+import dev.talos.runtime.policy.CapabilityAnswerPolicy;
+import dev.talos.runtime.policy.CurrentTurnCapabilityFrame;
+import dev.talos.runtime.policy.ResponseObligationVerifier;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
@@ -61,32 +66,6 @@ import java.util.function.UnaryOperator;
 public final class AssistantTurnExecutor {
 
     private static final Logger LOG = LoggerFactory.getLogger(AssistantTurnExecutor.class);
-
-    private static final String TALOS_IDENTITY_ANSWER =
-            "I am Talos, a local-first workspace assistant that can inspect files "
-            + "and apply approved changes in this workspace.";
-
-    private static final String TALOS_CAPABILITY_ANSWER =
-            "Talos can inspect this local workspace, read and search files, retrieve indexed context, "
-            + "and apply file changes only after approval. It runs against your configured local model "
-            + "and cannot use browser, shell, or unsupported binary-document tools unless those capabilities are added.";
-
-    private static final Set<String> ASSISTANT_IDENTITY_TURN_MARKERS = Set.of(
-            "who are you",
-            "what are you",
-            "what is talos",
-            "who is talos",
-            "tell me what you are",
-            "tell me about yourself"
-    );
-
-    private static final Set<String> ASSISTANT_CAPABILITY_TURN_MARKERS = Set.of(
-            "what can you do",
-            "what can you do for me",
-            "how can you assist me",
-            "how can you help me",
-            "what can talos do"
-    );
 
     private static final Set<String> CHANGE_SUMMARY_FOLLOW_UP_MARKERS = Set.of(
             "summarize what changed",
@@ -164,7 +143,11 @@ public final class AssistantTurnExecutor {
         initializeExecutionPhaseForTurn(taskContract, ctx);
         ctx = withNativeToolSurface(ctx, taskContract);
         recordPolicyTrace(taskContract, ctx);
-        injectTaskContractInstruction(messages);
+        injectTaskContractInstruction(
+                messages,
+                taskContract,
+                ctx.executionPhaseState() == null ? ExecutionPhase.APPLY : ctx.executionPhaseState().phase(),
+                NativeToolSpecPolicy.names(ctx.nativeToolSpecs()));
         injectStaticVerificationRepairInstruction(messages, taskContract);
         Context turnContext = ctx;
         String directAnswer = deterministicDirectAnswerIfNeeded(messages, taskContract);
@@ -549,10 +532,10 @@ public final class AssistantTurnExecutor {
         }
         String userRequest = latestUserRequest(messages);
         if (looksLikeAssistantIdentityTurn(userRequest)) {
-            return sanitizeAndTruncate(TALOS_IDENTITY_ANSWER, opts);
+            return sanitizeAndTruncate(CapabilityAnswerPolicy.identityAnswer(), opts);
         }
         if (looksLikeAssistantCapabilityTurn(userRequest)) {
-            return sanitizeAndTruncate(TALOS_CAPABILITY_ANSWER, opts);
+            return sanitizeAndTruncate(CapabilityAnswerPolicy.capabilityAnswer(), opts);
         }
         return sanitizeAndTruncate("Hi, I am Talos.", opts);
     }
@@ -607,6 +590,11 @@ public final class AssistantTurnExecutor {
                 phase.name(),
                 nativeTools,
                 nativeTools));
+        ActionObligation obligation = ActionObligationPolicy.derive(contract, phase);
+        LocalTurnTraceCapture.recordActionObligation(
+                obligation.name(),
+                "SELECTED",
+                "derived from task contract and execution phase");
     }
 
     private static LlmClient.StreamResult chatStreamFull(Context ctx, List<ChatMessage> messages) {
@@ -618,48 +606,61 @@ public final class AssistantTurnExecutor {
     }
 
     public static void injectTaskContractInstruction(List<ChatMessage> messages) {
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+        ExecutionPhase phase = contract.mutationAllowed()
+                ? ExecutionPhase.APPLY
+                : ExecutionPhase.INSPECT;
+        List<String> visibleTools = defaultVisibleToolNames(contract, phase);
+        injectTaskContractInstruction(messages, contract, phase, visibleTools);
+    }
+
+    public static void injectTaskContractInstruction(
+            List<ChatMessage> messages,
+            TaskContract contract,
+            ExecutionPhase phase,
+            List<String> visibleTools
+    ) {
         if (messages == null || messages.isEmpty()) return;
         if (messages.stream().anyMatch(AssistantTurnExecutor::isTaskContractInstruction)) return;
 
-        TaskContract contract = TaskContractResolver.fromMessages(messages);
-        if (contract.mutationAllowed()) return;
+        TaskContract safeContract = contract == null ? TaskContractResolver.fromMessages(messages) : contract;
+        ExecutionPhase safePhase = phase == null
+                ? (safeContract.mutationAllowed() ? ExecutionPhase.APPLY : ExecutionPhase.INSPECT)
+                : phase;
+        String instruction = CurrentTurnCapabilityFrame.render(safeContract, safePhase, visibleTools);
 
-        String instruction;
-        if (contract.type() == TaskType.SMALL_TALK) {
-            instruction = """
-                [TaskContract]
-                type: SMALL_TALK
-                mutationAllowed: false
-                This turn is conversational and does not ask about workspace files.
-                Answer directly in one short sentence. Do not call tools.""";
-        } else if (contract.type() == TaskType.DIRECTORY_LISTING) {
-            instruction = """
-                [TaskContract]
-                type: DIRECTORY_LISTING
-                mutationAllowed: false
-                This turn asks only for file or directory names.
-                Call talos.list_dir on "." unless the user named another in-workspace directory.
-                Do not inspect, search, retrieve, summarize, infer, write, or edit file contents.
-                Answer with directory entries only.""";
-        } else {
-            instruction = """
-                [TaskContract]
-                type: %s
-                mutationAllowed: false
-                This turn is read-only or diagnostic. Do not call talos.write_file or talos.edit_file.
-                Use talos.list_dir, talos.read_file, talos.grep, or talos.retrieve as needed to inspect.
-                For WORKSPACE_EXPLAIN, DIAGNOSE_ONLY, and VERIFY_ONLY turns, start from the current workspace (`.`) unless the user named another in-workspace path. Do not ask for a path that is already implied by "this folder", "here", or "this workspace".
-                If you identify a possible fix, describe it and wait for an explicit change request before editing.""".formatted(contract.type());
-        }
-
-        int insertAt = 0;
-        for (int i = 0; i < messages.size(); i++) {
-            if ("system".equals(messages.get(i).role())) {
-                insertAt = i + 1;
+        int insertAt = messages.size();
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            if ("user".equals(messages.get(i).role())) {
+                insertAt = i;
                 break;
             }
         }
+        if (insertAt == messages.size()) {
+            insertAt = 0;
+            for (int i = 0; i < messages.size(); i++) {
+                if ("system".equals(messages.get(i).role())) {
+                    insertAt = i + 1;
+                    break;
+                }
+            }
+        }
         messages.add(insertAt, ChatMessage.system(instruction));
+    }
+
+    private static List<String> defaultVisibleToolNames(TaskContract contract, ExecutionPhase phase) {
+        if (contract == null || contract.type() == TaskType.SMALL_TALK) return List.of();
+        if (contract.type() == TaskType.DIRECTORY_LISTING) return List.of("talos.list_dir");
+        if (contract.mutationAllowed() && phase == ExecutionPhase.APPLY) {
+            return List.of(
+                    "talos.edit_file",
+                    "talos.grep",
+                    "talos.list_dir",
+                    "talos.read_file",
+                    "talos.retrieve",
+                    "talos.write_file");
+        }
+        return List.of("talos.grep", "talos.list_dir", "talos.read_file", "talos.retrieve");
     }
 
     static void injectStaticVerificationRepairInstruction(
@@ -694,7 +695,8 @@ public final class AssistantTurnExecutor {
         return message != null
                 && "system".equals(message.role())
                 && message.content() != null
-                && message.content().startsWith("[TaskContract]");
+                && (message.content().startsWith("[TaskContract]")
+                || message.content().startsWith("[CurrentTurnCapability]"));
     }
 
     private static boolean isStaticVerificationRepairInstruction(ChatMessage message) {
@@ -712,12 +714,12 @@ public final class AssistantTurnExecutor {
         if (contract != null
                 && contract.type() == TaskType.SMALL_TALK
                 && looksLikeAssistantIdentityTurn(userRequest)) {
-            return TALOS_IDENTITY_ANSWER;
+            return CapabilityAnswerPolicy.identityAnswer();
         }
         if (contract != null
                 && contract.type() == TaskType.SMALL_TALK
                 && looksLikeAssistantCapabilityTurn(userRequest)) {
-            return TALOS_CAPABILITY_ANSWER;
+            return CapabilityAnswerPolicy.capabilityAnswer();
         }
         return verifiedFollowUpSummaryIfNeeded(messages, userRequest);
     }
@@ -725,19 +727,13 @@ public final class AssistantTurnExecutor {
     static boolean looksLikeAssistantIdentityTurn(String userRequest) {
         if (userRequest == null || userRequest.isBlank()) return false;
         String lower = userRequest.toLowerCase(Locale.ROOT);
-        for (String marker : ASSISTANT_IDENTITY_TURN_MARKERS) {
-            if (lower.contains(marker)) return true;
-        }
-        return false;
+        return CapabilityAnswerPolicy.looksLikeIdentityTurn(lower);
     }
 
     static boolean looksLikeAssistantCapabilityTurn(String userRequest) {
         if (userRequest == null || userRequest.isBlank()) return false;
         String lower = userRequest.toLowerCase(Locale.ROOT);
-        for (String marker : ASSISTANT_CAPABILITY_TURN_MARKERS) {
-            if (lower.contains(marker)) return true;
-        }
-        return false;
+        return CapabilityAnswerPolicy.looksLikeCapabilityTurn(lower);
     }
 
     private static String verifiedFollowUpSummaryIfNeeded(
@@ -1608,17 +1604,35 @@ public final class AssistantTurnExecutor {
         if (!retryContract.mutationAllowed()) {
             return new MutationRetryResult(answer, 0, null);
         }
+        ExecutionPhase phase = ctx.executionPhaseState() == null
+                ? ExecutionPhase.APPLY
+                : ctx.executionPhaseState().phase();
+        ActionObligation obligation = ActionObligationPolicy.derive(retryContract, phase);
+        if (!ResponseObligationVerifier.unsatisfiedNoToolResponse(obligation, answer)) {
+            return new MutationRetryResult(answer, 0, null);
+        }
         String priorMutationRequest = previousMutationUserRequest(messages, userRequest);
 
         LOG.info("Missing-mutation retry fired: user asked for a change but 0 mutating "
                 + "tool calls succeeded. Re-prompting with an explicit write nudge.");
 
-        messages.add(ChatMessage.assistant(answer.isBlank() ? "(no answer)" : answer));
+        LocalTurnTraceCapture.recordActionObligation(
+                obligation.name(),
+                "UNSATISFIED",
+                "model response had no write/edit tool calls");
+        messages.add(ChatMessage.assistant(ResponseObligationVerifier.retryFailureSummary(answer)));
+        messages.add(ChatMessage.system(CurrentTurnCapabilityFrame.render(
+                retryContract,
+                phase,
+                NativeToolSpecPolicy.names(ctx.nativeToolSpecs()))));
         messages.add(ChatMessage.user(
-                "You were asked to modify a file but you did not call talos.write_file "
-                + "or talos.edit_file in this turn. "
+                "The current-turn obligation was not satisfied: this turn has mutationAllowed=true "
+                + "and visible write/edit tools, but the previous response did not call talos.write_file "
+                + "or talos.edit_file. "
                 + mutationRetryRequestContext(userRequest, priorMutationRequest)
-                + "Call the appropriate write/edit tool NOW to perform the change. "
+                + "Call the appropriate write/edit tool NOW to perform the workspace change. "
+                + "Do not say you lack filesystem or workspace access; the runtime exposes file tools "
+                + "and handles approval, permissions, checkpointing, and verification. "
                 + "If you truly cannot (e.g., you do not know which file, or the "
                 + "content is impossible to produce), state exactly which file and why "
                 + "in one sentence. Do not ask further questions — act."));
@@ -1640,6 +1654,20 @@ public final class AssistantTurnExecutor {
                 if (retryLoop.mutatingToolSuccesses() > 0) {
                     LOG.info("Missing-mutation retry succeeded: {} mutation(s) performed.",
                             retryLoop.mutatingToolSuccesses());
+                    LocalTurnTraceCapture.recordActionObligation(
+                            obligation.name(),
+                            "SATISFIED_AFTER_RETRY",
+                            "retry response issued write/edit tool calls");
+                } else if (hasDeniedMutation(retryLoop)) {
+                    LocalTurnTraceCapture.recordActionObligation(
+                            obligation.name(),
+                            "BLOCKED_AFTER_RETRY",
+                            "retry response issued mutating tool calls but policy blocked them");
+                } else {
+                    LocalTurnTraceCapture.recordActionObligation(
+                            obligation.name(),
+                            "ATTEMPTED_AFTER_RETRY",
+                            "retry response issued tool calls but no mutation completed");
                 }
                 return new MutationRetryResult(
                         mergedAnswer == null || mergedAnswer.isBlank() ? answer : mergedAnswer,
@@ -1653,12 +1681,21 @@ public final class AssistantTurnExecutor {
             // fall back to the original answer.
             if (!retryText.isBlank() && !retryText.equals(answer)) {
                 String stripped = ToolCallParser.stripToolCalls(retryText);
-                return new MutationRetryResult(stripped.isBlank() ? answer : stripped, 0, null);
+                String deterministic = ResponseObligationVerifier.deterministicNoActionAnswer();
+                LocalTurnTraceCapture.recordActionObligation(
+                        obligation.name(),
+                        "FAILED",
+                        "retry response still had no write/edit tool calls");
+                return new MutationRetryResult(deterministic, 0, null);
             }
         } catch (Exception e) {
             LOG.warn("Missing-mutation retry failed: {}", e.getMessage());
         }
-        return new MutationRetryResult(answer, 0, null);
+        LocalTurnTraceCapture.recordActionObligation(
+                obligation.name(),
+                "FAILED",
+                "retry failed before write/edit tool calls executed");
+        return new MutationRetryResult(ResponseObligationVerifier.deterministicNoActionAnswer(), 0, null);
     }
 
     private static String mutationRetryRequestContext(String userRequest, String priorMutationRequest) {

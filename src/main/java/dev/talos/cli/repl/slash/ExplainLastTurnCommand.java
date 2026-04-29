@@ -7,10 +7,11 @@ import dev.talos.runtime.SessionStore;
 import dev.talos.runtime.TurnRecord;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.TraceRedactor;
+import dev.talos.runtime.trace.TurnTraceEvent;
 
 import java.nio.file.Path;
-import java.util.LinkedHashSet;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -231,6 +232,18 @@ public final class ExplainLastTurnCommand implements Command {
         if (trace.toolSurface() != null) {
             sb.append("  Visible tools: ").append(listOrNone(trace.toolSurface().nativeTools())).append('\n');
         }
+        latestEvent(trace, "ACTION_OBLIGATION_EVALUATED").ifPresent(event -> {
+            sb.append("  Action obligation: ").append(eventValue(event, "obligation"));
+            String status = eventValue(event, "status");
+            if (!status.isBlank()) {
+                sb.append(" (").append(status).append(')');
+            }
+            String reason = eventValue(event, "reason");
+            if (!reason.isBlank()) {
+                sb.append(" - ").append(reason);
+            }
+            sb.append('\n');
+        });
         sb.append("  Events: ").append(trace.events().size()).append('\n');
         if (trace.checkpoint() != null && !trace.checkpoint().status().isBlank()) {
             sb.append("  Checkpoint: ").append(trace.checkpoint().status());
@@ -263,6 +276,24 @@ public final class ExplainLastTurnCommand implements Command {
             }
             sb.append('\n');
         }
+    }
+
+    private static Optional<TurnTraceEvent> latestEvent(LocalTurnTrace trace, String type) {
+        if (trace == null || trace.events().isEmpty()) {
+            return Optional.empty();
+        }
+        for (int i = trace.events().size() - 1; i >= 0; i--) {
+            TurnTraceEvent event = trace.events().get(i);
+            if (type.equals(event.type())) {
+                return Optional.of(event);
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static String eventValue(TurnTraceEvent event, String key) {
+        Object value = event == null ? null : event.data().get(key);
+        return value == null ? "" : value.toString();
     }
 
     private static void appendPolicyTrace(StringBuilder sb, dev.talos.runtime.TurnPolicyTrace trace) {
