@@ -114,3 +114,41 @@ Additional fields used by the runner:
 
 T51 should add structured `/last trace` parsing. T50 only performs transcript
 substring checks.
+
+## Trace Assertions
+
+Cases may include a `traceAssertions` object. The runner parses the latest
+`/last trace` text enough to assert runtime facts without committing raw
+transcripts.
+
+Supported fields:
+
+- `contract`
+- `mutationAllowed`
+- `phaseIncludes`
+- `nativeToolsContains`
+- `nativeToolsExcludes`
+- `blockedContains`
+- `outcomeContains`
+- `checkpointContains`
+- `verificationContains`
+- `repairContains`
+- `transcriptContains`
+- `transcriptExcludes`
+
+Example:
+
+```json
+"traceAssertions": {
+  "contract": "DIRECTORY_LISTING",
+  "mutationAllowed": false,
+  "phaseIncludes": ["INSPECT"],
+  "nativeToolsContains": ["talos.list_dir"],
+  "nativeToolsExcludes": ["talos.read_file", "talos.grep", "talos.retrieve"],
+  "transcriptExcludes": ["SECRET=manual-test", "ALPHA-742"]
+}
+```
+
+Trace parsing is intentionally conservative and string-based in this version.
+If assertions become too complex, add structured trace parsing in a later
+ticket instead of expanding ad hoc transcript logic indefinitely.
