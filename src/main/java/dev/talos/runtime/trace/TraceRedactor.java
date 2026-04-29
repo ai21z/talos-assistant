@@ -4,10 +4,15 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /** Small deterministic redaction helpers for local trace v1. */
-final class TraceRedactor {
+public final class TraceRedactor {
     private TraceRedactor() {}
+
+    private static final Pattern SECRET_LIKE_ASSIGNMENT = Pattern.compile(
+            "(?i)\\b(secret|token|api[_-]?key|password|credential|credentials)\\b\\s*=\\s*(\"[^\"]*\"|'[^']*'|`[^`]*`|[^\\s,;]+)");
 
     static String hash(String value) {
         String safe = value == null ? "" : value;
@@ -51,5 +56,28 @@ final class TraceRedactor {
                 || lowerPath.contains("id_ed25519")
                 || lowerPath.contains("private_key")
                 || lowerPath.contains("private-key");
+    }
+
+    public static String redactSecretLikeAssignments(String text) {
+        if (text == null || text.isBlank()) return text;
+        Matcher matcher = SECRET_LIKE_ASSIGNMENT.matcher(text);
+        StringBuilder out = new StringBuilder();
+        while (matcher.find()) {
+            String key = matcher.group(1);
+            String rawValue = matcher.group(2);
+            String suffix = trailingSentencePunctuation(rawValue);
+            matcher.appendReplacement(out, Matcher.quoteReplacement(key + "=[redacted]" + suffix));
+        }
+        matcher.appendTail(out);
+        return out.toString();
+    }
+
+    private static String trailingSentencePunctuation(String value) {
+        if (value == null || value.length() < 2) return "";
+        char last = value.charAt(value.length() - 1);
+        if (last == '.' || last == '!' || last == '?') {
+            return String.valueOf(last);
+        }
+        return "";
     }
 }
