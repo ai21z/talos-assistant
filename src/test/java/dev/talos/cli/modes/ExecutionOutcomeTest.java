@@ -82,6 +82,36 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void deniedProtectedReadIsClassifiedAsApprovalBlockedAndSanitized() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Read .env and tell me what it says."));
+
+        var loopResult = new ToolCallLoop.LoopResult(
+                "The file says SECRET=original.", 1, 1,
+                List.of("talos.read_file"), List.of(),
+                1, 0, false, 0, List.of(),
+                0, 0, 0, 0,
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.read_file", ".env", false, false, true,
+                        "", "User did not approve the talos.read_file call.",
+                        null, ToolError.DENIED
+                )));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                "The file says SECRET=original.", messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.BLOCKED, outcome.completionStatus());
+        assertFalse(outcome.deniedMutation());
+        assertTrue(outcome.finalAnswer().contains("Protected content was not read"));
+        assertTrue(outcome.finalAnswer().contains("approval was denied"));
+        assertFalse(outcome.finalAnswer().contains("SECRET=original"));
+        assertEquals(TaskCompletionStatus.BLOCKED_BY_APPROVAL, outcome.taskOutcome().completionStatus());
+        assertEquals(MutationOutcomeStatus.NOT_REQUESTED, outcome.taskOutcome().mutationOutcome().status());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.DENIED_PROTECTED_READ));
+    }
+
+    @Test
     void deniedMutationDominatesMixedInvalidAndDeniedNoSuccessTurn() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));

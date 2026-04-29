@@ -16,6 +16,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -76,11 +77,18 @@ class TurnProcessorPermissionPolicyTest {
     void protectedReadAsksBeforeReading(@TempDir Path workspace) throws Exception {
         Files.writeString(workspace.resolve(".env"), "SECRET=1");
         AtomicInteger gateCalls = new AtomicInteger();
+        AtomicReference<String> approvalDescription = new AtomicReference<>();
+        AtomicReference<String> approvalDetail = new AtomicReference<>();
         Config config = new Config();
         ToolRegistry registry = new ToolRegistry();
         registry.register(new ReadFileTool());
         TurnProcessor processor = new TurnProcessor(
-                ModeController.defaultController(), gateApproves(gateCalls), registry);
+                ModeController.defaultController(), (description, detail) -> {
+                    gateCalls.incrementAndGet();
+                    approvalDescription.set(description);
+                    approvalDetail.set(detail);
+                    return true;
+                }, registry);
 
         TurnUserRequestCapture.set("read .env");
         ToolResult result = processor.executeTool(
@@ -90,6 +98,9 @@ class TurnProcessorPermissionPolicyTest {
 
         assertTrue(result.success(), result.errorMessage());
         assertEquals(1, gateCalls.get(), "protected read should require explicit approval");
+        assertEquals("protected read: talos.read_file", approvalDescription.get());
+        assertTrue(approvalDetail.get().contains("protected path `.env`"), approvalDetail.get());
+        assertFalse(approvalDetail.get().contains("SECRET=1"), approvalDetail.get());
         assertTrue(result.output().contains("SECRET=1"));
     }
 

@@ -135,6 +135,11 @@ public final class CliApprovalGate implements ApprovalGate {
     private static String inferRisk(String description, String detail) {
         String text = ((description == null ? "" : description) + "\n" + (detail == null ? "" : detail))
                 .toLowerCase(java.util.Locale.ROOT);
+        if (text.contains("protected read")
+                || text.contains("sensitive read")
+                || text.contains("reading protected path")) {
+            return "sensitive read";
+        }
         if (text.contains("delete") || text.contains("destructive") || text.contains("remove")) {
             return "destructive";
         }

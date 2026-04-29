@@ -916,6 +916,26 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/70-denied-protected-read-blocked-outcome.json] 70: denied protected read produces blocked outcome")
+    void deniedProtectedReadProducesBlockedOutcome() {
+        var loaded = JsonScenarioLoader.load("scenarios/70-denied-protected-read-blocked-outcome.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(1, 0, 1, 0)
+                    .assertAnswerContains("Protected content was not read")
+                    .assertAnswerContains("approval was denied")
+                    .assertAnswerNotContains("SECRET=original")
+                    .assertLocalTraceRecorded();
+            assertEquals("BLOCKED", result.localTrace().outcome().status());
+            assertEquals("BLOCKED_BY_APPROVAL", result.localTrace().outcome().classification());
+            assertEquals("DENIED", result.localTrace().outcome().approvalStatus());
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/67-literal-full-file-write-mismatch-fails-verification.json] 67: literal full-file mismatch fails verification")
     void literalFullFileWriteMismatchFailsVerification() {
         var loaded = JsonScenarioLoader.load("scenarios/67-literal-full-file-write-mismatch-fails-verification.json");
