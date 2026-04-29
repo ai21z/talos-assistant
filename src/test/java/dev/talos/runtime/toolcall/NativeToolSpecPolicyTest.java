@@ -6,7 +6,10 @@ import dev.talos.tools.FileUndoStack;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
+import dev.talos.tools.impl.GrepTool;
+import dev.talos.tools.impl.ListDirTool;
 import dev.talos.tools.impl.ReadFileTool;
+import dev.talos.tools.impl.RetrieveTool;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -18,7 +21,7 @@ class NativeToolSpecPolicyTest {
 
     @Test
     void readOnlyContractOmitsMutatingNativeSpecs() {
-        var contract = TaskContractResolver.fromUserRequest("What is in this workspace?");
+        var contract = TaskContractResolver.fromUserRequest("What is this project?");
 
         List<String> names = NativeToolSpecPolicy.names(
                 NativeToolSpecPolicy.select(contract, ExecutionPhase.INSPECT, registry()));
@@ -26,6 +29,21 @@ class NativeToolSpecPolicyTest {
         assertTrue(names.contains("talos.read_file"));
         assertFalse(names.contains("talos.write_file"));
         assertFalse(names.contains("talos.edit_file"));
+    }
+
+    @Test
+    void directoryListingContractExposesOnlyListDir() {
+        var contract = TaskContractResolver.fromUserRequest("What files are in this folder?");
+
+        List<String> names = NativeToolSpecPolicy.names(
+                NativeToolSpecPolicy.select(contract, ExecutionPhase.INSPECT, registry()));
+
+        assertTrue(names.contains("talos.list_dir"), names.toString());
+        assertFalse(names.contains("talos.read_file"), names.toString());
+        assertFalse(names.contains("talos.grep"), names.toString());
+        assertFalse(names.contains("talos.retrieve"), names.toString());
+        assertFalse(names.contains("talos.write_file"), names.toString());
+        assertFalse(names.contains("talos.edit_file"), names.toString());
     }
 
     @Test
@@ -81,6 +99,9 @@ class NativeToolSpecPolicyTest {
         ToolRegistry registry = new ToolRegistry();
         FileUndoStack undoStack = new FileUndoStack();
         registry.register(new ReadFileTool());
+        registry.register(new ListDirTool());
+        registry.register(new GrepTool());
+        registry.register(new RetrieveTool(null));
         registry.register(new FileWriteTool(undoStack));
         registry.register(new FileEditTool(undoStack));
         return registry;

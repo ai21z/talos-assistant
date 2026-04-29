@@ -47,6 +47,7 @@ public final class SystemPromptBuilder {
     private boolean hasHistory;
     private boolean nativeTools;
     private boolean readOnlyToolMode;
+    private boolean directoryListingToolMode;
     private java.nio.file.Path workspace;
 
     /** The prompt modes. */
@@ -99,6 +100,20 @@ public final class SystemPromptBuilder {
         return this;
     }
 
+    /**
+     * Limit the visible tool surface to directory listing only.
+     *
+     * <p>Used for prompts such as "What files are in this folder?" where
+     * reading file contents would violate data minimization.
+     */
+    public SystemPromptBuilder withDirectoryListingToolMode(boolean directoryListingToolMode) {
+        this.directoryListingToolMode = directoryListingToolMode;
+        if (directoryListingToolMode) {
+            this.readOnlyToolMode = true;
+        }
+        return this;
+    }
+
     /** Include the workspace path in the system prompt so the model knows where it's working. */
     public SystemPromptBuilder withWorkspace(java.nio.file.Path workspace) {
         this.workspace = workspace;
@@ -141,12 +156,16 @@ public final class SystemPromptBuilder {
 
         // 1b. Workspace manifest (file tree + README snippet for instant awareness)
         if (workspace != null) {
-            String manifest = WorkspaceManifest.build(workspace);
-            if (!manifest.isEmpty()) {
-                sb.append("\n\n").append(manifest);
-            } else {
-                // Path doesn't exist on disk (yet) — still inject the path for awareness
+            if (directoryListingToolMode) {
                 sb.append("\n\nWorkspace: ").append(workspace.toAbsolutePath().toString().replace('\\', '/'));
+            } else {
+                String manifest = WorkspaceManifest.build(workspace);
+                if (!manifest.isEmpty()) {
+                    sb.append("\n\n").append(manifest);
+                } else {
+                    // Path doesn't exist on disk (yet) — still inject the path for awareness
+                    sb.append("\n\nWorkspace: ").append(workspace.toAbsolutePath().toString().replace('\\', '/'));
+                }
             }
         }
 
@@ -156,7 +175,9 @@ public final class SystemPromptBuilder {
             case RAG     -> RES_RAG_RULES;
             case UNIFIED -> RES_UNIFIED_RULES;
         };
-        String modeRules = readResource(modeRes);
+        String modeRules = directoryListingToolMode
+                ? DEFAULT_DIRECTORY_LISTING_MODE_RULES
+                : readResource(modeRes);
         if (modeRules != null) {
             sb.append("\n\n").append(modeRules.strip());
         }
@@ -177,11 +198,15 @@ public final class SystemPromptBuilder {
 
         // Workspace manifest
         if (workspace != null) {
-            String manifest = WorkspaceManifest.build(workspace);
-            if (!manifest.isEmpty()) {
-                result += "\n\n" + manifest;
-            } else {
+            if (directoryListingToolMode) {
                 result += "\n\nWorkspace: " + workspace.toAbsolutePath().toString().replace('\\', '/');
+            } else {
+                String manifest = WorkspaceManifest.build(workspace);
+                if (!manifest.isEmpty()) {
+                    result += "\n\n" + manifest;
+                } else {
+                    result += "\n\nWorkspace: " + workspace.toAbsolutePath().toString().replace('\\', '/');
+                }
             }
         }
 
@@ -195,7 +220,9 @@ public final class SystemPromptBuilder {
     private String buildDynamicSections() {
         var sb = new StringBuilder();
 
-        if (readOnlyToolMode) {
+        if (directoryListingToolMode) {
+            sb.append(DEFAULT_DIRECTORY_LISTING_TASK_CONTRACT);
+        } else if (readOnlyToolMode) {
             sb.append(DEFAULT_READ_ONLY_TASK_CONTRACT);
         }
 
@@ -229,7 +256,11 @@ public final class SystemPromptBuilder {
         }
 
         List<ToolDescriptor> descriptors = toolRegistry.descriptors();
-        if (readOnlyToolMode) {
+        if (directoryListingToolMode) {
+            descriptors = descriptors.stream()
+                    .filter(td -> "talos.list_dir".equals(td.name()))
+                    .toList();
+        } else if (readOnlyToolMode) {
             descriptors = descriptors.stream()
                     .filter(td -> !td.riskLevel().requiresApproval())
                     .toList();
@@ -243,7 +274,11 @@ public final class SystemPromptBuilder {
         // Choose preamble based on native tool support:
         // - Native: shorter preamble without format instructions (API handles format)
         // - Fallback: full preamble with JSON code-fenced format instructions
-        if (readOnlyToolMode && nativeTools) {
+        if (directoryListingToolMode && nativeTools) {
+            sb.append(DEFAULT_DIRECTORY_LISTING_TOOLS_PREAMBLE_NATIVE);
+        } else if (directoryListingToolMode) {
+            sb.append(DEFAULT_DIRECTORY_LISTING_TOOLS_PREAMBLE);
+        } else if (readOnlyToolMode && nativeTools) {
             sb.append(DEFAULT_READ_ONLY_TOOLS_PREAMBLE_NATIVE);
         } else if (readOnlyToolMode) {
             sb.append(DEFAULT_READ_ONLY_TOOLS_PREAMBLE);
@@ -333,6 +368,12 @@ public final class SystemPromptBuilder {
             - Only call tools that are listed below. Do not invent tool names.
             - If a tool returns an error, explain the issue to the user.""";
 
+    private static final String DEFAULT_DIRECTORY_LISTING_MODE_RULES = """
+            Directory Listing Mode
+            The user is asking only for file or directory names. Minimize data access.
+            Use the listed directory tool once, then answer with names only.
+            Do not infer, summarize, or inspect file contents unless the user asks for that in a later turn.""";
+
     private static final String DEFAULT_TOOLS_PREAMBLE_NATIVE = """
             Available Tools
             You have access to the following tools. The runtime handles tool invocation \
@@ -383,6 +424,13 @@ public final class SystemPromptBuilder {
             - Inspect with read-only tools, then describe findings and possible fixes without applying them.
             - Wait for an explicit change request before using mutating tools.""";
 
+    private static final String DEFAULT_DIRECTORY_LISTING_TASK_CONTRACT = """
+            Current Turn Contract
+            - This specific user turn asks only to list directory entries.
+            - Use talos.list_dir only.
+            - Do not inspect, search, retrieve, summarize, or infer file contents unless the user explicitly asks for that in a later turn.
+            - Do not call talos.write_file or talos.edit_file in this turn.""";
+
     private static final String DEFAULT_READ_ONLY_TOOLS_PREAMBLE_NATIVE = """
             Available Tools
             This turn is read-only or diagnostic. Only inspection tools are listed for this turn.
@@ -399,6 +447,33 @@ public final class SystemPromptBuilder {
             - Wait for tool results before answering. Do not fabricate results.
             - Only call tools listed below. Do not invent names.
             - Never call the same tool with the same parameters twice in one turn.""";
+
+    private static final String DEFAULT_DIRECTORY_LISTING_TOOLS_PREAMBLE = """
+            Available Tools
+            This turn is a directory-listing task. Only talos.list_dir is listed for this turn.
+
+            To invoke a tool, emit a tool call as a JSON object in EXACTLY this format:
+
+            ```json
+            {"name": "tool_name", "parameters": {"key": "value"}}
+            ```
+
+            Rules:
+            - Call talos.list_dir on "." unless the user named another in-workspace directory.
+            - Answer with directory entries only.
+            - Do not read, grep, retrieve, summarize, or infer file contents.
+            - Only call tools listed below. Do not invent names.""";
+
+    private static final String DEFAULT_DIRECTORY_LISTING_TOOLS_PREAMBLE_NATIVE = """
+            Available Tools
+            This turn is a directory-listing task. Only talos.list_dir is listed for this turn.
+            The runtime handles tool invocation format automatically.
+
+            Rules:
+            - Call talos.list_dir on "." unless the user named another in-workspace directory.
+            - Answer with directory entries only.
+            - Do not read, grep, retrieve, summarize, or infer file contents.
+            - Only call tools listed below. Do not invent names.""";
 
     private static final String DEFAULT_CONVERSATION = """
             Conversation Continuity (CRITICAL)
@@ -425,6 +500,7 @@ public final class SystemPromptBuilder {
                 + ", tools=" + (toolRegistry != null && !toolRegistry.isEmpty())
                 + ", nativeTools=" + nativeTools
                 + ", readOnlyToolMode=" + readOnlyToolMode
+                + ", directoryListingToolMode=" + directoryListingToolMode
                 + ", history=" + hasHistory + "]";
     }
 }

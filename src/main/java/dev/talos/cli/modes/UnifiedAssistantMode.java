@@ -92,9 +92,11 @@ public final class UnifiedAssistantMode implements Mode {
         boolean nativeTools = CfgUtil.boolAt(CfgUtil.map(ctx.cfg().data.get("tools")), "native_calling", true);
         TaskContract taskContract = TaskContractResolver.fromMessages(contractMessages);
         boolean smallTalk = taskContract.type() == TaskType.SMALL_TALK;
+        boolean directoryListing = taskContract.type() == TaskType.DIRECTORY_LISTING;
         SystemPromptBuilder promptBuilder = SystemPromptBuilder.forUnified()
                 .withNativeTools(nativeTools)
-                .withHistory(hasHistory);
+                .withHistory(hasHistory)
+                .withDirectoryListingToolMode(directoryListing);
         if (!smallTalk) {
             promptBuilder
                     .withTools(ctx.toolRegistry())

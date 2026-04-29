@@ -239,7 +239,7 @@ class ApprovalGatedToolTest {
                 "path", "index.html",
                 "content", "<h1>changed</h1>"));
 
-        TurnUserRequestCapture.set("what files are in this workspace?");
+        TurnUserRequestCapture.set("what is this project?");
         try {
             ToolResult result = processor.executeTool(session, call, ctx);
             assertFalse(result.success(), "read-only prompt must reject write_file");

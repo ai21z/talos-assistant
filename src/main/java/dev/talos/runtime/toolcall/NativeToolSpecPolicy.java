@@ -21,6 +21,12 @@ public final class NativeToolSpecPolicy {
     ) {
         if (registry == null || registry.isEmpty()) return List.of();
         if (contract != null && contract.type() == TaskType.SMALL_TALK) return List.of();
+        if (contract != null && contract.type() == TaskType.DIRECTORY_LISTING) {
+            return registry.descriptors().stream()
+                    .filter(NativeToolSpecPolicy::isListDir)
+                    .map(NativeToolSpecPolicy::toSpec)
+                    .toList();
+        }
 
         boolean mutationAllowed = contract != null
                 && contract.mutationAllowed()
@@ -44,6 +50,10 @@ public final class NativeToolSpecPolicy {
         return descriptor != null
                 && descriptor.riskLevel() != null
                 && !descriptor.riskLevel().requiresApproval();
+    }
+
+    private static boolean isListDir(ToolDescriptor descriptor) {
+        return descriptor != null && "talos.list_dir".equals(descriptor.name());
     }
 
     private static ToolSpec toSpec(ToolDescriptor descriptor) {

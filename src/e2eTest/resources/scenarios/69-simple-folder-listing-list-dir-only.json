@@ -1,0 +1,17 @@
+{
+  "name": "simple folder listing uses list_dir only",
+  "fixture": "listing-privacy",
+  "v1Pack": true,
+  "claims": [
+    "simple-folder-listing-list-dir-only",
+    "data-minimization"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "What files are in this folder?",
+  "scriptedResponses": [
+    "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\",\"max_depth\":1}}",
+    "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\",\"max_depth\":1}}",
+    "I apologize, but I am not able to process or analyze the tool result you provided."
+  ]
+}

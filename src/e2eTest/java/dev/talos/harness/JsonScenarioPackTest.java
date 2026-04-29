@@ -962,6 +962,37 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/69-simple-folder-listing-list-dir-only.json] 69: simple folder listing uses list_dir only")
+    void simpleFolderListingUsesListDirOnly() {
+        var loaded = JsonScenarioLoader.load("scenarios/69-simple-folder-listing-list-dir-only.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains(".env")
+                    .assertAnswerContains("index.html")
+                    .assertAnswerContains("notes.md")
+                    .assertAnswerNotContains("ALPHA-742")
+                    .assertAnswerNotContains("SECRET=original")
+                    .assertAnswerNotContains("I apologize")
+                    .assertLocalTraceRecorded();
+            assertEquals("DIRECTORY_LISTING", result.localTrace().taskContract().type());
+            assertEquals(List.of("talos.list_dir"), result.localTrace().toolSurface().nativeTools());
+            assertEquals(List.of("talos.list_dir"), result.localTrace().toolSurface().promptTools());
+            assertTrue(result.localTrace().events().stream()
+                    .anyMatch(event -> "TOOL_EXECUTED".equals(event.type())
+                            && "talos.list_dir".equals(event.toolName())));
+            assertFalse(result.localTrace().events().stream()
+                    .anyMatch(event -> "TOOL_EXECUTED".equals(event.type())
+                            && ("talos.read_file".equals(event.toolName())
+                            || "talos.grep".equals(event.toolName())
+                            || "talos.retrieve".equals(event.toolName()))));
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/42-partial-followup-summary-uses-verified-history.json] 42: follow-up summary uses verified partial history")
     void partialFollowupSummaryUsesVerifiedHistory() {
         var loaded = JsonScenarioLoader.load("scenarios/42-partial-followup-summary-uses-verified-history.json");
