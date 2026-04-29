@@ -1,0 +1,16 @@
+{
+  "name": "literal full-file write mismatch fails verification",
+  "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "literal-full-file-expectation-fails-on-mismatch",
+    "exact-content-mismatch-is-not-readback-only"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Overwrite index.html with exactly AFTER. Use talos.write_file.",
+  "scriptedResponses": [
+    "```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"index.html\",\"content\":\"<!doctype html>\\n<html><body>AFTER</body></html>\"}}\n```",
+    "Updated index.html."
+  ]
+}

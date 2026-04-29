@@ -723,6 +723,94 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void literalMismatchAfterSuccessfulWriteIsIncompleteNotReadbackOnly() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-literal-mismatch-");
+        try {
+            Files.writeString(ws.resolve("index.html"), """
+                    <html>
+                    <body>
+                    <h1>Hello World</h1>
+                    </body>
+                    </html>
+                    """);
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Overwrite index.html with exactly AFTER. Use talos.write_file."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Updated index.html.", 1, 1,
+                    List.of("talos.write_file"), List.of(),
+                    0, 0, false, 1, List.of(),
+                    0, 0, 0, 0,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.write_file", "index.html", true, true, false,
+                            "wrote index.html", "", dev.talos.tools.VerificationStatus.PASS
+                    )));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "Updated index.html.", messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.FAILED, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.FAILED, outcome.verificationStatus());
+            assertTrue(outcome.finalAnswer().contains("Exact content verification failed"),
+                    outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("requested task is not verified complete"),
+                    outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("File write/readback passed"),
+                    outcome.finalAnswer());
+            assertEquals(TaskCompletionStatus.FAILED, outcome.taskOutcome().completionStatus());
+            assertEquals(TaskVerificationStatus.FAILED, outcome.taskOutcome().verificationResult().status());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
+    void literalMatchAfterSuccessfulWriteIsVerifiedComplete() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-literal-match-");
+        try {
+            Files.writeString(ws.resolve("index.html"), "AFTER");
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Overwrite index.html with exactly AFTER. Use talos.write_file."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Updated index.html.", 1, 1,
+                    List.of("talos.write_file"), List.of(),
+                    0, 0, false, 1, List.of(),
+                    0, 0, 0, 0,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.write_file", "index.html", true, true, false,
+                            "wrote index.html", "", dev.talos.tools.VerificationStatus.PASS
+                    )));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "Updated index.html.", messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.PASSED, outcome.verificationStatus());
+            assertTrue(outcome.finalAnswer().contains("Static verification: passed"),
+                    outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("Exact content verification passed"),
+                    outcome.finalAnswer());
+            assertEquals(TaskCompletionStatus.COMPLETED_VERIFIED, outcome.taskOutcome().completionStatus());
+            assertEquals(TaskVerificationStatus.PASSED, outcome.taskOutcome().verificationResult().status());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void streamingNoToolEvidenceAnswerIsAdvisoryAndUngrounded() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));
