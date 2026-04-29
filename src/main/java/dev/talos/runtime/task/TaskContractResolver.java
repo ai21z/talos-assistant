@@ -1,6 +1,7 @@
 package dev.talos.runtime.task;
 
 import dev.talos.runtime.MutationIntent;
+import dev.talos.runtime.policy.CapabilityAnswerPolicy;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.spi.types.ChatMessage;
 
@@ -108,20 +109,6 @@ public final class TaskContractResolver {
                     + "ok|okay|cool|nice|great|"
                     + "hmm+|huh"
                     + ")[\\s.!?]*$");
-
-    private static final Set<String> ASSISTANT_IDENTITY_MARKERS = Set.of(
-            "who are you",
-            "what are you",
-            "what is talos",
-            "who is talos",
-            "what can you do",
-            "what can you do for me",
-            "how can you assist me",
-            "how can you help me",
-            "what can talos do",
-            "tell me what you are",
-            "tell me about yourself"
-    );
 
     private static final Set<String> DEICTIC_FOLLOW_UPS = Set.of(
             "this here",
@@ -246,7 +233,7 @@ public final class TaskContractResolver {
     }
 
     private static boolean looksAssistantIdentityQuestion(String lower) {
-        return lower != null && containsAny(lower, ASSISTANT_IDENTITY_MARKERS);
+        return CapabilityAnswerPolicy.looksLikeIdentityOrCapabilityTurn(lower);
     }
 
     private static boolean looksPrivacyNoWorkspaceRequest(String lower) {

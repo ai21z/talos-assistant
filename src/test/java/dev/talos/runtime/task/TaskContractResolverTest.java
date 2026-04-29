@@ -201,9 +201,14 @@ class TaskContractResolverTest {
                 "who is talos?",
                 "what can you do?",
                 "what can you do for me?",
+                "what can you help me with?",
+                "what can you help with?",
                 "how can you assist me?",
                 "how can you help me?",
+                "how can you help?",
+                "how can Talos help?",
                 "what can Talos do?",
+                "what can Talos help me with?",
                 "tell me what you are")) {
             TaskContract contract = TaskContractResolver.fromUserRequest(input);
 

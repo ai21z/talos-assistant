@@ -7,12 +7,14 @@ import dev.talos.runtime.JsonSessionStore;
 import dev.talos.runtime.TurnPolicyTrace;
 import dev.talos.runtime.TurnRecord;
 import dev.talos.runtime.trace.LocalTurnTrace;
+import dev.talos.runtime.trace.TurnTraceEvent;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -349,6 +351,20 @@ class ExplainLastTurnCommandTest {
                         List.of("talos.read_file", "talos.write_file"),
                         List.of("talos.read_file", "talos.write_file"),
                         "mutation task")
+                .event(TurnTraceEvent.simple(
+                        "ACTION_OBLIGATION_EVALUATED",
+                        "2026-04-28T12:00:00Z",
+                        Map.of(
+                                "obligation", "MUTATING_TOOL_REQUIRED",
+                                "status", "UNSATISFIED",
+                                "reason", "model response had no write/edit tool calls")))
+                .event(TurnTraceEvent.simple(
+                        "ACTION_OBLIGATION_EVALUATED",
+                        "2026-04-28T12:00:01Z",
+                        Map.of(
+                                "obligation", "MUTATING_TOOL_REQUIRED",
+                                "status", "SATISFIED_AFTER_RETRY",
+                                "reason", "retry response issued write/edit tool calls")))
                 .checkpoint("CREATED", "chk-local")
                 .repair("PLANNED", "STATIC_VERIFICATION_REPAIR steps=2 problems=3")
                 .verification("FAILED", "Static verification failed", List.of("scripts.js missing"))
@@ -377,6 +393,7 @@ class ExplainLastTurnCommandTest {
         assertTrue(text.contains("Local trace: trc-local"), text);
         assertTrue(text.contains("Schema: 1"), text);
         assertTrue(text.contains("Redaction: DEFAULT"), text);
+        assertTrue(text.contains("Action obligation: MUTATING_TOOL_REQUIRED (SATISFIED_AFTER_RETRY)"), text);
         assertTrue(text.contains("Checkpoint: CREATED chk-local"), text);
         assertTrue(text.contains("Repair: PLANNED - STATIC_VERIFICATION_REPAIR steps=2 problems=3"), text);
         assertTrue(text.contains("Verification: FAILED - Static verification failed"), text);

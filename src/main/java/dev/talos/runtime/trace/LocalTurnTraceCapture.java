@@ -202,6 +202,15 @@ public final class LocalTurnTraceCapture {
         bag.builder.event(TurnTraceEvent.simple("PROTOCOL_SANITIZED", now(), Map.of("reason", safe(reason))));
     }
 
+    public static void recordActionObligation(String obligation, String status, String reason) {
+        Bag bag = HOLDER.get();
+        if (bag == null) return;
+        bag.builder.event(TurnTraceEvent.simple("ACTION_OBLIGATION_EVALUATED", now(), Map.of(
+                "obligation", safe(obligation),
+                "status", safe(status),
+                "reason", safe(reason))));
+    }
+
     public static void recordRepair(String status, String summary) {
         Bag bag = HOLDER.get();
         if (bag == null) return;

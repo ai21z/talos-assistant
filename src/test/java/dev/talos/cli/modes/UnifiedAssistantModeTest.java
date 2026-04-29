@@ -2,6 +2,7 @@ package dev.talos.cli.modes;
 
 import dev.talos.cli.prompt.LastPromptCapture;
 import dev.talos.cli.repl.Context;
+import dev.talos.cli.repl.Result;
 import dev.talos.cli.repl.SessionMemory;
 import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
@@ -83,6 +84,36 @@ class UnifiedAssistantModeTest {
     }
 
     @Test
+    void expandedCapabilityPromptUsesDeterministicNoToolAnswer() throws Exception {
+        LastPromptCapture.clear();
+        var mode = new UnifiedAssistantMode();
+
+        var result = mode.handle(
+                "What can you help me with?",
+                Path.of(".").toAbsolutePath().normalize(),
+                context("This scripted answer should not be used."));
+
+        assertTrue(result.isPresent());
+        var render = LastPromptCapture.latest().orElseThrow();
+        Result bodyResult = result.get();
+        String body;
+        if (bodyResult instanceof Result.Ok ok) {
+            body = ok.text;
+        } else if (bodyResult instanceof Result.Streamed streamed) {
+            body = streamed.fullText + streamed.suffix;
+        } else {
+            body = bodyResult.toString();
+        }
+
+        assertEquals("SMALL_TALK", render.taskType());
+        assertFalse(render.mutationAllowed());
+        assertTrue(render.tools().isEmpty(), render.tools().toString());
+        assertTrue(body.contains("apply file changes only after approval"), body);
+        assertTrue(body.contains("read and search files"), body);
+        assertFalse(body.contains("This scripted answer should not be used"), body);
+    }
+
+    @Test
     void explicitWorkspacePromptStillRecordsReadOnlyToolSurface() throws Exception {
         LastPromptCapture.clear();
         var mode = new UnifiedAssistantMode();
@@ -149,6 +180,13 @@ class UnifiedAssistantModeTest {
         assertTrue(render.tools().contains("talos.write_file"), render.tools().toString());
         assertTrue(render.tools().contains("talos.edit_file"), render.tools().toString());
         assertTrue(render.systemPrompt().contains("You CAN create files"), render.systemPrompt());
+        assertTrue(render.messages().stream()
+                        .anyMatch(message -> message.content() != null
+                                && message.content().contains("[CurrentTurnCapability]")
+                                && message.content().contains("obligation: MUTATING_TOOL_REQUIRED")
+                                && message.content().contains("talos.write_file")
+                                && message.content().contains("talos.edit_file")),
+                render.messages().toString());
         assertFalse(render.systemPrompt().contains("This specific user turn is read-only"),
                 render.systemPrompt());
     }
