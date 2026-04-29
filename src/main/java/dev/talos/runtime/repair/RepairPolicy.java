@@ -52,6 +52,9 @@ public final class RepairPolicy {
         List<String> expectedTargets = contract.expectedTargets().stream()
                 .sorted()
                 .toList();
+        if (expectedTargets.isEmpty() && problems.stream().anyMatch(RepairPolicy::isStructuralWebProblem)) {
+            expectedTargets = inferStructuralWebTargets(messages, problems);
+        }
         List<String> forbiddenTargets = contract.forbiddenTargets().stream()
                 .sorted()
                 .toList();
@@ -147,7 +150,8 @@ public final class RepairPolicy {
         for (String problem : problems) {
             targets.addAll(extractTargets(problem));
         }
-        if (targets.isEmpty() && expectedTargets != null) {
+        boolean structuralWebRepair = problems.stream().anyMatch(RepairPolicy::isStructuralWebProblem);
+        if ((targets.isEmpty() || structuralWebRepair) && expectedTargets != null) {
             targets.addAll(expectedTargets);
         }
         for (String target : targets) {
@@ -155,8 +159,10 @@ public final class RepairPolicy {
             steps.add(new RepairPlanStep(
                     RepairStepType.WRITE_COMPLETE_FILE,
                     target,
-                    "static verifier reported unresolved web-file problem",
-                    "Use talos.write_file with complete corrected file content for " + target + ".",
+                    structuralWebRepair
+                            ? "static verifier reported structural web-file problems"
+                            : "static verifier reported unresolved web-file problem",
+                    "You must use talos.write_file with complete corrected file content for " + target + ".",
                     false));
         }
         steps.add(new RepairPlanStep(
@@ -191,6 +197,17 @@ public final class RepairPolicy {
             out.append("- ... ").append(problems.size() - 8).append(" more\n");
         }
         out.append("\nRepair plan:\n");
+        List<String> fullWriteTargets = steps.stream()
+                .filter(step -> step.type() == RepairStepType.WRITE_COMPLETE_FILE)
+                .map(RepairPlanStep::targetPath)
+                .filter(target -> target != null && !target.isBlank())
+                .sorted()
+                .toList();
+        if (!fullWriteTargets.isEmpty()) {
+            out.append("Full-file replacement targets: ")
+                    .append(String.join(", ", fullWriteTargets))
+                    .append("\n");
+        }
         for (RepairPlanStep step : steps) {
             if (step.type() == RepairStepType.VERIFY_STATIC) {
                 out.append("- Verify static checks again before claiming completion.\n");
@@ -199,11 +216,38 @@ public final class RepairPolicy {
                         .append(step.instruction()).append("\n");
             }
         }
-        out.append("\nFor small HTML/CSS/JS files, prefer talos.write_file with complete corrected file content ")
-                .append("when exact talos.edit_file old_string matching would be brittle. ")
-                .append("Do not repeat an edit_file old_string that already failed. ")
+        if (!fullWriteTargets.isEmpty()) {
+            out.append("\nFor these structural web repair targets, you must use talos.write_file ")
+                    .append("with complete corrected file content. Do not use talos.edit_file ")
+                    .append("for these structural web repair targets; partial edits are too brittle ")
+                    .append("for these verifier findings. ");
+        } else {
+            out.append("\nFor small HTML/CSS/JS files, prefer talos.write_file with complete corrected file content ")
+                    .append("when exact talos.edit_file old_string matching would be brittle. ");
+        }
+        out.append("Do not repeat an edit_file old_string that already failed. ")
                 .append("After tool-backed changes, answer only from tool results and static verification.");
         return out.toString();
+    }
+
+    public static Set<String> fullRewriteTargetsFromRepairContext(List<ChatMessage> messages) {
+        if (messages == null || messages.isEmpty()) return Set.of();
+        Set<String> targets = new LinkedHashSet<>();
+        for (ChatMessage message : messages) {
+            if (message == null || !"system".equals(message.role()) || message.content() == null) continue;
+            String content = message.content();
+            if (!content.startsWith("[Static verification repair context]")) continue;
+            for (String rawLine : content.split("\\R")) {
+                String line = rawLine.strip();
+                if (!line.toLowerCase(Locale.ROOT).startsWith("full-file replacement targets:")) continue;
+                String values = line.substring(line.indexOf(':') + 1);
+                for (String value : values.split(",")) {
+                    String target = normalizeTarget(value);
+                    if (!target.isBlank()) targets.add(target);
+                }
+            }
+        }
+        return Set.copyOf(targets);
     }
 
     private static boolean looksLikeRepairContinuation(String userRequest) {
@@ -322,6 +366,69 @@ public final class RepairPolicy {
                 || lower.endsWith(".jsx")
                 || lower.endsWith(".ts")
                 || lower.endsWith(".tsx");
+    }
+
+    private static boolean isStructuralWebProblem(String problem) {
+        if (problem == null || problem.isBlank()) return false;
+        String lower = problem.toLowerCase(Locale.ROOT);
+        return lower.contains("does not link")
+                || lower.contains("missing javascript")
+                || lower.contains("missing js")
+                || lower.contains("missing a submit")
+                || lower.contains("missing submit")
+                || lower.contains("missing calculate")
+                || lower.contains("missing form")
+                || lower.contains("missing input")
+                || lower.contains("selector mismatch")
+                || lower.contains("selector")
+                || lower.contains("duplicate id")
+                || lower.contains("duplicate ids")
+                || lower.contains("placeholder")
+                || lower.contains("missing javascript behavior")
+                || lower.contains("missing js behavior");
+    }
+
+    private static List<String> inferStructuralWebTargets(
+            List<ChatMessage> messages,
+            List<String> problems
+    ) {
+        Set<String> targets = new LinkedHashSet<>();
+        String combinedProblems = String.join("\n", problems == null ? List.of() : problems)
+                .toLowerCase(Locale.ROOT);
+        if (combinedProblems.contains("html")
+                || combinedProblems.contains("form")
+                || combinedProblems.contains("button")
+                || combinedProblems.contains("input")
+                || combinedProblems.contains("duplicate id")
+                || combinedProblems.contains("selector")) {
+            targets.add("index.html");
+        }
+        if (combinedProblems.contains("css")
+                || combinedProblems.contains("style.css")
+                || combinedProblems.contains("styles.css")) {
+            targets.add("styles.css");
+        }
+        if (combinedProblems.contains("javascript")
+                || combinedProblems.contains("script.js")
+                || combinedProblems.contains("scripts.js")
+                || combinedProblems.contains("placeholder")) {
+            targets.add("scripts.js");
+        }
+
+        String conversation = messages == null ? "" : messages.stream()
+                .filter(message -> message != null && message.content() != null)
+                .map(ChatMessage::content)
+                .reduce("", (left, right) -> left + "\n" + right)
+                .toLowerCase(Locale.ROOT);
+        if ((conversation.contains("3-file") || conversation.contains("three-file")
+                || conversation.contains("three file"))
+                && (conversation.contains("webpage") || conversation.contains("web page")
+                || conversation.contains("website") || conversation.contains("page"))) {
+            targets.add("index.html");
+            targets.add("styles.css");
+            targets.add("scripts.js");
+        }
+        return targets.stream().sorted().toList();
     }
 
     private static String targetPathForJson(String path) {

@@ -834,6 +834,63 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/71-structural-web-repair-redirects-edit-to-write-file.json] 71: structural web repair redirects edit_file to write_file")
+    void structuralWebRepairRedirectsEditFileToWriteFile() {
+        var loaded = JsonScenarioLoader.load("scenarios/71-structural-web-repair-redirects-edit-to-write-file.json");
+        List<ChatMessage> history = new ArrayList<>();
+        var historyNode = loaded.raw().path("history");
+        for (var node : historyNode) {
+            history.add(new ChatMessage(
+                    node.path("role").asText(),
+                    node.path("content").asText()));
+        }
+
+        try (var result = ScenarioRunner.runThroughExecutorWithHistory(
+                loaded.definition(),
+                history,
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(3, 3, 0, 0)
+                    .assertAnswerContains("Static verification: passed")
+                    .assertFileContains("index.html", "<script src=\"scripts.js\"></script>")
+                    .assertFileContains("index.html", "id=\"bmiForm\"")
+                    .assertFileContains("styles.css", ".calculator")
+                    .assertFileContains("scripts.js", "getElementById('bmiForm')")
+                    .assertLocalTraceRecorded();
+            assertEquals("PLANNED", result.localTrace().repair().status());
+            assertTrue(result.localTrace().repair().summary().contains("STATIC_VERIFICATION_REPAIR"));
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/72-structural-web-repair-continues-until-planned-write-targets.json] 72: structural web repair continues until planned write targets")
+    void structuralWebRepairContinuesUntilPlannedWriteTargets() {
+        var loaded = JsonScenarioLoader.load("scenarios/72-structural-web-repair-continues-until-planned-write-targets.json");
+        List<ChatMessage> history = new ArrayList<>();
+        var historyNode = loaded.raw().path("history");
+        for (var node : historyNode) {
+            history.add(new ChatMessage(
+                    node.path("role").asText(),
+                    node.path("content").asText()));
+        }
+
+        try (var result = ScenarioRunner.runThroughExecutorWithHistory(
+                loaded.definition(),
+                history,
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(3, 3, 0, 0)
+                    .assertAnswerContains("Static verification: passed")
+                    .assertFileContains("index.html", "<script src=\"scripts.js\"></script>")
+                    .assertFileContains("styles.css", ".calculator")
+                    .assertFileContains("scripts.js", "getElementById('bmiForm')")
+                    .assertLocalTraceRecorded();
+            assertEquals("PLANNED", result.localTrace().repair().status());
+            assertTrue(result.localTrace().repair().summary().contains("STATIC_VERIFICATION_REPAIR"));
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/63-functional-web-task-missing-js-fails-verification.json] 63: functional web task missing JavaScript fails verification")
     void functionalWebTaskMissingJavascriptFailsVerification() {
         var loaded = JsonScenarioLoader.load("scenarios/63-functional-web-task-missing-js-fails-verification.json");

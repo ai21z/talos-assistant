@@ -245,7 +245,8 @@ class UnifiedAssistantModeTest {
                         && content.contains("HTML does not link JavaScript file")
                         && content.contains("submit/calculate button")
                         && content.contains("index.html, scripts.js, styles.css")
-                        && content.contains("prefer talos.write_file")));
+                        && content.contains("must use talos.write_file")
+                        && content.contains("Do not use talos.edit_file for these structural web repair targets")));
     }
 
     private static Context context(String response) {

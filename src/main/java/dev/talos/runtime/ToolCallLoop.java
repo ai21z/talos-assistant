@@ -225,6 +225,14 @@ public final class ToolCallLoop {
                     && lower.contains("missing required parameter");
             return oldStringProblem || newStringProblem;
         }
+
+        public boolean fullRewriteRepairRedirect() {
+            if (!"talos.edit_file".equals(toolName)) return false;
+            if (!mutating || success || denied) return false;
+            if (!ToolError.INVALID_PARAMS.equals(errorCode)) return false;
+            String lower = errorMessage.toLowerCase(java.util.Locale.ROOT);
+            return lower.contains("static verification repair requires a complete talos.write_file replacement");
+        }
     }
 
     public LoopResult run(String initialAnswer, List<ChatMessage> messages, Path workspace, Context ctx) {

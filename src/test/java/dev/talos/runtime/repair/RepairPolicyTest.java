@@ -37,7 +37,74 @@ class RepairPolicyTest {
                 .anyMatch(step -> step.type() == RepairStepType.VERIFY_STATIC));
         assertTrue(plan.instruction().contains("[Static verification repair context]"));
         assertTrue(plan.instruction().contains("Repair plan:"));
-        assertTrue(plan.instruction().contains("prefer talos.write_file"));
+        assertTrue(plan.instruction().contains("must use talos.write_file"));
+    }
+
+    @Test
+    void structuralWebFailuresRequireCompleteWritesForExpectedSmallWebTargets() {
+        List<ChatMessage> messages = repairMessages("Fix the remaining static verification problems now.");
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        RepairDecision decision = RepairPolicy.planForStaticVerification(messages, contract);
+
+        RepairPlan plan = decision.plan().orElseThrow();
+        assertTrue(plan.steps().stream()
+                .anyMatch(step -> step.type() == RepairStepType.WRITE_COMPLETE_FILE
+                        && "index.html".equals(step.targetPath())));
+        assertTrue(plan.steps().stream()
+                .anyMatch(step -> step.type() == RepairStepType.WRITE_COMPLETE_FILE
+                        && "styles.css".equals(step.targetPath())));
+        assertTrue(plan.steps().stream()
+                .anyMatch(step -> step.type() == RepairStepType.WRITE_COMPLETE_FILE
+                        && "scripts.js".equals(step.targetPath())));
+        assertTrue(plan.instruction().contains("Full-file replacement targets: index.html, scripts.js, styles.css"),
+                plan.instruction());
+        assertTrue(plan.instruction().contains("must use talos.write_file with complete corrected file content"),
+                plan.instruction());
+        assertTrue(plan.instruction().contains("Do not use talos.edit_file for these structural web repair targets"),
+                plan.instruction());
+    }
+
+    @Test
+    void fullRewriteTargetsAreExtractedFromRepairContextInstruction() {
+        List<ChatMessage> messages = List.of(ChatMessage.system("""
+                [Static verification repair context]
+                Full-file replacement targets: index.html, scripts.js, styles.css
+                """));
+
+        assertEquals(
+                java.util.Set.of("index.html", "scripts.js", "styles.css"),
+                RepairPolicy.fullRewriteTargetsFromRepairContext(messages));
+    }
+
+    @Test
+    void structuralWebRepairInfersConventionalThreeFileTargetsWhenCurrentPromptOmitsNames() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("""
+                This BMI page is broken. Fix it so it works as a 3-file webpage.
+                Use the local files and apply the changes.
+                """));
+        messages.add(ChatMessage.assistant("""
+                [Task incomplete: Static verification failed - HTML does not link JavaScript file: `scripts.js`;
+                scripts.js: JavaScript file appears to be placeholder content.;
+                Calculator/form task is missing a submit/calculate button.]
+
+                Remaining static verification problems:
+                - HTML does not link JavaScript file: `scripts.js`
+                - scripts.js: JavaScript file appears to be placeholder content.
+                - Calculator/form task is missing a submit/calculate button.
+                """));
+        messages.add(ChatMessage.user("Fix the remaining static verification problems now."));
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        RepairPlan plan = RepairPolicy.planForStaticVerification(messages, contract)
+                .plan()
+                .orElseThrow();
+
+        assertEquals(List.of("index.html", "scripts.js", "styles.css"), plan.expectedTargets());
+        assertTrue(plan.instruction().contains("Full-file replacement targets: index.html, scripts.js, styles.css"),
+                plan.instruction());
     }
 
     @Test

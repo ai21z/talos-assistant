@@ -1,6 +1,7 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.runtime.TurnProcessor;
+import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolCall;
@@ -64,6 +65,9 @@ public final class ToolCallExecutionStage {
         boolean pathPolicyBlockedThisIter = false;
         List<String> mutationSummariesThisIter = new ArrayList<>();
         Set<String> staleRereadRequiredAtStart = staleRereadRequiredPaths(state);
+        Set<String> fullRewriteRepairTargets = strict
+                ? Set.of()
+                : RepairPolicy.fullRewriteTargetsFromRepairContext(state.messages);
 
         for (int i = 0; i < parsed.calls().size(); i++) {
             ToolCall call = parsed.calls().get(i);
@@ -74,6 +78,24 @@ public final class ToolCallExecutionStage {
             LOG.debug("  Executing tool: {} (params: {})", effective.toolName(), effective.parameters());
 
             boolean isEditFile = "talos.edit_file".equals(effective.toolName());
+            if (isEditFile
+                    && !strict
+                    && fullRewriteRepairTargets.contains(normalizePath(pathHint))) {
+                state.failedCalls++;
+                failuresThisIter++;
+                recordFailure(state, effective.toolName(), pathHint);
+                String diagnosticError = fullRewriteRepairRequiredDiagnostic(pathHint);
+                String diagnostic = "[tool_result: " + effective.toolName() + "]\n"
+                        + "[error] " + diagnosticError
+                        + "\n[/tool_result]";
+                state.toolOutcomes.add(new dev.talos.runtime.ToolCallLoop.ToolOutcome(
+                        effective.toolName(), pathHint, false, true, false, "", diagnosticError,
+                        null, ToolError.INVALID_PARAMS));
+                appendResultMessage(state, parsed.useNativePath(), i, diagnostic);
+                LOG.debug("Blocked edit_file for full-rewrite repair target {}", pathHint);
+                continue;
+            }
+
             if (isEditFile && !strict && staleRereadRequiredAtStart.contains(normalizePath(pathHint))) {
                 state.failedCalls++;
                 failuresThisIter++;
@@ -348,6 +370,16 @@ public final class ToolCallExecutionStage {
                 + "Call talos.read_file for " + target
                 + " in a separate follow-up step before attempting another talos.edit_file. "
                 + "No approval was requested and no additional file change was made.";
+    }
+
+    private static String fullRewriteRepairRequiredDiagnostic(String pathHint) {
+        String target = pathHint == null || pathHint.isBlank()
+                ? "the target file"
+                : "`" + pathHint + "`";
+        return "Static verification repair requires a complete talos.write_file replacement for "
+                + target + ". This talos.edit_file call was not executed, no approval was requested, "
+                + "and no file was changed. Use talos.write_file with the full corrected file content "
+                + "for this small web file.";
     }
 
     private static boolean isUserApprovalDenial(ToolResult result) {
