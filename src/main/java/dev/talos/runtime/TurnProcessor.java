@@ -469,8 +469,7 @@ public final class TurnProcessor {
             TurnAuditCapture.recordApprovalRequired();
             LocalTurnTraceCapture.recordApprovalRequired(tracePhase, call);
 
-            String desc = risk.name().toLowerCase().replace('_', ' ')
-                    + " operation: " + call.toolName();
+            String desc = approvalDescription(call, risk, permissionDecision);
             String detail = buildApprovalDetail(call, path, scopeWarning, permissionDecision.userMessage());
             ApprovalResponse response = approvalGate.approveFull(desc, detail);
 
@@ -735,6 +734,24 @@ public final class TurnProcessor {
                 + (message == null || message.isBlank() ? "" : ": " + shortReason(message));
     }
 
+    private static String approvalDescription(
+            ToolCall call,
+            ToolRiskLevel risk,
+            PermissionDecision permissionDecision
+    ) {
+        String toolName = call == null ? "unknown tool" : call.toolName();
+        if (permissionDecision != null
+                && permissionDecision.protectedPath()
+                && isReadFileTool(toolName)) {
+            return "protected read: " + toolName;
+        }
+        return (risk == null ? ToolRiskLevel.READ_ONLY : risk)
+                .name()
+                .toLowerCase()
+                .replace('_', ' ')
+                + " operation: " + toolName;
+    }
+
     private static String toolFailureReason(ToolResult result) {
         if (result == null || result.success()) return "";
         String code = result.error() == null ? "tool failed" : result.error().code();
@@ -772,6 +789,13 @@ public final class TurnProcessor {
         return "edit_file".equals(normalized)
                 || "file_edit".equals(normalized)
                 || "editfile".equals(normalized);
+    }
+
+    private static boolean isReadFileTool(String toolName) {
+        String normalized = normalizeToolName(toolName);
+        return "read_file".equals(normalized)
+                || "fileread".equals(normalized)
+                || "readfile".equals(normalized);
     }
 
     private static boolean isListDirTool(String toolName) {

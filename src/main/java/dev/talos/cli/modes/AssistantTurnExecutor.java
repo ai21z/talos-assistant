@@ -1403,6 +1403,38 @@ public final class AssistantTurnExecutor {
         return outcome.errorMessage().startsWith("User did not approve ");
     }
 
+    static String summarizeDeniedProtectedReadOutcomesIfNeeded(
+            String answer,
+            ToolCallLoop.LoopResult loopResult
+    ) {
+        if (loopResult == null) return answer;
+        List<ToolCallLoop.ToolOutcome> deniedProtectedReads = loopResult.toolOutcomes().stream()
+                .filter(AssistantTurnExecutor::isDeniedProtectedReadOutcome)
+                .toList();
+        if (deniedProtectedReads.isEmpty()) return answer;
+
+        StringBuilder out = new StringBuilder();
+        out.append("[Approval blocked: protected content was not read]\n\n")
+                .append("Protected content was not read because approval was denied for:\n");
+        for (ToolCallLoop.ToolOutcome outcome : deniedProtectedReads) {
+            out.append("- ")
+                    .append(outcome.pathHint().isBlank() ? outcome.toolName() : outcome.pathHint())
+                    .append(": approval denied\n");
+        }
+        out.append("\nNo protected file content was shown. ")
+                .append("Approve the protected read if you want Talos to inspect it.");
+        return out.toString().stripTrailing();
+    }
+
+    private static boolean isDeniedProtectedReadOutcome(ToolCallLoop.ToolOutcome outcome) {
+        if (outcome == null || outcome.mutating() || outcome.success() || !outcome.denied()) {
+            return false;
+        }
+        if (!"talos.read_file".equals(outcome.toolName())) return false;
+        if (!ToolError.DENIED.equals(outcome.errorCode())) return false;
+        return isUserApprovalDeniedOutcome(outcome);
+    }
+
     static String summarizeReadOnlyDeniedMutationOutcomesIfNeeded(String answer,
                                                                   List<ChatMessage> messages,
                                                                   ToolCallLoop.LoopResult loopResult,

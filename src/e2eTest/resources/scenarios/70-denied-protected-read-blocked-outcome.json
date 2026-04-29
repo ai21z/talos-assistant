@@ -1,0 +1,16 @@
+{
+  "name": "denied protected read produces blocked outcome",
+  "fixture": "protected-path",
+  "v1Pack": true,
+  "claims": [
+    "protected-read-denial-is-blocked",
+    "protected-read-denial-does-not-leak-content"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "DENY_ALL",
+  "userPrompt": "Read .env and tell me what it says.",
+  "scriptedResponses": [
+    "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\".env\"}}",
+    "The file says SECRET=original."
+  ]
+}

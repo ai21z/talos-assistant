@@ -414,6 +414,30 @@ class ExplainLastTurnCommandTest {
     }
 
     @Test
+    void rendersDeniedProtectedReadAsBlockedApprovalOutcome() {
+        TurnRecord turn = record(
+                10,
+                "Read .env and tell me what it says.",
+                "Protected content was not read because approval was denied.",
+                List.of(new TurnRecord.ToolCallSummary(
+                        "talos.read_file",
+                        ".env",
+                        false,
+                        "approval denied by user for talos.read_file")),
+                1,
+                0,
+                1,
+                "ok");
+
+        String text = ExplainLastTurnCommand.renderTrace(turn);
+
+        assertTrue(text.contains("Outcome:   BLOCKED_BY_APPROVAL"), text);
+        assertFalse(text.contains("Outcome:   COMPLETE"), text);
+        assertFalse(text.contains("READ_ONLY_ANSWERED"), text);
+        assertTrue(text.contains("talos.read_file -> .env [failed]"), text);
+    }
+
+    @Test
     void rendersMutationAppliedOutcome() {
         TurnRecord turn = record(
                 3,

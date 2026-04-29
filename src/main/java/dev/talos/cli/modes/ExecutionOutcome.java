@@ -107,6 +107,11 @@ record ExecutionOutcome(
         boolean deniedMutation = readOnlyDeniedMutation || !Objects.equals(current, shaped);
         current = shaped;
 
+        shaped = AssistantTurnExecutor.summarizeDeniedProtectedReadOutcomesIfNeeded(
+                current, loopResult);
+        boolean deniedProtectedRead = !Objects.equals(current, shaped);
+        current = shaped;
+
         shaped = AssistantTurnExecutor.summarizeInvalidMutationOutcomesIfNeeded(
                 current, messages, loopResult, extraMutationSuccesses);
         boolean invalidMutation = !Objects.equals(current, shaped);
@@ -135,7 +140,7 @@ record ExecutionOutcome(
                 invalidMutation,
                 partialMutation,
                 falseMutationClaim || inspectUnderCompleted,
-                false
+                deniedProtectedRead
         );
 
         TaskVerificationResult taskVerification = workspace != null && shouldVerifyPostApply(
@@ -173,6 +178,7 @@ record ExecutionOutcome(
                 taskVerification,
                 toolLoopWarnings(
                         deniedMutation,
+                        deniedProtectedRead,
                         readOnlyDeniedMutation,
                         invalidMutation,
                         partialMutation,
@@ -370,6 +376,7 @@ record ExecutionOutcome(
 
     private static List<TruthWarning> toolLoopWarnings(
             boolean deniedMutation,
+            boolean deniedProtectedRead,
             boolean readOnlyDeniedMutation,
             boolean invalidMutation,
             boolean partialMutation,
@@ -387,6 +394,11 @@ record ExecutionOutcome(
                     readOnlyDeniedMutation
                             ? "A mutating tool call was blocked by the read-only task contract."
                             : "A mutating tool call was denied by approval."));
+        }
+        if (deniedProtectedRead) {
+            warnings.add(TruthWarning.of(
+                    TruthWarningType.DENIED_PROTECTED_READ,
+                    "A protected read was blocked because approval was denied."));
         }
         if (invalidMutation) {
             warnings.add(TruthWarning.of(
@@ -560,6 +572,7 @@ record ExecutionOutcome(
 
     private static String approvalStatus(TaskOutcome outcome) {
         if (outcome == null || outcome.mutationOutcome() == null) return "UNKNOWN";
+        if (outcome.toolOutcomes().stream().anyMatch(ToolCallLoop.ToolOutcome::denied)) return "DENIED";
         if (!outcome.mutationOutcome().denied().isEmpty()) return "DENIED";
         if (outcome.mutationOutcome().successCount() > 0) return "GRANTED_OR_NOT_REQUIRED";
         return "NONE";
