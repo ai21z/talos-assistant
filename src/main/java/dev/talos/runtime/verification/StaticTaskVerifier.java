@@ -2,9 +2,14 @@ package dev.talos.runtime.verification;
 
 import dev.talos.runtime.TemplatePlaceholderGuard;
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.expectation.ExpectationVerificationStatus;
+import dev.talos.runtime.expectation.LiteralContentExpectation;
+import dev.talos.runtime.expectation.TaskExpectation;
+import dev.talos.runtime.expectation.TaskExpectationResolver;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.tools.VerificationStatus;
 
 import java.nio.file.Files;
@@ -122,6 +127,7 @@ public final class StaticTaskVerifier {
         }
 
         verifyExpectedTargets(contract, mutatedPaths, facts, problems);
+        boolean expectationRequired = verifyTaskExpectations(contract, root, facts, problems);
 
         boolean webCoherenceRequired = shouldCheckWebCoherence(contract, root, mutatedPaths);
         if (shouldRequireSeparateWebAssetMutations(contract)) {
@@ -132,7 +138,17 @@ public final class StaticTaskVerifier {
         }
 
         if (!problems.isEmpty()) {
-            return TaskVerificationResult.failed(firstProblemSummary(problems), facts, problems);
+            return TaskVerificationResult.failed(
+                    expectationRequired && problems.stream().anyMatch(p -> p.contains("exact content mismatch"))
+                            ? "Exact content verification failed."
+                            : firstProblemSummary(problems),
+                    facts,
+                    problems);
+        }
+        if (expectationRequired && !webCoherenceRequired) {
+            return TaskVerificationResult.passed(
+                    "Exact content verification passed.",
+                    facts);
         }
         if (webCoherenceRequired) {
             return TaskVerificationResult.passed(
@@ -143,6 +159,90 @@ public final class StaticTaskVerifier {
                 "Target/readback checks passed for " + mutatedPaths.size()
                         + " mutated target(s); no task-specific static verifier was applicable.",
                 facts);
+    }
+
+    private static boolean verifyTaskExpectations(
+            TaskContract contract,
+            Path root,
+            List<String> facts,
+            List<String> problems
+    ) {
+        List<TaskExpectation> expectations = TaskExpectationResolver.resolve(contract);
+        if (expectations.isEmpty()) return false;
+        boolean verifiedAny = false;
+        for (TaskExpectation expectation : expectations) {
+            if (expectation instanceof LiteralContentExpectation literal) {
+                verifiedAny = true;
+                verifyLiteralContentExpectation(root, literal, facts, problems);
+            }
+        }
+        return verifiedAny;
+    }
+
+    private static void verifyLiteralContentExpectation(
+            Path root,
+            LiteralContentExpectation expectation,
+            List<String> facts,
+            List<String> problems
+    ) {
+        String pathHint = normalizePath(expectation.targetPath());
+        Path target;
+        try {
+            target = root.resolve(pathHint).normalize();
+        } catch (InvalidPathException e) {
+            problems.add(pathHint + ": exact content verification could not resolve target path.");
+            recordLiteralExpectation(expectation, ExpectationVerificationStatus.FAILED, "");
+            return;
+        }
+        if (!target.startsWith(root) || !Files.isRegularFile(target)) {
+            problems.add(pathHint + ": exact content verification target is not a readable file.");
+            recordLiteralExpectation(expectation, ExpectationVerificationStatus.FAILED, "");
+            return;
+        }
+        String observed;
+        try {
+            observed = Files.readString(target);
+        } catch (Exception e) {
+            problems.add(pathHint + ": exact content verification could not read target (" + e.getMessage() + ")");
+            recordLiteralExpectation(expectation, ExpectationVerificationStatus.FAILED, "");
+            return;
+        }
+
+        boolean matched = observed.equals(expectation.expectedContent());
+        ExpectationVerificationStatus status = matched
+                ? ExpectationVerificationStatus.PASSED
+                : ExpectationVerificationStatus.FAILED;
+        recordLiteralExpectation(expectation, status, observed);
+        if (matched) {
+            facts.add(pathHint + ": literal content matched requested exact content.");
+        } else {
+            problems.add(pathHint + ": exact content mismatch (expected "
+                    + expectation.expectedChars() + " chars/" + expectation.expectedBytes()
+                    + " bytes/" + expectation.expectedLines() + " lines, observed "
+                    + LiteralContentExpectation.charCount(observed) + " chars/"
+                    + LiteralContentExpectation.byteCount(observed) + " bytes/"
+                    + LiteralContentExpectation.lineCount(observed) + " lines).");
+        }
+    }
+
+    private static void recordLiteralExpectation(
+            LiteralContentExpectation expectation,
+            ExpectationVerificationStatus status,
+            String observedContent
+    ) {
+        LocalTurnTraceCapture.recordExpectationVerified(
+                expectation.kind(),
+                status == null ? "" : status.name(),
+                expectation.targetPath(),
+                expectation.sourcePattern(),
+                expectation.expectedHash(),
+                expectation.expectedBytes(),
+                expectation.expectedChars(),
+                expectation.expectedLines(),
+                LiteralContentExpectation.hash(observedContent),
+                LiteralContentExpectation.byteCount(observedContent),
+                LiteralContentExpectation.charCount(observedContent),
+                LiteralContentExpectation.lineCount(observedContent));
     }
 
     private static void verifyExpectedTargets(

@@ -1,7 +1,9 @@
 package dev.talos.runtime.verification;
 
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.tools.VerificationStatus;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -28,6 +30,81 @@ class StaticTaskVerifierTest {
                 workspace, "Check the website.", loopResult, 0);
 
         assertEquals(TaskVerificationStatus.NOT_RUN, result.status());
+    }
+
+    @Test
+    void literalExactMatchPassesTaskVerification() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), "AFTER");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Overwrite index.html with exactly AFTER. Use talos.write_file.",
+                loopResult(List.of(successfulWrite("index.html", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status());
+        assertTrue(result.summary().contains("Exact content verification passed"), result.summary());
+        assertTrue(result.facts().stream().anyMatch(f -> f.contains("literal content matched")));
+    }
+
+    @Test
+    void literalMismatchFailsInsteadOfReadbackOnly() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <html>
+                <body>
+                <h1>Hello World</h1>
+                </body>
+                </html>
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Overwrite index.html with exactly AFTER. Use talos.write_file.",
+                loopResult(List.of(successfulWrite("index.html", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.summary().contains("Exact content verification failed"), result.summary());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("index.html: exact content mismatch")));
+    }
+
+    @Test
+    void literalExpectationTraceEventIsRedacted() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), "<html>wrong</html>");
+        LocalTurnTraceCapture.begin(
+                "trc-test-literal",
+                "session-test",
+                1,
+                "2026-04-29T00:00:00Z",
+                "workspace-hash",
+                "auto",
+                "ollama",
+                "qwen2.5-coder:14b",
+                "Overwrite index.html with exactly AFTER. Use talos.write_file.");
+
+        try {
+            StaticTaskVerifier.verify(
+                    workspace,
+                    "Overwrite index.html with exactly AFTER. Use talos.write_file.",
+                    loopResult(List.of(successfulWrite("index.html", VerificationStatus.PASS))),
+                    0);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            var event = trace.events().stream()
+                    .filter(e -> e.type().equals("EXPECTATION_VERIFIED"))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("LITERAL_CONTENT", event.data().get("kind"));
+            assertEquals("FAILED", event.data().get("status"));
+            assertEquals("index.html", event.data().get("pathHint"));
+            assertTrue(event.data().containsKey("expectedHash"));
+            assertTrue(event.data().containsKey("observedHash"));
+            assertFalse(event.data().containsValue("AFTER"),
+                    "default trace must not store raw literal content");
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
     }
 
     @Test

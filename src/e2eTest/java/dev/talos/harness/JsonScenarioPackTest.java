@@ -916,6 +916,52 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/67-literal-full-file-write-mismatch-fails-verification.json] 67: literal full-file mismatch fails verification")
+    void literalFullFileWriteMismatchFailsVerification() {
+        var loaded = JsonScenarioLoader.load("scenarios/67-literal-full-file-write-mismatch-fails-verification.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(1, 1, 0, 0)
+                    .assertAnswerContains("Exact content verification failed")
+                    .assertAnswerContains("requested task is not verified complete")
+                    .assertAnswerNotContains("File write/readback passed")
+                    .assertFileContains("index.html", "<html><body>AFTER</body></html>")
+                    .assertFileNotContains("index.html", "\nAFTER\n");
+            assertEquals("FAILED", result.localTrace().verification().status());
+            assertTrue(result.localTrace().events().stream()
+                    .anyMatch(event -> "EXPECTATION_VERIFIED".equals(event.type())
+                            && "FAILED".equals(event.data().get("status"))
+                            && event.data().containsKey("expectedHash")
+                            && event.data().containsKey("observedHash")));
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/68-literal-full-file-write-match-passes-verification.json] 68: literal full-file match passes verification")
+    void literalFullFileWriteMatchPassesVerification() {
+        var loaded = JsonScenarioLoader.load("scenarios/68-literal-full-file-write-match-passes-verification.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(1, 1, 0, 0)
+                    .assertAnswerContains("Static verification: passed")
+                    .assertAnswerContains("Exact content verification passed")
+                    .assertAnswerNotContains("File write/readback passed")
+                    .assertFileContains("index.html", "AFTER");
+            assertEquals("PASSED", result.localTrace().verification().status());
+            assertTrue(result.localTrace().events().stream()
+                    .anyMatch(event -> "EXPECTATION_VERIFIED".equals(event.type())
+                            && "PASSED".equals(event.data().get("status"))
+                            && !event.data().containsValue("AFTER")));
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/42-partial-followup-summary-uses-verified-history.json] 42: follow-up summary uses verified partial history")
     void partialFollowupSummaryUsesVerifiedHistory() {
         var loaded = JsonScenarioLoader.load("scenarios/42-partial-followup-summary-uses-verified-history.json");

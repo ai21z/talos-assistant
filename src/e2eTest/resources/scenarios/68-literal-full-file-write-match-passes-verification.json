@@ -1,0 +1,15 @@
+{
+  "name": "literal full-file write match passes verification",
+  "fixture": "mini-site",
+  "v1Pack": true,
+  "claims": [
+    "literal-full-file-expectation-passes-on-exact-match"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Overwrite index.html with exactly AFTER. Use talos.write_file.",
+  "scriptedResponses": [
+    "```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"index.html\",\"content\":\"AFTER\"}}\n```",
+    "Updated index.html."
+  ]
+}
