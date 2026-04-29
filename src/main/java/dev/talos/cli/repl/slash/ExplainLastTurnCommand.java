@@ -6,6 +6,7 @@ import dev.talos.runtime.JsonSessionStore;
 import dev.talos.runtime.SessionStore;
 import dev.talos.runtime.TurnRecord;
 import dev.talos.runtime.trace.LocalTurnTrace;
+import dev.talos.runtime.trace.TraceRedactor;
 
 import java.nio.file.Path;
 import java.util.LinkedHashSet;
@@ -116,7 +117,7 @@ public final class ExplainLastTurnCommand implements Command {
         }
 
         sb.append("\nUser Request\n");
-        sb.append("  ").append(preview(turn.userInput())).append("\n");
+        sb.append("  ").append(userRequestPreview(turn.userInput())).append("\n");
 
         sb.append("\nTools\n");
         if (turn.toolCalls().isEmpty()) {
@@ -334,6 +335,10 @@ public final class ExplainLastTurnCommand implements Command {
         String oneLine = text.replace('\r', ' ').replace('\n', ' ').strip();
         if (oneLine.length() <= PREVIEW_LIMIT) return oneLine;
         return oneLine.substring(0, PREVIEW_LIMIT - 3) + "...";
+    }
+
+    private static String userRequestPreview(String text) {
+        return preview(TraceRedactor.redactSecretLikeAssignments(text));
     }
 
     private static String blankDefault(String value, String fallback) {

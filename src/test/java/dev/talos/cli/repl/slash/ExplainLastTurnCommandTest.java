@@ -292,6 +292,46 @@ class ExplainLastTurnCommandTest {
     }
 
     @Test
+    void traceViewRedactsSecretLikeValuesFromUserRequestPreview() {
+        TurnPolicyTrace policyTrace = new TurnPolicyTrace(
+                "FILE_EDIT",
+                true,
+                true,
+                List.of(".env"),
+                List.of(),
+                "APPLY",
+                "APPLY",
+                List.of("talos.write_file"),
+                List.of("talos.write_file"),
+                List.of("permission policy denied talos.write_file: PROTECTED_PATH_DENY path=.env"));
+        TurnRecord turn = new TurnRecord(
+                9,
+                Instant.parse("2026-04-26T00:00:00Z"),
+                1234,
+                "Overwrite .env with SECRET=changed. Use talos.write_file.",
+                "No file changed because the protected path policy blocked the request.",
+                List.of(new TurnRecord.ToolCallSummary(
+                        "talos.write_file",
+                        ".env",
+                        false,
+                        "permission policy denied talos.write_file: PROTECTED_PATH_DENY path=.env")),
+                0,
+                0,
+                0,
+                "",
+                "ok",
+                policyTrace);
+
+        String text = ExplainLastTurnCommand.renderTrace(turn);
+
+        assertTrue(text.contains("User Request"), text);
+        assertTrue(text.contains("Overwrite .env with SECRET=[redacted]. Use talos.write_file."), text);
+        assertFalse(text.contains("SECRET=changed"), text);
+        assertTrue(text.contains("talos.write_file -> .env [failed]"), text);
+        assertTrue(text.contains("PROTECTED_PATH_DENY"), text);
+    }
+
+    @Test
     void traceViewIncludesLocalTraceWhenTurnHasTraceId() {
         Path workspace = Path.of("/project/local-trace").toAbsolutePath().normalize();
         var store = new JsonSessionStore(tempDir);
