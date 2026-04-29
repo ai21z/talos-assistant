@@ -106,6 +106,118 @@ function Test-Substrings {
     }
 }
 
+function Get-LastRegexValue {
+    param([string]$Text, [string]$Pattern)
+    $matches = [regex]::Matches($Text, $Pattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    if ($matches.Count -eq 0) { return "" }
+    return $matches[$matches.Count - 1].Groups[1].Value.Trim()
+}
+
+function Get-TraceFacts {
+    param([string]$Text)
+    $contractLine = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Contract:\s+(.+)$"
+    $contract = ""
+    $mutationAllowed = ""
+    if (-not [string]::IsNullOrWhiteSpace($contractLine)) {
+        $parts = $contractLine -split "\s+"
+        if ($parts.Count -gt 0) { $contract = $parts[0] }
+        $mutationMatch = [regex]::Match($contractLine, "mutationAllowed=(true|false)", [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        if ($mutationMatch.Success) { $mutationAllowed = $mutationMatch.Groups[1].Value.ToLowerInvariant() }
+    }
+
+    return [pscustomobject]@{
+        Contract = $contract
+        MutationAllowed = $mutationAllowed
+        Phase = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Phase:\s+(.+)$"
+        NativeTools = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Native tools:\s+(.+)$"
+        Blocked = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Blocked:\s+(.+)$"
+        Outcome = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Outcome:\s+(.+)$"
+        Checkpoint = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Checkpoint:\s+(.+)$"
+        Verification = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Verification:\s+(.+)$"
+        Repair = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Repair:\s+(.+)$"
+    }
+}
+
+function Get-AssertionArray {
+    param($Assertions, [string]$Name)
+    if ($null -eq $Assertions) { return @() }
+    if (-not ($Assertions.PSObject.Properties.Name -contains $Name)) { return @() }
+    return @($Assertions.$Name | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+}
+
+function Test-TraceAssertions {
+    param([string]$Text, $Assertions)
+    $failures = @()
+    if ($null -eq $Assertions) { return $failures }
+
+    $facts = Get-TraceFacts -Text $Text
+
+    if ($Assertions.PSObject.Properties.Name -contains "contract") {
+        if ($facts.Contract -ne [string]$Assertions.contract) {
+            $failures += "trace contract expected '$($Assertions.contract)' but was '$($facts.Contract)'"
+        }
+    }
+    if ($Assertions.PSObject.Properties.Name -contains "mutationAllowed") {
+        $expected = ([bool]$Assertions.mutationAllowed).ToString().ToLowerInvariant()
+        if ($facts.MutationAllowed -ne $expected) {
+            $failures += "trace mutationAllowed expected '$expected' but was '$($facts.MutationAllowed)'"
+        }
+    }
+
+    foreach ($item in Get-AssertionArray -Assertions $Assertions -Name "phaseIncludes") {
+        if ($facts.Phase.IndexOf([string]$item, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+            $failures += "trace phase missing '$item'"
+        }
+    }
+    foreach ($item in Get-AssertionArray -Assertions $Assertions -Name "nativeToolsContains") {
+        if ($facts.NativeTools.IndexOf([string]$item, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+            $failures += "trace nativeTools missing '$item'"
+        }
+    }
+    foreach ($item in Get-AssertionArray -Assertions $Assertions -Name "nativeToolsExcludes") {
+        if ($facts.NativeTools.IndexOf([string]$item, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+            $failures += "trace nativeTools unexpectedly contained '$item'"
+        }
+    }
+    foreach ($item in Get-AssertionArray -Assertions $Assertions -Name "blockedContains") {
+        if ($facts.Blocked.IndexOf([string]$item, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+            $failures += "trace blocked missing '$item'"
+        }
+    }
+    foreach ($item in Get-AssertionArray -Assertions $Assertions -Name "outcomeContains") {
+        if ($facts.Outcome.IndexOf([string]$item, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+            $failures += "trace outcome missing '$item'"
+        }
+    }
+    foreach ($item in Get-AssertionArray -Assertions $Assertions -Name "checkpointContains") {
+        if ($facts.Checkpoint.IndexOf([string]$item, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+            $failures += "trace checkpoint missing '$item'"
+        }
+    }
+    foreach ($item in Get-AssertionArray -Assertions $Assertions -Name "verificationContains") {
+        if ($facts.Verification.IndexOf([string]$item, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+            $failures += "trace verification missing '$item'"
+        }
+    }
+    foreach ($item in Get-AssertionArray -Assertions $Assertions -Name "repairContains") {
+        if ($facts.Repair.IndexOf([string]$item, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+            $failures += "trace repair missing '$item'"
+        }
+    }
+    foreach ($item in Get-AssertionArray -Assertions $Assertions -Name "transcriptContains") {
+        if ($Text.IndexOf([string]$item, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+            $failures += "transcript missing '$item'"
+        }
+    }
+    foreach ($item in Get-AssertionArray -Assertions $Assertions -Name "transcriptExcludes") {
+        if ($Text.IndexOf([string]$item, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+            $failures += "transcript unexpectedly contained '$item'"
+        }
+    }
+
+    return $failures
+}
+
 function Get-TalosPath {
     if (-not [string]::IsNullOrWhiteSpace($TalosPath)) {
         return [System.IO.Path]::GetFullPath($TalosPath)
@@ -175,6 +287,7 @@ function Invoke-TalosCase {
     $required = @($Case.requiredOutputSubstrings | ForEach-Object { [string]$_ })
     $forbidden = @($Case.forbiddenOutputSubstrings | ForEach-Object { [string]$_ })
     $check = Test-Substrings -Text $text -Required $required -Forbidden $forbidden
+    $traceFailures = @(Test-TraceAssertions -Text $text -Assertions $Case.traceAssertions)
 
     $status = "PASS"
     $blocker = "no"
@@ -187,6 +300,12 @@ function Invoke-TalosCase {
         $status = "BLOCKER"
         $blocker = "yes"
         $notes += "Found forbidden: " + ($check.FoundForbidden -join "; ")
+    }
+    if ($traceFailures.Count -gt 0) {
+        if ($status -ne "BLOCKER") {
+            $status = "FAIL"
+        }
+        $notes += "Trace assertion failed: " + ($traceFailures -join "; ")
     }
     if ($notes.Count -eq 0) {
         $notes += $Case.notes
@@ -234,6 +353,27 @@ if ($ValidateOnly) {
         foreach ($field in @("id", "category", "workspaceFixture", "prompts", "expectedContract", "expectedToolsAllowed", "forbiddenOutputSubstrings", "requiredOutputSubstrings", "blockerConditions", "notes")) {
             if (-not ($case.PSObject.Properties.Name -contains $field)) {
                 throw "Case '$($case.id)' is missing required field '$field'."
+            }
+        }
+        if ($case.PSObject.Properties.Name -contains "traceAssertions") {
+            $allowedAssertions = @(
+                "contract",
+                "mutationAllowed",
+                "phaseIncludes",
+                "nativeToolsContains",
+                "nativeToolsExcludes",
+                "blockedContains",
+                "outcomeContains",
+                "checkpointContains",
+                "verificationContains",
+                "repairContains",
+                "transcriptContains",
+                "transcriptExcludes"
+            )
+            foreach ($assertionName in Get-NotePropertyNames $case.traceAssertions) {
+                if ($allowedAssertions -notcontains $assertionName) {
+                    throw "Case '$($case.id)' has unknown trace assertion '$assertionName'."
+                }
             }
         }
         if (-not $ids.Add([string]$case.id)) {
