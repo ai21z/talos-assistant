@@ -351,6 +351,33 @@ class ExplainLastTurnCommandTest {
                         List.of("talos.read_file", "talos.write_file"),
                         List.of("talos.read_file", "talos.write_file"),
                         "mutation task")
+                .promptAudit(new dev.talos.runtime.trace.PromptAuditSnapshot(
+                        1,
+                        "FILE_CREATE",
+                        true,
+                        true,
+                        "APPLY",
+                        "APPLY",
+                        "MUTATING_TOOL_REQUIRED",
+                        "NONE_OR_NOT_DERIVED",
+                        "NOT_DERIVED",
+                        "NONE_OR_NOT_DERIVED",
+                        "NONE_OR_NOT_DERIVED",
+                        "NONE_OR_NOT_DERIVED",
+                        "INCLUDED",
+                        4,
+                        true,
+                        "AFTER_HISTORY_BEFORE_USER",
+                        "frame-hash",
+                        "[CurrentTurnCapability] SECRET=[redacted]",
+                        2,
+                        1,
+                        7,
+                        "prompt-hash",
+                        List.of("talos.read_file", "talos.write_file"),
+                        List.of("talos.read_file", "talos.write_file"),
+                        List.of(),
+                        dev.talos.runtime.trace.TraceRedactionMode.DEFAULT))
                 .event(TurnTraceEvent.simple(
                         "ACTION_OBLIGATION_EVALUATED",
                         "2026-04-28T12:00:00Z",
@@ -391,8 +418,13 @@ class ExplainLastTurnCommandTest {
         assertInstanceOf(Result.TrustedInfo.class, result);
         String text = ((Result.TrustedInfo) result).text;
         assertTrue(text.contains("Local trace: trc-local"), text);
-        assertTrue(text.contains("Schema: 1"), text);
+        assertTrue(text.contains("Schema: 2"), text);
         assertTrue(text.contains("Redaction: DEFAULT"), text);
+        assertTrue(text.contains("Prompt Audit"), text);
+        assertTrue(text.contains("actionObligation: MUTATING_TOOL_REQUIRED"), text);
+        assertTrue(text.contains("currentTurnFrame: injected AFTER_HISTORY_BEFORE_USER hash=frame-hash"), text);
+        assertTrue(text.contains("SECRET=[redacted]"), text);
+        assertFalse(text.contains("SECRET=changed"), text);
         assertTrue(text.contains("Action obligation: MUTATING_TOOL_REQUIRED (SATISFIED_AFTER_RETRY)"), text);
         assertTrue(text.contains("Checkpoint: CREATED chk-local"), text);
         assertTrue(text.contains("Repair: PLANNED - STATIC_VERIFICATION_REPAIR steps=2 problems=3"), text);

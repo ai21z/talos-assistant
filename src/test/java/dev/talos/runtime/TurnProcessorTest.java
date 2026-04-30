@@ -436,7 +436,7 @@ class TurnProcessorTest {
 
         assertNotNull(result.audit().localTrace());
         LocalTurnTrace trace = result.audit().localTrace();
-        assertEquals(1, trace.schemaVersion());
+        assertEquals(2, trace.schemaVersion());
         assertFalse(trace.traceId().isBlank());
         assertTrue(trace.events().stream().anyMatch(event -> "TRACE_STARTED".equals(event.type())));
         assertTrue(trace.events().stream().anyMatch(event -> "MODEL_RESPONSE_RECEIVED".equals(event.type())));

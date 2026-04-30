@@ -14,6 +14,7 @@ public enum DebugLevel {
     BRIEF("brief"),
     RAG("rag"),
     TOOLS("tools"),
+    PROMPT("prompt"),
     TRACE("trace");
 
     private final String label;
@@ -38,6 +39,7 @@ public enum DebugLevel {
             case "on", "true", "1", "enable", "enabled", "brief" -> Optional.of(BRIEF);
             case "rag", "retrieval" -> Optional.of(RAG);
             case "tool", "tools" -> Optional.of(TOOLS);
+            case "prompt", "prompts", "frame" -> Optional.of(PROMPT);
             case "trace", "all" -> Optional.of(TRACE);
             default -> Optional.empty();
         };

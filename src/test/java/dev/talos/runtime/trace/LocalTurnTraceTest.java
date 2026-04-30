@@ -45,6 +45,33 @@ class LocalTurnTraceTest {
                         List.of("talos.read_file", "talos.write_file"),
                         List.of("talos.read_file", "talos.write_file"),
                         "mutation task in APPLY phase")
+                .promptAudit(new PromptAuditSnapshot(
+                        1,
+                        "FILE_CREATE",
+                        true,
+                        true,
+                        "APPLY",
+                        "APPLY",
+                        "MUTATING_TOOL_REQUIRED",
+                        "NONE_OR_NOT_DERIVED",
+                        "NOT_DERIVED",
+                        "NONE_OR_NOT_DERIVED",
+                        "NONE_OR_NOT_DERIVED",
+                        "NONE_OR_NOT_DERIVED",
+                        "INCLUDED",
+                        2,
+                        true,
+                        "AFTER_HISTORY_BEFORE_USER",
+                        "frame-hash",
+                        "[CurrentTurnCapability] SECRET=[redacted]",
+                        2,
+                        1,
+                        5,
+                        "prompt-hash",
+                        List.of("talos.read_file", "talos.write_file"),
+                        List.of("talos.read_file", "talos.write_file"),
+                        List.of(),
+                        TraceRedactionMode.DEFAULT))
                 .event(TurnTraceEvent.toolCallParsed(
                         "2026-04-28T12:00:01Z",
                         "APPLY",
@@ -56,8 +83,9 @@ class LocalTurnTraceTest {
 
         String json = MAPPER.writeValueAsString(trace);
 
-        assertTrue(json.contains("\"schemaVersion\":1"));
+        assertTrue(json.contains("\"schemaVersion\":2"));
         assertTrue(json.contains("\"traceId\":\"trc-fixed\""));
+        assertTrue(json.contains("\"promptAudit\""));
         assertTrue(json.contains("\"contentHash\""));
         assertTrue(json.contains("\"contentBytes\""));
         assertTrue(json.contains("\"contentLines\""));
@@ -67,9 +95,10 @@ class LocalTurnTraceTest {
         assertFalse(json.contains("<h1>Hello</h1>"), "default trace must not store raw file content");
 
         LocalTurnTrace roundTrip = MAPPER.readValue(json, LocalTurnTrace.class);
-        assertEquals(1, roundTrip.schemaVersion());
+        assertEquals(2, roundTrip.schemaVersion());
         assertEquals("trc-fixed", roundTrip.traceId());
         assertEquals("FILE_CREATE", roundTrip.taskContract().type());
+        assertEquals("MUTATING_TOOL_REQUIRED", roundTrip.promptAudit().actionObligation());
         assertEquals("FAILED", roundTrip.verification().status());
         assertEquals(TraceRedactionMode.DEFAULT, roundTrip.redaction().mode());
     }

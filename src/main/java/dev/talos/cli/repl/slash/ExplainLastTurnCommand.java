@@ -232,6 +232,9 @@ public final class ExplainLastTurnCommand implements Command {
         if (trace.toolSurface() != null) {
             sb.append("  Visible tools: ").append(listOrNone(trace.toolSurface().nativeTools())).append('\n');
         }
+        if (trace.promptAudit() != null && trace.promptAudit().hasPromptAuditData()) {
+            appendPromptAudit(sb, trace.promptAudit());
+        }
         latestEvent(trace, "ACTION_OBLIGATION_EVALUATED").ifPresent(event -> {
             sb.append("  Action obligation: ").append(eventValue(event, "obligation"));
             String status = eventValue(event, "status");
@@ -276,6 +279,52 @@ public final class ExplainLastTurnCommand implements Command {
             }
             sb.append('\n');
         }
+    }
+
+    private static void appendPromptAudit(StringBuilder sb, dev.talos.runtime.trace.PromptAuditSnapshot audit) {
+        sb.append("  Prompt Audit\n");
+        sb.append("    taskType: ").append(blankDefault(audit.taskType(), "UNKNOWN"))
+                .append(" mutationAllowed=").append(audit.mutationAllowed())
+                .append(" verificationRequired=").append(audit.verificationRequired())
+                .append('\n');
+        if (!audit.phaseInitial().isBlank() || !audit.phaseFinal().isBlank()) {
+            sb.append("    phase: ").append(blankDefault(audit.phaseInitial(), "UNKNOWN"));
+            if (!audit.phaseFinal().isBlank() && !audit.phaseFinal().equals(audit.phaseInitial())) {
+                sb.append(" -> ").append(audit.phaseFinal());
+            }
+            sb.append('\n');
+        }
+        sb.append("    actionObligation: ").append(blankDefault(audit.actionObligation(), "NOT_DERIVED")).append('\n');
+        sb.append("    evidenceObligation: ").append(blankDefault(audit.evidenceObligation(), "NONE_OR_NOT_DERIVED")).append('\n');
+        sb.append("    outputObligation: ").append(blankDefault(audit.outputObligation(), "NOT_DERIVED")).append('\n');
+        sb.append("    activeTaskContext: ").append(blankDefault(audit.activeTaskContext(), "NONE_OR_NOT_DERIVED")).append('\n');
+        sb.append("    artifactGoal: ").append(blankDefault(audit.artifactGoal(), "NONE_OR_NOT_DERIVED")).append('\n');
+        sb.append("    verifierProfile: ").append(blankDefault(audit.verifierProfile(), "NONE_OR_NOT_DERIVED")).append('\n');
+        sb.append("    history: ").append(blankDefault(audit.historyPolicy(), "NOT_DERIVED"))
+                .append(" messages=").append(audit.historyMessageCount())
+                .append('\n');
+        sb.append("    currentTurnFrame: ")
+                .append(audit.currentTurnFrameInjected() ? "injected " : "not-injected ")
+                .append(blankDefault(audit.currentTurnFramePlacement(), "UNKNOWN"));
+        if (!audit.currentTurnFrameHash().isBlank()) {
+            sb.append(" hash=").append(audit.currentTurnFrameHash());
+        }
+        sb.append('\n');
+        if (!audit.currentTurnFramePreviewRedacted().isBlank()) {
+            sb.append("    framePreview: ").append(audit.currentTurnFramePreviewRedacted()).append('\n');
+        }
+        sb.append("    messages: system=").append(audit.systemMessageCount())
+                .append(" history=").append(audit.historyMessageCount())
+                .append(" user=").append(audit.userMessageCount())
+                .append(" total=").append(audit.totalMessageCount())
+                .append('\n');
+        sb.append("    nativeTools: ").append(listOrNone(audit.nativeTools())).append('\n');
+        sb.append("    promptTools: ").append(listOrNone(audit.promptTools())).append('\n');
+        if (!audit.blockedTools().isEmpty()) {
+            sb.append("    blockedTools: ").append(listOrNone(audit.blockedTools())).append('\n');
+        }
+        sb.append("    promptHash: ").append(blankDefault(audit.promptHash(), "none")).append('\n');
+        sb.append("    redaction: ").append(audit.redactionMode()).append('\n');
     }
 
     private static Optional<TurnTraceEvent> latestEvent(LocalTurnTrace trace, String type) {
