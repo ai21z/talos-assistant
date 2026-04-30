@@ -9,6 +9,9 @@ import dev.talos.runtime.outcome.TaskOutcome;
 import dev.talos.runtime.outcome.TruthWarning;
 import dev.talos.runtime.outcome.TruthWarningType;
 import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.policy.EvidenceObligation;
+import dev.talos.runtime.policy.EvidenceObligationPolicy;
+import dev.talos.runtime.policy.EvidenceObligationVerifier;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
@@ -162,6 +165,18 @@ record ExecutionOutcome(
                 falseMutationClaim || inspectUnderCompleted,
                 deniedProtectedRead
         );
+        EvidenceObligationVerifier.Result evidenceResult = verifyEvidence(
+                safePlan,
+                evidenceOutcomes(loopResult));
+        boolean missingEvidence = evidenceResult.status() == EvidenceObligationVerifier.Status.UNSATISFIED;
+        boolean missingEvidenceDowngrade = missingEvidence
+                && completionStatus != CompletionStatus.FAILED
+                && completionStatus != CompletionStatus.BLOCKED
+                && completionStatus != CompletionStatus.PARTIAL;
+        if (missingEvidenceDowngrade) {
+            current = missingEvidencePrefix(current);
+            completionStatus = CompletionStatus.ADVISORY_ONLY;
+        }
 
         TaskVerificationResult taskVerification = workspace != null && shouldVerifyPostApply(
                 contract, completionStatus, loopResult, extraMutationSuccesses)
@@ -207,7 +222,8 @@ record ExecutionOutcome(
                         unsupportedDocumentCapabilityOverride,
                         webDiagnosticGroundedOverride,
                         selectorGroundedOverride,
-                        verificationStatus),
+                        verificationStatus,
+                        missingEvidence),
                 loopResult == null ? List.of() : loopResult.toolOutcomes()
         );
 
@@ -301,12 +317,23 @@ record ExecutionOutcome(
         CompletionStatus completionStatus = malformedProtocolDebrisReplaced
                 ? CompletionStatus.FAILED
                 : completionStatus(false, false, false, advisoryOnly, blocked);
+        EvidenceObligationVerifier.Result evidenceResult = verifyEvidence(safePlan, List.of());
+        boolean missingEvidence = evidenceResult.status() == EvidenceObligationVerifier.Status.UNSATISFIED;
+        boolean missingEvidenceDowngrade = missingEvidence
+                && completionStatus != CompletionStatus.FAILED
+                && completionStatus != CompletionStatus.BLOCKED;
+        if (missingEvidenceDowngrade) {
+            shaped = missingEvidencePrefix(shaped);
+            completionStatus = CompletionStatus.ADVISORY_ONLY;
+            advisoryOnly = true;
+        }
         TaskVerificationResult verification = TaskVerificationResult.notRun("Post-apply verification was not applicable.");
         List<TruthWarning> warnings = noToolWarnings(
                 noToolMutationReplaced,
                 ungrounded,
                 malformedProtocolDebrisReplaced,
-                localAccessCapabilityCorrected);
+                localAccessCapabilityCorrected,
+                missingEvidence);
         TaskOutcome taskOutcome = new TaskOutcome(
                 contract,
                 toTaskCompletionStatus(completionStatus, VerificationStatus.NOT_RUN, contract, noToolMutationReplaced),
@@ -427,7 +454,8 @@ record ExecutionOutcome(
             boolean unsupportedDocumentCapabilityOverride,
             boolean webDiagnosticGroundedOverride,
             boolean selectorGroundedOverride,
-            VerificationStatus verificationStatus
+            VerificationStatus verificationStatus,
+            boolean missingEvidence
     ) {
         List<TruthWarning> warnings = new ArrayList<>();
         if (deniedMutation) {
@@ -486,6 +514,11 @@ record ExecutionOutcome(
                     TruthWarningType.STATIC_VERIFICATION_UNAVAILABLE,
                     "Static post-apply verification could not complete."));
         }
+        if (missingEvidence) {
+            warnings.add(TruthWarning.of(
+                    TruthWarningType.MISSING_EVIDENCE,
+                    "Required workspace evidence was not gathered in this turn."));
+        }
         return List.copyOf(warnings);
     }
 
@@ -493,7 +526,8 @@ record ExecutionOutcome(
             boolean noToolMutationReplaced,
             boolean ungrounded,
             boolean malformedProtocolDebrisReplaced,
-            boolean localAccessCapabilityCorrected
+            boolean localAccessCapabilityCorrected,
+            boolean missingEvidence
     ) {
         List<TruthWarning> warnings = new ArrayList<>();
         if (noToolMutationReplaced) {
@@ -516,7 +550,57 @@ record ExecutionOutcome(
                     TruthWarningType.NO_TOOL_LOCAL_ACCESS_CAPABILITY_CORRECTED,
                     "A no-tool answer denied local workspace access despite Talos read tools."));
         }
+        if (missingEvidence) {
+            warnings.add(TruthWarning.of(
+                    TruthWarningType.MISSING_EVIDENCE,
+                    "Required workspace evidence was not gathered in this turn."));
+        }
         return List.copyOf(warnings);
+    }
+
+    private static EvidenceObligationVerifier.Result verifyEvidence(
+            CurrentTurnPlan plan,
+            List<ToolCallLoop.ToolOutcome> toolOutcomes
+    ) {
+        if (plan == null) {
+            return EvidenceObligationVerifier.Result.satisfied("No current-turn plan was available.");
+        }
+        EvidenceObligation obligation = EvidenceObligationPolicy.parse(plan.evidenceObligation());
+        TaskContract contract = plan.taskContract();
+        return EvidenceObligationVerifier.verify(
+                obligation,
+                contract == null ? java.util.Set.of() : contract.expectedTargets(),
+                toolOutcomes);
+    }
+
+    private static List<ToolCallLoop.ToolOutcome> evidenceOutcomes(ToolCallLoop.LoopResult loopResult) {
+        if (loopResult == null) return List.of();
+        if (loopResult.toolOutcomes() != null && !loopResult.toolOutcomes().isEmpty()) {
+            return loopResult.toolOutcomes();
+        }
+        if (loopResult.toolNames() == null || loopResult.toolNames().isEmpty()) {
+            return List.of();
+        }
+        List<ToolCallLoop.ToolOutcome> outcomes = new ArrayList<>();
+        List<String> readPaths = loopResult.readPaths() == null ? List.of() : loopResult.readPaths();
+        int readPathIndex = 0;
+        for (String toolName : loopResult.toolNames()) {
+            String pathHint = "";
+            if ("talos.read_file".equals(toolName) && readPathIndex < readPaths.size()) {
+                pathHint = readPaths.get(readPathIndex++);
+            }
+            outcomes.add(new ToolCallLoop.ToolOutcome(
+                    toolName, pathHint, true, false, false, "", ""));
+        }
+        return outcomes;
+    }
+
+    private static String missingEvidencePrefix(String answer) {
+        String current = answer == null ? "" : answer;
+        if (current.startsWith(EvidenceObligationVerifier.MISSING_EVIDENCE_PREFIX)) {
+            return current;
+        }
+        return EvidenceObligationVerifier.MISSING_EVIDENCE_PREFIX + "\n\n" + current;
     }
 
     private static String staticVerificationPassedAnnotation(TaskVerificationResult result) {

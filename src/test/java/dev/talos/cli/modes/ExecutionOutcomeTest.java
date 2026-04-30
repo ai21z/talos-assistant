@@ -984,9 +984,12 @@ class ExecutionOutcomeTest {
         assertEquals(ExecutionOutcome.GroundingStatus.UNGROUNDED, outcome.groundingStatus());
         assertTrue(outcome.advisoryOnly());
         assertFalse(outcome.noToolMutationReplaced());
-        assertTrue(outcome.finalAnswer().startsWith(AssistantTurnExecutor.UNGROUNDED_ANNOTATION));
+        assertTrue(outcome.finalAnswer().startsWith(
+                "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"));
+        assertTrue(outcome.finalAnswer().contains(AssistantTurnExecutor.UNGROUNDED_ANNOTATION));
         assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
         assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.STREAMING_NO_TOOL_UNGROUNDED));
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
     }
 
     @Test
@@ -1004,16 +1007,20 @@ class ExecutionOutcomeTest {
         assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
         assertEquals(ExecutionOutcome.GroundingStatus.UNGROUNDED, outcome.groundingStatus());
         assertTrue(outcome.advisoryOnly());
-        assertTrue(outcome.finalAnswer().startsWith("[Capability correction:"),
+        assertTrue(outcome.finalAnswer().startsWith(
+                        "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"),
+                outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains("[Capability correction:"),
                 outcome.finalAnswer());
         assertFalse(outcome.finalAnswer().contains("don't have direct access"));
         assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
         assertTrue(outcome.taskOutcome().hasWarning(
                 TruthWarningType.NO_TOOL_LOCAL_ACCESS_CAPABILITY_CORRECTED));
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
     }
 
     @Test
-    void streamingNoToolUnsupportedBinaryDocumentLimitationIsNotCorrected() {
+    void streamingNoToolUnsupportedBinaryDocumentLimitationIsAdvisoryWithoutCapabilityCorrection() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Summarize the documents in this workspace."));
@@ -1022,8 +1029,11 @@ class ExecutionOutcomeTest {
 
         ExecutionOutcome outcome = ExecutionOutcome.fromNoTool(limitation, messages, null, true);
 
-        assertEquals(limitation, outcome.finalAnswer());
-        assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+        assertTrue(outcome.finalAnswer().startsWith(
+                "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"));
+        assertTrue(outcome.finalAnswer().contains(limitation));
+        assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
     }
 
     @Test
@@ -1085,5 +1095,120 @@ class ExecutionOutcomeTest {
         assertEquals(TaskCompletionStatus.FAILED, outcome.taskOutcome().completionStatus());
         assertTrue(outcome.taskOutcome().hasWarning(
                 TruthWarningType.MALFORMED_TOOL_PROTOCOL_DEBRIS_REPLACED));
+    }
+
+    @Test
+    void noToolExplicitReadTargetIsAdvisoryWithMissingEvidenceWarning() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Read README.md and summarize it."));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromNoTool(
+                "README.md describes the project.", messages, null, true);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
+        assertTrue(outcome.finalAnswer().startsWith(
+                "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"));
+        assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+    }
+
+    @Test
+    void toolLoopReadTargetNotFoundCountsAsEvidenceAndReadOnlyAnswered() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Read README.md and summarize it."));
+
+        var loopResult = new ToolCallLoop.LoopResult(
+                "README.md was not found.", 1, 1,
+                List.of("talos.read_file"), List.of(),
+                1, 0, false, 0, List.of(),
+                0, 0, 0, 0,
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.read_file", "README.md", false, false, false,
+                        "", "README.md was not found.", null, ToolError.NOT_FOUND)));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                "README.md was not found.", messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+        assertEquals(TaskCompletionStatus.READ_ONLY_ANSWERED, outcome.taskOutcome().completionStatus());
+        assertFalse(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+        assertFalse(outcome.finalAnswer().startsWith("[Evidence incomplete:"));
+    }
+
+    @Test
+    void legacyLoopReadPathsCountAsReadTargetEvidence() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Read README.md and summarize it."));
+
+        var loopResult = new ToolCallLoop.LoopResult(
+                "README.md describes the project.", 1, 1,
+                List.of("talos.read_file"), List.of(),
+                0, 0, false, 0, List.of("README.md"),
+                0, 0, 0, 0);
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                "README.md describes the project.", messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+        assertEquals(TaskCompletionStatus.READ_ONLY_ANSWERED, outcome.taskOutcome().completionStatus());
+        assertFalse(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+        assertFalse(outcome.finalAnswer().startsWith("[Evidence incomplete:"));
+    }
+
+    @Test
+    void deniedProtectedReadDominatesMissingEvidenceAndSanitizesSecretProse() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Read .env and tell me what it says."));
+
+        var loopResult = new ToolCallLoop.LoopResult(
+                "The file says SECRET=original.", 1, 1,
+                List.of("talos.read_file"), List.of(),
+                1, 0, false, 0, List.of(),
+                0, 0, 0, 0,
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.read_file", ".env", false, false, true,
+                        "", "User did not approve the talos.read_file call.", null, ToolError.DENIED)));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                "The file says SECRET=original.", messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.BLOCKED, outcome.completionStatus());
+        assertEquals(TaskCompletionStatus.BLOCKED_BY_APPROVAL, outcome.taskOutcome().completionStatus());
+        assertFalse(outcome.finalAnswer().contains("SECRET=original"));
+        assertFalse(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.DENIED_PROTECTED_READ));
+    }
+
+    @Test
+    void listOnlyWithReadFileIsAdvisoryWithMissingEvidenceWarning() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("List the files in this directory."));
+
+        var loopResult = new ToolCallLoop.LoopResult(
+                "README.md contains project notes.", 1, 2,
+                List.of("talos.list_dir", "talos.read_file"), List.of(),
+                0, 0, false, 0, List.of("README.md"),
+                0, 0, 0, 0,
+                List.of(
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.list_dir", ".", true, false, false,
+                                "listed files", ""),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", "README.md", true, false, false,
+                                "read README.md", "")));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                "README.md contains project notes.", messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
+        assertTrue(outcome.finalAnswer().startsWith(
+                "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"));
+        assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
     }
 }

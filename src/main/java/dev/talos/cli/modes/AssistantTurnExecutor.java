@@ -989,6 +989,9 @@ public final class AssistantTurnExecutor {
     ) {
         TaskContract contract = safePlanFromMessages(plan, messages, null).taskContract();
         if (contract.type() != TaskType.DIRECTORY_LISTING || loopResult == null) return "";
+        if (loopResult.toolNames().stream().anyMatch(AssistantTurnExecutor::isContentInspectionTool)) {
+            return "";
+        }
         String body = latestToolResultBody(loopResult.messages(), "talos.list_dir");
         if (body.isBlank() || body.contains("[error]")) return "";
         List<String> entries = body.lines()
@@ -1000,6 +1003,12 @@ public final class AssistantTurnExecutor {
                 .toList();
         if (entries.isEmpty()) return "";
         return "Directory entries:\n- " + String.join("\n- ", entries);
+    }
+
+    private static boolean isContentInspectionTool(String toolName) {
+        return "talos.read_file".equals(toolName)
+                || "talos.grep".equals(toolName)
+                || "talos.retrieve".equals(toolName);
     }
 
     private static String latestToolResultBody(List<ChatMessage> messages, String toolName) {
@@ -2195,6 +2204,11 @@ public final class AssistantTurnExecutor {
                 mentionsUnsupported = true;
                 break;
             }
+            String stem = filenameStemOf(path);
+            if (!stem.isBlank() && lower.contains(stem)) {
+                mentionsUnsupported = true;
+                break;
+            }
             String extension = extensionOf(path);
             if (!extension.isBlank() && lower.contains("." + extension)) {
                 mentionsUnsupported = true;
@@ -2209,7 +2223,20 @@ public final class AssistantTurnExecutor {
                 || lower.contains("are empty")
                 || lower.contains("is empty")
                 || lower.contains("no content")
-                || lower.contains("nothing to extract");
+                || lower.contains("nothing to extract")
+                || lower.contains("says")
+                || lower.contains("states")
+                || lower.contains("contains")
+                || lower.contains("describes")
+                || lower.contains("summar");
+    }
+
+    private static String filenameStemOf(String path) {
+        if (path == null || path.isBlank()) return "";
+        int slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+        String name = slash >= 0 ? path.substring(slash + 1) : path;
+        int dot = name.lastIndexOf('.');
+        return (dot > 0 ? name.substring(0, dot) : name).toLowerCase(Locale.ROOT);
     }
 
     private static String extensionOf(String path) {

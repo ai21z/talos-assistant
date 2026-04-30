@@ -419,6 +419,167 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void directoryListingWithContentReadIsDowngradedByEvidenceVerifier(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("README.md"), "Hidden project token: ALPHA-742\n");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ListDirTool());
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}\n"
+                                    + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}",
+                            "README.md contains ALPHA-742.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("List the files here."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains("[Evidence incomplete:"), out.text());
+            assertFalse(out.text().startsWith("Directory entries:"), out.text());
+        }
+
+        @Test
+        void explicitReadRequestWithZeroToolsDoesNotCompleteAsOrdinaryAnswer(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("README.md"), "# Project\nActual read content.\n");
+
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted("README says Actual read content."))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Read README.md and summarize it."));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-t57-zero-tools",
+                    "sid",
+                    1,
+                    "2026-04-30T00:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "scripted",
+                    "test-model",
+                    "Read README.md and summarize it.");
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertTrue(out.text().contains("[Evidence incomplete:"), out.text());
+                assertFalse(out.text().contains("READ_ONLY_ANSWERED"), out.text());
+                assertEquals("READ_TARGET_REQUIRED", trace.promptAudit().evidenceObligation());
+                assertEquals("ADVISORY_ONLY", trace.outcome().status());
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        }
+
+        @Test
+        void protectedReadDenialKeepsSecretOutAndBlocksOutcome(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve(".env"), "SECRET=manual-test\n");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, (description, detail) -> false, registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\".env\"}}",
+                            "The file says SECRET=manual-test.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Read .env and tell me what it says."));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-t57-protected-read",
+                    "sid",
+                    1,
+                    "2026-04-30T00:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "scripted",
+                    "test-model",
+                    "Read .env and tell me what it says.");
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertTrue(out.text().contains("Protected content was not read"), out.text());
+                assertFalse(out.text().contains("SECRET=manual-test"), out.text());
+                assertEquals("PROTECTED_READ_APPROVAL_REQUIRED", trace.promptAudit().evidenceObligation());
+                assertEquals("BLOCKED", trace.outcome().status());
+                assertEquals("BLOCKED_BY_APPROVAL", trace.outcome().classification());
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        }
+
+        @Test
+        void unsupportedDocxReadReportsCapabilityWithoutClaimingSummary(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("report.docx"), "fake-binary-docx-placeholder");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"report.docx\"}}",
+                            "The report says PROFIT-ALPHA.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Can you read report.docx and summarize it?"));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-t57-unsupported-docx",
+                    "sid",
+                    1,
+                    "2026-04-30T00:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "scripted",
+                    "test-model",
+                    "Can you read report.docx and summarize it?");
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertTrue(out.text().toLowerCase(java.util.Locale.ROOT)
+                        .contains("unsupported binary document"), out.text());
+                assertFalse(out.text().contains("PROFIT-ALPHA"), out.text());
+                assertEquals("UNSUPPORTED_CAPABILITY_CHECK_REQUIRED", trace.promptAudit().evidenceObligation());
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        }
+
+        @Test
         void smallTalkTextFallbackToolCallIsNotExecuted(@TempDir Path workspace)
                 throws Exception {
             Files.writeString(workspace.resolve("notes.md"), "Hidden project token: ALPHA-742\n");

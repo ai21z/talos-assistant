@@ -481,6 +481,19 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void unsupportedDocumentTargetsAreExtractedWithoutMutationIntent() {
+        TaskContract docx = TaskContractResolver.fromUserRequest("Read report.docx and summarize it.");
+        TaskContract pdf = TaskContractResolver.fromUserRequest("Open report.pdf and tell me the title.");
+
+        assertEquals(Set.of("report.docx"), docx.expectedTargets());
+        assertFalse(docx.mutationRequested());
+        assertFalse(docx.mutationAllowed());
+        assertEquals(Set.of("report.pdf"), pdf.expectedTargets());
+        assertFalse(pdf.mutationRequested());
+        assertFalse(pdf.mutationAllowed());
+    }
+
+    @Test
     void syntheticToolResultTailIsSkippedWhenResolvingFromMessages() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.user("Edit index.html."));

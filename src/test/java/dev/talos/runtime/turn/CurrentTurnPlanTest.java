@@ -41,7 +41,7 @@ class CurrentTurnPlanTest {
         assertEquals(List.of("talos.write_file", "talos.read_file"), plan.nativeTools());
         assertEquals(List.of("talos.write_file", "talos.read_file"), plan.promptTools());
         assertEquals(List.of(), plan.blockedTools());
-        assertEquals(CurrentTurnPlan.NONE_OR_NOT_DERIVED, plan.evidenceObligation());
+        assertEquals("NONE", plan.evidenceObligation());
         assertEquals(CurrentTurnPlan.NOT_DERIVED, plan.outputObligation());
 
         assertEquals(1, plan.taskExpectations().size());
@@ -116,6 +116,20 @@ class CurrentTurnPlanTest {
                         "content",
                         LiteralContentExpectation.MatchMode.EXACT,
                         "test")));
+    }
+
+    @Test
+    void readTargetPlanCapturesReadEvidenceObligation() {
+        TaskContract contract = TaskContractResolver.fromUserRequest("Read README.md and summarize it.");
+
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                contract,
+                ExecutionPhase.INSPECT,
+                List.of("talos.read_file"),
+                List.of("talos.read_file"),
+                List.of());
+
+        assertEquals("READ_TARGET_REQUIRED", plan.evidenceObligation());
     }
 
     @Test
