@@ -2,6 +2,7 @@ package dev.talos.cli.repl;
 
 import dev.talos.core.context.ConversationManager;
 import dev.talos.core.context.TokenBudget;
+import dev.talos.core.Config;
 import dev.talos.runtime.JsonSessionStore;
 import dev.talos.runtime.SessionData;
 import dev.talos.runtime.TurnRecord;
@@ -10,9 +11,12 @@ import dev.talos.runtime.context.ArtifactGoal;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.PrintStream;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -33,6 +37,45 @@ class TalosBootstrapReconcileTest {
 
     private static ConversationManager cm(SessionMemory mem) {
         return new ConversationManager(mem, new TokenBudget());
+    }
+
+    private interface CheckedRunnable {
+        void run() throws Exception;
+    }
+
+    private static void withUserHome(Path home, CheckedRunnable body) throws Exception {
+        String previous = System.getProperty("user.home");
+        System.setProperty("user.home", home.toString());
+        try {
+            body.run();
+        } finally {
+            if (previous == null) {
+                System.clearProperty("user.home");
+            } else {
+                System.setProperty("user.home", previous);
+            }
+        }
+    }
+
+    private static Config configWithSessionPolicy(boolean persistence, boolean autoLoad) {
+        Config cfg = new Config();
+        Map<String, Object> session = new LinkedHashMap<>();
+        session.put("persistence", persistence);
+        session.put("auto_load", autoLoad);
+        cfg.data.put("session", session);
+        return cfg;
+    }
+
+    private static SessionState sessionState() {
+        return new SessionState() {
+            private int k = 6;
+            private boolean debug;
+
+            public int getK() { return k; }
+            public void setK(int k) { this.k = k; }
+            public boolean isDebug() { return debug; }
+            public void setDebug(boolean on) { debug = on; }
+        };
     }
 
     @Test
@@ -77,6 +120,32 @@ class TalosBootstrapReconcileTest {
         assertEquals(ActiveTaskContext.State.ACTIVE, mem.activeTaskContext().state());
         assertEquals(List.of("README.md"), mem.activeTaskContext().targets());
         assertEquals(ArtifactGoal.ArtifactKind.README, mem.artifactGoal().artifactKind());
+    }
+
+    @Test
+    void closeSavePersistsActiveTaskContextAndArtifactGoal(@TempDir Path home) throws Exception {
+        Path workspace = home.resolve("workspace");
+        java.nio.file.Files.createDirectories(workspace);
+
+        withUserHome(home, () -> {
+            ReplRouter router = TalosBootstrap.create(
+                    sessionState(),
+                    configWithSessionPolicy(true, false),
+                    new PrintStream(java.io.OutputStream.nullOutputStream()),
+                    workspace);
+            ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+                    3, "trace-save", List.of("README.md"), "Improve README.");
+            router.context().memory().setActiveTaskContext(context);
+            router.context().memory().setArtifactGoal(ArtifactGoal.fromActiveContext(context));
+
+            router.getRuntimeSession().close();
+
+            JsonSessionStore store = new JsonSessionStore(home.resolve(".talos").resolve("sessions"));
+            SessionData saved = store.load(JsonSessionStore.sessionIdFor(workspace)).orElseThrow();
+            assertEquals(ActiveTaskContext.State.ACTIVE, saved.activeTaskContext().state());
+            assertEquals(List.of("README.md"), saved.activeTaskContext().targets());
+            assertEquals(ArtifactGoal.ArtifactKind.README, saved.artifactGoal().artifactKind());
+        });
     }
 
     @Test
