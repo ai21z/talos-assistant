@@ -149,6 +149,17 @@ Commands:
 ./gradlew.bat check --no-daemon
 ```
 
+Hardening pass, 2026-04-30:
+
+- `OutcomeDominancePolicy` now maps non-mutating verification-required turns
+  with `VerificationStatus.NOT_RUN` to `ADVISORY_ONLY`, not
+  `READ_ONLY_ANSWERED`.
+- `ExecutionOutcome` annotates those turns with an explicit `Task not verified`
+  marker, including the missing-evidence path.
+- Verified with `./gradlew.bat check --no-daemon` and full non-manual
+  TalosBench against `build/install/talos/bin/talos.bat`; summary:
+  `local/manual-testing/talosbench/20260430-230044/summary.md`.
+
 ## Known Risks
 
 - If the dominance policy is too abstract, it may obscure why a turn failed.

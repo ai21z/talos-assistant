@@ -152,6 +152,17 @@ Add broader gate before closeout:
 ./gradlew.bat check --no-daemon
 ```
 
+Hardening pass, 2026-04-30:
+
+- Added runtime coverage that `VERIFY_ONLY` read-only status turns cannot render
+  complete when verification remains `NOT_RUN`.
+- Added the missing-evidence variant so a `VERIFY_ONLY` answer still says
+  `not verified` even when the evidence obligation is unsatisfied.
+- Re-ran TalosBench with the patched CLI:
+  `local/manual-testing/talosbench/20260430-230044/summary.md`.
+  Non-manual T57/T56/T58 smoke cases passed; approval-sensitive cases remained
+  `MANUAL_REQUIRED`.
+
 ## Known Risks
 
 - Evidence obligations can over-constrain broad Q&A if the policy treats every

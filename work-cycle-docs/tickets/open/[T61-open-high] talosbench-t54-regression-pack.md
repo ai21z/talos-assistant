@@ -165,6 +165,20 @@ Broader candidate evidence:
 ./gradlew.bat check --no-daemon
 ```
 
+Hardening pass, 2026-04-30:
+
+- Tightened `run-talosbench.ps1` trace parsing so core `Trace Detail` fields
+  such as `Phase`, `Contract`, `Outcome`, and `Verification` are read
+  case-sensitively and are not confused with Prompt Audit lowercase fields.
+- Relaxed the simple listing case from an exact tool-call count to a tool-call
+  presence assertion while keeping content-read tools forbidden.
+- Aligned the unsupported DOCX case with the current `WORKSPACE_EXPLAIN`
+  classifier and strengthened `failed-static-verification-truth` around
+  `ADVISORY_ONLY` + `NOT_RUN`.
+- `pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly` passes.
+- Full non-manual TalosBench passed against the patched distribution:
+  `local/manual-testing/talosbench/20260430-230044/summary.md`.
+
 ## Known Risks
 
 - Live local-model tests can be noisy. Assertions should focus on runtime trace

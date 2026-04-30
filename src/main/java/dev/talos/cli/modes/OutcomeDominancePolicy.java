@@ -78,14 +78,14 @@ final class OutcomeDominancePolicy {
         if (facts.verificationStatus() == ExecutionOutcome.VerificationStatus.FAILED) {
             return failed();
         }
+        if (verificationRequiredButNotRun(facts)) {
+            return advisory();
+        }
         if (facts.missingEvidence()
                 || facts.falseMutationClaim()
                 || facts.inspectUnderCompleted()
                 || facts.ungroundedAdvisory()) {
-            return new Decision(
-                    ExecutionOutcome.CompletionStatus.ADVISORY_ONLY,
-                    TaskCompletionStatus.ADVISORY_ONLY,
-                    false);
+            return advisory();
         }
         if (facts.verificationStatus() == ExecutionOutcome.VerificationStatus.PASSED) {
             return new Decision(
@@ -110,5 +110,19 @@ final class OutcomeDominancePolicy {
                 ExecutionOutcome.CompletionStatus.FAILED,
                 TaskCompletionStatus.FAILED,
                 false);
+    }
+
+    private static Decision advisory() {
+        return new Decision(
+                ExecutionOutcome.CompletionStatus.ADVISORY_ONLY,
+                TaskCompletionStatus.ADVISORY_ONLY,
+                false);
+    }
+
+    private static boolean verificationRequiredButNotRun(Facts facts) {
+        return facts.contract() != null
+                && facts.contract().verificationRequired()
+                && !facts.contract().mutationRequested()
+                && facts.verificationStatus() == ExecutionOutcome.VerificationStatus.NOT_RUN;
     }
 }

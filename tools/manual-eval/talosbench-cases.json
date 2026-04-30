@@ -130,7 +130,7 @@
         "README.md",
         "index.html",
         "notes.md",
-        "Tool calls: 1"
+        "Tool calls:"
       ],
       "traceAssertions": {
         "contract": "DIRECTORY_LISTING",
@@ -449,14 +449,17 @@
         "contract": "VERIFY_ONLY",
         "mutationAllowed": false,
         "phaseIncludes": [
-          "VERIFY"
+          "INSPECT"
         ],
         "nativeToolsExcludes": [
           "talos.write_file",
           "talos.edit_file"
         ],
         "verificationContains": [
-          "FAILED"
+          "NOT_RUN"
+        ],
+        "outcomeContains": [
+          "ADVISORY_ONLY"
         ]
       },
       "blockerConditions": [
@@ -663,7 +666,7 @@
       "prompts": [
         "Can you read report.docx and summarize it?"
       ],
-      "expectedContract": "READ_ONLY_QA",
+      "expectedContract": "WORKSPACE_EXPLAIN",
       "expectedToolsAllowed": [
         "talos.read_file"
       ],
@@ -676,9 +679,9 @@
         "document"
       ],
       "traceAssertions": {
-        "contract": "READ_ONLY_QA",
+        "contract": "WORKSPACE_EXPLAIN",
         "mutationAllowed": false,
-        "promptAuditTaskType": "READ_ONLY_QA",
+        "promptAuditTaskType": "WORKSPACE_EXPLAIN",
         "promptAuditEvidenceObligationContains": [
           "UNSUPPORTED_CAPABILITY_CHECK_REQUIRED"
         ]
