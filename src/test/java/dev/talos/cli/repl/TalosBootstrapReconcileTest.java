@@ -123,6 +123,45 @@ class TalosBootstrapReconcileTest {
     }
 
     @Test
+    void inspectSavedSessionReportsContextOnlySnapshotAvailable(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "ws-context-only";
+        Instant created = Instant.parse("2026-01-15T10:30:00Z");
+        ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+                3, "trace-save", List.of("README.md"), "Improve README.");
+        ArtifactGoal goal = ArtifactGoal.fromActiveContext(context);
+        store.save(new SessionData(sid, "/ws", "", 0, created, List.of(), "ollama/qwen2.5-coder:14b",
+                context, goal));
+
+        var summary = TalosBootstrap.inspectSavedSession(store, sid);
+
+        assertTrue(summary.hasReplay(), "context-only snapshot should count as available");
+        assertEquals(0, summary.pairsReplayed());
+        assertEquals(created, summary.createdAt());
+        assertEquals("ollama/qwen2.5-coder:14b", summary.model());
+    }
+
+    @Test
+    void restoreSavedSessionRestoresContextOnlySnapshot(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "ws-context-only-restore";
+        ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+                3, "trace-save", List.of("README.md"), "Improve README.");
+        ArtifactGoal goal = ArtifactGoal.fromActiveContext(context);
+        store.save(new SessionData(sid, "/ws", "", 0, Instant.now(), List.of(), "",
+                context, goal));
+
+        SessionMemory mem = new SessionMemory();
+        var summary = TalosBootstrap.restoreSavedSession(store, sid, mem, cm(mem));
+
+        assertTrue(summary.hasReplay(), "context-only restore should count as available");
+        assertEquals(0, summary.pairsReplayed());
+        assertEquals(ActiveTaskContext.State.ACTIVE, mem.activeTaskContext().state());
+        assertEquals(List.of("README.md"), mem.activeTaskContext().targets());
+        assertEquals(ArtifactGoal.ArtifactKind.README, mem.artifactGoal().artifactKind());
+    }
+
+    @Test
     void closeSavePersistsActiveTaskContextAndArtifactGoal(@TempDir Path home) throws Exception {
         Path workspace = home.resolve("workspace");
         java.nio.file.Files.createDirectories(workspace);

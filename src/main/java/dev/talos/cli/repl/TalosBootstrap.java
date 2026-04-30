@@ -25,6 +25,8 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallStreamFilter;
 import dev.talos.runtime.TurnProcessor;
 import dev.talos.runtime.checkpoint.CheckpointService;
+import dev.talos.runtime.context.ActiveTaskContext;
+import dev.talos.runtime.context.ArtifactGoal;
 import dev.talos.tools.FileUndoStack;
 import dev.talos.tools.ToolProgressSink;
 import dev.talos.tools.ToolRegistry;
@@ -61,8 +63,12 @@ import java.util.stream.Collectors;
  */
 public final class TalosBootstrap {
 
-    public record RestoreSummary(int pairsReplayed, java.time.Instant createdAt, String model) {
-        public boolean hasReplay() { return pairsReplayed > 0; }
+    public record RestoreSummary(int pairsReplayed, java.time.Instant createdAt, String model, boolean available) {
+        public RestoreSummary(int pairsReplayed, java.time.Instant createdAt, String model) {
+            this(pairsReplayed, createdAt, model, pairsReplayed > 0);
+        }
+
+        public boolean hasReplay() { return available; }
     }
 
     private TalosBootstrap() {} // static factory only
@@ -417,8 +423,8 @@ public final class TalosBootstrap {
         if (loaded.isPresent()) {
             SessionData data = loaded.get();
             int pairs = countReplayableSnapshotPairs(data);
-            if (pairs > 0) {
-                return new RestoreSummary(pairs, data.createdAt(), data.model());
+            if (pairs > 0 || hasSavedActiveContext(data)) {
+                return new RestoreSummary(pairs, data.createdAt(), data.model(), true);
             }
         }
         int turnLogPairs = 0;
@@ -453,7 +459,7 @@ public final class TalosBootstrap {
         }
         memory.setActiveTaskContext(data.activeTaskContext());
         memory.setArtifactGoal(data.artifactGoal());
-        return new RestoreSummary(pairs, data.createdAt(), data.model());
+        return new RestoreSummary(pairs, data.createdAt(), data.model(), pairs > 0 || hasSavedActiveContext(data));
     }
 
     /**
@@ -505,6 +511,14 @@ public final class TalosBootstrap {
             }
         }
         return pairs;
+    }
+
+    private static boolean hasSavedActiveContext(SessionData data) {
+        if (data == null) return false;
+        ActiveTaskContext context = data.activeTaskContext();
+        ArtifactGoal goal = data.artifactGoal();
+        return (context != null && context.state() != ActiveTaskContext.State.NONE)
+                || (goal != null && goal.source() != ArtifactGoal.Source.NONE);
     }
 
     private static boolean isReplayableSnapshotPair(SessionData.Turn user, SessionData.Turn assistant) {
