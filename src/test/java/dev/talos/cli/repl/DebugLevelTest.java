@@ -20,6 +20,7 @@ class DebugLevelTest {
         assertEquals(DebugLevel.RAG, DebugLevel.parse("rag").orElseThrow());
         assertEquals(DebugLevel.TOOLS, DebugLevel.parse("tools").orElseThrow());
         assertEquals(DebugLevel.TRACE, DebugLevel.parse("trace").orElseThrow());
+        assertEquals(DebugLevel.PROMPT, DebugLevel.parse("prompt").orElseThrow());
     }
 
     @Test

@@ -211,6 +211,18 @@ public final class LocalTurnTraceCapture {
                 "reason", safe(reason))));
     }
 
+    public static void recordPromptAudit(PromptAuditSnapshot snapshot) {
+        Bag bag = HOLDER.get();
+        if (bag == null || snapshot == null || !snapshot.hasPromptAuditData()) return;
+        bag.builder.promptAudit(snapshot);
+        bag.builder.event(TurnTraceEvent.simple("PROMPT_AUDIT_RECORDED", now(), Map.of(
+                "taskType", snapshot.taskType(),
+                "actionObligation", snapshot.actionObligation(),
+                "currentTurnFrameInjected", snapshot.currentTurnFrameInjected(),
+                "currentTurnFramePlacement", snapshot.currentTurnFramePlacement(),
+                "historyPolicy", snapshot.historyPolicy())));
+    }
+
     public static void recordRepair(String status, String summary) {
         Bag bag = HOLDER.get();
         if (bag == null) return;

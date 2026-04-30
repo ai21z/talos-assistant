@@ -8,7 +8,7 @@ import java.util.List;
 /**
  * First-class local trace artifact for one Talos turn.
  *
- * <p>Version 1 is intentionally Java-record/JSON friendly and conservative:
+ * <p>Version 2 is intentionally Java-record/JSON friendly and conservative:
  * raw prompts, assistant answers, file contents, and write/edit payloads are
  * summarized by hashes and counts in the default redaction mode.
  */
@@ -24,6 +24,7 @@ public record LocalTurnTrace(
         TaskContractSummary taskContract,
         List<PhaseTransition> phaseTransitions,
         ToolSurface toolSurface,
+        PromptAuditSnapshot promptAudit,
         List<TurnTraceEvent> events,
         VerificationSummary verification,
         RepairSummary repair,
@@ -33,7 +34,7 @@ public record LocalTurnTrace(
         RedactionSummary redaction
 ) {
     public LocalTurnTrace {
-        schemaVersion = schemaVersion <= 0 ? 1 : schemaVersion;
+        schemaVersion = schemaVersion <= 0 ? 2 : schemaVersion;
         traceId = safe(traceId);
         sessionId = safe(sessionId);
         timestamp = safe(timestamp);
@@ -43,6 +44,7 @@ public record LocalTurnTrace(
         taskContract = taskContract == null ? TaskContractSummary.empty() : taskContract;
         phaseTransitions = phaseTransitions == null ? List.of() : List.copyOf(phaseTransitions);
         toolSurface = toolSurface == null ? ToolSurface.empty() : toolSurface;
+        promptAudit = promptAudit == null ? PromptAuditSnapshot.empty() : promptAudit;
         events = events == null ? List.of() : List.copyOf(events);
         verification = verification == null ? VerificationSummary.empty() : verification;
         repair = repair == null ? RepairSummary.empty() : repair;
@@ -236,6 +238,7 @@ public record LocalTurnTrace(
         private TaskContractSummary taskContract = TaskContractSummary.empty();
         private final List<PhaseTransition> phaseTransitions = new ArrayList<>();
         private ToolSurface toolSurface = ToolSurface.empty();
+        private PromptAuditSnapshot promptAudit = PromptAuditSnapshot.empty();
         private final List<TurnTraceEvent> events = new ArrayList<>();
         private VerificationSummary verification = VerificationSummary.empty();
         private RepairSummary repair = RepairSummary.empty();
@@ -298,6 +301,11 @@ public record LocalTurnTrace(
             return this;
         }
 
+        public Builder promptAudit(PromptAuditSnapshot snapshot) {
+            this.promptAudit = snapshot == null ? PromptAuditSnapshot.empty() : snapshot;
+            return this;
+        }
+
         public Builder event(TurnTraceEvent event) {
             if (event != null) this.events.add(event);
             return this;
@@ -342,7 +350,7 @@ public record LocalTurnTrace(
 
         public LocalTurnTrace build() {
             return new LocalTurnTrace(
-                    1,
+                    2,
                     traceId,
                     sessionId,
                     turnNumber,
@@ -353,6 +361,7 @@ public record LocalTurnTrace(
                     taskContract,
                     phaseTransitions,
                     toolSurface,
+                    promptAudit,
                     events,
                     verification,
                     repair,

@@ -36,6 +36,10 @@
         "nativeToolsContains": [
           "none"
         ],
+        "promptAuditTaskType": "SMALL_TALK",
+        "promptAuditActionObligationContains": [
+          "DIRECT_ANSWER_ONLY"
+        ],
         "transcriptExcludes": [
           "ALPHA-742"
         ]
@@ -81,6 +85,10 @@
         ],
         "nativeToolsContains": [
           "none"
+        ],
+        "promptAuditTaskType": "SMALL_TALK",
+        "promptAuditActionObligationContains": [
+          "DIRECT_ANSWER_ONLY"
         ],
         "transcriptExcludes": [
           "ALPHA-742",
@@ -140,6 +148,10 @@
           "talos.write_file",
           "talos.edit_file"
         ],
+        "promptAuditTaskType": "DIRECTORY_LISTING",
+        "promptAuditActionObligationContains": [
+          "LIST_DIR_ONLY"
+        ],
         "transcriptExcludes": [
           "ALPHA-742",
           "SECRET=manual-test"
@@ -193,6 +205,13 @@
           "talos.write_file",
           "talos.edit_file"
         ],
+        "promptAuditTaskType": "FILE_CREATE",
+        "promptAuditActionObligationContains": [
+          "MUTATING_TOOL_REQUIRED"
+        ],
+        "promptAuditCurrentTurnFrameContains": [
+          "injected"
+        ],
         "transcriptExcludes": [
           "I am unable to create or modify files",
           "underlying file system"
@@ -242,6 +261,10 @@
         ],
         "outcomeContains": [
           "BLOCKED_BY_APPROVAL"
+        ],
+        "promptAuditTaskType": "FILE_EDIT",
+        "promptAuditActionObligationContains": [
+          "MUTATING_TOOL_REQUIRED"
         ],
         "transcriptContains": [
           "SECRET=[redacted]"

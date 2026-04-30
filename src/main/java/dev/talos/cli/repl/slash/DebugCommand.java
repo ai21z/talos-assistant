@@ -11,7 +11,7 @@ public final class DebugCommand implements Command {
     public DebugCommand(CliRuntime rt) { this.rt = rt; }
 
     @Override public CommandSpec spec() {
-        return new CommandSpec("debug", List.of(), "/debug [off|brief|rag|tools|trace]",
+        return new CommandSpec("debug", List.of(), "/debug [off|brief|rag|tools|prompt|trace]",
                 "Set debug output level.", CommandGroup.DEBUG);
     }
 
@@ -24,6 +24,6 @@ public final class DebugCommand implements Command {
                     rt.setDebugLevel(level);
                     return new Result.Info("debug = " + level.label());
                 })
-                .orElseGet(() -> new Result.Error("Usage: /debug off|brief|rag|tools|trace", 201));
+                .orElseGet(() -> new Result.Error("Usage: /debug off|brief|rag|tools|prompt|trace", 201));
     }
 }

@@ -1,6 +1,7 @@
 package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
+import dev.talos.cli.repl.DebugLevel;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.MutationIntent;
 import dev.talos.runtime.ToolCallLoop;
@@ -22,6 +23,7 @@ import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.runtime.trace.PromptAuditSnapshot;
 import dev.talos.runtime.verification.StaticTaskVerifier;
 import dev.talos.runtime.verification.WebDiagnosticIntent;
 import dev.talos.spi.EngineException;
@@ -149,6 +151,8 @@ public final class AssistantTurnExecutor {
                 ctx.executionPhaseState() == null ? ExecutionPhase.APPLY : ctx.executionPhaseState().phase(),
                 NativeToolSpecPolicy.names(ctx.nativeToolSpecs()));
         injectStaticVerificationRepairInstruction(messages, taskContract);
+        PromptAuditSnapshot promptAudit = recordPromptAudit(taskContract, ctx, messages);
+        emitPromptAuditIfEnabled(promptAudit, ctx);
         Context turnContext = ctx;
         String directAnswer = deterministicDirectAnswerIfNeeded(messages, taskContract);
         if (directAnswer != null) {
@@ -595,6 +599,37 @@ public final class AssistantTurnExecutor {
                 obligation.name(),
                 "SELECTED",
                 "derived from task contract and execution phase");
+    }
+
+    private static PromptAuditSnapshot recordPromptAudit(
+            TaskContract contract,
+            Context ctx,
+            List<ChatMessage> messages
+    ) {
+        ExecutionPhase phase = ctx == null || ctx.executionPhaseState() == null
+                ? (contract != null && contract.mutationAllowed() ? ExecutionPhase.APPLY : ExecutionPhase.INSPECT)
+                : ctx.executionPhaseState().phase();
+        List<String> nativeTools = ctx == null
+                ? defaultVisibleToolNames(contract, phase)
+                : NativeToolSpecPolicy.names(ctx.nativeToolSpecs());
+        ActionObligation obligation = ActionObligationPolicy.derive(contract, phase);
+        PromptAuditSnapshot snapshot = PromptAuditSnapshot.fromMessages(
+                contract,
+                phase,
+                phase,
+                obligation,
+                messages,
+                nativeTools,
+                nativeTools,
+                List.of());
+        LocalTurnTraceCapture.recordPromptAudit(snapshot);
+        return snapshot;
+    }
+
+    private static void emitPromptAuditIfEnabled(PromptAuditSnapshot snapshot, Context ctx) {
+        if (snapshot == null || ctx == null || ctx.streamSink() == null || ctx.session() == null) return;
+        if (ctx.session().getDebugLevel() != DebugLevel.PROMPT) return;
+        ctx.streamSink().accept("\n" + snapshot.renderCompact() + "\n");
     }
 
     private static LlmClient.StreamResult chatStreamFull(Context ctx, List<ChatMessage> messages) {

@@ -1,9 +1,13 @@
 package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
+import dev.talos.cli.repl.DebugLevel;
+import dev.talos.cli.repl.SessionState;
 import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.TurnAuditCapture;
+import dev.talos.runtime.trace.LocalTurnTrace;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import org.junit.jupiter.api.DisplayName;
@@ -36,6 +40,17 @@ class AssistantTurnExecutorTest {
                 .build();
     }
 
+    private static SessionState sessionWithDebugLevel(DebugLevel level) {
+        return new SessionState() {
+            @Override public int getK() { return 8; }
+            @Override public void setK(int k) { }
+            @Override public boolean isDebug() { return level != null && level.enabled(); }
+            @Override public void setDebug(boolean on) { }
+            @Override public DebugLevel getDebugLevel() { return level == null ? DebugLevel.OFF : level; }
+            @Override public void setDebugLevel(DebugLevel ignored) { }
+        };
+    }
+
     @Test
     @DisplayName("records task contract and phase in active turn audit")
     void recordsPolicyTraceInActiveTurnAudit() {
@@ -55,6 +70,43 @@ class AssistantTurnExecutorTest {
             assertEquals("APPLY", audit.policyTrace().initialPhase());
         } finally {
             if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
+        }
+    }
+
+    @Test
+    @DisplayName("records and prints redacted prompt audit in debug prompt mode")
+    void recordsAndPrintsPromptAuditInDebugPromptMode() {
+        StringBuilder stream = new StringBuilder();
+        var ctx = Context.builder(new Config())
+                .session(sessionWithDebugLevel(DebugLevel.PROMPT))
+                .llm(LlmClient.scripted("hello"))
+                .streamSink(stream::append)
+                .build();
+        List<ChatMessage> messages = new ArrayList<>(List.of(
+                ChatMessage.system("system"),
+                ChatMessage.user("Hello friend")));
+
+        LocalTurnTraceCapture.begin(
+                "trc-prompt",
+                "sid",
+                1,
+                "2026-04-30T00:00:00Z",
+                "workspace-hash",
+                "auto",
+                "scripted",
+                "test-model",
+                "Hello friend");
+        try {
+            AssistantTurnExecutor.execute(messages, WS, ctx, new AssistantTurnExecutor.Options());
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertNotNull(trace.promptAudit());
+            assertFalse(trace.promptAudit().taskType().isBlank());
+            assertFalse(trace.promptAudit().actionObligation().isBlank());
+            assertTrue(stream.toString().contains("Prompt Audit"), stream.toString());
+            assertTrue(stream.toString().contains("actionObligation:"), stream.toString());
+        } finally {
+            LocalTurnTraceCapture.clear();
         }
     }
 
