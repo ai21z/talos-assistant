@@ -4,6 +4,8 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.outcome.MutationOutcomeStatus;
 import dev.talos.runtime.outcome.TaskCompletionStatus;
 import dev.talos.runtime.outcome.TruthWarningType;
+import dev.talos.runtime.trace.LocalTurnTrace;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.verification.TaskVerificationStatus;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolError;
@@ -17,6 +19,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ExecutionOutcomeTest {
@@ -1111,6 +1114,40 @@ class ExecutionOutcomeTest {
                 "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"));
         assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
         assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+    }
+
+    @Test
+    void traceOutcomeClassificationMatchesDominantTaskOutcome() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Read README.md and summarize it."));
+
+        LocalTurnTraceCapture.begin(
+                "trc-test",
+                "sid",
+                1,
+                "2026-04-30T12:00:00Z",
+                "workspace-hash",
+                "auto",
+                "test",
+                "model",
+                "Read README.md and summarize it.");
+        try {
+            ExecutionOutcome outcome = ExecutionOutcome.fromNoTool(
+                    "README.md describes the project.", messages, null, true);
+
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+            assertNotNull(trace);
+            assertNotNull(trace.outcome());
+            assertEquals(outcome.completionStatus().name(), trace.outcome().status());
+            assertEquals(
+                    outcome.taskOutcome().completionStatus().name(),
+                    trace.outcome().classification());
+            assertEquals("ADVISORY_ONLY", trace.outcome().status());
+            assertEquals("ADVISORY_ONLY", trace.outcome().classification());
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
     }
 
     @Test

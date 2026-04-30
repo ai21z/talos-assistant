@@ -1,0 +1,114 @@
+package dev.talos.cli.modes;
+
+import dev.talos.runtime.outcome.TaskCompletionStatus;
+import dev.talos.runtime.task.TaskContract;
+
+final class OutcomeDominancePolicy {
+    private OutcomeDominancePolicy() {
+    }
+
+    record Facts(
+            TaskContract contract,
+            boolean invalidMutationArguments,
+            boolean malformedProtocolDebris,
+            boolean readOnlyDeniedMutation,
+            boolean failedActionObligation,
+            boolean deniedMutation,
+            boolean deniedProtectedRead,
+            boolean partialMutation,
+            boolean falseMutationClaim,
+            boolean inspectUnderCompleted,
+            boolean ungroundedAdvisory,
+            boolean missingEvidence,
+            ExecutionOutcome.VerificationStatus verificationStatus
+    ) {
+        Facts {
+            verificationStatus = verificationStatus == null
+                    ? ExecutionOutcome.VerificationStatus.NOT_RUN
+                    : verificationStatus;
+        }
+    }
+
+    record Decision(
+            ExecutionOutcome.CompletionStatus completionStatus,
+            TaskCompletionStatus taskCompletionStatus,
+            boolean blockedByPolicy
+    ) {
+    }
+
+    static Decision decide(Facts facts) {
+        if (facts == null) {
+            facts = new Facts(
+                    null,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                    ExecutionOutcome.VerificationStatus.NOT_RUN);
+        }
+
+        if (facts.malformedProtocolDebris() || facts.invalidMutationArguments()) {
+            return failed();
+        }
+        if (facts.readOnlyDeniedMutation() || facts.failedActionObligation()) {
+            return new Decision(
+                    ExecutionOutcome.CompletionStatus.BLOCKED,
+                    TaskCompletionStatus.BLOCKED_BY_POLICY,
+                    true);
+        }
+        if (facts.deniedMutation() || facts.deniedProtectedRead()) {
+            return new Decision(
+                    ExecutionOutcome.CompletionStatus.BLOCKED,
+                    TaskCompletionStatus.BLOCKED_BY_APPROVAL,
+                    false);
+        }
+        if (facts.partialMutation()) {
+            return new Decision(
+                    ExecutionOutcome.CompletionStatus.PARTIAL,
+                    TaskCompletionStatus.PARTIAL,
+                    false);
+        }
+        if (facts.verificationStatus() == ExecutionOutcome.VerificationStatus.FAILED) {
+            return failed();
+        }
+        if (facts.missingEvidence()
+                || facts.falseMutationClaim()
+                || facts.inspectUnderCompleted()
+                || facts.ungroundedAdvisory()) {
+            return new Decision(
+                    ExecutionOutcome.CompletionStatus.ADVISORY_ONLY,
+                    TaskCompletionStatus.ADVISORY_ONLY,
+                    false);
+        }
+        if (facts.verificationStatus() == ExecutionOutcome.VerificationStatus.PASSED) {
+            return new Decision(
+                    ExecutionOutcome.CompletionStatus.COMPLETE,
+                    TaskCompletionStatus.COMPLETED_VERIFIED,
+                    false);
+        }
+        if (facts.contract() != null && !facts.contract().mutationRequested()) {
+            return new Decision(
+                    ExecutionOutcome.CompletionStatus.COMPLETE,
+                    TaskCompletionStatus.READ_ONLY_ANSWERED,
+                    false);
+        }
+        return new Decision(
+                ExecutionOutcome.CompletionStatus.COMPLETE,
+                TaskCompletionStatus.COMPLETED_UNVERIFIED,
+                false);
+    }
+
+    private static Decision failed() {
+        return new Decision(
+                ExecutionOutcome.CompletionStatus.FAILED,
+                TaskCompletionStatus.FAILED,
+                false);
+    }
+}

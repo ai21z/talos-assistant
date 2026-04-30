@@ -4,7 +4,6 @@ import dev.talos.cli.repl.Context;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.outcome.MutationOutcome;
-import dev.talos.runtime.outcome.TaskCompletionStatus;
 import dev.talos.runtime.outcome.TaskOutcome;
 import dev.talos.runtime.outcome.TruthWarning;
 import dev.talos.runtime.outcome.TruthWarningType;
@@ -85,11 +84,29 @@ record ExecutionOutcome(
     ) {
         return fromToolLoop(
                 answer,
+                messages,
+                loopResult,
+                workspace,
+                extraMutationSuccesses,
+                false);
+    }
+
+    static ExecutionOutcome fromToolLoop(
+            String answer,
+            List<ChatMessage> messages,
+            ToolCallLoop.LoopResult loopResult,
+            Path workspace,
+            int extraMutationSuccesses,
+            boolean failedActionObligation
+    ) {
+        return fromToolLoop(
+                answer,
                 compatibilityPlan(messages),
                 messages,
                 loopResult,
                 workspace,
-                extraMutationSuccesses);
+                extraMutationSuccesses,
+                failedActionObligation);
     }
 
     static ExecutionOutcome fromToolLoop(
@@ -99,6 +116,25 @@ record ExecutionOutcome(
             ToolCallLoop.LoopResult loopResult,
             Path workspace,
             int extraMutationSuccesses
+    ) {
+        return fromToolLoop(
+                answer,
+                plan,
+                messages,
+                loopResult,
+                workspace,
+                extraMutationSuccesses,
+                false);
+    }
+
+    static ExecutionOutcome fromToolLoop(
+            String answer,
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages,
+            ToolCallLoop.LoopResult loopResult,
+            Path workspace,
+            int extraMutationSuccesses,
+            boolean failedActionObligation
     ) {
         String current = answer == null ? "" : answer;
         CurrentTurnPlan safePlan = plan == null ? compatibilityPlan(messages) : plan;
@@ -158,24 +194,27 @@ record ExecutionOutcome(
         boolean inspectUnderCompleted = !Objects.equals(current, shaped);
         current = shaped;
 
-        CompletionStatus completionStatus = completionStatus(
-                deniedMutation,
-                invalidMutation,
-                partialMutation,
-                falseMutationClaim || inspectUnderCompleted,
-                deniedProtectedRead
-        );
         EvidenceObligationVerifier.Result evidenceResult = verifyEvidence(
                 safePlan,
                 evidenceOutcomes(loopResult));
         boolean missingEvidence = evidenceResult.status() == EvidenceObligationVerifier.Status.UNSATISFIED;
-        boolean missingEvidenceDowngrade = missingEvidence
-                && completionStatus != CompletionStatus.FAILED
-                && completionStatus != CompletionStatus.BLOCKED
-                && completionStatus != CompletionStatus.PARTIAL;
-        if (missingEvidenceDowngrade) {
+        OutcomeDominancePolicy.Decision preVerificationDecision = outcomeDecision(
+                contract,
+                invalidMutation,
+                false,
+                readOnlyDeniedMutation,
+                failedActionObligation,
+                deniedMutation,
+                deniedProtectedRead,
+                partialMutation,
+                falseMutationClaim,
+                inspectUnderCompleted,
+                false,
+                missingEvidence,
+                VerificationStatus.NOT_RUN);
+        CompletionStatus completionStatus = preVerificationDecision.completionStatus();
+        if (missingEvidence && completionStatus == CompletionStatus.ADVISORY_ONLY) {
             current = missingEvidencePrefix(current);
-            completionStatus = CompletionStatus.ADVISORY_ONLY;
         }
 
         TaskVerificationResult taskVerification = workspace != null && shouldVerifyPostApply(
@@ -192,7 +231,6 @@ record ExecutionOutcome(
                 current = partialStaticVerificationFailedAnnotation(taskVerification) + current;
             } else {
                 current = staticVerificationFailedAnnotation(taskVerification) + current;
-                completionStatus = CompletionStatus.FAILED;
             }
         } else if (verificationStatus == VerificationStatus.UNAVAILABLE) {
             current = staticVerificationUnavailableAnnotation(taskVerification) + current;
@@ -206,15 +244,31 @@ record ExecutionOutcome(
             }
         }
 
+        OutcomeDominancePolicy.Decision finalDecision = outcomeDecision(
+                contract,
+                invalidMutation,
+                false,
+                readOnlyDeniedMutation,
+                failedActionObligation,
+                deniedMutation,
+                deniedProtectedRead,
+                partialMutation,
+                falseMutationClaim,
+                inspectUnderCompleted,
+                false,
+                missingEvidence,
+                verificationStatus);
+        completionStatus = finalDecision.completionStatus();
         TaskOutcome taskOutcome = new TaskOutcome(
                 contract,
-                toTaskCompletionStatus(completionStatus, verificationStatus, contract, readOnlyDeniedMutation),
+                finalDecision.taskCompletionStatus(),
                 MutationOutcome.from(contract, loopResult, extraMutationSuccesses),
                 taskVerification,
                 toolLoopWarnings(
                         deniedMutation,
                         deniedProtectedRead,
                         readOnlyDeniedMutation,
+                        failedActionObligation,
                         invalidMutation,
                         partialMutation,
                         falseMutationClaim,
@@ -268,7 +322,7 @@ record ExecutionOutcome(
             Context ctx,
             boolean streamed
     ) {
-        return fromNoTool(answer, compatibilityPlan(messages), messages, ctx, streamed);
+        return fromNoTool(answer, compatibilityPlan(messages), messages, ctx, streamed, false);
     }
 
     static ExecutionOutcome fromNoTool(
@@ -277,6 +331,17 @@ record ExecutionOutcome(
             List<ChatMessage> messages,
             Context ctx,
             boolean streamed
+    ) {
+        return fromNoTool(answer, plan, messages, ctx, streamed, false);
+    }
+
+    static ExecutionOutcome fromNoTool(
+            String answer,
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages,
+            Context ctx,
+            boolean streamed,
+            boolean failedActionObligation
     ) {
         String shaped = answer == null ? "" : answer;
         CurrentTurnPlan safePlan = plan == null ? compatibilityPlan(messages) : plan;
@@ -314,29 +379,38 @@ record ExecutionOutcome(
                 && (shaped.startsWith(AssistantTurnExecutor.UNGROUNDED_ANNOTATION)
                 || localAccessCapabilityCorrected);
         boolean advisoryOnly = ungrounded && !blocked;
-        CompletionStatus completionStatus = malformedProtocolDebrisReplaced
-                ? CompletionStatus.FAILED
-                : completionStatus(false, false, false, advisoryOnly, blocked);
         EvidenceObligationVerifier.Result evidenceResult = verifyEvidence(safePlan, List.of());
         boolean missingEvidence = evidenceResult.status() == EvidenceObligationVerifier.Status.UNSATISFIED;
-        boolean missingEvidenceDowngrade = missingEvidence
-                && completionStatus != CompletionStatus.FAILED
-                && completionStatus != CompletionStatus.BLOCKED;
-        if (missingEvidenceDowngrade) {
+        OutcomeDominancePolicy.Decision decision = outcomeDecision(
+                contract,
+                false,
+                malformedProtocolDebrisReplaced,
+                noToolMutationReplaced,
+                failedActionObligation,
+                false,
+                false,
+                false,
+                false,
+                false,
+                advisoryOnly,
+                missingEvidence,
+                VerificationStatus.NOT_RUN);
+        CompletionStatus completionStatus = decision.completionStatus();
+        if (missingEvidence && completionStatus == CompletionStatus.ADVISORY_ONLY) {
             shaped = missingEvidencePrefix(shaped);
-            completionStatus = CompletionStatus.ADVISORY_ONLY;
-            advisoryOnly = true;
         }
+        advisoryOnly = completionStatus == CompletionStatus.ADVISORY_ONLY;
         TaskVerificationResult verification = TaskVerificationResult.notRun("Post-apply verification was not applicable.");
         List<TruthWarning> warnings = noToolWarnings(
                 noToolMutationReplaced,
+                failedActionObligation,
                 ungrounded,
                 malformedProtocolDebrisReplaced,
                 localAccessCapabilityCorrected,
                 missingEvidence);
         TaskOutcome taskOutcome = new TaskOutcome(
                 contract,
-                toTaskCompletionStatus(completionStatus, VerificationStatus.NOT_RUN, contract, noToolMutationReplaced),
+                decision.taskCompletionStatus(),
                 MutationOutcome.from(contract, null, 0),
                 verification,
                 warnings,
@@ -382,20 +456,6 @@ record ExecutionOutcome(
         return CurrentTurnPlan.compatibility(contract, phase, List.of(), List.of(), List.of());
     }
 
-    private static CompletionStatus completionStatus(
-            boolean deniedMutation,
-            boolean invalidMutation,
-            boolean partialMutation,
-            boolean advisoryOnly,
-            boolean blocked
-    ) {
-        if (invalidMutation) return CompletionStatus.FAILED;
-        if (deniedMutation || blocked) return CompletionStatus.BLOCKED;
-        if (partialMutation) return CompletionStatus.PARTIAL;
-        if (advisoryOnly) return CompletionStatus.ADVISORY_ONLY;
-        return CompletionStatus.COMPLETE;
-    }
-
     private static boolean shouldVerifyPostApply(
             TaskContract contract,
             CompletionStatus completionStatus,
@@ -420,33 +480,42 @@ record ExecutionOutcome(
         };
     }
 
-    private static TaskCompletionStatus toTaskCompletionStatus(
-            CompletionStatus completionStatus,
-            VerificationStatus verificationStatus,
+    private static OutcomeDominancePolicy.Decision outcomeDecision(
             TaskContract contract,
-            boolean blockedByPolicy
+            boolean invalidMutationArguments,
+            boolean malformedProtocolDebris,
+            boolean readOnlyDeniedMutation,
+            boolean failedActionObligation,
+            boolean deniedMutation,
+            boolean deniedProtectedRead,
+            boolean partialMutation,
+            boolean falseMutationClaim,
+            boolean inspectUnderCompleted,
+            boolean ungroundedAdvisory,
+            boolean missingEvidence,
+            VerificationStatus verificationStatus
     ) {
-        if (completionStatus == CompletionStatus.FAILED) return TaskCompletionStatus.FAILED;
-        if (completionStatus == CompletionStatus.PARTIAL) return TaskCompletionStatus.PARTIAL;
-        if (completionStatus == CompletionStatus.ADVISORY_ONLY) return TaskCompletionStatus.ADVISORY_ONLY;
-        if (completionStatus == CompletionStatus.BLOCKED) {
-            return blockedByPolicy
-                    ? TaskCompletionStatus.BLOCKED_BY_POLICY
-                    : TaskCompletionStatus.BLOCKED_BY_APPROVAL;
-        }
-        if (verificationStatus == VerificationStatus.PASSED) {
-            return TaskCompletionStatus.COMPLETED_VERIFIED;
-        }
-        if (contract != null && !contract.mutationRequested()) {
-            return TaskCompletionStatus.READ_ONLY_ANSWERED;
-        }
-        return TaskCompletionStatus.COMPLETED_UNVERIFIED;
+        return OutcomeDominancePolicy.decide(new OutcomeDominancePolicy.Facts(
+                contract,
+                invalidMutationArguments,
+                malformedProtocolDebris,
+                readOnlyDeniedMutation,
+                failedActionObligation,
+                deniedMutation,
+                deniedProtectedRead,
+                partialMutation,
+                falseMutationClaim,
+                inspectUnderCompleted,
+                ungroundedAdvisory,
+                missingEvidence,
+                verificationStatus));
     }
 
     private static List<TruthWarning> toolLoopWarnings(
             boolean deniedMutation,
             boolean deniedProtectedRead,
             boolean readOnlyDeniedMutation,
+            boolean failedActionObligation,
             boolean invalidMutation,
             boolean partialMutation,
             boolean falseMutationClaim,
@@ -464,6 +533,11 @@ record ExecutionOutcome(
                     readOnlyDeniedMutation
                             ? "A mutating tool call was blocked by the read-only task contract."
                             : "A mutating tool call was denied by approval."));
+        }
+        if (failedActionObligation) {
+            warnings.add(TruthWarning.of(
+                    TruthWarningType.FAILED_ACTION_OBLIGATION,
+                    "A required mutating action was not performed after retry."));
         }
         if (deniedProtectedRead) {
             warnings.add(TruthWarning.of(
@@ -524,6 +598,7 @@ record ExecutionOutcome(
 
     private static List<TruthWarning> noToolWarnings(
             boolean noToolMutationReplaced,
+            boolean failedActionObligation,
             boolean ungrounded,
             boolean malformedProtocolDebrisReplaced,
             boolean localAccessCapabilityCorrected,
@@ -534,6 +609,11 @@ record ExecutionOutcome(
             warnings.add(TruthWarning.of(
                     TruthWarningType.STREAMING_NO_TOOL_MUTATION_REPLACED,
                     "A streaming no-tool mutation narrative was blocked."));
+        }
+        if (failedActionObligation) {
+            warnings.add(TruthWarning.of(
+                    TruthWarningType.FAILED_ACTION_OBLIGATION,
+                    "The required write/edit tool calls were not issued, so no file was changed."));
         }
         if (ungrounded) {
             warnings.add(TruthWarning.of(

@@ -7,6 +7,7 @@ import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.TurnAuditCapture;
 import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.policy.ResponseObligationVerifier;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
@@ -481,6 +482,200 @@ class AssistantTurnExecutorTest {
                 assertFalse(out.text().contains("READ_ONLY_ANSWERED"), out.text());
                 assertEquals("READ_TARGET_REQUIRED", trace.promptAudit().evidenceObligation());
                 assertEquals("ADVISORY_ONLY", trace.outcome().status());
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        }
+
+        @Test
+        void failedNoToolMutationRetryDoesNotCompleteAsUnverified(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("index.html"), "<h1>Old</h1>\n");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "I updated index.html.",
+                            "I still cannot edit files here.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Change index.html to say hello."));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-t58-failed-mutation-obligation",
+                    "sid",
+                    1,
+                    "2026-04-30T00:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "scripted",
+                    "test-model",
+                    "Change index.html to say hello.");
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertTrue(out.text().startsWith("[Action obligation failed:"), out.text());
+                assertEquals("<h1>Old</h1>\n", Files.readString(workspace.resolve("index.html")));
+                assertEquals("BLOCKED", trace.outcome().status());
+                assertEquals("BLOCKED_BY_POLICY", trace.outcome().classification());
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        }
+
+        @Test
+        void failedMutationRetryAfterReadOnlyToolLoopDoesNotCompleteAsUnverified(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("index.html"), "<h1>Old</h1>\n");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            registry.register(new dev.talos.tools.impl.FileWriteTool());
+            registry.register(new dev.talos.tools.impl.FileEditTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}",
+                            "I inspected index.html and updated it in this response.",
+                            "I still cannot edit files here.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Change index.html to say hello."));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-t58-failed-mutation-obligation-after-read",
+                    "sid",
+                    1,
+                    "2026-04-30T00:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "scripted",
+                    "test-model",
+                    "Change index.html to say hello.");
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertTrue(out.text().contains("[Action obligation failed:"), out.text());
+                assertEquals("<h1>Old</h1>\n", Files.readString(workspace.resolve("index.html")));
+                assertEquals("BLOCKED", trace.outcome().status());
+                assertEquals("BLOCKED_BY_POLICY", trace.outcome().classification());
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        }
+
+        @Test
+        void readOnlyToolMutationRetryDoesNotCompleteAsUnverified(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("index.html"), "<h1>Old</h1>\n");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            registry.register(new dev.talos.tools.impl.FileWriteTool());
+            registry.register(new dev.talos.tools.impl.FileEditTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}",
+                            "I inspected index.html and updated it in this response.",
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}",
+                            "I inspected index.html again but did not change it.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Change index.html to say hello."));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-t58-read-only-mutation-retry",
+                    "sid",
+                    1,
+                    "2026-04-30T00:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "scripted",
+                    "test-model",
+                    "Change index.html to say hello.");
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertTrue(out.text().contains("[Action obligation failed:"), out.text());
+                assertEquals("<h1>Old</h1>\n", Files.readString(workspace.resolve("index.html")));
+                assertEquals("BLOCKED", trace.outcome().status());
+                assertEquals("BLOCKED_BY_POLICY", trace.outcome().classification());
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        }
+
+        @Test
+        void invalidMutationRetryAfterReadOnlyToolLoopFailsOutcome(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("index.html"), "<h1>Old</h1>\n");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            registry.register(new dev.talos.tools.impl.FileEditTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}",
+                            "I inspected index.html and updated it in this response.",
+                            "{\"name\":\"talos.edit_file\",\"arguments\":{\"path\":\"index.html\","
+                                    + "\"new_string\":\"<h1>Hello</h1>\"}}",
+                            "I updated index.html.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Change index.html to say hello."));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-t58-invalid-mutation-retry-after-read",
+                    "sid",
+                    1,
+                    "2026-04-30T00:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "scripted",
+                    "test-model",
+                    "Change index.html to say hello.");
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertTrue(out.text().contains(AssistantTurnExecutor.INVALID_MUTATION_ANNOTATION), out.text());
+                assertEquals("<h1>Old</h1>\n", Files.readString(workspace.resolve("index.html")));
+                assertEquals("FAILED", trace.outcome().status());
+                assertEquals("FAILED", trace.outcome().classification());
             } finally {
                 LocalTurnTraceCapture.clear();
             }
@@ -1682,7 +1877,8 @@ class AssistantTurnExecutorTest {
             var result = AssistantTurnExecutor.mutationRequestRetryIfNeeded(
                     "original answer", messages, loopResult, WS, ctx);
 
-            assertEquals("Listed files from the retry.", result.answer());
+            assertEquals(ResponseObligationVerifier.deterministicNoActionAnswer(), result.answer());
+            assertTrue(result.actionObligationFailed());
             assertFalse(result.answer().contains("\"name\""),
                     "text-fallback tool JSON must not leak as the final answer");
             assertNotNull(result.extraSummary(),
