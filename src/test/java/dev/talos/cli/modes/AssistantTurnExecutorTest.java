@@ -6,8 +6,11 @@ import dev.talos.cli.repl.SessionState;
 import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.TurnAuditCapture;
+import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import org.junit.jupiter.api.DisplayName;
@@ -775,6 +778,38 @@ class AssistantTurnExecutorTest {
             assertTrue(frame.content().contains("talos.write_file"), frame.content());
             assertTrue(frame.content().contains("talos.edit_file"), frame.content());
             assertTrue(frame.content().contains("Do not say you lack filesystem"), frame.content());
+        }
+
+        @Test
+        void injectTaskContractInstructionUsesPlanAfterMessagesDrift() {
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Overwrite index.html with exactly AFTER. Use talos.write_file."));
+
+            CurrentTurnPlan plan = CurrentTurnPlan.create(
+                    TaskContractResolver.fromMessages(messages),
+                    ExecutionPhase.APPLY,
+                    List.of("talos.write_file"),
+                    List.of("talos.write_file"),
+                    List.of());
+
+            messages.add(ChatMessage.assistant("I can help with that."));
+            messages.add(ChatMessage.user(
+                    "The current-turn obligation was not satisfied. Call the write tool now."));
+
+            AssistantTurnExecutor.injectTaskContractInstruction(messages, plan);
+
+            String frame = messages.stream()
+                    .filter(message -> "system".equals(message.role()))
+                    .map(ChatMessage::content)
+                    .filter(content -> content.startsWith("[CurrentTurnCapability]"))
+                    .findFirst()
+                    .orElseThrow();
+
+            assertTrue(frame.contains("type: FILE_EDIT"));
+            assertTrue(frame.contains("mutationAllowed: true"));
+            assertTrue(frame.contains("visibleTools: talos.write_file"));
+            assertTrue(frame.contains("obligation: MUTATING_TOOL_REQUIRED"));
         }
 
         @Test
