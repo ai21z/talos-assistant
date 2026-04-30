@@ -81,12 +81,12 @@ public final class ActiveTaskContextPolicy {
             return new Decision(
                     current,
                     savedContext.suppressed("current request does not require workspace context"),
-                    savedGoal,
+                    ArtifactGoal.none(),
                     savedContext,
                     false);
         }
 
-        if (namesDifferentExplicitTarget(current, savedContext.targets())) {
+        if (explicitTargetsDifferFromSavedTargets(current, savedContext.targets())) {
             return new Decision(
                     current,
                     savedContext.cleared("current request names a different explicit target"),
@@ -117,14 +117,15 @@ public final class ActiveTaskContextPolicy {
         return false;
     }
 
-    private static boolean namesDifferentExplicitTarget(TaskContract contract, List<String> savedTargets) {
+    private static boolean explicitTargetsDifferFromSavedTargets(TaskContract contract, List<String> savedTargets) {
         if (contract == null || contract.expectedTargets().isEmpty()) return false;
         Set<String> saved = normalizedTargets(savedTargets);
-        if (saved.isEmpty()) return false;
+        Set<String> explicit = new LinkedHashSet<>();
         for (String target : contract.expectedTargets()) {
-            if (saved.contains(normalizedTarget(target))) return false;
+            String value = normalizedTarget(target);
+            if (!value.isBlank()) explicit.add(value);
         }
-        return true;
+        return !explicit.equals(saved);
     }
 
     private static boolean isNarrowDeicticApply(String userRequest) {
