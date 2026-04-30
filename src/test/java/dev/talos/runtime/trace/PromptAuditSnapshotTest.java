@@ -100,6 +100,42 @@ class PromptAuditSnapshotTest {
         assertTrue(snapshot.promptTools().isEmpty());
     }
 
+    @Test
+    void fromPlanUsesPlanFieldsAndHonestPlaceholders() {
+        List<ChatMessage> messages = new ArrayList<>();
+        messages.add(ChatMessage.system("system"));
+        messages.add(ChatMessage.system("[CurrentTurnCapability]\ntype: FILE_EDIT"));
+        messages.add(ChatMessage.user("Overwrite index.html with exactly AFTER. Use talos.write_file."));
+
+        var plan = dev.talos.runtime.turn.CurrentTurnPlan.create(
+                new TaskContract(
+                        TaskType.FILE_EDIT,
+                        true,
+                        true,
+                        true,
+                        Set.of("index.html"),
+                        Set.of(),
+                        "Overwrite index.html with exactly AFTER. Use talos.write_file."),
+                ExecutionPhase.APPLY,
+                List.of("talos.read_file", "talos.write_file"),
+                List.of("talos.read_file", "talos.write_file"),
+                List.of("talos.shell"));
+
+        PromptAuditSnapshot snapshot = PromptAuditSnapshot.fromPlan(plan, messages);
+
+        assertEquals("FILE_EDIT", snapshot.taskType());
+        assertTrue(snapshot.mutationAllowed());
+        assertTrue(snapshot.verificationRequired());
+        assertEquals("APPLY", snapshot.phaseInitial());
+        assertEquals("APPLY", snapshot.phaseFinal());
+        assertEquals("MUTATING_TOOL_REQUIRED", snapshot.actionObligation());
+        assertEquals(PromptAuditSnapshot.NONE_OR_NOT_DERIVED, snapshot.evidenceObligation());
+        assertEquals(PromptAuditSnapshot.NOT_DERIVED, snapshot.outputObligation());
+        assertEquals(List.of("talos.read_file", "talos.write_file"), snapshot.nativeTools());
+        assertEquals(List.of("talos.read_file", "talos.write_file"), snapshot.promptTools());
+        assertEquals(List.of("talos.shell"), snapshot.blockedTools());
+    }
+
     private static TaskContract contract(String request) {
         return new TaskContract(
                 TaskType.FILE_EDIT,
