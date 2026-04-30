@@ -801,6 +801,57 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void planContractKeepsExactLiteralVerificationAfterRetryMessagesAppend() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-plan-literal-drift-");
+        try {
+            Files.writeString(ws.resolve("index.html"), "WRONG");
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Overwrite index.html with exactly AFTER. Use talos.write_file."));
+
+            var plan = dev.talos.runtime.turn.CurrentTurnPlan.create(
+                    dev.talos.runtime.task.TaskContractResolver.fromMessages(messages),
+                    dev.talos.runtime.phase.ExecutionPhase.APPLY,
+                    List.of("talos.write_file"),
+                    List.of("talos.write_file"),
+                    List.of());
+
+            messages.add(ChatMessage.assistant("I can help with that."));
+            messages.add(ChatMessage.user(
+                    "The current-turn obligation was not satisfied. Call the write tool now."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Updated index.html.", 1, 1,
+                    List.of("talos.write_file"), List.of(),
+                    0, 0, false, 1, List.of(),
+                    0, 0, 0, 0,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.write_file", "index.html", true, true, false,
+                            "wrote index.html", "", dev.talos.tools.VerificationStatus.PASS
+                    )));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "Updated index.html.", plan, messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.FAILED, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.FAILED, outcome.verificationStatus());
+            assertTrue(outcome.finalAnswer().contains("Exact content verification failed"),
+                    outcome.finalAnswer());
+            assertEquals(List.of("index.html"),
+                    outcome.taskOutcome().contract().expectedTargets().stream().toList());
+            assertEquals(TaskVerificationStatus.FAILED,
+                    outcome.taskOutcome().verificationResult().status());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void literalMatchAfterSuccessfulWriteIsVerifiedComplete() throws Exception {
         Path ws = Files.createTempDirectory("talos-execution-outcome-literal-match-");
         try {
