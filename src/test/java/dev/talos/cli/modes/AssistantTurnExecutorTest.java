@@ -2,13 +2,17 @@ package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.DebugLevel;
+import dev.talos.cli.repl.SessionMemory;
 import dev.talos.cli.repl.SessionState;
 import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.TurnAuditCapture;
+import dev.talos.runtime.context.ActiveTaskContext;
+import dev.talos.runtime.context.ArtifactGoal;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.ResponseObligationVerifier;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.turn.CurrentTurnPlan;
@@ -110,6 +114,122 @@ class AssistantTurnExecutorTest {
             assertTrue(stream.toString().contains("Prompt Audit"), stream.toString());
             assertTrue(stream.toString().contains("actionObligation:"), stream.toString());
         } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void deicticApplyUsesActiveProposalContextForToolSurfaceAndPromptAudit(@TempDir Path workspace)
+            throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "# Old title\n");
+        ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+                1, "trace-propose", List.of("README.md"),
+                "Replace the README title and add usage.");
+        SessionMemory memory = new SessionMemory();
+        memory.setActiveTaskContext(context);
+        memory.setArtifactGoal(ArtifactGoal.fromActiveContext(context));
+
+        var registry = new dev.talos.tools.ToolRegistry();
+        var undoStack = new dev.talos.tools.FileUndoStack();
+        registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+        var processor = new dev.talos.runtime.TurnProcessor(
+                null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+        var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+        var ctx = Context.builder(new Config())
+                .memory(memory)
+                .llm(LlmClient.scripted(List.of(
+                        "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"README.md\","
+                                + "\"content\":\"# Talos\\n\\nUsage: run Talos.\\n\"}}",
+                        "Updated README.md.")))
+                .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                .toolRegistry(registry)
+                .toolCallLoop(loop)
+                .build();
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("system"));
+        messages.add(ChatMessage.user("make those changes"));
+
+        TurnAuditCapture.begin();
+        LocalTurnTraceCapture.begin(
+                "trc-apply",
+                "sid",
+                2,
+                "2026-04-30T00:00:00Z",
+                "workspace-hash",
+                "auto",
+                "scripted",
+                "test-model",
+                "make those changes");
+        try {
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+            var audit = TurnAuditCapture.end();
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertTrue(Files.readString(workspace.resolve("README.md")).contains("Usage: run Talos."));
+            assertTrue(out.text().contains("Updated README.md"), out.text());
+            assertEquals("FILE_EDIT", audit.policyTrace().taskType());
+            assertTrue(audit.policyTrace().mutationAllowed());
+            assertEquals(List.of("README.md"), audit.policyTrace().expectedTargets());
+            assertNotNull(trace.promptAudit());
+            assertTrue(trace.promptAudit().activeTaskContext().contains("state=ACTIVE"),
+                    trace.promptAudit().activeTaskContext());
+            assertTrue(trace.promptAudit().activeTaskContext().contains("kind=PROPOSED_CHANGES"),
+                    trace.promptAudit().activeTaskContext());
+            assertTrue(trace.promptAudit().artifactGoal().contains("kind=README"),
+                    trace.promptAudit().artifactGoal());
+            assertTrue(trace.promptAudit().artifactGoal().contains("operation=APPLY_EDIT"),
+                    trace.promptAudit().artifactGoal());
+        } finally {
+            if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void noWorkspaceChatSuppressesActiveContextInPromptAudit() {
+        ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+                1, "trace-propose", List.of("README.md"),
+                "Replace the README title and add usage.");
+        SessionMemory memory = new SessionMemory();
+        memory.setActiveTaskContext(context);
+        memory.setArtifactGoal(ArtifactGoal.fromActiveContext(context));
+        var ctx = Context.builder(new Config())
+                .memory(memory)
+                .llm(LlmClient.scripted("No problem, we can just chat."))
+                .build();
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("system"));
+        messages.add(ChatMessage.user("I am only chatting, please don't inspect my files."));
+
+        TurnAuditCapture.begin();
+        LocalTurnTraceCapture.begin(
+                "trc-chat",
+                "sid",
+                2,
+                "2026-04-30T00:00:00Z",
+                "workspace-hash",
+                "auto",
+                "scripted",
+                "test-model",
+                "I am only chatting, please don't inspect my files.");
+        try {
+            AssistantTurnExecutor.execute(messages, WS, ctx, new AssistantTurnExecutor.Options());
+            var audit = TurnAuditCapture.end();
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertEquals(TaskType.SMALL_TALK.name(), audit.policyTrace().taskType());
+            assertFalse(audit.policyTrace().mutationAllowed());
+            assertNotNull(trace.promptAudit());
+            assertTrue(trace.promptAudit().activeTaskContext().contains("state=SUPPRESSED"),
+                    trace.promptAudit().activeTaskContext());
+            assertTrue(trace.promptAudit().artifactGoal().equals("NONE_OR_NOT_DERIVED")
+                            || (!trace.promptAudit().artifactGoal().contains("README")
+                            && !trace.promptAudit().artifactGoal().contains("APPLY_EDIT")),
+                    trace.promptAudit().artifactGoal());
+            assertEquals(ActiveTaskContext.State.ACTIVE, memory.activeTaskContext().state());
+        } finally {
+            if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
             LocalTurnTraceCapture.clear();
         }
     }
