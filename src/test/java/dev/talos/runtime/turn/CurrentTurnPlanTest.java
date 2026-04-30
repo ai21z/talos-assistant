@@ -39,6 +39,8 @@ class CurrentTurnPlanTest {
         assertEquals(ExecutionPhase.APPLY, plan.phaseFinal());
         assertEquals(ActionObligation.MUTATING_TOOL_REQUIRED, plan.actionObligation());
         assertEquals(List.of("talos.write_file", "talos.read_file"), plan.nativeTools());
+        assertEquals(List.of("talos.write_file", "talos.read_file"), plan.promptTools());
+        assertEquals(List.of(), plan.blockedTools());
         assertEquals(CurrentTurnPlan.NONE_OR_NOT_DERIVED, plan.evidenceObligation());
         assertEquals(CurrentTurnPlan.NOT_DERIVED, plan.outputObligation());
 
@@ -85,18 +87,34 @@ class CurrentTurnPlanTest {
     void listFieldsAreImmutableCopies() {
         TaskContract contract = TaskContractResolver.fromUserRequest("Create README.md.");
         List<String> nativeTools = new ArrayList<>(List.of("talos.write_file"));
+        List<String> promptTools = new ArrayList<>(List.of("talos.write_file"));
+        List<String> blockedTools = new ArrayList<>(List.of("talos.shell"));
 
         CurrentTurnPlan plan = CurrentTurnPlan.create(
                 contract,
                 ExecutionPhase.APPLY,
                 nativeTools,
-                nativeTools,
-                List.of());
+                promptTools,
+                blockedTools);
 
         nativeTools.add("talos.edit_file");
+        promptTools.add("talos.edit_file");
+        blockedTools.add("talos.exec");
 
         assertEquals(List.of("talos.write_file"), plan.nativeTools());
+        assertEquals(List.of("talos.write_file"), plan.promptTools());
+        assertEquals(List.of("talos.shell"), plan.blockedTools());
         assertThrows(UnsupportedOperationException.class,
                 () -> plan.nativeTools().add("talos.grep"));
+        assertThrows(UnsupportedOperationException.class,
+                () -> plan.promptTools().add("talos.grep"));
+        assertThrows(UnsupportedOperationException.class,
+                () -> plan.blockedTools().add("talos.grep"));
+        assertThrows(UnsupportedOperationException.class,
+                () -> plan.taskExpectations().add(new LiteralContentExpectation(
+                        "README.md",
+                        "content",
+                        LiteralContentExpectation.MatchMode.EXACT,
+                        "test")));
     }
 }
