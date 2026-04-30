@@ -16,6 +16,11 @@ Observed problem:
 - Static web verification and repair are useful, but web-specific concepts are
   spread through generic task, verifier, repair, outcome, and prompt code.
 - T47 is valid but should not be the immediate next step before T55 through T61.
+- Installed Talos 0.9.8 smoke run on 2026-04-30 showed natural BMI web app
+  creation writing only `index.html`, then failing static verification because
+  the workspace did not expose a small HTML/CSS/JS surface. That is a useful
+  verifier result, but the static web profile should own the target-shape
+  expectation instead of generic turn-control code.
 
 ## Classification
 
@@ -66,6 +71,11 @@ Likely code/document areas:
 Introduce a minimal static capability/profile boundary so web-specific verifier
 and repair behavior no longer lives as generic turn-control logic.
 
+The profile boundary should also clarify natural web creation expectations:
+whether a task is allowed to produce one self-contained HTML file, whether it
+must produce an HTML/CSS/JS surface, and how the verifier reports incomplete
+surface shape without owning the final outcome status.
+
 ## Non-Goals
 
 - No dynamic plugin loader.
@@ -90,6 +100,11 @@ and repair behavior no longer lives as generic turn-control logic.
 
 - Static web verifier applicability is profile-owned or clearly isolated.
 - Static web repair guidance is profile-owned or clearly isolated.
+- Natural web app creation selects the Static Web profile and records the
+  expected surface shape before verification.
+- A one-file web creation can pass only when it is explicitly self-contained or
+  allowed by the selected profile; otherwise the verifier reports an incomplete
+  surface and T58 owns the final failed/not-verified status.
 - Generic task classification does not own detailed BMI/web repair coherence.
 - T47 has a clear implementation owner and no longer requires generic repair
   prompt expansion.
@@ -100,7 +115,11 @@ and repair behavior no longer lives as generic turn-control logic.
 Required deterministic regression:
 
 - Unit test: Static Web profile selected for HTML/CSS/JS web tasks.
+- Unit test: Static Web profile selected for natural BMI/web app creation from
+  an empty workspace.
 - Unit test: non-web README/config/code tasks do not select Static Web repair.
+- Static verifier test: one-file BMI creation is accepted only when
+  self-contained/profile-allowed, otherwise reports incomplete web surface.
 - Static verifier tests remain passing.
 - T47 e2e scenarios can be implemented after this ticket or as part of it if
   the scope remains small.

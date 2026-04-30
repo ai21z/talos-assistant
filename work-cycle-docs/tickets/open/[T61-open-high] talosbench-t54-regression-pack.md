@@ -17,6 +17,12 @@ Observed gap:
   verification, and trace redaction.
 - T54 found additional release-blocking prompt families that are not yet
   represented as regression gates.
+- Installed Talos 0.9.8 smoke run on 2026-04-30 exposed harness gaps:
+  `mutation-create-bmi` passed even though local trace ended
+  `Outcome: FAILED (FAILED)`, `literal-exact-write` falsely failed because the
+  phase parser read Prompt Audit `phase: APPLY` instead of Trace Detail
+  `final=VERIFY`, and scripted approval input can consume `/last trace` when the
+  number of approval prompts varies.
 
 ## Classification
 
@@ -83,6 +89,15 @@ release blocker has a named assertion.
 - Keep hidden-token fixtures for privacy and data minimization cases.
 - Add trace assertions for prompt audit action/evidence obligations as soon as
   those fields exist.
+- Tighten trace parsing before expanding the matrix: distinguish Current Turn
+  Trace, Last Turn Trace Detail, Local Trace, and Prompt Audit fields instead of
+  taking the last matching label globally.
+- Treat failed Local Trace outcome, failed verification, failure-policy stop, or
+  contradictory Last Turn/Local Trace outcomes as case failures unless the case
+  explicitly expects that failure mode.
+- For approval-sensitive cases, either keep them manual-only or make scripted
+  approval synchronization deterministic enough that `/last trace` cannot be
+  consumed as an approval answer.
 
 ## Acceptance Criteria
 
@@ -102,6 +117,16 @@ release blocker has a named assertion.
   - unknown tool alias replay.
 - Cases assert contract, tool surface, obligation, outcome, and transcript
   redaction where applicable.
+- Existing starter cases assert final outcome and verification status, not only
+  contract/tool surface substrings.
+- `mutation-create-bmi` cannot pass when `/last trace` records
+  `Verification: FAILED` or `Outcome: FAILED`.
+- `literal-exact-write` passes when Trace Detail shows `final=VERIFY` and
+  Local Trace verification is `PASSED`, even if Prompt Audit phase remains
+  `APPLY`.
+- Approval-sensitive scripted runs either emit a valid `/last trace` section or
+  return `MANUAL_REQUIRED` with clear manual steps; they must not silently treat
+  slash commands as approval responses.
 - `run-talosbench.ps1 -ValidateOnly` passes.
 - Approval-sensitive cases are clearly marked `manualRequired`.
 
@@ -110,7 +135,10 @@ release blocker has a named assertion.
 Required deterministic regression:
 
 - JSON schema validation through existing runner.
-- Runner trace parsing extended only when needed for new fields.
+- Runner trace parsing tests or fixture-transcript checks for:
+  - Trace Detail phase versus Prompt Audit phase;
+  - Local Trace failed outcome versus Last Turn mutation-applied label;
+  - approval prompt synchronization around `/last trace`.
 - Unit/e2e tests added for cases that should not depend on model behavior.
 
 Manual/TalosBench rerun:
@@ -118,6 +146,10 @@ Manual/TalosBench rerun:
 - Run selected new non-manual T54 cases.
 - Run manual-required protected read and literal write cases before candidate
   review.
+- Re-run the installed-version smoke set from
+  `local/manual-testing/talosbench/20260430-220811`,
+  `local/manual-testing/talosbench/20260430-220944`, and the focused
+  `/debug prompt` protected-read transcript as a regression reference.
 
 Commands:
 
