@@ -1,5 +1,7 @@
 package dev.talos.runtime.context;
 
+import dev.talos.runtime.trace.PromptAuditRedactor;
+
 import java.util.List;
 import java.util.Locale;
 
@@ -32,7 +34,9 @@ public record ArtifactGoal(
     }
 
     public static ArtifactGoal fromActiveContext(ActiveTaskContext context) {
-        if (context == null || !context.hasTargets()) return none();
+        if (context == null || !context.hasTargets() || context.state() != ActiveTaskContext.State.ACTIVE) {
+            return none();
+        }
         return new ArtifactGoal(
                 inferKind(context.targets()),
                 context.operation(),
@@ -43,13 +47,14 @@ public record ArtifactGoal(
 
     public String renderForPlan() {
         if (source == Source.NONE) return ActiveTaskContext.NONE_OR_NOT_DERIVED;
-        return "artifactGoal{"
+        String rendered = "artifactGoal{"
                 + "kind=" + artifactKind
                 + ", operation=" + operation
                 + ", targets=" + targets
                 + ", verifierProfile=" + verifierProfile
                 + ", source=" + source
                 + '}';
+        return PromptAuditRedactor.preview(rendered, ActiveTaskContext.PROMPT_RENDER_CHAR_CAP);
     }
 
     private static ArtifactKind inferKind(List<String> targets) {
