@@ -3,12 +3,20 @@ package dev.talos.runtime.policy;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
+import dev.talos.runtime.turn.CurrentTurnPlan;
 
 import java.util.List;
 
 /** Renders a short current-turn-local capability frame from runtime state. */
 public final class CurrentTurnCapabilityFrame {
     private CurrentTurnCapabilityFrame() {}
+
+    public static String render(CurrentTurnPlan plan) {
+        if (plan == null) {
+            return render(null, ExecutionPhase.INSPECT, List.of());
+        }
+        return render(plan.taskContract(), plan.phaseInitial(), plan.nativeTools());
+    }
 
     public static String render(TaskContract contract, ExecutionPhase phase, List<String> visibleTools) {
         TaskType type = contract == null || contract.type() == null ? TaskType.UNKNOWN : contract.type();
