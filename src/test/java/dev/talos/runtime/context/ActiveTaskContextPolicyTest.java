@@ -83,6 +83,9 @@ class ActiveTaskContextPolicyTest {
 
         assertFalse(decision.consumed());
         assertEquals(ActiveTaskContext.State.SUPPRESSED, decision.planContext().state());
+        assertEquals(ArtifactGoal.none(), decision.artifactGoal());
+        assertEquals(ArtifactGoal.Source.NONE, decision.artifactGoal().source());
+        assertEquals(ArtifactGoal.ArtifactKind.UNKNOWN, decision.artifactGoal().artifactKind());
         assertEquals(saved, decision.memoryContext());
     }
 
@@ -102,6 +105,24 @@ class ActiveTaskContextPolicyTest {
         assertEquals(ActiveTaskContext.State.CLEARED, decision.planContext().state());
         assertEquals(ActiveTaskContext.none(), decision.memoryContext());
         assertEquals(Set.of("config.json"), decision.taskContract().expectedTargets());
+    }
+
+    @Test void partialExplicitTargetOverlapClearsContextForMemory() {
+        ActiveTaskContext saved = readmeProposal();
+        String userRequest = "Read README.md and config.json.";
+        TaskContract rawContract = TaskContractResolver.fromUserRequest(userRequest);
+
+        ActiveTaskContextPolicy.Decision decision = ActiveTaskContextPolicy.evaluate(
+                userRequest,
+                rawContract,
+                saved,
+                ArtifactGoal.fromActiveContext(saved),
+                3);
+
+        assertFalse(decision.consumed());
+        assertEquals(ActiveTaskContext.State.CLEARED, decision.planContext().state());
+        assertEquals(ActiveTaskContext.none(), decision.memoryContext());
+        assertEquals(Set.of("README.md", "config.json"), decision.taskContract().expectedTargets());
     }
 
     @Test void expiredContextIsMarkedExpiredAndCleared() {
