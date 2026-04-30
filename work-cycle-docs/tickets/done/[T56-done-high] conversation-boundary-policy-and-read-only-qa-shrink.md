@@ -1,6 +1,6 @@
-# [T56-open-high] ConversationBoundaryPolicy And READ_ONLY_QA Shrink
+# [T56-done-high] ConversationBoundaryPolicy And READ_ONLY_QA Shrink
 
-Status: open
+Status: done
 Priority: high
 
 ## Evidence Summary
