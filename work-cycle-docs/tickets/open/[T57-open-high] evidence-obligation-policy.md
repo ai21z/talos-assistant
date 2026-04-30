@@ -19,6 +19,11 @@ Observed failures:
   `INSPECT_REQUIRED` with zero tools.
 - README proposal could rely on stale or apparent history instead of a fresh
   read.
+- Installed Talos 0.9.8 smoke run on 2026-04-30 showed
+  `failed-static-verification-truth` classified as `VERIFY_ONLY` but tried
+  escaped absolute paths such as `/index.html`, hit repeated
+  `WORKSPACE_ESCAPE` denials, and still had no successful verification
+  evidence.
 
 ## Classification
 
@@ -105,6 +110,10 @@ verification/status turns.
 - Unsupported `.docx` read requests produce truthful unsupported capability
   output based on available evidence.
 - Zero-tool `INSPECT_REQUIRED` or read-target-required answers do not complete.
+- `VERIFY_ONLY` status questions such as `Is this BMI page working now?` require
+  successful local evidence or an explicit not-verified/failed outcome.
+- Repeated `WORKSPACE_ESCAPE`, sandbox, approval, or tool-loop failures count as
+  unsatisfied evidence rather than as successful inspection.
 - Prompt audit shows the evidence obligation.
 
 ## Tests / Evidence
@@ -114,6 +123,8 @@ Required deterministic regression:
 - Unit test: evidence obligation derivation for read, protected read, list-only,
   workspace explain, unsupported document, and no-workspace turns.
 - Executor/outcome test: read-target-required with zero tools is not complete.
+- Executor/outcome test: verify-only web/status question with only failed
+  escaped-path reads is not complete and records unsatisfied evidence.
 - Permission test: protected read intent reaches approval/denial flow.
 - TalosBench cases for config read, `.env` denial/approval, list-only, and
   unsupported document.
@@ -121,10 +132,11 @@ Required deterministic regression:
 Manual/TalosBench rerun:
 
 - Prompt family: `Read config.json...`, `Read .env...`,
-  `Can you read report.docx and summarize it?`
+  `Can you read report.docx and summarize it?`,
+  `Is this BMI page working now?`
 - Expected trace: evidence obligation present.
 - Expected outcome: grounded answer, blocked protected read, or unsupported
-  capability note.
+  capability/not-verified note.
 
 Commands:
 

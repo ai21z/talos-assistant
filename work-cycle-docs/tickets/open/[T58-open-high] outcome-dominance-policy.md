@@ -18,6 +18,12 @@ Observed failures:
 - `INSPECT_REQUIRED` with zero tools could complete.
 - Protected read denial and failed obligations need one central final-status
   precedence model.
+- Installed Talos 0.9.8 smoke run on 2026-04-30 showed
+  `failed-static-verification-truth` ending with `COMPLETE (READ_ONLY_ANSWERED)`
+  after repeated `WORKSPACE_ESCAPE` denials and failure-policy stop.
+- The same smoke run showed `mutation-create-bmi` with `Last Turn` outcome
+  `MUTATION_APPLIED` while `Local Trace` outcome was `FAILED (FAILED)` after
+  static verification failed.
 
 ## Classification
 
@@ -88,6 +94,8 @@ always dominate completion labels, final annotations, task outcomes, and trace.
   - read-only task attempted mutation;
   - missing mutating tool under `MUTATING_TOOL_REQUIRED`;
   - missing evidence under evidence obligation;
+  - workspace/scope/sandbox denials such as `WORKSPACE_ESCAPE`;
+  - repeated tool failure or failure-policy stop;
   - partial mutation;
   - exact expectation failure;
   - static verifier failure;
@@ -100,6 +108,10 @@ always dominate completion labels, final annotations, task outcomes, and trace.
 - Failed evidence obligation cannot render as complete.
 - Exact content verification failure dominates write/readback success.
 - Protected read denial dominates model prose and does not leak content.
+- Workspace escape, sandbox denial, approval denial, and failure-policy stop
+  dominate model prose and cannot render as completed inspection.
+- Static verifier failure dominates mutation-applied labels in every visible
+  outcome surface.
 - Partial mutation remains partial even if answer claims success.
 - Trace outcome, task outcome, and final answer annotation agree.
 - No regressions to existing denied mutation, invalid mutation, partial mutation,
@@ -114,13 +126,18 @@ Required deterministic regression:
   answered.
 - Outcome test: missing evidence is advisory/failed according to T57 decision,
   not complete.
+- Outcome test: failed verify-only run with only `WORKSPACE_ESCAPE` tool results
+  is failed/not verified, not `READ_ONLY_ANSWERED`.
+- Outcome test: static verifier failure cannot leave `Last Turn` as
+  `MUTATION_APPLIED` while `Local Trace` says `FAILED`.
 - Outcome test: exact literal mismatch after retry fails.
 - Trace test: outcome fields match final status.
 
 Manual/TalosBench rerun:
 
 - Prompt family: failed no-tool mutation, protected read denial, exact literal
-  mismatch, unsupported document read.
+  mismatch, unsupported document read, failed static verification truth,
+  natural BMI creation with verifier failure.
 - Expected trace: strongest unmet obligation appears in warning/outcome.
 - Expected outcome: no contradictory complete label.
 
