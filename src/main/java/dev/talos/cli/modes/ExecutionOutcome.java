@@ -123,7 +123,7 @@ record ExecutionOutcome(
         current = shaped;
 
         shaped = AssistantTurnExecutor.summarizeDeniedMutationOutcomesIfNeeded(
-                current, messages, loopResult, extraMutationSuccesses);
+                current, safePlan, messages, loopResult, extraMutationSuccesses);
         boolean deniedMutation = readOnlyDeniedMutation || !Objects.equals(current, shaped);
         current = shaped;
 
@@ -133,7 +133,7 @@ record ExecutionOutcome(
         current = shaped;
 
         shaped = AssistantTurnExecutor.summarizeInvalidMutationOutcomesIfNeeded(
-                current, messages, loopResult, extraMutationSuccesses);
+                current, safePlan, messages, loopResult, extraMutationSuccesses);
         boolean invalidMutation = !Objects.equals(current, shaped);
         current = shaped;
 

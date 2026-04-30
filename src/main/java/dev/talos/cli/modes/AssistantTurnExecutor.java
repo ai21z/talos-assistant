@@ -1433,10 +1433,19 @@ public final class AssistantTurnExecutor {
                                                           List<ChatMessage> messages,
                                                           ToolCallLoop.LoopResult loopResult,
                                                           int extraMutationSuccesses) {
+        return summarizeDeniedMutationOutcomesIfNeeded(
+                answer, safePlanFromMessages(null, messages, null), messages, loopResult, extraMutationSuccesses);
+    }
+
+    static String summarizeDeniedMutationOutcomesIfNeeded(String answer,
+                                                          CurrentTurnPlan plan,
+                                                          List<ChatMessage> messages,
+                                                          ToolCallLoop.LoopResult loopResult,
+                                                          int extraMutationSuccesses) {
         if (loopResult == null) return answer;
         if (extraMutationSuccesses > 0) return answer;
         if (loopResult.mutatingToolSuccesses() > 0) return answer;
-        if (!looksLikeMutationRequest(latestUserRequest(messages))) return answer;
+        if (!planRequestsMutation(plan, messages)) return answer;
 
         List<ToolCallLoop.ToolOutcome> outcomes = loopResult.toolOutcomes();
         if (outcomes == null || outcomes.isEmpty()) return answer;
@@ -1493,6 +1502,13 @@ public final class AssistantTurnExecutor {
         }
         out.append("\nTalos can still help in a later turn if you want to retry the edit or take a read-only approach.");
         return out.toString().stripTrailing();
+    }
+
+    private static boolean planRequestsMutation(CurrentTurnPlan plan, List<ChatMessage> messages) {
+        CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, null);
+        TaskContract contract = safePlan.taskContract();
+        return contract.mutationRequested()
+                || looksLikeMutationRequest(safePlan.originalUserRequest());
     }
 
     private static String deniedMutationAnnotation(List<ToolCallLoop.ToolOutcome> policyDeniedMutations,
@@ -1615,10 +1631,19 @@ public final class AssistantTurnExecutor {
                                                            List<ChatMessage> messages,
                                                            ToolCallLoop.LoopResult loopResult,
                                                            int extraMutationSuccesses) {
+        return summarizeInvalidMutationOutcomesIfNeeded(
+                answer, safePlanFromMessages(null, messages, null), messages, loopResult, extraMutationSuccesses);
+    }
+
+    static String summarizeInvalidMutationOutcomesIfNeeded(String answer,
+                                                           CurrentTurnPlan plan,
+                                                           List<ChatMessage> messages,
+                                                           ToolCallLoop.LoopResult loopResult,
+                                                           int extraMutationSuccesses) {
         if (loopResult == null) return answer;
         if (extraMutationSuccesses > 0) return answer;
         if (loopResult.mutatingToolSuccesses() > 0) return answer;
-        if (!looksLikeMutationRequest(latestUserRequest(messages))) return answer;
+        if (!planRequestsMutation(plan, messages)) return answer;
 
         List<ToolCallLoop.ToolOutcome> outcomes = loopResult.toolOutcomes();
         if (outcomes == null || outcomes.isEmpty()) return answer;
@@ -1779,7 +1804,7 @@ public final class AssistantTurnExecutor {
                 String summary = retryLoop.summary();
                 if (hasDeniedMutation(retryLoop)) {
                     mergedAnswer = summarizeDeniedMutationOutcomesIfNeeded(
-                            mergedAnswer, messages, retryLoop, 0);
+                            mergedAnswer, safePlan, messages, retryLoop, 0);
                 }
                 if (retryLoop.mutatingToolSuccesses() > 0) {
                     LOG.info("Missing-mutation retry succeeded: {} mutation(s) performed.",

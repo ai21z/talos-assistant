@@ -183,6 +183,81 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void planContractKeepsDeniedMutationClassificationAfterRetryMessagesAppend() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Edit index.html to add the CTA button."));
+
+        var plan = dev.talos.runtime.turn.CurrentTurnPlan.create(
+                dev.talos.runtime.task.TaskContractResolver.fromMessages(messages),
+                dev.talos.runtime.phase.ExecutionPhase.APPLY,
+                List.of("talos.edit_file"),
+                List.of("talos.edit_file"),
+                List.of());
+
+        messages.add(ChatMessage.assistant("I can help with that."));
+        messages.add(ChatMessage.user(
+                "The current-turn obligation was not satisfied. Call the write tool now."));
+
+        var loopResult = new ToolCallLoop.LoopResult(
+                "manual replacement prose", 1, 1,
+                List.of("talos.edit_file"), List.of(),
+                1, 0, false, 0, List.of(),
+                0, 0, 0, 0,
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.edit_file", "index.html", false, true, true,
+                        "", "User did not approve the talos.edit_file call.",
+                        null, ToolError.DENIED
+                )));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                "manual replacement prose", plan, messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.BLOCKED, outcome.completionStatus());
+        assertTrue(outcome.deniedMutation());
+        assertTrue(outcome.finalAnswer().startsWith(AssistantTurnExecutor.DENIED_MUTATION_ANNOTATION),
+                outcome.finalAnswer());
+        assertEquals(TaskCompletionStatus.BLOCKED_BY_APPROVAL, outcome.taskOutcome().completionStatus());
+    }
+
+    @Test
+    void planContractKeepsInvalidMutationClassificationAfterRetryMessagesAppend() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Edit index.html to add the CTA button."));
+
+        var plan = dev.talos.runtime.turn.CurrentTurnPlan.create(
+                dev.talos.runtime.task.TaskContractResolver.fromMessages(messages),
+                dev.talos.runtime.phase.ExecutionPhase.APPLY,
+                List.of("talos.edit_file"),
+                List.of("talos.edit_file"),
+                List.of());
+
+        messages.add(ChatMessage.assistant("I can help with that."));
+        messages.add(ChatMessage.user(
+                "The current-turn obligation was not satisfied. Call the write tool now."));
+
+        var loopResult = new ToolCallLoop.LoopResult(
+                "I updated index.html.", 1, 1,
+                List.of("talos.edit_file"), List.of(),
+                1, 0, false, 0, List.of(),
+                0, 0, 0, 0,
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.edit_file", "index.html", false, true, false,
+                        "", "Invalid talos.edit_file call: `old_string` must be present and non-empty.",
+                        null, ToolError.INVALID_PARAMS
+                )));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                "I updated index.html.", plan, messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.FAILED, outcome.completionStatus());
+        assertTrue(outcome.invalidMutation());
+        assertTrue(outcome.finalAnswer().startsWith(AssistantTurnExecutor.INVALID_MUTATION_ANNOTATION),
+                outcome.finalAnswer());
+    }
+
+    @Test
     void unsupportedDocumentReadRemovesEmptyContentClaims() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));
