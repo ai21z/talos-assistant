@@ -19,7 +19,9 @@ public final class CurrentTurnCapabilityFrame {
                 plan.taskContract(),
                 plan.phaseInitial(),
                 plan.nativeTools(),
-                EvidenceObligationPolicy.parse(plan.evidenceObligation()));
+                EvidenceObligationPolicy.parse(plan.evidenceObligation()),
+                plan.activeTaskContext(),
+                plan.artifactGoal());
     }
 
     public static String render(TaskContract contract, ExecutionPhase phase, List<String> visibleTools) {
@@ -30,14 +32,18 @@ public final class CurrentTurnCapabilityFrame {
                 EvidenceObligationPolicy.derive(
                         contract,
                         phase,
-                        java.nio.file.Path.of("").toAbsolutePath()));
+                        java.nio.file.Path.of("").toAbsolutePath()),
+                CurrentTurnPlan.NONE_OR_NOT_DERIVED,
+                CurrentTurnPlan.NONE_OR_NOT_DERIVED);
     }
 
     private static String render(
             TaskContract contract,
             ExecutionPhase phase,
             List<String> visibleTools,
-            EvidenceObligation evidenceObligation
+            EvidenceObligation evidenceObligation,
+            String activeTaskContext,
+            String artifactGoal
     ) {
         TaskType type = contract == null || contract.type() == null ? TaskType.UNKNOWN : contract.type();
         ExecutionPhase safePhase = phase == null ? ExecutionPhase.INSPECT : phase;
@@ -61,6 +67,7 @@ public final class CurrentTurnCapabilityFrame {
                 .append("visibleTools: ").append(tools).append('\n')
                 .append("obligation: ").append(obligation.name()).append('\n')
                 .append("evidenceObligation: ").append(evidence.name()).append('\n');
+        appendActiveTaskContext(frame, activeTaskContext, artifactGoal);
 
         switch (obligation) {
             case MUTATING_TOOL_REQUIRED -> frame.append("""
@@ -97,6 +104,35 @@ public final class CurrentTurnCapabilityFrame {
         }
         frame.append('\n').append(evidenceGuidance(evidence));
         return frame.toString();
+    }
+
+    private static void appendActiveTaskContext(
+            StringBuilder frame,
+            String activeTaskContext,
+            String artifactGoal
+    ) {
+        boolean hasActiveTaskContext = isDerived(activeTaskContext);
+        boolean hasArtifactGoal = isDerived(artifactGoal);
+        if (!hasActiveTaskContext && !hasArtifactGoal) {
+            return;
+        }
+        frame.append("[ActiveTaskContext]\n")
+                .append("activeTaskContext: ")
+                .append(hasActiveTaskContext ? activeTaskContext : CurrentTurnPlan.NONE_OR_NOT_DERIVED)
+                .append('\n')
+                .append("artifactGoal: ")
+                .append(hasArtifactGoal ? artifactGoal : CurrentTurnPlan.NONE_OR_NOT_DERIVED)
+                .append('\n')
+                .append("Active context is a current-turn hint only.\n")
+                .append("Explicit current user instructions win over active context.\n")
+                .append("Use active targets only for narrow deictic follow-ups.\n")
+                .append("Do not broaden to unrelated workspace files because context is present.\n");
+    }
+
+    private static boolean isDerived(String value) {
+        return value != null
+                && !value.isBlank()
+                && !CurrentTurnPlan.NONE_OR_NOT_DERIVED.equals(value);
     }
 
     private static String evidenceGuidance(EvidenceObligation evidence) {
