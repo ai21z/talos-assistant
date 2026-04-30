@@ -166,6 +166,33 @@ class SessionMemoryTest {
         assertEquals(ArtifactGoal.ArtifactKind.UNKNOWN, mem.artifactGoal().artifactKind());
     }
 
+    @Test void clearActiveTaskContextResetsContextAndGoal() {
+        var mem = new SessionMemory();
+        ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+                5,
+                "trace-active",
+                List.of("README.md"),
+                "update README");
+        mem.setActiveTaskContext(context);
+        mem.setArtifactGoal(ArtifactGoal.fromActiveContext(context));
+
+        mem.clearActiveTaskContext();
+
+        assertEquals(ActiveTaskContext.State.NONE, mem.activeTaskContext().state());
+        assertEquals(ArtifactGoal.ArtifactKind.UNKNOWN, mem.artifactGoal().artifactKind());
+    }
+
+    @Test void nullSettersNormalizeToNoneAndUnknown() {
+        var mem = new SessionMemory();
+
+        mem.setActiveTaskContext(null);
+        mem.setArtifactGoal(null);
+
+        assertEquals(ActiveTaskContext.State.NONE, mem.activeTaskContext().state());
+        assertEquals(ArtifactGoal.ArtifactKind.UNKNOWN, mem.artifactGoal().artifactKind());
+        assertEquals(ActiveTaskContext.Operation.NONE, mem.artifactGoal().operation());
+    }
+
     @Test void getTurns_prunes_oldest_when_exceeding_max() {
         var mem = new SessionMemory();
         // MAX_TURNS is 200 — fill beyond that (110 pairs = 220 messages)
