@@ -150,12 +150,14 @@ public final class AssistantTurnExecutor {
         ActiveTaskContextPolicy.Decision activeDecision = activeTaskContextDecision(
                 latestUserRequest(messages), rawTaskContract, ctx);
         TaskContract taskContract = activeDecision.taskContract();
+        boolean activeDecisionUpdatesTurnSurface =
+                activeDecisionUpdatesTurnSurface(rawTaskContract, activeDecision);
         applyActiveTaskMemoryDecision(activeDecision, ctx);
         initializeExecutionPhaseForTurn(taskContract, ctx);
-        ctx = withNativeToolSurface(ctx, taskContract);
+        ctx = withNativeToolSurface(ctx, taskContract, activeDecisionUpdatesTurnSurface);
         CurrentTurnPlan currentTurnPlan = buildCurrentTurnPlan(taskContract, ctx, activeDecision);
         recordPolicyTrace(currentTurnPlan, ctx);
-        injectTaskContractInstruction(messages, currentTurnPlan);
+        injectTaskContractInstruction(messages, currentTurnPlan, activeDecisionUpdatesTurnSurface);
         injectStaticVerificationRepairInstruction(messages, currentTurnPlan.taskContract());
         PromptAuditSnapshot promptAudit = recordPromptAudit(currentTurnPlan, messages);
         emitPromptAuditIfEnabled(promptAudit, ctx);
@@ -539,7 +541,11 @@ public final class AssistantTurnExecutor {
     }
 
     private static Context withNativeToolSurface(Context ctx, TaskContract contract) {
-        if (ctx == null || ctx.hasNativeToolSpecOverride()) return ctx;
+        return withNativeToolSurface(ctx, contract, false);
+    }
+
+    private static Context withNativeToolSurface(Context ctx, TaskContract contract, boolean forceRecompute) {
+        if (ctx == null || (ctx.hasNativeToolSpecOverride() && !forceRecompute)) return ctx;
         ExecutionPhase phase = ctx.executionPhaseState() == null
                 ? ExecutionPhase.APPLY
                 : ctx.executionPhaseState().phase();
@@ -596,6 +602,16 @@ public final class AssistantTurnExecutor {
                 currentUserTurnNumber(ctx));
     }
 
+    private static boolean activeDecisionUpdatesTurnSurface(
+            TaskContract rawTaskContract,
+            ActiveTaskContextPolicy.Decision decision
+    ) {
+        if (decision == null) return false;
+        if (!Objects.equals(rawTaskContract, decision.taskContract())) return true;
+        ActiveTaskContext planContext = decision.planContext();
+        return planContext != null && planContext.hasPromptContext();
+    }
+
     private static int currentUserTurnNumber(Context ctx) {
         if (ctx == null || ctx.memory() == null) return 1;
         int completedUserTurns = 0;
@@ -612,12 +628,20 @@ public final class AssistantTurnExecutor {
             Context ctx
     ) {
         if (decision == null || ctx == null || ctx.memory() == null) return;
+        ActiveTaskContext planContext = decision.planContext();
+        if (planContext != null && planContext.state() == ActiveTaskContext.State.SUPPRESSED) {
+            return;
+        }
         ActiveTaskContext memoryContext = decision.memoryContext();
         if (memoryContext == null || memoryContext.state() == ActiveTaskContext.State.NONE) {
             ctx.memory().clearActiveTaskContext();
             return;
         }
-        if (memoryContext.state() != ActiveTaskContext.State.SUPPRESSED) {
+        boolean derivedActiveUpdate = planContext != null
+                && planContext.state() == ActiveTaskContext.State.ACTIVE
+                && memoryContext.state() == ActiveTaskContext.State.ACTIVE
+                && decision.artifactGoal().source() != ArtifactGoal.Source.NONE;
+        if (derivedActiveUpdate) {
             ctx.memory().setActiveTaskContext(memoryContext);
             ctx.memory().setArtifactGoal(decision.artifactGoal());
         }
@@ -789,8 +813,20 @@ public final class AssistantTurnExecutor {
     }
 
     public static void injectTaskContractInstruction(List<ChatMessage> messages, CurrentTurnPlan plan) {
+        injectTaskContractInstruction(messages, plan, false);
+    }
+
+    private static void injectTaskContractInstruction(
+            List<ChatMessage> messages,
+            CurrentTurnPlan plan,
+            boolean replaceExisting
+    ) {
         if (messages == null || messages.isEmpty()) return;
-        if (messages.stream().anyMatch(AssistantTurnExecutor::isTaskContractInstruction)) return;
+        if (replaceExisting) {
+            messages.removeIf(AssistantTurnExecutor::isTaskContractInstruction);
+        } else if (messages.stream().anyMatch(AssistantTurnExecutor::isTaskContractInstruction)) {
+            return;
+        }
 
         if (plan == null) {
             injectTaskContractInstruction(messages);
@@ -798,7 +834,7 @@ public final class AssistantTurnExecutor {
         }
 
         String instruction = CurrentTurnCapabilityFrame.render(plan);
-        injectTaskContractInstruction(messages, instruction);
+        injectTaskContractInstruction(messages, instruction, replaceExisting);
     }
 
     public static void injectTaskContractInstruction(
@@ -819,8 +855,20 @@ public final class AssistantTurnExecutor {
             List<ChatMessage> messages,
             String instruction
     ) {
+        injectTaskContractInstruction(messages, instruction, false);
+    }
+
+    private static void injectTaskContractInstruction(
+            List<ChatMessage> messages,
+            String instruction,
+            boolean replaceExisting
+    ) {
         if (messages == null || messages.isEmpty()) return;
-        if (messages.stream().anyMatch(AssistantTurnExecutor::isTaskContractInstruction)) return;
+        if (replaceExisting) {
+            messages.removeIf(AssistantTurnExecutor::isTaskContractInstruction);
+        } else if (messages.stream().anyMatch(AssistantTurnExecutor::isTaskContractInstruction)) {
+            return;
+        }
 
         int insertAt = messages.size();
         for (int i = messages.size() - 1; i >= 0; i--) {
