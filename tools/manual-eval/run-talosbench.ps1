@@ -137,6 +137,7 @@ function Get-TraceFacts {
         Repair = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Repair:\s+(.+)$"
         PromptAuditTaskType = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*taskType:\s+([A-Z_]+).*$"
         PromptAuditActionObligation = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*actionObligation:\s+(.+)$"
+        PromptAuditEvidenceObligation = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*evidenceObligation:\s+(.+)$"
         PromptAuditCurrentTurnFrame = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*currentTurnFrame:\s+(.+)$"
         PromptAuditHistory = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*history:\s+(.+)$"
         PromptAuditRedaction = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*redaction:\s+(.+)$"
@@ -217,6 +218,11 @@ function Test-TraceAssertions {
     foreach ($item in Get-AssertionArray -Assertions $Assertions -Name "promptAuditActionObligationContains") {
         if ($facts.PromptAuditActionObligation.IndexOf([string]$item, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
             $failures += "prompt audit actionObligation missing '$item'"
+        }
+    }
+    foreach ($item in Get-AssertionArray -Assertions $Assertions -Name "promptAuditEvidenceObligationContains") {
+        if ($facts.PromptAuditEvidenceObligation.IndexOf([string]$item, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+            $failures += "prompt audit evidenceObligation missing '$item'"
         }
     }
     foreach ($item in Get-AssertionArray -Assertions $Assertions -Name "promptAuditCurrentTurnFrameContains") {
@@ -399,6 +405,7 @@ if ($ValidateOnly) {
                 "repairContains",
                 "promptAuditTaskType",
                 "promptAuditActionObligationContains",
+                "promptAuditEvidenceObligationContains",
                 "promptAuditCurrentTurnFrameContains",
                 "promptAuditHistoryContains",
                 "promptAuditRedactionContains",

@@ -5,8 +5,10 @@ import dev.talos.runtime.expectation.TaskExpectationResolver;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.ActionObligation;
 import dev.talos.runtime.policy.ActionObligationPolicy;
+import dev.talos.runtime.policy.EvidenceObligationPolicy;
 import dev.talos.runtime.task.TaskContract;
 
+import java.nio.file.Path;
 import java.util.List;
 
 /** Immutable runtime-owned current-turn facts captured before retries can drift. */
@@ -71,7 +73,7 @@ public record CurrentTurnPlan(
                 nativeTools,
                 promptTools,
                 blockedTools,
-                NONE_OR_NOT_DERIVED,
+                EvidenceObligationPolicy.derive(safeContract, phase, Path.of("").toAbsolutePath()).name(),
                 NOT_DERIVED,
                 NONE_OR_NOT_DERIVED,
                 NONE_OR_NOT_DERIVED,

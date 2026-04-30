@@ -18,9 +18,10 @@ import java.util.regex.Pattern;
 public final class TaskContractResolver {
 
     private static final Pattern TARGET_FILE = Pattern.compile(
-            "(?i)(?<![A-Za-z0-9_./\\\\-])([A-Za-z0-9_.\\\\/-]+\\."
+            "(?i)(?<![A-Za-z0-9_./\\\\-])((?:[A-Za-z0-9_.\\\\/-]+\\."
                     + "(?:html|htm|css|js|jsx|ts|tsx|java|md|txt|json|yaml|yml|xml|"
-                    + "properties|gradle|kts|toml|ini|env|csv))"
+                    + "properties|gradle|kts|toml|ini|env|csv|pdf|doc|docx|xls|xlsx|ppt|pptx)"
+                    + ")|(?:(?:[A-Za-z0-9_.\\\\/-]+/)?\\.env(?:\\.[A-Za-z0-9_.-]+)?))"
                     + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
 
     private static final Pattern NEGATED_TARGET_SPAN = Pattern.compile(

@@ -130,7 +130,7 @@ class PromptAuditSnapshotTest {
         assertEquals("APPLY", snapshot.phaseInitial());
         assertEquals("APPLY", snapshot.phaseFinal());
         assertEquals("MUTATING_TOOL_REQUIRED", snapshot.actionObligation());
-        assertEquals(PromptAuditSnapshot.NONE_OR_NOT_DERIVED, snapshot.evidenceObligation());
+        assertEquals("NONE", snapshot.evidenceObligation());
         assertEquals(PromptAuditSnapshot.NOT_DERIVED, snapshot.outputObligation());
         assertEquals(PromptAuditSnapshot.NONE_OR_NOT_DERIVED, snapshot.activeTaskContext());
         assertEquals(PromptAuditSnapshot.NONE_OR_NOT_DERIVED, snapshot.artifactGoal());
@@ -138,6 +138,30 @@ class PromptAuditSnapshotTest {
         assertEquals(List.of("talos.read_file", "talos.write_file"), snapshot.nativeTools());
         assertEquals(List.of("talos.read_file", "talos.write_file"), snapshot.promptTools());
         assertEquals(List.of("talos.shell"), snapshot.blockedTools());
+    }
+
+    @Test
+    void renderCompactIncludesDerivedReadTargetEvidenceObligation() {
+        List<ChatMessage> messages = List.of(
+                ChatMessage.system("system"),
+                ChatMessage.user("Read README.md and summarize it."));
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                new TaskContract(
+                        TaskType.READ_ONLY_QA,
+                        false,
+                        false,
+                        false,
+                        Set.of("README.md"),
+                        Set.of(),
+                        "Read README.md and summarize it."),
+                ExecutionPhase.INSPECT,
+                List.of("talos.read_file"),
+                List.of("talos.read_file"),
+                List.of());
+
+        PromptAuditSnapshot snapshot = PromptAuditSnapshot.fromPlan(plan, messages);
+
+        assertTrue(snapshot.renderCompact().contains("evidenceObligation: READ_TARGET_REQUIRED"));
     }
 
     @Test
