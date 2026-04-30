@@ -781,6 +781,28 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void nullPlanInstructionFallbackKeepsDefaultMutationTools() {
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Create README.md."));
+
+            AssistantTurnExecutor.injectTaskContractInstruction(messages, (CurrentTurnPlan) null);
+
+            String frame = messages.stream()
+                    .filter(message -> "system".equals(message.role()))
+                    .map(ChatMessage::content)
+                    .filter(content -> content.startsWith("[CurrentTurnCapability]"))
+                    .findFirst()
+                    .orElseThrow();
+
+            assertTrue(frame.contains("type: FILE_CREATE"));
+            assertTrue(frame.contains("obligation: MUTATING_TOOL_REQUIRED"));
+            assertTrue(frame.contains("visibleTools: talos.edit_file"));
+            assertTrue(frame.contains("talos.write_file"));
+            assertTrue(frame.contains("talos.edit_file"));
+        }
+
+        @Test
         void injectTaskContractInstructionUsesPlanAfterMessagesDrift() {
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));

@@ -708,15 +708,12 @@ public final class AssistantTurnExecutor {
         if (messages == null || messages.isEmpty()) return;
         if (messages.stream().anyMatch(AssistantTurnExecutor::isTaskContractInstruction)) return;
 
-        CurrentTurnPlan safePlan = plan == null
-                ? CurrentTurnPlan.compatibility(
-                        TaskContractResolver.fromMessages(messages),
-                        null,
-                        List.of(),
-                        List.of(),
-                        List.of())
-                : plan;
-        String instruction = CurrentTurnCapabilityFrame.render(safePlan);
+        if (plan == null) {
+            injectTaskContractInstruction(messages);
+            return;
+        }
+
+        String instruction = CurrentTurnCapabilityFrame.render(plan);
         injectTaskContractInstruction(messages, instruction);
     }
 
