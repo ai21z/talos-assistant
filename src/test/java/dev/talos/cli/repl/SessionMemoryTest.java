@@ -1,5 +1,7 @@
 package dev.talos.cli.repl;
 
+import dev.talos.runtime.context.ActiveTaskContext;
+import dev.talos.runtime.context.ArtifactGoal;
 import dev.talos.spi.types.ChatMessage;
 import org.junit.jupiter.api.Test;
 
@@ -124,6 +126,44 @@ class SessionMemoryTest {
         assertFalse(mem.getTurns().isEmpty());
         mem.clear();
         assertTrue(mem.getTurns().isEmpty(), "Structured turns should be cleared");
+    }
+
+    @Test void activeTaskContextDefaultsToNoneAndCanBeReplaced() {
+        var mem = new SessionMemory();
+        ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+                5,
+                "trace-active",
+                List.of("README.md"),
+                "update README");
+        ArtifactGoal goal = ArtifactGoal.fromActiveContext(context);
+
+        assertEquals(ActiveTaskContext.State.NONE, mem.activeTaskContext().state());
+        assertEquals(ArtifactGoal.ArtifactKind.UNKNOWN, mem.artifactGoal().artifactKind());
+
+        mem.setActiveTaskContext(context);
+        mem.setArtifactGoal(goal);
+
+        assertSame(context, mem.activeTaskContext());
+        assertSame(goal, mem.artifactGoal());
+    }
+
+    @Test void clearResetsActiveTaskContextAndArtifactGoal() {
+        var mem = new SessionMemory();
+        ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+                5,
+                "trace-active",
+                List.of("README.md"),
+                "update README");
+        mem.update("q", "a");
+        mem.setActiveTaskContext(context);
+        mem.setArtifactGoal(ArtifactGoal.fromActiveContext(context));
+
+        mem.clear();
+
+        assertNull(mem.get());
+        assertTrue(mem.getTurns().isEmpty());
+        assertEquals(ActiveTaskContext.State.NONE, mem.activeTaskContext().state());
+        assertEquals(ArtifactGoal.ArtifactKind.UNKNOWN, mem.artifactGoal().artifactKind());
     }
 
     @Test void getTurns_prunes_oldest_when_exceeding_max() {
