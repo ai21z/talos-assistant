@@ -3,6 +3,7 @@ package dev.talos.runtime.policy;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
+import dev.talos.runtime.turn.CurrentTurnPlan;
 
 import java.util.List;
 
@@ -10,10 +11,40 @@ import java.util.List;
 public final class CurrentTurnCapabilityFrame {
     private CurrentTurnCapabilityFrame() {}
 
+    public static String render(CurrentTurnPlan plan) {
+        if (plan == null) {
+            return render(null, ExecutionPhase.INSPECT, List.of());
+        }
+        return render(
+                plan.taskContract(),
+                plan.phaseInitial(),
+                plan.nativeTools(),
+                EvidenceObligationPolicy.parse(plan.evidenceObligation()));
+    }
+
     public static String render(TaskContract contract, ExecutionPhase phase, List<String> visibleTools) {
+        return render(
+                contract,
+                phase,
+                visibleTools,
+                EvidenceObligationPolicy.derive(
+                        contract,
+                        phase,
+                        java.nio.file.Path.of("").toAbsolutePath()));
+    }
+
+    private static String render(
+            TaskContract contract,
+            ExecutionPhase phase,
+            List<String> visibleTools,
+            EvidenceObligation evidenceObligation
+    ) {
         TaskType type = contract == null || contract.type() == null ? TaskType.UNKNOWN : contract.type();
         ExecutionPhase safePhase = phase == null ? ExecutionPhase.INSPECT : phase;
         ActionObligation obligation = ActionObligationPolicy.derive(contract, safePhase);
+        EvidenceObligation evidence = evidenceObligation == null
+                ? EvidenceObligation.NONE
+                : evidenceObligation;
         boolean mutationAllowed = contract != null && contract.mutationAllowed();
         boolean verificationRequired = contract != null && contract.verificationRequired();
         String tools = visibleTools == null || visibleTools.isEmpty()
@@ -28,7 +59,8 @@ public final class CurrentTurnCapabilityFrame {
                 .append("verificationRequired: ").append(verificationRequired).append('\n')
                 .append("phase: ").append(safePhase.name()).append('\n')
                 .append("visibleTools: ").append(tools).append('\n')
-                .append("obligation: ").append(obligation.name()).append('\n');
+                .append("obligation: ").append(obligation.name()).append('\n')
+                .append("evidenceObligation: ").append(evidence.name()).append('\n');
 
         switch (obligation) {
             case MUTATING_TOOL_REQUIRED -> frame.append("""
@@ -63,6 +95,24 @@ public final class CurrentTurnCapabilityFrame {
                     Follow the visible tool surface and task contract.
                     Do not claim unavailable workspace capabilities that the runtime has exposed.""");
         }
+        frame.append('\n').append(evidenceGuidance(evidence));
         return frame.toString();
+    }
+
+    private static String evidenceGuidance(EvidenceObligation evidence) {
+        return switch (evidence) {
+            case READ_TARGET_REQUIRED -> "Evidence: read the named target before answering.";
+            case PROTECTED_READ_APPROVAL_REQUIRED ->
+                    "Evidence: the named target is protected; obtain runtime approval before reading it.";
+            case LIST_DIRECTORY_ONLY ->
+                    "Evidence: list directory entries only; do not inspect file contents.";
+            case WORKSPACE_INSPECTION_REQUIRED ->
+                    "Evidence: inspect the workspace with read-only tools before answering.";
+            case VERIFY_FROM_TRACE_OR_EVIDENCE ->
+                    "Evidence: answer from prior trace/status evidence or fresh read-only verification.";
+            case UNSUPPORTED_CAPABILITY_CHECK_REQUIRED ->
+                    "Evidence: check and report unsupported document capability before relying on file contents.";
+            case NONE -> "Evidence: no additional evidence obligation is derived.";
+        };
     }
 }

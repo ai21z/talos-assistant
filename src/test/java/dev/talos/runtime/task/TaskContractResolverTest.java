@@ -192,6 +192,43 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void conversationBoundaryPromptsBecomeSmallTalkContracts() {
+        for (String input : List.of(
+                "Hello friend",
+                "how are you are you good?",
+                "perfect just as I want it!",
+                "debug /trace",
+                "last trace")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertEquals(TaskType.SMALL_TALK, contract.type(), input);
+            assertFalse(contract.mutationRequested(), input);
+            assertFalse(contract.mutationAllowed(), input);
+            assertFalse(contract.verificationRequired(), input);
+        }
+    }
+
+    @Test
+    void workspaceIntentBoundaryPromptsAreNotSmallTalkContracts() {
+        for (String input : List.of(
+                "Hello friend, read notes.md",
+                "how are you and can you inspect this repo?",
+                "perfect, now search my files for ALPHA-742",
+                "debug trace for this workspace",
+                "do not use the workspace, list the files here",
+                "just answer, no workspace, search my files for ALPHA-742",
+                "Do not read files, what is in the repo?",
+                "Do not read files, show me the files in the repo")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertFalse(contract.mutationRequested(), input);
+            assertFalse(contract.mutationAllowed(), input);
+            assertFalse(contract.verificationRequired(), input);
+            assertFalse(contract.type() == TaskType.SMALL_TALK, input);
+        }
+    }
+
+    @Test
     void assistantIdentityQuestionsBecomeSmallTalkContract() {
         for (String input : List.of(
                 "hello who are you?",
@@ -441,6 +478,19 @@ class TaskContractResolverTest {
                 "Update index.html and style.css, but leave script.js alone.");
 
         assertEquals(Set.of("index.html", "style.css", "script.js"), contract.expectedTargets());
+    }
+
+    @Test
+    void unsupportedDocumentTargetsAreExtractedWithoutMutationIntent() {
+        TaskContract docx = TaskContractResolver.fromUserRequest("Read report.docx and summarize it.");
+        TaskContract pdf = TaskContractResolver.fromUserRequest("Open report.pdf and tell me the title.");
+
+        assertEquals(Set.of("report.docx"), docx.expectedTargets());
+        assertFalse(docx.mutationRequested());
+        assertFalse(docx.mutationAllowed());
+        assertEquals(Set.of("report.pdf"), pdf.expectedTargets());
+        assertFalse(pdf.mutationRequested());
+        assertFalse(pdf.mutationAllowed());
     }
 
     @Test

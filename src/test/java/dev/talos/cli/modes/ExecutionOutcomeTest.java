@@ -4,6 +4,8 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.outcome.MutationOutcomeStatus;
 import dev.talos.runtime.outcome.TaskCompletionStatus;
 import dev.talos.runtime.outcome.TruthWarningType;
+import dev.talos.runtime.trace.LocalTurnTrace;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.verification.TaskVerificationStatus;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolError;
@@ -17,6 +19,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ExecutionOutcomeTest {
@@ -180,6 +183,81 @@ class ExecutionOutcomeTest {
         assertEquals(TaskCompletionStatus.FAILED, outcome.taskOutcome().completionStatus());
         assertEquals(MutationOutcomeStatus.FAILED, outcome.taskOutcome().mutationOutcome().status());
         assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.INVALID_MUTATION_ARGUMENTS));
+    }
+
+    @Test
+    void planContractKeepsDeniedMutationClassificationAfterRetryMessagesAppend() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Edit index.html to add the CTA button."));
+
+        var plan = dev.talos.runtime.turn.CurrentTurnPlan.create(
+                dev.talos.runtime.task.TaskContractResolver.fromMessages(messages),
+                dev.talos.runtime.phase.ExecutionPhase.APPLY,
+                List.of("talos.edit_file"),
+                List.of("talos.edit_file"),
+                List.of());
+
+        messages.add(ChatMessage.assistant("I can help with that."));
+        messages.add(ChatMessage.user(
+                "The current-turn obligation was not satisfied. Call the write tool now."));
+
+        var loopResult = new ToolCallLoop.LoopResult(
+                "manual replacement prose", 1, 1,
+                List.of("talos.edit_file"), List.of(),
+                1, 0, false, 0, List.of(),
+                0, 0, 0, 0,
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.edit_file", "index.html", false, true, true,
+                        "", "User did not approve the talos.edit_file call.",
+                        null, ToolError.DENIED
+                )));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                "manual replacement prose", plan, messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.BLOCKED, outcome.completionStatus());
+        assertTrue(outcome.deniedMutation());
+        assertTrue(outcome.finalAnswer().startsWith(AssistantTurnExecutor.DENIED_MUTATION_ANNOTATION),
+                outcome.finalAnswer());
+        assertEquals(TaskCompletionStatus.BLOCKED_BY_APPROVAL, outcome.taskOutcome().completionStatus());
+    }
+
+    @Test
+    void planContractKeepsInvalidMutationClassificationAfterRetryMessagesAppend() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Edit index.html to add the CTA button."));
+
+        var plan = dev.talos.runtime.turn.CurrentTurnPlan.create(
+                dev.talos.runtime.task.TaskContractResolver.fromMessages(messages),
+                dev.talos.runtime.phase.ExecutionPhase.APPLY,
+                List.of("talos.edit_file"),
+                List.of("talos.edit_file"),
+                List.of());
+
+        messages.add(ChatMessage.assistant("I can help with that."));
+        messages.add(ChatMessage.user(
+                "The current-turn obligation was not satisfied. Call the write tool now."));
+
+        var loopResult = new ToolCallLoop.LoopResult(
+                "I updated index.html.", 1, 1,
+                List.of("talos.edit_file"), List.of(),
+                1, 0, false, 0, List.of(),
+                0, 0, 0, 0,
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.edit_file", "index.html", false, true, false,
+                        "", "Invalid talos.edit_file call: `old_string` must be present and non-empty.",
+                        null, ToolError.INVALID_PARAMS
+                )));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                "I updated index.html.", plan, messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.FAILED, outcome.completionStatus());
+        assertTrue(outcome.invalidMutation());
+        assertTrue(outcome.finalAnswer().startsWith(AssistantTurnExecutor.INVALID_MUTATION_ANNOTATION),
+                outcome.finalAnswer());
     }
 
     @Test
@@ -801,6 +879,57 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void planContractKeepsExactLiteralVerificationAfterRetryMessagesAppend() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-plan-literal-drift-");
+        try {
+            Files.writeString(ws.resolve("index.html"), "WRONG");
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Overwrite index.html with exactly AFTER. Use talos.write_file."));
+
+            var plan = dev.talos.runtime.turn.CurrentTurnPlan.create(
+                    dev.talos.runtime.task.TaskContractResolver.fromMessages(messages),
+                    dev.talos.runtime.phase.ExecutionPhase.APPLY,
+                    List.of("talos.write_file"),
+                    List.of("talos.write_file"),
+                    List.of());
+
+            messages.add(ChatMessage.assistant("I can help with that."));
+            messages.add(ChatMessage.user(
+                    "The current-turn obligation was not satisfied. Call the write tool now."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Updated index.html.", 1, 1,
+                    List.of("talos.write_file"), List.of(),
+                    0, 0, false, 1, List.of(),
+                    0, 0, 0, 0,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.write_file", "index.html", true, true, false,
+                            "wrote index.html", "", dev.talos.tools.VerificationStatus.PASS
+                    )));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "Updated index.html.", plan, messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.FAILED, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.FAILED, outcome.verificationStatus());
+            assertTrue(outcome.finalAnswer().contains("Exact content verification failed"),
+                    outcome.finalAnswer());
+            assertEquals(List.of("index.html"),
+                    outcome.taskOutcome().contract().expectedTargets().stream().toList());
+            assertEquals(TaskVerificationStatus.FAILED,
+                    outcome.taskOutcome().verificationResult().status());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void literalMatchAfterSuccessfulWriteIsVerifiedComplete() throws Exception {
         Path ws = Files.createTempDirectory("talos-execution-outcome-literal-match-");
         try {
@@ -858,9 +987,12 @@ class ExecutionOutcomeTest {
         assertEquals(ExecutionOutcome.GroundingStatus.UNGROUNDED, outcome.groundingStatus());
         assertTrue(outcome.advisoryOnly());
         assertFalse(outcome.noToolMutationReplaced());
-        assertTrue(outcome.finalAnswer().startsWith(AssistantTurnExecutor.UNGROUNDED_ANNOTATION));
+        assertTrue(outcome.finalAnswer().startsWith(
+                "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"));
+        assertTrue(outcome.finalAnswer().contains(AssistantTurnExecutor.UNGROUNDED_ANNOTATION));
         assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
         assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.STREAMING_NO_TOOL_UNGROUNDED));
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
     }
 
     @Test
@@ -878,16 +1010,20 @@ class ExecutionOutcomeTest {
         assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
         assertEquals(ExecutionOutcome.GroundingStatus.UNGROUNDED, outcome.groundingStatus());
         assertTrue(outcome.advisoryOnly());
-        assertTrue(outcome.finalAnswer().startsWith("[Capability correction:"),
+        assertTrue(outcome.finalAnswer().startsWith(
+                        "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"),
+                outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains("[Capability correction:"),
                 outcome.finalAnswer());
         assertFalse(outcome.finalAnswer().contains("don't have direct access"));
         assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
         assertTrue(outcome.taskOutcome().hasWarning(
                 TruthWarningType.NO_TOOL_LOCAL_ACCESS_CAPABILITY_CORRECTED));
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
     }
 
     @Test
-    void streamingNoToolUnsupportedBinaryDocumentLimitationIsNotCorrected() {
+    void streamingNoToolUnsupportedBinaryDocumentLimitationIsAdvisoryWithoutCapabilityCorrection() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Summarize the documents in this workspace."));
@@ -896,8 +1032,11 @@ class ExecutionOutcomeTest {
 
         ExecutionOutcome outcome = ExecutionOutcome.fromNoTool(limitation, messages, null, true);
 
-        assertEquals(limitation, outcome.finalAnswer());
-        assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+        assertTrue(outcome.finalAnswer().startsWith(
+                "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"));
+        assertTrue(outcome.finalAnswer().contains(limitation));
+        assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
     }
 
     @Test
@@ -959,5 +1098,154 @@ class ExecutionOutcomeTest {
         assertEquals(TaskCompletionStatus.FAILED, outcome.taskOutcome().completionStatus());
         assertTrue(outcome.taskOutcome().hasWarning(
                 TruthWarningType.MALFORMED_TOOL_PROTOCOL_DEBRIS_REPLACED));
+    }
+
+    @Test
+    void noToolExplicitReadTargetIsAdvisoryWithMissingEvidenceWarning() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Read README.md and summarize it."));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromNoTool(
+                "README.md describes the project.", messages, null, true);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
+        assertTrue(outcome.finalAnswer().startsWith(
+                "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"));
+        assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+    }
+
+    @Test
+    void traceOutcomeClassificationMatchesDominantTaskOutcome() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Read README.md and summarize it."));
+
+        LocalTurnTraceCapture.begin(
+                "trc-test",
+                "sid",
+                1,
+                "2026-04-30T12:00:00Z",
+                "workspace-hash",
+                "auto",
+                "test",
+                "model",
+                "Read README.md and summarize it.");
+        try {
+            ExecutionOutcome outcome = ExecutionOutcome.fromNoTool(
+                    "README.md describes the project.", messages, null, true);
+
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+            assertNotNull(trace);
+            assertNotNull(trace.outcome());
+            assertEquals(outcome.completionStatus().name(), trace.outcome().status());
+            assertEquals(
+                    outcome.taskOutcome().completionStatus().name(),
+                    trace.outcome().classification());
+            assertEquals("ADVISORY_ONLY", trace.outcome().status());
+            assertEquals("ADVISORY_ONLY", trace.outcome().classification());
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void toolLoopReadTargetNotFoundCountsAsEvidenceAndReadOnlyAnswered() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Read README.md and summarize it."));
+
+        var loopResult = new ToolCallLoop.LoopResult(
+                "README.md was not found.", 1, 1,
+                List.of("talos.read_file"), List.of(),
+                1, 0, false, 0, List.of(),
+                0, 0, 0, 0,
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.read_file", "README.md", false, false, false,
+                        "", "README.md was not found.", null, ToolError.NOT_FOUND)));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                "README.md was not found.", messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+        assertEquals(TaskCompletionStatus.READ_ONLY_ANSWERED, outcome.taskOutcome().completionStatus());
+        assertFalse(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+        assertFalse(outcome.finalAnswer().startsWith("[Evidence incomplete:"));
+    }
+
+    @Test
+    void legacyLoopReadPathsCountAsReadTargetEvidence() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Read README.md and summarize it."));
+
+        var loopResult = new ToolCallLoop.LoopResult(
+                "README.md describes the project.", 1, 1,
+                List.of("talos.read_file"), List.of(),
+                0, 0, false, 0, List.of("README.md"),
+                0, 0, 0, 0);
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                "README.md describes the project.", messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+        assertEquals(TaskCompletionStatus.READ_ONLY_ANSWERED, outcome.taskOutcome().completionStatus());
+        assertFalse(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+        assertFalse(outcome.finalAnswer().startsWith("[Evidence incomplete:"));
+    }
+
+    @Test
+    void deniedProtectedReadDominatesMissingEvidenceAndSanitizesSecretProse() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Read .env and tell me what it says."));
+
+        var loopResult = new ToolCallLoop.LoopResult(
+                "The file says SECRET=original.", 1, 1,
+                List.of("talos.read_file"), List.of(),
+                1, 0, false, 0, List.of(),
+                0, 0, 0, 0,
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.read_file", ".env", false, false, true,
+                        "", "User did not approve the talos.read_file call.", null, ToolError.DENIED)));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                "The file says SECRET=original.", messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.BLOCKED, outcome.completionStatus());
+        assertEquals(TaskCompletionStatus.BLOCKED_BY_APPROVAL, outcome.taskOutcome().completionStatus());
+        assertFalse(outcome.finalAnswer().contains("SECRET=original"));
+        assertFalse(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.DENIED_PROTECTED_READ));
+    }
+
+    @Test
+    void listOnlyWithReadFileIsAdvisoryWithMissingEvidenceWarning() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("List the files in this directory."));
+
+        var loopResult = new ToolCallLoop.LoopResult(
+                "README.md contains project notes.", 1, 2,
+                List.of("talos.list_dir", "talos.read_file"), List.of(),
+                0, 0, false, 0, List.of("README.md"),
+                0, 0, 0, 0,
+                List.of(
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.list_dir", ".", true, false, false,
+                                "listed files", ""),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", "README.md", true, false, false,
+                                "read README.md", "")));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                "README.md contains project notes.", messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
+        assertTrue(outcome.finalAnswer().startsWith(
+                "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"));
+        assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
     }
 }
