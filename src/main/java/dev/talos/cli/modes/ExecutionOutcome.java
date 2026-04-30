@@ -8,9 +8,11 @@ import dev.talos.runtime.outcome.TaskCompletionStatus;
 import dev.talos.runtime.outcome.TaskOutcome;
 import dev.talos.runtime.outcome.TruthWarning;
 import dev.talos.runtime.outcome.TruthWarningType;
+import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.runtime.verification.StaticTaskVerifier;
 import dev.talos.runtime.verification.TaskVerificationResult;
 import dev.talos.runtime.verification.TaskVerificationStatus;
@@ -78,8 +80,26 @@ record ExecutionOutcome(
             Path workspace,
             int extraMutationSuccesses
     ) {
+        return fromToolLoop(
+                answer,
+                compatibilityPlan(messages),
+                messages,
+                loopResult,
+                workspace,
+                extraMutationSuccesses);
+    }
+
+    static ExecutionOutcome fromToolLoop(
+            String answer,
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages,
+            ToolCallLoop.LoopResult loopResult,
+            Path workspace,
+            int extraMutationSuccesses
+    ) {
         String current = answer == null ? "" : answer;
-        TaskContract contract = TaskContractResolver.fromMessages(messages);
+        CurrentTurnPlan safePlan = plan == null ? compatibilityPlan(messages) : plan;
+        TaskContract contract = safePlan.taskContract();
         boolean mutationRequested = contract.mutationRequested();
 
         String shaped = AssistantTurnExecutor.overrideUnsupportedDocumentClaimsIfNeeded(
@@ -98,7 +118,7 @@ record ExecutionOutcome(
         current = shaped;
 
         shaped = AssistantTurnExecutor.summarizeReadOnlyDeniedMutationOutcomesIfNeeded(
-                current, messages, loopResult, extraMutationSuccesses);
+                current, safePlan, messages, loopResult, extraMutationSuccesses);
         boolean readOnlyDeniedMutation = !Objects.equals(current, shaped);
         current = shaped;
 
@@ -232,7 +252,18 @@ record ExecutionOutcome(
             Context ctx,
             boolean streamed
     ) {
+        return fromNoTool(answer, compatibilityPlan(messages), messages, ctx, streamed);
+    }
+
+    static ExecutionOutcome fromNoTool(
+            String answer,
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages,
+            Context ctx,
+            boolean streamed
+    ) {
         String shaped = answer == null ? "" : answer;
+        CurrentTurnPlan safePlan = plan == null ? compatibilityPlan(messages) : plan;
         boolean noToolMutationReplaced = false;
         boolean malformedProtocolDebrisReplaced = false;
         boolean localAccessCapabilityCorrected = false;
@@ -242,22 +273,25 @@ record ExecutionOutcome(
             shaped = AssistantTurnExecutor.MALFORMED_TOOL_PROTOCOL_REPLACEMENT;
             malformedProtocolDebrisReplaced = true;
         } else {
-            String corrected = AssistantTurnExecutor.correctNegativeLocalAccessClaimIfNeeded(shaped, messages);
+            String corrected = AssistantTurnExecutor.correctNegativeLocalAccessClaimIfNeeded(
+                    shaped, safePlan, messages);
             localAccessCapabilityCorrected = !Objects.equals(shaped, corrected);
             shaped = corrected;
 
             if (!localAccessCapabilityCorrected) {
                 if (streamed) {
-                    String replaced = AssistantTurnExecutor.enforceStreamingNoToolTruthfulness(shaped, messages);
+                    String replaced = AssistantTurnExecutor.enforceStreamingNoToolTruthfulness(
+                            shaped, safePlan, messages);
                     noToolMutationReplaced = AssistantTurnExecutor.STREAMING_NO_TOOL_MUTATION_REPLACEMENT.equals(replaced);
                     shaped = replaced;
                 } else {
-                    shaped = AssistantTurnExecutor.groundingRetryIfNeeded(shaped, messages, ctx);
+                    shaped = AssistantTurnExecutor.groundingRetryIfNeeded(
+                            shaped, safePlan, messages, ctx);
                 }
             }
         }
 
-        TaskContract contract = TaskContractResolver.fromMessages(messages);
+        TaskContract contract = safePlan.taskContract();
         boolean mutationRequested = contract.mutationRequested();
         boolean blocked = noToolMutationReplaced;
         boolean ungrounded = shaped != null
@@ -311,6 +345,14 @@ record ExecutionOutcome(
                 malformedProtocolDebrisReplaced,
                 advisoryOnly
         );
+    }
+
+    private static CurrentTurnPlan compatibilityPlan(List<ChatMessage> messages) {
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+        ExecutionPhase phase = contract.mutationAllowed()
+                ? ExecutionPhase.APPLY
+                : ExecutionPhase.INSPECT;
+        return CurrentTurnPlan.compatibility(contract, phase, List.of(), List.of(), List.of());
     }
 
     private static CompletionStatus completionStatus(

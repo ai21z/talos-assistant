@@ -971,7 +971,7 @@ public final class AssistantTurnExecutor {
             return sanitizeAndTruncate(directoryListingAnswer, opts);
         }
         ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
-                answer, messages, loopResult, workspace, extraMutationSuccesses);
+                answer, plan, messages, loopResult, workspace, extraMutationSuccesses);
         return sanitizeAndTruncate(outcome.finalAnswer(), opts);
     }
 
@@ -1065,9 +1065,7 @@ public final class AssistantTurnExecutor {
             boolean streamed,
             Options opts
     ) {
-        // Task 4 will move ExecutionOutcome to plan-based overloads. Until then,
-        // keep the existing message-based calls for compatibility.
-        ExecutionOutcome outcome = ExecutionOutcome.fromNoTool(answer, messages, ctx, streamed);
+        ExecutionOutcome outcome = ExecutionOutcome.fromNoTool(answer, plan, messages, ctx, streamed);
         if (streamed && outcome.groundingStatus() == ExecutionOutcome.GroundingStatus.UNGROUNDED) {
             LOG.info("Streaming grounding annotation appended: answer={} chars, "
                     + "zero tools, user asked for evidence.", answer == null ? 0 : answer.length());
@@ -1549,11 +1547,20 @@ public final class AssistantTurnExecutor {
                                                                   List<ChatMessage> messages,
                                                                   ToolCallLoop.LoopResult loopResult,
                                                                   int extraMutationSuccesses) {
+        return summarizeReadOnlyDeniedMutationOutcomesIfNeeded(
+                answer, safePlanFromMessages(null, messages, null), messages, loopResult, extraMutationSuccesses);
+    }
+
+    static String summarizeReadOnlyDeniedMutationOutcomesIfNeeded(String answer,
+                                                                  CurrentTurnPlan plan,
+                                                                  List<ChatMessage> messages,
+                                                                  ToolCallLoop.LoopResult loopResult,
+                                                                  int extraMutationSuccesses) {
         if (loopResult == null) return answer;
         if (extraMutationSuccesses > 0) return answer;
         if (loopResult.mutatingToolSuccesses() > 0) return answer;
 
-        TaskContract contract = TaskContractResolver.fromMessages(messages);
+        TaskContract contract = safePlanFromMessages(plan, messages, null).taskContract();
         if (contract.mutationAllowed()) return answer;
 
         List<ToolCallLoop.ToolOutcome> readOnlyBlockedMutations = loopResult.toolOutcomes().stream()
@@ -2411,6 +2418,15 @@ public final class AssistantTurnExecutor {
         return null;
     }
 
+    private static String latestUserRequest(CurrentTurnPlan plan, List<ChatMessage> messages) {
+        if (plan != null
+                && plan.originalUserRequest() != null
+                && !plan.originalUserRequest().isBlank()) {
+            return plan.originalUserRequest();
+        }
+        return latestUserRequest(messages);
+    }
+
     /**
      * True iff the given user request contains at least one evidence-request
      * phrase. Conservative: matches the latest user message only; never
@@ -2429,7 +2445,16 @@ public final class AssistantTurnExecutor {
             String answer,
             List<ChatMessage> messages
     ) {
-        if (!shouldCorrectNegativeLocalAccessClaim(answer, messages)) return answer;
+        return correctNegativeLocalAccessClaimIfNeeded(
+                answer, safePlanFromMessages(null, messages, null), messages);
+    }
+
+    static String correctNegativeLocalAccessClaimIfNeeded(
+            String answer,
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages
+    ) {
+        if (!shouldCorrectNegativeLocalAccessClaim(answer, plan, messages)) return answer;
         return LOCAL_ACCESS_CAPABILITY_CORRECTION;
     }
 
@@ -2437,8 +2462,17 @@ public final class AssistantTurnExecutor {
             String answer,
             List<ChatMessage> messages
     ) {
+        return shouldCorrectNegativeLocalAccessClaim(
+                answer, safePlanFromMessages(null, messages, null), messages);
+    }
+
+    static boolean shouldCorrectNegativeLocalAccessClaim(
+            String answer,
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages
+    ) {
         if (!containsNegativeLocalAccessClaim(answer)) return false;
-        return looksLikeLocalWorkspaceTurn(messages, answer);
+        return looksLikeLocalWorkspaceTurn(plan, messages, answer);
     }
 
     static boolean containsNegativeLocalAccessClaim(String answer) {
@@ -2454,7 +2488,16 @@ public final class AssistantTurnExecutor {
             List<ChatMessage> messages,
             String answer
     ) {
-        TaskContract contract = TaskContractResolver.fromMessages(messages);
+        return looksLikeLocalWorkspaceTurn(safePlanFromMessages(null, messages, null), messages, answer);
+    }
+
+    private static boolean looksLikeLocalWorkspaceTurn(
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages,
+            String answer
+    ) {
+        CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, null);
+        TaskContract contract = safePlan.taskContract();
         if (contract.mutationRequested()) return false;
 
         TaskType type = contract.type();
@@ -2465,7 +2508,7 @@ public final class AssistantTurnExecutor {
             return true;
         }
 
-        String userRequest = latestUserRequest(messages);
+        String userRequest = latestUserRequest(safePlan, messages);
         if (containsLocalWorkspaceMarker(userRequest)) return true;
         return containsLocalWorkspaceMarker(answer) && type != TaskType.SMALL_TALK;
     }
@@ -2505,14 +2548,32 @@ public final class AssistantTurnExecutor {
      */
     static boolean shouldAppendStreamingGroundingAnnotation(
             String answer, List<ChatMessage> messages) {
+        return shouldAppendStreamingGroundingAnnotation(
+                answer, safePlanFromMessages(null, messages, null), messages);
+    }
+
+    static boolean shouldAppendStreamingGroundingAnnotation(
+            String answer,
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages
+    ) {
         if (answer == null || answer.isBlank()) return false;
         if (answer.length() < UNGROUNDED_MIN_CHARS) return false;
-        return looksLikeEvidenceRequest(latestUserRequest(messages));
+        return looksLikeEvidenceRequest(latestUserRequest(plan, messages));
     }
 
     static String annotateStreamingNoToolMutationClaim(String answer, List<ChatMessage> messages) {
+        return annotateStreamingNoToolMutationClaim(
+                answer, safePlanFromMessages(null, messages, null), messages);
+    }
+
+    static String annotateStreamingNoToolMutationClaim(
+            String answer,
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages
+    ) {
         if (answer == null || answer.isBlank()) return answer;
-        if (!looksLikeMutationRequest(latestUserRequest(messages))) return answer;
+        if (!safePlanFromMessages(plan, messages, null).taskContract().mutationRequested()) return answer;
         if (!containsMutationClaim(answer) && !containsStreamingMutationNarrative(answer)) return answer;
         return STREAMING_NO_TOOL_MUTATION_ANNOTATION + answer;
     }
@@ -2544,21 +2605,39 @@ public final class AssistantTurnExecutor {
     }
 
     static String enforceStreamingNoToolTruthfulness(String answer, List<ChatMessage> messages) {
+        return enforceStreamingNoToolTruthfulness(
+                answer, safePlanFromMessages(null, messages, null), messages);
+    }
+
+    static String enforceStreamingNoToolTruthfulness(
+            String answer,
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages
+    ) {
         String out = answer;
-        if (shouldReplaceStreamingNoToolMutationNarrative(answer, messages)) {
+        if (shouldReplaceStreamingNoToolMutationNarrative(answer, plan, messages)) {
             return STREAMING_NO_TOOL_MUTATION_REPLACEMENT;
         }
-        if (shouldAppendStreamingGroundingAnnotation(answer, messages)) {
+        if (shouldAppendStreamingGroundingAnnotation(answer, plan, messages)) {
             out = UNGROUNDED_ANNOTATION + answer;
         }
-        out = annotateStreamingNoToolMutationClaim(out, messages);
+        out = annotateStreamingNoToolMutationClaim(out, plan, messages);
         return out;
     }
 
     static boolean shouldReplaceStreamingNoToolMutationNarrative(
             String answer, List<ChatMessage> messages) {
+        return shouldReplaceStreamingNoToolMutationNarrative(
+                answer, safePlanFromMessages(null, messages, null), messages);
+    }
+
+    static boolean shouldReplaceStreamingNoToolMutationNarrative(
+            String answer,
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages
+    ) {
         if (answer == null || answer.isBlank()) return false;
-        if (!looksLikeMutationRequest(latestUserRequest(messages))) return false;
+        if (!safePlanFromMessages(plan, messages, null).taskContract().mutationRequested()) return false;
         return containsMutationClaim(answer) || containsStreamingMutationNarrative(answer);
     }
 
@@ -2595,11 +2674,21 @@ public final class AssistantTurnExecutor {
      *
      * <p>Package-private for direct testing.
      */
-    static String groundingRetryIfNeeded(String answer, List<ChatMessage> messages, Context ctx) {        if (answer == null || answer.isBlank()) return answer;
+    static String groundingRetryIfNeeded(String answer, List<ChatMessage> messages, Context ctx) {
+        return groundingRetryIfNeeded(answer, safePlanFromMessages(null, messages, ctx), messages, ctx);
+    }
+
+    static String groundingRetryIfNeeded(
+            String answer,
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages,
+            Context ctx
+    ) {
+        if (answer == null || answer.isBlank()) return answer;
         if (answer.length() < UNGROUNDED_MIN_CHARS) return answer;
         if (ctx == null || ctx.llm() == null) return answer;
 
-        String userRequest = latestUserRequest(messages);
+        String userRequest = latestUserRequest(plan, messages);
         if (!looksLikeEvidenceRequest(userRequest)) return answer;
 
         LOG.info("No-tool grounding retry fired: answer={} chars, zero tools, "
