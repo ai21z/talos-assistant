@@ -135,7 +135,7 @@ class TalosBootstrapReconcileTest {
 
         var summary = TalosBootstrap.inspectSavedSession(store, sid);
 
-        assertTrue(summary.hasReplay(), "context-only snapshot should count as available");
+        assertTrue(summary.hasSavedSession(), "context-only snapshot should count as available");
         assertEquals(0, summary.pairsReplayed());
         assertEquals(created, summary.createdAt());
         assertEquals("ollama/qwen2.5-coder:14b", summary.model());
@@ -154,9 +154,32 @@ class TalosBootstrapReconcileTest {
         SessionMemory mem = new SessionMemory();
         var summary = TalosBootstrap.restoreSavedSession(store, sid, mem, cm(mem));
 
-        assertTrue(summary.hasReplay(), "context-only restore should count as available");
+        assertTrue(summary.hasSavedSession(), "context-only restore should count as available");
         assertEquals(0, summary.pairsReplayed());
         assertEquals(ActiveTaskContext.State.ACTIVE, mem.activeTaskContext().state());
+        assertEquals(List.of("README.md"), mem.activeTaskContext().targets());
+        assertEquals(ArtifactGoal.ArtifactKind.README, mem.artifactGoal().artifactKind());
+    }
+
+    @Test
+    void restoreSavedSessionFallsBackToJsonlForContextOnlySnapshot(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "ws-context-with-jsonl";
+        ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+                3, "trace-save", List.of("README.md"), "Improve README.");
+        ArtifactGoal goal = ArtifactGoal.fromActiveContext(context);
+        store.save(new SessionData(sid, "/ws", "", 0, Instant.now(), List.of(), "",
+                context, goal));
+        store.appendTurn(sid, new TurnRecord(1, Instant.now(), 0L,
+                "from-jsonl-u", "from-jsonl-a", List.of(), 0, 0, 0, ""));
+
+        SessionMemory mem = new SessionMemory();
+        var summary = TalosBootstrap.restoreSavedSession(store, sid, mem, cm(mem));
+
+        assertTrue(summary.hasSavedSession());
+        assertEquals(1, summary.pairsReplayed());
+        assertTrue(mem.get().contains("from-jsonl-u"));
+        assertTrue(mem.get().contains("from-jsonl-a"));
         assertEquals(List.of("README.md"), mem.activeTaskContext().targets());
         assertEquals(ArtifactGoal.ArtifactKind.README, mem.artifactGoal().artifactKind());
     }

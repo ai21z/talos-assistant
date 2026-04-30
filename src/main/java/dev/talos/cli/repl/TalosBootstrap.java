@@ -63,12 +63,18 @@ import java.util.stream.Collectors;
  */
 public final class TalosBootstrap {
 
-    public record RestoreSummary(int pairsReplayed, java.time.Instant createdAt, String model, boolean available) {
+    public record RestoreSummary(
+            int pairsReplayed,
+            java.time.Instant createdAt,
+            String model,
+            boolean savedSessionAvailable) {
         public RestoreSummary(int pairsReplayed, java.time.Instant createdAt, String model) {
             this(pairsReplayed, createdAt, model, pairsReplayed > 0);
         }
 
-        public boolean hasReplay() { return available; }
+        public boolean hasReplay() { return pairsReplayed > 0; }
+
+        public boolean hasSavedSession() { return savedSessionAvailable; }
     }
 
     private TalosBootstrap() {} // static factory only
@@ -324,7 +330,7 @@ public final class TalosBootstrap {
                 sessionStore, checkpointService, runtimeSession.startedAt());
 
         // ── Assemble router ──────────────────────────────────────────────
-        String startupNotice = restoreSummary.hasReplay()
+        String startupNotice = restoreSummary.hasSavedSession()
                 ? buildRestoreNotice(restoreSummary)
                 : buildSavedSessionNotice(savedSessionSummary);
         return new ReplRouter(modes, turnProcessor, runtimeSession, ctx, render,
@@ -406,10 +412,14 @@ public final class TalosBootstrap {
     public static RestoreSummary restoreSavedSession(SessionStore store, String sessionId,
                                          SessionMemory memory, ConversationManager cm) {
         RestoreSummary restoreSummary = replaySnapshot(store, sessionId, memory, cm);
-        if (!restoreSummary.hasReplay()) {
+        if (restoreSummary.pairsReplayed() == 0) {
             int turnLogTurnsReplayed = replayTurnLog(store, sessionId, memory);
             if (turnLogTurnsReplayed > 0) {
-                restoreSummary = new RestoreSummary(turnLogTurnsReplayed, null, "");
+                restoreSummary = new RestoreSummary(
+                        turnLogTurnsReplayed,
+                        restoreSummary.createdAt(),
+                        restoreSummary.model(),
+                        true);
             }
         }
         return restoreSummary;
@@ -546,7 +556,7 @@ public final class TalosBootstrap {
     }
 
     static String buildRestoreNotice(RestoreSummary summary) {
-        if (summary == null || !summary.hasReplay()) return "";
+        if (summary == null || !summary.hasSavedSession()) return "";
         String age = "";
         if (summary.createdAt() != null) {
             java.time.Duration d = java.time.Duration.between(summary.createdAt(), java.time.Instant.now());
@@ -567,7 +577,7 @@ public final class TalosBootstrap {
     }
 
     static String buildSavedSessionNotice(RestoreSummary summary) {
-        if (summary == null || !summary.hasReplay()) return "";
+        if (summary == null || !summary.hasSavedSession()) return "";
         String age = "";
         if (summary.createdAt() != null) {
             java.time.Duration d = java.time.Duration.between(summary.createdAt(), java.time.Instant.now());
