@@ -75,7 +75,7 @@ public final class SessionCommand implements Command {
     }
     private Result load(Context ctx) {
         TalosBootstrap.RestoreSummary available = TalosBootstrap.inspectSavedSession(store, sessionId);
-        if (!available.hasReplay()) {
+        if (!available.hasSavedSession()) {
             return new Result.Info("No saved session found for this workspace.");
         }
         ConversationManager cm = ctx.conversationManager();

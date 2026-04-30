@@ -7,6 +7,8 @@ import dev.talos.core.context.ConversationManager;
 import dev.talos.runtime.JsonSessionStore;
 import dev.talos.runtime.SessionData;
 import dev.talos.runtime.TurnRecord;
+import dev.talos.runtime.context.ActiveTaskContext;
+import dev.talos.runtime.context.ArtifactGoal;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -115,6 +117,31 @@ class SessionCommandTest {
             assertTrue(((Result.Info) loadResult).text.contains("Session restored"));
             assertEquals(1, freshCm.turnCount());
             assertTrue(freshMem.get().contains("recovered answer"));
+        }
+        @Test void load_restoresContextOnlySnapshot() throws Exception {
+            var st = store();
+            Path ws = Path.of("/context/project").toAbsolutePath().normalize();
+            var cmd = new SessionCommand(ws, st);
+            ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+                    3, "trace-save", List.of("README.md"), "Improve README.");
+            st.save(new SessionData(cmd.sessionId(), ws.toString(), "", 0, Instant.now(), List.of(), "",
+                    context, ArtifactGoal.fromActiveContext(context)));
+
+            SessionMemory freshMem = new SessionMemory();
+            ConversationManager freshCm = new ConversationManager(freshMem);
+            Context freshCtx = Context.builder(new Config())
+                    .memory(freshMem)
+                    .conversationManager(freshCm)
+                    .build();
+
+            Result loadResult = cmd.execute("load", freshCtx);
+
+            assertInstanceOf(Result.Info.class, loadResult);
+            String text = ((Result.Info) loadResult).text;
+            assertFalse(text.contains("No saved session found"));
+            assertTrue(text.contains("Session restored"));
+            assertEquals(List.of("README.md"), freshMem.activeTaskContext().targets());
+            assertEquals(ArtifactGoal.ArtifactKind.README, freshMem.artifactGoal().artifactKind());
         }
     }
     // -- Clear --
