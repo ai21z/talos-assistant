@@ -83,6 +83,52 @@ class JsonSessionStoreTest {
             assertEquals(ActiveTaskContext.State.NONE, loaded.activeTaskContext().state());
             assertEquals(ArtifactGoal.ArtifactKind.UNKNOWN, loaded.artifactGoal().artifactKind());
         }
+        @Test void load_snapshotWithMalformedActiveContextDefaultsOnlyNewFields() throws Exception {
+            var store = store();
+            Files.writeString(tempDir.resolve("malformed-context.json"), """
+                    {
+                      "sessionId": "malformed-context",
+                      "workspace": "/tmp/ws",
+                      "sketch": "still valid",
+                      "turnCount": 0,
+                      "createdAt": "2026-01-15T10:30:00Z",
+                      "model": "",
+                      "activeTaskContext": {
+                        "schemaVersion": 1,
+                        "state": "BOGUS",
+                        "kind": "BAD",
+                        "sourceTurnNumber": 3,
+                        "sourceTraceId": "trace-save",
+                        "updatedTurnNumber": 3,
+                        "expiresAfterTurnNumber": 6,
+                        "targets": ["README.md", null, 42],
+                        "operation": "NOPE",
+                        "proposalSummary": "Improve README.",
+                        "previousOutcomeStatus": "",
+                        "verifierFindings": [null, "finding"],
+                        "blockedReason": "",
+                        "suppressionReason": ""
+                      },
+                      "artifactGoal": {
+                        "artifactKind": "NOPE",
+                        "operation": "BAD",
+                        "targets": ["README.md", null, 42],
+                        "verifierProfile": "",
+                        "source": "WRONG"
+                      },
+                      "turns": []
+                    }
+                    """);
+
+            SessionData loaded = store.load("malformed-context").orElseThrow();
+            assertEquals("malformed-context", loaded.sessionId());
+            assertEquals("still valid", loaded.sketch());
+            assertEquals(ActiveTaskContext.State.NONE, loaded.activeTaskContext().state());
+            assertEquals(ActiveTaskContext.Kind.NONE, loaded.activeTaskContext().kind());
+            assertEquals(ActiveTaskContext.Operation.NONE, loaded.activeTaskContext().operation());
+            assertEquals(ArtifactGoal.ArtifactKind.UNKNOWN, loaded.artifactGoal().artifactKind());
+            assertEquals(ArtifactGoal.Source.NONE, loaded.artifactGoal().source());
+        }
         @Test void load_nonExistent_returnsEmpty() {
             var store = store();
             assertTrue(store.load("nonexistent").isEmpty());
