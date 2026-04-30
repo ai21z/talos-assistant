@@ -1,0 +1,15 @@
+{
+  "name": "near slash command does not execute workspace tools",
+  "fixture": "chat-privacy",
+  "v1Pack": true,
+  "claims": [
+    "t54-near-slash-command-is-direct-answer-only",
+    "near-slash-command-gets-command-guidance"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "debug /trace",
+  "scriptedResponses": [
+    "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"notes.md\"}}"
+  ]
+}

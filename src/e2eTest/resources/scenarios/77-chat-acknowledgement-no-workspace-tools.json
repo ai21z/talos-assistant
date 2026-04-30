@@ -1,0 +1,15 @@
+{
+  "name": "chat acknowledgement does not execute workspace tools",
+  "fixture": "chat-privacy",
+  "v1Pack": true,
+  "claims": [
+    "t54-acknowledgement-is-direct-answer-only",
+    "direct-chat-exposes-no-workspace-tools"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "perfect just as I want it!",
+  "scriptedResponses": [
+    "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}"
+  ]
+}

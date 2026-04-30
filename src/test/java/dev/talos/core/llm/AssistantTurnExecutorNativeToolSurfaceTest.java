@@ -20,7 +20,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.stream.Stream;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AssistantTurnExecutorNativeToolSurfaceTest {
@@ -43,18 +46,40 @@ class AssistantTurnExecutorNativeToolSurfaceTest {
     }
 
     @Test
-    void smallTalkTurnSendsNoNativeToolSpecs() {
+    void directAnswerOnlyTurnsSendNoNativeToolSpecs() {
+        for (String prompt : List.of(
+                "hello",
+                "Hello friend",
+                "how are you are you good?",
+                "perfect just as I want it!")) {
+            RecordingResolver resolver = new RecordingResolver();
+            Context ctx = context(resolver);
+
+            AssistantTurnExecutor.execute(
+                    messages(prompt),
+                    Path.of("."),
+                    ctx,
+                    new AssistantTurnExecutor.Options());
+
+            assertNotNull(resolver.lastRequest, prompt);
+            List<String> names = toolNames(resolver.lastRequest);
+            assertTrue(names.isEmpty(), prompt);
+        }
+    }
+
+    @Test
+    void nearSlashCommandReturnsDeterministicGuidanceWithoutLlmRequest() {
         RecordingResolver resolver = new RecordingResolver();
         Context ctx = context(resolver);
 
-        AssistantTurnExecutor.execute(
-                messages("hello"),
+        AssistantTurnExecutor.TurnOutput output = AssistantTurnExecutor.execute(
+                messages("debug /trace"),
                 Path.of("."),
                 ctx,
                 new AssistantTurnExecutor.Options());
 
-        List<String> names = toolNames(resolver.lastRequest);
-        assertTrue(names.isEmpty());
+        assertEquals("Use `/last trace` to show the most recent trace.", output.text());
+        assertNull(resolver.lastRequest);
     }
 
     @Test
