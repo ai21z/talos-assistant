@@ -18,6 +18,7 @@ import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ToolSpec;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -191,9 +192,10 @@ class AssistantTurnExecutorTest {
         ActiveTaskContext context = ActiveTaskContext.proposedChanges(
                 1, "trace-propose", List.of("README.md"),
                 "Replace the README title and add usage.");
+        ArtifactGoal goal = ArtifactGoal.fromActiveContext(context);
         SessionMemory memory = new SessionMemory();
         memory.setActiveTaskContext(context);
-        memory.setArtifactGoal(ArtifactGoal.fromActiveContext(context));
+        memory.setArtifactGoal(goal);
         var ctx = Context.builder(new Config())
                 .memory(memory)
                 .llm(LlmClient.scripted("No problem, we can just chat."))
@@ -228,10 +230,93 @@ class AssistantTurnExecutorTest {
                             && !trace.promptAudit().artifactGoal().contains("APPLY_EDIT")),
                     trace.promptAudit().artifactGoal());
             assertEquals(ActiveTaskContext.State.ACTIVE, memory.activeTaskContext().state());
+            assertEquals(goal, memory.artifactGoal());
         } finally {
             if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
             LocalTurnTraceCapture.clear();
         }
+    }
+
+    @Test
+    void deicticApplyReplacesStaleNativeSurfaceAndCapabilityFrame(@TempDir Path workspace)
+            throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "# Old title\n");
+        ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+                1, "trace-propose", List.of("README.md"),
+                "Replace the README title and add usage.");
+        SessionMemory memory = new SessionMemory();
+        memory.setActiveTaskContext(context);
+        memory.setArtifactGoal(ArtifactGoal.fromActiveContext(context));
+
+        var registry = new dev.talos.tools.ToolRegistry();
+        var undoStack = new dev.talos.tools.FileUndoStack();
+        registry.register(new dev.talos.tools.impl.ReadFileTool());
+        registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+        registry.register(new dev.talos.tools.impl.FileEditTool(undoStack));
+        var processor = new dev.talos.runtime.TurnProcessor(
+                null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+        var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+        var ctx = Context.builder(new Config())
+                .memory(memory)
+                .llm(LlmClient.scripted(List.of(
+                        "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"README.md\","
+                                + "\"content\":\"# Talos\\n\\nUsage: run Talos.\\n\"}}",
+                        "Updated README.md.")))
+                .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                .toolRegistry(registry)
+                .toolCallLoop(loop)
+                .nativeToolSpecs(List.of(new ToolSpec("talos.read_file", "Read", "{}")))
+                .build();
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("system"));
+        messages.add(ChatMessage.system("""
+                [CurrentTurnCapability]
+                [TaskContract]
+                type: WORKSPACE_EXPLAIN
+                mutationAllowed: false
+                verificationRequired: false
+                phase: INSPECT
+                visibleTools: talos.read_file
+                """));
+        messages.add(ChatMessage.user("make those changes"));
+
+        LocalTurnTraceCapture.begin(
+                "trc-apply-stale-frame",
+                "sid",
+                2,
+                "2026-04-30T00:00:00Z",
+                "workspace-hash",
+                "auto",
+                "scripted",
+                "test-model",
+                "make those changes");
+        try {
+            AssistantTurnExecutor.execute(messages, workspace, ctx, new AssistantTurnExecutor.Options());
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertTrue(trace.promptAudit().nativeTools().contains("talos.write_file"),
+                    trace.promptAudit().nativeTools().toString());
+            assertTrue(trace.promptAudit().nativeTools().contains("talos.edit_file"),
+                    trace.promptAudit().nativeTools().toString());
+            List<String> frames = messages.stream()
+                    .filter(AssistantTurnExecutorTest::isCurrentTurnCapabilityFrame)
+                    .map(ChatMessage::content)
+                    .toList();
+            assertEquals(1, frames.size(), frames.toString());
+            assertTrue(frames.getFirst().contains("type: FILE_EDIT"), frames.getFirst());
+            assertTrue(frames.getFirst().contains("mutationAllowed: true"), frames.getFirst());
+            assertTrue(frames.getFirst().contains("talos.write_file"), frames.getFirst());
+            assertTrue(frames.getFirst().contains("kind=PROPOSED_CHANGES"), frames.getFirst());
+            assertFalse(frames.getFirst().contains("type: WORKSPACE_EXPLAIN"), frames.getFirst());
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    private static boolean isCurrentTurnCapabilityFrame(ChatMessage message) {
+        return message != null
+                && message.content() != null
+                && message.content().contains("[CurrentTurnCapability]");
     }
 
     @Test
