@@ -117,4 +117,47 @@ class CurrentTurnPlanTest {
                         LiteralContentExpectation.MatchMode.EXACT,
                         "test")));
     }
+
+    @Test
+    void directConstructorDefensivelyCopiesTaskExpectations() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Overwrite index.html with exactly AFTER. Use talos.write_file.");
+        List<TaskExpectation> expectations = new ArrayList<>();
+        expectations.add(new LiteralContentExpectation(
+                "index.html",
+                "AFTER",
+                LiteralContentExpectation.MatchMode.EXACT,
+                "test"));
+
+        CurrentTurnPlan plan = new CurrentTurnPlan(
+                contract,
+                contract.originalUserRequest(),
+                ExecutionPhase.APPLY,
+                ExecutionPhase.APPLY,
+                ActionObligation.MUTATING_TOOL_REQUIRED,
+                expectations,
+                List.of("talos.write_file"),
+                List.of("talos.write_file"),
+                List.of(),
+                CurrentTurnPlan.NONE_OR_NOT_DERIVED,
+                CurrentTurnPlan.NOT_DERIVED,
+                CurrentTurnPlan.NONE_OR_NOT_DERIVED,
+                CurrentTurnPlan.NOT_DERIVED,
+                CurrentTurnPlan.NOT_DERIVED);
+
+        expectations.clear();
+
+        assertEquals(1, plan.taskExpectations().size());
+        LiteralContentExpectation literal = assertInstanceOf(
+                LiteralContentExpectation.class,
+                plan.taskExpectations().getFirst());
+        assertEquals("index.html", literal.targetPath());
+        assertEquals("AFTER", literal.expectedContent());
+        assertThrows(UnsupportedOperationException.class,
+                () -> plan.taskExpectations().add(new LiteralContentExpectation(
+                        "index.html",
+                        "CHANGED",
+                        LiteralContentExpectation.MatchMode.EXACT,
+                        "test")));
+    }
 }
