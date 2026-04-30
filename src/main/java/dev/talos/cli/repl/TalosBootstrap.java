@@ -231,7 +231,8 @@ public final class TalosBootstrap {
                     String sketch = cmRef.sketch();
                     SessionData data = new SessionData(sidRef, wsRef.toString(),
                             sketch != null ? sketch : "", cmRef.turnCount(),
-                            runtimeSession.startedAt(), turns, llm.getModel());
+                            runtimeSession.startedAt(), turns, llm.getModel(),
+                            memRef.activeTaskContext(), memRef.artifactGoal());
                     sessionStore.save(data);
                 }
             });
@@ -450,6 +451,8 @@ public final class TalosBootstrap {
         if (data.sketch() != null && !data.sketch().isBlank()) {
             cm.setSketch(data.sketch());
         }
+        memory.setActiveTaskContext(data.activeTaskContext());
+        memory.setArtifactGoal(data.artifactGoal());
         return new RestoreSummary(pairs, data.createdAt(), data.model());
     }
 

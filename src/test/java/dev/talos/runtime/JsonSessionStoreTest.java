@@ -1,4 +1,6 @@
 package dev.talos.runtime;
+import dev.talos.runtime.context.ActiveTaskContext;
+import dev.talos.runtime.context.ArtifactGoal;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -45,6 +47,41 @@ class JsonSessionStoreTest {
             assertEquals("assistant", d.turns().get(1).role());
             assertEquals("hi there", d.turns().get(1).content());
             assertEquals("ok", d.turns().get(1).status());
+        }
+        @Test void roundTrip_preservesActiveTaskContextAndArtifactGoal() {
+            var store = store();
+            ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+                    3, "trace-save", List.of("README.md"), "Improve README.");
+            ArtifactGoal goal = ArtifactGoal.fromActiveContext(context);
+            SessionData original = new SessionData("ctx1", "/tmp/ws", "goal sketch", 1,
+                    Instant.parse("2026-01-15T10:30:00Z"), List.of(), "ollama/qwen2.5-coder:14b",
+                    context, goal);
+
+            store.save(original);
+
+            SessionData loaded = store.load("ctx1").orElseThrow();
+            assertEquals(ActiveTaskContext.State.ACTIVE, loaded.activeTaskContext().state());
+            assertEquals(ActiveTaskContext.Kind.PROPOSED_CHANGES, loaded.activeTaskContext().kind());
+            assertEquals(List.of("README.md"), loaded.activeTaskContext().targets());
+            assertEquals(ArtifactGoal.ArtifactKind.README, loaded.artifactGoal().artifactKind());
+        }
+        @Test void load_oldSnapshotWithoutActiveContextDefaultsToNone() throws Exception {
+            var store = store();
+            Files.writeString(tempDir.resolve("legacy.json"), """
+                    {
+                      "sessionId": "legacy",
+                      "workspace": "/tmp/ws",
+                      "sketch": "old sketch",
+                      "turnCount": 0,
+                      "createdAt": "2026-01-15T10:30:00Z",
+                      "model": "",
+                      "turns": []
+                    }
+                    """);
+
+            SessionData loaded = store.load("legacy").orElseThrow();
+            assertEquals(ActiveTaskContext.State.NONE, loaded.activeTaskContext().state());
+            assertEquals(ArtifactGoal.ArtifactKind.UNKNOWN, loaded.artifactGoal().artifactKind());
         }
         @Test void load_nonExistent_returnsEmpty() {
             var store = store();
