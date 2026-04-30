@@ -131,6 +131,9 @@ class PromptAuditSnapshotTest {
         assertEquals("MUTATING_TOOL_REQUIRED", snapshot.actionObligation());
         assertEquals(PromptAuditSnapshot.NONE_OR_NOT_DERIVED, snapshot.evidenceObligation());
         assertEquals(PromptAuditSnapshot.NOT_DERIVED, snapshot.outputObligation());
+        assertEquals(PromptAuditSnapshot.NONE_OR_NOT_DERIVED, snapshot.activeTaskContext());
+        assertEquals(PromptAuditSnapshot.NONE_OR_NOT_DERIVED, snapshot.artifactGoal());
+        assertEquals(PromptAuditSnapshot.NONE_OR_NOT_DERIVED, snapshot.verifierProfile());
         assertEquals(List.of("talos.read_file", "talos.write_file"), snapshot.nativeTools());
         assertEquals(List.of("talos.read_file", "talos.write_file"), snapshot.promptTools());
         assertEquals(List.of("talos.shell"), snapshot.blockedTools());

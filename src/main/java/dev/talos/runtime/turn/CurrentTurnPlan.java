@@ -48,8 +48,8 @@ public record CurrentTurnPlan(
         evidenceObligation = evidenceObligation == null ? NONE_OR_NOT_DERIVED : evidenceObligation;
         outputObligation = outputObligation == null ? NOT_DERIVED : outputObligation;
         activeTaskContext = activeTaskContext == null ? NONE_OR_NOT_DERIVED : activeTaskContext;
-        artifactGoal = artifactGoal == null ? NOT_DERIVED : artifactGoal;
-        verifierProfile = verifierProfile == null ? NOT_DERIVED : verifierProfile;
+        artifactGoal = artifactGoal == null ? NONE_OR_NOT_DERIVED : artifactGoal;
+        verifierProfile = verifierProfile == null ? NONE_OR_NOT_DERIVED : verifierProfile;
     }
 
     public static CurrentTurnPlan create(
@@ -74,8 +74,8 @@ public record CurrentTurnPlan(
                 NONE_OR_NOT_DERIVED,
                 NOT_DERIVED,
                 NONE_OR_NOT_DERIVED,
-                NOT_DERIVED,
-                NOT_DERIVED);
+                NONE_OR_NOT_DERIVED,
+                NONE_OR_NOT_DERIVED);
     }
 
     public static CurrentTurnPlan compatibility(
