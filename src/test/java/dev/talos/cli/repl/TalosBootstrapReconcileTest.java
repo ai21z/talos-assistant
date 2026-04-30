@@ -5,6 +5,8 @@ import dev.talos.core.context.TokenBudget;
 import dev.talos.runtime.JsonSessionStore;
 import dev.talos.runtime.SessionData;
 import dev.talos.runtime.TurnRecord;
+import dev.talos.runtime.context.ActiveTaskContext;
+import dev.talos.runtime.context.ArtifactGoal;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -57,6 +59,24 @@ class TalosBootstrapReconcileTest {
         assertTrue(buf.contains("from-snap-a"));
         assertFalse(buf.contains("from-jsonl-u"),
                 "JSONL content must not leak in when snapshot has turns");
+    }
+
+    @Test
+    void snapshotRestoresActiveTaskContextAndArtifactGoal(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "ws-context";
+        ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+                3, "trace-save", List.of("README.md"), "Improve README.");
+        ArtifactGoal goal = ArtifactGoal.fromActiveContext(context);
+        store.save(new SessionData(sid, "/ws", "", 0, Instant.now(), List.of(), "",
+                context, goal));
+
+        SessionMemory mem = new SessionMemory();
+        TalosBootstrap.replaySnapshot(store, sid, mem, cm(mem));
+
+        assertEquals(ActiveTaskContext.State.ACTIVE, mem.activeTaskContext().state());
+        assertEquals(List.of("README.md"), mem.activeTaskContext().targets());
+        assertEquals(ArtifactGoal.ArtifactKind.README, mem.artifactGoal().artifactKind());
     }
 
     @Test

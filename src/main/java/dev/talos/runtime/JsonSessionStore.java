@@ -3,6 +3,8 @@ package dev.talos.runtime;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.core.util.Hash;
+import dev.talos.runtime.context.ActiveTaskContext;
+import dev.talos.runtime.context.ArtifactGoal;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -62,6 +64,8 @@ public final class JsonSessionStore implements SessionStore {
             root.put("turnCount", data.turnCount());
             root.put("createdAt", data.createdAt().toString());
             root.put("model", data.model());
+            root.put("activeTaskContext", activeTaskContextToMap(data.activeTaskContext()));
+            root.put("artifactGoal", artifactGoalToMap(data.artifactGoal()));
             root.put("turns", data.turns().stream()
                     .map(t -> Map.of("role", t.role(), "content", t.content(), "status", t.status()))
                     .toList());
@@ -91,6 +95,8 @@ public final class JsonSessionStore implements SessionStore {
             int turnCount    = intVal(root, "turnCount");
             Instant created  = parseInstant(root.get("createdAt"));
             String model     = str(root, "model");
+            ActiveTaskContext activeTaskContext = activeTaskContextFrom(root.get("activeTaskContext"));
+            ArtifactGoal artifactGoal = artifactGoalFrom(root.get("artifactGoal"));
 
             @SuppressWarnings("unchecked")
             List<Map<String, String>> rawTurns =
@@ -103,7 +109,8 @@ public final class JsonSessionStore implements SessionStore {
                             m.getOrDefault("status", "")))
                     .toList();
 
-            return Optional.of(new SessionData(sid, workspace, sketch, turnCount, created, turns, model));
+            return Optional.of(new SessionData(sid, workspace, sketch, turnCount, created, turns, model,
+                    activeTaskContext, artifactGoal));
         } catch (Exception e) {
             LOG.warn("Failed to load session {}: {}", sessionId, e.getMessage());
             return Optional.empty();
@@ -230,6 +237,82 @@ public final class JsonSessionStore implements SessionStore {
                 calls, reqd, grnt, deny, traceSummary, status, policyTrace, traceId);
     }
 
+    private static Map<String, Object> activeTaskContextToMap(ActiveTaskContext context) {
+        ActiveTaskContext safe = context == null ? ActiveTaskContext.none() : context;
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("schemaVersion", safe.schemaVersion());
+        out.put("state", safe.state().name());
+        out.put("kind", safe.kind().name());
+        out.put("sourceTurnNumber", safe.sourceTurnNumber());
+        out.put("sourceTraceId", safe.sourceTraceId());
+        out.put("updatedTurnNumber", safe.updatedTurnNumber());
+        out.put("expiresAfterTurnNumber", safe.expiresAfterTurnNumber());
+        out.put("targets", safe.targets());
+        out.put("operation", safe.operation().name());
+        out.put("proposalSummary", safe.proposalSummary());
+        out.put("previousOutcomeStatus", safe.previousOutcomeStatus());
+        out.put("verifierFindings", safe.verifierFindings());
+        out.put("blockedReason", safe.blockedReason());
+        out.put("suppressionReason", safe.suppressionReason());
+        return out;
+    }
+
+    private static ActiveTaskContext activeTaskContextFrom(Object raw) {
+        if (!(raw instanceof Map<?, ?> map)) return ActiveTaskContext.none();
+        try {
+            ActiveTaskContext.State state = enumValOrNull(ActiveTaskContext.State.class, map, "state");
+            ActiveTaskContext.Kind kind = enumValOrNull(ActiveTaskContext.Kind.class, map, "kind");
+            ActiveTaskContext.Operation operation = enumValOrNull(ActiveTaskContext.Operation.class, map, "operation");
+            if (state == null || kind == null || operation == null) return ActiveTaskContext.none();
+            return new ActiveTaskContext(
+                    intValLoose(map, "schemaVersion"),
+                    state,
+                    kind,
+                    intValLoose(map, "sourceTurnNumber"),
+                    stringVal(map, "sourceTraceId", ""),
+                    intValLoose(map, "updatedTurnNumber"),
+                    intValLoose(map, "expiresAfterTurnNumber"),
+                    stringList(map.get("targets")),
+                    operation,
+                    stringVal(map, "proposalSummary", ""),
+                    stringVal(map, "previousOutcomeStatus", ""),
+                    stringList(map.get("verifierFindings")),
+                    stringVal(map, "blockedReason", ""),
+                    stringVal(map, "suppressionReason", ""));
+        } catch (Exception e) {
+            return ActiveTaskContext.none();
+        }
+    }
+
+    private static Map<String, Object> artifactGoalToMap(ArtifactGoal goal) {
+        ArtifactGoal safe = goal == null ? ArtifactGoal.none() : goal;
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("artifactKind", safe.artifactKind().name());
+        out.put("operation", safe.operation().name());
+        out.put("targets", safe.targets());
+        out.put("verifierProfile", safe.verifierProfile());
+        out.put("source", safe.source().name());
+        return out;
+    }
+
+    private static ArtifactGoal artifactGoalFrom(Object raw) {
+        if (!(raw instanceof Map<?, ?> map)) return ArtifactGoal.none();
+        try {
+            ArtifactGoal.ArtifactKind artifactKind = enumValOrNull(ArtifactGoal.ArtifactKind.class, map, "artifactKind");
+            ActiveTaskContext.Operation operation = enumValOrNull(ActiveTaskContext.Operation.class, map, "operation");
+            ArtifactGoal.Source source = enumValOrNull(ArtifactGoal.Source.class, map, "source");
+            if (artifactKind == null || operation == null || source == null) return ArtifactGoal.none();
+            return new ArtifactGoal(
+                    artifactKind,
+                    operation,
+                    stringList(map.get("targets")),
+                    stringVal(map, "verifierProfile", ""),
+                    source);
+        } catch (Exception e) {
+            return ArtifactGoal.none();
+        }
+    }
+
     // ── Local turn trace v1 artifacts ─────────────────────────────────
 
     @Override
@@ -333,6 +416,20 @@ public final class JsonSessionStore implements SessionStore {
     private static boolean boolVal(Map<?, ?> map, String key) {
         Object value = map.get(key);
         return value instanceof Boolean b && b;
+    }
+
+    private static int intValLoose(Map<?, ?> map, String key) {
+        Object value = map.get(key);
+        if (value instanceof Number n) return n.intValue();
+        try { return Integer.parseInt(String.valueOf(value)); }
+        catch (Exception e) { return 0; }
+    }
+
+    private static <E extends Enum<E>> E enumValOrNull(Class<E> enumType, Map<?, ?> map, String key) {
+        Object value = map.get(key);
+        if (value == null) return null;
+        try { return Enum.valueOf(enumType, String.valueOf(value)); }
+        catch (Exception e) { return null; }
     }
 
     private static List<String> stringList(Object raw) {
