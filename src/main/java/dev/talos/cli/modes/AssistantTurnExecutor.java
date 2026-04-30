@@ -10,6 +10,9 @@ import dev.talos.runtime.ToolCallStreamFilter;
 import dev.talos.runtime.TurnAuditCapture;
 import dev.talos.runtime.TurnPolicyTrace;
 import dev.talos.runtime.TurnTaskContractCapture;
+import dev.talos.runtime.context.ActiveTaskContext;
+import dev.talos.runtime.context.ActiveTaskContextPolicy;
+import dev.talos.runtime.context.ArtifactGoal;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.ActionObligation;
 import dev.talos.runtime.policy.ActionObligationPolicy;
@@ -143,10 +146,14 @@ public final class AssistantTurnExecutor {
                               Context ctx, Options opts) {
         StringBuilder out = new StringBuilder();
         boolean streamed = false;
-        TaskContract taskContract = TaskContractResolver.fromMessages(messages);
+        TaskContract rawTaskContract = TaskContractResolver.fromMessages(messages);
+        ActiveTaskContextPolicy.Decision activeDecision = activeTaskContextDecision(
+                latestUserRequest(messages), rawTaskContract, ctx);
+        TaskContract taskContract = activeDecision.taskContract();
+        applyActiveTaskMemoryDecision(activeDecision, ctx);
         initializeExecutionPhaseForTurn(taskContract, ctx);
         ctx = withNativeToolSurface(ctx, taskContract);
-        CurrentTurnPlan currentTurnPlan = buildCurrentTurnPlan(taskContract, ctx);
+        CurrentTurnPlan currentTurnPlan = buildCurrentTurnPlan(taskContract, ctx, activeDecision);
         recordPolicyTrace(currentTurnPlan, ctx);
         injectTaskContractInstruction(messages, currentTurnPlan);
         injectStaticVerificationRepairInstruction(messages, currentTurnPlan.taskContract());
@@ -541,11 +548,79 @@ public final class AssistantTurnExecutor {
     }
 
     private static CurrentTurnPlan buildCurrentTurnPlan(TaskContract taskContract, Context ctx) {
+        return buildCurrentTurnPlan(taskContract, ctx, null);
+    }
+
+    private static CurrentTurnPlan buildCurrentTurnPlan(
+            TaskContract taskContract,
+            Context ctx,
+            ActiveTaskContextPolicy.Decision activeDecision
+    ) {
         ExecutionPhase phase = currentExecutionPhase(ctx, taskContract);
         List<String> nativeTools = ctx == null
                 ? defaultVisibleToolNames(taskContract, phase)
                 : NativeToolSpecPolicy.names(ctx.nativeToolSpecs());
-        return CurrentTurnPlan.create(taskContract, phase, nativeTools, nativeTools, List.of());
+        String activeTaskContext = activeDecision == null
+                ? ActiveTaskContext.NONE_OR_NOT_DERIVED
+                : activeDecision.planContext().renderForPlan();
+        String artifactGoal = activeDecision == null
+                ? ActiveTaskContext.NONE_OR_NOT_DERIVED
+                : activeDecision.artifactGoal().renderForPlan();
+        return CurrentTurnPlan.create(
+                taskContract,
+                phase,
+                nativeTools,
+                nativeTools,
+                List.of(),
+                activeTaskContext,
+                artifactGoal,
+                ActiveTaskContext.NONE_OR_NOT_DERIVED);
+    }
+
+    private static ActiveTaskContextPolicy.Decision activeTaskContextDecision(
+            String userRequest,
+            TaskContract rawTaskContract,
+            Context ctx
+    ) {
+        ActiveTaskContext savedContext = ctx == null || ctx.memory() == null
+                ? ActiveTaskContext.none()
+                : ctx.memory().activeTaskContext();
+        ArtifactGoal savedGoal = ctx == null || ctx.memory() == null
+                ? ArtifactGoal.none()
+                : ctx.memory().artifactGoal();
+        return ActiveTaskContextPolicy.evaluate(
+                userRequest,
+                rawTaskContract,
+                savedContext,
+                savedGoal,
+                currentUserTurnNumber(ctx));
+    }
+
+    private static int currentUserTurnNumber(Context ctx) {
+        if (ctx == null || ctx.memory() == null) return 1;
+        int completedUserTurns = 0;
+        for (ChatMessage turn : ctx.memory().getTurns()) {
+            if (turn != null && "user".equals(turn.role())) {
+                completedUserTurns++;
+            }
+        }
+        return completedUserTurns + 1;
+    }
+
+    private static void applyActiveTaskMemoryDecision(
+            ActiveTaskContextPolicy.Decision decision,
+            Context ctx
+    ) {
+        if (decision == null || ctx == null || ctx.memory() == null) return;
+        ActiveTaskContext memoryContext = decision.memoryContext();
+        if (memoryContext == null || memoryContext.state() == ActiveTaskContext.State.NONE) {
+            ctx.memory().clearActiveTaskContext();
+            return;
+        }
+        if (memoryContext.state() != ActiveTaskContext.State.SUPPRESSED) {
+            ctx.memory().setActiveTaskContext(memoryContext);
+            ctx.memory().setArtifactGoal(decision.artifactGoal());
+        }
     }
 
     private static CurrentTurnPlan compatibilityPlanFromMessages(List<ChatMessage> messages, Context ctx) {
