@@ -61,6 +61,27 @@ public record CurrentTurnPlan(
             List<String> promptTools,
             List<String> blockedTools
     ) {
+        return create(
+                contract,
+                phase,
+                nativeTools,
+                promptTools,
+                blockedTools,
+                NONE_OR_NOT_DERIVED,
+                NONE_OR_NOT_DERIVED,
+                NONE_OR_NOT_DERIVED);
+    }
+
+    public static CurrentTurnPlan create(
+            TaskContract contract,
+            ExecutionPhase phase,
+            List<String> nativeTools,
+            List<String> promptTools,
+            List<String> blockedTools,
+            String activeTaskContext,
+            String artifactGoal,
+            String verifierProfile
+    ) {
         TaskContract safeContract = contract == null ? TaskContract.unknown("") : contract;
         List<TaskExpectation> expectations = TaskExpectationResolver.resolve(safeContract);
         return new CurrentTurnPlan(
@@ -75,9 +96,9 @@ public record CurrentTurnPlan(
                 blockedTools,
                 EvidenceObligationPolicy.derive(safeContract, phase, Path.of("").toAbsolutePath()).name(),
                 NOT_DERIVED,
-                NONE_OR_NOT_DERIVED,
-                NONE_OR_NOT_DERIVED,
-                NONE_OR_NOT_DERIVED);
+                activeTaskContext,
+                artifactGoal,
+                verifierProfile);
     }
 
     public static CurrentTurnPlan compatibility(

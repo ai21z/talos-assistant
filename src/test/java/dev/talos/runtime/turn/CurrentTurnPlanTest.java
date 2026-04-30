@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -130,6 +131,34 @@ class CurrentTurnPlanTest {
                 List.of());
 
         assertEquals("READ_TARGET_REQUIRED", plan.evidenceObligation());
+    }
+
+    @Test
+    void createCanCarryActiveContextArtifactGoalAndVerifierProfile() {
+        TaskContract contract = new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                Set.of("README.md"),
+                Set.of(),
+                "make those changes");
+
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                contract,
+                ExecutionPhase.APPLY,
+                List.of("talos.write_file"),
+                List.of("talos.write_file"),
+                List.of(),
+                "ACTIVE PROPOSED_CHANGES targets=[README.md] operation=APPLY_EDIT",
+                "README APPLY_EDIT targets=[README.md] source=ACTIVE_CONTEXT",
+                "NONE_OR_NOT_DERIVED");
+
+        assertEquals("ACTIVE PROPOSED_CHANGES targets=[README.md] operation=APPLY_EDIT",
+                plan.activeTaskContext());
+        assertEquals("README APPLY_EDIT targets=[README.md] source=ACTIVE_CONTEXT",
+                plan.artifactGoal());
+        assertEquals("NONE_OR_NOT_DERIVED", plan.verifierProfile());
     }
 
     @Test
