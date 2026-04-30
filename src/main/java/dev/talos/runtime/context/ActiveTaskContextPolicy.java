@@ -65,7 +65,7 @@ public final class ActiveTaskContextPolicy {
         TaskContract current = rawContract == null ? TaskContract.unknown(userRequest) : rawContract;
 
         if (savedContext == null || savedContext.state() != ActiveTaskContext.State.ACTIVE) {
-            return new Decision(current, ActiveTaskContext.none(), ArtifactGoal.none(), savedContext, false);
+            return new Decision(current, ActiveTaskContext.none(), ArtifactGoal.none(), ActiveTaskContext.none(), false);
         }
 
         if (!savedContext.activeAt(currentUserTurnNumber)) {

@@ -31,7 +31,41 @@ class ActiveTaskContextPolicyTest {
         assertTrue(decision.taskContract().mutationAllowed());
         assertTrue(decision.taskContract().verificationRequired());
         assertEquals(Set.of("README.md"), decision.taskContract().expectedTargets());
+        assertEquals(savedGoal, decision.artifactGoal());
+        assertEquals(ArtifactGoal.Source.ACTIVE_CONTEXT, decision.artifactGoal().source());
+        assertEquals(ArtifactGoal.ArtifactKind.README, decision.artifactGoal().artifactKind());
+        assertEquals(saved, decision.memoryContext());
         assertTrue(decision.taskContract().originalUserRequest().contains("Add title and usage."));
+        assertTrue(decision.taskContract().originalUserRequest().contains("make those changes"));
+    }
+
+    @Test void nullSavedContextReturnsBaselineDecisionWithoutMemory() {
+        String userRequest = "Read README.md.";
+        TaskContract rawContract = TaskContractResolver.fromUserRequest(userRequest);
+
+        ActiveTaskContextPolicy.Decision decision = ActiveTaskContextPolicy.evaluate(
+                userRequest,
+                rawContract,
+                null,
+                ArtifactGoal.fromActiveContext(readmeProposal()),
+                3);
+
+        assertFalse(decision.consumed());
+        assertEquals(rawContract, decision.taskContract());
+        assertEquals(ActiveTaskContext.State.NONE, decision.planContext().state());
+        assertEquals(ArtifactGoal.none(), decision.artifactGoal());
+        assertEquals(ArtifactGoal.Source.NONE, decision.artifactGoal().source());
+        assertEquals(ActiveTaskContext.none(), decision.memoryContext());
+    }
+
+    @Test void nonActiveSavedContextReturnsBaselineDecisionWithoutMemory() {
+        String userRequest = "make those changes";
+        TaskContract rawContract = TaskContractResolver.fromUserRequest(userRequest);
+        ActiveTaskContext saved = readmeProposal();
+
+        assertNonActiveBaseline(rawContract, saved.suppressed("answer only"));
+        assertNonActiveBaseline(rawContract, saved.cleared("new target"));
+        assertNonActiveBaseline(rawContract, saved.expired("too old"));
     }
 
     @Test void noWorkspaceChatSuppressesWithoutClearingMemory() {
@@ -110,5 +144,20 @@ class ActiveTaskContextPolicyTest {
                 "trace-propose",
                 List.of("README.md"),
                 "Add title and usage.");
+    }
+
+    private static void assertNonActiveBaseline(TaskContract rawContract, ActiveTaskContext savedContext) {
+        ActiveTaskContextPolicy.Decision decision = ActiveTaskContextPolicy.evaluate(
+                rawContract.originalUserRequest(),
+                rawContract,
+                savedContext,
+                ArtifactGoal.fromActiveContext(readmeProposal()),
+                3);
+
+        assertFalse(decision.consumed());
+        assertEquals(rawContract, decision.taskContract());
+        assertEquals(ActiveTaskContext.State.NONE, decision.planContext().state());
+        assertEquals(ArtifactGoal.none(), decision.artifactGoal());
+        assertEquals(ActiveTaskContext.none(), decision.memoryContext());
     }
 }
