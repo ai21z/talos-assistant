@@ -107,15 +107,20 @@ function Test-Substrings {
 }
 
 function Get-LastRegexValue {
-    param([string]$Text, [string]$Pattern)
-    $matches = [regex]::Matches($Text, $Pattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    param([string]$Text, [string]$Pattern, [switch]$CaseSensitive)
+    $options = if ($CaseSensitive) {
+        [System.Text.RegularExpressions.RegexOptions]::None
+    } else {
+        [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
+    }
+    $matches = [regex]::Matches($Text, $Pattern, $options)
     if ($matches.Count -eq 0) { return "" }
     return $matches[$matches.Count - 1].Groups[1].Value.Trim()
 }
 
 function Get-TraceFacts {
     param([string]$Text)
-    $contractLine = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Contract:\s+(.+)$"
+    $contractLine = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Contract:\s+(.+)$" -CaseSensitive
     $contract = ""
     $mutationAllowed = ""
     if (-not [string]::IsNullOrWhiteSpace($contractLine)) {
@@ -128,13 +133,13 @@ function Get-TraceFacts {
     return [pscustomobject]@{
         Contract = $contract
         MutationAllowed = $mutationAllowed
-        Phase = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Phase:\s+(.+)$"
-        NativeTools = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Native tools:\s+(.+)$"
-        Blocked = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Blocked:\s+(.+)$"
-        Outcome = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Outcome:\s+(.+)$"
-        Checkpoint = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Checkpoint:\s+(.+)$"
-        Verification = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Verification:\s+(.+)$"
-        Repair = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Repair:\s+(.+)$"
+        Phase = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Phase:\s+(.+)$" -CaseSensitive
+        NativeTools = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Native tools:\s+(.+)$" -CaseSensitive
+        Blocked = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Blocked:\s+(.+)$" -CaseSensitive
+        Outcome = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Outcome:\s+(.+)$" -CaseSensitive
+        Checkpoint = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Checkpoint:\s+(.+)$" -CaseSensitive
+        Verification = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Verification:\s+(.+)$" -CaseSensitive
+        Repair = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Repair:\s+(.+)$" -CaseSensitive
         PromptAuditTaskType = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*taskType:\s+([A-Z_]+).*$"
         PromptAuditActionObligation = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*actionObligation:\s+(.+)$"
         PromptAuditEvidenceObligation = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*evidenceObligation:\s+(.+)$"

@@ -1175,6 +1175,74 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void verificationRequiredReadOnlyWithEvidenceButNoVerifierIsAdvisory() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Is this BMI page working now?"));
+
+        var contract = dev.talos.runtime.task.TaskContractResolver.fromMessages(messages);
+        var plan = dev.talos.runtime.turn.CurrentTurnPlan.create(
+                contract,
+                dev.talos.runtime.phase.ExecutionPhase.VERIFY,
+                List.of("talos.read_file", "talos.grep", "talos.retrieve"),
+                List.of("talos.read_file", "talos.grep", "talos.retrieve"),
+                List.of());
+
+        var loopResult = new ToolCallLoop.LoopResult(
+                "The BMI page appears to be working.", 3, 3,
+                List.of("talos.read_file", "talos.read_file", "talos.read_file"), List.of(),
+                3, 0, false, 0, List.of("index.html", "styles.css", "scripts.js"),
+                0, 0, 0, 0,
+                List.of(
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", "index.html", true, false, false,
+                                "<!doctype html><title>BMI</title><h1>BMI</h1>", ""),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", "styles.css", true, false, false,
+                                "body { font-family: sans-serif; }", ""),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", "scripts.js", true, false, false,
+                                "// Your JavaScript logic here", "")
+                ));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                "The BMI page appears to be working.", plan, messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
+        assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
+        assertEquals(ExecutionOutcome.VerificationStatus.NOT_RUN, outcome.verificationStatus());
+        assertTrue(outcome.finalAnswer().startsWith("[Task not verified:"), outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains("not verified"), outcome.finalAnswer());
+        assertFalse(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+        assertFalse(outcome.finalAnswer().startsWith("[Evidence incomplete:"));
+    }
+
+    @Test
+    void verificationRequiredReadOnlyWithMissingEvidenceStillSaysNotVerified() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Is this BMI page working now?"));
+
+        var contract = dev.talos.runtime.task.TaskContractResolver.fromMessages(messages);
+        var plan = dev.talos.runtime.turn.CurrentTurnPlan.create(
+                contract,
+                dev.talos.runtime.phase.ExecutionPhase.VERIFY,
+                List.of("talos.read_file", "talos.grep", "talos.retrieve"),
+                List.of("talos.read_file", "talos.grep", "talos.retrieve"),
+                List.of());
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromNoTool(
+                "The BMI page appears to be working.", plan, messages, null, true);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
+        assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
+        assertTrue(outcome.finalAnswer().startsWith(
+                "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"));
+        assertTrue(outcome.finalAnswer().contains("not verified"), outcome.finalAnswer());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+    }
+
+    @Test
     void legacyLoopReadPathsCountAsReadTargetEvidence() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));

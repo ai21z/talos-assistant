@@ -173,6 +173,17 @@ class OutcomeDominancePolicyTest {
     }
 
     @Test
+    void verificationRequiredReadOnlyCannotCompleteWhenVerifierDidNotRun() {
+        var decision = decide(verifyOnlyContract(),
+                false, false, false, false, false,
+                false, false, false, false, false,
+                ExecutionOutcome.VerificationStatus.NOT_RUN);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, decision.completionStatus());
+        assertEquals(TaskCompletionStatus.ADVISORY_ONLY, decision.taskCompletionStatus());
+    }
+
+    @Test
     void unverifiedMutationCompletesUnverified() {
         var decision = decide(mutationContract(),
                 false, false, false, false, false,
@@ -250,6 +261,17 @@ class OutcomeDominancePolicyTest {
                 Set.of(),
                 Set.of(),
                 "Read the workspace.");
+    }
+
+    private static TaskContract verifyOnlyContract() {
+        return new TaskContract(
+                TaskType.VERIFY_ONLY,
+                false,
+                false,
+                true,
+                Set.of(),
+                Set.of(),
+                "Is this BMI page working now?");
     }
 
     private static TaskContract mutationContract() {
