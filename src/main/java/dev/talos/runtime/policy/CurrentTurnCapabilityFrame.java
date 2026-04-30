@@ -1,8 +1,10 @@
 package dev.talos.runtime.policy;
 
+import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
+import dev.talos.runtime.trace.PromptAuditRedactor;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 
 import java.util.List;
@@ -118,10 +120,10 @@ public final class CurrentTurnCapabilityFrame {
         }
         frame.append("[ActiveTaskContext]\n")
                 .append("activeTaskContext: ")
-                .append(hasActiveTaskContext ? activeTaskContext : CurrentTurnPlan.NONE_OR_NOT_DERIVED)
+                .append(hasActiveTaskContext ? promptPreview(activeTaskContext) : CurrentTurnPlan.NONE_OR_NOT_DERIVED)
                 .append('\n')
                 .append("artifactGoal: ")
-                .append(hasArtifactGoal ? artifactGoal : CurrentTurnPlan.NONE_OR_NOT_DERIVED)
+                .append(hasArtifactGoal ? promptPreview(artifactGoal) : CurrentTurnPlan.NONE_OR_NOT_DERIVED)
                 .append('\n')
                 .append("Active context is a current-turn hint only.\n")
                 .append("Explicit current user instructions win over active context.\n")
@@ -133,6 +135,10 @@ public final class CurrentTurnCapabilityFrame {
         return value != null
                 && !value.isBlank()
                 && !CurrentTurnPlan.NONE_OR_NOT_DERIVED.equals(value);
+    }
+
+    private static String promptPreview(String value) {
+        return PromptAuditRedactor.preview(value, ActiveTaskContext.PROMPT_RENDER_CHAR_CAP);
     }
 
     private static String evidenceGuidance(EvidenceObligation evidence) {

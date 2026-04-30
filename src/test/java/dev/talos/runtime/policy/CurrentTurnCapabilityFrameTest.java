@@ -67,4 +67,34 @@ class CurrentTurnCapabilityFrameTest {
         assertFalse(frame.contains("activeTaskContext:"));
         assertFalse(frame.contains("artifactGoal:"));
     }
+
+    @Test
+    void renderRedactsAndBoundsPlanDerivedActiveTaskContextFields() {
+        TaskContract contract = new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                Set.of("README.md"),
+                Set.of(),
+                "make those changes");
+        String longBody = "LONG_ACTIVE_BODY ".repeat(2_000);
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                contract,
+                ExecutionPhase.APPLY,
+                List.of("talos.write_file"),
+                List.of("talos.write_file"),
+                List.of(),
+                "ACTIVE API_KEY=secret " + longBody,
+                "ARTIFACT API_KEY=secret " + longBody,
+                CurrentTurnPlan.NONE_OR_NOT_DERIVED);
+
+        String frame = CurrentTurnCapabilityFrame.render(plan);
+
+        assertFalse(frame.contains("API_KEY=secret"));
+        assertTrue(frame.contains("API_KEY=[redacted]"));
+        assertTrue(frame.contains("..."));
+        assertFalse(frame.contains(longBody));
+        assertTrue(frame.length() < 4_000, "frame should not include unbounded active context text");
+    }
 }
