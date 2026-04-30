@@ -3,6 +3,7 @@ package dev.talos.runtime.trace;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.ActionObligation;
 import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
 
 import java.util.List;
@@ -45,11 +46,11 @@ public record PromptAuditSnapshot(
         phaseInitial = safe(phaseInitial);
         phaseFinal = safe(phaseFinal);
         actionObligation = safe(actionObligation);
-        evidenceObligation = blankDefault(evidenceObligation, NONE_OR_NOT_DERIVED);
-        outputObligation = blankDefault(outputObligation, NOT_DERIVED);
-        activeTaskContext = blankDefault(activeTaskContext, NONE_OR_NOT_DERIVED);
-        artifactGoal = blankDefault(artifactGoal, NONE_OR_NOT_DERIVED);
-        verifierProfile = blankDefault(verifierProfile, NONE_OR_NOT_DERIVED);
+        evidenceObligation = redactedAuditField(evidenceObligation, NONE_OR_NOT_DERIVED);
+        outputObligation = redactedAuditField(outputObligation, NOT_DERIVED);
+        activeTaskContext = redactedAuditField(activeTaskContext, NONE_OR_NOT_DERIVED);
+        artifactGoal = redactedAuditField(artifactGoal, NONE_OR_NOT_DERIVED);
+        verifierProfile = redactedAuditField(verifierProfile, NONE_OR_NOT_DERIVED);
         historyPolicy = blankDefault(historyPolicy, NOT_DERIVED);
         currentTurnFramePlacement = blankDefault(currentTurnFramePlacement, "UNKNOWN");
         currentTurnFrameHash = safe(currentTurnFrameHash);
@@ -101,21 +102,35 @@ public record PromptAuditSnapshot(
             List<String> promptTools,
             List<String> blockedTools
     ) {
+        CurrentTurnPlan plan = new CurrentTurnPlan(
+                contract,
+                contract == null ? "" : contract.originalUserRequest(),
+                phaseInitial,
+                phaseFinal,
+                actionObligation,
+                List.of(),
+                nativeTools,
+                promptTools,
+                blockedTools,
+                NONE_OR_NOT_DERIVED,
+                NOT_DERIVED,
+                NONE_OR_NOT_DERIVED,
+                NONE_OR_NOT_DERIVED,
+                NONE_OR_NOT_DERIVED);
         PromptMessageLayout layout = PromptMessageLayout.fromMessages(messages);
-        String taskType = contract == null || contract.type() == null ? "" : contract.type().name();
         return new PromptAuditSnapshot(
                 1,
-                taskType,
+                contract == null || contract.type() == null ? "" : contract.type().name(),
                 contract != null && contract.mutationAllowed(),
                 contract != null && contract.verificationRequired(),
                 phaseInitial == null ? "" : phaseInitial.name(),
                 phaseFinal == null ? "" : phaseFinal.name(),
                 actionObligation == null ? "" : actionObligation.name(),
-                NONE_OR_NOT_DERIVED,
-                NOT_DERIVED,
-                NONE_OR_NOT_DERIVED,
-                NONE_OR_NOT_DERIVED,
-                NONE_OR_NOT_DERIVED,
+                plan.evidenceObligation(),
+                plan.outputObligation(),
+                plan.activeTaskContext(),
+                plan.artifactGoal(),
+                plan.verifierProfile(),
                 layout.historyPolicy(),
                 layout.historyMessageCount(),
                 layout.currentTurnFrameInjected(),
@@ -126,9 +141,45 @@ public record PromptAuditSnapshot(
                 layout.userMessageCount(),
                 layout.totalMessageCount(),
                 layout.promptHash(),
-                nativeTools,
-                promptTools,
-                blockedTools,
+                plan.nativeTools(),
+                plan.promptTools(),
+                plan.blockedTools(),
+                TraceRedactionMode.DEFAULT);
+    }
+
+    public static PromptAuditSnapshot fromPlan(CurrentTurnPlan plan, List<ChatMessage> messages) {
+        CurrentTurnPlan safePlan = plan == null
+                ? CurrentTurnPlan.compatibility(null, null, List.of(), List.of(), List.of())
+                : plan;
+        PromptMessageLayout layout = PromptMessageLayout.fromMessages(messages);
+        TaskContract contract = safePlan.taskContract();
+        String taskType = contract.type() == null ? "" : contract.type().name();
+        return new PromptAuditSnapshot(
+                1,
+                taskType,
+                contract.mutationAllowed(),
+                contract.verificationRequired(),
+                safePlan.phaseInitial() == null ? "" : safePlan.phaseInitial().name(),
+                safePlan.phaseFinal() == null ? "" : safePlan.phaseFinal().name(),
+                safePlan.actionObligation() == null ? "" : safePlan.actionObligation().name(),
+                safePlan.evidenceObligation(),
+                safePlan.outputObligation(),
+                safePlan.activeTaskContext(),
+                safePlan.artifactGoal(),
+                safePlan.verifierProfile(),
+                layout.historyPolicy(),
+                layout.historyMessageCount(),
+                layout.currentTurnFrameInjected(),
+                layout.currentTurnFramePlacement(),
+                layout.currentTurnFrameHash(),
+                layout.currentTurnFramePreviewRedacted(),
+                layout.systemMessageCount(),
+                layout.userMessageCount(),
+                layout.totalMessageCount(),
+                layout.promptHash(),
+                safePlan.nativeTools(),
+                safePlan.promptTools(),
+                safePlan.blockedTools(),
                 TraceRedactionMode.DEFAULT);
     }
 
@@ -194,6 +245,10 @@ public record PromptAuditSnapshot(
 
     private static String blankDefault(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value;
+    }
+
+    private static String redactedAuditField(String value, String fallback) {
+        return blankDefault(PromptAuditRedactor.preview(value), fallback);
     }
 
     private static String safe(String value) {

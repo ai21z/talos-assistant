@@ -101,3 +101,7 @@ V1_IMPLEMENTATION_BRIDGE.md
 *.env.*
 *.secret.*
 *.private.*
+
+# Tracked fake e2e fixtures; these are not real secrets.
+!src/e2eTest/resources/fixtures/listing-privacy/.env
+!src/e2eTest/resources/fixtures/protected-path/.env

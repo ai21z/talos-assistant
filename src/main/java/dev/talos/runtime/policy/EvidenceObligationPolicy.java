@@ -1,0 +1,68 @@
+package dev.talos.runtime.policy;
+
+import dev.talos.core.ingest.UnsupportedDocumentFormats;
+import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskType;
+
+import java.nio.file.Path;
+import java.util.Locale;
+
+/** Deterministic derivation for current-turn evidence obligations. */
+public final class EvidenceObligationPolicy {
+    private EvidenceObligationPolicy() {}
+
+    public static EvidenceObligation derive(TaskContract contract, ExecutionPhase phase, Path workspace) {
+        if (contract == null) return EvidenceObligation.NONE;
+        TaskType type = contract.type() == null ? TaskType.UNKNOWN : contract.type();
+        if (type == TaskType.UNKNOWN || type == TaskType.SMALL_TALK) {
+            return EvidenceObligation.NONE;
+        }
+        if (type == TaskType.DIRECTORY_LISTING) {
+            return EvidenceObligation.LIST_DIRECTORY_ONLY;
+        }
+        if (type == TaskType.VERIFY_ONLY) {
+            return EvidenceObligation.VERIFY_FROM_TRACE_OR_EVIDENCE;
+        }
+        if (hasUnsupportedDocumentTarget(contract)) {
+            return EvidenceObligation.UNSUPPORTED_CAPABILITY_CHECK_REQUIRED;
+        }
+        if (!contract.mutationAllowed() && hasProtectedExpectedTarget(contract, workspace)) {
+            return EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED;
+        }
+        if (!contract.mutationAllowed() && !contract.expectedTargets().isEmpty()) {
+            return EvidenceObligation.READ_TARGET_REQUIRED;
+        }
+        if (type == TaskType.WORKSPACE_EXPLAIN || type == TaskType.DIAGNOSE_ONLY) {
+            return EvidenceObligation.WORKSPACE_INSPECTION_REQUIRED;
+        }
+        return EvidenceObligation.NONE;
+    }
+
+    public static EvidenceObligation parse(String value) {
+        if (value == null || value.isBlank()) return EvidenceObligation.NONE;
+        try {
+            return EvidenceObligation.valueOf(value.strip().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException ignored) {
+            return EvidenceObligation.NONE;
+        }
+    }
+
+    private static boolean hasUnsupportedDocumentTarget(TaskContract contract) {
+        for (String target : contract.expectedTargets()) {
+            if (UnsupportedDocumentFormats.isUnsupported(Path.of(target))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasProtectedExpectedTarget(TaskContract contract, Path workspace) {
+        for (String target : contract.expectedTargets()) {
+            if (ProtectedPathPolicy.classify(workspace, target).protectedPath()) {
+                return true;
+            }
+        }
+        return false;
+    }
+}

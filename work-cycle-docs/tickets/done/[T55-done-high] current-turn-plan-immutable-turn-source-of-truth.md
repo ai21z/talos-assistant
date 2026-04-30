@@ -1,6 +1,6 @@
-# [T55-open-high] CurrentTurnPlan Immutable Turn Source Of Truth
+# [T55-done-high] CurrentTurnPlan Immutable Turn Source Of Truth
 
-Status: open
+Status: done
 Priority: high
 
 ## Evidence Summary
@@ -145,6 +145,70 @@ Commands:
 - Do not update `CHANGELOG.md`.
 - Keep the first implementation narrow enough that T56 and T57 can extend it
   without rewriting it.
+
+## Implementation Summary
+
+- Added immutable `CurrentTurnPlan` as the current-turn source of truth for:
+  - original user request
+  - task contract
+  - initial/final phase
+  - action obligation
+  - literal task expectations
+  - native/prompt/blocked tool surfaces
+  - explicit placeholder fields for evidence/output/context/artifact/profile
+- Updated current-turn capability frame rendering to consume the plan.
+- Updated prompt audit snapshot generation to render from the plan while keeping
+  placeholder fields honest and redacted.
+- Built the plan once near the start of `AssistantTurnExecutor.execute`, after
+  contract resolution, phase initialization, and native tool-surface selection.
+- Threaded the plan through no-tool retry, mutation retry, inspection retry,
+  fallback plan, tool-loop shaping, no-tool shaping, and static verification
+  paths that previously re-read mutable message history.
+- Added plan-aware `ExecutionOutcome` overloads and kept legacy overloads as
+  compatibility adapters.
+- Added plan-aware denied/invalid mutation classification so retry-appended
+  synthetic user messages cannot hide the original mutation obligation.
+- Restored the fake protected-path `.env` e2e fixture and explicitly allowlisted
+  tracked fake fixture `.env` files in `.gitignore`; this was found during full
+  T55 closeout verification.
+
+## Files Changed
+
+- `.gitignore`
+- `src/e2eTest/resources/fixtures/protected-path/.env`
+- `src/main/java/dev/talos/cli/modes/AssistantTurnExecutor.java`
+- `src/main/java/dev/talos/cli/modes/ExecutionOutcome.java`
+- `src/main/java/dev/talos/runtime/policy/CurrentTurnCapabilityFrame.java`
+- `src/main/java/dev/talos/runtime/trace/PromptAuditSnapshot.java`
+- `src/main/java/dev/talos/runtime/turn/CurrentTurnPlan.java`
+- `src/test/java/dev/talos/cli/modes/AssistantTurnExecutorTest.java`
+- `src/test/java/dev/talos/cli/modes/ExecutionOutcomeTest.java`
+- `src/test/java/dev/talos/runtime/trace/PromptAuditSnapshotTest.java`
+- `src/test/java/dev/talos/runtime/turn/CurrentTurnPlanTest.java`
+
+## Tests / Evidence Completed
+
+- `.\gradlew.bat test --tests dev.talos.runtime.turn.CurrentTurnPlanTest --tests dev.talos.runtime.trace.PromptAuditSnapshotTest --tests dev.talos.cli.modes.ExecutionOutcomeTest --tests dev.talos.cli.modes.AssistantTurnExecutorTest --tests dev.talos.core.llm.AssistantTurnExecutorNativeToolSurfaceTest --tests dev.talos.cli.modes.AssistantTurnExecutorPhasePolicyTest --no-daemon` - PASS
+- `.\gradlew.bat test --no-daemon` - PASS
+- `.\gradlew.bat e2eTest --no-daemon` - initially failed on scenarios 65 and
+  66 because the protected-path fixture expected `.env` but the fake fixture was
+  missing and `*.env` was globally ignored.
+- `.\gradlew.bat e2eTest --tests dev.talos.harness.JsonScenarioPackTest.protectedPathMutationDeniedBeforeApproval --tests dev.talos.harness.JsonScenarioPackTest.protectedReadRequiresApproval --no-daemon` - PASS after restoring the fixture.
+- `.\gradlew.bat e2eTest --no-daemon` - PASS after restoring the fixture.
+- `.\gradlew.bat check --no-daemon` - PASS
+- `pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly` - PASS; validated 10 TalosBench cases.
+
+## Review Evidence
+
+- Task 1 spec review: APPROVED.
+- Task 1 code quality review: APPROVED.
+- Task 2 spec review: APPROVED after prompt-audit placeholder hardening.
+- Task 2 code quality review: APPROVED.
+- Task 3 spec review: APPROVED after fallback frame preservation.
+- Task 3 code quality review: APPROVED.
+- Task 4 spec review: APPROVED after denied/invalid mutation classification
+  stopped reading retry-mutated latest user messages.
+- Task 4 code quality review: APPROVED.
 
 ## Known Risks
 

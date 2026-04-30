@@ -14,6 +14,7 @@ import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.ActionObligation;
 import dev.talos.runtime.policy.ActionObligationPolicy;
 import dev.talos.runtime.policy.CapabilityAnswerPolicy;
+import dev.talos.runtime.policy.ConversationBoundaryPolicy;
 import dev.talos.runtime.policy.CurrentTurnCapabilityFrame;
 import dev.talos.runtime.policy.ResponseObligationVerifier;
 import dev.talos.runtime.task.TaskContract;
@@ -21,6 +22,7 @@ import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
 import dev.talos.runtime.toolcall.ToolCallSupport;
+import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.trace.PromptAuditSnapshot;
@@ -144,23 +146,20 @@ public final class AssistantTurnExecutor {
         TaskContract taskContract = TaskContractResolver.fromMessages(messages);
         initializeExecutionPhaseForTurn(taskContract, ctx);
         ctx = withNativeToolSurface(ctx, taskContract);
-        recordPolicyTrace(taskContract, ctx);
-        injectTaskContractInstruction(
-                messages,
-                taskContract,
-                ctx.executionPhaseState() == null ? ExecutionPhase.APPLY : ctx.executionPhaseState().phase(),
-                NativeToolSpecPolicy.names(ctx.nativeToolSpecs()));
-        injectStaticVerificationRepairInstruction(messages, taskContract);
-        PromptAuditSnapshot promptAudit = recordPromptAudit(taskContract, ctx, messages);
+        CurrentTurnPlan currentTurnPlan = buildCurrentTurnPlan(taskContract, ctx);
+        recordPolicyTrace(currentTurnPlan, ctx);
+        injectTaskContractInstruction(messages, currentTurnPlan);
+        injectStaticVerificationRepairInstruction(messages, currentTurnPlan.taskContract());
+        PromptAuditSnapshot promptAudit = recordPromptAudit(currentTurnPlan, messages);
         emitPromptAuditIfEnabled(promptAudit, ctx);
         Context turnContext = ctx;
-        String directAnswer = deterministicDirectAnswerIfNeeded(messages, taskContract);
+        String directAnswer = deterministicDirectAnswerIfNeeded(messages, currentTurnPlan.taskContract());
         if (directAnswer != null) {
             return directTurnOutput(directAnswer, ctx, opts);
         }
-        boolean useStreaming = shouldUseStreaming(ctx, taskContract);
+        boolean useStreaming = shouldUseStreaming(ctx, currentTurnPlan.taskContract());
 
-        TurnTaskContractCapture.set(taskContract);
+        TurnTaskContractCapture.set(currentTurnPlan.taskContract());
         try {
             if (useStreaming) {
                 // ── Streaming path ──────────────────────────────────────────
@@ -184,7 +183,7 @@ public final class AssistantTurnExecutor {
 
                 if (answer != null) {
                     if (ctx.toolCallLoop() != null && hasAnyToolCalls(streamResult)) {
-                        if (blocksToolCallsForContract(taskContract)) {
+                        if (blocksToolCallsForContract(currentTurnPlan.taskContract())) {
                             answer = answerForBlockedSmallTalkToolCalls(answer, messages, opts);
                             emitBlockedSmallTalkToolCallAnswer(answer, ctx);
                             out.append(answer);
@@ -198,7 +197,7 @@ public final class AssistantTurnExecutor {
                                     loopResult.iterations(), loopResult.toolsInvoked());
                             appendSummary(out, loopResult);
                             ToolLoopAnswerResolution resolution = resolveToolLoopAnswer(
-                                    answer, messages, loopResult, workspace, ctx, opts);
+                                    answer, messages, currentTurnPlan, loopResult, workspace, ctx, opts);
                             appendExtraSummary(out, resolution.extraSummary());
                             out.append(resolution.answer());
                         }
@@ -209,7 +208,7 @@ public final class AssistantTurnExecutor {
                         // must be enforced by visible annotation of high-risk shapes.
                         streamed = true;
                         String rawAnswer = answer;
-                        answer = shapeAnswerWithoutTools(answer, messages, ctx, true, opts);
+                        answer = shapeAnswerWithoutTools(answer, messages, currentTurnPlan, ctx, true, opts);
                         emitStreamingNoToolCorrectionIfNeeded(rawAnswer, answer, ctx);
                         emitMalformedProtocolReplacementIfNeeded(rawAnswer, answer, ctx);
                         out.append(answer);
@@ -230,7 +229,7 @@ public final class AssistantTurnExecutor {
                 String answer = streamResult.text();
                 if (answer != null) {
                     if (ctx.toolCallLoop() != null && hasAnyToolCalls(streamResult)) {
-                        if (blocksToolCallsForContract(taskContract)) {
+                        if (blocksToolCallsForContract(currentTurnPlan.taskContract())) {
                             answer = answerForBlockedSmallTalkToolCalls(answer, messages, opts);
                         } else {
                             LOG.debug("Tool calls detected in LLM response (native: {}), entering tool-call loop",
@@ -242,7 +241,7 @@ public final class AssistantTurnExecutor {
                                     loopResult.iterations(), loopResult.toolsInvoked());
                             appendSummary(out, loopResult);
                             ToolLoopAnswerResolution resolution = resolveToolLoopAnswer(
-                                    answer, messages, loopResult, workspace, ctx, opts);
+                                    answer, messages, currentTurnPlan, loopResult, workspace, ctx, opts);
                             appendExtraSummary(out, resolution.extraSummary());
                             answer = resolution.answer();
                         }
@@ -252,7 +251,7 @@ public final class AssistantTurnExecutor {
                         // / reading / inspection and the answer is long-and-confident,
                         // re-prompt once asking the model to answer from workspace evidence.
                         ToolLoopAnswerResolution resolution = resolveNoToolAnswer(
-                                answer, messages, workspace, ctx, opts);
+                                answer, messages, currentTurnPlan, workspace, ctx, opts);
                         appendExtraSummary(out, resolution.extraSummary());
                         answer = resolution.answer();
                     }
@@ -315,6 +314,7 @@ public final class AssistantTurnExecutor {
     private static ToolLoopAnswerResolution resolveToolLoopAnswer(
             String answer,
             List<ChatMessage> messages,
+            CurrentTurnPlan plan,
             ToolCallLoop.LoopResult loopResult,
             Path workspace,
             Context ctx,
@@ -323,17 +323,23 @@ public final class AssistantTurnExecutor {
         answer = synthesisRetryIfNeeded(answer, loopResult.toolsInvoked(), messages, ctx);
 
         MutationRetryResult mrr = mutationRequestRetryIfNeeded(
-                answer, messages, loopResult, workspace, ctx);
+                answer, messages, plan, loopResult, workspace, ctx);
         answer = mrr.answer();
 
         InspectRetryResult irr = inspectCompletenessRetryIfNeeded(
-                answer, messages, loopResult, workspace, ctx);
+                answer, messages, plan, loopResult, workspace, ctx);
         answer = irr.answer();
 
-        moveToVerifyAfterSuccessfulMutation(ctx, loopResult, mrr.mutationsInRetry());
+        ToolCallLoop.LoopResult outcomeLoopResult =
+                mrr.retryLoopResult() == null ? loopResult : mrr.retryLoopResult();
+        int outcomeExtraMutationSuccesses =
+                mrr.retryLoopResult() == null ? mrr.mutationsInRetry() : 0;
+
+        moveToVerifyAfterSuccessfulMutation(ctx, outcomeLoopResult, outcomeExtraMutationSuccesses);
 
         String finalAnswer = shapeAnswerAfterToolLoop(
-                answer, messages, loopResult, workspace, mrr.mutationsInRetry(), opts);
+                answer, messages, plan, outcomeLoopResult, workspace,
+                outcomeExtraMutationSuccesses, mrr.actionObligationFailed(), opts);
 
         return new ToolLoopAnswerResolution(
                 finalAnswer,
@@ -344,6 +350,7 @@ public final class AssistantTurnExecutor {
     private static ToolLoopAnswerResolution resolveNoToolAnswer(
             String answer,
             List<ChatMessage> messages,
+            CurrentTurnPlan plan,
             Path workspace,
             Context ctx,
             Options opts
@@ -351,12 +358,12 @@ public final class AssistantTurnExecutor {
         if (ToolCallParser.looksLikeMalformedProtocolArrayDebris(answer)
                 || ToolCallParser.looksLikeMalformedToolProtocol(answer)) {
             return new ToolLoopAnswerResolution(
-                    shapeAnswerWithoutTools(answer, messages, ctx, false, opts),
+                    shapeAnswerWithoutTools(answer, messages, plan, ctx, false, opts),
                     null);
         }
         ToolCallLoop.LoopResult noToolLoopResult = emptyNoToolLoopResult(answer, messages);
         MutationRetryResult mrr = mutationRequestRetryIfNeeded(
-                answer, messages, noToolLoopResult, workspace, ctx);
+                answer, messages, plan, noToolLoopResult, workspace, ctx);
         if (mrr.extraSummary() != null || mrr.mutationsInRetry() > 0) {
             ToolCallLoop.LoopResult verificationLoop =
                     mrr.retryLoopResult() == null ? noToolLoopResult : mrr.retryLoopResult();
@@ -365,21 +372,23 @@ public final class AssistantTurnExecutor {
             moveToVerifyAfterSuccessfulMutation(ctx, verificationLoop, extraMutationSuccesses);
             return new ToolLoopAnswerResolution(
                     shapeAnswerAfterToolLoop(
-                            mrr.answer(), messages, verificationLoop, workspace,
-                            extraMutationSuccesses, opts),
+                            mrr.answer(), messages, plan, verificationLoop, workspace,
+                            extraMutationSuccesses, mrr.actionObligationFailed(), opts),
                     mrr.extraSummary());
         }
         ReadOnlyInspectionRetryResult inspectionRetry = readOnlyInspectionRetryIfNeeded(
-                mrr.answer(), messages, workspace, ctx);
+                mrr.answer(), messages, plan, workspace, ctx);
         if (inspectionRetry.loopResult() != null) {
             return new ToolLoopAnswerResolution(
                     shapeAnswerAfterToolLoop(
-                            inspectionRetry.answer(), messages, inspectionRetry.loopResult(),
+                            inspectionRetry.answer(), messages, plan, inspectionRetry.loopResult(),
                             workspace, 0, opts),
                     inspectionRetry.extraSummary());
         }
         return new ToolLoopAnswerResolution(
-                shapeAnswerWithoutTools(inspectionRetry.answer(), messages, ctx, false, opts),
+                shapeAnswerWithoutTools(
+                        inspectionRetry.answer(), messages, plan, ctx, false,
+                        mrr.actionObligationFailed(), opts),
                 null);
     }
 
@@ -395,8 +404,24 @@ public final class AssistantTurnExecutor {
             Path workspace,
             Context ctx
     ) {
+        return readOnlyInspectionRetryIfNeeded(
+                answer,
+                messages,
+                compatibilityPlanFromMessages(messages, ctx),
+                workspace,
+                ctx);
+    }
+
+    static ReadOnlyInspectionRetryResult readOnlyInspectionRetryIfNeeded(
+            String answer,
+            List<ChatMessage> messages,
+            CurrentTurnPlan plan,
+            Path workspace,
+            Context ctx
+    ) {
         if (answer == null) answer = "";
-        TaskContract contract = TaskContractResolver.fromMessages(messages);
+        CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, ctx);
+        TaskContract contract = safePlan.taskContract();
         if (!requiresWorkspaceEvidence(contract)) {
             return new ReadOnlyInspectionRetryResult(answer, null, null);
         }
@@ -407,7 +432,7 @@ public final class AssistantTurnExecutor {
             return new ReadOnlyInspectionRetryResult(answer, null, null);
         }
 
-        String userRequest = latestUserRequest(messages);
+        String userRequest = safePlan.originalUserRequest();
         List<ChatMessage> retryMessages = new ArrayList<>(messages);
         retryMessages.add(ChatMessage.assistant(answer.isBlank() ? "(no answer)" : answer));
         retryMessages.add(ChatMessage.user(readOnlyInspectionRetryPrompt(contract, userRequest, workspace)));
@@ -515,6 +540,40 @@ public final class AssistantTurnExecutor {
                 NativeToolSpecPolicy.select(contract, phase, ctx.toolRegistry()));
     }
 
+    private static CurrentTurnPlan buildCurrentTurnPlan(TaskContract taskContract, Context ctx) {
+        ExecutionPhase phase = currentExecutionPhase(ctx, taskContract);
+        List<String> nativeTools = ctx == null
+                ? defaultVisibleToolNames(taskContract, phase)
+                : NativeToolSpecPolicy.names(ctx.nativeToolSpecs());
+        return CurrentTurnPlan.create(taskContract, phase, nativeTools, nativeTools, List.of());
+    }
+
+    private static CurrentTurnPlan compatibilityPlanFromMessages(List<ChatMessage> messages, Context ctx) {
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+        ExecutionPhase phase = currentExecutionPhase(ctx, contract);
+        List<String> nativeTools = ctx == null
+                ? defaultVisibleToolNames(contract, phase)
+                : NativeToolSpecPolicy.names(ctx.nativeToolSpecs());
+        return CurrentTurnPlan.compatibility(contract, phase, nativeTools, nativeTools, List.of());
+    }
+
+    private static CurrentTurnPlan safePlanFromMessages(
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages,
+            Context ctx
+    ) {
+        return plan == null ? compatibilityPlanFromMessages(messages, ctx) : plan;
+    }
+
+    private static ExecutionPhase currentExecutionPhase(Context ctx, TaskContract contract) {
+        if (ctx != null && ctx.executionPhaseState() != null) {
+            return ctx.executionPhaseState().phase();
+        }
+        return contract != null && contract.mutationAllowed()
+                ? ExecutionPhase.APPLY
+                : ExecutionPhase.INSPECT;
+    }
+
     private static boolean shouldUseStreaming(Context ctx, TaskContract taskContract) {
         if (ctx == null || ctx.streamSink() == null) return false;
         if (taskContract != null && taskContract.mutationAllowed()) return false;
@@ -584,19 +643,26 @@ public final class AssistantTurnExecutor {
     }
 
     private static void recordPolicyTrace(TaskContract contract, Context ctx) {
+        ExecutionPhase phase = currentExecutionPhase(ctx, contract);
+        List<String> nativeTools = ctx == null
+                ? defaultVisibleToolNames(contract, phase)
+                : NativeToolSpecPolicy.names(ctx.nativeToolSpecs());
+        recordPolicyTrace(CurrentTurnPlan.compatibility(
+                contract, phase, nativeTools, nativeTools, List.of()), ctx);
+    }
+
+    private static void recordPolicyTrace(CurrentTurnPlan plan, Context ctx) {
         if (ctx == null || !TurnAuditCapture.isActive()) return;
-        ExecutionPhase phase = ctx.executionPhaseState() == null
-                ? ExecutionPhase.APPLY
-                : ctx.executionPhaseState().phase();
-        List<String> nativeTools = NativeToolSpecPolicy.names(ctx.nativeToolSpecs());
+        CurrentTurnPlan safePlan = plan == null
+                ? buildCurrentTurnPlan(null, ctx)
+                : plan;
         TurnAuditCapture.recordPolicyTrace(TurnPolicyTrace.from(
-                contract,
-                phase.name(),
-                nativeTools,
-                nativeTools));
-        ActionObligation obligation = ActionObligationPolicy.derive(contract, phase);
+                safePlan.taskContract(),
+                safePlan.phaseInitial().name(),
+                safePlan.nativeTools(),
+                safePlan.promptTools()));
         LocalTurnTraceCapture.recordActionObligation(
-                obligation.name(),
+                safePlan.actionObligation().name(),
                 "SELECTED",
                 "derived from task contract and execution phase");
     }
@@ -606,22 +672,19 @@ public final class AssistantTurnExecutor {
             Context ctx,
             List<ChatMessage> messages
     ) {
-        ExecutionPhase phase = ctx == null || ctx.executionPhaseState() == null
-                ? (contract != null && contract.mutationAllowed() ? ExecutionPhase.APPLY : ExecutionPhase.INSPECT)
-                : ctx.executionPhaseState().phase();
+        ExecutionPhase phase = currentExecutionPhase(ctx, contract);
         List<String> nativeTools = ctx == null
                 ? defaultVisibleToolNames(contract, phase)
                 : NativeToolSpecPolicy.names(ctx.nativeToolSpecs());
-        ActionObligation obligation = ActionObligationPolicy.derive(contract, phase);
-        PromptAuditSnapshot snapshot = PromptAuditSnapshot.fromMessages(
-                contract,
-                phase,
-                phase,
-                obligation,
-                messages,
-                nativeTools,
-                nativeTools,
-                List.of());
+        return recordPromptAudit(CurrentTurnPlan.compatibility(
+                contract, phase, nativeTools, nativeTools, List.of()), messages);
+    }
+
+    private static PromptAuditSnapshot recordPromptAudit(
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages
+    ) {
+        PromptAuditSnapshot snapshot = PromptAuditSnapshot.fromPlan(plan, messages);
         LocalTurnTraceCapture.recordPromptAudit(snapshot);
         return snapshot;
     }
@@ -646,7 +709,21 @@ public final class AssistantTurnExecutor {
                 ? ExecutionPhase.APPLY
                 : ExecutionPhase.INSPECT;
         List<String> visibleTools = defaultVisibleToolNames(contract, phase);
-        injectTaskContractInstruction(messages, contract, phase, visibleTools);
+        injectTaskContractInstruction(messages, CurrentTurnPlan.compatibility(
+                contract, phase, visibleTools, visibleTools, List.of()));
+    }
+
+    public static void injectTaskContractInstruction(List<ChatMessage> messages, CurrentTurnPlan plan) {
+        if (messages == null || messages.isEmpty()) return;
+        if (messages.stream().anyMatch(AssistantTurnExecutor::isTaskContractInstruction)) return;
+
+        if (plan == null) {
+            injectTaskContractInstruction(messages);
+            return;
+        }
+
+        String instruction = CurrentTurnCapabilityFrame.render(plan);
+        injectTaskContractInstruction(messages, instruction);
     }
 
     public static void injectTaskContractInstruction(
@@ -655,14 +732,20 @@ public final class AssistantTurnExecutor {
             ExecutionPhase phase,
             List<String> visibleTools
     ) {
-        if (messages == null || messages.isEmpty()) return;
-        if (messages.stream().anyMatch(AssistantTurnExecutor::isTaskContractInstruction)) return;
-
         TaskContract safeContract = contract == null ? TaskContractResolver.fromMessages(messages) : contract;
         ExecutionPhase safePhase = phase == null
                 ? (safeContract.mutationAllowed() ? ExecutionPhase.APPLY : ExecutionPhase.INSPECT)
                 : phase;
-        String instruction = CurrentTurnCapabilityFrame.render(safeContract, safePhase, visibleTools);
+        injectTaskContractInstruction(messages, CurrentTurnPlan.compatibility(
+                safeContract, safePhase, visibleTools, visibleTools, List.of()));
+    }
+
+    private static void injectTaskContractInstruction(
+            List<ChatMessage> messages,
+            String instruction
+    ) {
+        if (messages == null || messages.isEmpty()) return;
+        if (messages.stream().anyMatch(AssistantTurnExecutor::isTaskContractInstruction)) return;
 
         int insertAt = messages.size();
         for (int i = messages.size() - 1; i >= 0; i--) {
@@ -746,6 +829,12 @@ public final class AssistantTurnExecutor {
             TaskContract contract
     ) {
         String userRequest = latestUserRequest(messages);
+        if (contract != null && contract.type() == TaskType.SMALL_TALK) {
+            String conversationBoundaryAnswer = ConversationBoundaryPolicy.deterministicAnswer(userRequest);
+            if (conversationBoundaryAnswer != null) {
+                return conversationBoundaryAnswer;
+            }
+        }
         if (contract != null
                 && contract.type() == TaskType.SMALL_TALK
                 && looksLikeAssistantIdentityTurn(userRequest)) {
@@ -886,26 +975,46 @@ public final class AssistantTurnExecutor {
     private static String shapeAnswerAfterToolLoop(
             String answer,
             List<ChatMessage> messages,
+            CurrentTurnPlan plan,
             ToolCallLoop.LoopResult loopResult,
             Path workspace,
             int extraMutationSuccesses,
             Options opts
     ) {
-        String directoryListingAnswer = directoryListingAnswerIfApplicable(messages, loopResult);
+        return shapeAnswerAfterToolLoop(
+                answer, messages, plan, loopResult, workspace, extraMutationSuccesses, false, opts);
+    }
+
+    private static String shapeAnswerAfterToolLoop(
+            String answer,
+            List<ChatMessage> messages,
+            CurrentTurnPlan plan,
+            ToolCallLoop.LoopResult loopResult,
+            Path workspace,
+            int extraMutationSuccesses,
+            boolean failedActionObligation,
+            Options opts
+    ) {
+        String directoryListingAnswer = directoryListingAnswerIfApplicable(messages, plan, loopResult);
         if (!directoryListingAnswer.isBlank()) {
             return sanitizeAndTruncate(directoryListingAnswer, opts);
         }
         ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
-                answer, messages, loopResult, workspace, extraMutationSuccesses);
+                answer, plan, messages, loopResult, workspace,
+                extraMutationSuccesses, failedActionObligation);
         return sanitizeAndTruncate(outcome.finalAnswer(), opts);
     }
 
     private static String directoryListingAnswerIfApplicable(
             List<ChatMessage> messages,
+            CurrentTurnPlan plan,
             ToolCallLoop.LoopResult loopResult
     ) {
-        TaskContract contract = TaskContractResolver.fromMessages(messages);
+        TaskContract contract = safePlanFromMessages(plan, messages, null).taskContract();
         if (contract.type() != TaskType.DIRECTORY_LISTING || loopResult == null) return "";
+        if (loopResult.toolNames().stream().anyMatch(AssistantTurnExecutor::isContentInspectionTool)) {
+            return "";
+        }
         String body = latestToolResultBody(loopResult.messages(), "talos.list_dir");
         if (body.isBlank() || body.contains("[error]")) return "";
         List<String> entries = body.lines()
@@ -917,6 +1026,12 @@ public final class AssistantTurnExecutor {
                 .toList();
         if (entries.isEmpty()) return "";
         return "Directory entries:\n- " + String.join("\n- ", entries);
+    }
+
+    private static boolean isContentInspectionTool(String toolName) {
+        return "talos.read_file".equals(toolName)
+                || "talos.grep".equals(toolName)
+                || "talos.retrieve".equals(toolName);
     }
 
     private static String latestToolResultBody(List<ChatMessage> messages, String toolName) {
@@ -984,11 +1099,25 @@ public final class AssistantTurnExecutor {
     private static String shapeAnswerWithoutTools(
             String answer,
             List<ChatMessage> messages,
+            CurrentTurnPlan plan,
             Context ctx,
             boolean streamed,
             Options opts
     ) {
-        ExecutionOutcome outcome = ExecutionOutcome.fromNoTool(answer, messages, ctx, streamed);
+        return shapeAnswerWithoutTools(answer, messages, plan, ctx, streamed, false, opts);
+    }
+
+    private static String shapeAnswerWithoutTools(
+            String answer,
+            List<ChatMessage> messages,
+            CurrentTurnPlan plan,
+            Context ctx,
+            boolean streamed,
+            boolean failedActionObligation,
+            Options opts
+    ) {
+        ExecutionOutcome outcome = ExecutionOutcome.fromNoTool(
+                answer, plan, messages, ctx, streamed, failedActionObligation);
         if (streamed && outcome.groundingStatus() == ExecutionOutcome.GroundingStatus.UNGROUNDED) {
             LOG.info("Streaming grounding annotation appended: answer={} chars, "
                     + "zero tools, user asked for evidence.", answer == null ? 0 : answer.length());
@@ -1356,10 +1485,19 @@ public final class AssistantTurnExecutor {
                                                           List<ChatMessage> messages,
                                                           ToolCallLoop.LoopResult loopResult,
                                                           int extraMutationSuccesses) {
+        return summarizeDeniedMutationOutcomesIfNeeded(
+                answer, safePlanFromMessages(null, messages, null), messages, loopResult, extraMutationSuccesses);
+    }
+
+    static String summarizeDeniedMutationOutcomesIfNeeded(String answer,
+                                                          CurrentTurnPlan plan,
+                                                          List<ChatMessage> messages,
+                                                          ToolCallLoop.LoopResult loopResult,
+                                                          int extraMutationSuccesses) {
         if (loopResult == null) return answer;
         if (extraMutationSuccesses > 0) return answer;
         if (loopResult.mutatingToolSuccesses() > 0) return answer;
-        if (!looksLikeMutationRequest(latestUserRequest(messages))) return answer;
+        if (!planRequestsMutation(plan, messages)) return answer;
 
         List<ToolCallLoop.ToolOutcome> outcomes = loopResult.toolOutcomes();
         if (outcomes == null || outcomes.isEmpty()) return answer;
@@ -1418,6 +1556,13 @@ public final class AssistantTurnExecutor {
         return out.toString().stripTrailing();
     }
 
+    private static boolean planRequestsMutation(CurrentTurnPlan plan, List<ChatMessage> messages) {
+        CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, null);
+        TaskContract contract = safePlan.taskContract();
+        return contract.mutationRequested()
+                || looksLikeMutationRequest(safePlan.originalUserRequest());
+    }
+
     private static String deniedMutationAnnotation(List<ToolCallLoop.ToolOutcome> policyDeniedMutations,
                                                    List<ToolCallLoop.ToolOutcome> approvalDeniedMutations) {
         if (!policyDeniedMutations.isEmpty() && approvalDeniedMutations.isEmpty()) {
@@ -1470,11 +1615,20 @@ public final class AssistantTurnExecutor {
                                                                   List<ChatMessage> messages,
                                                                   ToolCallLoop.LoopResult loopResult,
                                                                   int extraMutationSuccesses) {
+        return summarizeReadOnlyDeniedMutationOutcomesIfNeeded(
+                answer, safePlanFromMessages(null, messages, null), messages, loopResult, extraMutationSuccesses);
+    }
+
+    static String summarizeReadOnlyDeniedMutationOutcomesIfNeeded(String answer,
+                                                                  CurrentTurnPlan plan,
+                                                                  List<ChatMessage> messages,
+                                                                  ToolCallLoop.LoopResult loopResult,
+                                                                  int extraMutationSuccesses) {
         if (loopResult == null) return answer;
         if (extraMutationSuccesses > 0) return answer;
         if (loopResult.mutatingToolSuccesses() > 0) return answer;
 
-        TaskContract contract = TaskContractResolver.fromMessages(messages);
+        TaskContract contract = safePlanFromMessages(plan, messages, null).taskContract();
         if (contract.mutationAllowed()) return answer;
 
         List<ToolCallLoop.ToolOutcome> readOnlyBlockedMutations = loopResult.toolOutcomes().stream()
@@ -1529,10 +1683,19 @@ public final class AssistantTurnExecutor {
                                                            List<ChatMessage> messages,
                                                            ToolCallLoop.LoopResult loopResult,
                                                            int extraMutationSuccesses) {
+        return summarizeInvalidMutationOutcomesIfNeeded(
+                answer, safePlanFromMessages(null, messages, null), messages, loopResult, extraMutationSuccesses);
+    }
+
+    static String summarizeInvalidMutationOutcomesIfNeeded(String answer,
+                                                           CurrentTurnPlan plan,
+                                                           List<ChatMessage> messages,
+                                                           ToolCallLoop.LoopResult loopResult,
+                                                           int extraMutationSuccesses) {
         if (loopResult == null) return answer;
         if (extraMutationSuccesses > 0) return answer;
         if (loopResult.mutatingToolSuccesses() > 0) return answer;
-        if (!looksLikeMutationRequest(latestUserRequest(messages))) return answer;
+        if (!planRequestsMutation(plan, messages)) return answer;
 
         List<ToolCallLoop.ToolOutcome> outcomes = loopResult.toolOutcomes();
         if (outcomes == null || outcomes.isEmpty()) return answer;
@@ -1579,10 +1742,20 @@ public final class AssistantTurnExecutor {
             String answer,
             int mutationsInRetry,
             String extraSummary,
-            ToolCallLoop.LoopResult retryLoopResult
+            ToolCallLoop.LoopResult retryLoopResult,
+            boolean actionObligationFailed
     ) {
         MutationRetryResult(String answer, int mutationsInRetry, String extraSummary) {
-            this(answer, mutationsInRetry, extraSummary, null);
+            this(answer, mutationsInRetry, extraSummary, null, false);
+        }
+
+        MutationRetryResult(
+                String answer,
+                int mutationsInRetry,
+                String extraSummary,
+                ToolCallLoop.LoopResult retryLoopResult
+        ) {
+            this(answer, mutationsInRetry, extraSummary, retryLoopResult, false);
         }
     }
 
@@ -1625,6 +1798,20 @@ public final class AssistantTurnExecutor {
             String answer, List<ChatMessage> messages,
             ToolCallLoop.LoopResult loopResult,
             Path workspace, Context ctx) {
+        return mutationRequestRetryIfNeeded(
+                answer,
+                messages,
+                compatibilityPlanFromMessages(messages, ctx),
+                loopResult,
+                workspace,
+                ctx);
+    }
+
+    static MutationRetryResult mutationRequestRetryIfNeeded(
+            String answer, List<ChatMessage> messages,
+            CurrentTurnPlan plan,
+            ToolCallLoop.LoopResult loopResult,
+            Path workspace, Context ctx) {
         if (answer == null) answer = "";
         if (loopResult == null) return new MutationRetryResult(answer, 0, null);
         if (loopResult.mutatingToolSuccesses() > 0) return new MutationRetryResult(answer, 0, null);
@@ -1634,15 +1821,13 @@ public final class AssistantTurnExecutor {
         if (loopResult.failureDecision().shouldStop()) return new MutationRetryResult(answer, 0, null);
         if (hasInvalidMutatingFailure(loopResult)) return new MutationRetryResult(answer, 0, null);
 
-        String userRequest = latestUserRequest(messages);
-        TaskContract retryContract = TaskContractResolver.fromMessages(messages);
+        CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, ctx);
+        String userRequest = safePlan.originalUserRequest();
+        TaskContract retryContract = safePlan.taskContract();
         if (!retryContract.mutationAllowed()) {
             return new MutationRetryResult(answer, 0, null);
         }
-        ExecutionPhase phase = ctx.executionPhaseState() == null
-                ? ExecutionPhase.APPLY
-                : ctx.executionPhaseState().phase();
-        ActionObligation obligation = ActionObligationPolicy.derive(retryContract, phase);
+        ActionObligation obligation = safePlan.actionObligation();
         if (!ResponseObligationVerifier.unsatisfiedNoToolResponse(obligation, answer)) {
             return new MutationRetryResult(answer, 0, null);
         }
@@ -1656,10 +1841,7 @@ public final class AssistantTurnExecutor {
                 "UNSATISFIED",
                 "model response had no write/edit tool calls");
         messages.add(ChatMessage.assistant(ResponseObligationVerifier.retryFailureSummary(answer)));
-        messages.add(ChatMessage.system(CurrentTurnCapabilityFrame.render(
-                retryContract,
-                phase,
-                NativeToolSpecPolicy.names(ctx.nativeToolSpecs()))));
+        messages.add(ChatMessage.system(CurrentTurnCapabilityFrame.render(safePlan)));
         messages.add(ChatMessage.user(
                 "The current-turn obligation was not satisfied: this turn has mutationAllowed=true "
                 + "and visible write/edit tools, but the previous response did not call talos.write_file "
@@ -1682,9 +1864,11 @@ public final class AssistantTurnExecutor {
                         retryText, retry.toolCalls(), messages, workspace, ctx);
                 String mergedAnswer = retryLoop.finalAnswer();
                 String summary = retryLoop.summary();
+                boolean retryIssuedMutatingTool = retryLoop.toolOutcomes().stream()
+                        .anyMatch(ToolCallLoop.ToolOutcome::mutating);
                 if (hasDeniedMutation(retryLoop)) {
                     mergedAnswer = summarizeDeniedMutationOutcomesIfNeeded(
-                            mergedAnswer, messages, retryLoop, 0);
+                            mergedAnswer, safePlan, messages, retryLoop, 0);
                 }
                 if (retryLoop.mutatingToolSuccesses() > 0) {
                     LOG.info("Missing-mutation retry succeeded: {} mutation(s) performed.",
@@ -1698,11 +1882,22 @@ public final class AssistantTurnExecutor {
                             obligation.name(),
                             "BLOCKED_AFTER_RETRY",
                             "retry response issued mutating tool calls but policy blocked them");
-                } else {
+                } else if (retryIssuedMutatingTool) {
                     LocalTurnTraceCapture.recordActionObligation(
                             obligation.name(),
                             "ATTEMPTED_AFTER_RETRY",
                             "retry response issued tool calls but no mutation completed");
+                } else {
+                    LocalTurnTraceCapture.recordActionObligation(
+                            obligation.name(),
+                            "FAILED",
+                            "retry response issued tool calls but no write/edit tool calls");
+                    return new MutationRetryResult(
+                            ResponseObligationVerifier.deterministicNoActionAnswer(),
+                            0,
+                            summary,
+                            retryLoop,
+                            true);
                 }
                 return new MutationRetryResult(
                         mergedAnswer == null || mergedAnswer.isBlank() ? answer : mergedAnswer,
@@ -1721,7 +1916,7 @@ public final class AssistantTurnExecutor {
                         obligation.name(),
                         "FAILED",
                         "retry response still had no write/edit tool calls");
-                return new MutationRetryResult(deterministic, 0, null);
+                return new MutationRetryResult(deterministic, 0, null, null, true);
             }
         } catch (Exception e) {
             LOG.warn("Missing-mutation retry failed: {}", e.getMessage());
@@ -1730,7 +1925,12 @@ public final class AssistantTurnExecutor {
                 obligation.name(),
                 "FAILED",
                 "retry failed before write/edit tool calls executed");
-        return new MutationRetryResult(ResponseObligationVerifier.deterministicNoActionAnswer(), 0, null);
+        return new MutationRetryResult(
+                ResponseObligationVerifier.deterministicNoActionAnswer(),
+                0,
+                null,
+                null,
+                true);
     }
 
     private static String mutationRetryRequestContext(String userRequest, String priorMutationRequest) {
@@ -1919,12 +2119,27 @@ public final class AssistantTurnExecutor {
             String answer, List<ChatMessage> messages,
             ToolCallLoop.LoopResult loopResult,
             Path workspace, Context ctx) {
+        return inspectCompletenessRetryIfNeeded(
+                answer,
+                messages,
+                compatibilityPlanFromMessages(messages, ctx),
+                loopResult,
+                workspace,
+                ctx);
+    }
+
+    static InspectRetryResult inspectCompletenessRetryIfNeeded(
+            String answer, List<ChatMessage> messages,
+            CurrentTurnPlan plan,
+            ToolCallLoop.LoopResult loopResult,
+            Path workspace, Context ctx) {
         if (answer == null) answer = "";
         if (loopResult == null || ctx == null || ctx.llm() == null || ctx.toolCallLoop() == null) {
             return new InspectRetryResult(answer, null);
         }
-        String userRequest = latestUserRequest(messages);
-        TaskContract contract = TaskContractResolver.fromMessages(messages);
+        CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, ctx);
+        String userRequest = safePlan.originalUserRequest();
+        TaskContract contract = safePlan.taskContract();
         if (!looksLikeInspectFirstRequest(userRequest) && !requiresWorkspaceEvidence(contract)) {
             return new InspectRetryResult(answer, null);
         }
@@ -2053,6 +2268,11 @@ public final class AssistantTurnExecutor {
                 mentionsUnsupported = true;
                 break;
             }
+            String stem = filenameStemOf(path);
+            if (!stem.isBlank() && lower.contains(stem)) {
+                mentionsUnsupported = true;
+                break;
+            }
             String extension = extensionOf(path);
             if (!extension.isBlank() && lower.contains("." + extension)) {
                 mentionsUnsupported = true;
@@ -2067,7 +2287,20 @@ public final class AssistantTurnExecutor {
                 || lower.contains("are empty")
                 || lower.contains("is empty")
                 || lower.contains("no content")
-                || lower.contains("nothing to extract");
+                || lower.contains("nothing to extract")
+                || lower.contains("says")
+                || lower.contains("states")
+                || lower.contains("contains")
+                || lower.contains("describes")
+                || lower.contains("summar");
+    }
+
+    private static String filenameStemOf(String path) {
+        if (path == null || path.isBlank()) return "";
+        int slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+        String name = slash >= 0 ? path.substring(slash + 1) : path;
+        int dot = name.lastIndexOf('.');
+        return (dot > 0 ? name.substring(0, dot) : name).toLowerCase(Locale.ROOT);
     }
 
     private static String extensionOf(String path) {
@@ -2308,6 +2541,15 @@ public final class AssistantTurnExecutor {
         return null;
     }
 
+    private static String latestUserRequest(CurrentTurnPlan plan, List<ChatMessage> messages) {
+        if (plan != null
+                && plan.originalUserRequest() != null
+                && !plan.originalUserRequest().isBlank()) {
+            return plan.originalUserRequest();
+        }
+        return latestUserRequest(messages);
+    }
+
     /**
      * True iff the given user request contains at least one evidence-request
      * phrase. Conservative: matches the latest user message only; never
@@ -2326,7 +2568,16 @@ public final class AssistantTurnExecutor {
             String answer,
             List<ChatMessage> messages
     ) {
-        if (!shouldCorrectNegativeLocalAccessClaim(answer, messages)) return answer;
+        return correctNegativeLocalAccessClaimIfNeeded(
+                answer, safePlanFromMessages(null, messages, null), messages);
+    }
+
+    static String correctNegativeLocalAccessClaimIfNeeded(
+            String answer,
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages
+    ) {
+        if (!shouldCorrectNegativeLocalAccessClaim(answer, plan, messages)) return answer;
         return LOCAL_ACCESS_CAPABILITY_CORRECTION;
     }
 
@@ -2334,8 +2585,17 @@ public final class AssistantTurnExecutor {
             String answer,
             List<ChatMessage> messages
     ) {
+        return shouldCorrectNegativeLocalAccessClaim(
+                answer, safePlanFromMessages(null, messages, null), messages);
+    }
+
+    static boolean shouldCorrectNegativeLocalAccessClaim(
+            String answer,
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages
+    ) {
         if (!containsNegativeLocalAccessClaim(answer)) return false;
-        return looksLikeLocalWorkspaceTurn(messages, answer);
+        return looksLikeLocalWorkspaceTurn(plan, messages, answer);
     }
 
     static boolean containsNegativeLocalAccessClaim(String answer) {
@@ -2351,7 +2611,16 @@ public final class AssistantTurnExecutor {
             List<ChatMessage> messages,
             String answer
     ) {
-        TaskContract contract = TaskContractResolver.fromMessages(messages);
+        return looksLikeLocalWorkspaceTurn(safePlanFromMessages(null, messages, null), messages, answer);
+    }
+
+    private static boolean looksLikeLocalWorkspaceTurn(
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages,
+            String answer
+    ) {
+        CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, null);
+        TaskContract contract = safePlan.taskContract();
         if (contract.mutationRequested()) return false;
 
         TaskType type = contract.type();
@@ -2362,7 +2631,7 @@ public final class AssistantTurnExecutor {
             return true;
         }
 
-        String userRequest = latestUserRequest(messages);
+        String userRequest = latestUserRequest(safePlan, messages);
         if (containsLocalWorkspaceMarker(userRequest)) return true;
         return containsLocalWorkspaceMarker(answer) && type != TaskType.SMALL_TALK;
     }
@@ -2402,14 +2671,32 @@ public final class AssistantTurnExecutor {
      */
     static boolean shouldAppendStreamingGroundingAnnotation(
             String answer, List<ChatMessage> messages) {
+        return shouldAppendStreamingGroundingAnnotation(
+                answer, safePlanFromMessages(null, messages, null), messages);
+    }
+
+    static boolean shouldAppendStreamingGroundingAnnotation(
+            String answer,
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages
+    ) {
         if (answer == null || answer.isBlank()) return false;
         if (answer.length() < UNGROUNDED_MIN_CHARS) return false;
-        return looksLikeEvidenceRequest(latestUserRequest(messages));
+        return looksLikeEvidenceRequest(latestUserRequest(plan, messages));
     }
 
     static String annotateStreamingNoToolMutationClaim(String answer, List<ChatMessage> messages) {
+        return annotateStreamingNoToolMutationClaim(
+                answer, safePlanFromMessages(null, messages, null), messages);
+    }
+
+    static String annotateStreamingNoToolMutationClaim(
+            String answer,
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages
+    ) {
         if (answer == null || answer.isBlank()) return answer;
-        if (!looksLikeMutationRequest(latestUserRequest(messages))) return answer;
+        if (!safePlanFromMessages(plan, messages, null).taskContract().mutationRequested()) return answer;
         if (!containsMutationClaim(answer) && !containsStreamingMutationNarrative(answer)) return answer;
         return STREAMING_NO_TOOL_MUTATION_ANNOTATION + answer;
     }
@@ -2441,21 +2728,39 @@ public final class AssistantTurnExecutor {
     }
 
     static String enforceStreamingNoToolTruthfulness(String answer, List<ChatMessage> messages) {
+        return enforceStreamingNoToolTruthfulness(
+                answer, safePlanFromMessages(null, messages, null), messages);
+    }
+
+    static String enforceStreamingNoToolTruthfulness(
+            String answer,
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages
+    ) {
         String out = answer;
-        if (shouldReplaceStreamingNoToolMutationNarrative(answer, messages)) {
+        if (shouldReplaceStreamingNoToolMutationNarrative(answer, plan, messages)) {
             return STREAMING_NO_TOOL_MUTATION_REPLACEMENT;
         }
-        if (shouldAppendStreamingGroundingAnnotation(answer, messages)) {
+        if (shouldAppendStreamingGroundingAnnotation(answer, plan, messages)) {
             out = UNGROUNDED_ANNOTATION + answer;
         }
-        out = annotateStreamingNoToolMutationClaim(out, messages);
+        out = annotateStreamingNoToolMutationClaim(out, plan, messages);
         return out;
     }
 
     static boolean shouldReplaceStreamingNoToolMutationNarrative(
             String answer, List<ChatMessage> messages) {
+        return shouldReplaceStreamingNoToolMutationNarrative(
+                answer, safePlanFromMessages(null, messages, null), messages);
+    }
+
+    static boolean shouldReplaceStreamingNoToolMutationNarrative(
+            String answer,
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages
+    ) {
         if (answer == null || answer.isBlank()) return false;
-        if (!looksLikeMutationRequest(latestUserRequest(messages))) return false;
+        if (!safePlanFromMessages(plan, messages, null).taskContract().mutationRequested()) return false;
         return containsMutationClaim(answer) || containsStreamingMutationNarrative(answer);
     }
 
@@ -2492,11 +2797,21 @@ public final class AssistantTurnExecutor {
      *
      * <p>Package-private for direct testing.
      */
-    static String groundingRetryIfNeeded(String answer, List<ChatMessage> messages, Context ctx) {        if (answer == null || answer.isBlank()) return answer;
+    static String groundingRetryIfNeeded(String answer, List<ChatMessage> messages, Context ctx) {
+        return groundingRetryIfNeeded(answer, safePlanFromMessages(null, messages, ctx), messages, ctx);
+    }
+
+    static String groundingRetryIfNeeded(
+            String answer,
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages,
+            Context ctx
+    ) {
+        if (answer == null || answer.isBlank()) return answer;
         if (answer.length() < UNGROUNDED_MIN_CHARS) return answer;
         if (ctx == null || ctx.llm() == null) return answer;
 
-        String userRequest = latestUserRequest(messages);
+        String userRequest = latestUserRequest(plan, messages);
         if (!looksLikeEvidenceRequest(userRequest)) return answer;
 
         LOG.info("No-tool grounding retry fired: answer={} chars, zero tools, "
