@@ -14,6 +14,7 @@ import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.ActionObligation;
 import dev.talos.runtime.policy.ActionObligationPolicy;
 import dev.talos.runtime.policy.CapabilityAnswerPolicy;
+import dev.talos.runtime.policy.ConversationBoundaryPolicy;
 import dev.talos.runtime.policy.CurrentTurnCapabilityFrame;
 import dev.talos.runtime.policy.ResponseObligationVerifier;
 import dev.talos.runtime.task.TaskContract;
@@ -820,6 +821,12 @@ public final class AssistantTurnExecutor {
             TaskContract contract
     ) {
         String userRequest = latestUserRequest(messages);
+        if (contract != null && contract.type() == TaskType.SMALL_TALK) {
+            String conversationBoundaryAnswer = ConversationBoundaryPolicy.deterministicAnswer(userRequest);
+            if (conversationBoundaryAnswer != null) {
+                return conversationBoundaryAnswer;
+            }
+        }
         if (contract != null
                 && contract.type() == TaskType.SMALL_TALK
                 && looksLikeAssistantIdentityTurn(userRequest)) {

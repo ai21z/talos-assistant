@@ -2,6 +2,7 @@ package dev.talos.runtime.task;
 
 import dev.talos.runtime.MutationIntent;
 import dev.talos.runtime.policy.CapabilityAnswerPolicy;
+import dev.talos.runtime.policy.ConversationBoundaryPolicy;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.spi.types.ChatMessage;
 
@@ -60,34 +61,6 @@ public final class TaskContractResolver {
             "read", "explain", "summarize", "summary", "inspect", "diagnose",
             "search", "grep", "find ", "content", "contents", "inside the files",
             "what does", "what is this project", "what is this folder for"
-    );
-
-    private static final Set<String> PRIVACY_NO_WORKSPACE_MARKERS = Set.of(
-            "only chatting",
-            "just chat",
-            "don't inspect my files",
-            "dont inspect my files",
-            "do not inspect my files",
-            "don't inspect the files",
-            "dont inspect the files",
-            "do not inspect the files",
-            "don't use the workspace",
-            "dont use the workspace",
-            "do not use the workspace",
-            "don't use workspace",
-            "dont use workspace",
-            "do not use workspace",
-            "don't read my files",
-            "dont read my files",
-            "do not read my files",
-            "don't search my files",
-            "dont search my files",
-            "do not search my files",
-            "just answer, no workspace",
-            "no workspace",
-            "without checking files",
-            "without reading files",
-            "without searching files"
     );
 
     private static final Set<String> CHAT_ONLY_HINTS = Set.of(
@@ -205,7 +178,7 @@ public final class TaskContractResolver {
         if (mutationRequested) {
             return containsAny(lower, CREATE_MARKERS) ? TaskType.FILE_CREATE : TaskType.FILE_EDIT;
         }
-        if (looksPrivacyNoWorkspaceRequest(lower)
+        if (ConversationBoundaryPolicy.isDirectAnswerOnly(lower)
                 || looksConversationalGreetingRequest(lower)
                 || looksAssistantIdentityQuestion(lower)) {
             return TaskType.SMALL_TALK;
@@ -234,10 +207,6 @@ public final class TaskContractResolver {
 
     private static boolean looksAssistantIdentityQuestion(String lower) {
         return CapabilityAnswerPolicy.looksLikeIdentityOrCapabilityTurn(lower);
-    }
-
-    private static boolean looksPrivacyNoWorkspaceRequest(String lower) {
-        return lower != null && containsAny(lower, PRIVACY_NO_WORKSPACE_MARKERS);
     }
 
     private static boolean looksSimpleDirectoryListingRequest(String lower) {

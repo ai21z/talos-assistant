@@ -744,6 +744,78 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/75-chat-hello-friend-no-workspace-tools.json] 75: chat hello friend does not execute workspace tools")
+    void helloFriendDoesNotExecuteWorkspaceTools() {
+        assertDirectChatDoesNotExposeWorkspaceTools(
+                "scenarios/75-chat-hello-friend-no-workspace-tools.json");
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/76-chat-wellbeing-no-workspace-tools.json] 76: chat wellbeing does not execute workspace tools")
+    void wellbeingChatDoesNotExecuteWorkspaceTools() {
+        assertDirectChatDoesNotExposeWorkspaceTools(
+                "scenarios/76-chat-wellbeing-no-workspace-tools.json");
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/77-chat-acknowledgement-no-workspace-tools.json] 77: chat acknowledgement does not execute workspace tools")
+    void acknowledgementChatDoesNotExecuteWorkspaceTools() {
+        assertDirectChatDoesNotExposeWorkspaceTools(
+                "scenarios/77-chat-acknowledgement-no-workspace-tools.json");
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/78-near-slash-command-no-workspace-tools.json] 78: near slash command does not execute workspace tools")
+    void nearSlashCommandDoesNotExecuteWorkspaceTools() {
+        var loaded = JsonScenarioLoader.load("scenarios/78-near-slash-command-no-workspace-tools.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("/last trace")
+                    .assertAnswerNotContains("ALPHA-742");
+            assertNoWorkspaceToolEvidence(result);
+        }
+    }
+
+    private static void assertDirectChatDoesNotExposeWorkspaceTools(String scenarioPath) {
+        var loaded = JsonScenarioLoader.load(scenarioPath);
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerNotContains("ALPHA-742");
+            assertNoWorkspaceToolEvidence(result);
+        }
+    }
+
+    private static void assertNoWorkspaceToolEvidence(ExecutorScenarioResult result) {
+        for (String toolName : List.of(
+                "talos.read_file",
+                "talos.list_dir",
+                "talos.grep",
+                "talos.retrieve",
+                "talos.write_file",
+                "talos.edit_file")) {
+            result.assertAnswerNotContains(toolName);
+            if (result.localTrace() != null) {
+                boolean executed = result.localTrace().events().stream()
+                        .anyMatch(event -> "TOOL_EXECUTED".equals(event.type())
+                                && toolName.equals(event.toolName()));
+                if (executed) {
+                    throw new AssertionError("Scenario '" + result.definition().name()
+                            + "': expected tool not to execute: " + toolName);
+                }
+            }
+        }
+        result.assertAnswerNotContains("Used ");
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/59-overwrite-repair-phrasing-allows-mutation.json] 59: overwrite repair phrasing allows mutation")
     void overwriteRepairPhrasingAllowsMutation() {
         var loaded = JsonScenarioLoader.load("scenarios/59-overwrite-repair-phrasing-allows-mutation.json");
