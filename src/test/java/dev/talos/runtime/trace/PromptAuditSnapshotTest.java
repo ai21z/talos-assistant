@@ -5,6 +5,7 @@ import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.ActionObligation;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
+import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
 import org.junit.jupiter.api.Test;
 
@@ -137,6 +138,79 @@ class PromptAuditSnapshotTest {
         assertEquals(List.of("talos.read_file", "talos.write_file"), snapshot.nativeTools());
         assertEquals(List.of("talos.read_file", "talos.write_file"), snapshot.promptTools());
         assertEquals(List.of("talos.shell"), snapshot.blockedTools());
+    }
+
+    @Test
+    void redactsPlanDerivedAuditFields() throws Exception {
+        CurrentTurnPlan plan = new CurrentTurnPlan(
+                contract("Use secret-like values for audit fields."),
+                "Use secret-like values for audit fields.",
+                ExecutionPhase.APPLY,
+                ExecutionPhase.APPLY,
+                ActionObligation.MUTATING_TOOL_REQUIRED,
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                "evidence SECRET=changed",
+                "output TOKEN=abc",
+                "context PASSWORD=pw",
+                "artifact API_KEY=key",
+                "verifier CREDENTIAL=cred");
+        List<ChatMessage> messages = List.of(ChatMessage.system("system"));
+
+        PromptAuditSnapshot snapshot = PromptAuditSnapshot.fromPlan(plan, messages);
+
+        assertTrue(snapshot.evidenceObligation().contains("SECRET=[redacted]"));
+        assertTrue(snapshot.outputObligation().contains("TOKEN=[redacted]"));
+        assertTrue(snapshot.activeTaskContext().contains("PASSWORD=[redacted]"));
+        assertTrue(snapshot.artifactGoal().contains("API_KEY=[redacted]"));
+        assertTrue(snapshot.verifierProfile().contains("CREDENTIAL=[redacted]"));
+        assertNoRawSecretValues(
+                snapshot.evidenceObligation(),
+                snapshot.outputObligation(),
+                snapshot.activeTaskContext(),
+                snapshot.artifactGoal(),
+                snapshot.verifierProfile());
+
+        String json = MAPPER.writeValueAsString(snapshot);
+        assertNoRawSecretValues(json);
+
+        String compact = snapshot.renderCompact();
+        assertNoRawSecretValues(compact);
+    }
+
+    @Test
+    void fromMessagesPreservesLegacyNullAuditFields() {
+        PromptAuditSnapshot snapshot = PromptAuditSnapshot.fromMessages(
+                null,
+                null,
+                null,
+                null,
+                List.of(ChatMessage.system("system")),
+                null,
+                null,
+                null);
+
+        assertEquals("", snapshot.taskType());
+        assertEquals("", snapshot.phaseInitial());
+        assertEquals("", snapshot.phaseFinal());
+        assertEquals("", snapshot.actionObligation());
+        assertFalse(snapshot.mutationAllowed());
+        assertFalse(snapshot.verificationRequired());
+        assertTrue(snapshot.nativeTools().isEmpty());
+        assertTrue(snapshot.promptTools().isEmpty());
+        assertTrue(snapshot.blockedTools().isEmpty());
+    }
+
+    private static void assertNoRawSecretValues(String... values) {
+        for (String value : values) {
+            assertFalse(value.contains("SECRET=changed"), value);
+            assertFalse(value.contains("TOKEN=abc"), value);
+            assertFalse(value.contains("PASSWORD=pw"), value);
+            assertFalse(value.contains("API_KEY=key"), value);
+            assertFalse(value.contains("CREDENTIAL=cred"), value);
+        }
     }
 
     private static TaskContract contract(String request) {
