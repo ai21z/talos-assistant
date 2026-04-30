@@ -330,10 +330,16 @@ public final class AssistantTurnExecutor {
                 answer, messages, plan, loopResult, workspace, ctx);
         answer = irr.answer();
 
-        moveToVerifyAfterSuccessfulMutation(ctx, loopResult, mrr.mutationsInRetry());
+        ToolCallLoop.LoopResult outcomeLoopResult =
+                mrr.retryLoopResult() == null ? loopResult : mrr.retryLoopResult();
+        int outcomeExtraMutationSuccesses =
+                mrr.retryLoopResult() == null ? mrr.mutationsInRetry() : 0;
+
+        moveToVerifyAfterSuccessfulMutation(ctx, outcomeLoopResult, outcomeExtraMutationSuccesses);
 
         String finalAnswer = shapeAnswerAfterToolLoop(
-                answer, messages, plan, loopResult, workspace, mrr.mutationsInRetry(), opts);
+                answer, messages, plan, outcomeLoopResult, workspace,
+                outcomeExtraMutationSuccesses, mrr.actionObligationFailed(), opts);
 
         return new ToolLoopAnswerResolution(
                 finalAnswer,
@@ -367,7 +373,7 @@ public final class AssistantTurnExecutor {
             return new ToolLoopAnswerResolution(
                     shapeAnswerAfterToolLoop(
                             mrr.answer(), messages, plan, verificationLoop, workspace,
-                            extraMutationSuccesses, opts),
+                            extraMutationSuccesses, mrr.actionObligationFailed(), opts),
                     mrr.extraSummary());
         }
         ReadOnlyInspectionRetryResult inspectionRetry = readOnlyInspectionRetryIfNeeded(
@@ -380,7 +386,9 @@ public final class AssistantTurnExecutor {
                     inspectionRetry.extraSummary());
         }
         return new ToolLoopAnswerResolution(
-                shapeAnswerWithoutTools(inspectionRetry.answer(), messages, plan, ctx, false, opts),
+                shapeAnswerWithoutTools(
+                        inspectionRetry.answer(), messages, plan, ctx, false,
+                        mrr.actionObligationFailed(), opts),
                 null);
     }
 
@@ -973,12 +981,27 @@ public final class AssistantTurnExecutor {
             int extraMutationSuccesses,
             Options opts
     ) {
+        return shapeAnswerAfterToolLoop(
+                answer, messages, plan, loopResult, workspace, extraMutationSuccesses, false, opts);
+    }
+
+    private static String shapeAnswerAfterToolLoop(
+            String answer,
+            List<ChatMessage> messages,
+            CurrentTurnPlan plan,
+            ToolCallLoop.LoopResult loopResult,
+            Path workspace,
+            int extraMutationSuccesses,
+            boolean failedActionObligation,
+            Options opts
+    ) {
         String directoryListingAnswer = directoryListingAnswerIfApplicable(messages, plan, loopResult);
         if (!directoryListingAnswer.isBlank()) {
             return sanitizeAndTruncate(directoryListingAnswer, opts);
         }
         ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
-                answer, plan, messages, loopResult, workspace, extraMutationSuccesses);
+                answer, plan, messages, loopResult, workspace,
+                extraMutationSuccesses, failedActionObligation);
         return sanitizeAndTruncate(outcome.finalAnswer(), opts);
     }
 
@@ -1081,7 +1104,20 @@ public final class AssistantTurnExecutor {
             boolean streamed,
             Options opts
     ) {
-        ExecutionOutcome outcome = ExecutionOutcome.fromNoTool(answer, plan, messages, ctx, streamed);
+        return shapeAnswerWithoutTools(answer, messages, plan, ctx, streamed, false, opts);
+    }
+
+    private static String shapeAnswerWithoutTools(
+            String answer,
+            List<ChatMessage> messages,
+            CurrentTurnPlan plan,
+            Context ctx,
+            boolean streamed,
+            boolean failedActionObligation,
+            Options opts
+    ) {
+        ExecutionOutcome outcome = ExecutionOutcome.fromNoTool(
+                answer, plan, messages, ctx, streamed, failedActionObligation);
         if (streamed && outcome.groundingStatus() == ExecutionOutcome.GroundingStatus.UNGROUNDED) {
             LOG.info("Streaming grounding annotation appended: answer={} chars, "
                     + "zero tools, user asked for evidence.", answer == null ? 0 : answer.length());
@@ -1706,10 +1742,20 @@ public final class AssistantTurnExecutor {
             String answer,
             int mutationsInRetry,
             String extraSummary,
-            ToolCallLoop.LoopResult retryLoopResult
+            ToolCallLoop.LoopResult retryLoopResult,
+            boolean actionObligationFailed
     ) {
         MutationRetryResult(String answer, int mutationsInRetry, String extraSummary) {
-            this(answer, mutationsInRetry, extraSummary, null);
+            this(answer, mutationsInRetry, extraSummary, null, false);
+        }
+
+        MutationRetryResult(
+                String answer,
+                int mutationsInRetry,
+                String extraSummary,
+                ToolCallLoop.LoopResult retryLoopResult
+        ) {
+            this(answer, mutationsInRetry, extraSummary, retryLoopResult, false);
         }
     }
 
@@ -1818,6 +1864,8 @@ public final class AssistantTurnExecutor {
                         retryText, retry.toolCalls(), messages, workspace, ctx);
                 String mergedAnswer = retryLoop.finalAnswer();
                 String summary = retryLoop.summary();
+                boolean retryIssuedMutatingTool = retryLoop.toolOutcomes().stream()
+                        .anyMatch(ToolCallLoop.ToolOutcome::mutating);
                 if (hasDeniedMutation(retryLoop)) {
                     mergedAnswer = summarizeDeniedMutationOutcomesIfNeeded(
                             mergedAnswer, safePlan, messages, retryLoop, 0);
@@ -1834,11 +1882,22 @@ public final class AssistantTurnExecutor {
                             obligation.name(),
                             "BLOCKED_AFTER_RETRY",
                             "retry response issued mutating tool calls but policy blocked them");
-                } else {
+                } else if (retryIssuedMutatingTool) {
                     LocalTurnTraceCapture.recordActionObligation(
                             obligation.name(),
                             "ATTEMPTED_AFTER_RETRY",
                             "retry response issued tool calls but no mutation completed");
+                } else {
+                    LocalTurnTraceCapture.recordActionObligation(
+                            obligation.name(),
+                            "FAILED",
+                            "retry response issued tool calls but no write/edit tool calls");
+                    return new MutationRetryResult(
+                            ResponseObligationVerifier.deterministicNoActionAnswer(),
+                            0,
+                            summary,
+                            retryLoop,
+                            true);
                 }
                 return new MutationRetryResult(
                         mergedAnswer == null || mergedAnswer.isBlank() ? answer : mergedAnswer,
@@ -1857,7 +1916,7 @@ public final class AssistantTurnExecutor {
                         obligation.name(),
                         "FAILED",
                         "retry response still had no write/edit tool calls");
-                return new MutationRetryResult(deterministic, 0, null);
+                return new MutationRetryResult(deterministic, 0, null, null, true);
             }
         } catch (Exception e) {
             LOG.warn("Missing-mutation retry failed: {}", e.getMessage());
@@ -1866,7 +1925,12 @@ public final class AssistantTurnExecutor {
                 obligation.name(),
                 "FAILED",
                 "retry failed before write/edit tool calls executed");
-        return new MutationRetryResult(ResponseObligationVerifier.deterministicNoActionAnswer(), 0, null);
+        return new MutationRetryResult(
+                ResponseObligationVerifier.deterministicNoActionAnswer(),
+                0,
+                null,
+                null,
+                true);
     }
 
     private static String mutationRetryRequestContext(String userRequest, String priorMutationRequest) {
