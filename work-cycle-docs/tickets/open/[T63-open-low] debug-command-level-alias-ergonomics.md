@@ -101,3 +101,10 @@ pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly
 
 - Over-accepting debug syntax can make command mistakes harder to catch. Keep
   the compatibility surface narrow and explicit.
+
+## Related Tickets
+
+- `work-cycle-docs/tickets/open/[T67-open-medium] model-switch-command-boundary-and-small-talk-classification.md`
+  tracks the separate T61 audit finding that `/model` is unknown and small talk
+  after `/set model ...` can be misclassified. Keep this ticket focused on
+  `/debug ... on/off` ergonomics.
