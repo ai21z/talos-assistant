@@ -12,7 +12,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 
 /**
  * Derives the next active task context from deterministic post-turn facts.
@@ -59,7 +58,7 @@ public final class ActiveTaskContextUpdater {
             return active(context);
         }
 
-        if (!targets.isEmpty() && facts.successfulMutation() && facts.verificationPassedOrNotRun()) {
+        if (!targets.isEmpty() && facts.fullyVerifiedMutation()) {
             return new Update(ActiveTaskContext.none(), ArtifactGoal.none());
         }
 
@@ -133,6 +132,8 @@ public final class ActiveTaskContextUpdater {
             List<String> targets,
             String traceId,
             String verificationStatus,
+            String mutationStatus,
+            String completionStatus,
             List<String> verifierFindings,
             boolean mutationAllowed,
             boolean successfulMutation,
@@ -149,11 +150,14 @@ public final class ActiveTaskContextUpdater {
                     ? List.of()
                     : audit.toolCalls();
             List<String> targets = targets(policyTrace, localTrace, calls);
-            boolean successfulMutation = calls.stream()
-                    .anyMatch(call -> call.success() && isMutatingTool(call.name()));
+            List<TurnRecord.ToolCallSummary> mutatingCalls = calls.stream()
+                    .filter(call -> isMutatingTool(call.name()))
+                    .toList();
+            boolean successfulMutation = !mutatingCalls.isEmpty()
+                    && mutatingCalls.stream().allMatch(TurnRecord.ToolCallSummary::success);
             boolean deniedMutation = audit.approvalsDenied() > 0
                     && (mutationAllowed(policyTrace, localTrace)
-                    || calls.stream().anyMatch(call -> isMutatingTool(call.name())));
+                    || !mutatingCalls.isEmpty());
             String verificationStatus = verificationStatus(localTrace);
             return new TurnFacts(
                     audit,
@@ -162,6 +166,8 @@ public final class ActiveTaskContextUpdater {
                     targets,
                     traceId(localTrace),
                     verificationStatus,
+                    mutationStatus(localTrace),
+                    completionStatus(localTrace),
                     verifierFindings(localTrace),
                     mutationAllowed(policyTrace, localTrace),
                     successfulMutation,
@@ -172,10 +178,11 @@ public final class ActiveTaskContextUpdater {
             return "FAILED".equalsIgnoreCase(verificationStatus);
         }
 
-        boolean verificationPassedOrNotRun() {
-            if (verificationStatus == null || verificationStatus.isBlank()) return true;
-            Set<String> ok = Set.of("PASSED", "NOT_RUN", "READBACK_ONLY");
-            return ok.contains(verificationStatus.toUpperCase(Locale.ROOT));
+        boolean fullyVerifiedMutation() {
+            return successfulMutation
+                    && "SUCCEEDED".equalsIgnoreCase(mutationStatus)
+                    && "PASSED".equalsIgnoreCase(verificationStatus)
+                    && "COMPLETED_VERIFIED".equalsIgnoreCase(completionStatus);
         }
 
         private static List<String> targets(
@@ -217,6 +224,17 @@ public final class ActiveTaskContextUpdater {
             String fromVerification = localTrace.verification().status();
             if (fromVerification != null && !fromVerification.isBlank()) return fromVerification;
             return localTrace.outcome().verificationStatus();
+        }
+
+        private static String mutationStatus(LocalTurnTrace localTrace) {
+            return localTrace == null ? "" : localTrace.outcome().mutationStatus();
+        }
+
+        private static String completionStatus(LocalTurnTrace localTrace) {
+            if (localTrace == null) return "";
+            String classification = localTrace.outcome().classification();
+            if (classification != null && !classification.isBlank()) return classification;
+            return localTrace.outcome().status();
         }
 
         private static List<String> verifierFindings(LocalTurnTrace localTrace) {

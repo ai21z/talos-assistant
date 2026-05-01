@@ -129,6 +129,56 @@ class ActiveTaskContextUpdaterTest {
     }
 
     @Test
+    void successfulMutationWithNotRunVerificationPreservesExistingContextAndGoal() {
+        assertSuccessfulUnverifiedMutationPreservesContext(
+                "NOT_RUN",
+                "SUCCEEDED",
+                "COMPLETED_UNVERIFIED");
+    }
+
+    @Test
+    void successfulMutationWithBlankVerificationPreservesExistingContextAndGoal() {
+        assertSuccessfulUnverifiedMutationPreservesContext(
+                "",
+                "SUCCEEDED",
+                "COMPLETED_UNVERIFIED");
+    }
+
+    @Test
+    void successfulMutationWithReadbackOnlyVerificationPreservesExistingContextAndGoal() {
+        assertSuccessfulUnverifiedMutationPreservesContext(
+                "READBACK_ONLY",
+                "SUCCEEDED",
+                "COMPLETED_UNVERIFIED");
+    }
+
+    @Test
+    void mixedSuccessfulAndFailedMutationPreservesExistingContextAndGoal() {
+        ActiveTaskContext previous = ActiveTaskContext.proposedChanges(
+                6, "trace-old", List.of("index.html", "style.css"), "Update page and styles.");
+        ArtifactGoal previousGoal = ArtifactGoal.fromActiveContext(previous);
+        TurnResult result = turn(
+                12,
+                new Result.Ok("Partially done."),
+                policy("FILE_EDIT", true, true, List.of("index.html", "style.css")),
+                trace(12, "trace-partial", true, true, List.of("index.html", "style.css"),
+                        "PASSED", "Readback passed for index.html", "GRANTED_OR_NOT_REQUIRED", "PARTIAL", "PARTIAL"),
+                List.of(
+                        new TurnRecord.ToolCallSummary("talos.edit_file", "index.html", true, ""),
+                        new TurnRecord.ToolCallSummary("talos.edit_file", "style.css", false, "old_string not found")),
+                0);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result,
+                "Apply those changes.",
+                previous,
+                previousGoal);
+
+        assertSame(previous, update.activeTaskContext());
+        assertSame(previousGoal, update.artifactGoal());
+    }
+
+    @Test
     void unrelatedTurnPreservesExistingContextAndGoal() {
         ActiveTaskContext previous = ActiveTaskContext.proposedChanges(
                 6, "trace-old", List.of("README.md"), "Improve README.");
@@ -145,6 +195,32 @@ class ActiveTaskContextUpdaterTest {
         ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
                 result,
                 "hi",
+                previous,
+                previousGoal);
+
+        assertSame(previous, update.activeTaskContext());
+        assertSame(previousGoal, update.artifactGoal());
+    }
+
+    private void assertSuccessfulUnverifiedMutationPreservesContext(
+            String verificationStatus,
+            String mutationStatus,
+            String classification) {
+        ActiveTaskContext previous = ActiveTaskContext.proposedChanges(
+                6, "trace-old", List.of("index.html"), "Change the hero.");
+        ArtifactGoal previousGoal = ArtifactGoal.fromActiveContext(previous);
+        TurnResult result = turn(
+                12,
+                new Result.Ok("Done."),
+                policy("FILE_EDIT", true, true, List.of("index.html")),
+                trace(12, "trace-unverified", true, true, List.of("index.html"),
+                        verificationStatus, "", "GRANTED_OR_NOT_REQUIRED", mutationStatus, classification),
+                List.of(new TurnRecord.ToolCallSummary("talos.edit_file", "index.html", true, "")),
+                0);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result,
+                "Apply those changes.",
                 previous,
                 previousGoal);
 
