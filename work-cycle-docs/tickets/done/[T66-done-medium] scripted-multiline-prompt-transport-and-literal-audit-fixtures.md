@@ -1,6 +1,6 @@
-# [T66-open-medium] Scripted Multiline Prompt Transport And Literal Audit Fixtures
+# [T66-done-medium] Scripted Multiline Prompt Transport And Literal Audit Fixtures
 
-Status: open
+Status: done
 Priority: medium
 Date: 2026-05-01
 
@@ -130,6 +130,23 @@ pwsh .\tools\manual-eval\run-talosbench.ps1 -SelfTest
 pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly
 .\gradlew.bat test --no-daemon
 ```
+
+## Completion Notes
+
+Completed on 2026-05-01.
+
+- Added `run-talosbench.ps1 -SelfTest` coverage that loads the T61 exact README
+  retry case and fails if the literal payload would be transported as standalone
+  REPL turns.
+- Rewrote `t61-literal-readme-write-after-retry` to use single-line logical
+  prompts that describe the two-line target content without physical CR/LF
+  characters.
+- Made retry sequencing explicit: first prompt receives denial input, second
+  prompt restates the literal content and receives approval input.
+- Updated TalosBench manual docs with the supported multiline-literal audit
+  discipline for the current line-oriented REPL.
+- Verified the focused live case against the installed Talos path:
+  `local/manual-testing/talosbench/20260501-122140/summary.md`.
 
 ## Known Risks
 
