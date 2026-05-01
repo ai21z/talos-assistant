@@ -1,8 +1,9 @@
-# [T68-open-high] No-Inspection Intent And Negative Read Constraints
+# [T68-done-high] No-Inspection Intent And Negative Read Constraints
 
-Status: open
+Status: done
 Priority: high
 Date: 2026-05-01
+Completed: 2026-05-01
 
 ## Evidence Summary
 
@@ -124,6 +125,27 @@ Suggested commands:
 .\gradlew.bat test --no-daemon
 pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly
 ```
+
+Executed evidence:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.runtime.task.TaskContractResolverTest" --tests "dev.talos.runtime.toolcall.NativeToolSpecPolicyTest" --no-daemon
+.\gradlew.bat test e2eTest --rerun-tasks --no-daemon
+pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly
+pwsh .\tools\manual-eval\run-talosbench.ps1 -SelfTest
+git diff --check
+```
+
+Resolution:
+
+- Added deterministic resolver handling for abstract no-inspection methodology
+  prompts so they become direct-answer/no-tool contracts.
+- Added directory-listing-only handling for list/show-files prompts with
+  negative read/content clauses.
+- Filtered file names found only inside negative read/content clauses out of
+  read-target evidence.
+- Added resolver, native tool-surface, and TalosBench regression coverage for
+  the T67 turn 2 and turn 7 failures.
 
 ## Known Risks
 
