@@ -129,6 +129,11 @@ function Get-TraceFacts {
         $mutationMatch = [regex]::Match($contractLine, "mutationAllowed=(true|false)", [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
         if ($mutationMatch.Success) { $mutationAllowed = $mutationMatch.Groups[1].Value.ToLowerInvariant() }
     }
+    $currentTurnFrame = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*currentTurnFrame:\s+(.+)$"
+    $framePreview = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*framePreview:\s+(.+)$"
+    if (-not [string]::IsNullOrWhiteSpace($framePreview)) {
+        $currentTurnFrame = "$currentTurnFrame $framePreview".Trim()
+    }
 
     return [pscustomobject]@{
         Contract = $contract
@@ -143,7 +148,9 @@ function Get-TraceFacts {
         PromptAuditTaskType = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*taskType:\s+([A-Z_]+).*$"
         PromptAuditActionObligation = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*actionObligation:\s+(.+)$"
         PromptAuditEvidenceObligation = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*evidenceObligation:\s+(.+)$"
-        PromptAuditCurrentTurnFrame = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*currentTurnFrame:\s+(.+)$"
+        PromptAuditActiveTaskContext = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*activeTaskContext:\s+(.+)$"
+        PromptAuditArtifactGoal = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*artifactGoal:\s+(.+)$"
+        PromptAuditCurrentTurnFrame = $currentTurnFrame
         PromptAuditHistory = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*history:\s+(.+)$"
         PromptAuditRedaction = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*redaction:\s+(.+)$"
     }
@@ -230,6 +237,16 @@ function Test-TraceAssertions {
             $failures += "prompt audit evidenceObligation missing '$item'"
         }
     }
+    foreach ($item in Get-AssertionArray -Assertions $Assertions -Name "promptAuditActiveTaskContextContains") {
+        if ($facts.PromptAuditActiveTaskContext.IndexOf([string]$item, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+            $failures += "prompt audit activeTaskContext missing '$item'"
+        }
+    }
+    foreach ($item in Get-AssertionArray -Assertions $Assertions -Name "promptAuditArtifactGoalContains") {
+        if ($facts.PromptAuditArtifactGoal.IndexOf([string]$item, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+            $failures += "prompt audit artifactGoal missing '$item'"
+        }
+    }
     foreach ($item in Get-AssertionArray -Assertions $Assertions -Name "promptAuditCurrentTurnFrameContains") {
         if ($facts.PromptAuditCurrentTurnFrame.IndexOf([string]$item, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
             $failures += "prompt audit currentTurnFrame missing '$item'"
@@ -304,9 +321,14 @@ function Invoke-TalosCase {
     $inputLines = New-Object System.Collections.Generic.List[string]
     $inputLines.Add("/session clear")
     $inputLines.Add("/debug trace")
-    foreach ($prompt in @($Case.prompts)) {
+    $prompts = @($Case.prompts)
+    $hasPromptApprovals = $Case.PSObject.Properties.Name -contains "approvalInputsByPrompt"
+    $promptApprovals = if ($hasPromptApprovals) { @($Case.approvalInputsByPrompt) } else { @() }
+    for ($promptIndex = 0; $promptIndex -lt $prompts.Count; $promptIndex++) {
+        $prompt = $prompts[$promptIndex]
         $inputLines.Add([string]$prompt)
-        foreach ($approval in @($Case.approvalInputs)) {
+        $approvals = if ($hasPromptApprovals) { @($promptApprovals[$promptIndex]) } else { @($Case.approvalInputs) }
+        foreach ($approval in $approvals) {
             if (-not [string]::IsNullOrWhiteSpace($approval)) {
                 $inputLines.Add([string]$approval)
             }
@@ -411,6 +433,8 @@ if ($ValidateOnly) {
                 "promptAuditTaskType",
                 "promptAuditActionObligationContains",
                 "promptAuditEvidenceObligationContains",
+                "promptAuditActiveTaskContextContains",
+                "promptAuditArtifactGoalContains",
                 "promptAuditCurrentTurnFrameContains",
                 "promptAuditHistoryContains",
                 "promptAuditRedactionContains",
@@ -421,6 +445,13 @@ if ($ValidateOnly) {
                 if ($allowedAssertions -notcontains $assertionName) {
                     throw "Case '$($case.id)' has unknown trace assertion '$assertionName'."
                 }
+            }
+        }
+        if ($case.PSObject.Properties.Name -contains "approvalInputsByPrompt") {
+            $promptCount = @($case.prompts).Count
+            $approvalCount = @($case.approvalInputsByPrompt).Count
+            if ($approvalCount -ne $promptCount) {
+                throw "Case '$($case.id)' approvalInputsByPrompt count ($approvalCount) must match prompts count ($promptCount)."
             }
         }
         if (-not $ids.Add([string]$case.id)) {
