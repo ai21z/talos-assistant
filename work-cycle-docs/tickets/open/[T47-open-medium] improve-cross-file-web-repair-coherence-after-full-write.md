@@ -21,6 +21,24 @@ policy or boundedness; it was cross-file coherence:
 - JavaScript referenced IDs that were absent from HTML.
 - Static verification correctly reported the task incomplete.
 
+T67 audit update, 2026-05-01:
+
+- Summary:
+  `local/manual-testing/t67-audit-20260501-143927/summary.md`
+- Recovered session:
+  `%USERPROFILE%/.talos/sessions/8d5e5c90b2f8140e09e5d7247d210c1cc1718331.turns.jsonl`
+- Prompt:
+  `Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js. It should calculate BMI from height and weight.`
+- Turn 21 (`trc-31a74e56-b4f1-42e3-b781-32d97bac07b8`) classified
+  `FILE_CREATE` but made no tool calls.
+- Turn 22 (`trc-04fa73dc-d044-4498-9fc3-7fc8aec9d554`) wrote
+  `index.html`, `styles.css`, and `scripts.js`, but verification reported
+  `web coherence could not be checked because the workspace does not expose a
+  small HTML/CSS/JS surface`.
+- The final files were incoherent: `scripts.js` referenced `bmiForm`, `height`,
+  and `weight`, while `index.html` did not define those elements.
+- Follow-up repair prompts in turns 23-24 did not correct the artifact.
+
 ## Problem
 
 The repair prompt tells the model to use complete file replacements, but it does
