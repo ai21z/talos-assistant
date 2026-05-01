@@ -709,7 +709,7 @@
       "approvalInputsByPrompt": [
         [],
         [
-          "y"
+          "a"
         ]
       ],
       "expectedContract": "FILE_EDIT",
