@@ -1,6 +1,6 @@
-# [T58-open-high] OutcomeDominancePolicy
+# [T58-done-high] OutcomeDominancePolicy
 
-Status: open
+Status: done
 Priority: high
 
 ## Evidence Summary
@@ -172,3 +172,10 @@ Hardening pass, 2026-04-30:
 - T61 should add TalosBench assertions for final outcome dominance.
 - Later capability profiles can add profile-specific verifier summaries without
   owning final truth precedence.
+
+## Completion Evidence
+
+- Implemented in `3da1254 T58: add outcome dominance policy`.
+- Merged through `1779bad Merge T55-T58 control-plane work into beta dev`.
+- Hardened in `f39d7e3 Hardening pass for T57 T58 T61`.
+- Non-manual TalosBench evidence recorded in `local/manual-testing/talosbench/20260430-230044/summary.md`.

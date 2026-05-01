@@ -1,6 +1,6 @@
-# [T57-open-high] EvidenceObligationPolicy
+# [T57-done-high] EvidenceObligationPolicy
 
-Status: open
+Status: done
 Priority: high
 
 ## Evidence Summary
@@ -174,3 +174,9 @@ Hardening pass, 2026-04-30:
 
 - T58 centralizes final dominance over failed evidence obligations.
 - Future document capability can add real extraction under a capability profile.
+
+## Completion Evidence
+
+- Implemented in `f2c1e54 T57: add evidence obligation policy`.
+- Hardened in `f39d7e3 Hardening pass for T57 T58 T61`.
+- Non-manual TalosBench evidence recorded in `local/manual-testing/talosbench/20260430-230044/summary.md`.
