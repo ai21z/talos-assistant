@@ -113,9 +113,9 @@ public final class CurrentTurnCapabilityFrame {
             String activeTaskContext,
             String artifactGoal
     ) {
-        boolean hasActiveTaskContext = isDerived(activeTaskContext);
-        boolean hasArtifactGoal = isDerived(artifactGoal);
-        if (!hasActiveTaskContext && !hasArtifactGoal) {
+        boolean hasActiveTaskContext = isActiveContextForModel(activeTaskContext);
+        boolean hasArtifactGoal = hasActiveTaskContext && isDerived(artifactGoal);
+        if (!hasActiveTaskContext) {
             return;
         }
         frame.append("[ActiveTaskContext]\n")
@@ -135,6 +135,12 @@ public final class CurrentTurnCapabilityFrame {
         return value != null
                 && !value.isBlank()
                 && !CurrentTurnPlan.NONE_OR_NOT_DERIVED.equals(value);
+    }
+
+    private static boolean isActiveContextForModel(String value) {
+        if (!isDerived(value)) return false;
+        String trimmed = value.strip();
+        return trimmed.startsWith("ACTIVE") || trimmed.contains("state=ACTIVE");
     }
 
     private static String promptPreview(String value) {
