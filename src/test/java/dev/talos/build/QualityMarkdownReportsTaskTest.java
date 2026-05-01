@@ -28,7 +28,8 @@ class QualityMarkdownReportsTaskTest {
         Path projectDir = createBuildFixture();
         Path summariesDir = Files.createDirectories(projectDir.resolve("build/reports/talos"));
         Path reportsDir = Files.createDirectories(projectDir.resolve("reports"));
-        writeUtf8(reportsDir.resolve("coverage-01052026-090.md"), "stale generated coverage report\n");
+        String staleDateStamp = LocalDate.now().minusDays(1).format(DateTimeFormatter.ofPattern("ddMMyyyy"));
+        writeUtf8(reportsDir.resolve("coverage-" + staleDateStamp + "-090.md"), "stale generated coverage report\n");
         writeUtf8(reportsDir.resolve("notes.md"), "manual notes must be preserved\n");
 
         writeUtf8(summariesDir.resolve("coverage-summary.json"), """
@@ -124,7 +125,7 @@ class QualityMarkdownReportsTaskTest {
         assertTrue(Files.exists(e2eReport));
         assertTrue(Files.exists(qodanaReport));
         assertTrue(Files.exists(versionReport));
-        assertFalse(Files.exists(reportsDir.resolve("coverage-01052026-090.md")));
+        assertFalse(Files.exists(reportsDir.resolve("coverage-" + staleDateStamp + "-090.md")));
         assertTrue(Files.exists(reportsDir.resolve("notes.md")));
 
         String coverage = Files.readString(coverageReport, StandardCharsets.UTF_8);
