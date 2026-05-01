@@ -14,6 +14,7 @@ import dev.talos.core.net.NetPolicy;
 import dev.talos.core.rag.RagService;
 import dev.talos.core.security.Redactor;
 import dev.talos.core.security.Sandbox;
+import dev.talos.runtime.ActiveTaskContextUpdateListener;
 import dev.talos.runtime.CliApprovalGate;
 import dev.talos.runtime.JsonSessionStore;
 import dev.talos.runtime.MemoryUpdateListener;
@@ -314,6 +315,7 @@ public final class TalosBootstrap {
         // premature context loss during multi-turn editing sessions.
         memoryListener.setAssistMode(true);
         turnProcessor.addListener(memoryListener);
+        turnProcessor.addListener(new ActiveTaskContextUpdateListener(memory));
 
         // Per-turn structured durability (Step 2): appends one JSON line per
         // completed turn to ~/.talos/sessions/<sid>.turns.jsonl. Complements
