@@ -143,6 +143,25 @@ class ActiveTaskContextPolicyTest {
         assertFalse(decision.taskContract().mutationAllowed());
     }
 
+    @Test void expiredContextDoesNotAttachToSmallTalkBoundaryTurn() {
+        ActiveTaskContext saved = readmeProposal();
+        String userRequest = "Hello friend, how are you?";
+        TaskContract rawContract = TaskContractResolver.fromUserRequest(userRequest);
+
+        ActiveTaskContextPolicy.Decision decision = ActiveTaskContextPolicy.evaluate(
+                userRequest,
+                rawContract,
+                saved,
+                ArtifactGoal.fromActiveContext(saved),
+                6);
+
+        assertFalse(decision.consumed());
+        assertEquals(TaskType.SMALL_TALK, decision.taskContract().type());
+        assertEquals(ActiveTaskContext.State.NONE, decision.planContext().state());
+        assertEquals(ArtifactGoal.none(), decision.artifactGoal());
+        assertEquals(ActiveTaskContext.none(), decision.memoryContext());
+    }
+
     @Test void bareYesDoesNotConsumeProposalContext() {
         ActiveTaskContext saved = readmeProposal();
         String userRequest = "yes";

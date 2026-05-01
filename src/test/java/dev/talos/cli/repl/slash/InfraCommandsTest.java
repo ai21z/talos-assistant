@@ -305,6 +305,10 @@ class InfraCommandsTest {
             assertNotNull(r);
             assertTrue(r instanceof Result.Error || r instanceof Result.Info || r instanceof Result.Ok,
                     "Should handle missing Ollama gracefully");
+            if (r instanceof Result.Ok ok) {
+                assertTrue(ok.text.contains("/set model <backend/model>"));
+                assertFalse(ok.text.contains(":set model"));
+            }
         }
 
         @Test void error_message_mentions_ollama() throws Exception {
@@ -319,7 +323,16 @@ class InfraCommandsTest {
         @Test void spec_name_and_group() {
             var cmd = new ModelsCommand();
             assertEquals("models", cmd.spec().name());
+            assertTrue(cmd.spec().aliases().contains("model"));
             assertEquals(CommandGroup.MODELS, cmd.spec().group());
+        }
+
+        @Test void command_registry_accepts_model_alias_for_models() {
+            var reg = new CommandRegistry();
+            reg.register(new ModelsCommand());
+
+            assertTrue(reg.has("models"));
+            assertTrue(reg.has("model"));
         }
     }
 

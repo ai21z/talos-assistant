@@ -195,6 +195,7 @@ class TaskContractResolverTest {
     void conversationBoundaryPromptsBecomeSmallTalkContracts() {
         for (String input : List.of(
                 "Hello friend",
+                "Hello friend, how are you?",
                 "how are you are you good?",
                 "perfect just as I want it!",
                 "debug /trace",

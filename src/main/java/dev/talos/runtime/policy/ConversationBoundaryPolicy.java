@@ -13,6 +13,7 @@ public final class ConversationBoundaryPolicy {
 
     private static final Set<String> DIRECT_CHAT_PROMPTS = Set.of(
             "hello friend",
+            "hello friend, how are you?",
             "how are you are you good?",
             "perfect just as i want it!",
             "thanks, that is perfect",

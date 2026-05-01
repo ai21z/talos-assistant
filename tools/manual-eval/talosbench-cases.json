@@ -1094,8 +1094,8 @@
       "notes": "Approval-sensitive T61 artifact creation case; this is the release-gate version of the natural creation prompt from T54."
     },
     {
-      "id": "t61-model-switch-small-talk",
-      "category": "t61/t54-regression-pack",
+      "id": "t67-model-switch-small-talk",
+      "category": "t67/intent-boundary",
       "manualRequired": true,
       "workspaceFixture": {
         "files": {
@@ -1145,10 +1145,10 @@
         ]
       },
       "blockerConditions": [
-        "T61 regression: small talk after model command triggers workspace inspection.",
-        "T61 regression: model command context leaks hidden fixture content."
+        "T67 regression: small talk after model command triggers workspace inspection.",
+        "T67 regression: model command context leaks hidden fixture content."
       ],
-      "notes": "Manual until slash-command ergonomics are stable enough for fully scripted model switching."
+      "notes": "Manual-gated model command boundary case. /model should route to model listing, and the following small-talk /last trace must remain SMALL_TALK, DIRECT_ANSWER_ONLY, and tool-free."
     },
     {
       "id": "t61-unknown-tool-alias-replay",

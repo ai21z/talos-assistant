@@ -68,21 +68,29 @@ public final class ActiveTaskContextPolicy {
             return new Decision(current, ActiveTaskContext.none(), ArtifactGoal.none(), ActiveTaskContext.none(), false);
         }
 
+        if (suppressesContext(userRequest, current)) {
+            if (!savedContext.activeAt(currentUserTurnNumber)) {
+                return new Decision(
+                        current,
+                        ActiveTaskContext.none(),
+                        ArtifactGoal.none(),
+                        ActiveTaskContext.none(),
+                        false);
+            }
+            return new Decision(
+                    current,
+                    savedContext.suppressed("current request does not require workspace context"),
+                    ArtifactGoal.none(),
+                    savedContext,
+                    false);
+        }
+
         if (!savedContext.activeAt(currentUserTurnNumber)) {
             return new Decision(
                     current,
                     savedContext.expired("expired after active-context turn limit"),
                     ArtifactGoal.none(),
                     ActiveTaskContext.none(),
-                    false);
-        }
-
-        if (suppressesContext(userRequest, current)) {
-            return new Decision(
-                    current,
-                    savedContext.suppressed("current request does not require workspace context"),
-                    ArtifactGoal.none(),
-                    savedContext,
                     false);
         }
 

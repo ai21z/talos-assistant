@@ -70,6 +70,14 @@ public final class HelpCommand implements Command {
                             "/reindex refreshes the local workspace index.",
                             "/files and /show inspect indexed context.",
                             "/grep searches workspace text directly.")));
+            case "models", "model" -> new Result.Ok(topicHelp(
+                    "Model Help",
+                    "List installed models and switch the active chat model.",
+                    CommandGroup.MODELS,
+                    List.of(
+                            "/models lists installed models. /model is an alias.",
+                            "/set model <backend/model> switches the active model.",
+                            "Example: /set model ollama/qwen3:8b.")));
             default -> findSpec(q)
                     .map(spec -> (Result) new Result.Ok(detail(spec)))
                     .orElseGet(() -> new Result.Error("No such help topic or command: " + q, 204));
@@ -86,6 +94,7 @@ public final class HelpCommand implements Command {
 
         appendIfRegistered(sb, "status", "workspace, model, index, policy");
         appendIfRegistered(sb, "mode", "switch operating mode");
+        appendIfRegistered(sb, "models", "list installed models; switch with /set model <backend/model>");
         appendIfRegistered(sb, "reindex", "refresh local index");
         appendIfRegistered(sb, "files", "list indexed files");
         appendIfRegistered(sb, "k", "set retrieval depth");
