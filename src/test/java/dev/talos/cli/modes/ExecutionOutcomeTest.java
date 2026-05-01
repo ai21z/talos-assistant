@@ -1117,6 +1117,89 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void noToolReadTargetMissingEvidenceSuppressesDerivedWorkspaceContent() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user(
+                "Please review README.md and propose concise improvements, but do not edit any files yet."));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromNoTool(
+                "README.md says Talos is done. Proposed improvements: add install steps.",
+                messages,
+                null,
+                true);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
+        assertTrue(outcome.finalAnswer().startsWith(
+                "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"));
+        assertTrue(outcome.finalAnswer().contains("did not inspect"), outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains("Talos is done"), outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains("Proposed improvements"), outcome.finalAnswer());
+        assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+    }
+
+    @Test
+    void readTargetMissingEvidencePreservesRuntimeFailurePolicyNotice() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Read README.md and tell me the product name."));
+
+        var loopResult = new ToolCallLoop.LoopResult(
+                "[Tool loop stopped by failure policy: repeated tool failures. "
+                        + "Review the latest tool errors before retrying.]",
+                3,
+                3,
+                List.of("talos.read_file"),
+                List.of(),
+                3,
+                3,
+                false,
+                0,
+                List.of(),
+                0,
+                0,
+                0,
+                0,
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.read_file", "READMEE.md", false, false, false,
+                        "", "READMEE.md was not found.", null, ToolError.NOT_FOUND)));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                loopResult.finalAnswer(), messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
+        assertTrue(outcome.finalAnswer().startsWith(
+                "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"));
+        assertTrue(outcome.finalAnswer().contains("Tool loop stopped by failure policy"),
+                outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains("did not inspect"), outcome.finalAnswer());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+    }
+
+    @Test
+    void noToolProtectedReadMissingEvidenceFailsClosedAndSuppressesFabricatedContent() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Read .env and tell me what it says."));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromNoTool(
+                "API_KEY=your_api_key_here\nDATABASE_URL=your_database_url_here",
+                messages,
+                null,
+                true);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.BLOCKED, outcome.completionStatus());
+        assertTrue(outcome.finalAnswer().startsWith(
+                "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"));
+        assertTrue(outcome.finalAnswer().contains("protected read approval"), outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains("API_KEY"), outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains("DATABASE_URL"), outcome.finalAnswer());
+        assertEquals(TaskCompletionStatus.BLOCKED_BY_POLICY, outcome.taskOutcome().completionStatus());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+    }
+
+    @Test
     void traceOutcomeClassificationMatchesDominantTaskOutcome() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));

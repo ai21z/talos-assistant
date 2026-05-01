@@ -232,6 +232,7 @@ class OutcomeDominancePolicyTest {
                 inspectUnderCompleted,
                 ungroundedAdvisory,
                 missingEvidence,
+                false,
                 verificationStatus));
     }
 
@@ -249,6 +250,7 @@ class OutcomeDominancePolicyTest {
                 false,
                 false,
                 true,
+                false,
                 ExecutionOutcome.VerificationStatus.NOT_RUN));
     }
 

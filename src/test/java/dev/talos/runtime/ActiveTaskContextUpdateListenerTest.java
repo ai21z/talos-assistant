@@ -4,6 +4,7 @@ import dev.talos.cli.repl.Result;
 import dev.talos.cli.repl.SessionMemory;
 import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ArtifactGoal;
+import dev.talos.runtime.policy.EvidenceObligationVerifier;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import org.junit.jupiter.api.Test;
 
@@ -58,6 +59,52 @@ class ActiveTaskContextUpdateListenerTest {
         assertEquals(List.of("README.md"), memory.activeTaskContext().targets());
         assertEquals(ArtifactGoal.Source.ACTIVE_CONTEXT, memory.artifactGoal().source());
         assertEquals(ArtifactGoal.ArtifactKind.README, memory.artifactGoal().artifactKind());
+    }
+
+    @Test
+    void evidenceIncompleteProposalDoesNotBecomeActiveContext() {
+        SessionMemory memory = new SessionMemory();
+        ActiveTaskContextUpdateListener listener = new ActiveTaskContextUpdateListener(memory);
+
+        TurnResult result = new TurnResult(
+                new Result.Ok(EvidenceObligationVerifier.MISSING_EVIDENCE_PREFIX
+                        + "\n\nI would add setup steps to README.md."),
+                null,
+                3,
+                Duration.ofMillis(25),
+                new TurnAudit(
+                        List.of(),
+                        0,
+                        0,
+                        0,
+                        new TurnPolicyTrace(
+                                "READ_ONLY_QA",
+                                false,
+                                false,
+                                List.of("README.md"),
+                                List.of(),
+                                "INSPECT",
+                                "INSPECT",
+                                List.of(),
+                                List.of(),
+                                List.of()),
+                        LocalTurnTrace.builder("trace-listener", "session", 3, "2026-05-01T00:00:00Z")
+                                .taskContract(new LocalTurnTrace.TaskContractSummary(
+                                        "READ_ONLY_QA",
+                                        false,
+                                        false,
+                                        false,
+                                        List.of("README.md"),
+                                        List.of()))
+                                .outcome("ADVISORY_ONLY", "NOT_RUN", "NONE", "NOT_REQUESTED", "ADVISORY_ONLY")
+                                .warning("MISSING_EVIDENCE",
+                                        "Required workspace evidence was not gathered in this turn.")
+                                .build()));
+
+        listener.onTurnComplete(result, "Propose README.md changes without editing.");
+
+        assertEquals(ActiveTaskContext.State.NONE, memory.activeTaskContext().state());
+        assertEquals(ArtifactGoal.Source.NONE, memory.artifactGoal().source());
     }
 
     @Test

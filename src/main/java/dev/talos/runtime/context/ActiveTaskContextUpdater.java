@@ -5,6 +5,7 @@ import dev.talos.runtime.TurnAudit;
 import dev.talos.runtime.TurnPolicyTrace;
 import dev.talos.runtime.TurnRecord;
 import dev.talos.runtime.TurnResult;
+import dev.talos.runtime.policy.EvidenceObligationVerifier;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.PromptAuditRedactor;
 
@@ -63,6 +64,12 @@ public final class ActiveTaskContextUpdater {
         }
 
         if (!targets.isEmpty()
+                && looksLikeProposalIntent(userInput)
+                && evidenceIncomplete(result.result())) {
+            return new Update(ActiveTaskContext.none(), ArtifactGoal.none());
+        }
+
+        if (!targets.isEmpty()
                 && !facts.mutationAllowed()
                 && !facts.successfulMutation()
                 && !facts.approvalDeniedMutationAttempt()
@@ -84,6 +91,11 @@ public final class ActiveTaskContextUpdater {
 
     private static String proposalSummary(Result result) {
         return PromptAuditRedactor.preview(extractText(result), ActiveTaskContext.MAX_PROPOSAL_CHARS);
+    }
+
+    private static boolean evidenceIncomplete(Result result) {
+        return extractText(result).stripLeading()
+                .startsWith(EvidenceObligationVerifier.MISSING_EVIDENCE_PREFIX);
     }
 
     private static String extractText(Result result) {

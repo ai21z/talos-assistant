@@ -1,6 +1,6 @@
-# [T64-open-high] Enforce Evidence Obligations Before Final Answer
+# [T64-done-high] Enforce Evidence Obligations Before Final Answer
 
-Status: open
+Status: done
 Priority: high
 Date: 2026-05-01
 
@@ -150,6 +150,44 @@ Suggested commands:
 pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly
 pwsh .\tools\manual-eval\run-talosbench.ps1 -CaseId t57-protected-read-denial,t61-protected-env-read-approved,t59-proposal-follow-up-apply-readme -IncludeManualRequired
 ```
+
+## Implementation Notes
+
+- Runtime outcome shaping now suppresses model-derived workspace/protected-file
+  prose when `READ_TARGET_REQUIRED` or `PROTECTED_READ_APPROVAL_REQUIRED`
+  evidence is missing.
+- Missing protected-read approval now fails closed as `BLOCKED` /
+  `BLOCKED_BY_POLICY` instead of preserving fabricated file content.
+- Missing normal read-target evidence remains `ADVISORY_ONLY`, but the final
+  answer is a deterministic "target not inspected" message rather than an
+  ungrounded proposal or summary.
+- Deterministic runtime failure-policy notices are preserved while still
+  carrying the missing-evidence prefix.
+- Active task context update now clears/suppresses proposal context when the
+  completed turn result starts with the missing-evidence marker.
+
+## Verification
+
+Completed in `codex/t64-evidence-obligation-enforcement`:
+
+```powershell
+.\gradlew.bat test --tests dev.talos.cli.modes.ExecutionOutcomeTest --tests dev.talos.runtime.ActiveTaskContextUpdateListenerTest --no-daemon
+.\gradlew.bat test --tests dev.talos.cli.modes.ExecutionOutcomeTest --no-daemon
+.\gradlew.bat e2eTest --tests dev.talos.harness.JsonScenarioPackTest.repeatedMissingPathFailureStopsByFailurePolicy --no-daemon
+.\gradlew.bat e2eTest --no-daemon
+.\gradlew.bat test --no-daemon
+pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly
+```
+
+Notes:
+
+- The first full `test` run surfaced a non-deterministic
+  `ToolCallLoopP0Test` failure; the failing test passed in isolation and the
+  full unit suite passed on rerun.
+- The first full `e2eTest` run exposed an actual mismatch where the new
+  evidence gate removed a deterministic failure-policy notice. The gate now
+  preserves that runtime status while still suppressing derived workspace
+  content, and full `e2eTest` passes.
 
 ## Known Risks
 
