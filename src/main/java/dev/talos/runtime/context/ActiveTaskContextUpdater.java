@@ -1,0 +1,260 @@
+package dev.talos.runtime.context;
+
+import dev.talos.cli.repl.Result;
+import dev.talos.runtime.TurnAudit;
+import dev.talos.runtime.TurnPolicyTrace;
+import dev.talos.runtime.TurnRecord;
+import dev.talos.runtime.TurnResult;
+import dev.talos.runtime.trace.LocalTurnTrace;
+import dev.talos.runtime.trace.PromptAuditRedactor;
+
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+
+/**
+ * Derives the next active task context from deterministic post-turn facts.
+ */
+public final class ActiveTaskContextUpdater {
+
+    public record Update(ActiveTaskContext activeTaskContext, ArtifactGoal artifactGoal) {
+        public Update {
+            activeTaskContext = activeTaskContext == null ? ActiveTaskContext.none() : activeTaskContext;
+            artifactGoal = artifactGoal == null ? ArtifactGoal.none() : artifactGoal;
+        }
+    }
+
+    public Update updateAfterTurn(
+            TurnResult result,
+            String userInput,
+            ActiveTaskContext previousContext,
+            ArtifactGoal previousGoal) {
+        ActiveTaskContext preservedContext = previousContext == null ? ActiveTaskContext.none() : previousContext;
+        ArtifactGoal preservedGoal = previousGoal == null ? ArtifactGoal.none() : previousGoal;
+        if (result == null) {
+            return new Update(preservedContext, preservedGoal);
+        }
+
+        TurnFacts facts = TurnFacts.from(result);
+        List<String> targets = facts.targets();
+
+        if (facts.approvalDeniedMutationAttempt()) {
+            ActiveTaskContext context = ActiveTaskContext.deniedMutation(
+                    result.turnNumber(),
+                    facts.traceId(),
+                    targets,
+                    "No files changed; approval denied by user.");
+            return active(context);
+        }
+
+        if (!targets.isEmpty() && facts.verificationFailed()) {
+            ActiveTaskContext context = ActiveTaskContext.verifierFindings(
+                    result.turnNumber(),
+                    facts.traceId(),
+                    targets,
+                    facts.verifierFindings(),
+                    facts.verificationStatus());
+            return active(context);
+        }
+
+        if (!targets.isEmpty() && facts.successfulMutation() && facts.verificationPassedOrNotRun()) {
+            return new Update(ActiveTaskContext.none(), ArtifactGoal.none());
+        }
+
+        if (!targets.isEmpty()
+                && !facts.mutationAllowed()
+                && !facts.successfulMutation()
+                && !facts.approvalDeniedMutationAttempt()
+                && looksLikeProposalIntent(userInput)) {
+            ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+                    result.turnNumber(),
+                    facts.traceId(),
+                    targets,
+                    proposalSummary(result.result()));
+            return active(context);
+        }
+
+        return new Update(preservedContext, preservedGoal);
+    }
+
+    private static Update active(ActiveTaskContext context) {
+        return new Update(context, ArtifactGoal.fromActiveContext(context));
+    }
+
+    private static String proposalSummary(Result result) {
+        return PromptAuditRedactor.preview(extractText(result), ActiveTaskContext.MAX_PROPOSAL_CHARS);
+    }
+
+    private static String extractText(Result result) {
+        if (result == null) return "";
+        return switch (result) {
+            case Result.Ok ok -> ok.text;
+            case Result.Streamed streamed -> streamed.fullText;
+            case Result.Info ignored -> "";
+            case Result.TrustedInfo ignored -> "";
+            case Result.Error ignored -> "";
+            case Result.Table ignored -> "";
+            case Result.StreamStart ignored -> "";
+            case Result.StreamChunk ignored -> "";
+            case Result.StreamEnd ignored -> "";
+            case Result.ToolProgress ignored -> "";
+        };
+    }
+
+    private static boolean looksLikeProposalIntent(String userInput) {
+        if (userInput == null || userInput.isBlank()) return false;
+        String lower = userInput.strip().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
+        boolean explicitProposal = lower.contains("propose")
+                || lower.contains("proposal")
+                || lower.contains("suggest changes")
+                || lower.contains("suggest the changes")
+                || lower.contains("what would you change")
+                || lower.contains("would change");
+        boolean noMutationYet = lower.contains("before editing")
+                || lower.contains("before applying")
+                || lower.contains("do not edit")
+                || lower.contains("don't edit")
+                || lower.contains("without editing")
+                || lower.contains("without changing");
+        boolean changeIntent = lower.contains("change")
+                || lower.contains("edit")
+                || lower.contains("update")
+                || lower.contains("fix")
+                || lower.contains("apply");
+        return explicitProposal || (noMutationYet && changeIntent);
+    }
+
+    private record TurnFacts(
+            TurnAudit audit,
+            TurnPolicyTrace policyTrace,
+            LocalTurnTrace localTrace,
+            List<String> targets,
+            String traceId,
+            String verificationStatus,
+            List<String> verifierFindings,
+            boolean mutationAllowed,
+            boolean successfulMutation,
+            boolean approvalDeniedMutationAttempt
+    ) {
+
+        static TurnFacts from(TurnResult result) {
+            TurnAudit audit = result.audit() == null ? TurnAudit.empty() : result.audit();
+            TurnPolicyTrace policyTrace = audit.policyTrace() == null
+                    ? TurnPolicyTrace.empty()
+                    : audit.policyTrace();
+            LocalTurnTrace localTrace = audit.localTrace();
+            List<TurnRecord.ToolCallSummary> calls = audit.toolCalls() == null
+                    ? List.of()
+                    : audit.toolCalls();
+            List<String> targets = targets(policyTrace, localTrace, calls);
+            boolean successfulMutation = calls.stream()
+                    .anyMatch(call -> call.success() && isMutatingTool(call.name()));
+            boolean deniedMutation = audit.approvalsDenied() > 0
+                    && (mutationAllowed(policyTrace, localTrace)
+                    || calls.stream().anyMatch(call -> isMutatingTool(call.name())));
+            String verificationStatus = verificationStatus(localTrace);
+            return new TurnFacts(
+                    audit,
+                    policyTrace,
+                    localTrace,
+                    targets,
+                    traceId(localTrace),
+                    verificationStatus,
+                    verifierFindings(localTrace),
+                    mutationAllowed(policyTrace, localTrace),
+                    successfulMutation,
+                    deniedMutation);
+        }
+
+        boolean verificationFailed() {
+            return "FAILED".equalsIgnoreCase(verificationStatus);
+        }
+
+        boolean verificationPassedOrNotRun() {
+            if (verificationStatus == null || verificationStatus.isBlank()) return true;
+            Set<String> ok = Set.of("PASSED", "NOT_RUN", "READBACK_ONLY");
+            return ok.contains(verificationStatus.toUpperCase(Locale.ROOT));
+        }
+
+        private static List<String> targets(
+                TurnPolicyTrace policyTrace,
+                LocalTurnTrace localTrace,
+                List<TurnRecord.ToolCallSummary> calls) {
+            LinkedHashSet<String> out = new LinkedHashSet<>();
+            addAll(out, localTrace == null ? List.of() : localTrace.taskContract().expectedTargets());
+            addAll(out, policyTrace == null ? List.of() : policyTrace.expectedTargets());
+            if (out.isEmpty()) {
+                for (TurnRecord.ToolCallSummary call : calls) {
+                    if (call != null && isMutatingTool(call.name())) {
+                        add(out, call.pathHint());
+                    }
+                }
+            }
+            return List.copyOf(out);
+        }
+
+        private static void addAll(LinkedHashSet<String> out, List<String> values) {
+            if (values == null) return;
+            for (String value : values) {
+                add(out, value);
+            }
+        }
+
+        private static void add(LinkedHashSet<String> out, String value) {
+            if (value == null) return;
+            String normalized = value.strip();
+            if (!normalized.isBlank()) out.add(normalized);
+        }
+
+        private static String traceId(LocalTurnTrace localTrace) {
+            return localTrace == null ? "" : localTrace.traceId();
+        }
+
+        private static String verificationStatus(LocalTurnTrace localTrace) {
+            if (localTrace == null) return "";
+            String fromVerification = localTrace.verification().status();
+            if (fromVerification != null && !fromVerification.isBlank()) return fromVerification;
+            return localTrace.outcome().verificationStatus();
+        }
+
+        private static List<String> verifierFindings(LocalTurnTrace localTrace) {
+            if (localTrace == null || localTrace.verification() == null) return List.of();
+            List<String> problems = localTrace.verification().problems();
+            if (problems != null && !problems.isEmpty()) return List.copyOf(problems);
+            String summary = localTrace.verification().summary();
+            if (summary == null || summary.isBlank()) return List.of();
+            List<String> out = new ArrayList<>();
+            out.add(summary);
+            return List.copyOf(out);
+        }
+
+        private static boolean mutationAllowed(TurnPolicyTrace policyTrace, LocalTurnTrace localTrace) {
+            if (policyTrace != null && policyTrace.mutationAllowed()) return true;
+            return localTrace != null && localTrace.taskContract().mutationAllowed();
+        }
+
+        private static boolean isMutatingTool(String toolName) {
+            String normalized = normalizeToolName(toolName);
+            return normalized.equals("edit_file")
+                    || normalized.equals("file_edit")
+                    || normalized.equals("editfile")
+                    || normalized.equals("write_file")
+                    || normalized.equals("file_write")
+                    || normalized.equals("writefile")
+                    || normalized.equals("create_file")
+                    || normalized.equals("file_create")
+                    || normalized.equals("createfile");
+        }
+
+        private static String normalizeToolName(String toolName) {
+            if (toolName == null) return "";
+            String normalized = toolName.strip().toLowerCase(Locale.ROOT);
+            if (normalized.startsWith("talos.")) {
+                normalized = normalized.substring("talos.".length());
+            }
+            return normalized.replace('-', '_');
+        }
+    }
+}
