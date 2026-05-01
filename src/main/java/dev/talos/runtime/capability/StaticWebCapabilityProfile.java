@@ -145,6 +145,22 @@ public final class StaticWebCapabilityProfile {
                 + profile.targetSurface().description() + ".";
     }
 
+    public static String repairCoherenceGuidance(List<String> fullWriteTargets) {
+        List<String> targets = fullWriteTargets == null ? List.of() : fullWriteTargets.stream()
+                .filter(StaticWebCapabilityProfile::isSmallWebFile)
+                .sorted()
+                .toList();
+        if (targets.isEmpty()) return "";
+        return """
+
+                Cross-file coherence checklist:
+                - HTML must link every CSS and JavaScript file being written.
+                - Every JavaScript ID or selector must exist in HTML before the JavaScript uses it.
+                - CSS selectors should correspond to classes or IDs in HTML where practical.
+                - If you rewrite any one of %s, cross-check all HTML/CSS/JS files before emitting tool calls.
+                """.formatted(String.join(", ", targets)).stripTrailing();
+    }
+
     private static ArtifactOperation operationFor(TaskContract contract) {
         if (contract == null) return ArtifactOperation.NONE;
         String lower = contract.originalUserRequest() == null

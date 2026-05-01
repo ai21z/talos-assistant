@@ -66,8 +66,13 @@ public final class RepairPolicy {
         List<String> forbiddenTargets = contract.forbiddenTargets().stream()
                 .sorted()
                 .toList();
+        boolean structuralWebRepair = problems.stream().anyMatch(StaticWebCapabilityProfile::isStructuralProblem);
         List<RepairPlanStep> steps = planSteps(problems, expectedTargets);
-        String instruction = renderStaticVerificationInstruction(problems, expectedTargets, steps);
+        String instruction = renderStaticVerificationInstruction(
+                problems,
+                expectedTargets,
+                steps,
+                structuralWebRepair);
 
         return RepairDecision.planned(new RepairPlan(
                 "repair-static-verification-v1",
@@ -185,7 +190,8 @@ public final class RepairPolicy {
     private static String renderStaticVerificationInstruction(
             List<String> problems,
             List<String> expectedTargets,
-            List<RepairPlanStep> steps
+            List<RepairPlanStep> steps,
+            boolean structuralWebRepair
     ) {
         StringBuilder out = new StringBuilder();
         out.append("[Static verification repair context]\n")
@@ -229,6 +235,10 @@ public final class RepairPolicy {
                     .append("with complete corrected file content. Do not use talos.edit_file ")
                     .append("for these structural web repair targets; partial edits are too brittle ")
                     .append("for these verifier findings. ");
+            if (structuralWebRepair) {
+                out.append(StaticWebCapabilityProfile.repairCoherenceGuidance(fullWriteTargets))
+                        .append("\n\n");
+            }
         } else {
             out.append("\nFor small HTML/CSS/JS files, prefer talos.write_file with complete corrected file content ")
                     .append("when exact talos.edit_file old_string matching would be brittle. ");

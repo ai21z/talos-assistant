@@ -1,7 +1,8 @@
-# [T47-open-medium] Ticket: Improve Cross-File Web Repair Coherence After Full Write
+# [T47-done-medium] Ticket: Improve Cross-File Web Repair Coherence After Full Write
 Date: 2026-04-29
 Priority: medium
-Status: open
+Status: done
+Closed: 2026-05-02
 Architecture references:
 - `docs/architecture/06-bounded-repair-controller.md`
 - `work-cycle-docs/tickets/done/[T44-done-medium] improve-live-bmi-repair-after-bounded-repair-v1.md`
@@ -113,3 +114,23 @@ itself.
   tasks.
 - Static checks must remain deterministic and not pretend to prove browser
   runtime behavior.
+
+## Closure Notes
+
+- Added Static Web profile-owned repair guidance for full-file web repair
+  targets.
+- Structural web repair context now includes a cross-file coherence checklist:
+  HTML links written CSS/JS files, JavaScript selectors/IDs exist in HTML, and
+  CSS selectors correspond to HTML where practical.
+- Guarded the guidance so non-web README/config repairs do not receive the web
+  checklist.
+- Existing static verifier and JSON scenarios already cover incoherent
+  full-file web rewrites and coherent passing rewrites.
+
+Verification:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.runtime.repair.RepairPolicyTest.structuralWebRepairInstructionRequiresCrossFileCoherenceBeforeWrites" --no-daemon
+.\gradlew.bat test --tests "dev.talos.runtime.repair.RepairPolicyTest.structuralWebRepairInstructionRequiresCrossFileCoherenceBeforeWrites" --tests "dev.talos.runtime.repair.RepairPolicyTest.staleReadmeStaticFailureStillPlansRepairForCurrentReadmeTarget" --no-daemon
+.\gradlew.bat test e2eTest --tests "dev.talos.runtime.repair.RepairPolicyTest" --tests "dev.talos.runtime.verification.StaticTaskVerifierTest" --tests "dev.talos.harness.JsonScenarioPackTest.staticVerifierFailsBrokenWebAppBuildLinkage" --tests "dev.talos.harness.JsonScenarioPackTest.structuralWebRepairContinuesUntilPlannedWriteTargets" --no-daemon
+```
