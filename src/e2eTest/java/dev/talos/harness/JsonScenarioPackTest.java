@@ -1537,9 +1537,11 @@ class JsonScenarioPackTest {
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
             result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("[Evidence incomplete: required workspace evidence was not gathered in this turn.]")
                     .assertAnswerContains(AssistantTurnExecutor.UNGROUNDED_ANNOTATION)
-                    .assertAnswerContains("There are no mismatches")
-                    .assertAnswerContains("cta-button")
+                    .assertAnswerContains("I did not inspect the required workspace evidence")
+                    .assertAnswerNotContains("There are no mismatches")
+                    .assertAnswerNotContains("cta-button")
                     .assertFileContains("index.html", "<title>Horror Synthwave Band</title>");
 
             assertFalse(result.streamed(),

@@ -730,20 +730,80 @@ record ExecutionOutcome(
         if (isRuntimeFailureStatus(answer)) {
             return missingEvidencePrefix(answer);
         }
-        if (obligation == EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED) {
-            return missingEvidencePrefix(
+        if (isDominantRuntimeContainment(answer)) {
+            return answer;
+        }
+        String runtimeSafeBody = runtimeSafeBodyForMissingEvidence(answer);
+        if (runtimeSafeBody != null) {
+            return missingEvidencePrefix(runtimeSafeBody);
+        }
+        return missingEvidencePrefix(missingEvidenceContainmentMessage(plan, obligation));
+    }
+
+    private static String missingEvidenceContainmentMessage(
+            CurrentTurnPlan plan,
+            EvidenceObligation obligation
+    ) {
+        return switch (obligation) {
+            case PROTECTED_READ_APPROVAL_REQUIRED ->
                     "I did not read protected content this turn. A protected read approval "
                             + "path was required before answering from that file, so no protected "
                             + "file content is available from this turn."
-                            + targetSentence(plan));
-        }
-        if (obligation == EvidenceObligation.READ_TARGET_REQUIRED) {
-            return missingEvidencePrefix(
+                            + targetSentence(plan);
+            case READ_TARGET_REQUIRED ->
                     "I did not inspect the required workspace target this turn, so I cannot "
                             + "answer from its contents or propose grounded changes yet."
-                            + targetSentence(plan));
+                            + targetSentence(plan);
+            case LIST_DIRECTORY_ONLY ->
+                    "I did not complete a directory-list-only evidence path this turn. "
+                            + "I cannot answer with file contents or derived file claims from "
+                            + "this turn.";
+            case WORKSPACE_INSPECTION_REQUIRED ->
+                    "I did not inspect the workspace this turn, so I cannot list files, "
+                            + "show file contents, or claim changed files from this turn.";
+            case VERIFY_FROM_TRACE_OR_EVIDENCE ->
+                    "I did not gather trace or workspace evidence this turn, so I cannot "
+                            + "verify the requested status from this turn.";
+            case UNSUPPORTED_CAPABILITY_CHECK_REQUIRED ->
+                    "I did not gather the required unsupported-capability evidence this turn, "
+                            + "so I cannot answer from unsupported document contents.";
+            case NONE -> "";
+        };
+    }
+
+    private static boolean isDominantRuntimeContainment(String answer) {
+        if (answer == null || answer.isBlank()) return false;
+        return answer.startsWith(AssistantTurnExecutor.READ_ONLY_DENIED_MUTATION_REPLACEMENT)
+                || answer.startsWith(AssistantTurnExecutor.STREAMING_NO_TOOL_MUTATION_REPLACEMENT)
+                || answer.startsWith(AssistantTurnExecutor.MALFORMED_TOOL_PROTOCOL_REPLACEMENT)
+                || answer.startsWith(AssistantTurnExecutor.DENIED_MUTATION_ANNOTATION)
+                || answer.startsWith(AssistantTurnExecutor.POLICY_DENIED_MUTATION_ANNOTATION)
+                || answer.startsWith(AssistantTurnExecutor.MIXED_DENIED_MUTATION_ANNOTATION)
+                || answer.startsWith(AssistantTurnExecutor.INVALID_MUTATION_ANNOTATION);
+    }
+
+    private static String runtimeSafeBodyForMissingEvidence(String answer) {
+        if (answer == null || answer.isBlank()) return null;
+        if (answer.startsWith(AssistantTurnExecutor.UNGROUNDED_ANNOTATION)) {
+            return AssistantTurnExecutor.UNGROUNDED_ANNOTATION
+                    + "I did not inspect the required workspace evidence this turn, "
+                    + "so I cannot answer from workspace facts yet.";
         }
-        return answer;
+        if (answer.startsWith(AssistantTurnExecutor.LOCAL_ACCESS_CAPABILITY_CORRECTION)) {
+            return AssistantTurnExecutor.LOCAL_ACCESS_CAPABILITY_CORRECTION;
+        }
+        if (isCapabilityLimitation(answer)) {
+            return answer;
+        }
+        return null;
+    }
+
+    private static boolean isCapabilityLimitation(String answer) {
+        String lower = answer.toLowerCase(java.util.Locale.ROOT);
+        return lower.startsWith("talos cannot extract ")
+                || lower.startsWith("i cannot extract ")
+                || lower.startsWith("i can't extract ")
+                || lower.startsWith("unsupported ");
     }
 
     private static boolean isRuntimeFailureStatus(String answer) {
