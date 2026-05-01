@@ -8,7 +8,7 @@ import java.util.List;
 
 public final class ModelsCommand implements Command {
     @Override public CommandSpec spec() {
-        return new CommandSpec("models", List.of(), "/models", "List installed models.", CommandGroup.MODELS);
+        return new CommandSpec("models", List.of("model"), "/models", "List installed models.", CommandGroup.MODELS);
     }
 
     @Override public Result execute(String args, Context ctx) throws Exception {
@@ -23,7 +23,7 @@ public final class ModelsCommand implements Command {
                 for (var m : list) {
                     sb.append("  ").append(m.backend()).append("/").append(m.name()).append("\n");
                 }
-                sb.append("\nTip: use :set model <backend/model> to switch.\n");
+                sb.append("\nTip: use /set model <backend/model> to switch.\n");
                 return new Result.Ok(sb.toString());
             }
         } catch (Exception e) {

@@ -376,6 +376,8 @@ class SimpleCommandsTest {
         private CommandRegistry fullRegistry() {
             var reg = registry();
             reg.register(new ModeCommand(ModeController.defaultController()));
+            reg.register(new ModelsCommand());
+            reg.register(new SetModelCommand());
             reg.register(new ExplainLastTurnCommand(Path.of("."), new dev.talos.runtime.NoOpSessionStore()));
             return reg;
         }
@@ -416,6 +418,17 @@ class SimpleCommandsTest {
             assertInstanceOf(Result.Ok.class, r);
             assertTrue(r.toString().contains("Debug Help"));
             assertTrue(r.toString().contains("/debug"));
+        }
+
+        @Test void help_models_topic_explains_model_switch_flow() {
+            var cmd = new HelpCommand(fullRegistry());
+            Result r = cmd.execute("models", ctx);
+            assertInstanceOf(Result.Ok.class, r);
+            String text = r.toString();
+            assertTrue(text.contains("Model Help"), text);
+            assertTrue(text.contains("/models"), text);
+            assertTrue(text.contains("/model"), text);
+            assertTrue(text.contains("/set model <backend/model>"), text);
         }
 
         @Test void help_security_topic() {

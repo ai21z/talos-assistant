@@ -1,8 +1,9 @@
-# [T67-open-medium] Model Switch Command Boundary And Small-Talk Classification
+# [T67-done-medium] Model Switch Command Boundary And Small-Talk Classification
 
-Status: open
+Status: done
 Priority: medium
 Date: 2026-05-01
+Completed: 2026-05-01
 
 ## Evidence Summary
 
@@ -81,6 +82,19 @@ Likely code/document areas:
 Make model-switch command UX clear and preserve T56 small-talk/no-tool
 classification immediately after model command turns.
 
+## Resolution
+
+- `/model` now aliases `/models`, so the command used during the T61 audit is
+  accepted rather than reported as unknown.
+- `/help` now lists the model command flow, and `/help models` / `/help model`
+  explicitly documents `/models`, `/model`, and `/set model <backend/model>`.
+- The exact audit prompt `Hello friend, how are you?` is classified as
+  `SMALL_TALK` and uses `DIRECT_ANSWER_ONLY` with no native or prompt tools.
+- Expired active task context is cleared for pure small-talk boundary turns
+  instead of rendering `activeTaskContext{state=EXPIRED}` into the prompt audit.
+- The TalosBench model-switch regression case is now owned by T67 as
+  `t67-model-switch-small-talk`.
+
 ## Non-Goals
 
 - No new model provider.
@@ -117,6 +131,27 @@ Suggested commands:
 .\gradlew.bat test --no-daemon
 pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly
 ```
+
+Executed evidence:
+
+- `pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly` - pass,
+  validated 25 cases.
+- `pwsh .\tools\manual-eval\run-talosbench.ps1 -SelfTest` - pass.
+- `.\gradlew.bat test e2eTest --no-daemon` - pass.
+- `.\gradlew.bat clean installDist --no-daemon` followed by
+  `pwsh .\tools\install-windows.ps1 -Force -Quiet` - pass.
+- `pwsh .\tools\manual-eval\run-talosbench.ps1 -CaseId
+  t67-model-switch-small-talk -IncludeManualRequired` - pass.
+
+Focused manual evidence:
+
+- Summary:
+  `local/manual-testing/talosbench/20260501-131552/summary.md`
+- Transcript:
+  `local/manual-testing/talosbench/20260501-131552/t67-model-switch-small-talk.txt`
+- Observed `/last trace`: `SMALL_TALK`, `nativeTools: none`,
+  `promptTools: none`, `actionObligation: DIRECT_ANSWER_ONLY`,
+  `activeTaskContext: NONE_OR_NOT_DERIVED`, and `Tool calls: 0`.
 
 ## Known Risks
 
