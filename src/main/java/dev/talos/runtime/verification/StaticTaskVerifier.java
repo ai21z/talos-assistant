@@ -2,13 +2,15 @@ package dev.talos.runtime.verification;
 
 import dev.talos.runtime.TemplatePlaceholderGuard;
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.capability.CapabilityProfile;
+import dev.talos.runtime.capability.CapabilityProfileRegistry;
+import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.expectation.ExpectationVerificationStatus;
 import dev.talos.runtime.expectation.LiteralContentExpectation;
 import dev.talos.runtime.expectation.TaskExpectation;
 import dev.talos.runtime.expectation.TaskExpectationResolver;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
-import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.tools.VerificationStatus;
 
@@ -129,12 +131,17 @@ public final class StaticTaskVerifier {
         verifyExpectedTargets(contract, mutatedPaths, facts, problems);
         boolean expectationRequired = verifyTaskExpectations(contract, root, facts, problems);
 
-        boolean webCoherenceRequired = shouldCheckWebCoherence(contract, root, mutatedPaths);
-        if (shouldRequireSeparateWebAssetMutations(contract)) {
+        CapabilityProfile profile = CapabilityProfileRegistry.select(contract, root, mutatedPaths);
+        boolean webCoherenceRequired = profile.staticWeb();
+        if (webCoherenceRequired) {
+            String profileFact = StaticWebCapabilityProfile.profileFact(profile);
+            if (!profileFact.isBlank()) facts.add(profileFact);
+        }
+        if (StaticWebCapabilityProfile.requiresSeparateAssetMutations(profile)) {
             verifyPrimaryWebMutationCoverage(mutatedPaths, facts, problems);
         }
         if (webCoherenceRequired) {
-            verifySmallWebWorkspace(root, contract, facts, problems);
+            verifySmallWebWorkspace(root, contract, profile, facts, problems);
         }
 
         if (!problems.isEmpty()) {
@@ -342,22 +349,32 @@ public final class StaticTaskVerifier {
     private static void verifySmallWebWorkspace(
             Path root,
             TaskContract contract,
+            CapabilityProfile profile,
             List<String> facts,
             List<String> problems
     ) {
         List<String> primary = obviousPrimaryFiles(root);
         if (primary.size() < 3) {
-            if (looksFunctionalWebTask(contract)) {
+            if (!primary.isEmpty()
+                    && profile.targetSurface().allowsFunctionalPartial()
+                    && StaticWebCapabilityProfile.looksFunctionalWebTask(contract)) {
                 verifyPartialFunctionalWebWorkspace(root, contract, primary, facts, problems);
                 if (!problems.isEmpty()) return;
+                facts.add("Self-contained functional web checks passed for "
+                        + String.join(", ", primary) + ".");
+                return;
             }
             problems.add("web coherence could not be checked because the workspace does not expose a small HTML/CSS/JS surface.");
             return;
         }
         if (!hasPrimaryWebSurface(primary)) {
-            if (looksFunctionalWebTask(contract)) {
+            if (profile.targetSurface().allowsFunctionalPartial()
+                    && StaticWebCapabilityProfile.looksFunctionalWebTask(contract)) {
                 verifyPartialFunctionalWebWorkspace(root, contract, primary, facts, problems);
                 if (!problems.isEmpty()) return;
+                facts.add("Self-contained functional web checks passed for "
+                        + String.join(", ", primary) + ".");
+                return;
             }
             problems.add("web coherence could not be checked because HTML, CSS, and JavaScript primary files were not all present.");
             return;
@@ -372,7 +389,7 @@ public final class StaticTaskVerifier {
         problems.addAll(selectors.linkageProblems());
         problems.addAll(selectors.contentProblems());
         problems.addAll(selectors.selectorProblems());
-        if (looksCalculatorOrFormTask(contract)) {
+        if (StaticWebCapabilityProfile.looksCalculatorOrFormTask(contract)) {
             List<String> formProblems = selectors.calculatorFormProblems(contract.originalUserRequest());
             problems.addAll(formProblems);
             if (formProblems.isEmpty()) {
@@ -405,7 +422,7 @@ public final class StaticTaskVerifier {
                 if (!SMALL_WORKSPACE_WEB_EXTS.contains(ext)) return List.of();
                 out.add(name.replace('\\', '/'));
             }
-            return out.size() >= 2 ? out.stream().sorted().toList() : List.of();
+            return out.isEmpty() ? List.of() : out.stream().sorted().toList();
         } catch (Exception e) {
             return List.of();
         }
@@ -478,152 +495,6 @@ public final class StaticTaskVerifier {
         return out.toString().stripTrailing();
     }
 
-    private static boolean shouldCheckSelectorCoherence(String userRequest) {
-        if (userRequest == null || userRequest.isBlank()) return false;
-        String lower = userRequest.toLowerCase(Locale.ROOT);
-        if (lower.contains("selector") || lower.contains(".cta-button") || lower.contains("#cta-button")) {
-            return true;
-        }
-        boolean namesWebParts = lower.contains("html")
-                && (lower.contains("css") || lower.contains("stylesheet"))
-                && (lower.contains("javascript") || lower.contains("script.js") || lower.contains("js"));
-        boolean asksAlignment = lower.contains("match")
-                || lower.contains("mismatch")
-                || lower.contains("align")
-                || lower.contains("linkage")
-                || lower.contains("wire")
-                || lower.contains("reference");
-        return namesWebParts && asksAlignment;
-    }
-
-    private static boolean shouldCheckWebCoherence(
-            TaskContract contract,
-            Path root,
-            Set<String> mutatedPaths
-    ) {
-        if (contract == null) return false;
-        String request = contract.originalUserRequest();
-        if (shouldCheckSelectorCoherence(request) || looksBroadWebTask(contract)) return true;
-        return looksGenericMutationFollowUp(request) && mutatesSmallWebSurface(root, mutatedPaths);
-    }
-
-    private static boolean looksBroadWebTask(TaskContract contract) {
-        if (contract == null) return false;
-        String request = contract.originalUserRequest();
-        if (request == null || request.isBlank()) return false;
-        String lower = request.toLowerCase(Locale.ROOT);
-        boolean mutatingTask = contract.mutationRequested();
-        boolean mentionsWebSurface = lower.contains("website")
-                || lower.contains("web app")
-                || lower.contains("webpage")
-                || lower.contains("web page")
-                || lower.contains("index.html")
-                || lower.contains(".html")
-                || lower.contains(" html")
-                || lower.startsWith("html")
-                || lower.contains(" site")
-                || lower.contains(" page");
-        boolean mentionsStyle = lower.contains("css")
-                || lower.contains(".css")
-                || lower.contains("stylesheet")
-                || lower.contains("style.css")
-                || lower.contains("styles.css")
-                || lower.contains("styling");
-        boolean mentionsScript = lower.contains("javascript")
-                || lower.contains(".js")
-                || lower.contains("script.js")
-                || lower.contains("scripts.js")
-                || lower.contains("scripting")
-                || lower.contains(" js ")
-                || lower.endsWith(" js")
-                || lower.contains("script file");
-        boolean asksFunctional = lower.contains("functioning")
-                || lower.contains("functional")
-                || lower.contains("working")
-                || lower.contains("interactive")
-                || lower.contains("calculator")
-                || lower.contains("bmi")
-                || lower.contains("make it work")
-                || lower.contains("actually work")
-                || lower.contains("does not work")
-                || lower.contains("doesn't work")
-                || lower.contains("form");
-        return mutatingTask && mentionsWebSurface
-                && ((mentionsStyle && mentionsScript) || asksFunctional);
-    }
-
-    private static boolean looksCalculatorOrFormTask(TaskContract contract) {
-        if (!looksFunctionalWebTask(contract)) return false;
-        String request = contract.originalUserRequest();
-        if (request == null || request.isBlank()) return false;
-        String lower = request.toLowerCase(Locale.ROOT);
-        return lower.contains("calculator")
-                || lower.contains("bmi")
-                || lower.contains("form")
-                || lower.contains("input")
-                || lower.contains("interactive")
-                || lower.contains("functioning")
-                || lower.contains("functional");
-    }
-
-    private static boolean looksFunctionalWebTask(TaskContract contract) {
-        if (!looksBroadWebTask(contract)) return false;
-        String request = contract.originalUserRequest();
-        if (request == null || request.isBlank()) return false;
-        String lower = request.toLowerCase(Locale.ROOT);
-        return lower.contains("functioning")
-                || lower.contains("functional")
-                || lower.contains("working")
-                || lower.contains("interactive")
-                || lower.contains("calculator")
-                || lower.contains("bmi")
-                || lower.contains("make it work")
-                || lower.contains("actually work")
-                || lower.contains("does not work")
-                || lower.contains("doesn't work")
-                || lower.contains("form");
-    }
-
-    private static boolean shouldRequireSeparateWebAssetMutations(TaskContract contract) {
-        if (!looksBroadWebTask(contract)) return false;
-        String lower = contract.originalUserRequest().toLowerCase(Locale.ROOT);
-        boolean createLike = contract.type() == TaskType.FILE_CREATE
-                || lower.contains("build")
-                || lower.contains("create")
-                || lower.contains("generate")
-                || lower.contains("scaffold")
-                || lower.contains("set up")
-                || lower.contains("setup");
-        boolean separateAssets = (lower.contains("separate") || lower.contains("different files"))
-                && (lower.contains("css") || lower.contains("styling"))
-                && (lower.contains("javascript") || lower.contains("script") || lower.contains("scripting"));
-        return createLike && separateAssets;
-    }
-
-    private static boolean looksGenericMutationFollowUp(String request) {
-        if (request == null || request.isBlank()) return false;
-        String lower = request.toLowerCase(Locale.ROOT).strip();
-        return lower.equals("can you make it?")
-                || lower.equals("make it")
-                || lower.equals("make it please")
-                || lower.equals("do it")
-                || lower.equals("do it please")
-                || lower.equals("make the edits please")
-                || lower.equals("make the changes please")
-                || lower.equals("apply it")
-                || lower.equals("apply the changes")
-                || lower.equals("fix it")
-                || lower.equals("edit it");
-    }
-
-    private static boolean mutatesSmallWebSurface(Path root, Set<String> mutatedPaths) {
-        if (root == null || mutatedPaths == null || mutatedPaths.isEmpty()) return false;
-        if (mutatedPaths.stream().noneMatch(path -> hasExtension(path, ".html", ".htm", ".css", ".js"))) {
-            return false;
-        }
-        return hasPrimaryWebSurface(obviousPrimaryFiles(root));
-    }
-
     private static boolean hasPrimaryWebSurface(List<String> files) {
         return pickPrimary(files, ".html", ".htm") != null
                 && pickPrimary(files, ".css") != null
@@ -671,7 +542,7 @@ public final class StaticTaskVerifier {
         for (String id : duplicateValues(htmlIdOccurrences)) {
             problems.add("HTML defines duplicate IDs: `#" + id + "`");
         }
-        if (looksCalculatorOrFormTask(contract)) {
+        if (StaticWebCapabilityProfile.looksCalculatorOrFormTask(contract)) {
             List<String> formProblems = calculatorFormProblems(contract.originalUserRequest(), html);
             problems.addAll(formProblems);
             if (formProblems.isEmpty()) {
