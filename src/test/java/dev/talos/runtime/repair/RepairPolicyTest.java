@@ -66,6 +66,32 @@ class RepairPolicyTest {
     }
 
     @Test
+    void staleReadmeStaticFailureDoesNotPlanRepairForFreshWebTargets() {
+        List<ChatMessage> messages = readmeFailureMessages(
+                "Create index.html, styles.css, and scripts.js for a BMI calculator. Use talos.write_file.");
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        RepairDecision decision = RepairPolicy.planForStaticVerification(messages, contract);
+
+        assertEquals(RepairDecisionStatus.NOT_APPLICABLE, decision.status());
+        assertTrue(decision.plan().isEmpty());
+        assertTrue(decision.reason().contains("targets did not overlap"), decision.reason());
+    }
+
+    @Test
+    void staleReadmeStaticFailureStillPlansRepairForCurrentReadmeTarget() {
+        List<ChatMessage> messages = readmeFailureMessages("Fix README.md now using talos.write_file.");
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        RepairDecision decision = RepairPolicy.planForStaticVerification(messages, contract);
+
+        assertEquals(RepairDecisionStatus.PLAN_CREATED, decision.status());
+        RepairPlan plan = decision.plan().orElseThrow();
+        assertEquals(List.of("README.md"), plan.expectedTargets());
+        assertTrue(plan.instruction().contains("README.md"), plan.instruction());
+    }
+
+    @Test
     void fullRewriteTargetsAreExtractedFromRepairContextInstruction() {
         List<ChatMessage> messages = List.of(ChatMessage.system("""
                 [Static verification repair context]
@@ -178,6 +204,22 @@ class RepairPolicyTest {
                 - styles.css: expected target was not successfully mutated.
                 - HTML does not link JavaScript file: `scripts.js`
                 - Calculator/form task is missing a submit/calculate button.
+                """));
+        messages.add(ChatMessage.user(latestUser));
+        return messages;
+    }
+
+    private static List<ChatMessage> readmeFailureMessages(String latestUser) {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user(
+                "Edit README.md now using talos.write_file. The complete file must contain exactly two lines."));
+        messages.add(ChatMessage.assistant("""
+                [Task incomplete: Static verification failed - README.md literal content mismatch]
+
+                The requested task is not verified complete.
+                Remaining static verification problems:
+                - README.md: literal content did not match the exact requested content.
                 """));
         messages.add(ChatMessage.user(latestUser));
         return messages;
