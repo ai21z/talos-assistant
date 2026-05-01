@@ -8,6 +8,7 @@ import dev.talos.runtime.TurnResult;
 import dev.talos.runtime.policy.EvidenceObligationVerifier;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.PromptAuditRedactor;
+import dev.talos.runtime.toolcall.ToolCallSupport;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -270,25 +271,7 @@ public final class ActiveTaskContextUpdater {
         }
 
         private static boolean isMutatingTool(String toolName) {
-            String normalized = normalizeToolName(toolName);
-            return normalized.equals("edit_file")
-                    || normalized.equals("file_edit")
-                    || normalized.equals("editfile")
-                    || normalized.equals("write_file")
-                    || normalized.equals("file_write")
-                    || normalized.equals("writefile")
-                    || normalized.equals("create_file")
-                    || normalized.equals("file_create")
-                    || normalized.equals("createfile");
-        }
-
-        private static String normalizeToolName(String toolName) {
-            if (toolName == null) return "";
-            String normalized = toolName.strip().toLowerCase(Locale.ROOT);
-            if (normalized.startsWith("talos.")) {
-                normalized = normalized.substring("talos.".length());
-            }
-            return normalized.replace('-', '_');
+            return ToolCallSupport.isMutatingTool(toolName);
         }
     }
 }

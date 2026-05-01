@@ -10,7 +10,6 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -212,33 +211,20 @@ public final class ToolCallSupport {
     }
 
     public static boolean isReadOnlyTool(String toolName) {
-        return READ_ONLY_TOOLS.contains(normalizeToolName(toolName));
+        String canonical = ToolAliasPolicy.localCanonicalName(toolName);
+        return READ_ONLY_TOOLS.contains(canonical);
     }
 
     public static boolean isMutatingTool(String toolName) {
-        return MUTATING_TOOLS.contains(normalizeToolName(toolName));
+        String canonical = ToolAliasPolicy.localCanonicalName(toolName);
+        return MUTATING_TOOLS.contains(canonical);
     }
 
     private static boolean isEditFileTool(String toolName) {
-        String normalized = normalizeToolName(toolName);
+        String normalized = ToolAliasPolicy.localCanonicalName(toolName);
         return "edit_file".equals(normalized)
                 || "file_edit".equals(normalized)
                 || "editfile".equals(normalized);
-    }
-
-    private static String normalizeToolName(String toolName) {
-        if (toolName == null) return "";
-        String normalized = toolName.strip().toLowerCase(Locale.ROOT);
-        if (normalized.length() > 5 && normalized.regionMatches(true, 0, "talos", 0, 5)) {
-            char c = normalized.charAt(5);
-            if (c == ':' || c == '/' || c == '-' || c == '_') {
-                normalized = "talos." + normalized.substring(6);
-            }
-        }
-        if (normalized.startsWith("talos.")) {
-            normalized = normalized.substring("talos.".length());
-        }
-        return normalized;
     }
 
     public static String buildReadCallSignature(ToolCall call) {
@@ -253,7 +239,7 @@ public final class ToolCallSupport {
     }
 
     public static ToolCall repairMissingPath(ToolCall call) {
-        if (!PATH_REQUIRED_TOOLS.contains(normalizeToolName(call.toolName()))) {
+        if (!PATH_REQUIRED_TOOLS.contains(ToolAliasPolicy.localCanonicalName(call.toolName()))) {
             return call;
         }
         for (String key : PATH_PARAM_KEYS) {

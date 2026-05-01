@@ -1194,6 +1194,9 @@ public final class AssistantTurnExecutor {
             if (conversationBoundaryAnswer != null) {
                 return conversationBoundaryAnswer;
             }
+            if (CapabilityAnswerPolicy.looksLikeToolAliasCapabilityTurn(userRequest)) {
+                return CapabilityAnswerPolicy.toolAliasCapabilityAnswer(userRequest);
+            }
         }
         if (contract != null
                 && contract.type() == TaskType.SMALL_TALK

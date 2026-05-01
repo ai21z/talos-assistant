@@ -290,4 +290,20 @@ class ToolRegistryTest {
         assertNotNull(registry.get("talos:ls"), "`talos:ls` must resolve via separator rewrite + alias");
         assertEquals("talos.list_dir", registry.get("talos:ls").name());
     }
+
+    @Test
+    void explicitBackendToolAliasesResolveButUnknownNamespacesDoNot() {
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new dev.talos.tools.impl.FileWriteTool());
+        registry.register(new dev.talos.tools.impl.ListDirTool());
+
+        assertNotNull(registry.get("tool_use:write_file"));
+        assertEquals("talos.write_file", registry.get("tool_use:write_file").name());
+        assertNotNull(registry.get("file_utils:write_file"));
+        assertEquals("talos.write_file", registry.get("file_utils:write_file").name());
+        assertNotNull(registry.get("tool_use:list_dir"));
+        assertEquals("talos.list_dir", registry.get("tool_use:list_dir").name());
+
+        assertNull(registry.get("unknown_provider.write_file"));
+    }
 }

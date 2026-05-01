@@ -16,6 +16,7 @@ import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.runtime.toolcall.ToolAliasPolicy;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.tools.*;
 import org.slf4j.Logger;
@@ -286,6 +287,8 @@ public final class TurnProcessor {
         }
         String tracePhase = tracePhase(ctx);
         LocalTurnTraceCapture.recordToolCallParsed(tracePhase, call);
+        ToolAliasPolicy.Decision aliasDecision = ToolAliasPolicy.resolve(call.toolName());
+        LocalTurnTraceCapture.recordToolAliasDecision(aliasDecision);
 
         // Check if the tool exists
         TalosTool tool = toolRegistry.get(call.toolName());
@@ -809,18 +812,7 @@ public final class TurnProcessor {
     }
 
     private static String normalizeToolName(String toolName) {
-        if (toolName == null) return "";
-        String normalized = toolName.strip().toLowerCase(java.util.Locale.ROOT);
-        if (normalized.length() > 5 && normalized.regionMatches(true, 0, "talos", 0, 5)) {
-            char c = normalized.charAt(5);
-            if (c == ':' || c == '/' || c == '-' || c == '_') {
-                normalized = "talos." + normalized.substring(6);
-            }
-        }
-        if (normalized.startsWith("talos.")) {
-            normalized = normalized.substring("talos.".length());
-        }
-        return normalized;
+        return ToolAliasPolicy.localCanonicalName(toolName);
     }
 
     private static boolean sameScopedTarget(String candidate, String forbidden) {

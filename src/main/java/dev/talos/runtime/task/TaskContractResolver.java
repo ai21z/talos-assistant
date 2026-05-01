@@ -208,6 +208,17 @@ public final class TaskContractResolver {
 
         String original = userRequest.strip();
         String lower = original.toLowerCase(Locale.ROOT);
+        if (CapabilityAnswerPolicy.looksLikeToolAliasCapabilityTurn(original)) {
+            return new TaskContract(
+                    TaskType.SMALL_TALK,
+                    false,
+                    false,
+                    false,
+                    Set.of(),
+                    Set.of(),
+                    original,
+                    "tool-alias-capability-question");
+        }
         boolean priorChangeStatusQuestion = MutationIntent.looksPriorChangeStatusQuestion(original);
         String classificationReason = MutationIntent.classificationReason(original);
         boolean mutationRequested = !priorChangeStatusQuestion

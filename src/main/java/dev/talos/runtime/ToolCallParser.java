@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.json.JsonReadFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import dev.talos.runtime.toolcall.ToolAliasPolicy;
 import dev.talos.tools.ToolCall;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -74,40 +75,6 @@ public final class ToolCallParser {
             .enable(JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS)
             .enable(JsonReadFeature.ALLOW_BACKSLASH_ESCAPING_ANY_CHARACTER)
             .build();
-
-    private static final Set<String> CANONICAL_TOOL_NAMES = Set.of(
-            "talos.read_file",
-            "talos.write_file",
-            "talos.edit_file",
-            "talos.list_dir",
-            "talos.grep",
-            "talos.retrieve"
-    );
-
-    private static final Set<String> TOOL_NAME_ALIASES = Set.of(
-            "file_write",
-            "write_file",
-            "file_create",
-            "create_file",
-            "file_read",
-            "read_file",
-            "file_edit",
-            "edit_file",
-            "list_dir",
-            "list_directory",
-            "dir_list",
-            "ls",
-            "grep",
-            "search",
-            "retrieve",
-            "writefile",
-            "createfile",
-            "readfile",
-            "editfile",
-            "listdir",
-            "listdirectory",
-            "grepsearch"
-    );
 
     /** Variant XML tags: tool_call, function_call, tool, function.
      *  DEPRECATED COMPATIBILITY ONLY — retained for models that emit XML variants.
@@ -345,19 +312,7 @@ public final class ToolCallParser {
     }
 
     static boolean isRecognizedToolName(String rawName) {
-        if (rawName == null || rawName.isBlank()) return false;
-        String normalized = rawName.strip().toLowerCase(Locale.ROOT);
-        if (normalized.length() > 5 && normalized.startsWith("talos")) {
-            char c = normalized.charAt(5);
-            if (c == ':' || c == '/' || c == '-' || c == '_') {
-                normalized = "talos." + normalized.substring(6);
-            }
-        }
-        if (CANONICAL_TOOL_NAMES.contains(normalized)) return true;
-        if (normalized.startsWith("talos.")) {
-            normalized = normalized.substring("talos.".length());
-        }
-        return TOOL_NAME_ALIASES.contains(normalized);
+        return ToolAliasPolicy.resolve(rawName).accepted();
     }
 
     // ── Internal extraction helpers ──────────────────────────────────

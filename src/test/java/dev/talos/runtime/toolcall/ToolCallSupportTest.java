@@ -38,4 +38,13 @@ class ToolCallSupportTest {
                     "path repair should preserve create-file alias calls so the write tool reports the missing path");
         }
     }
+
+    @Test
+    void backendQualifiedAliasesPreserveRiskClassification() {
+        assertTrue(ToolCallSupport.isMutatingTool("tool_use:write_file"));
+        assertTrue(ToolCallSupport.isMutatingTool("file_utils:edit_file"));
+        assertTrue(ToolCallSupport.isReadOnlyTool("tool_use:list_dir"));
+        assertFalse(ToolCallSupport.isReadOnlyTool("tool_use:write_file"));
+        assertFalse(ToolCallSupport.isMutatingTool("tool_use:list_dir"));
+    }
 }
