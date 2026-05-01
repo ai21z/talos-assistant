@@ -24,7 +24,8 @@ final class ReplRouterTraceTest {
                 "INSPECT",
                 List.of(),
                 List.of(),
-                List.of());
+                List.of(),
+                "conversation-boundary-policy");
         TurnResult result = new TurnResult(
                 new Result.Ok("hello"),
                 null,
@@ -36,6 +37,7 @@ final class ReplRouterTraceTest {
 
         assertTrue(text.contains("Current Turn Trace"));
         assertTrue(text.contains("contract: SMALL_TALK mutationAllowed=false verificationRequired=false"));
+        assertTrue(text.contains("classificationReason: conversation-boundary-policy"));
         assertTrue(text.contains("phase: initial=INSPECT final=INSPECT"));
         assertTrue(text.contains("nativeTools: none"));
         assertTrue(text.contains("blocked: none"));

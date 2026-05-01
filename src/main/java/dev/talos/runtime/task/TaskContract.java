@@ -16,13 +16,35 @@ public record TaskContract(
         boolean verificationRequired,
         Set<String> expectedTargets,
         Set<String> forbiddenTargets,
-        String originalUserRequest
+        String originalUserRequest,
+        String classificationReason
 ) {
+    public TaskContract(
+            TaskType type,
+            boolean mutationRequested,
+            boolean mutationAllowed,
+            boolean verificationRequired,
+            Set<String> expectedTargets,
+            Set<String> forbiddenTargets,
+            String originalUserRequest
+    ) {
+        this(
+                type,
+                mutationRequested,
+                mutationAllowed,
+                verificationRequired,
+                expectedTargets,
+                forbiddenTargets,
+                originalUserRequest,
+                "");
+    }
+
     public TaskContract {
         type = type == null ? TaskType.UNKNOWN : type;
         expectedTargets = expectedTargets == null ? Set.of() : Set.copyOf(expectedTargets);
         forbiddenTargets = forbiddenTargets == null ? Set.of() : Set.copyOf(forbiddenTargets);
         originalUserRequest = originalUserRequest == null ? "" : originalUserRequest;
+        classificationReason = classificationReason == null ? "" : classificationReason;
     }
 
     public static TaskContract unknown(String userRequest) {
@@ -33,6 +55,7 @@ public record TaskContract(
                 false,
                 Set.of(),
                 Set.of(),
-                userRequest);
+                userRequest,
+                "unknown");
     }
 }

@@ -177,6 +177,7 @@ Supported fields:
 
 - `contract`
 - `mutationAllowed`
+- `classificationReasonContains`
 - `phaseIncludes`
 - `nativeToolsContains`
 - `nativeToolsExcludes`

@@ -77,13 +77,15 @@ public final class LocalTurnTraceCapture {
                 trace.verificationRequired(),
                 trace.mutationAllowed(),
                 trace.expectedTargets(),
-                trace.forbiddenTargets()));
+                trace.forbiddenTargets(),
+                trace.classificationReason()));
         bag.builder.phaseTransition(trace.initialPhase(), trace.finalPhase(), "policy trace");
         bag.builder.toolSurface(trace.nativeTools(), trace.promptTools(), "selected for resolved task contract");
         bag.builder.event(TurnTraceEvent.simple("TASK_CONTRACT_RESOLVED", now(), Map.of(
                 "taskType", trace.taskType(),
                 "mutationAllowed", trace.mutationAllowed(),
-                "verificationRequired", trace.verificationRequired())));
+                "verificationRequired", trace.verificationRequired(),
+                "classificationReason", trace.classificationReason())));
         bag.builder.event(TurnTraceEvent.simple("TOOL_SURFACE_SELECTED", now(), Map.of(
                 "nativeToolCount", trace.nativeTools().size(),
                 "promptToolCount", trace.promptTools().size())));

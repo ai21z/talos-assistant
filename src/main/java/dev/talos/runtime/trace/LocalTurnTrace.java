@@ -71,16 +71,36 @@ public record LocalTurnTrace(
             boolean verificationRequired,
             boolean mutationRequested,
             List<String> expectedTargets,
-            List<String> forbiddenTargets
+            List<String> forbiddenTargets,
+            String classificationReason
     ) {
+        public TaskContractSummary(
+                String type,
+                boolean mutationAllowed,
+                boolean verificationRequired,
+                boolean mutationRequested,
+                List<String> expectedTargets,
+                List<String> forbiddenTargets
+        ) {
+            this(
+                    type,
+                    mutationAllowed,
+                    verificationRequired,
+                    mutationRequested,
+                    expectedTargets,
+                    forbiddenTargets,
+                    "");
+        }
+
         public TaskContractSummary {
             type = safe(type);
             expectedTargets = expectedTargets == null ? List.of() : List.copyOf(expectedTargets);
             forbiddenTargets = forbiddenTargets == null ? List.of() : List.copyOf(forbiddenTargets);
+            classificationReason = safe(classificationReason);
         }
 
         static TaskContractSummary empty() {
-            return new TaskContractSummary("", false, false, false, List.of(), List.of());
+            return new TaskContractSummary("", false, false, false, List.of(), List.of(), "");
         }
 
         static TaskContractSummary from(TaskContract contract) {
@@ -91,7 +111,8 @@ public record LocalTurnTrace(
                     contract.verificationRequired(),
                     contract.mutationRequested(),
                     contract.expectedTargets().stream().sorted().toList(),
-                    contract.forbiddenTargets().stream().sorted().toList());
+                    contract.forbiddenTargets().stream().sorted().toList(),
+                    contract.classificationReason());
         }
     }
 

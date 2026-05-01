@@ -1,8 +1,9 @@
-# [T74-open-high] Preamble-Tolerant Explicit Mutation Retry Classification
+# [T74-done-high] Preamble-Tolerant Explicit Mutation Retry Classification
 
-Status: open
+Status: done
 Priority: high
 Date: 2026-05-01
+Closed: 2026-05-02
 
 ## Evidence Summary
 
@@ -121,3 +122,16 @@ pwsh .\tools\manual-eval\run-talosbench.ps1 -SelfTest
 - Over-broad matching could turn advisory or question prompts into writes.
 - Exact-literal content may include words that look like mutation verbs; target
   extraction and literal expectation parsing must stay scoped.
+
+## Closure Notes
+
+- Added preamble-tolerant explicit mutation classification for current turns
+  that contain a mutation verb plus a named file target.
+- Preserved read-only classification for review, denied-attempt status,
+  advisory edit, and instructional "how to edit" prompts.
+- Added task contract and trace classification reason propagation so debug
+  trace and `/last trace` can show why mutation mode was selected.
+- Updated the T61 retry TalosBench manual case to use the preamble-first retry
+  prompt and assert the classification reason.
+- Verified with focused classifier/resolver tests, full unit/e2e tests,
+  TalosBench validation, and TalosBench self-test.
