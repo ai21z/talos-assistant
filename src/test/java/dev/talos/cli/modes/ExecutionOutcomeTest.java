@@ -1372,6 +1372,27 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void workspaceInspectionMissingEvidenceSuppressesModelBody() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("What files changed during this audit? Do not read protected files."));
+
+        String fabricated = "Changed files:\n"
+                + "- README.md now contains public notes.\n"
+                + "- notes.md contains SECRET-FAKE audit details.\n";
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromNoTool(
+                fabricated, messages, null, false);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
+        assertTrue(outcome.finalAnswer().startsWith(
+                "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"));
+        assertFalse(outcome.finalAnswer().contains("README.md now contains"), outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains("SECRET-FAKE"), outcome.finalAnswer());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+    }
+
+    @Test
     void legacyLoopReadPathsCountAsReadTargetEvidence() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));
@@ -1442,6 +1463,7 @@ class ExecutionOutcomeTest {
         assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
         assertTrue(outcome.finalAnswer().startsWith(
                 "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"));
+        assertFalse(outcome.finalAnswer().contains("README.md contains project notes."), outcome.finalAnswer());
         assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
         assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
     }

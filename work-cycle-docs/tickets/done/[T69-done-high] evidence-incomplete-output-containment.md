@@ -1,8 +1,9 @@
-# [T69-open-high] Evidence-Incomplete Output Containment
+# [T69-done-high] Evidence-Incomplete Output Containment
 
-Status: open
+Status: done
 Priority: high
 Date: 2026-05-01
+Completed: 2026-05-01
 
 ## Evidence Summary
 
@@ -87,6 +88,25 @@ When evidence is incomplete or action obligation fails, the user-visible final
 answer must not append ungrounded workspace facts, file contents, success
 claims, or invented summaries.
 
+## Resolution
+
+- Missing-evidence shaping now uses a runtime-owned containment message for all
+  evidence obligation types, not only read-target and protected-read turns.
+- Workspace-inspection failures now suppress fabricated changed-file lists,
+  file-content claims, and invented summaries after the evidence-incomplete
+  banner.
+- Directory-list-only violations now suppress model-derived content claims when
+  the model read file contents instead of only listing directory entries.
+- Existing dominant runtime safety outcomes remain intact: read-only denied
+  mutations, malformed protocol replacement, no-tool mutation replacement, and
+  invalid/denied mutation summaries are not overwritten by generic evidence
+  containment.
+- Streaming no-tool grounding still exposes the grounding warning, but the
+  fabricated model body is replaced with a bounded runtime explanation.
+- TalosBench now has the manual T69 guard
+  `t69-changed-files-evidence-containment` for the T67 changed-files sanity
+  prompt.
+
 ## Non-Goals
 
 - No suppression of legitimate grounded answers.
@@ -123,6 +143,24 @@ Suggested commands:
 .\gradlew.bat test --no-daemon
 pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly
 ```
+
+Executed evidence:
+
+- RED: `.\gradlew.bat test --tests
+  "dev.talos.cli.modes.ExecutionOutcomeTest.workspaceInspectionMissingEvidenceSuppressesModelBody"
+  --tests
+  "dev.talos.cli.modes.ExecutionOutcomeTest.listOnlyWithReadFileIsAdvisoryWithMissingEvidenceWarning"
+  --no-daemon` - failed for the expected body-containment assertions.
+- GREEN targeted: same command - pass.
+- `.\gradlew.bat test --tests "dev.talos.cli.modes.ExecutionOutcomeTest"
+  --no-daemon` - pass.
+- `.\gradlew.bat e2eTest --tests
+  "dev.talos.harness.JsonScenarioPackTest.streamingNoToolEvidenceAnswerIsVisiblyUngrounded"
+  --no-daemon` - pass.
+- `.\gradlew.bat test e2eTest --rerun-tasks --no-daemon` - pass.
+- `pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly` - pass,
+  validated 26 cases.
+- `pwsh .\tools\manual-eval\run-talosbench.ps1 -SelfTest` - pass.
 
 ## Known Risks
 
