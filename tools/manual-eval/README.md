@@ -80,9 +80,11 @@ evidence, prefer manual runs where a human watches the approval prompt and
 records the exact choice.
 
 Use `approvalInputsByPrompt` for multi-turn cases where only specific prompts
-need scripted approval input. The runner always appends `/last trace` after all
-prompts and approvals. If a scripted approval case does not produce a recognizable
-trace block, the case fails with a diagnostic instead of silently passing.
+need scripted approval input. The runner appends repeated `/last trace` commands
+after all prompts and approvals so one can be consumed by an extra approval
+prompt while a later one still captures the turn trace. If a scripted approval
+case does not produce a recognizable trace block, the case fails with a
+diagnostic instead of silently passing.
 
 ## Multiline Literal Prompts
 
