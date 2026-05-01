@@ -991,6 +991,167 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void explicitProtectedReadNoToolAnswerUsesRuntimeHandoffAndApproval(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve(".env"), "SECRET=manual-test\n");
+
+            var approvals = new java.util.concurrent.atomic.AtomicInteger();
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null,
+                    (description, detail) -> {
+                        approvals.incrementAndGet();
+                        assertTrue(description.contains("protected read"), description);
+                        assertTrue(detail.contains(".env"), detail);
+                        return false;
+                    },
+                    registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "I can help with that.",
+                            "The file says SECRET=manual-test.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Read .env and tell me what it says."));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-t72-protected-read-no-tool-handoff",
+                    "sid",
+                    1,
+                    "2026-05-01T00:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "scripted",
+                    "test-model",
+                    "Read .env and tell me what it says.");
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertEquals(1, approvals.get(), "no-tool protected read must still reach approval");
+                assertTrue(out.text().contains("Protected content was not read"), out.text());
+                assertFalse(out.text().contains("SECRET=manual-test"), out.text());
+                assertEquals("PROTECTED_READ_APPROVAL_REQUIRED", trace.promptAudit().evidenceObligation());
+                assertEquals("BLOCKED", trace.outcome().status());
+                assertEquals("BLOCKED_BY_APPROVAL", trace.outcome().classification());
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        }
+
+        @Test
+        void explicitProtectedReadNoToolAnswerCanUseApprovedContent(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve(".env"), "SECRET=manual-test\n");
+
+            var approvals = new java.util.concurrent.atomic.AtomicInteger();
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null,
+                    (description, detail) -> {
+                        approvals.incrementAndGet();
+                        assertTrue(description.contains("protected read"), description);
+                        assertTrue(detail.contains(".env"), detail);
+                        return true;
+                    },
+                    registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "I can help with that.",
+                            "The approved file says SECRET=manual-test.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Read .env and tell me what it says."));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-t72-protected-read-no-tool-approved",
+                    "sid",
+                    1,
+                    "2026-05-01T00:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "scripted",
+                    "test-model",
+                    "Read .env and tell me what it says.");
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertEquals(1, approvals.get(), "no-tool protected read must ask before reading");
+                assertTrue(out.text().contains("SECRET=manual-test"), out.text());
+                assertFalse(out.text().contains("Protected content was not read"), out.text());
+                assertEquals("PROTECTED_READ_APPROVAL_REQUIRED", trace.promptAudit().evidenceObligation());
+                assertEquals("COMPLETE", trace.outcome().status());
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        }
+
+        @Test
+        void protectedTargetMentionWithoutReadIntentDoesNotTriggerRuntimeHandoff(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve(".env"), "SECRET=manual-test\n");
+            Files.writeString(workspace.resolve("README.md"), "Public readme\n");
+
+            var approvals = new java.util.concurrent.atomic.AtomicInteger();
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null,
+                    (description, detail) -> {
+                        approvals.incrementAndGet();
+                        return true;
+                    },
+                    registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of("README is the target.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("I do not want the .env, I want the README.md !"));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-t72-protected-target-mention-no-handoff",
+                    "sid",
+                    1,
+                    "2026-05-01T00:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "scripted",
+                    "test-model",
+                    "I do not want the .env, I want the README.md !");
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertEquals(0, approvals.get(), "negated protected target mention must not ask for read approval");
+                assertFalse(out.text().contains("SECRET=manual-test"), out.text());
+                assertEquals("PROTECTED_READ_APPROVAL_REQUIRED", trace.promptAudit().evidenceObligation());
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        }
+
+        @Test
         void unsupportedDocxReadReportsCapabilityWithoutClaimingSummary(@TempDir Path workspace)
                 throws Exception {
             Files.writeString(workspace.resolve("report.docx"), "fake-binary-docx-placeholder");
