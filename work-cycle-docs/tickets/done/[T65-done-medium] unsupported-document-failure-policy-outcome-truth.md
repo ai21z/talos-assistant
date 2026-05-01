@@ -146,6 +146,8 @@ Completed on 2026-05-01.
   `pwsh .\tools\manual-eval\run-talosbench.ps1 -SelfTest`,
   `pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly`, and installed
   TalosBench case `t57-unsupported-docx`.
+- Main-workspace TalosBench summary:
+  `local/manual-testing/talosbench/20260501-125431/summary.md`.
 
 ## Known Risks
 
