@@ -19,6 +19,9 @@ import dev.talos.runtime.policy.ActionObligationPolicy;
 import dev.talos.runtime.policy.CapabilityAnswerPolicy;
 import dev.talos.runtime.policy.ConversationBoundaryPolicy;
 import dev.talos.runtime.policy.CurrentTurnCapabilityFrame;
+import dev.talos.runtime.policy.EvidenceObligation;
+import dev.talos.runtime.policy.EvidenceObligationPolicy;
+import dev.talos.runtime.policy.ProtectedPathPolicy;
 import dev.talos.runtime.policy.ResponseObligationVerifier;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -385,6 +388,15 @@ public final class AssistantTurnExecutor {
                             extraMutationSuccesses, mrr.actionObligationFailed(), opts),
                     mrr.extraSummary());
         }
+        ProtectedReadHandoffResult protectedReadHandoff = protectedReadHandoffIfNeeded(
+                mrr.answer(), messages, plan, workspace, ctx);
+        if (protectedReadHandoff.loopResult() != null) {
+            return new ToolLoopAnswerResolution(
+                    shapeAnswerAfterToolLoop(
+                            protectedReadHandoff.answer(), messages, plan,
+                            protectedReadHandoff.loopResult(), workspace, 0, opts),
+                    protectedReadHandoff.extraSummary());
+        }
         ReadOnlyInspectionRetryResult inspectionRetry = readOnlyInspectionRetryIfNeeded(
                 mrr.answer(), messages, plan, workspace, ctx);
         if (inspectionRetry.loopResult() != null) {
@@ -406,6 +418,206 @@ public final class AssistantTurnExecutor {
             ToolCallLoop.LoopResult loopResult,
             String extraSummary
     ) {}
+
+    record ProtectedReadHandoffResult(
+            String answer,
+            ToolCallLoop.LoopResult loopResult,
+            String extraSummary
+    ) {}
+
+    static ProtectedReadHandoffResult protectedReadHandoffIfNeeded(
+            String answer,
+            List<ChatMessage> messages,
+            CurrentTurnPlan plan,
+            Path workspace,
+            Context ctx
+    ) {
+        if (answer == null) answer = "";
+        CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, ctx);
+        TaskContract contract = safePlan.taskContract();
+        if (!requiresProtectedReadHandoff(safePlan, workspace)) {
+            return new ProtectedReadHandoffResult(answer, null, null);
+        }
+        if (contract.mutationRequested() || contract.mutationAllowed()) {
+            return new ProtectedReadHandoffResult(answer, null, null);
+        }
+        if (ctx == null || ctx.llm() == null || ctx.toolCallLoop() == null || workspace == null) {
+            return new ProtectedReadHandoffResult(answer, null, null);
+        }
+
+        List<String> targets = protectedExpectedTargets(contract, workspace);
+        if (targets.isEmpty()) {
+            return new ProtectedReadHandoffResult(answer, null, null);
+        }
+        if (!hasExplicitProtectedReadIntent(contract, targets)) {
+            return new ProtectedReadHandoffResult(answer, null, null);
+        }
+
+        String handoffCalls = targets.stream()
+                .map(AssistantTurnExecutor::readFileToolCallJson)
+                .reduce((left, right) -> left + "\n" + right)
+                .orElse("");
+        try {
+            ToolCallLoop.LoopResult loop = ctx.toolCallLoop().run(
+                    handoffCalls,
+                    messages,
+                    workspace,
+                    ctx);
+            String mergedAnswer = loop.finalAnswer();
+            return new ProtectedReadHandoffResult(
+                    mergedAnswer == null || mergedAnswer.isBlank() ? answer : mergedAnswer,
+                    loop,
+                    loop.summary());
+        } catch (Exception e) {
+            LOG.warn("Protected read handoff failed: {}", e.getMessage());
+            return new ProtectedReadHandoffResult(answer, null, null);
+        }
+    }
+
+    private static boolean requiresProtectedReadHandoff(CurrentTurnPlan plan, Path workspace) {
+        if (plan == null) return false;
+        TaskContract contract = plan.taskContract();
+        if (contract == null) return false;
+        EvidenceObligation recorded = EvidenceObligationPolicy.parse(plan.evidenceObligation());
+        EvidenceObligation derived = EvidenceObligationPolicy.derive(
+                contract,
+                plan.phaseInitial(),
+                workspace);
+        return recorded == EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED
+                || derived == EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED;
+    }
+
+    private static List<String> protectedExpectedTargets(TaskContract contract, Path workspace) {
+        if (contract == null || workspace == null || contract.expectedTargets().isEmpty()) {
+            return List.of();
+        }
+        return contract.expectedTargets().stream()
+                .filter(target -> ProtectedPathPolicy.classify(workspace, target).protectedPath())
+                .toList();
+    }
+
+    private static boolean hasExplicitProtectedReadIntent(TaskContract contract, List<String> targets) {
+        if (contract == null || targets == null || targets.isEmpty()) return false;
+        String request = contract.originalUserRequest();
+        if (request == null || request.isBlank()) return false;
+        String lowerRequest = request.toLowerCase(Locale.ROOT).replace('\\', '/');
+        for (String target : targets) {
+            if (targetHasExplicitReadIntent(lowerRequest, target)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean targetHasExplicitReadIntent(String lowerRequest, String target) {
+        if (lowerRequest == null || lowerRequest.isBlank() || target == null || target.isBlank()) {
+            return false;
+        }
+        String normalizedTarget = target.toLowerCase(Locale.ROOT).replace('\\', '/');
+        int from = 0;
+        while (from < lowerRequest.length()) {
+            int index = lowerRequest.indexOf(normalizedTarget, from);
+            if (index < 0) return false;
+            int beforeStart = Math.max(0, index - 80);
+            int afterEnd = Math.min(lowerRequest.length(), index + normalizedTarget.length() + 80);
+            String before = lowerRequest.substring(beforeStart, index);
+            String after = lowerRequest.substring(index + normalizedTarget.length(), afterEnd);
+            if (!hasLocalTargetNegation(before)
+                    && (hasReadIntentMarker(before) || hasReadIntentMarker(after))) {
+                return true;
+            }
+            from = index + normalizedTarget.length();
+        }
+        return false;
+    }
+
+    private static boolean hasLocalTargetNegation(String value) {
+        if (value == null || value.isBlank()) return false;
+        return value.contains("do not want")
+                || value.contains("do not need")
+                || value.contains("don't want")
+                || value.contains("don't need")
+                || value.contains("dont want")
+                || value.contains("dont need")
+                || value.contains("not want")
+                || value.contains("not the")
+                || value.contains("without ")
+                || value.contains("exclude")
+                || value.contains("skip")
+                || value.contains("avoid")
+                || value.contains("not ");
+    }
+
+    private static boolean hasReadIntentMarker(String value) {
+        if (value == null || value.isBlank()) return false;
+        return containsWord(value, "read")
+                || containsWord(value, "open")
+                || containsWord(value, "inspect")
+                || containsWord(value, "show")
+                || containsWord(value, "display")
+                || containsWord(value, "summarize")
+                || containsWord(value, "print")
+                || containsWord(value, "cat")
+                || value.contains("tell me")
+                || value.contains("value inside")
+                || value.contains("what does")
+                || value.contains("what is in")
+                || value.contains("content")
+                || value.contains("contents");
+    }
+
+    private static boolean containsWord(String value, String word) {
+        if (value == null || word == null || word.isBlank()) return false;
+        int from = 0;
+        while (from < value.length()) {
+            int index = value.indexOf(word, from);
+            if (index < 0) return false;
+            int before = index - 1;
+            int after = index + word.length();
+            boolean leftBoundary = before < 0 || !isWordChar(value.charAt(before));
+            boolean rightBoundary = after >= value.length() || !isWordChar(value.charAt(after));
+            if (leftBoundary && rightBoundary) return true;
+            from = index + word.length();
+        }
+        return false;
+    }
+
+    private static boolean isWordChar(char c) {
+        return (c >= 'a' && c <= 'z')
+                || (c >= '0' && c <= '9')
+                || c == '_';
+    }
+
+    private static String readFileToolCallJson(String target) {
+        return "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\""
+                + jsonEscape(target)
+                + "\"}}";
+    }
+
+    private static String jsonEscape(String value) {
+        if (value == null || value.isBlank()) return "";
+        StringBuilder escaped = new StringBuilder(value.length() + 8);
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            switch (c) {
+                case '"' -> escaped.append("\\\"");
+                case '\\' -> escaped.append("\\\\");
+                case '\b' -> escaped.append("\\b");
+                case '\f' -> escaped.append("\\f");
+                case '\n' -> escaped.append("\\n");
+                case '\r' -> escaped.append("\\r");
+                case '\t' -> escaped.append("\\t");
+                default -> {
+                    if (c < 0x20) {
+                        escaped.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        escaped.append(c);
+                    }
+                }
+            }
+        }
+        return escaped.toString();
+    }
 
     static ReadOnlyInspectionRetryResult readOnlyInspectionRetryIfNeeded(
             String answer,
