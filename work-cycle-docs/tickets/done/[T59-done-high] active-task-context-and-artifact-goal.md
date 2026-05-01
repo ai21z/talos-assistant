@@ -1,6 +1,6 @@
-# [T59-open-high] ActiveTaskContext And ArtifactGoal
+# [T59-done-high] ActiveTaskContext And ArtifactGoal
 
-Status: open
+Status: done
 Priority: high
 
 ## Evidence Summary
@@ -137,3 +137,28 @@ Commands:
 ## Known Follow-Ups
 
 - Capability profile work can own richer artifact-specific goal details.
+
+## Completion Evidence
+
+- Implemented bounded `ActiveTaskContext` and `ArtifactGoal` state.
+- Persisted and restored active context and artifact goal in session snapshots.
+- Added deterministic active-context consume/suppress/clear policy.
+- Rendered active context and artifact goal through current-turn plan, prompt audit, and `/last trace`.
+- Consumed active context before assistant phase/tool-surface selection so narrow follow-ups like `make those changes` inherit the evaluated target and operation.
+- Added post-turn updater/listener for proposal-only turns, approval denial, verifier failure, verified mutation clear, and preservation after unverified or partial mutation.
+- Added TalosBench active-context assertions and T59 smoke cases.
+- Fixed one unrelated date-sensitive quality-report test uncovered by broad verification on 2026-05-01.
+
+Verification:
+
+```powershell
+.\gradlew.bat test --tests dev.talos.runtime.context.ActiveTaskContextTest --tests dev.talos.runtime.context.ArtifactGoalTest --tests dev.talos.runtime.context.ActiveTaskContextPolicyTest --tests dev.talos.runtime.context.ActiveTaskContextUpdaterTest --tests dev.talos.runtime.ActiveTaskContextUpdateListenerTest --tests dev.talos.cli.repl.SessionMemoryTest --tests dev.talos.runtime.JsonSessionStoreTest --tests dev.talos.runtime.turn.CurrentTurnPlanTest --tests dev.talos.runtime.trace.PromptAuditSnapshotTest --tests dev.talos.runtime.policy.CurrentTurnCapabilityFrameTest --tests dev.talos.cli.modes.AssistantTurnExecutorTest --no-daemon
+.\gradlew.bat test e2eTest --no-daemon
+pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly
+.\gradlew.bat check --no-daemon
+.\gradlew.bat installDist --no-daemon
+pwsh .\tools\manual-eval\run-talosbench.ps1 -TalosPath .\build\install\talos\bin\talos.bat -CaseId t59-no-workspace-suppresses-active-context
+pwsh .\tools\manual-eval\run-talosbench.ps1 -TalosPath .\build\install\talos\bin\talos.bat -CaseId t59-proposal-follow-up-apply-readme -IncludeManualRequired
+```
+
+All commands passed after the TalosBench apply case switched to session approval (`a`) so recovered edit attempts do not consume the only approval line.
