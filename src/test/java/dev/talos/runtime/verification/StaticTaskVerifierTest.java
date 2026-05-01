@@ -70,6 +70,41 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void exactTwoLineReadmeLiteralPassesTaskVerification() throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "T71 exact README\nLine two");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Edit README.md now using talos.write_file. "
+                        + "The complete file must contain exactly two lines: "
+                        + "first line T71 exact README; second line Line two; no other characters.",
+                loopResult(List.of(successfulWrite("README.md", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status());
+        assertTrue(result.summary().contains("Exact content verification passed"), result.summary());
+        assertTrue(result.facts().stream().anyMatch(f -> f.contains("README.md: literal content matched")));
+    }
+
+    @Test
+    void exactTwoLineReadmeLiteralMismatchFailsInsteadOfReadbackOnly() throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "T71 exact README\nWrong second line");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Edit README.md now using talos.write_file. "
+                        + "The complete file must contain exactly two lines: "
+                        + "first line T71 exact README; second line Line two; no other characters.",
+                loopResult(List.of(successfulWrite("README.md", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.summary().contains("Exact content verification failed"), result.summary());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("README.md: exact content mismatch")));
+    }
+
+    @Test
     void literalExpectationTraceEventIsRedacted() throws Exception {
         Files.writeString(workspace.resolve("index.html"), "<html>wrong</html>");
         LocalTurnTraceCapture.begin(

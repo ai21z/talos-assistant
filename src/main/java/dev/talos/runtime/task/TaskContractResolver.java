@@ -29,6 +29,12 @@ public final class TaskContractResolver {
                     + "(?:change|edit|modify|write|create|save|apply|touch|mutate)"
                     + "|\\bwithout\\s+changing)\\s+(.{0,240})");
 
+    private static final Pattern EXTENSIONLESS_TEXT_TARGET = Pattern.compile(
+            "(?i)\\b(?:edit|overwrite|replace|update|write|create|set)\\s+`?"
+                    + "((?:[A-Za-z0-9_.\\\\/-]+/)?"
+                    + "(?:README|LICENSE|NOTICE|CHANGELOG|CONTRIBUTING|AUTHORS|Makefile|Dockerfile))"
+                    + "`?(?=$|\\s|[`'\"),;:!?\\]])");
+
     private static final Pattern NEGATED_READ_TARGET_SPAN = Pattern.compile(
             "(?i)(?:\\b(?:do\\s+not|don't|dont)\\s+"
                     + "(?:show|display|include|read|inspect|open|summarize)\\s+"
@@ -233,6 +239,11 @@ public final class TaskContractResolver {
         Set<String> out = new LinkedHashSet<>();
         while (matcher.find()) {
             String target = normalizeTarget(matcher.group(1));
+            if (!target.isBlank()) out.add(target);
+        }
+        Matcher extensionlessMatcher = EXTENSIONLESS_TEXT_TARGET.matcher(userRequest);
+        while (extensionlessMatcher.find()) {
+            String target = normalizeTarget(extensionlessMatcher.group(1));
             if (!target.isBlank()) out.add(target);
         }
         return Set.copyOf(out);

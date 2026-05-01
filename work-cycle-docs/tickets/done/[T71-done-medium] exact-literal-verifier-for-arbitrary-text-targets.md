@@ -1,8 +1,9 @@
-# [T71-open-medium] Exact Literal Verifier For Arbitrary Text Targets
+# [T71-done-medium] Exact Literal Verifier For Arbitrary Text Targets
 
-Status: open
+Status: done
 Priority: medium
 Date: 2026-05-01
+Completed: 2026-05-01
 
 ## Evidence Summary
 
@@ -112,6 +113,30 @@ Suggested commands:
 .\gradlew.bat test --no-daemon
 pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly
 ```
+
+Executed evidence:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.runtime.expectation.TaskExpectationResolverTest" --tests "dev.talos.runtime.verification.StaticTaskVerifierTest" --no-daemon
+pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly
+.\gradlew.bat test e2eTest --rerun-tasks --no-daemon
+pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly
+pwsh .\tools\manual-eval\run-talosbench.ps1 -SelfTest
+git diff --check
+```
+
+Resolution:
+
+- Added deterministic exact-literal expectation parsing for explicit
+  two-line full-file wording:
+  `complete file must contain exactly two lines: first line X; second line Y; no other characters`.
+- Kept exact-content verification target-agnostic by feeding the existing
+  `LiteralContentExpectation` verifier instead of special-casing README.
+- Added contextual extensionless text target resolution for common text files
+  such as `README`, without treating the same words inside literal content as
+  extra read/mutation targets.
+- Added static verifier pass/fail regressions for exact README content and a
+  TalosBench approved-write case that requires exact-content verification.
 
 ## Known Risks
 

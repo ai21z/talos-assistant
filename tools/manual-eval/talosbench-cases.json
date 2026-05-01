@@ -421,6 +421,75 @@
       "notes": "Approval-sensitive live case; run manually or with -IncludeManualRequired."
     },
     {
+      "id": "t71-readme-two-line-exact-write",
+      "category": "t71/literal-verification",
+      "manualRequired": true,
+      "workspaceFixture": {
+        "files": {
+          "README.md": "Original README\n"
+        }
+      },
+      "prompts": [
+        "Edit README.md now using talos.write_file. The complete file must contain exactly two lines: first line T71 exact README; second line Line two; no other characters."
+      ],
+      "approvalInputs": [
+        "y"
+      ],
+      "expectedContract": "FILE_EDIT",
+      "expectedToolsAllowed": [
+        "talos.write_file",
+        "talos.edit_file",
+        "talos.read_file"
+      ],
+      "forbiddenOutputSubstrings": [
+        "underlying file system",
+        "not have access",
+        "no task-specific static verifier was applicable"
+      ],
+      "requiredOutputSubstrings": [
+        "Exact content verification",
+        "T71 exact README",
+        "Line two"
+      ],
+      "traceAssertions": {
+        "contract": "FILE_EDIT",
+        "mutationAllowed": true,
+        "phaseIncludes": [
+          "APPLY",
+          "VERIFY"
+        ],
+        "nativeToolsContains": [
+          "talos.write_file"
+        ],
+        "checkpointContains": [
+          "CREATED"
+        ],
+        "verificationContains": [
+          "Exact content verification",
+          "README.md: literal content matched"
+        ],
+        "verificationExcludes": [
+          "FAILED",
+          "no task-specific static verifier"
+        ],
+        "outcomeExcludes": [
+          "FAILED"
+        ],
+        "localTraceOutcomeExcludes": [
+          "FAILED"
+        ],
+        "transcriptContains": [
+          "T71 exact README",
+          "Line two"
+        ]
+      },
+      "blockerConditions": [
+        "T71 regression: exact README literal write only receives readback verification.",
+        "T71 regression: exact two-line README content is not preserved after approval."
+      ],
+      "notes": "Approval-sensitive T71 case; run manually or with -IncludeManualRequired after the deterministic verifier tests pass."
+    },
+    {
       "id": "checkpoint-restore",
       "category": "checkpoint-restore",
       "manualRequired": true,
