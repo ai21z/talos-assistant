@@ -147,6 +147,37 @@ class UnifiedAssistantModeTest {
     }
 
     @Test
+    void traceCommandHelpQuestionUsesDeterministicNoToolAnswer() throws Exception {
+        LastPromptCapture.clear();
+        var mode = new UnifiedAssistantMode();
+
+        var result = mode.handle(
+                "I typed /debug prompt on earlier. What command shows the last trace?",
+                Path.of(".").toAbsolutePath().normalize(),
+                context("Try journalctl or tail logs."));
+
+        assertTrue(result.isPresent());
+        var render = LastPromptCapture.latest().orElseThrow();
+        Result bodyResult = result.get();
+        String body;
+        if (bodyResult instanceof Result.Ok ok) {
+            body = ok.text;
+        } else if (bodyResult instanceof Result.Streamed streamed) {
+            body = streamed.fullText + streamed.suffix;
+        } else {
+            body = bodyResult.toString();
+        }
+
+        assertEquals("SMALL_TALK", render.taskType());
+        assertFalse(render.mutationAllowed());
+        assertTrue(render.tools().isEmpty(), render.tools().toString());
+        assertFalse(render.systemPrompt().contains("Available Tools"));
+        assertTrue(body.contains("/last trace"), body);
+        assertFalse(body.contains("journalctl"), body);
+        assertFalse(body.contains("tail logs"), body);
+    }
+
+    @Test
     void explicitWorkspacePromptStillRecordsReadOnlyToolSurface() throws Exception {
         LastPromptCapture.clear();
         var mode = new UnifiedAssistantMode();

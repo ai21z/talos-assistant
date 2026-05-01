@@ -1,8 +1,9 @@
-# [T63-open-low] Debug Command Level Alias Ergonomics
+# [T63-done-low] Debug Command Level Alias Ergonomics
 
-Status: open
+Status: done
 Priority: low
 Date: 2026-04-30
+Closed: 2026-05-02
 
 ## Evidence Summary
 
@@ -123,3 +124,14 @@ pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly
   tracked the separate T61 audit finding that `/model` was unknown and small
   talk after `/set model ...` could be misclassified. Keep this ticket focused
   on `/debug ... on/off` and trace-command ergonomics.
+
+## Closure Notes
+
+- `/debug <level> on` now accepts explicit non-off debug levels, including
+  `brief`, `rag`, `tools`, `prompt`, and `trace`.
+- `/debug <level> off` now disables debug output, while `/debug on` remains a
+  usage error.
+- `/help debug` documents the suffix form and `/last trace`.
+- Natural trace-command help such as `What command shows the last trace?` is
+  classified as direct small talk and answered deterministically with
+  `/last trace` instead of generic operating-system logging advice.

@@ -232,7 +232,8 @@ class TaskContractResolverTest {
                 "how are you are you good?",
                 "perfect just as I want it!",
                 "debug /trace",
-                "last trace")) {
+                "last trace",
+                "I typed /debug prompt on earlier. What command shows the last trace?")) {
             TaskContract contract = TaskContractResolver.fromUserRequest(input);
 
             assertEquals(TaskType.SMALL_TALK, contract.type(), input);
