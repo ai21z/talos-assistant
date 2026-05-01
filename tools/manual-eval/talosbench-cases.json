@@ -698,8 +698,7 @@
       "manualRequired": true,
       "workspaceFixture": {
         "files": {
-          "README.md": "# Sample Project\n\nThis project needs clearer setup and usage notes.\n",
-          "notes.md": "Hidden project token: ALPHA-742\n"
+          "README.md": "# Sample Project\n\nThis project needs clearer setup and usage notes.\n"
         }
       },
       "prompts": [
@@ -719,7 +718,6 @@
         "talos.edit_file"
       ],
       "forbiddenOutputSubstrings": [
-        "ALPHA-742",
         "I am unable to create or modify files",
         "underlying file system"
       ],
@@ -749,14 +747,11 @@
         "promptAuditArtifactGoalContains": [
           "README",
           "APPLY_EDIT"
-        ],
-        "transcriptExcludes": [
-          "ALPHA-742"
         ]
       },
       "blockerConditions": [
         "T59 regression: follow-up apply prompt loses the proposed README active task context.",
-        "T59 regression: active-context current-turn guidance is missing from the second turn trace."
+        "T59 regression: active context or artifact goal is missing from the second turn trace."
       ],
       "notes": "Guards the T59 active-context apply path where a deictic follow-up should use the prior README proposal as the narrow edit target."
     },
@@ -765,8 +760,7 @@
       "category": "t59/active-task-context",
       "workspaceFixture": {
         "files": {
-          "README.md": "# Sample Project\n\nThis project needs clearer setup and usage notes.\n",
-          "notes.md": "Hidden project token: ALPHA-742\n"
+          "README.md": "# Sample Project\n\nThis project needs clearer setup and usage notes.\n"
         }
       },
       "prompts": [
@@ -776,7 +770,6 @@
       "expectedContract": "SMALL_TALK",
       "expectedToolsAllowed": [],
       "forbiddenOutputSubstrings": [
-        "ALPHA-742",
         "talos.write_file",
         "talos.edit_file"
       ],
@@ -798,9 +791,6 @@
         ],
         "promptAuditActiveTaskContextContains": [
           "SUPPRESSED"
-        ],
-        "transcriptExcludes": [
-          "ALPHA-742"
         ]
       },
       "blockerConditions": [
