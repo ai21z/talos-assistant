@@ -2,6 +2,7 @@ package dev.talos.runtime.policy;
 
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import org.junit.jupiter.api.Test;
@@ -66,6 +67,22 @@ class CurrentTurnCapabilityFrameTest {
         assertFalse(frame.contains("[ActiveTaskContext]"));
         assertFalse(frame.contains("activeTaskContext:"));
         assertFalse(frame.contains("artifactGoal:"));
+    }
+
+    @Test
+    void protectedReadFrameInstructsReadFileApprovalPath() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Read .env and tell me what it says.");
+
+        String frame = CurrentTurnCapabilityFrame.render(
+                contract,
+                ExecutionPhase.INSPECT,
+                List.of("talos.read_file"));
+
+        assertTrue(frame.contains("evidenceObligation: PROTECTED_READ_APPROVAL_REQUIRED"));
+        assertTrue(frame.contains("Call talos.read_file for the protected target"));
+        assertTrue(frame.contains("runtime will request approval"));
+        assertTrue(frame.contains("Do not answer from protected content unless the read succeeds"));
     }
 
     @Test

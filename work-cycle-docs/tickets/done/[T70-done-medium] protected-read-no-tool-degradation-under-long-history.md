@@ -1,8 +1,9 @@
-# [T70-open-medium] Protected Read No-Tool Degradation Under Long History
+# [T70-done-medium] Protected Read No-Tool Degradation Under Long History
 
-Status: open
+Status: done
 Priority: medium
 Date: 2026-05-01
+Completed: 2026-05-01
 
 ## Evidence Summary
 
@@ -116,6 +117,32 @@ Suggested commands:
 .\gradlew.bat test --no-daemon
 pwsh .\tools\manual-eval\run-talosbench.ps1 -CaseId protected-read-denial,t57-protected-read-denial,t61-protected-env-read-approved -IncludeManualRequired
 ```
+
+Executed evidence:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.cli.modes.ExecutionOutcomeTest" --tests "dev.talos.runtime.policy.EvidenceObligationVerifierTest" --tests "dev.talos.runtime.policy.CurrentTurnCapabilityFrameTest" --no-daemon
+.\gradlew.bat test e2eTest --rerun-tasks --no-daemon
+pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly
+pwsh .\tools\manual-eval\run-talosbench.ps1 -SelfTest
+git diff --check
+```
+
+Resolution:
+
+- Added protected-read-specific no-tool containment that says the
+  `talos.read_file` call was not issued, no approval prompt ran, and no
+  protected content was read.
+- Kept denied protected reads dominant as `BLOCKED_BY_APPROVAL` with protected
+  content suppressed.
+- Added separate wording for attempted-but-incomplete protected reads so Talos
+  does not falsely report “not attempted” when a read tool was issued but did
+  not return content.
+- Strengthened the current-turn evidence frame for protected reads to instruct
+  the model to call `talos.read_file`; runtime remains responsible for asking
+  approval before content is returned.
+- Added a long-history manual TalosBench protected-read case that warms the
+  conversation before the approved `.env` read.
 
 ## Known Risks
 
