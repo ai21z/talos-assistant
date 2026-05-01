@@ -1,6 +1,6 @@
-# [T65-open-medium] Unsupported Document Failure Policy Outcome Truth
+# [T65-done-medium] Unsupported Document Failure Policy Outcome Truth
 
-Status: open
+Status: done
 Priority: medium
 Date: 2026-05-01
 
@@ -119,6 +119,33 @@ Suggested commands:
 .\gradlew.bat e2eTest --no-daemon
 pwsh .\tools\manual-eval\run-talosbench.ps1 -CaseId t57-unsupported-docx
 ```
+
+## Completion Notes
+
+Completed on 2026-05-01.
+
+- Unsupported binary document read evidence now dominates outcome truth as
+  `ADVISORY_ONLY` instead of `COMPLETE (READ_ONLY_ANSWERED)`.
+- The tool loop stops after an unsupported document read when that iteration
+  gathered no successful evidence, preventing speculative fallback reads such
+  as `report.txt` and `extracted_report.txt`.
+- User-provided converted targets remain allowed: if the user explicitly names
+  `report.txt` or `extracted_report.txt`, Talos may read that target after the
+  unsupported `report.docx` failure.
+- Mixed evidence remains supported: if a turn reads supported text evidence and
+  also encounters unsupported documents, the loop can still synthesize from the
+  gathered supported evidence.
+- Added deterministic unit coverage for unsupported-format outcome and local
+  trace classification.
+- Added e2e coverage for a `report.docx` prompt where scripted fallback reads
+  must not execute, plus the explicit converted-target exception.
+- Strengthened TalosBench `t57-unsupported-docx` to reject speculative fallback
+  filenames and require an advisory local trace outcome.
+- Verification passed:
+  `.\gradlew.bat test e2eTest --no-daemon`,
+  `pwsh .\tools\manual-eval\run-talosbench.ps1 -SelfTest`,
+  `pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly`, and installed
+  TalosBench case `t57-unsupported-docx`.
 
 ## Known Risks
 

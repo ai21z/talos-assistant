@@ -67,6 +67,14 @@ public final class ToolCallRepromptStage {
             return false;
         }
 
+        String unsupportedDocument = unsupportedDocumentStopAnswer(state, outcome);
+        if (unsupportedDocument != null) {
+            state.currentText = unsupportedDocument;
+            state.currentNativeCalls = List.of();
+            LOG.debug("Stopping tool-call loop after unsupported binary document read.");
+            return false;
+        }
+
         // CCR-020: skip the post-mutation re-prompt only when every call in
         // this iteration succeeded. A partial-success iteration (at least
         // one mutation succeeded AND at least one call failed) MUST re-prompt
@@ -304,6 +312,45 @@ public final class ToolCallRepromptStage {
 
     private static String deniedMutationStopMessage() {
         return "[Tool loop stopped because a mutating tool was not allowed for this turn.]";
+    }
+
+    private static String unsupportedDocumentStopAnswer(
+            LoopState state,
+            ToolCallExecutionStage.IterationOutcome outcome
+    ) {
+        if (outcome == null) return null;
+        if (outcome.successesThisIteration() > 0 || outcome.mutationsThisIteration() > 0) return null;
+        List<String> unsupportedPaths = outcome.unsupportedReadPathsThisIteration();
+        if (unsupportedPaths == null || unsupportedPaths.isEmpty()) return null;
+        if (userNamedConvertedFallback(state, unsupportedPaths)) return null;
+        return "[Document capability note: Talos could not inspect unsupported binary document contents with "
+                + "the current local text-tool surface: "
+                + String.join(", ", unsupportedPaths)
+                + ". It cannot confirm whether those files are empty or what they contain.]";
+    }
+
+    private static boolean userNamedConvertedFallback(LoopState state, List<String> unsupportedPaths) {
+        if (state == null || unsupportedPaths == null || unsupportedPaths.isEmpty()) return false;
+        String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
+        if (userTask == null || userTask.isBlank()) return false;
+        String lower = userTask.toLowerCase(java.util.Locale.ROOT);
+        for (String path : unsupportedPaths) {
+            String stem = filenameStem(path);
+            if (stem.isBlank()) continue;
+            if (lower.contains(stem + ".txt") || lower.contains("extracted_" + stem + ".txt")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String filenameStem(String path) {
+        if (path == null || path.isBlank()) return "";
+        String normalized = path.replace('\\', '/');
+        int slash = normalized.lastIndexOf('/');
+        String name = slash >= 0 ? normalized.substring(slash + 1) : normalized;
+        int dot = name.lastIndexOf('.');
+        return (dot > 0 ? name.substring(0, dot) : name).toLowerCase(java.util.Locale.ROOT);
     }
 
     private static String readOnlyWebDiagnosticStopAnswer(

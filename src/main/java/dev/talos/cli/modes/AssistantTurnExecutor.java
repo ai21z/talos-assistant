@@ -2345,7 +2345,10 @@ public final class AssistantTurnExecutor {
         if (unsupportedPaths.isEmpty()) return answer;
 
         String current = answer == null ? "" : answer;
-        String cleaned = removeUnsupportedDocumentContentClaims(current, unsupportedPaths).strip();
+        String cleaned = removeUnsupportedDocumentContentClaims(
+                current,
+                unsupportedPaths,
+                successfulReadPaths(loopResult)).strip();
         String note = unsupportedDocumentCapabilityNote(unsupportedPaths);
         if (cleaned.isBlank()) {
             cleaned = "Talos inspected the supported text files it could read, but it did not inspect the "
@@ -2376,15 +2379,19 @@ public final class AssistantTurnExecutor {
                 + ". It cannot confirm whether those files are empty or what they contain.]";
     }
 
-    private static String removeUnsupportedDocumentContentClaims(String answer, List<String> unsupportedPaths) {
+    private static String removeUnsupportedDocumentContentClaims(
+            String answer,
+            List<String> unsupportedPaths,
+            List<String> successfulReadPaths
+    ) {
         if (answer == null || answer.isBlank()) return "";
         StringBuilder kept = new StringBuilder();
         String[] lines = answer.split("\\R", -1);
         for (String line : lines) {
-            if (isUnsupportedDocumentContentClaim(line, unsupportedPaths)) {
+            if (isUnsupportedDocumentContentClaim(line, unsupportedPaths, successfulReadPaths)) {
                 StringBuilder sentenceKept = new StringBuilder();
                 for (String sentence : line.split("(?<=[.!?])\\s+")) {
-                    if (isUnsupportedDocumentContentClaim(sentence, unsupportedPaths)) continue;
+                    if (isUnsupportedDocumentContentClaim(sentence, unsupportedPaths, successfulReadPaths)) continue;
                     if (!sentence.isBlank()) {
                         if (sentenceKept.length() > 0) sentenceKept.append(' ');
                         sentenceKept.append(sentence.strip());
@@ -2400,30 +2407,38 @@ public final class AssistantTurnExecutor {
         return kept.toString();
     }
 
-    private static boolean isUnsupportedDocumentContentClaim(String line, List<String> unsupportedPaths) {
+    private static boolean isUnsupportedDocumentContentClaim(
+            String line,
+            List<String> unsupportedPaths,
+            List<String> successfulReadPaths
+    ) {
         if (line == null || line.isBlank()) return false;
         String lower = line.toLowerCase(Locale.ROOT);
-        boolean mentionsUnsupported = lower.contains("these files")
+        boolean mentionsSuccessfulRead = mentionsSuccessfulReadPath(lower, successfulReadPaths);
+        boolean mentionsGenericUnsupported = lower.contains("these files")
                 || lower.contains("binary files")
                 || lower.contains("document files");
+        boolean mentionsUnsupportedExact = false;
+        boolean mentionsUnsupportedStem = false;
         for (String path : unsupportedPaths) {
-            if (path != null && !path.isBlank() && lower.contains(path.toLowerCase(Locale.ROOT))) {
-                mentionsUnsupported = true;
-                break;
+            if (path == null || path.isBlank()) continue;
+            String lowerPath = path.toLowerCase(Locale.ROOT);
+            String filename = filenameOf(path);
+            if (lower.contains(lowerPath) || (!filename.isBlank() && lower.contains(filename))) {
+                mentionsUnsupportedExact = true;
             }
             String stem = filenameStemOf(path);
             if (!stem.isBlank() && lower.contains(stem)) {
-                mentionsUnsupported = true;
-                break;
+                mentionsUnsupportedStem = true;
             }
             String extension = extensionOf(path);
             if (!extension.isBlank() && lower.contains("." + extension)) {
-                mentionsUnsupported = true;
-                break;
+                mentionsUnsupportedExact = true;
             }
         }
+        boolean mentionsUnsupported = mentionsGenericUnsupported || mentionsUnsupportedExact || mentionsUnsupportedStem;
         if (!mentionsUnsupported) return false;
-        return lower.contains("no extractable text")
+        boolean claimsContent = lower.contains("no extractable text")
                 || lower.contains("no readable text")
                 || lower.contains("do not contain any")
                 || lower.contains("does not contain any")
@@ -2436,14 +2451,50 @@ public final class AssistantTurnExecutor {
                 || lower.contains("contains")
                 || lower.contains("describes")
                 || lower.contains("summar");
+        if (!claimsContent) return false;
+        if (mentionsSuccessfulRead && !mentionsUnsupportedExact && !mentionsGenericUnsupported) return false;
+        return true;
+    }
+
+    private static List<String> successfulReadPaths(ToolCallLoop.LoopResult loopResult) {
+        if (loopResult == null || loopResult.toolOutcomes() == null) return List.of();
+        List<String> paths = new ArrayList<>();
+        for (ToolCallLoop.ToolOutcome outcome : loopResult.toolOutcomes()) {
+            if (outcome == null) continue;
+            if (!"talos.read_file".equals(outcome.toolName())) continue;
+            if (!outcome.success()) continue;
+            String path = outcome.pathHint();
+            if (path == null || path.isBlank()) continue;
+            if (!paths.contains(path)) paths.add(path);
+        }
+        return List.copyOf(paths);
+    }
+
+    private static boolean mentionsSuccessfulReadPath(String lowerLine, List<String> successfulReadPaths) {
+        if (lowerLine == null || lowerLine.isBlank()
+                || successfulReadPaths == null
+                || successfulReadPaths.isEmpty()) return false;
+        for (String path : successfulReadPaths) {
+            if (path == null || path.isBlank()) continue;
+            String lowerPath = path.toLowerCase(Locale.ROOT);
+            if (lowerLine.contains(lowerPath)) return true;
+            String filename = filenameOf(path);
+            if (!filename.isBlank() && lowerLine.contains(filename)) return true;
+        }
+        return false;
+    }
+
+    private static String filenameOf(String path) {
+        if (path == null || path.isBlank()) return "";
+        int slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+        return (slash >= 0 ? path.substring(slash + 1) : path).toLowerCase(Locale.ROOT);
     }
 
     private static String filenameStemOf(String path) {
-        if (path == null || path.isBlank()) return "";
-        int slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
-        String name = slash >= 0 ? path.substring(slash + 1) : path;
+        String name = filenameOf(path);
+        if (name.isBlank()) return "";
         int dot = name.lastIndexOf('.');
-        return (dot > 0 ? name.substring(0, dot) : name).toLowerCase(Locale.ROOT);
+        return dot > 0 ? name.substring(0, dot) : name;
     }
 
     private static String extensionOf(String path) {

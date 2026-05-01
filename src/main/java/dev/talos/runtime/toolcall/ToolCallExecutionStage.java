@@ -38,7 +38,32 @@ public final class ToolCallExecutionStage {
                                    boolean approvalDeniedThisIteration,
                                    boolean mutatingDeniedThisIteration,
                                    boolean pathPolicyBlockedThisIteration,
-                                   int successesThisIteration) {}
+                                   int successesThisIteration,
+                                   List<String> unsupportedReadPathsThisIteration) {
+        public IterationOutcome {
+            unsupportedReadPathsThisIteration = unsupportedReadPathsThisIteration == null
+                    ? List.of()
+                    : List.copyOf(unsupportedReadPathsThisIteration);
+        }
+
+        public IterationOutcome(int mutationsThisIteration,
+                                List<String> mutationSummaries,
+                                int failuresThisIteration,
+                                boolean approvalDeniedThisIteration,
+                                boolean mutatingDeniedThisIteration,
+                                boolean pathPolicyBlockedThisIteration,
+                                int successesThisIteration) {
+            this(
+                    mutationsThisIteration,
+                    mutationSummaries,
+                    failuresThisIteration,
+                    approvalDeniedThisIteration,
+                    mutatingDeniedThisIteration,
+                    pathPolicyBlockedThisIteration,
+                    successesThisIteration,
+                    List.of());
+        }
+    }
 
     private final TurnProcessor turnProcessor;
     private final ToolProgressSink progressSink;
@@ -64,6 +89,7 @@ public final class ToolCallExecutionStage {
         boolean mutatingDeniedThisIter = false;
         boolean pathPolicyBlockedThisIter = false;
         List<String> mutationSummariesThisIter = new ArrayList<>();
+        List<String> unsupportedReadPathsThisIter = new ArrayList<>();
         Set<String> staleRereadRequiredAtStart = staleRereadRequiredPaths(state);
         Set<String> fullRewriteRepairTargets = strict
                 ? Set.of()
@@ -203,6 +229,14 @@ public final class ToolCallExecutionStage {
             if (denied && ToolCallSupport.isMutatingTool(effective.toolName())) {
                 mutatingDeniedThisIter = true;
             }
+            if (!result.success()
+                    && result.error() != null
+                    && ToolError.UNSUPPORTED_FORMAT.equals(result.error().code())
+                    && "talos.read_file".equals(effective.toolName())
+                    && pathHint != null
+                    && !pathHint.isBlank()) {
+                unsupportedReadPathsThisIter.add(ToolCallSupport.normalizePath(pathHint));
+            }
             if (isPreApprovalPathPolicyBlock(result) && ToolCallSupport.isMutatingTool(effective.toolName())) {
                 pathPolicyBlockedThisIter = true;
             }
@@ -268,7 +302,8 @@ public final class ToolCallExecutionStage {
                 approvalDeniedThisIter,
                 mutatingDeniedThisIter,
                 pathPolicyBlockedThisIter,
-                successesThisIter);
+                successesThisIter,
+                unsupportedReadPathsThisIter);
     }
 
     private static void recordFailure(LoopState state, String toolName, String pathHint) {

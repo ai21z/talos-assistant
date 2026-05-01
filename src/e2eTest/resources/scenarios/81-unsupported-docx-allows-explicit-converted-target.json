@@ -1,0 +1,16 @@
+{
+  "name": "unsupported docx allows explicit converted target",
+  "fixture": "unsupported-docx",
+  "v1Pack": true,
+  "claims": [
+    "explicit-converted-target-is-allowed-after-unsupported-docx"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Can you read report.docx and summarize it? If report.docx is unsupported, read report.txt instead.",
+  "scriptedResponses": [
+    "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"report.docx\"}}",
+    "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"report.txt\"}}",
+    "report.txt says: Converted report text fixture."
+  ]
+}

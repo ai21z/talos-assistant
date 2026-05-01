@@ -1,0 +1,17 @@
+{
+  "name": "unsupported docx stops before speculative fallbacks",
+  "fixture": "unsupported-docx",
+  "v1Pack": true,
+  "claims": [
+    "unsupported-docx-read-is-terminal",
+    "unsupported-docx-outcome-is-advisory"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Can you read report.docx and summarize it?",
+  "scriptedResponses": [
+    "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"report.docx\"}}",
+    "I will try possible converted filenames now.\n```json\n{\"name\":\"talos.read_file\",\"parameters\":{\"path\":\"report.txt\"}}\n```\n```json\n{\"name\":\"talos.read_file\",\"parameters\":{\"path\":\"extracted_report.txt\"}}\n```",
+    "This response should not be reached."
+  ]
+}

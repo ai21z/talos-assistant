@@ -267,8 +267,8 @@ class ExecutionOutcomeTest {
         messages.add(ChatMessage.user("Summarize the documents in this workspace."));
 
         var loopResult = new ToolCallLoop.LoopResult(
-                "notes.txt: Project notes.\n"
-                        + "sample.pdf and sample.xlsx: Do not contain any extractable text.\n"
+                "notes.txt says Talos should summarize supported text files. "
+                        + "sample.pdf and sample.xlsx do not contain any extractable text. "
                         + "These files are empty or do not contain readable text.",
                 3, 3,
                 List.of("talos.read_file", "talos.read_file", "talos.read_file"), List.of(),
@@ -297,10 +297,56 @@ class ExecutionOutcomeTest {
         assertTrue(outcome.finalAnswer().startsWith("[Document capability note:"));
         assertTrue(outcome.finalAnswer().contains("sample.pdf"));
         assertTrue(outcome.finalAnswer().contains("sample.xlsx"));
-        assertTrue(outcome.finalAnswer().contains("notes.txt: Project notes."));
-        assertFalse(outcome.finalAnswer().contains("Do not contain any extractable text"));
+        assertTrue(outcome.finalAnswer().contains("notes.txt says Talos should summarize supported text files."));
+        assertFalse(outcome.finalAnswer().contains("do not contain any extractable text"));
         assertFalse(outcome.finalAnswer().contains("These files are empty"));
         assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.UNSUPPORTED_DOCUMENT_CAPABILITY_NOTE));
+    }
+
+    @Test
+    void unsupportedDocumentReadIsAdvisoryAndTraceOutcomeIsNotComplete() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Can you read report.docx and summarize it?"));
+
+        var loopResult = new ToolCallLoop.LoopResult(
+                "I cannot inspect report.docx with the current text-only reader.", 1, 1,
+                List.of("talos.read_file"), List.of(),
+                1, 0, false, 0, List.of(),
+                0, 0, 0, 0,
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.read_file", "report.docx", false, false, false,
+                        "", "Unsupported binary document format: report.docx (Microsoft Word .docx). "
+                        + "Talos cannot extract Word document contents with the current local text-tool surface.",
+                        null, ToolError.UNSUPPORTED_FORMAT
+                )));
+
+        LocalTurnTraceCapture.begin(
+                "trc-unsupported-docx",
+                "sid",
+                1,
+                "2026-05-01T12:00:00Z",
+                "workspace-hash",
+                "auto",
+                "test",
+                "model",
+                "Can you read report.docx and summarize it?");
+        try {
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    loopResult.finalAnswer(), messages, loopResult, null, 0);
+
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+            assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
+            assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
+            assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.UNSUPPORTED_DOCUMENT_CAPABILITY_NOTE));
+            assertNotNull(trace);
+            assertNotNull(trace.outcome());
+            assertEquals("ADVISORY_ONLY", trace.outcome().status());
+            assertEquals("ADVISORY_ONLY", trace.outcome().classification());
+            assertFalse("READ_ONLY_ANSWERED".equals(trace.outcome().classification()));
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
     }
 
     @Test
