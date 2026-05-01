@@ -194,10 +194,20 @@ record ExecutionOutcome(
         boolean inspectUnderCompleted = !Objects.equals(current, shaped);
         current = shaped;
 
+        EvidenceObligation evidenceObligation = evidenceObligation(safePlan);
         EvidenceObligationVerifier.Result evidenceResult = verifyEvidence(
                 safePlan,
                 evidenceOutcomes(loopResult));
         boolean missingEvidence = evidenceResult.status() == EvidenceObligationVerifier.Status.UNSATISFIED;
+        boolean protectedReadApprovalMissing = protectedReadApprovalMissing(
+                evidenceObligation,
+                evidenceResult);
+        if (missingEvidence) {
+            current = suppressDerivedContentForMissingEvidence(
+                    current,
+                    safePlan,
+                    evidenceObligation);
+        }
         OutcomeDominancePolicy.Decision preVerificationDecision = outcomeDecision(
                 contract,
                 invalidMutation,
@@ -211,6 +221,7 @@ record ExecutionOutcome(
                 inspectUnderCompleted,
                 false,
                 missingEvidence,
+                protectedReadApprovalMissing,
                 VerificationStatus.NOT_RUN);
         CompletionStatus completionStatus = preVerificationDecision.completionStatus();
         if (missingEvidence && completionStatus == CompletionStatus.ADVISORY_ONLY) {
@@ -260,6 +271,7 @@ record ExecutionOutcome(
                 inspectUnderCompleted,
                 false,
                 missingEvidence,
+                protectedReadApprovalMissing,
                 verificationStatus);
         completionStatus = finalDecision.completionStatus();
         if (!missingEvidence
@@ -387,8 +399,18 @@ record ExecutionOutcome(
                 && (shaped.startsWith(AssistantTurnExecutor.UNGROUNDED_ANNOTATION)
                 || localAccessCapabilityCorrected);
         boolean advisoryOnly = ungrounded && !blocked;
+        EvidenceObligation evidenceObligation = evidenceObligation(safePlan);
         EvidenceObligationVerifier.Result evidenceResult = verifyEvidence(safePlan, List.of());
         boolean missingEvidence = evidenceResult.status() == EvidenceObligationVerifier.Status.UNSATISFIED;
+        boolean protectedReadApprovalMissing = protectedReadApprovalMissing(
+                evidenceObligation,
+                evidenceResult);
+        if (missingEvidence) {
+            shaped = suppressDerivedContentForMissingEvidence(
+                    shaped,
+                    safePlan,
+                    evidenceObligation);
+        }
         OutcomeDominancePolicy.Decision decision = outcomeDecision(
                 contract,
                 false,
@@ -402,6 +424,7 @@ record ExecutionOutcome(
                 false,
                 advisoryOnly,
                 missingEvidence,
+                protectedReadApprovalMissing,
                 VerificationStatus.NOT_RUN);
         CompletionStatus completionStatus = decision.completionStatus();
         if (missingEvidence && completionStatus == CompletionStatus.ADVISORY_ONLY) {
@@ -504,6 +527,7 @@ record ExecutionOutcome(
             boolean inspectUnderCompleted,
             boolean ungroundedAdvisory,
             boolean missingEvidence,
+            boolean protectedReadApprovalMissing,
             VerificationStatus verificationStatus
     ) {
         return OutcomeDominancePolicy.decide(new OutcomeDominancePolicy.Facts(
@@ -519,6 +543,7 @@ record ExecutionOutcome(
                 inspectUnderCompleted,
                 ungroundedAdvisory,
                 missingEvidence,
+                protectedReadApprovalMissing,
                 verificationStatus));
     }
 
@@ -649,6 +674,11 @@ record ExecutionOutcome(
         return List.copyOf(warnings);
     }
 
+    private static EvidenceObligation evidenceObligation(CurrentTurnPlan plan) {
+        if (plan == null) return EvidenceObligation.NONE;
+        return EvidenceObligationPolicy.parse(plan.evidenceObligation());
+    }
+
     private static EvidenceObligationVerifier.Result verifyEvidence(
             CurrentTurnPlan plan,
             List<ToolCallLoop.ToolOutcome> toolOutcomes
@@ -656,12 +686,56 @@ record ExecutionOutcome(
         if (plan == null) {
             return EvidenceObligationVerifier.Result.satisfied("No current-turn plan was available.");
         }
-        EvidenceObligation obligation = EvidenceObligationPolicy.parse(plan.evidenceObligation());
+        EvidenceObligation obligation = evidenceObligation(plan);
         TaskContract contract = plan.taskContract();
         return EvidenceObligationVerifier.verify(
                 obligation,
                 contract == null ? java.util.Set.of() : contract.expectedTargets(),
                 toolOutcomes);
+    }
+
+    private static boolean protectedReadApprovalMissing(
+            EvidenceObligation obligation,
+            EvidenceObligationVerifier.Result result
+    ) {
+        return obligation == EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED
+                && result != null
+                && result.status() == EvidenceObligationVerifier.Status.UNSATISFIED;
+    }
+
+    private static String suppressDerivedContentForMissingEvidence(
+            String answer,
+            CurrentTurnPlan plan,
+            EvidenceObligation obligation
+    ) {
+        if (isRuntimeFailureStatus(answer)) {
+            return missingEvidencePrefix(answer);
+        }
+        if (obligation == EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED) {
+            return missingEvidencePrefix(
+                    "I did not read protected content this turn. A protected read approval "
+                            + "path was required before answering from that file, so no protected "
+                            + "file content is available from this turn."
+                            + targetSentence(plan));
+        }
+        if (obligation == EvidenceObligation.READ_TARGET_REQUIRED) {
+            return missingEvidencePrefix(
+                    "I did not inspect the required workspace target this turn, so I cannot "
+                            + "answer from its contents or propose grounded changes yet."
+                            + targetSentence(plan));
+        }
+        return answer;
+    }
+
+    private static boolean isRuntimeFailureStatus(String answer) {
+        if (answer == null || answer.isBlank()) return false;
+        return answer.contains("[Tool loop stopped by failure policy:");
+    }
+
+    private static String targetSentence(CurrentTurnPlan plan) {
+        TaskContract contract = plan == null ? null : plan.taskContract();
+        if (contract == null || contract.expectedTargets().isEmpty()) return "";
+        return " Required target(s): " + String.join(", ", contract.expectedTargets()) + ".";
     }
 
     private static List<ToolCallLoop.ToolOutcome> evidenceOutcomes(ToolCallLoop.LoopResult loopResult) {

@@ -20,6 +20,7 @@ final class OutcomeDominancePolicy {
             boolean inspectUnderCompleted,
             boolean ungroundedAdvisory,
             boolean missingEvidence,
+            boolean protectedReadApprovalMissing,
             ExecutionOutcome.VerificationStatus verificationStatus
     ) {
         Facts {
@@ -51,6 +52,7 @@ final class OutcomeDominancePolicy {
                     false,
                     false,
                     false,
+                    false,
                     ExecutionOutcome.VerificationStatus.NOT_RUN);
         }
 
@@ -68,6 +70,12 @@ final class OutcomeDominancePolicy {
                     ExecutionOutcome.CompletionStatus.BLOCKED,
                     TaskCompletionStatus.BLOCKED_BY_APPROVAL,
                     false);
+        }
+        if (facts.protectedReadApprovalMissing()) {
+            return new Decision(
+                    ExecutionOutcome.CompletionStatus.BLOCKED,
+                    TaskCompletionStatus.BLOCKED_BY_POLICY,
+                    true);
         }
         if (facts.partialMutation()) {
             return new Decision(
