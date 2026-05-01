@@ -8,6 +8,7 @@ import dev.talos.core.Config;
 import org.junit.jupiter.api.*;
 
 import java.nio.file.Path;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -65,10 +66,10 @@ class SimpleCommandsTest {
         private final StubRuntime rt = new StubRuntime();
         private final DebugCommand cmd = new DebugCommand(rt);
 
-        @Test void on_enables_debug() {
-            cmd.execute("on", ctx);
-            assertTrue(rt.isDebug());
-            assertEquals(DebugLevel.BRIEF, rt.getDebugLevel());
+        @Test void on_without_explicit_level_is_invalid() {
+            Result r = cmd.execute("on", ctx);
+            assertInstanceOf(Result.Error.class, r);
+            assertEquals(DebugLevel.OFF, rt.getDebugLevel());
         }
 
         @Test void off_disables_debug() {
@@ -115,6 +116,28 @@ class SimpleCommandsTest {
         @Test void trace_level_sets_trace_debug_intent() {
             cmd.execute("trace", ctx);
             assertEquals(DebugLevel.TRACE, rt.getDebugLevel());
+        }
+
+        @Test void on_suffix_sets_non_off_debug_level() {
+            for (var entry : Map.of(
+                    "brief on", DebugLevel.BRIEF,
+                    "rag on", DebugLevel.RAG,
+                    "tools on", DebugLevel.TOOLS,
+                    "prompt on", DebugLevel.PROMPT,
+                    "trace on", DebugLevel.TRACE
+            ).entrySet()) {
+                cmd.execute("off", ctx);
+                Result r = cmd.execute(entry.getKey(), ctx);
+                assertInstanceOf(Result.Info.class, r, entry.getKey());
+                assertEquals(entry.getValue(), rt.getDebugLevel(), entry.getKey());
+            }
+        }
+
+        @Test void off_suffix_after_level_disables_debug() {
+            rt.setDebugLevel(DebugLevel.PROMPT);
+            Result r = cmd.execute("prompt off", ctx);
+            assertInstanceOf(Result.Info.class, r);
+            assertEquals(DebugLevel.OFF, rt.getDebugLevel());
         }
 
         @Test void no_args_shows_current() {
@@ -416,8 +439,12 @@ class SimpleCommandsTest {
             var cmd = new HelpCommand(registry());
             Result r = cmd.execute("debug", ctx);
             assertInstanceOf(Result.Ok.class, r);
-            assertTrue(r.toString().contains("Debug Help"));
-            assertTrue(r.toString().contains("/debug"));
+            String text = r.toString();
+            assertTrue(text.contains("Debug Help"));
+            assertTrue(text.contains("/debug"));
+            assertTrue(text.contains("/debug prompt on"), text);
+            assertTrue(text.contains("/debug prompt off"), text);
+            assertTrue(text.contains("/last trace"), text);
         }
 
         @Test void help_models_topic_explains_model_switch_flow() {

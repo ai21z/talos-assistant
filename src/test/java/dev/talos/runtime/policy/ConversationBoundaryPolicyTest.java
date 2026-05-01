@@ -71,7 +71,9 @@ class ConversationBoundaryPolicyTest {
                 "last trace",
                 "last /trace",
                 "show last trace",
-                "show me last trace")) {
+                "show me last trace",
+                "what command shows the last trace",
+                "I typed /debug prompt on earlier. What command shows the last trace?")) {
             assertEquals(NEAR_SLASH_COMMAND, ConversationBoundaryPolicy.classification(input), input);
             assertTrue(ConversationBoundaryPolicy.isDirectAnswerOnly(input), input);
             assertTrue(ConversationBoundaryPolicy.deterministicAnswer(input).contains("/last trace"), input);

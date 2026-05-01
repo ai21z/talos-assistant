@@ -111,6 +111,10 @@ Enter keypress, keep the literal line-break description on that same submitted
 line, then run `/last trace` after the answer. Do not paste a raw multiline
 literal payload into the current REPL for release-gate evidence.
 
+For prompt-audit smoke runs, enable prompt diagnostics with `/debug prompt` or
+the equivalent `/debug prompt on` before the audited prompt. Use `/debug prompt
+off` or `/debug off` to return to quiet output.
+
 ## Output
 
 Workspaces:

@@ -52,6 +52,7 @@ public final class HelpCommand implements Command {
                     List.of(
                             "/debug brief keeps compatible debug hints on.",
                             "/debug rag, /debug tools, /debug prompt, and /debug trace reserve deeper diagnostic intent.",
+                            "Use /debug prompt on as a harmless suffix form; /debug prompt off disables debug output.",
                             "/last, /last tools, /last sources, and /last trace inspect the latest recorded turn.",
                             "/help all lists every registered command.")));
             case "security", "safety", "approval" -> new Result.Ok(topicHelp(

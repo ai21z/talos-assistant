@@ -99,7 +99,8 @@ public final class ConversationBoundaryPolicy {
                     + "debug\\s+/?trace|"
                     + "last\\s+/?trace|"
                     + "show\\s+(?:me\\s+)?(?:the\\s+)?last\\s+trace|"
-                    + "show\\s+/?trace"
+                    + "show\\s+/?trace|"
+                    + ".*\\bwhat\\s+command\\s+shows?\\b.{0,80}\\blast\\s+/?trace\\b.*"
                     + ")");
 
     private static final Pattern POSITIVE_WORKSPACE_QUERY = Pattern.compile(
