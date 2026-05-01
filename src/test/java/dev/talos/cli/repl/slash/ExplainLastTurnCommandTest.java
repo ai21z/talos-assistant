@@ -264,7 +264,8 @@ class ExplainLastTurnCommandTest {
                 "APPLY",
                 List.of("talos.read_file", "talos.write_file"),
                 List.of("talos.read_file", "talos.write_file"),
-                List.of("approval denied by user for talos.write_file"));
+                List.of("approval denied by user for talos.write_file"),
+                "explicit-request-pattern");
         TurnRecord turn = new TurnRecord(
                 8,
                 Instant.parse("2026-04-26T00:00:00Z"),
@@ -286,6 +287,7 @@ class ExplainLastTurnCommandTest {
         String text = ExplainLastTurnCommand.renderTrace(turn);
 
         assertTrue(text.contains("Contract: FILE_CREATE mutationAllowed=true verificationRequired=true"));
+        assertTrue(text.contains("Classification reason: explicit-request-pattern"));
         assertTrue(text.contains("Expected targets: index.html"));
         assertTrue(text.contains("Phase: initial=APPLY final=APPLY"));
         assertTrue(text.contains("Native tools: talos.read_file, talos.write_file"));

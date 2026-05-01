@@ -107,22 +107,59 @@ public final class MutationIntent {
                     + "properties|gradle|kts|toml|ini|env|csv))"
                     + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
 
+    private static final String EXPLICIT_FILE_TARGET =
+            "(?:`?(?:(?:[a-z0-9_.\\\\/-]+\\."
+                    + "(?:html|htm|css|js|jsx|ts|tsx|java|md|txt|json|yaml|yml|xml|"
+                    + "properties|gradle|kts|toml|ini|env|csv|pdf|doc|docx|xls|xlsx|ppt|pptx))"
+                    + "|(?:(?:[a-z0-9_.\\\\/-]+/)?"
+                    + "(?:readme|license|notice|changelog|contributing|authors|makefile|dockerfile))"
+                    + "|(?:(?:[a-z0-9_.\\\\/-]+/)?\\.env(?:\\.[a-z0-9_.-]+)?))`?)";
+
+    private static final Pattern MUTATION_VERB_WITH_FILE_TARGET = Pattern.compile(
+            "\\b" + CORE_MUTATION_VERBS + "\\s+(?:only\\s+)?" + EXPLICIT_FILE_TARGET
+                    + "(?=$|\\s|[`'\"),;:!?\\]])");
+
+    private static final Pattern ADVISORY_MUTATION_QUESTION = Pattern.compile(
+            "^" + PREFIX + "(?:should|would|could|can|may)\\s+(?:i|we)\\s+"
+                    + CORE_MUTATION_VERBS + "\\b");
+
+    private static final Pattern ADVISORY_WHAT_HOW_MUTATION_QUESTION = Pattern.compile(
+            "^" + PREFIX + "(?:what|how)\\s+(?:would|should|could)\\s+(?:you|i|we)\\s+"
+                    + CORE_MUTATION_VERBS + "\\b");
+
+    private static final Pattern INSTRUCTIONAL_MUTATION_QUESTION = Pattern.compile(
+            "\\b(?:how\\s+to|how\\s+(?:can|could|should)\\s+(?:i|we)|"
+                    + "(?:explain|show|tell)\\s+(?:me\\s+)?how\\s+to)\\s+"
+                    + CORE_MUTATION_VERBS + "\\b");
+
     private MutationIntent() {}
 
     public static boolean looksExplicitMutationRequest(String userRequest) {
-        if (userRequest == null || userRequest.isBlank()) return false;
-        if (ToolCallSupport.isSyntheticToolResultContent(userRequest)) return false;
+        return isExplicitMutationClassificationReason(classificationReason(userRequest));
+    }
+
+    public static String classificationReason(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return "empty-user-request";
+        if (ToolCallSupport.isSyntheticToolResultContent(userRequest)) return "synthetic-tool-result";
         String lower = userRequest.toLowerCase().trim();
-        if (containsGlobalReadOnlyNegation(lower)) return false;
-        if (looksPriorChangeStatusQuestion(lower)) return false;
+        if (containsGlobalReadOnlyNegation(lower)) return "global-read-only-negation";
+        if (looksPriorChangeStatusQuestion(lower)) return "prior-change-status-question";
+        if (looksAdvisoryMutationQuestion(lower)) return "advisory-mutation-question";
+        if (looksInstructionalMutationQuestion(lower)) return "instructional-mutation-question";
         for (Pattern pattern : REQUEST_PATTERNS) {
-            if (pattern.matcher(lower).find()) return true;
+            if (pattern.matcher(lower).find()) return "explicit-request-pattern";
         }
-        if (looksNaturalMakeItArtifactRequest(lower)) return true;
+        if (looksNaturalMakeItArtifactRequest(lower)) return "natural-artifact-request";
+        if (looksExplicitFileTargetMutation(lower)) return "explicit-mutation-verb-with-file-target";
         for (String marker : MARKERS) {
-            if (lower.contains(marker)) return true;
+            if (lower.contains(marker)) return "explicit-mutation-marker";
         }
-        return false;
+        return "non-mutating";
+    }
+
+    public static boolean isExplicitMutationClassificationReason(String reason) {
+        if (reason == null || reason.isBlank()) return false;
+        return reason.startsWith("explicit-") || "natural-artifact-request".equals(reason);
     }
 
     public static boolean looksPriorChangeStatusQuestion(String userRequest) {
@@ -154,6 +191,20 @@ public final class MutationIntent {
                 || lower.contains("file")
                 || lower.contains("open and use")
                 || lower.contains("i just want"));
+    }
+
+    private static boolean looksExplicitFileTargetMutation(String lower) {
+        return lower != null && MUTATION_VERB_WITH_FILE_TARGET.matcher(lower).find();
+    }
+
+    private static boolean looksAdvisoryMutationQuestion(String lower) {
+        return lower != null
+                && (ADVISORY_MUTATION_QUESTION.matcher(lower).find()
+                || ADVISORY_WHAT_HOW_MUTATION_QUESTION.matcher(lower).find());
+    }
+
+    private static boolean looksInstructionalMutationQuestion(String lower) {
+        return lower != null && INSTRUCTIONAL_MUTATION_QUESTION.matcher(lower).find();
     }
 
     private static boolean containsGlobalReadOnlyNegation(String lower) {

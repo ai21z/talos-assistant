@@ -209,8 +209,9 @@ public final class TaskContractResolver {
         String original = userRequest.strip();
         String lower = original.toLowerCase(Locale.ROOT);
         boolean priorChangeStatusQuestion = MutationIntent.looksPriorChangeStatusQuestion(original);
+        String classificationReason = MutationIntent.classificationReason(original);
         boolean mutationRequested = !priorChangeStatusQuestion
-                && MutationIntent.looksExplicitMutationRequest(original);
+                && MutationIntent.isExplicitMutationClassificationReason(classificationReason);
         TaskType type = priorChangeStatusQuestion
                 ? TaskType.VERIFY_ONLY
                 : classify(lower, mutationRequested);
@@ -234,7 +235,8 @@ public final class TaskContractResolver {
                 verificationRequired,
                 expectedTargets,
                 forbiddenTargets,
-                original);
+                original,
+                classificationReason);
     }
 
     public static Set<String> extractExpectedTargets(String userRequest) {
@@ -479,7 +481,8 @@ public final class TaskContractResolver {
                 true,
                 prior.expectedTargets(),
                 prior.forbiddenTargets(),
-                inheritedRepairOriginalRequest(previousUser, latestUserRequest));
+                inheritedRepairOriginalRequest(previousUser, latestUserRequest),
+                "repair-follow-up-inherits-previous-mutation-contract");
     }
 
     private static String inheritedRepairOriginalRequest(String previousUser, String latestUserRequest) {
@@ -523,7 +526,8 @@ public final class TaskContractResolver {
                 prior.type() == TaskType.VERIFY_ONLY,
                 Set.of(),
                 Set.of(),
-                latestUserRequest);
+                latestUserRequest,
+                "deictic-read-only-follow-up-inherits-workspace-contract");
     }
 
     private static boolean containsAny(String lower, Set<String> markers) {

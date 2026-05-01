@@ -13,6 +13,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TaskContractResolverTest {
 
+    private static final String T61_B_RETRY_PROMPT =
+            "This is a retry after the denied attempt. Edit README.md now using talos.write_file. "
+                    + "The complete file must contain exactly two lines: first line T61-B exact README; "
+                    + "second line Line two; no other characters.";
+
     @Test
     void explicitEditRequestBecomesFileEditContract() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
@@ -70,6 +75,34 @@ class TaskContractResolverTest {
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
         assertEquals(Set.of("index.html"), contract.expectedTargets());
+    }
+
+    @Test
+    void retryPreambleBeforeExplicitFileEditBecomesMutationAllowedContract() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(T61_B_RETRY_PROMPT);
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("README.md"), contract.expectedTargets());
+        assertEquals("explicit-mutation-verb-with-file-target", contract.classificationReason());
+    }
+
+    @Test
+    void retryStatusReviewAndAdvisoryEditPromptsStayReadOnlyContracts() {
+        for (String input : List.of(
+                "Review README.md",
+                "What happened after the denied attempt?",
+                "Should I edit README.md?",
+                "Can you explain how to edit README.md?",
+                "Show me how to update README.md.")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertFalse(contract.mutationRequested(), input);
+            assertFalse(contract.mutationAllowed(), input);
+            assertFalse(contract.type() == TaskType.FILE_EDIT || contract.type() == TaskType.FILE_CREATE, input);
+        }
     }
 
     @Test

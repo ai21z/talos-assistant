@@ -1129,7 +1129,7 @@
       },
       "prompts": [
         "Edit README.md now using talos.write_file. The complete file must contain exactly two lines: first line T61 exact README; second line Line two; no other characters.",
-        "Edit README.md now using talos.write_file. This is a retry after the denied attempt. The complete file must contain exactly two lines: first line T61 exact README; second line Line two; no other characters."
+        "This is a retry after the denied attempt. Edit README.md now using talos.write_file. The complete file must contain exactly two lines: first line T61 exact README; second line Line two; no other characters."
       ],
       "approvalInputsByPrompt": [
         [
@@ -1156,6 +1156,9 @@
       "traceAssertions": {
         "contract": "FILE_EDIT",
         "mutationAllowed": true,
+        "classificationReasonContains": [
+          "explicit-mutation-verb-with-file-target"
+        ],
         "phaseIncludes": [
           "VERIFY"
         ],

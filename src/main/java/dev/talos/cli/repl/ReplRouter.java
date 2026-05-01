@@ -173,6 +173,9 @@ public final class ReplRouter {
                 .append(" mutationAllowed=").append(trace.mutationAllowed())
                 .append(" verificationRequired=").append(trace.verificationRequired())
                 .append('\n');
+        if (!trace.classificationReason().isBlank()) {
+            sb.append("  classificationReason: ").append(trace.classificationReason()).append('\n');
+        }
         sb.append("  phase: initial=").append(trace.initialPhase())
                 .append(" final=").append(trace.finalPhase())
                 .append('\n');

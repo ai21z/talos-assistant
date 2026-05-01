@@ -190,6 +190,10 @@ function Get-TraceFacts {
     if (-not [string]::IsNullOrWhiteSpace($framePreview)) {
         $currentTurnFrame = "$currentTurnFrame $framePreview".Trim()
     }
+    $classificationReason = Get-LastRegexValue -Text $traceDetail -Pattern "(?m)^\s*(?:Classification reason|classificationReason):\s+(.+)$" -CaseSensitive
+    if ([string]::IsNullOrWhiteSpace($classificationReason)) {
+        $classificationReason = Get-LastRegexValue -Text $localTrace -Pattern "(?m)^\s*Classification reason:\s+(.+)$" -CaseSensitive
+    }
 
     $traceOutcome = Get-LastRegexValue -Text $traceDetail -Pattern "(?m)^\s*Outcome:\s+(.+)$" -CaseSensitive
     $localTraceOutcome = Get-LastRegexValue -Text $localTrace -Pattern "(?m)^\s*Outcome:\s+(.+)$" -CaseSensitive
@@ -210,6 +214,7 @@ function Get-TraceFacts {
     return [pscustomobject]@{
         Contract = $contract
         MutationAllowed = $mutationAllowed
+        ClassificationReason = $classificationReason
         Phase = Get-LastRegexValue -Text $traceDetail -Pattern "(?m)^\s*Phase:\s+(.+)$" -CaseSensitive
         NativeTools = Get-LastRegexValue -Text $traceDetail -Pattern "(?m)^\s*Native tools:\s+(.+)$" -CaseSensitive
         Blocked = Get-LastRegexValue -Text $traceDetail -Pattern "(?m)^\s*Blocked:\s+(.+)$" -CaseSensitive
@@ -259,6 +264,11 @@ function Test-TraceAssertions {
     foreach ($item in Get-AssertionArray -Assertions $Assertions -Name "phaseIncludes") {
         if ($facts.Phase.IndexOf([string]$item, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
             $failures += "trace phase missing '$item'"
+        }
+    }
+    foreach ($item in Get-AssertionArray -Assertions $Assertions -Name "classificationReasonContains") {
+        if ($facts.ClassificationReason.IndexOf([string]$item, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+            $failures += "trace classificationReason missing '$item'"
         }
     }
     foreach ($item in Get-AssertionArray -Assertions $Assertions -Name "nativeToolsContains") {
@@ -697,6 +707,7 @@ if ($ValidateOnly) {
             $allowedAssertions = @(
                 "contract",
                 "mutationAllowed",
+                "classificationReasonContains",
                 "phaseIncludes",
                 "nativeToolsContains",
                 "nativeToolsExcludes",

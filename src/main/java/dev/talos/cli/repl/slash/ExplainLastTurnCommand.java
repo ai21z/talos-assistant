@@ -228,6 +228,11 @@ public final class ExplainLastTurnCommand implements Command {
                     .append(" mutationAllowed=").append(trace.taskContract().mutationAllowed())
                     .append(" verificationRequired=").append(trace.taskContract().verificationRequired())
                     .append('\n');
+            if (!trace.taskContract().classificationReason().isBlank()) {
+                sb.append("  Classification reason: ")
+                        .append(trace.taskContract().classificationReason())
+                        .append('\n');
+            }
         }
         if (trace.toolSurface() != null) {
             sb.append("  Visible tools: ").append(listOrNone(trace.toolSurface().nativeTools())).append('\n');
@@ -354,6 +359,9 @@ public final class ExplainLastTurnCommand implements Command {
                 .append(" mutationAllowed=").append(trace.mutationAllowed())
                 .append(" verificationRequired=").append(trace.verificationRequired())
                 .append('\n');
+        if (!trace.classificationReason().isBlank()) {
+            sb.append("  Classification reason: ").append(trace.classificationReason()).append('\n');
+        }
         if (!trace.expectedTargets().isEmpty()) {
             sb.append("  Expected targets: ").append(String.join(", ", trace.expectedTargets())).append('\n');
         }

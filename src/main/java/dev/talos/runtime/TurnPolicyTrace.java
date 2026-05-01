@@ -20,8 +20,35 @@ public record TurnPolicyTrace(
         String finalPhase,
         List<String> nativeTools,
         List<String> promptTools,
-        List<String> blocks
+        List<String> blocks,
+        String classificationReason
 ) {
+    public TurnPolicyTrace(
+            String taskType,
+            boolean mutationAllowed,
+            boolean verificationRequired,
+            List<String> expectedTargets,
+            List<String> forbiddenTargets,
+            String initialPhase,
+            String finalPhase,
+            List<String> nativeTools,
+            List<String> promptTools,
+            List<String> blocks
+    ) {
+        this(
+                taskType,
+                mutationAllowed,
+                verificationRequired,
+                expectedTargets,
+                forbiddenTargets,
+                initialPhase,
+                finalPhase,
+                nativeTools,
+                promptTools,
+                blocks,
+                "");
+    }
+
     public TurnPolicyTrace {
         taskType = blankDefault(taskType, "UNKNOWN");
         expectedTargets = expectedTargets == null ? List.of() : List.copyOf(expectedTargets);
@@ -31,6 +58,7 @@ public record TurnPolicyTrace(
         nativeTools = nativeTools == null ? List.of() : List.copyOf(nativeTools);
         promptTools = promptTools == null ? List.of() : List.copyOf(promptTools);
         blocks = blocks == null ? List.of() : List.copyOf(blocks);
+        classificationReason = blankDefault(classificationReason, "");
     }
 
     public static TurnPolicyTrace empty() {
@@ -58,33 +86,38 @@ public record TurnPolicyTrace(
                 initialPhase,
                 nativeTools,
                 promptTools,
-                List.of());
+                List.of(),
+                contract.classificationReason());
     }
 
     public TurnPolicyTrace withInitialPhase(String phase) {
         return new TurnPolicyTrace(taskType, mutationAllowed, verificationRequired,
-                expectedTargets, forbiddenTargets, phase, finalPhase, nativeTools, promptTools, blocks);
+                expectedTargets, forbiddenTargets, phase, finalPhase, nativeTools, promptTools, blocks,
+                classificationReason);
     }
 
     public TurnPolicyTrace withFinalPhase(String phase) {
         return new TurnPolicyTrace(taskType, mutationAllowed, verificationRequired,
-                expectedTargets, forbiddenTargets, initialPhase, phase, nativeTools, promptTools, blocks);
+                expectedTargets, forbiddenTargets, initialPhase, phase, nativeTools, promptTools, blocks,
+                classificationReason);
     }
 
     public TurnPolicyTrace withNativeTools(List<String> tools) {
         return new TurnPolicyTrace(taskType, mutationAllowed, verificationRequired,
-                expectedTargets, forbiddenTargets, initialPhase, finalPhase, tools, promptTools, blocks);
+                expectedTargets, forbiddenTargets, initialPhase, finalPhase, tools, promptTools, blocks,
+                classificationReason);
     }
 
     public TurnPolicyTrace withPromptTools(List<String> tools) {
         return new TurnPolicyTrace(taskType, mutationAllowed, verificationRequired,
-                expectedTargets, forbiddenTargets, initialPhase, finalPhase, nativeTools, tools, blocks);
+                expectedTargets, forbiddenTargets, initialPhase, finalPhase, nativeTools, tools, blocks,
+                classificationReason);
     }
 
     public TurnPolicyTrace withBlocks(List<String> newBlocks) {
         return new TurnPolicyTrace(taskType, mutationAllowed, verificationRequired,
                 expectedTargets, forbiddenTargets, initialPhase, finalPhase,
-                nativeTools, promptTools, newBlocks);
+                nativeTools, promptTools, newBlocks, classificationReason);
     }
 
     public boolean hasPolicyData() {
@@ -92,7 +125,8 @@ public record TurnPolicyTrace(
                 || !"unknown".equals(initialPhase)
                 || !nativeTools.isEmpty()
                 || !promptTools.isEmpty()
-                || !blocks.isEmpty();
+                || !blocks.isEmpty()
+                || !classificationReason.isBlank();
     }
 
     private static String blankDefault(String value, String fallback) {

@@ -390,6 +390,7 @@ public final class JsonSessionStore implements SessionStore {
         out.put("nativeTools", safe.nativeTools());
         out.put("promptTools", safe.promptTools());
         out.put("blocks", safe.blocks());
+        out.put("classificationReason", safe.classificationReason());
         return out;
     }
 
@@ -405,7 +406,8 @@ public final class JsonSessionStore implements SessionStore {
                 stringVal(map, "finalPhase", "unknown"),
                 stringList(map.get("nativeTools")),
                 stringList(map.get("promptTools")),
-                stringList(map.get("blocks")));
+                stringList(map.get("blocks")),
+                stringVal(map, "classificationReason", ""));
     }
 
     private static String stringVal(Map<?, ?> map, String key, String fallback) {

@@ -7,6 +7,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MutationIntentTest {
 
+    private static final String T61_B_RETRY_PROMPT =
+            "This is a retry after the denied attempt. Edit README.md now using talos.write_file. "
+                    + "The complete file must contain exactly two lines: first line T61-B exact README; "
+                    + "second line Line two; no other characters.";
+
     @Test
     void overwriteRewriteReplaceAndNaturalCreationPhrasingAreExplicitMutationIntent() {
         for (String input : java.util.List.of(
@@ -26,6 +31,25 @@ class MutationIntentTest {
         assertTrue(MutationIntent.looksExplicitMutationRequest("Repair this website."));
         assertTrue(MutationIntent.looksExplicitMutationRequest("Can you repair index.html?"));
         assertTrue(MutationIntent.looksExplicitMutationRequest("Please repair the broken app."));
+    }
+
+    @Test
+    void preambleBeforeExplicitFileEditIsMutationIntent() {
+        assertTrue(MutationIntent.looksExplicitMutationRequest(T61_B_RETRY_PROMPT));
+        assertTrue(MutationIntent.classificationReason(T61_B_RETRY_PROMPT)
+                .contains("explicit-mutation-verb-with-file-target"));
+    }
+
+    @Test
+    void retryStatusReviewAndAdvisoryEditPromptsStayReadOnly() {
+        for (String input : java.util.List.of(
+                "Review README.md",
+                "What happened after the denied attempt?",
+                "Should I edit README.md?",
+                "Can you explain how to edit README.md?",
+                "Show me how to update README.md.")) {
+            assertFalse(MutationIntent.looksExplicitMutationRequest(input), input);
+        }
     }
 
     @Test
