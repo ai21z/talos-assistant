@@ -58,6 +58,32 @@ class TaskExpectationResolverTest {
     }
 
     @Test
+    void extractsCompleteFileTwoLineExactLiteralForTextTargets() {
+        for (String target : List.of(
+                "README.md",
+                "notes.txt",
+                "index.html",
+                "styles.css",
+                "script.js",
+                "README")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(
+                    "Edit " + target + " now using talos.write_file. "
+                            + "The complete file must contain exactly two lines: "
+                            + "first line T71 exact literal; second line Line two; no other characters.");
+
+            List<TaskExpectation> expectations = TaskExpectationResolver.resolve(contract);
+
+            assertEquals(1, expectations.size(), target);
+            LiteralContentExpectation literal = (LiteralContentExpectation) expectations.getFirst();
+            assertEquals(target, literal.targetPath(), target);
+            assertEquals("T71 exact literal\nLine two", literal.expectedContent(), target);
+            assertEquals(LiteralContentExpectation.MatchMode.EXACT, literal.matchMode(), target);
+            assertEquals("literal-complete-file-two-lines", literal.sourcePattern(), target);
+            assertTrue(contract.mutationAllowed(), target);
+        }
+    }
+
+    @Test
     void ignoresAmbiguousPageAboutLiteralText() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Make index.html into a simple webpage that says AFTER.");

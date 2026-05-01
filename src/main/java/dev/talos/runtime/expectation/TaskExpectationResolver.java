@@ -19,6 +19,12 @@ public final class TaskExpectationResolver {
             "(?is)\\bcontent\\s+argument\\s+to\\s+the\\s+exact\\s+(?:five\\s+letters|content|string|text)?\\s*(.+)");
     private static final Pattern WHOLE_FILE_REPLACE = Pattern.compile(
             "(?is)\\breplace\\s+the\\s+whole\\s+file\\s+with\\s+(.+)");
+    private static final Pattern COMPLETE_FILE_TWO_LINES = Pattern.compile(
+            "(?is)\\b(?:the\\s+)?(?:complete|entire)\\s+file\\s+"
+                    + "(?:must|should)\\s+contain\\s+exactly\\s+two\\s+lines\\s*:\\s*"
+                    + "first\\s+line\\s+(.+?)\\s*;\\s*"
+                    + "second\\s+line\\s+(.+?)\\s*;\\s*"
+                    + "no\\s+other\\s+characters\\b");
 
     private TaskExpectationResolver() {}
 
@@ -32,6 +38,7 @@ public final class TaskExpectationResolver {
         String normalizedTarget = normalizePath(target);
         List<Candidate> candidates = new ArrayList<>();
         addTargetSpecificExactCandidates(request, normalizedTarget, candidates);
+        addCompleteFileTwoLineCandidate(request, candidates);
         addGenericCandidate(request, ENTIRE_FILE_SHOULD_BE, "literal-entire-file", candidates);
         addGenericCandidate(request, CONTENT_ARGUMENT_EXACT, "literal-content-argument", candidates);
         addGenericCandidate(request, WHOLE_FILE_REPLACE, "literal-whole-file-replace", candidates);
@@ -42,7 +49,9 @@ public final class TaskExpectationResolver {
         LinkedHashSet<String> literals = new LinkedHashSet<>();
         String firstSourcePattern = "";
         for (Candidate candidate : candidates) {
-            String literal = normalizeLiteral(candidate.literal());
+            String literal = candidate.alreadyExact()
+                    ? normalizeExactLiteral(candidate.literal())
+                    : normalizeLiteral(candidate.literal());
             if (literal.isBlank()) continue;
             literals.add(literal);
             if (firstSourcePattern.isBlank()) firstSourcePattern = candidate.sourcePattern();
@@ -71,6 +80,19 @@ public final class TaskExpectationResolver {
         }
     }
 
+    private static void addCompleteFileTwoLineCandidate(String request, List<Candidate> candidates) {
+        Matcher matcher = COMPLETE_FILE_TWO_LINES.matcher(request);
+        while (matcher.find()) {
+            String firstLine = normalizeLineLiteral(matcher.group(1));
+            String secondLine = normalizeLineLiteral(matcher.group(2));
+            if (firstLine.isBlank() && secondLine.isBlank()) continue;
+            candidates.add(new Candidate(
+                    firstLine + "\n" + secondLine,
+                    "literal-complete-file-two-lines",
+                    true));
+        }
+    }
+
     private static void addGenericCandidate(
             String request,
             Pattern pattern,
@@ -89,6 +111,18 @@ public final class TaskExpectationResolver {
         literal = stripCodeFence(literal).strip();
         literal = stripWrappingQuotes(literal).strip();
         return literal;
+    }
+
+    private static String normalizeExactLiteral(String raw) {
+        if (raw == null) return "";
+        String literal = raw.strip();
+        literal = stripCodeFence(literal).strip();
+        literal = stripWrappingQuotes(literal).strip();
+        return literal;
+    }
+
+    private static String normalizeLineLiteral(String raw) {
+        return stripWrappingQuotes(raw == null ? "" : raw.strip()).strip();
     }
 
     private static String firstSentenceOrLine(String raw) {
@@ -134,5 +168,9 @@ public final class TaskExpectationResolver {
         return normalized;
     }
 
-    private record Candidate(String literal, String sourcePattern) {}
+    private record Candidate(String literal, String sourcePattern, boolean alreadyExact) {
+        private Candidate(String literal, String sourcePattern) {
+            this(literal, sourcePattern, false);
+        }
+    }
 }
