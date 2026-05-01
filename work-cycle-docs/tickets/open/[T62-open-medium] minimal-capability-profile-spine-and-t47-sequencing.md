@@ -22,6 +22,19 @@ Observed problem:
   verifier result, but the static web profile should own the target-shape
   expectation instead of generic turn-control code.
 
+T67 audit update, 2026-05-01:
+
+- Summary:
+  `local/manual-testing/t67-audit-20260501-143927/summary.md`
+- Natural BMI creation now sometimes writes all three expected files
+  (`index.html`, `styles.css`, `scripts.js`) but the verifier can still report
+  that the workspace does not expose a small HTML/CSS/JS surface.
+- The generated file set was also cross-file incoherent: JavaScript referenced
+  IDs that HTML did not define.
+- This strengthens the profile-boundary need: Static Web should own artifact
+  target shape, selected verifier profile, and post-write surface recognition
+  instead of relying on generic turn-control code.
+
 ## Classification
 
 Primary taxonomy bucket: `REPAIR_CONTROL`

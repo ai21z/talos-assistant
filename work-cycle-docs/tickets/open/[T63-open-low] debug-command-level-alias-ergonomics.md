@@ -19,6 +19,18 @@ Observed behavior:
   current syntax is slightly surprising even though it is documented by
   `/help debug`.
 
+T67 audit update, 2026-05-01:
+
+- Summary:
+  `local/manual-testing/t67-audit-20260501-143927/summary.md`
+- Prompt:
+  `I typed /debug prompt on earlier. What command shows the last trace?`
+- Trace: `trc-a8bba70c-d84e-40c0-bba8-eacc8e584f70`
+- Talos made no tool calls, which is correct, but answered with generic Linux
+  logging advice instead of the known CLI command `/last trace`.
+- This keeps T63 low priority, but the scope should include direct command-help
+  answers for debug/trace ergonomics, not only slash-command parsing.
+
 ## Classification
 
 Primary taxonomy bucket: `CLI_UX`
@@ -75,6 +87,9 @@ Suggested behavior:
 - Optional `off` suffix after a non-off level disables debug output.
 - Invalid forms still return clear usage.
 - `/help debug` mentions both canonical syntax and the optional `on` suffix.
+- A natural question such as `What command shows the last trace?` answers
+  `/last trace` directly and does not produce generic operating-system log
+  advice.
 
 ## Tests / Evidence
 
@@ -104,7 +119,7 @@ pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly
 
 ## Related Tickets
 
-- `work-cycle-docs/tickets/open/[T67-open-medium] model-switch-command-boundary-and-small-talk-classification.md`
-  tracks the separate T61 audit finding that `/model` is unknown and small talk
-  after `/set model ...` can be misclassified. Keep this ticket focused on
-  `/debug ... on/off` ergonomics.
+- `work-cycle-docs/tickets/done/[T67-done-medium] model-switch-command-boundary-and-small-talk-classification.md`
+  tracked the separate T61 audit finding that `/model` was unknown and small
+  talk after `/set model ...` could be misclassified. Keep this ticket focused
+  on `/debug ... on/off` and trace-command ergonomics.
