@@ -734,7 +734,8 @@
           "APPLY"
         ],
         "nativeToolsContains": [
-          "talos"
+          "talos.write_file",
+          "talos.edit_file"
         ],
         "promptAuditTaskType": "FILE_EDIT",
         "promptAuditActionObligationContains": [
@@ -748,10 +749,6 @@
         "promptAuditArtifactGoalContains": [
           "README",
           "APPLY_EDIT"
-        ],
-        "promptAuditCurrentTurnFrameContains": [
-          "Active context is a current-turn hint only",
-          "Use active targets only for narrow deictic follow-ups"
         ],
         "transcriptExcludes": [
           "ALPHA-742"
