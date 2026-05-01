@@ -179,10 +179,14 @@ public final class ActiveTaskContextUpdater {
         }
 
         boolean fullyVerifiedMutation() {
-            return successfulMutation
-                    && "SUCCEEDED".equalsIgnoreCase(mutationStatus)
+            return mutationSucceeded()
                     && "PASSED".equalsIgnoreCase(verificationStatus)
                     && "COMPLETED_VERIFIED".equalsIgnoreCase(completionStatus);
+        }
+
+        private boolean mutationSucceeded() {
+            if (mutationStatus == null || mutationStatus.isBlank()) return successfulMutation;
+            return "SUCCEEDED".equalsIgnoreCase(mutationStatus);
         }
 
         private static List<String> targets(

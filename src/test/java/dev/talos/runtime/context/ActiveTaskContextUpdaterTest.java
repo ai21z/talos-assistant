@@ -179,6 +179,32 @@ class ActiveTaskContextUpdaterTest {
     }
 
     @Test
+    void recoveredFailedThenSuccessfulMutationClearsWhenTraceOutcomeIsVerifiedSucceeded() {
+        ActiveTaskContext previous = ActiveTaskContext.proposedChanges(
+                6, "trace-old", List.of("index.html"), "Change the hero.");
+        ArtifactGoal previousGoal = ArtifactGoal.fromActiveContext(previous);
+        TurnResult result = turn(
+                12,
+                new Result.Ok("Done after retry."),
+                policy("FILE_EDIT", true, true, List.of("index.html")),
+                trace(12, "trace-recovered", true, true, List.of("index.html"),
+                        "PASSED", "All checks passed", "GRANTED_OR_NOT_REQUIRED", "SUCCEEDED", "COMPLETED_VERIFIED"),
+                List.of(
+                        new TurnRecord.ToolCallSummary("talos.edit_file", "index.html", false, "old_string not found"),
+                        new TurnRecord.ToolCallSummary("talos.edit_file", "index.html", true, "")),
+                0);
+
+        ActiveTaskContextUpdater.Update update = updater.updateAfterTurn(
+                result,
+                "Apply those changes.",
+                previous,
+                previousGoal);
+
+        assertEquals(ActiveTaskContext.none(), update.activeTaskContext());
+        assertEquals(ArtifactGoal.none(), update.artifactGoal());
+    }
+
+    @Test
     void unrelatedTurnPreservesExistingContextAndGoal() {
         ActiveTaskContext previous = ActiveTaskContext.proposedChanges(
                 6, "trace-old", List.of("README.md"), "Improve README.");
