@@ -207,7 +207,8 @@ record ExecutionOutcome(
             current = suppressDerivedContentForMissingEvidence(
                     current,
                     safePlan,
-                    evidenceObligation);
+                    evidenceObligation,
+                    evidenceResult);
         }
         OutcomeDominancePolicy.Decision preVerificationDecision = outcomeDecision(
                 contract,
@@ -412,7 +413,8 @@ record ExecutionOutcome(
             shaped = suppressDerivedContentForMissingEvidence(
                     shaped,
                     safePlan,
-                    evidenceObligation);
+                    evidenceObligation,
+                    evidenceResult);
         }
         OutcomeDominancePolicy.Decision decision = outcomeDecision(
                 contract,
@@ -725,8 +727,12 @@ record ExecutionOutcome(
     private static String suppressDerivedContentForMissingEvidence(
             String answer,
             CurrentTurnPlan plan,
-            EvidenceObligation obligation
+            EvidenceObligation obligation,
+            EvidenceObligationVerifier.Result evidenceResult
     ) {
+        if (obligation == EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED) {
+            return protectedReadMissingEvidenceContainment(plan, evidenceResult);
+        }
         if (isRuntimeFailureStatus(answer)) {
             return missingEvidencePrefix(answer);
         }
@@ -845,6 +851,47 @@ record ExecutionOutcome(
             return current;
         }
         return EvidenceObligationVerifier.MISSING_EVIDENCE_PREFIX + "\n\n" + current;
+    }
+
+    private static String protectedReadMissingEvidenceContainment(
+            CurrentTurnPlan plan,
+            EvidenceObligationVerifier.Result evidenceResult
+    ) {
+        String message = evidenceResult == null ? "" : evidenceResult.message();
+        if (message.contains("not attempted")) {
+            return protectedReadNotAttemptedPrefix(protectedReadNotAttemptedMessage(plan));
+        }
+        return protectedReadIncompletePrefix(protectedReadIncompleteMessage(plan));
+    }
+
+    private static String protectedReadNotAttemptedPrefix(String answer) {
+        String current = answer == null ? "" : answer;
+        String prefix = "[Protected read not attempted: approval-required read_file tool call was not issued.]";
+        if (current.startsWith(prefix)) {
+            return current;
+        }
+        return prefix + "\n\n" + current;
+    }
+
+    private static String protectedReadNotAttemptedMessage(CurrentTurnPlan plan) {
+        return "The model did not call talos.read_file for the protected target, "
+                + "so no approval prompt ran and no protected content was read."
+                + targetSentence(plan);
+    }
+
+    private static String protectedReadIncompletePrefix(String answer) {
+        String current = answer == null ? "" : answer;
+        String prefix = "[Protected read incomplete: approval-required read_file tool call did not return content.]";
+        if (current.startsWith(prefix)) {
+            return current;
+        }
+        return prefix + "\n\n" + current;
+    }
+
+    private static String protectedReadIncompleteMessage(CurrentTurnPlan plan) {
+        return "talos.read_file was attempted for the protected target, but protected content "
+                + "was not returned successfully. No protected content was read from this turn."
+                + targetSentence(plan);
     }
 
     private static boolean verificationRequiredButNotRun(

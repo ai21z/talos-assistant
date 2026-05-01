@@ -151,7 +151,9 @@ public final class CurrentTurnCapabilityFrame {
         return switch (evidence) {
             case READ_TARGET_REQUIRED -> "Evidence: read the named target before answering.";
             case PROTECTED_READ_APPROVAL_REQUIRED ->
-                    "Evidence: the named target is protected; obtain runtime approval before reading it.";
+                    "Evidence: the named target is protected. "
+                            + "Call talos.read_file for the protected target; runtime will request approval. "
+                            + "Do not answer from protected content unless the read succeeds.";
             case LIST_DIRECTORY_ONLY ->
                     "Evidence: list directory entries only; do not inspect file contents.";
             case WORKSPACE_INSPECTION_REQUIRED ->

@@ -100,7 +100,8 @@ public final class EvidenceObligationVerifier {
 
     private static Result verifyProtectedRead(Set<String> expectedTargets, List<ToolCallLoop.ToolOutcome> outcomes) {
         if (outcomes.isEmpty()) {
-            return Result.unsatisfied("Protected read evidence was not gathered.");
+            return Result.unsatisfied(
+                    "Protected read was not attempted; no approval prompt ran and no protected content was read.");
         }
         return verifyReadTargets(expectedTargets, outcomes, true);
     }

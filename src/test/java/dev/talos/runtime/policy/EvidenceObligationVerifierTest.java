@@ -58,6 +58,19 @@ class EvidenceObligationVerifierTest {
     }
 
     @Test
+    void protectedReadWithoutToolAttemptIsSpecific() {
+        var result = EvidenceObligationVerifier.verify(
+                EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED,
+                Set.of(".env"),
+                List.of());
+
+        assertEquals(EvidenceObligationVerifier.Status.UNSATISFIED, result.status());
+        assertEquals(
+                "Protected read was not attempted; no approval prompt ran and no protected content was read.",
+                result.message());
+    }
+
+    @Test
     void protectedReadDenialDominatesMissingTarget() {
         var result = EvidenceObligationVerifier.verify(
                 EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED,

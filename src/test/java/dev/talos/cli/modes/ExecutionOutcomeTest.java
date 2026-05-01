@@ -1236,9 +1236,12 @@ class ExecutionOutcomeTest {
                 true);
 
         assertEquals(ExecutionOutcome.CompletionStatus.BLOCKED, outcome.completionStatus());
-        assertTrue(outcome.finalAnswer().startsWith(
-                "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"));
-        assertTrue(outcome.finalAnswer().contains("protected read approval"), outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().startsWith("[Protected read not attempted:"),
+                outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains("talos.read_file"), outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains("no approval prompt ran"), outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains("no protected content was read"), outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains("[Evidence incomplete:"), outcome.finalAnswer());
         assertFalse(outcome.finalAnswer().contains("API_KEY"), outcome.finalAnswer());
         assertFalse(outcome.finalAnswer().contains("DATABASE_URL"), outcome.finalAnswer());
         assertEquals(TaskCompletionStatus.BLOCKED_BY_POLICY, outcome.taskOutcome().completionStatus());
@@ -1436,6 +1439,32 @@ class ExecutionOutcomeTest {
         assertFalse(outcome.finalAnswer().contains("SECRET=original"));
         assertFalse(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
         assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.DENIED_PROTECTED_READ));
+    }
+
+    @Test
+    void attemptedProtectedReadFailureDoesNotReportNoToolAttempt() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Read .env and tell me what it says."));
+
+        var loopResult = new ToolCallLoop.LoopResult(
+                "The file says SECRET=original.", 1, 1,
+                List.of("talos.read_file"), List.of(),
+                1, 0, false, 0, List.of(),
+                0, 0, 0, 0,
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.read_file", ".env", false, false, false,
+                        "", "Read failed before protected content was returned.", null, ToolError.NOT_FOUND)));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                "The file says SECRET=original.", messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.BLOCKED, outcome.completionStatus());
+        assertTrue(outcome.finalAnswer().startsWith("[Protected read incomplete:"), outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains("talos.read_file was attempted"), outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains("not attempted"), outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains("SECRET=original"), outcome.finalAnswer());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
     }
 
     @Test
