@@ -66,6 +66,26 @@ class RepairPolicyTest {
     }
 
     @Test
+    void structuralWebRepairInstructionRequiresCrossFileCoherenceBeforeWrites() {
+        List<ChatMessage> messages = repairMessages("Fix the remaining static verification problems now.");
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        RepairPlan plan = RepairPolicy.planForStaticVerification(messages, contract)
+                .plan()
+                .orElseThrow();
+
+        assertTrue(plan.instruction().contains("Cross-file coherence checklist"), plan.instruction());
+        assertTrue(plan.instruction().contains("HTML must link every CSS and JavaScript file being written"),
+                plan.instruction());
+        assertTrue(plan.instruction().contains("Every JavaScript ID or selector must exist in HTML"),
+                plan.instruction());
+        assertTrue(plan.instruction().contains("CSS selectors should correspond to classes or IDs in HTML"),
+                plan.instruction());
+        assertTrue(plan.instruction().contains("cross-check all HTML/CSS/JS files before emitting tool calls"),
+                plan.instruction());
+    }
+
+    @Test
     void staleReadmeStaticFailureDoesNotPlanRepairForFreshWebTargets() {
         List<ChatMessage> messages = readmeFailureMessages(
                 "Create index.html, styles.css, and scripts.js for a BMI calculator. Use talos.write_file.");
@@ -89,6 +109,7 @@ class RepairPolicyTest {
         RepairPlan plan = decision.plan().orElseThrow();
         assertEquals(List.of("README.md"), plan.expectedTargets());
         assertTrue(plan.instruction().contains("README.md"), plan.instruction());
+        assertFalse(plan.instruction().contains("Cross-file coherence checklist"), plan.instruction());
     }
 
     @Test
