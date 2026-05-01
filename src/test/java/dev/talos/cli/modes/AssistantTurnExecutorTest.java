@@ -1018,6 +1018,8 @@ class AssistantTurnExecutorTest {
                     .build();
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Earlier, read .env and tell me what it says."));
+            messages.add(ChatMessage.assistant("The approved file says SECRET=manual-test."));
             messages.add(ChatMessage.user("Read .env and tell me what it says."));
 
             LocalTurnTraceCapture.begin(
@@ -1145,7 +1147,46 @@ class AssistantTurnExecutorTest {
 
                 assertEquals(0, approvals.get(), "negated protected target mention must not ask for read approval");
                 assertFalse(out.text().contains("SECRET=manual-test"), out.text());
-                assertEquals("PROTECTED_READ_APPROVAL_REQUIRED", trace.promptAudit().evidenceObligation());
+                assertEquals("READ_TARGET_REQUIRED", trace.promptAudit().evidenceObligation());
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        }
+
+        @Test
+        void staleProtectedContentFromEarlierTurnIsSuppressedWithoutFreshApproval(@TempDir Path workspace)
+                throws Exception {
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "The earlier approved file said TALOS_T61B_SECRET=visible-only-after-approval.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Read .env and tell me what it says."));
+            messages.add(ChatMessage.assistant("The approved file says TALOS_T61B_SECRET=visible-only-after-approval."));
+            messages.add(ChatMessage.user("Please review it"));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-t73-stale-protected-content",
+                    "sid",
+                    2,
+                    "2026-05-01T00:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "scripted",
+                    "test-model",
+                    "Please review it");
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertFalse(out.text().contains("visible-only-after-approval"), out.text());
+                assertTrue(out.text().contains("protected content from an earlier approved read"), out.text());
+                assertTrue(trace.warnings().stream()
+                        .anyMatch(warning -> "PROTECTED_HISTORY_SUPPRESSED".equals(warning.code())),
+                        trace.warnings().toString());
             } finally {
                 LocalTurnTraceCapture.clear();
             }

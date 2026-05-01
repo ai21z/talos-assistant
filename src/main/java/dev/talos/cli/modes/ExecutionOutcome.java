@@ -11,6 +11,7 @@ import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.EvidenceObligation;
 import dev.talos.runtime.policy.EvidenceObligationPolicy;
 import dev.talos.runtime.policy.EvidenceObligationVerifier;
+import dev.talos.runtime.policy.ProtectedPathPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
@@ -22,8 +23,13 @@ import dev.talos.spi.types.ChatMessage;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Centralized end-of-turn outcome classification for current answer shaping.
@@ -52,6 +58,9 @@ record ExecutionOutcome(
         boolean malformedProtocolDebrisReplaced,
         boolean advisoryOnly
 ) {
+
+    private static final Pattern ENV_ASSIGNMENT = Pattern.compile(
+            "(?<![A-Za-z0-9_])([A-Z][A-Z0-9_]{2,}\\s*=\\s*[^\\s`'\"<>]+)");
 
     enum CompletionStatus {
         COMPLETE,
@@ -209,6 +218,12 @@ record ExecutionOutcome(
                     safePlan,
                     evidenceObligation,
                     evidenceResult);
+        } else {
+            current = suppressProtectedHistoryContentIfNeeded(
+                    current,
+                    messages,
+                    loopResult,
+                    workspace);
         }
         OutcomeDominancePolicy.Decision preVerificationDecision = outcomeDecision(
                 contract,
@@ -415,6 +430,12 @@ record ExecutionOutcome(
                     safePlan,
                     evidenceObligation,
                     evidenceResult);
+        } else {
+            shaped = suppressProtectedHistoryContentIfNeeded(
+                    shaped,
+                    messages,
+                    null,
+                    null);
         }
         OutcomeDominancePolicy.Decision decision = outcomeDecision(
                 contract,
@@ -713,6 +734,98 @@ record ExecutionOutcome(
             }
         }
         return false;
+    }
+
+    private static String suppressProtectedHistoryContentIfNeeded(
+            String answer,
+            List<ChatMessage> messages,
+            ToolCallLoop.LoopResult loopResult,
+            Path workspace
+    ) {
+        if (answer == null || answer.isBlank()) return answer == null ? "" : answer;
+        if (hasSuccessfulCurrentProtectedRead(loopResult, workspace)) return answer;
+        for (String snippet : priorProtectedSnippets(messages)) {
+            if (answerContainsSnippet(answer, snippet)) {
+                LocalTurnTraceCapture.warning(
+                        "PROTECTED_HISTORY_SUPPRESSED",
+                        "Suppressed answer text matching protected content from prior conversation history "
+                                + "without a current-turn approved protected read.");
+                return "I did not show protected content from an earlier approved read because this turn "
+                        + "did not request and complete a fresh protected read approval.";
+            }
+        }
+        return answer;
+    }
+
+    private static boolean hasSuccessfulCurrentProtectedRead(
+            ToolCallLoop.LoopResult loopResult,
+            Path workspace
+    ) {
+        if (loopResult == null || loopResult.toolOutcomes() == null) return false;
+        for (ToolCallLoop.ToolOutcome outcome : loopResult.toolOutcomes()) {
+            if (outcome == null) continue;
+            if (!"talos.read_file".equals(outcome.toolName())) continue;
+            if (!outcome.success() || outcome.denied()) continue;
+            if (ProtectedPathPolicy.classify(workspace, outcome.pathHint()).protectedPath()
+                    || looksProtectedPathHint(outcome.pathHint())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean looksProtectedPathHint(String pathHint) {
+        if (pathHint == null || pathHint.isBlank()) return false;
+        String lower = pathHint.replace('\\', '/').toLowerCase(Locale.ROOT);
+        return lower.equals(".env")
+                || lower.endsWith("/.env")
+                || lower.contains("/.env.")
+                || lower.contains("secret")
+                || lower.contains("token")
+                || lower.contains("credential");
+    }
+
+    private static Set<String> priorProtectedSnippets(List<ChatMessage> messages) {
+        if (messages == null || messages.isEmpty()) return Set.of();
+        Set<String> out = new LinkedHashSet<>();
+        for (ChatMessage message : messages) {
+            if (message == null || !"assistant".equals(message.role())) continue;
+            String content = message.content();
+            if (content == null || content.isBlank()) continue;
+            if (!looksLikeProtectedHistoryAnswer(content)) continue;
+            Matcher matcher = ENV_ASSIGNMENT.matcher(content);
+            while (matcher.find()) {
+                String snippet = normalizeSensitiveSnippet(matcher.group(1));
+                if (snippet.length() >= 8) out.add(snippet);
+            }
+        }
+        return out;
+    }
+
+    private static boolean looksLikeProtectedHistoryAnswer(String content) {
+        String lower = content.toLowerCase(Locale.ROOT);
+        return lower.contains(".env")
+                || lower.contains("approved file")
+                || lower.contains("protected")
+                || lower.contains("secret")
+                || lower.contains("token")
+                || lower.contains("password")
+                || lower.contains("credential");
+    }
+
+    private static boolean answerContainsSnippet(String answer, String snippet) {
+        String normalizedAnswer = normalizeSensitiveSnippet(answer).toLowerCase(Locale.ROOT);
+        String normalizedSnippet = normalizeSensitiveSnippet(snippet).toLowerCase(Locale.ROOT);
+        return normalizedSnippet.length() >= 8 && normalizedAnswer.contains(normalizedSnippet);
+    }
+
+    private static String normalizeSensitiveSnippet(String value) {
+        if (value == null) return "";
+        String stripped = value.strip();
+        while (!stripped.isEmpty() && ".,;:!?)]}".indexOf(stripped.charAt(stripped.length() - 1)) >= 0) {
+            stripped = stripped.substring(0, stripped.length() - 1);
+        }
+        return stripped.replaceAll("\\s+", " ");
     }
 
     private static boolean protectedReadApprovalMissing(

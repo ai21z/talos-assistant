@@ -44,6 +44,10 @@ public final class TaskContractResolver {
                     + "(?:the\\s+)?(?:file\\s+)?(?:content|contents)?\\s*(?:from|of|in)?)"
                     + "\\s+(.{0,240})");
 
+    private static final Pattern NEGATED_TARGET_PREFERENCE_SPAN = Pattern.compile(
+            "(?i)\\b(?:do\\s+not|don't|dont)\\s+(?:want|need)\\s+"
+                    + "(?:the\\s+)?(?:file\\s+)?(.{0,160})");
+
     private static final Set<String> CREATE_MARKERS = Set.of(
             "create", "write a", "write the", "save as", "add a", "add the",
             "new file", "build", "generate", "scaffold", "set up", "setup",
@@ -266,8 +270,8 @@ public final class TaskContractResolver {
 
     private static Set<String> extractReadForbiddenTargets(String userRequest) {
         if (userRequest == null || userRequest.isBlank()) return Set.of();
-        Matcher spanMatcher = NEGATED_READ_TARGET_SPAN.matcher(userRequest);
         Set<String> out = new LinkedHashSet<>();
+        Matcher spanMatcher = NEGATED_READ_TARGET_SPAN.matcher(userRequest);
         while (spanMatcher.find()) {
             String span = firstSentenceFragment(spanMatcher.group(1));
             Matcher targetMatcher = TARGET_FILE.matcher(span);
@@ -276,7 +280,39 @@ public final class TaskContractResolver {
                 if (!target.isBlank()) out.add(target);
             }
         }
+        Matcher preferenceMatcher = NEGATED_TARGET_PREFERENCE_SPAN.matcher(userRequest);
+        while (preferenceMatcher.find()) {
+            String span = targetCorrectionFragment(preferenceMatcher.group(1));
+            String target = firstTargetIn(span);
+            if (!target.isBlank()) out.add(target);
+        }
         return Set.copyOf(out);
+    }
+
+    private static String firstTargetIn(String span) {
+        if (span == null || span.isBlank()) return "";
+        Matcher targetMatcher = TARGET_FILE.matcher(span);
+        if (targetMatcher.find()) {
+            return normalizeTarget(targetMatcher.group(1));
+        }
+        Matcher extensionlessMatcher = EXTENSIONLESS_TEXT_TARGET.matcher(span);
+        if (extensionlessMatcher.find()) {
+            return normalizeTarget(extensionlessMatcher.group(1));
+        }
+        return "";
+    }
+
+    private static String targetCorrectionFragment(String span) {
+        String fragment = firstSentenceFragment(span);
+        String lower = fragment.toLowerCase(Locale.ROOT);
+        int end = fragment.length();
+        for (String marker : List.of(", i want", ", but", " but ", " instead", " rather", ";")) {
+            int index = lower.indexOf(marker);
+            if (index >= 0 && index < end) {
+                end = index;
+            }
+        }
+        return fragment.substring(0, end);
     }
 
     private static TaskType classify(String lower, boolean mutationRequested) {
