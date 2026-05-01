@@ -158,6 +158,43 @@ class TurnProcessorTest {
         assertEquals(ToolError.NOT_FOUND, result.error().code());
     }
 
+    @Test
+    void unknownNamespacedToolAliasIsRejectedAndRecordedInLocalTrace() {
+        var tp = new TurnProcessor(ModeController.defaultController());
+        var session = new Session(WS, new Config());
+        var ctx = Context.builder(new Config()).build();
+
+        LocalTurnTraceCapture.begin(
+                "trc-t60",
+                "session-t60",
+                1,
+                "2026-05-02T00:00:00Z",
+                "workspace-hash",
+                "auto",
+                "test",
+                "model",
+                "test");
+        try {
+            ToolResult result = tp.executeTool(
+                    session,
+                    new ToolCall("unknown_provider.write_file", Map.of("path", "README.md", "content", "hello")),
+                    ctx);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertFalse(result.success());
+            assertEquals(ToolError.NOT_FOUND, result.error().code());
+            var aliasEvent = trace.events().stream()
+                    .filter(event -> "TOOL_ALIAS_DECISION".equals(event.type()))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("REJECTED_UNKNOWN_NAMESPACE", aliasEvent.data().get("status"));
+            assertEquals("unknown_provider.write_file", aliasEvent.data().get("rawName"));
+            assertEquals("talos.write_file", aliasEvent.data().get("canonicalTool"));
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
     @Test void executeToolWithNullCallReturnsError() {
         var tp = new TurnProcessor(ModeController.defaultController());
         var session = new Session(WS, new Config());

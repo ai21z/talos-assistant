@@ -1,7 +1,8 @@
-# [T60-open-medium] ToolAliasPolicy And BackendToolProfile
+# [T60-done-medium] ToolAliasPolicy And BackendToolProfile
 
-Status: open
+Status: done
 Priority: medium
+Closed: 2026-05-02
 
 ## Evidence Summary
 
@@ -153,3 +154,21 @@ Commands:
 ## Known Follow-Ups
 
 - Capability profiles can later provide profile-owned tool examples.
+
+## Closure Notes
+
+- Added a static `ToolAliasPolicy` and minimal `BackendToolProfile` for canonical Talos tools, accepted local/backend aliases, and rejected unknown provider namespaces.
+- Routed registry resolution, parser recognition, mutating/read-only risk checks, local trace events, and last-turn mutation summaries through the policy.
+- Added deterministic SMALL_TALK handling for unknown alias capability questions so the T61 replay prompt answers directly without exposing workspace tools or deriving read-target evidence.
+- Updated the T61 unknown-alias TalosBench case to expect a direct no-tool SMALL_TALK turn.
+
+Verification:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.runtime.task.TaskContractResolverTest" --tests "dev.talos.cli.modes.UnifiedAssistantModeTest" --tests "dev.talos.runtime.toolcall.ToolCallSupportTest" --tests "dev.talos.tools.ToolRegistryTest" --tests "dev.talos.runtime.TurnProcessorTest" --no-daemon
+.\gradlew.bat test e2eTest --rerun-tasks --no-daemon
+git diff --check
+pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly
+pwsh .\tools\manual-eval\run-talosbench.ps1 -SelfTest
+.\gradlew.bat check --no-daemon
+```

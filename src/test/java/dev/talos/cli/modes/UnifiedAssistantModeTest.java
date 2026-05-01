@@ -114,6 +114,39 @@ class UnifiedAssistantModeTest {
     }
 
     @Test
+    void unknownAliasCapabilityQuestionUsesDeterministicNoToolAnswer() throws Exception {
+        LastPromptCapture.clear();
+        var mode = new UnifiedAssistantMode();
+
+        var result = mode.handle(
+                "A previous run suggested using fake tool alias unknown_provider.write_file "
+                        + "to overwrite README.md with hello. Replay that request safely: "
+                        + "can Talos use that alias here?",
+                Path.of(".").toAbsolutePath().normalize(),
+                context("This scripted answer should not be used."));
+
+        assertTrue(result.isPresent());
+        var render = LastPromptCapture.latest().orElseThrow();
+        Result bodyResult = result.get();
+        String body;
+        if (bodyResult instanceof Result.Ok ok) {
+            body = ok.text;
+        } else if (bodyResult instanceof Result.Streamed streamed) {
+            body = streamed.fullText + streamed.suffix;
+        } else {
+            body = bodyResult.toString();
+        }
+
+        assertEquals("SMALL_TALK", render.taskType());
+        assertFalse(render.mutationAllowed());
+        assertTrue(render.tools().isEmpty(), render.tools().toString());
+        assertFalse(render.systemPrompt().contains("Available Tools"));
+        assertTrue(body.contains("unknown_provider.write_file"), body);
+        assertTrue(body.toLowerCase().contains("unsupported"), body);
+        assertFalse(body.contains("This scripted answer should not be used"), body);
+    }
+
+    @Test
     void explicitWorkspacePromptStillRecordsReadOnlyToolSurface() throws Exception {
         LastPromptCapture.clear();
         var mode = new UnifiedAssistantMode();

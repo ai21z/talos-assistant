@@ -1,4 +1,7 @@
 package dev.talos.tools;
+
+import dev.talos.runtime.toolcall.ToolAliasPolicy;
+
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -14,8 +17,8 @@ import org.slf4j.LoggerFactory;
  * (TurnProcessor) and future MCP/tool integration layers.
  *
  * <p>Supports fuzzy tool name resolution: if exact lookup fails, the
- * registry tries stripping common prefixes ({@code talos.}) and
- * matching well-known aliases (e.g. {@code file_write → talos.write_file}).
+ * registry tries stripping common prefixes ({@code talos.}) and delegates
+ * known tool-name aliases to {@link ToolAliasPolicy}.
  */
 public final class ToolRegistry {
     private static final Logger LOG = LoggerFactory.getLogger(ToolRegistry.class);
@@ -69,43 +72,6 @@ public final class ToolRegistry {
         return strict;
     }
 
-    /**
-     * Common aliases that models emit instead of the canonical {@code talos.}
-     * name. Maps alias → canonical tool name.
-     */
-    private static final Map<String, String> ALIASES = Map.ofEntries(
-            // snake_case variants
-            Map.entry("file_write",    "talos.write_file"),
-            Map.entry("write_file",    "talos.write_file"),
-            Map.entry("file_create",   "talos.write_file"),
-            Map.entry("create_file",   "talos.write_file"),
-            Map.entry("file_read",     "talos.read_file"),
-            Map.entry("read_file",     "talos.read_file"),
-            Map.entry("file_edit",     "talos.edit_file"),
-            Map.entry("edit_file",     "talos.edit_file"),
-            Map.entry("list_dir",      "talos.list_dir"),
-            Map.entry("list_directory","talos.list_dir"),
-            Map.entry("dir_list",      "talos.list_dir"),
-            // Unix muscle-memory: models trained on shell transcripts frequently
-            // emit bare `ls` (and, via the separator-rewrite above, `talos:ls`
-            // → `talos.ls` → alias lookup of "ls"). Observed: gemma4:26b,
-            // test-output.txt Apr 2026 — two wasted tool-loop iterations on
-            // "Unknown tool: ls" / "Unknown tool: talos:ls" before abandoning
-            // the listing attempt. One entry closes both.
-            Map.entry("ls",            "talos.list_dir"),
-            Map.entry("grep",          "talos.grep"),
-            Map.entry("search",        "talos.grep"),
-            Map.entry("retrieve",      "talos.retrieve"),
-            // camelCase variants (models frequently emit these)
-            Map.entry("writefile",     "talos.write_file"),
-            Map.entry("createfile",    "talos.write_file"),
-            Map.entry("readfile",      "talos.read_file"),
-            Map.entry("editfile",      "talos.edit_file"),
-            Map.entry("listdir",       "talos.list_dir"),
-            Map.entry("listdirectory", "talos.list_dir"),
-            Map.entry("grepsearch",    "talos.grep")
-    );
-
     public void register(TalosTool tool) {
         tools.put(tool.name(), tool);
     }
@@ -122,20 +88,7 @@ public final class ToolRegistry {
     public TalosTool get(String name) {
         if (name == null) return null;
 
-        // Separator normalization: local models frequently emit "talos:X",
-        // "talos/X", "talos-X", "talos_X" instead of the canonical "talos.X"
-        // (observed: gemma4:26b mixed colon and dot in the same turn,
-        // wasting two tool-loop iterations on "Unknown tool" errors). Rewrite
-        // any non-dot separator immediately after the "talos" prefix once
-        // before the cache lookup. Bounded to the prefix so unrelated tokens
-        // containing these characters (e.g., an embedded path) are untouched.
-        if (name.length() > 5) {
-            char c = name.charAt(5);
-            if ((c == ':' || c == '/' || c == '-' || c == '_')
-                    && name.regionMatches(true, 0, "talos", 0, 5)) {
-                name = "talos." + name.substring(6);
-            }
-        }
+        name = ToolAliasPolicy.normalizeTalosSeparator(name);
 
         // 1. Exact match
         TalosTool tool = tools.get(name);
@@ -158,31 +111,23 @@ public final class ToolRegistry {
             }
         }
 
-        // 3. Known alias mapping
-        String canonical = ALIASES.get(name);
-        if (canonical != null) {
-            tool = tools.get(canonical);
+        // 3. Explicit canonical/alias/backend profile policy.
+        ToolAliasPolicy.Decision decision = ToolAliasPolicy.resolve(name);
+        if (decision.status() == ToolAliasPolicy.AliasDecisionStatus.REJECTED_UNKNOWN_NAMESPACE) {
+            return null;
+        }
+        if (decision.accepted()) {
+            tool = tools.get(decision.canonicalToolName());
             if (tool != null) {
-                aliasRescueCount.incrementAndGet();
-                LOG.debug("Alias tool match: '{}' → '{}'", name, canonical);
+                if (!tool.name().equals(name)) {
+                    aliasRescueCount.incrementAndGet();
+                }
+                LOG.debug("Alias tool match: '{}' → '{}'", name, decision.canonicalToolName());
                 return tool;
             }
         }
 
-        // 4. Also try alias after stripping talos. prefix
-        if (name.startsWith("talos.")) {
-            canonical = ALIASES.get(name.substring(6));
-            if (canonical != null) {
-                tool = tools.get(canonical);
-                if (tool != null) {
-                    aliasRescueCount.incrementAndGet();
-                    LOG.debug("Alias tool match (stripped prefix): '{}' → '{}'", name, canonical);
-                    return tool;
-                }
-            }
-        }
-
-        // 5. Case-insensitive normalization: lowercase the name (handles camelCase
+        // 4. Case-insensitive normalization: lowercase the name (handles camelCase
         //    like writeFile → writefile, ReadFile → readfile) and retry alias lookup
         String lowered = name.toLowerCase(java.util.Locale.ROOT);
         if (!lowered.equals(name)) {
@@ -202,26 +147,14 @@ public final class ToolRegistry {
                     return tool;
                 }
             }
-            // Try alias lookup with lowered name
-            canonical = ALIASES.get(lowered);
-            if (canonical != null) {
-                tool = tools.get(canonical);
+            // Try explicit alias policy with lowered name.
+            decision = ToolAliasPolicy.resolve(lowered);
+            if (decision.accepted()) {
+                tool = tools.get(decision.canonicalToolName());
                 if (tool != null) {
                     aliasRescueCount.incrementAndGet();
-                    LOG.debug("Case-normalized alias match: '{}' → '{}'", name, canonical);
+                    LOG.debug("Case-normalized alias match: '{}' → '{}'", name, decision.canonicalToolName());
                     return tool;
-                }
-            }
-            // Try alias after stripping talos. prefix from lowered name
-            if (lowered.startsWith("talos.")) {
-                canonical = ALIASES.get(lowered.substring(6));
-                if (canonical != null) {
-                    tool = tools.get(canonical);
-                    if (tool != null) {
-                        aliasRescueCount.incrementAndGet();
-                        LOG.debug("Case-normalized alias match (stripped): '{}' → '{}'", name, canonical);
-                        return tool;
-                    }
                 }
             }
         }

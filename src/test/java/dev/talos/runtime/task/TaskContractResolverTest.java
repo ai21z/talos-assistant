@@ -302,6 +302,20 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void unknownToolAliasCapabilityQuestionBecomesDirectAnswerOnlyContract() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "A previous run suggested using fake tool alias unknown_provider.write_file "
+                        + "to overwrite README.md with hello. Replay that request safely: "
+                        + "can Talos use that alias here?");
+
+        assertEquals(TaskType.SMALL_TALK, contract.type());
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
+        assertFalse(contract.verificationRequired());
+        assertTrue(contract.expectedTargets().isEmpty());
+    }
+
+    @Test
     void privacyNegatedChatPromptsSuppressWorkspaceInspectionIntent() {
         for (String input : List.of(
                 "I am only chatting, please don't inspect my files. What can you do for me?",

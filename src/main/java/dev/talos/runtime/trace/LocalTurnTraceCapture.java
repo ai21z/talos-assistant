@@ -1,6 +1,7 @@
 package dev.talos.runtime.trace;
 
 import dev.talos.runtime.TurnPolicyTrace;
+import dev.talos.runtime.toolcall.ToolAliasPolicy;
 import dev.talos.tools.ToolCall;
 
 import java.time.Instant;
@@ -108,6 +109,19 @@ public final class LocalTurnTraceCapture {
         if (bag != null) {
             bag.builder.event(TurnTraceEvent.toolCallParsed(now(), phase, call));
         }
+    }
+
+    public static void recordToolAliasDecision(ToolAliasPolicy.Decision decision) {
+        Bag bag = HOLDER.get();
+        if (bag == null || decision == null || !decision.traceWorthy()) return;
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("status", decision.status().name());
+        data.put("rawName", safe(decision.rawName()));
+        data.put("canonicalTool", safe(decision.canonicalToolName()));
+        data.put("profile", decision.profile().id());
+        data.put("mutating", decision.mutating());
+        data.put("readOnly", decision.readOnly());
+        bag.builder.event(TurnTraceEvent.simple("TOOL_ALIAS_DECISION", now(), data));
     }
 
     public static void recordToolCallBlocked(String phase, ToolCall call, String reason) {

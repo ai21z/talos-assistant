@@ -8,6 +8,7 @@ import dev.talos.runtime.TurnRecord;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.TraceRedactor;
 import dev.talos.runtime.trace.TurnTraceEvent;
+import dev.talos.runtime.toolcall.ToolCallSupport;
 
 import java.nio.file.Path;
 import java.util.Comparator;
@@ -410,12 +411,7 @@ public final class ExplainLastTurnCommand implements Command {
     }
 
     static boolean isMutatingTool(String name) {
-        if (name == null) return false;
-        String normalized = name.toLowerCase(Locale.ROOT);
-        return normalized.equals("write_file")
-                || normalized.equals("edit_file")
-                || normalized.endsWith(".write_file")
-                || normalized.endsWith(".edit_file");
+        return ToolCallSupport.isMutatingTool(name);
     }
 
     private static String preview(String text) {
