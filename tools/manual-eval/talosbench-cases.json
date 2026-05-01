@@ -969,11 +969,13 @@
         }
       },
       "prompts": [
-        "Replace README.md exactly with the text below and no extra prose:\n\nT61 exact README\nLine two",
-        "That was exact literal content. Retry if needed and keep README.md exactly as requested."
+        "Edit README.md now using talos.write_file. The complete file must contain exactly two lines: first line T61 exact README; second line Line two; no other characters.",
+        "Edit README.md now using talos.write_file. This is a retry after the denied attempt. The complete file must contain exactly two lines: first line T61 exact README; second line Line two; no other characters."
       ],
       "approvalInputsByPrompt": [
-        [],
+        [
+          "n"
+        ],
         [
           "y"
         ]

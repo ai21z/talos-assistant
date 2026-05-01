@@ -442,6 +442,45 @@ function Assert-TalosBenchContains {
     }
 }
 
+function Get-TalosBenchSelfTestCases {
+    $path = if ([string]::IsNullOrWhiteSpace($CasesPath)) {
+        Join-Path $PSScriptRoot "talosbench-cases.json"
+    } else {
+        Resolve-RepoPath $CasesPath
+    }
+    if (-not (Test-Path -LiteralPath $path)) {
+        throw "Self-test failed: cases file not found: $path"
+    }
+    return (Get-Content -LiteralPath $path -Raw | ConvertFrom-Json).cases
+}
+
+function Assert-TalosBenchLiteralPromptTransport {
+    $literalCase = Get-CaseById -Cases @(Get-TalosBenchSelfTestCases) -Id "t61-literal-readme-write-after-retry"
+    if ($null -eq $literalCase) {
+        throw "Self-test failed: missing t61-literal-readme-write-after-retry case."
+    }
+
+    foreach ($prompt in @($literalCase.prompts)) {
+        if (([string]$prompt).Contains("`r") -or ([string]$prompt).Contains("`n")) {
+            throw "Self-test failed: literal README audit prompt contains physical newlines and can be split by the REPL."
+        }
+    }
+
+    $scriptedText = (@(New-TalosBenchInputLines -Case $literalCase) -join [Environment]::NewLine) + [Environment]::NewLine
+    $physicalLines = @($scriptedText -split "`r?`n")
+    foreach ($payloadLine in @("T61 exact README", "Line two")) {
+        if ($physicalLines -contains $payloadLine) {
+            throw "Self-test failed: literal README payload line '$payloadLine' would be submitted as an independent REPL turn."
+        }
+    }
+
+    $payloadPrompts = @($physicalLines | Where-Object {
+            $_.IndexOf("T61 exact README", [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+            $_.IndexOf("Line two", [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+        })
+    Assert-TalosBenchEqual -Name "literal README payload prompt count" -Expected @($literalCase.prompts).Count -Actual $payloadPrompts.Count
+}
+
 function Invoke-TalosBenchSelfTest {
     $traceFixture = @"
 Trace Detail
@@ -502,6 +541,7 @@ Local Trace
         throw "Self-test failed: /last trace appeared before the scripted approval input."
     }
     Assert-TalosBenchEqual -Name "input line last" -Expected "/q" -Actual $lines[$lines.Count - 1]
+    Assert-TalosBenchLiteralPromptTransport
 
     Write-Output "TalosBench self-test passed."
 }

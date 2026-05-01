@@ -84,6 +84,24 @@ need scripted approval input. The runner always appends `/last trace` after all
 prompts and approvals. If a scripted approval case does not produce a recognizable
 trace block, the case fails with a diagnostic instead of silently passing.
 
+## Multiline Literal Prompts
+
+TalosBench drives the current REPL through line-oriented stdin. Until Talos has a
+dedicated multiline prompt transport, a prompt string that contains physical
+CR/LF characters can be split into separate user turns.
+
+For literal audit fixtures that need multiline target content, write the logical
+prompt as one physical line and describe line breaks explicitly:
+
+```text
+Edit README.md now using talos.write_file. The complete file must contain exactly two lines: first line T61 exact README; second line Line two; no other characters.
+```
+
+Manual audits should use the same discipline: submit one logical prompt per
+Enter keypress, keep the literal line-break description on that same submitted
+line, then run `/last trace` after the answer. Do not paste a raw multiline
+literal payload into the current REPL for release-gate evidence.
+
 ## Output
 
 Workspaces:
