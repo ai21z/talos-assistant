@@ -695,6 +695,7 @@
     {
       "id": "t59-proposal-follow-up-apply-readme",
       "category": "t59/active-task-context",
+      "manualRequired": true,
       "workspaceFixture": {
         "files": {
           "README.md": "# Sample Project\n\nThis project needs clearer setup and usage notes.\n",
