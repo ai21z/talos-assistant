@@ -604,7 +604,10 @@
       ],
       "forbiddenOutputSubstrings": [
         "talos.write_file",
-        "talos.edit_file"
+        "talos.edit_file",
+        "report.txt",
+        "extracted_report.txt",
+        "failure policy stopped"
       ],
       "requiredOutputSubstrings": [
         "Tool calls:",
@@ -775,6 +778,13 @@
         "promptAuditTaskType": "WORKSPACE_EXPLAIN",
         "promptAuditEvidenceObligationContains": [
           "UNSUPPORTED_CAPABILITY_CHECK_REQUIRED"
+        ],
+        "localTraceOutcomeContains": [
+          "ADVISORY_ONLY"
+        ],
+        "localTraceOutcomeExcludes": [
+          "READ_ONLY_ANSWERED",
+          "COMPLETE"
         ]
       },
       "blockerConditions": [

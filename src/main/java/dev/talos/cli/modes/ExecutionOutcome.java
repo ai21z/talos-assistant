@@ -140,6 +140,7 @@ record ExecutionOutcome(
         CurrentTurnPlan safePlan = plan == null ? compatibilityPlan(messages) : plan;
         TaskContract contract = safePlan.taskContract();
         boolean mutationRequested = contract.mutationRequested();
+        boolean unsupportedDocumentCapabilityLimited = hasUnsupportedDocumentCapabilityLimit(loopResult);
 
         String shaped = AssistantTurnExecutor.overrideUnsupportedDocumentClaimsIfNeeded(
                 current, loopResult);
@@ -220,6 +221,7 @@ record ExecutionOutcome(
                 falseMutationClaim,
                 inspectUnderCompleted,
                 false,
+                unsupportedDocumentCapabilityLimited,
                 missingEvidence,
                 protectedReadApprovalMissing,
                 VerificationStatus.NOT_RUN);
@@ -270,6 +272,7 @@ record ExecutionOutcome(
                 falseMutationClaim,
                 inspectUnderCompleted,
                 false,
+                unsupportedDocumentCapabilityLimited,
                 missingEvidence,
                 protectedReadApprovalMissing,
                 verificationStatus);
@@ -293,7 +296,7 @@ record ExecutionOutcome(
                         partialMutation,
                         falseMutationClaim,
                         inspectUnderCompleted,
-                        unsupportedDocumentCapabilityOverride,
+                        unsupportedDocumentCapabilityLimited,
                         webDiagnosticGroundedOverride,
                         selectorGroundedOverride,
                         verificationStatus,
@@ -423,6 +426,7 @@ record ExecutionOutcome(
                 false,
                 false,
                 advisoryOnly,
+                false,
                 missingEvidence,
                 protectedReadApprovalMissing,
                 VerificationStatus.NOT_RUN);
@@ -526,6 +530,7 @@ record ExecutionOutcome(
             boolean falseMutationClaim,
             boolean inspectUnderCompleted,
             boolean ungroundedAdvisory,
+            boolean unsupportedCapabilityLimited,
             boolean missingEvidence,
             boolean protectedReadApprovalMissing,
             VerificationStatus verificationStatus
@@ -542,6 +547,7 @@ record ExecutionOutcome(
                 falseMutationClaim,
                 inspectUnderCompleted,
                 ungroundedAdvisory,
+                unsupportedCapabilityLimited,
                 missingEvidence,
                 protectedReadApprovalMissing,
                 verificationStatus));
@@ -556,7 +562,7 @@ record ExecutionOutcome(
             boolean partialMutation,
             boolean falseMutationClaim,
             boolean inspectUnderCompleted,
-            boolean unsupportedDocumentCapabilityOverride,
+            boolean unsupportedDocumentCapabilityLimited,
             boolean webDiagnosticGroundedOverride,
             boolean selectorGroundedOverride,
             VerificationStatus verificationStatus,
@@ -600,7 +606,7 @@ record ExecutionOutcome(
                     TruthWarningType.INSPECT_UNDER_COMPLETION,
                     "The answer sounded complete after an inspection-only tool path."));
         }
-        if (unsupportedDocumentCapabilityOverride) {
+        if (unsupportedDocumentCapabilityLimited) {
             warnings.add(TruthWarning.of(
                     TruthWarningType.UNSUPPORTED_DOCUMENT_CAPABILITY_NOTE,
                     "Unsupported binary document reads were corrected to capability-based wording."));
@@ -692,6 +698,19 @@ record ExecutionOutcome(
                 obligation,
                 contract == null ? java.util.Set.of() : contract.expectedTargets(),
                 toolOutcomes);
+    }
+
+    private static boolean hasUnsupportedDocumentCapabilityLimit(ToolCallLoop.LoopResult loopResult) {
+        if (loopResult == null || loopResult.toolOutcomes() == null) return false;
+        for (ToolCallLoop.ToolOutcome outcome : loopResult.toolOutcomes()) {
+            if (outcome == null) continue;
+            if (!"talos.read_file".equals(outcome.toolName())) continue;
+            if (outcome.success()) continue;
+            if (dev.talos.tools.ToolError.UNSUPPORTED_FORMAT.equals(outcome.errorCode())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean protectedReadApprovalMissing(

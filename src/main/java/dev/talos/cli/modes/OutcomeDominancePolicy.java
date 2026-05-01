@@ -19,6 +19,7 @@ final class OutcomeDominancePolicy {
             boolean falseMutationClaim,
             boolean inspectUnderCompleted,
             boolean ungroundedAdvisory,
+            boolean unsupportedCapabilityLimited,
             boolean missingEvidence,
             boolean protectedReadApprovalMissing,
             ExecutionOutcome.VerificationStatus verificationStatus
@@ -27,6 +28,40 @@ final class OutcomeDominancePolicy {
             verificationStatus = verificationStatus == null
                     ? ExecutionOutcome.VerificationStatus.NOT_RUN
                     : verificationStatus;
+        }
+
+        Facts(
+                TaskContract contract,
+                boolean invalidMutationArguments,
+                boolean malformedProtocolDebris,
+                boolean readOnlyDeniedMutation,
+                boolean failedActionObligation,
+                boolean deniedMutation,
+                boolean deniedProtectedRead,
+                boolean partialMutation,
+                boolean falseMutationClaim,
+                boolean inspectUnderCompleted,
+                boolean ungroundedAdvisory,
+                boolean missingEvidence,
+                boolean protectedReadApprovalMissing,
+                ExecutionOutcome.VerificationStatus verificationStatus
+        ) {
+            this(
+                    contract,
+                    invalidMutationArguments,
+                    malformedProtocolDebris,
+                    readOnlyDeniedMutation,
+                    failedActionObligation,
+                    deniedMutation,
+                    deniedProtectedRead,
+                    partialMutation,
+                    falseMutationClaim,
+                    inspectUnderCompleted,
+                    ungroundedAdvisory,
+                    false,
+                    missingEvidence,
+                    protectedReadApprovalMissing,
+                    verificationStatus);
         }
     }
 
@@ -41,6 +76,7 @@ final class OutcomeDominancePolicy {
         if (facts == null) {
             facts = new Facts(
                     null,
+                    false,
                     false,
                     false,
                     false,
@@ -89,7 +125,8 @@ final class OutcomeDominancePolicy {
         if (verificationRequiredButNotRun(facts)) {
             return advisory();
         }
-        if (facts.missingEvidence()
+        if (facts.unsupportedCapabilityLimited()
+                || facts.missingEvidence()
                 || facts.falseMutationClaim()
                 || facts.inspectUnderCompleted()
                 || facts.ungroundedAdvisory()) {

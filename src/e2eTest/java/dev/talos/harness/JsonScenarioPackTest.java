@@ -1409,6 +1409,48 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/80-unsupported-docx-stops-before-speculative-fallbacks.json] 80: unsupported docx stops before speculative fallbacks")
+    void unsupportedDocxStopsBeforeSpeculativeFallbacks() {
+        var loaded = JsonScenarioLoader.load("scenarios/80-unsupported-docx-stops-before-speculative-fallbacks.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("[Document capability note:")
+                    .assertAnswerContains("report.docx")
+                    .assertAnswerContains("current local text-tool surface")
+                    .assertAnswerNotContains("report.txt")
+                    .assertAnswerNotContains("extracted_report.txt")
+                    .assertAnswerNotContains("failure policy stopped")
+                    .assertAnswerNotContains("This response should not be reached")
+                    .assertLocalTraceRecorded();
+            assertEquals("ADVISORY_ONLY", result.localTrace().outcome().status());
+            assertEquals("ADVISORY_ONLY", result.localTrace().outcome().classification());
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/81-unsupported-docx-allows-explicit-converted-target.json] 81: unsupported docx allows explicit converted target")
+    void unsupportedDocxAllowsExplicitConvertedTarget() {
+        var loaded = JsonScenarioLoader.load("scenarios/81-unsupported-docx-allows-explicit-converted-target.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(0, 0, 0, 0)
+                    .assertAnswerContains("[Document capability note:")
+                    .assertAnswerContains("report.docx")
+                    .assertAnswerContains("report.txt says: Converted report text fixture.")
+                    .assertAnswerNotContains("failure policy stopped")
+                    .assertLocalTraceRecorded();
+            assertEquals("ADVISORY_ONLY", result.localTrace().outcome().status());
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/33-read-only-web-diagnostics-short-circuit.json] 33: read-only web diagnostics stop before iteration cap")
     void readOnlyWebDiagnosticsShortCircuit() {
         var loaded = JsonScenarioLoader.load("scenarios/33-read-only-web-diagnostics-short-circuit.json");
