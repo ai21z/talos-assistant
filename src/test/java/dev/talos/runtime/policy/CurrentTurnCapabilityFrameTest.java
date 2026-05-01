@@ -69,6 +69,34 @@ class CurrentTurnCapabilityFrameTest {
     }
 
     @Test
+    void renderOmitsSuppressedContextDetailsFromModelGuidance() {
+        TaskContract contract = new TaskContract(
+                TaskType.SMALL_TALK,
+                false,
+                false,
+                false,
+                Set.of(),
+                Set.of(),
+                "I am only chatting, please don't inspect my files.");
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                contract,
+                ExecutionPhase.INSPECT,
+                List.of(),
+                List.of(),
+                List.of(),
+                "SUPPRESSED PROPOSED_CHANGES targets=[README.md] operation=APPLY_EDIT summary=Replace the README title",
+                CurrentTurnPlan.NONE_OR_NOT_DERIVED,
+                CurrentTurnPlan.NONE_OR_NOT_DERIVED);
+
+        String frame = CurrentTurnCapabilityFrame.render(plan);
+
+        assertFalse(frame.contains("[ActiveTaskContext]"));
+        assertFalse(frame.contains("README.md"));
+        assertFalse(frame.contains("Replace the README"));
+        assertFalse(frame.contains("Use active targets only for narrow deictic follow-ups"));
+    }
+
+    @Test
     void renderRedactsAndBoundsPlanDerivedActiveTaskContextFields() {
         TaskContract contract = new TaskContract(
                 TaskType.FILE_EDIT,

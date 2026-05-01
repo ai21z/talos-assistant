@@ -566,12 +566,8 @@ public final class AssistantTurnExecutor {
         List<String> nativeTools = ctx == null
                 ? defaultVisibleToolNames(taskContract, phase)
                 : NativeToolSpecPolicy.names(ctx.nativeToolSpecs());
-        String activeTaskContext = activeDecision == null
-                ? ActiveTaskContext.NONE_OR_NOT_DERIVED
-                : activeDecision.planContext().renderForPlan();
-        String artifactGoal = activeDecision == null
-                ? ActiveTaskContext.NONE_OR_NOT_DERIVED
-                : activeDecision.artifactGoal().renderForPlan();
+        String activeTaskContext = renderActiveTaskContextForPlan(activeDecision);
+        String artifactGoal = renderArtifactGoalForPlan(activeDecision);
         return CurrentTurnPlan.create(
                 taskContract,
                 phase,
@@ -581,6 +577,30 @@ public final class AssistantTurnExecutor {
                 activeTaskContext,
                 artifactGoal,
                 ActiveTaskContext.NONE_OR_NOT_DERIVED);
+    }
+
+    private static String renderActiveTaskContextForPlan(ActiveTaskContextPolicy.Decision activeDecision) {
+        if (activeDecision == null || activeDecision.planContext() == null) {
+            return ActiveTaskContext.NONE_OR_NOT_DERIVED;
+        }
+        ActiveTaskContext planContext = activeDecision.planContext();
+        if (planContext.state() == ActiveTaskContext.State.NONE) {
+            return ActiveTaskContext.NONE_OR_NOT_DERIVED;
+        }
+        if (planContext.state() == ActiveTaskContext.State.ACTIVE) {
+            return planContext.renderForPlan();
+        }
+        return "activeTaskContext{state=" + planContext.state() + "}";
+    }
+
+    private static String renderArtifactGoalForPlan(ActiveTaskContextPolicy.Decision activeDecision) {
+        if (activeDecision == null || activeDecision.planContext() == null) {
+            return ActiveTaskContext.NONE_OR_NOT_DERIVED;
+        }
+        if (activeDecision.planContext().state() != ActiveTaskContext.State.ACTIVE) {
+            return ActiveTaskContext.NONE_OR_NOT_DERIVED;
+        }
+        return activeDecision.artifactGoal().renderForPlan();
     }
 
     private static ActiveTaskContextPolicy.Decision activeTaskContextDecision(

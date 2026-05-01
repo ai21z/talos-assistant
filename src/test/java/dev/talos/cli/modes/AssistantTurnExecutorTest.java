@@ -225,6 +225,10 @@ class AssistantTurnExecutorTest {
             assertNotNull(trace.promptAudit());
             assertTrue(trace.promptAudit().activeTaskContext().contains("state=SUPPRESSED"),
                     trace.promptAudit().activeTaskContext());
+            assertFalse(trace.promptAudit().activeTaskContext().contains("README.md"),
+                    trace.promptAudit().activeTaskContext());
+            assertFalse(trace.promptAudit().activeTaskContext().contains("Replace the README"),
+                    trace.promptAudit().activeTaskContext());
             assertTrue(trace.promptAudit().artifactGoal().equals("NONE_OR_NOT_DERIVED")
                             || (!trace.promptAudit().artifactGoal().contains("README")
                             && !trace.promptAudit().artifactGoal().contains("APPLY_EDIT")),

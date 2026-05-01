@@ -7,6 +7,8 @@ import dev.talos.core.context.ConversationManager;
 import dev.talos.runtime.JsonSessionStore;
 import dev.talos.runtime.SessionData;
 import dev.talos.runtime.SessionStore;
+import dev.talos.runtime.context.ActiveTaskContext;
+import dev.talos.runtime.context.ArtifactGoal;
 
 import java.nio.file.Path;
 import java.time.Duration;
@@ -118,8 +120,11 @@ public final class SessionCommand implements Command {
         } else {
             turns = List.of();
         }
+        ActiveTaskContext activeTaskContext = mem == null ? ActiveTaskContext.none() : mem.activeTaskContext();
+        ArtifactGoal artifactGoal = mem == null ? ArtifactGoal.none() : mem.artifactGoal();
         return new SessionData(sessionId, workspace.toString(), sketch != null ? sketch : "",
-                turnCount, Instant.now(), turns, ctx.llm() != null ? ctx.llm().getModel() : "");
+                turnCount, Instant.now(), turns, ctx.llm() != null ? ctx.llm().getModel() : "",
+                activeTaskContext, artifactGoal);
     }
     /** The session ID for this workspace (for external use, e.g. auto-save). */
     public String sessionId() {

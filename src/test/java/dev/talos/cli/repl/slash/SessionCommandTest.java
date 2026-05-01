@@ -92,6 +92,28 @@ class SessionCommandTest {
             assertEquals("User is learning about Java.", freshCm.sketch());
             assertEquals(4, freshMem.getTurns().size()); // 2 pairs
         }
+        @Test void save_persistsActiveTaskContextAndArtifactGoal() throws Exception {
+            var st = store();
+            Path ws = Path.of("/active/project").toAbsolutePath().normalize();
+            var cmd = new SessionCommand(ws, st);
+            SessionMemory mem = new SessionMemory();
+            ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+                    3, "trace-save", List.of("README.md"), "Improve README.");
+            ArtifactGoal goal = ArtifactGoal.fromActiveContext(context);
+            mem.setActiveTaskContext(context);
+            mem.setArtifactGoal(goal);
+            Context ctx = Context.builder(new Config())
+                    .memory(mem)
+                    .conversationManager(new ConversationManager(mem))
+                    .build();
+
+            Result saveResult = cmd.execute("save", ctx);
+
+            assertInstanceOf(Result.Info.class, saveResult);
+            SessionData saved = st.load(cmd.sessionId()).orElseThrow();
+            assertEquals(context, saved.activeTaskContext());
+            assertEquals(goal, saved.artifactGoal());
+        }
         @Test void load_noSession_returnsInfo() throws Exception {
             var cmd = new SessionCommand(Path.of("/empty"), store());
             Result r = cmd.execute("load", minimalCtx());
