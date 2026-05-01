@@ -65,6 +65,13 @@ Run every non-manual case:
 pwsh .\tools\manual-eval\run-talosbench.ps1
 ```
 
+Create a timestamped T67 full-audit workspace with fixtures, runbook, and
+question list:
+
+```powershell
+pwsh .\tools\manual-eval\new-t67-audit-workspace.ps1
+```
+
 Run approval-sensitive cases only when you intentionally want to pipe the
 configured approval inputs:
 
