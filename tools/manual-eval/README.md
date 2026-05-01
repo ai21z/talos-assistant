@@ -4,6 +4,10 @@ This folder contains the first TalosBench live prompt runner. It runs installed
 Talos against controlled local fixtures and writes raw transcripts under
 `local/manual-testing/talosbench/`.
 
+The T61 pack is the T54 regression gate. It combines live prompt cases with
+deterministic runner self-tests so trace parsing, approval input ordering, and
+failure-truth assertions can be checked without launching Talos.
+
 TalosBench is intentionally local-first:
 
 - do not use real private documents as fixtures
@@ -42,6 +46,12 @@ Validate the case file:
 pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly
 ```
 
+Run deterministic runner self-tests:
+
+```powershell
+pwsh .\tools\manual-eval\run-talosbench.ps1 -SelfTest
+```
+
 Run selected non-approval cases:
 
 ```powershell
@@ -69,6 +79,11 @@ approval prompts can be fragile when fully scripted. For critical candidate
 evidence, prefer manual runs where a human watches the approval prompt and
 records the exact choice.
 
+Use `approvalInputsByPrompt` for multi-turn cases where only specific prompts
+need scripted approval input. The runner always appends `/last trace` after all
+prompts and approvals. If a scripted approval case does not produce a recognizable
+trace block, the case fails with a diagnostic instead of silently passing.
+
 ## Output
 
 Workspaces:
@@ -94,7 +109,7 @@ case id | status | category | blocker? | transcript path | notes
 
 ## Case Schema
 
-Starter cases live in `talosbench-cases.json`. T50 supports these fields:
+Starter cases live in `talosbench-cases.json`. The runner supports these fields:
 
 - `id`
 - `category`
@@ -111,15 +126,25 @@ Additional fields used by the runner:
 
 - `manualRequired`
 - `approvalInputs`
+- `approvalInputsByPrompt`
+- `traceAssertions`
 
-T51 should add structured `/last trace` parsing. T50 only performs transcript
-substring checks.
+`approvalInputsByPrompt` must have the same number of entries as `prompts`.
+Each entry is an array of approval input lines to send after that prompt.
 
 ## Trace Assertions
 
 Cases may include a `traceAssertions` object. The runner parses the latest
 `/last trace` text enough to assert runtime facts without committing raw
 transcripts.
+
+Trace parsing is section-aware:
+
+- Trace Detail fields use `Trace Detail`, `Last Turn Trace Detail`, or
+  `Current Turn Trace`.
+- Prompt Audit fields use the nested `Prompt Audit` block.
+- Local Trace fields use the `Local Trace` block.
+- ANSI terminal escapes are stripped before parsing.
 
 Supported fields:
 
@@ -130,9 +155,23 @@ Supported fields:
 - `nativeToolsExcludes`
 - `blockedContains`
 - `outcomeContains`
+- `outcomeExcludes`
 - `checkpointContains`
 - `verificationContains`
+- `verificationExcludes`
+- `localTraceOutcomeContains`
+- `localTraceOutcomeExcludes`
+- `localTraceVerificationContains`
+- `localTraceVerificationExcludes`
 - `repairContains`
+- `promptAuditTaskType`
+- `promptAuditActionObligationContains`
+- `promptAuditEvidenceObligationContains`
+- `promptAuditActiveTaskContextContains`
+- `promptAuditArtifactGoalContains`
+- `promptAuditCurrentTurnFrameContains`
+- `promptAuditHistoryContains`
+- `promptAuditRedactionContains`
 - `transcriptContains`
 - `transcriptExcludes`
 
@@ -145,10 +184,11 @@ Example:
   "phaseIncludes": ["INSPECT"],
   "nativeToolsContains": ["talos.list_dir"],
   "nativeToolsExcludes": ["talos.read_file", "talos.grep", "talos.retrieve"],
+  "localTraceOutcomeExcludes": ["FAILED"],
   "transcriptExcludes": ["SECRET=manual-test", "ALPHA-742"]
 }
 ```
 
 Trace parsing is intentionally conservative and string-based in this version.
-If assertions become too complex, add structured trace parsing in a later
-ticket instead of expanding ad hoc transcript logic indefinitely.
+If assertions become too complex, prefer adding a new narrowly named trace fact
+over expanding global transcript matching.

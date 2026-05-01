@@ -3,6 +3,7 @@ param(
     [string[]]$CaseId = @(),
     [switch]$ListCases,
     [switch]$ValidateOnly,
+    [switch]$SelfTest,
     [switch]$IncludeManualRequired,
     [string]$TalosPath = "",
     [string]$WorkspaceRoot = "local/manual-workspaces/talosbench",
@@ -118,9 +119,64 @@ function Get-LastRegexValue {
     return $matches[$matches.Count - 1].Groups[1].Value.Trim()
 }
 
+function Remove-AnsiSequences {
+    param([string]$Text)
+    if ($null -eq $Text) { return "" }
+    return [regex]::Replace($Text, "`e\[[0-?]*[ -/]*[@-~]", "")
+}
+
+function Get-TraceSection {
+    param(
+        [string]$Text,
+        [string[]]$HeaderNames
+    )
+
+    $clean = Remove-AnsiSequences -Text $Text
+    $lines = $clean -split "`r?`n"
+    $sectionHeaders = @(
+        "Current Turn Trace",
+        "Last Turn Trace Detail",
+        "Trace Detail",
+        "Local Trace",
+        "Events"
+    )
+
+    $start = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $trimmed = $lines[$i].Trim()
+        foreach ($header in $HeaderNames) {
+            if ($trimmed -eq $header -or $trimmed.EndsWith("> $header", [System.StringComparison]::OrdinalIgnoreCase)) {
+                $start = $i
+            }
+        }
+    }
+    if ($start -lt 0) { return "" }
+
+    $buffer = New-Object System.Collections.Generic.List[string]
+    for ($i = $start + 1; $i -lt $lines.Count; $i++) {
+        $trimmed = $lines[$i].Trim()
+        if (($sectionHeaders -contains $trimmed) -and -not ($HeaderNames -contains $trimmed)) {
+            break
+        }
+        [void]$buffer.Add($lines[$i])
+    }
+    return ($buffer -join "`n")
+}
+
 function Get-TraceFacts {
     param([string]$Text)
-    $contractLine = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Contract:\s+(.+)$" -CaseSensitive
+    $cleanText = Remove-AnsiSequences -Text $Text
+    $traceDetail = Get-TraceSection -Text $cleanText -HeaderNames @("Trace Detail", "Last Turn Trace Detail", "Current Turn Trace")
+    if ([string]::IsNullOrWhiteSpace($traceDetail)) {
+        $traceDetail = $cleanText
+    }
+    $localTrace = Get-TraceSection -Text $cleanText -HeaderNames @("Local Trace")
+    $promptAudit = Get-TraceSection -Text $localTrace -HeaderNames @("Prompt Audit")
+    if ([string]::IsNullOrWhiteSpace($promptAudit)) {
+        $promptAudit = Get-TraceSection -Text $cleanText -HeaderNames @("Prompt Audit")
+    }
+
+    $contractLine = Get-LastRegexValue -Text $traceDetail -Pattern "(?m)^\s*Contract:\s+(.+)$" -CaseSensitive
     $contract = ""
     $mutationAllowed = ""
     if (-not [string]::IsNullOrWhiteSpace($contractLine)) {
@@ -129,30 +185,44 @@ function Get-TraceFacts {
         $mutationMatch = [regex]::Match($contractLine, "mutationAllowed=(true|false)", [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
         if ($mutationMatch.Success) { $mutationAllowed = $mutationMatch.Groups[1].Value.ToLowerInvariant() }
     }
-    $currentTurnFrame = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*currentTurnFrame:\s+(.+)$"
-    $framePreview = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*framePreview:\s+(.+)$"
+    $currentTurnFrame = Get-LastRegexValue -Text $promptAudit -Pattern "(?m)^\s*currentTurnFrame:\s+(.+)$"
+    $framePreview = Get-LastRegexValue -Text $promptAudit -Pattern "(?m)^\s*framePreview:\s+(.+)$"
     if (-not [string]::IsNullOrWhiteSpace($framePreview)) {
         $currentTurnFrame = "$currentTurnFrame $framePreview".Trim()
     }
 
+    $traceOutcome = Get-LastRegexValue -Text $traceDetail -Pattern "(?m)^\s*Outcome:\s+(.+)$" -CaseSensitive
+    $localTraceOutcome = Get-LastRegexValue -Text $localTrace -Pattern "(?m)^\s*Outcome:\s+(.+)$" -CaseSensitive
+    $fallbackOutcome = Get-LastRegexValue -Text $cleanText -Pattern "(?m)^\s*Outcome:\s+(.+)$" -CaseSensitive
+    $outcome = $localTraceOutcome
+    if ([string]::IsNullOrWhiteSpace($outcome)) { $outcome = $traceOutcome }
+    if ([string]::IsNullOrWhiteSpace($outcome)) { $outcome = $fallbackOutcome }
+
+    $traceVerification = Get-LastRegexValue -Text $traceDetail -Pattern "(?m)^\s*Verification:\s+(.+)$" -CaseSensitive
+    $localTraceVerification = Get-LastRegexValue -Text $localTrace -Pattern "(?m)^\s*Verification:\s+(.+)$" -CaseSensitive
+    $verification = $localTraceVerification
+    if ([string]::IsNullOrWhiteSpace($verification)) { $verification = $traceVerification }
+
     return [pscustomobject]@{
         Contract = $contract
         MutationAllowed = $mutationAllowed
-        Phase = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Phase:\s+(.+)$" -CaseSensitive
-        NativeTools = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Native tools:\s+(.+)$" -CaseSensitive
-        Blocked = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Blocked:\s+(.+)$" -CaseSensitive
-        Outcome = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Outcome:\s+(.+)$" -CaseSensitive
-        Checkpoint = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Checkpoint:\s+(.+)$" -CaseSensitive
-        Verification = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Verification:\s+(.+)$" -CaseSensitive
-        Repair = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*Repair:\s+(.+)$" -CaseSensitive
-        PromptAuditTaskType = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*taskType:\s+([A-Z_]+).*$"
-        PromptAuditActionObligation = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*actionObligation:\s+(.+)$"
-        PromptAuditEvidenceObligation = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*evidenceObligation:\s+(.+)$"
-        PromptAuditActiveTaskContext = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*activeTaskContext:\s+(.+)$"
-        PromptAuditArtifactGoal = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*artifactGoal:\s+(.+)$"
+        Phase = Get-LastRegexValue -Text $traceDetail -Pattern "(?m)^\s*Phase:\s+(.+)$" -CaseSensitive
+        NativeTools = Get-LastRegexValue -Text $traceDetail -Pattern "(?m)^\s*Native tools:\s+(.+)$" -CaseSensitive
+        Blocked = Get-LastRegexValue -Text $traceDetail -Pattern "(?m)^\s*Blocked:\s+(.+)$" -CaseSensitive
+        Outcome = $outcome
+        LocalTraceOutcome = $localTraceOutcome
+        Checkpoint = Get-LastRegexValue -Text $traceDetail -Pattern "(?m)^\s*Checkpoint:\s+(.+)$" -CaseSensitive
+        Verification = $verification
+        LocalTraceVerification = $localTraceVerification
+        Repair = Get-LastRegexValue -Text $traceDetail -Pattern "(?m)^\s*Repair:\s+(.+)$" -CaseSensitive
+        PromptAuditTaskType = Get-LastRegexValue -Text $promptAudit -Pattern "(?m)^\s*taskType:\s+([A-Z_]+).*$"
+        PromptAuditActionObligation = Get-LastRegexValue -Text $promptAudit -Pattern "(?m)^\s*actionObligation:\s+(.+)$"
+        PromptAuditEvidenceObligation = Get-LastRegexValue -Text $promptAudit -Pattern "(?m)^\s*evidenceObligation:\s+(.+)$"
+        PromptAuditActiveTaskContext = Get-LastRegexValue -Text $promptAudit -Pattern "(?m)^\s*activeTaskContext:\s+(.+)$"
+        PromptAuditArtifactGoal = Get-LastRegexValue -Text $promptAudit -Pattern "(?m)^\s*artifactGoal:\s+(.+)$"
         PromptAuditCurrentTurnFrame = $currentTurnFrame
-        PromptAuditHistory = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*history:\s+(.+)$"
-        PromptAuditRedaction = Get-LastRegexValue -Text $Text -Pattern "(?m)^\s*redaction:\s+(.+)$"
+        PromptAuditHistory = Get-LastRegexValue -Text $promptAudit -Pattern "(?m)^\s*history:\s+(.+)$"
+        PromptAuditRedaction = Get-LastRegexValue -Text $promptAudit -Pattern "(?m)^\s*redaction:\s+(.+)$"
     }
 }
 
@@ -207,6 +277,11 @@ function Test-TraceAssertions {
             $failures += "trace outcome missing '$item'"
         }
     }
+    foreach ($item in Get-AssertionArray -Assertions $Assertions -Name "outcomeExcludes") {
+        if ($facts.Outcome.IndexOf([string]$item, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+            $failures += "trace outcome unexpectedly contained '$item'"
+        }
+    }
     foreach ($item in Get-AssertionArray -Assertions $Assertions -Name "checkpointContains") {
         if ($facts.Checkpoint.IndexOf([string]$item, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
             $failures += "trace checkpoint missing '$item'"
@@ -215,6 +290,31 @@ function Test-TraceAssertions {
     foreach ($item in Get-AssertionArray -Assertions $Assertions -Name "verificationContains") {
         if ($facts.Verification.IndexOf([string]$item, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
             $failures += "trace verification missing '$item'"
+        }
+    }
+    foreach ($item in Get-AssertionArray -Assertions $Assertions -Name "verificationExcludes") {
+        if ($facts.Verification.IndexOf([string]$item, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+            $failures += "trace verification unexpectedly contained '$item'"
+        }
+    }
+    foreach ($item in Get-AssertionArray -Assertions $Assertions -Name "localTraceOutcomeContains") {
+        if ($facts.LocalTraceOutcome.IndexOf([string]$item, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+            $failures += "local trace outcome missing '$item'"
+        }
+    }
+    foreach ($item in Get-AssertionArray -Assertions $Assertions -Name "localTraceOutcomeExcludes") {
+        if ($facts.LocalTraceOutcome.IndexOf([string]$item, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+            $failures += "local trace outcome unexpectedly contained '$item'"
+        }
+    }
+    foreach ($item in Get-AssertionArray -Assertions $Assertions -Name "localTraceVerificationContains") {
+        if ($facts.LocalTraceVerification.IndexOf([string]$item, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+            $failures += "local trace verification missing '$item'"
+        }
+    }
+    foreach ($item in Get-AssertionArray -Assertions $Assertions -Name "localTraceVerificationExcludes") {
+        if ($facts.LocalTraceVerification.IndexOf([string]$item, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+            $failures += "local trace verification unexpectedly contained '$item'"
         }
     }
     foreach ($item in Get-AssertionArray -Assertions $Assertions -Name "repairContains") {
@@ -276,6 +376,136 @@ function Test-TraceAssertions {
     return $failures
 }
 
+function Test-TranscriptHasLastTrace {
+    param([string]$Transcript)
+    $clean = Remove-AnsiSequences -Text $Transcript
+    return (
+        $clean.Contains("Last Turn Trace Detail") -or
+        $clean.Contains("Trace Detail") -or
+        $clean.Contains("Current Turn Trace")
+    )
+}
+
+function New-TalosBenchInputLines {
+    param($Case)
+
+    $inputLines = New-Object System.Collections.Generic.List[string]
+    $inputLines.Add("/session clear")
+    $inputLines.Add("/debug trace")
+    $prompts = @($Case.prompts)
+    $hasPromptApprovals = $Case.PSObject.Properties.Name -contains "approvalInputsByPrompt"
+    $promptApprovals = if ($hasPromptApprovals) { @($Case.approvalInputsByPrompt) } else { @() }
+    for ($promptIndex = 0; $promptIndex -lt $prompts.Count; $promptIndex++) {
+        $prompt = $prompts[$promptIndex]
+        $inputLines.Add([string]$prompt)
+        $approvals = if ($hasPromptApprovals) {
+            if ($promptIndex -lt $promptApprovals.Count) {
+                @($promptApprovals[$promptIndex])
+            } else {
+                @()
+            }
+        } else {
+            @($Case.approvalInputs)
+        }
+        foreach ($approval in $approvals) {
+            if (-not [string]::IsNullOrWhiteSpace($approval)) {
+                $inputLines.Add([string]$approval)
+            }
+        }
+    }
+    $inputLines.Add("/last trace")
+    $inputLines.Add("/q")
+    return @($inputLines)
+}
+
+function Assert-TalosBenchEqual {
+    param(
+        [string]$Name,
+        [object]$Expected,
+        [object]$Actual
+    )
+
+    if ($Expected -ne $Actual) {
+        throw "Self-test failed: $Name expected '$Expected' but got '$Actual'."
+    }
+}
+
+function Assert-TalosBenchContains {
+    param(
+        [string]$Name,
+        [string]$Text,
+        [string]$Needle
+    )
+
+    if ($Text.IndexOf($Needle, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+        throw "Self-test failed: $Name did not contain '$Needle'."
+    }
+}
+
+function Invoke-TalosBenchSelfTest {
+    $traceFixture = @"
+Trace Detail
+  Contract: FILE_EDIT mutationAllowed=true verificationRequired=true
+  Phase: initial=APPLY final=VERIFY
+  Native tools: talos.write_file, talos.read_file
+  Outcome: MUTATION_APPLIED
+  Verification: PASSED
+
+Local Trace
+  Local trace: trc-self-test
+  Prompt Audit
+    taskType: FILE_EDIT mutationAllowed=true verificationRequired=true
+    phase: APPLY
+    evidenceObligation: FILE_SYSTEM_EVIDENCE_REQUIRED
+    currentTurnFrame: injected
+    framePreview: README.md
+  Verification: PASSED
+  Outcome: OK (TURN_RECORDED)
+"@
+    $facts = Get-TraceFacts -Text $traceFixture
+    Assert-TalosBenchEqual -Name "trace detail contract" -Expected "FILE_EDIT" -Actual $facts.Contract
+    Assert-TalosBenchContains -Name "trace detail phase" -Text $facts.Phase -Needle "final=VERIFY"
+    Assert-TalosBenchContains -Name "prompt audit evidence" -Text $facts.PromptAuditEvidenceObligation -Needle "FILE_SYSTEM_EVIDENCE_REQUIRED"
+    Assert-TalosBenchContains -Name "prompt audit frame" -Text $facts.PromptAuditCurrentTurnFrame -Needle "README.md"
+    Assert-TalosBenchContains -Name "local trace outcome" -Text $facts.LocalTraceOutcome -Needle "OK"
+
+    $failedLocalTraceFixture = @"
+Trace Detail
+  Contract: FILE_EDIT mutationAllowed=true verificationRequired=true
+  Outcome: MUTATION_APPLIED
+  Verification: PASSED
+
+Local Trace
+  Outcome: FAILED (TURN_RECORD_FAILED)
+"@
+    $failedFacts = Get-TraceFacts -Text $failedLocalTraceFixture
+    Assert-TalosBenchContains -Name "legacy outcome prefers local trace" -Text $failedFacts.Outcome -Needle "FAILED"
+    Assert-TalosBenchContains -Name "failed local trace outcome" -Text $failedFacts.LocalTraceOutcome -Needle "FAILED"
+
+    $approvalCase = [pscustomobject]@{
+        prompts = @(
+            "Propose the smallest README.md edit.",
+            "Apply that README.md change now."
+        )
+        approvalInputsByPrompt = @(
+            @(),
+            @("a")
+        )
+    }
+    $lines = @(New-TalosBenchInputLines -Case $approvalCase)
+    $approvalIndex = [array]::LastIndexOf($lines, "a")
+    $lastTraceIndex = [array]::LastIndexOf($lines, "/last trace")
+    Assert-TalosBenchEqual -Name "input line first" -Expected "/session clear" -Actual $lines[0]
+    Assert-TalosBenchEqual -Name "input line second" -Expected "/debug trace" -Actual $lines[1]
+    Assert-TalosBenchEqual -Name "approval appears after second prompt" -Expected "Apply that README.md change now." -Actual $lines[$approvalIndex - 1]
+    if ($lastTraceIndex -le $approvalIndex) {
+        throw "Self-test failed: /last trace appeared before the scripted approval input."
+    }
+    Assert-TalosBenchEqual -Name "input line last" -Expected "/q" -Actual $lines[$lines.Count - 1]
+
+    Write-Output "TalosBench self-test passed."
+}
+
 function Get-TalosPath {
     if (-not [string]::IsNullOrWhiteSpace($TalosPath)) {
         return [System.IO.Path]::GetFullPath($TalosPath)
@@ -318,25 +548,7 @@ function Invoke-TalosCase {
         }
     }
 
-    $inputLines = New-Object System.Collections.Generic.List[string]
-    $inputLines.Add("/session clear")
-    $inputLines.Add("/debug trace")
-    $prompts = @($Case.prompts)
-    $hasPromptApprovals = $Case.PSObject.Properties.Name -contains "approvalInputsByPrompt"
-    $promptApprovals = if ($hasPromptApprovals) { @($Case.approvalInputsByPrompt) } else { @() }
-    for ($promptIndex = 0; $promptIndex -lt $prompts.Count; $promptIndex++) {
-        $prompt = $prompts[$promptIndex]
-        $inputLines.Add([string]$prompt)
-        $approvals = if ($hasPromptApprovals) { @($promptApprovals[$promptIndex]) } else { @($Case.approvalInputs) }
-        foreach ($approval in $approvals) {
-            if (-not [string]::IsNullOrWhiteSpace($approval)) {
-                $inputLines.Add([string]$approval)
-            }
-        }
-    }
-    $inputLines.Add("/last trace")
-    $inputLines.Add("/q")
-
+    $inputLines = @(New-TalosBenchInputLines -Case $Case)
     $inputText = ($inputLines -join [Environment]::NewLine) + [Environment]::NewLine
     Push-Location $workspace
     try {
@@ -350,7 +562,14 @@ function Invoke-TalosCase {
     $required = @($Case.requiredOutputSubstrings | ForEach-Object { [string]$_ })
     $forbidden = @($Case.forbiddenOutputSubstrings | ForEach-Object { [string]$_ })
     $check = Test-Substrings -Text $text -Required $required -Forbidden $forbidden
-    $traceFailures = @(Test-TraceAssertions -Text $text -Assertions $Case.traceAssertions)
+    $traceFailures = @()
+    if ($Case.PSObject.Properties.Name -contains "traceAssertions") {
+        if (-not (Test-TranscriptHasLastTrace -Transcript $text)) {
+            $traceFailures += "/last trace was not captured; approval input may have consumed a slash command"
+        } else {
+            $traceFailures = @(Test-TraceAssertions -Text $text -Assertions $Case.traceAssertions)
+        }
+    }
 
     $status = "PASS"
     $blocker = "no"
@@ -391,6 +610,10 @@ function Escape-MarkdownCell {
 }
 
 $script:RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "../.."))
+if ($SelfTest) {
+    Invoke-TalosBenchSelfTest
+    exit 0
+}
 if ([string]::IsNullOrWhiteSpace($CasesPath)) {
     $CasesPath = Join-Path $PSScriptRoot "talosbench-cases.json"
 }
@@ -427,8 +650,14 @@ if ($ValidateOnly) {
                 "nativeToolsExcludes",
                 "blockedContains",
                 "outcomeContains",
+                "outcomeExcludes",
                 "checkpointContains",
                 "verificationContains",
+                "verificationExcludes",
+                "localTraceOutcomeContains",
+                "localTraceOutcomeExcludes",
+                "localTraceVerificationContains",
+                "localTraceVerificationExcludes",
                 "repairContains",
                 "promptAuditTaskType",
                 "promptAuditActionObligationContains",

@@ -1,6 +1,6 @@
-# [T61-open-high] TalosBench T54 Regression Pack
+# [T61-done-high] TalosBench T54 Regression Pack
 
-Status: open
+Status: done
 Priority: high
 
 ## Evidence Summary
@@ -178,6 +178,35 @@ Hardening pass, 2026-04-30:
 - `pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly` passes.
 - Full non-manual TalosBench passed against the patched distribution:
   `local/manual-testing/talosbench/20260430-230044/summary.md`.
+
+T61 completion, 2026-05-01:
+
+- Added deterministic `run-talosbench.ps1 -SelfTest` coverage for section-aware
+  Trace Detail versus Prompt Audit parsing, failed Local Trace outcome parsing,
+  and approval input ordering before `/last trace`.
+- Added failure-truth assertion keys:
+  `outcomeExcludes`, `verificationExcludes`,
+  `localTraceOutcomeContains`, `localTraceOutcomeExcludes`,
+  `localTraceVerificationContains`, and
+  `localTraceVerificationExcludes`.
+- Expanded TalosBench from 20 to 25 cases with named T61/T54 gates for
+  approved `.env` read, exact README write after retry, natural artifact
+  creation, model-switch small talk, and unknown tool alias replay.
+- Strengthened existing starter/manual cases with explicit outcome,
+  verification, and Local Trace failure exclusions.
+- Updated `tools/manual-eval/README.md` with T61 runner behavior,
+  `-SelfTest`, `approvalInputsByPrompt`, section-aware trace parsing, and new
+  assertion keys.
+- Deterministic evidence:
+  `pwsh .\tools\manual-eval\run-talosbench.ps1 -SelfTest` passed;
+  `pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly` validated 25
+  cases; `.\gradlew.bat test --no-daemon` passed.
+- Installed-version evidence after rebuilding from the T61 worktree:
+  `pwsh .\tools\uninstall-windows.ps1 -Quiet`;
+  `.\gradlew.bat clean installDist --no-daemon`;
+  `pwsh .\tools\install-windows.ps1 -Force -Quiet`;
+  then full non-manual TalosBench passed with manual-gated approval cases:
+  `local/manual-testing/talosbench/20260501-101813/summary.md`.
 
 ## Known Risks
 
