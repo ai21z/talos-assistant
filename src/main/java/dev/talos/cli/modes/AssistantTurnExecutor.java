@@ -1144,9 +1144,10 @@ public final class AssistantTurnExecutor {
         if (messages.stream().anyMatch(AssistantTurnExecutor::isStaticVerificationRepairInstruction)) {
             return;
         }
-        RepairPolicy.planForStaticVerification(messages, taskContract)
+        var repairDecision = RepairPolicy.planForStaticVerification(messages, taskContract);
+        repairDecision
                 .plan()
-                .ifPresent(plan -> {
+                .ifPresentOrElse(plan -> {
                     String instruction = plan.instruction();
                     if (instruction.isBlank()) return;
                     LocalTurnTraceCapture.recordRepair("PLANNED", plan.traceSummary());
@@ -1161,6 +1162,10 @@ public final class AssistantTurnExecutor {
                         }
                     }
                     messages.add(insertAt, ChatMessage.system(instruction));
+                }, () -> {
+                    if (repairDecision.reason().contains("targets did not overlap")) {
+                        LocalTurnTraceCapture.recordRepair("SKIPPED", repairDecision.reason());
+                    }
                 });
     }
 

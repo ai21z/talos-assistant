@@ -49,11 +49,18 @@ public final class RepairPolicy {
         if (problems.isEmpty()) {
             problems = List.of(firstStaticFailureLine(previous));
         }
+        Set<String> previousTargets = previousFailureTargets(previous, problems, messages);
         List<String> expectedTargets = contract.expectedTargets().stream()
                 .sorted()
                 .toList();
         if (expectedTargets.isEmpty() && problems.stream().anyMatch(RepairPolicy::isStructuralWebProblem)) {
             expectedTargets = inferStructuralWebTargets(messages, problems);
+        }
+        if (!expectedTargets.isEmpty()
+                && !previousTargets.isEmpty()
+                && !targetsOverlap(expectedTargets, previousTargets)) {
+            return RepairDecision.notApplicable(
+                    "static repair context skipped: targets did not overlap with current task targets");
         }
         List<String> forbiddenTargets = contract.forbiddenTargets().stream()
                 .sorted()
@@ -357,6 +364,36 @@ public final class RepairPolicy {
         return out;
     }
 
+    private static Set<String> previousFailureTargets(
+            String previous,
+            List<String> problems,
+            List<ChatMessage> messages
+    ) {
+        Set<String> targets = new LinkedHashSet<>();
+        targets.addAll(extractTargets(previous));
+        for (String problem : problems == null ? List.<String>of() : problems) {
+            targets.addAll(extractTargets(problem));
+        }
+        if (problems != null && problems.stream().anyMatch(RepairPolicy::isStructuralWebProblem)) {
+            targets.addAll(inferStructuralWebTargets(messages, problems));
+        }
+        return Set.copyOf(targets);
+    }
+
+    private static boolean targetsOverlap(List<String> expectedTargets, Set<String> previousTargets) {
+        Set<String> previous = new LinkedHashSet<>();
+        for (String target : previousTargets == null ? Set.<String>of() : previousTargets) {
+            String normalized = normalizeTargetKey(target);
+            if (!normalized.isBlank()) previous.add(normalized);
+        }
+        for (String target : expectedTargets == null ? List.<String>of() : expectedTargets) {
+            if (previous.contains(normalizeTargetKey(target))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean isSmallWebFile(String target) {
         String lower = target == null ? "" : target.toLowerCase(Locale.ROOT);
         return lower.endsWith(".html")
@@ -446,6 +483,10 @@ public final class RepairPolicy {
             normalized = normalized.substring(2);
         }
         return normalized;
+    }
+
+    private static String normalizeTargetKey(String raw) {
+        return normalizeTarget(raw).toLowerCase(Locale.ROOT);
     }
 
     private static String singleLine(String value) {

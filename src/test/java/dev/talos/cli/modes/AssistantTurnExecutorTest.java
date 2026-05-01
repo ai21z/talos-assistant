@@ -1686,6 +1686,49 @@ class AssistantTurnExecutorTest {
                     .count();
             assertEquals(1, count);
         }
+
+        @Test
+        void staleStaticRepairContextIsSkippedForFreshUnrelatedTargetsAndRecordedInTrace() {
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Edit README.md now using talos.write_file. The complete file must contain exactly two lines."));
+            messages.add(ChatMessage.assistant("""
+                    [Task incomplete: Static verification failed - README.md literal content mismatch]
+
+                    The requested task is not verified complete.
+                    Remaining static verification problems:
+                    - README.md: literal content did not match the exact requested content.
+                    """));
+            messages.add(ChatMessage.user(
+                    "Create index.html, styles.css, and scripts.js for a BMI calculator. Use talos.write_file."));
+            var contract = TaskContractResolver.fromMessages(messages);
+
+            LocalTurnTraceCapture.begin(
+                    "trc-t75",
+                    "session-t75",
+                    1,
+                    "2026-05-02T00:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "test",
+                    "model",
+                    messages.get(messages.size() - 1).content());
+            try {
+                AssistantTurnExecutor.injectStaticVerificationRepairInstruction(messages, contract);
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertTrue(messages.stream()
+                        .filter(message -> "system".equals(message.role()))
+                        .map(message -> message.content() == null ? "" : message.content())
+                        .noneMatch(content -> content.startsWith("[Static verification repair context]")));
+                assertEquals("SKIPPED", trace.repair().status());
+                assertTrue(trace.repair().summary().contains("targets did not overlap"),
+                        trace.repair().summary());
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════

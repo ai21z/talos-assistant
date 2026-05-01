@@ -1,8 +1,9 @@
-# [T75-open-high] Static Repair Context Requires Target Overlap
+# [T75-done-high] Static Repair Context Requires Target Overlap
 
-Status: open
+Status: done
 Priority: high
 Date: 2026-05-01
+Closed: 2026-05-02
 
 ## Evidence Summary
 
@@ -133,3 +134,15 @@ pwsh .\tools\manual-eval\run-talosbench.ps1 -SelfTest
 - Too-strict overlap could suppress legitimate repair after a vague follow-up
   such as `fix it`; allow immediate previous failed-target repair when the
   prompt is clearly deictic and no conflicting explicit targets are present.
+
+## Closure Notes
+
+- Added a static repair target-overlap gate: previous verifier targets must
+  overlap the current task targets before static repair context is injected.
+- Preserved same-target repair behavior for current `README.md` repair after a
+  prior `README.md` static verification failure.
+- Recorded skipped stale repair context in local trace with `Repair: SKIPPED`
+  when targets do not overlap.
+- Verified with new `RepairPolicy` and `AssistantTurnExecutor` regressions,
+  focused prompt-path tests, full unit/e2e tests, TalosBench validation, and
+  TalosBench self-test.
