@@ -1,8 +1,9 @@
-# [T73-open-high] Current-Turn Target Dominance And Protected Content Containment
+# [T73-done-high] Current-Turn Target Dominance And Protected Content Containment
 
-Status: open
+Status: done
 Priority: high
 Date: 2026-05-01
+Closed: 2026-05-01
 
 ## Evidence Summary
 
@@ -130,3 +131,13 @@ pwsh .\tools\manual-eval\run-talosbench.ps1 -SelfTest
 - Redaction must not hide legitimate current-turn approved protected reads.
 - Target negation must be scoped so literal content containing filenames is not
   accidentally interpreted as target correction.
+
+## Closure Notes
+
+- Added current-turn target correction handling for `do not want/need <target>`
+  phrases so the negated protected target is removed from expected targets.
+- Added output containment for protected-looking snippets from prior assistant
+  answers unless the current turn completed a fresh protected `read_file`.
+- Added trace warning `PROTECTED_HISTORY_SUPPRESSED` when stale protected
+  history content is suppressed.
+- Verified with targeted resolver/executor regressions and full unit tests.

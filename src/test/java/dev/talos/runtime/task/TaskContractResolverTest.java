@@ -230,6 +230,17 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void currentTurnTargetCorrectionDropsNegatedProtectedTarget() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "I do not want the .env, I want the README.md !");
+
+        assertEquals(TaskType.READ_ONLY_QA, contract.type());
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
+        assertEquals(Set.of("README.md"), contract.expectedTargets());
+    }
+
+    @Test
     void assistantIdentityQuestionsBecomeSmallTalkContract() {
         for (String input : List.of(
                 "hello who are you?",
