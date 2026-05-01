@@ -59,6 +59,36 @@ class NativeToolSpecPolicyTest {
     }
 
     @Test
+    void noInspectionMethodologyPromptExposesNoNativeTools() {
+        var contract = TaskContractResolver.fromUserRequest(
+                "Without inspecting the workspace, tell me how you would approach reviewing a Java CLI project.");
+
+        List<String> names = NativeToolSpecPolicy.names(
+                NativeToolSpecPolicy.select(contract, ExecutionPhase.INSPECT, registry()));
+
+        assertTrue(names.isEmpty(), names.toString());
+    }
+
+    @Test
+    void listOnlyNegativeContentPromptExposesOnlyListDir() {
+        for (String prompt : List.of(
+                "List files only; do not show content from README.md or notes.md.",
+                "Do not read files, show me the files in the repo.")) {
+            var contract = TaskContractResolver.fromUserRequest(prompt);
+
+            List<String> names = NativeToolSpecPolicy.names(
+                    NativeToolSpecPolicy.select(contract, ExecutionPhase.INSPECT, registry()));
+
+            assertTrue(names.contains("talos.list_dir"), prompt + " -> " + names);
+            assertFalse(names.contains("talos.read_file"), prompt + " -> " + names);
+            assertFalse(names.contains("talos.grep"), prompt + " -> " + names);
+            assertFalse(names.contains("talos.retrieve"), prompt + " -> " + names);
+            assertFalse(names.contains("talos.write_file"), prompt + " -> " + names);
+            assertFalse(names.contains("talos.edit_file"), prompt + " -> " + names);
+        }
+    }
+
+    @Test
     void mutationContractInApplyIncludesWriteAndEditNativeSpecs() {
         var contract = TaskContractResolver.fromUserRequest("Create a README.md file.");
 

@@ -29,6 +29,15 @@ public final class TaskContractResolver {
                     + "(?:change|edit|modify|write|create|save|apply|touch|mutate)"
                     + "|\\bwithout\\s+changing)\\s+(.{0,240})");
 
+    private static final Pattern NEGATED_READ_TARGET_SPAN = Pattern.compile(
+            "(?i)(?:\\b(?:do\\s+not|don't|dont)\\s+"
+                    + "(?:show|display|include|read|inspect|open|summarize)\\s+"
+                    + "(?:the\\s+)?(?:file\\s+)?(?:content|contents)?\\s*(?:from|of|in)?"
+                    + "|\\bwithout\\s+"
+                    + "(?:showing|displaying|including|reading|inspecting|opening|summarizing)\\s+"
+                    + "(?:the\\s+)?(?:file\\s+)?(?:content|contents)?\\s*(?:from|of|in)?)"
+                    + "\\s+(.{0,240})");
+
     private static final Set<String> CREATE_MARKERS = Set.of(
             "create", "write a", "write the", "save as", "add a", "add the",
             "new file", "build", "generate", "scaffold", "set up", "setup",
@@ -62,6 +71,71 @@ public final class TaskContractResolver {
             "read", "explain", "summarize", "summary", "inspect", "diagnose",
             "search", "grep", "find ", "content", "contents", "inside the files",
             "what does", "what is this project", "what is this folder for"
+    );
+
+    private static final Set<String> DIRECTORY_LIST_ONLY_MARKERS = Set.of(
+            "list files only",
+            "list the files only",
+            "only list files",
+            "only list the files",
+            "files only",
+            "file names only",
+            "names only"
+    );
+
+    private static final Set<String> NEGATIVE_CONTENT_MARKERS = Set.of(
+            "do not show content",
+            "don't show content",
+            "dont show content",
+            "do not display content",
+            "don't display content",
+            "dont display content",
+            "do not read content",
+            "don't read content",
+            "dont read content",
+            "do not read files",
+            "don't read files",
+            "dont read files",
+            "do not inspect files",
+            "don't inspect files",
+            "dont inspect files",
+            "without showing content",
+            "without displaying content",
+            "without reading content",
+            "without reading files",
+            "without inspecting files",
+            "no content"
+    );
+
+    private static final Set<String> NO_INSPECTION_MARKERS = Set.of(
+            "without inspecting the workspace",
+            "without inspecting workspace",
+            "without checking the workspace",
+            "without checking workspace",
+            "without reading the workspace",
+            "without reading workspace",
+            "without inspecting the repo",
+            "without inspecting repo",
+            "without checking the repo",
+            "without checking repo",
+            "without reading the repo",
+            "without reading repo",
+            "without inspecting the repository",
+            "without checking the repository",
+            "without reading the repository",
+            "without inspecting the codebase",
+            "without checking the codebase",
+            "without reading the codebase"
+    );
+
+    private static final Set<String> NO_INSPECTION_DIRECT_ANSWER_MARKERS = Set.of(
+            "how you would approach",
+            "how would you approach",
+            "approach reviewing",
+            "approach review",
+            "reviewing a",
+            "methodology",
+            "general approach"
     );
 
     private static final Set<String> CHAT_ONLY_HINTS = Set.of(
@@ -138,6 +212,10 @@ public final class TaskContractResolver {
         if (mutationAllowed && !forbiddenTargets.isEmpty()) {
             expectedTargets = withoutForbiddenTargets(expectedTargets, forbiddenTargets);
         }
+        Set<String> readForbiddenTargets = extractReadForbiddenTargets(original);
+        if (!readForbiddenTargets.isEmpty()) {
+            expectedTargets = withoutForbiddenTargets(expectedTargets, readForbiddenTargets);
+        }
 
         return new TaskContract(
                 type,
@@ -175,9 +253,27 @@ public final class TaskContractResolver {
         return Set.copyOf(out);
     }
 
+    private static Set<String> extractReadForbiddenTargets(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return Set.of();
+        Matcher spanMatcher = NEGATED_READ_TARGET_SPAN.matcher(userRequest);
+        Set<String> out = new LinkedHashSet<>();
+        while (spanMatcher.find()) {
+            String span = firstSentenceFragment(spanMatcher.group(1));
+            Matcher targetMatcher = TARGET_FILE.matcher(span);
+            while (targetMatcher.find()) {
+                String target = normalizeTarget(targetMatcher.group(1));
+                if (!target.isBlank()) out.add(target);
+            }
+        }
+        return Set.copyOf(out);
+    }
+
     private static TaskType classify(String lower, boolean mutationRequested) {
         if (mutationRequested) {
             return containsAny(lower, CREATE_MARKERS) ? TaskType.FILE_CREATE : TaskType.FILE_EDIT;
+        }
+        if (looksExplicitNoInspectionDirectAnswer(lower)) {
+            return TaskType.SMALL_TALK;
         }
         if (ConversationBoundaryPolicy.isDirectAnswerOnly(lower)
                 || looksConversationalGreetingRequest(lower)
@@ -212,8 +308,50 @@ public final class TaskContractResolver {
 
     private static boolean looksSimpleDirectoryListingRequest(String lower) {
         if (lower == null || lower.isBlank()) return false;
+        if (looksDirectoryListingOnlyRequest(lower)) return true;
         if (containsAny(lower, SIMPLE_LISTING_EXCLUSION_MARKERS)) return false;
         return SIMPLE_DIRECTORY_LISTING.matcher(lower).matches();
+    }
+
+    private static boolean looksDirectoryListingOnlyRequest(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        if (!asksForDirectoryListing(lower)) return false;
+        if (lower.contains("summarize")
+                || lower.contains("summary")
+                || lower.contains("explain")
+                || lower.contains("diagnose")
+                || lower.contains("search")
+                || lower.contains("grep")
+                || lower.contains("inside the files")
+                || lower.contains("what does")) {
+            return false;
+        }
+        return containsAny(lower, DIRECTORY_LIST_ONLY_MARKERS)
+                || containsAny(lower, NEGATIVE_CONTENT_MARKERS);
+    }
+
+    private static boolean asksForDirectoryListing(String lower) {
+        return lower.contains("list files")
+                || lower.contains("list the files")
+                || lower.contains("show me the files")
+                || lower.contains("show the files")
+                || lower.contains("what files")
+                || lower.contains("which files")
+                || SIMPLE_DIRECTORY_LISTING.matcher(lower).matches();
+    }
+
+    private static boolean looksExplicitNoInspectionDirectAnswer(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        if (!containsAny(lower, NO_INSPECTION_MARKERS)) return false;
+        if (asksForDirectoryListing(lower)) return false;
+        if (lower.contains("search")
+                || lower.contains("grep")
+                || lower.contains("read ")
+                || lower.contains("show me the files")
+                || lower.contains("what files")) {
+            return false;
+        }
+        return containsAny(lower, NO_INSPECTION_DIRECT_ANSWER_MARKERS);
     }
 
     private static boolean looksConversationalGreetingRequest(String lower) {

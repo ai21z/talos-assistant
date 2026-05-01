@@ -277,6 +277,18 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void noInspectionMethodologyPromptBecomesDirectAnswerOnlyContract() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Without inspecting the workspace, tell me how you would approach reviewing a Java CLI project.");
+
+        assertEquals(TaskType.SMALL_TALK, contract.type());
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
+        assertFalse(contract.verificationRequired());
+        assertTrue(contract.expectedTargets().isEmpty());
+    }
+
+    @Test
     void greetingWithWorkspaceIntentStillInspectsWorkspace() {
         TaskContract contract = TaskContractResolver.fromUserRequest("Hey, what is in this workspace?");
 
@@ -420,6 +432,21 @@ class TaskContractResolverTest {
             assertFalse(contract.mutationRequested(), input);
             assertFalse(contract.mutationAllowed(), input);
             assertFalse(contract.verificationRequired(), input);
+        }
+    }
+
+    @Test
+    void listOnlyWithNegativeContentTargetsBecomesDirectoryListingContract() {
+        for (String input : List.of(
+                "List files only; do not show content from README.md or notes.md.",
+                "Do not read files, show me the files in the repo.")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertEquals(TaskType.DIRECTORY_LISTING, contract.type(), input);
+            assertFalse(contract.mutationRequested(), input);
+            assertFalse(contract.mutationAllowed(), input);
+            assertFalse(contract.verificationRequired(), input);
+            assertTrue(contract.expectedTargets().isEmpty(), input);
         }
     }
 
