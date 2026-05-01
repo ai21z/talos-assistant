@@ -202,6 +202,10 @@ function Get-TraceFacts {
     $localTraceVerification = Get-LastRegexValue -Text $localTrace -Pattern "(?m)^\s*Verification:\s+(.+)$" -CaseSensitive
     $verification = $localTraceVerification
     if ([string]::IsNullOrWhiteSpace($verification)) { $verification = $traceVerification }
+    $traceCheckpoint = Get-LastRegexValue -Text $traceDetail -Pattern "(?m)^\s*Checkpoint:\s+(.+)$" -CaseSensitive
+    $localTraceCheckpoint = Get-LastRegexValue -Text $localTrace -Pattern "(?m)^\s*Checkpoint:\s+(.+)$" -CaseSensitive
+    $checkpoint = $traceCheckpoint
+    if ([string]::IsNullOrWhiteSpace($checkpoint)) { $checkpoint = $localTraceCheckpoint }
 
     return [pscustomobject]@{
         Contract = $contract
@@ -211,7 +215,7 @@ function Get-TraceFacts {
         Blocked = Get-LastRegexValue -Text $traceDetail -Pattern "(?m)^\s*Blocked:\s+(.+)$" -CaseSensitive
         Outcome = $outcome
         LocalTraceOutcome = $localTraceOutcome
-        Checkpoint = Get-LastRegexValue -Text $traceDetail -Pattern "(?m)^\s*Checkpoint:\s+(.+)$" -CaseSensitive
+        Checkpoint = $checkpoint
         Verification = $verification
         LocalTraceVerification = $localTraceVerification
         Repair = Get-LastRegexValue -Text $traceDetail -Pattern "(?m)^\s*Repair:\s+(.+)$" -CaseSensitive
@@ -414,6 +418,8 @@ function New-TalosBenchInputLines {
         }
     }
     $inputLines.Add("/last trace")
+    $inputLines.Add("/last trace")
+    $inputLines.Add("/last trace")
     $inputLines.Add("/q")
     return @($inputLines)
 }
@@ -498,6 +504,7 @@ Local Trace
     evidenceObligation: FILE_SYSTEM_EVIDENCE_REQUIRED
     currentTurnFrame: injected
     framePreview: README.md
+  Checkpoint: CREATED chk-self-test
   Verification: PASSED
   Outcome: OK (TURN_RECORDED)
 "@
@@ -506,6 +513,7 @@ Local Trace
     Assert-TalosBenchContains -Name "trace detail phase" -Text $facts.Phase -Needle "final=VERIFY"
     Assert-TalosBenchContains -Name "prompt audit evidence" -Text $facts.PromptAuditEvidenceObligation -Needle "FILE_SYSTEM_EVIDENCE_REQUIRED"
     Assert-TalosBenchContains -Name "prompt audit frame" -Text $facts.PromptAuditCurrentTurnFrame -Needle "README.md"
+    Assert-TalosBenchContains -Name "local trace checkpoint" -Text $facts.Checkpoint -Needle "CREATED"
     Assert-TalosBenchContains -Name "local trace outcome" -Text $facts.LocalTraceOutcome -Needle "OK"
 
     $failedLocalTraceFixture = @"
@@ -534,11 +542,15 @@ Local Trace
     $lines = @(New-TalosBenchInputLines -Case $approvalCase)
     $approvalIndex = [array]::LastIndexOf($lines, "a")
     $lastTraceIndex = [array]::LastIndexOf($lines, "/last trace")
+    $lastTraceCount = @($lines | Where-Object { $_ -eq "/last trace" }).Count
     Assert-TalosBenchEqual -Name "input line first" -Expected "/session clear" -Actual $lines[0]
     Assert-TalosBenchEqual -Name "input line second" -Expected "/debug trace" -Actual $lines[1]
     Assert-TalosBenchEqual -Name "approval appears after second prompt" -Expected "Apply that README.md change now." -Actual $lines[$approvalIndex - 1]
     if ($lastTraceIndex -le $approvalIndex) {
         throw "Self-test failed: /last trace appeared before the scripted approval input."
+    }
+    if ($lastTraceCount -lt 3) {
+        throw "Self-test failed: fewer than three /last trace commands were appended."
     }
     Assert-TalosBenchEqual -Name "input line last" -Expected "/q" -Actual $lines[$lines.Count - 1]
     Assert-TalosBenchLiteralPromptTransport
