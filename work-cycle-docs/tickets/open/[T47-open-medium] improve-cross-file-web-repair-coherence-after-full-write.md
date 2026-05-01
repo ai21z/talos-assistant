@@ -68,12 +68,22 @@ require cross-file coherence:
 
 Likely areas:
 
+- `src/main/java/dev/talos/runtime/capability/StaticWebCapabilityProfile.java`
 - `src/main/java/dev/talos/runtime/repair/RepairPolicy.java`
 - `src/main/java/dev/talos/runtime/verification/StaticTaskVerifier.java`
 - `src/e2eTest/resources/scenarios/`
 
 Keep this as a guidance/static-verification refinement. Do not turn it into a
 browser/runtime execution verifier.
+
+T62 update, 2026-05-02:
+
+- Static Web profile ownership now exists.
+- T47 should refine `StaticWebCapabilityProfile` plus its verifier/repair
+  adapters, not add broad BMI/web prompt text to generic turn-control code.
+- Cross-file coherence acceptance should stay deterministic: HTML links the
+  selected CSS/JS assets, JavaScript IDs exist in HTML, and CSS selectors match
+  HTML structure where practical.
 
 ## Acceptance Criteria
 

@@ -508,6 +508,51 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void selfContainedHtmlWebCreationPassesWhenStaticWebProfileAllowsSingleFile() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!DOCTYPE html>
+                <html>
+                  <head>
+                    <title>BMI Calculator</title>
+                    <style>
+                      .calculator { max-width: 28rem; }
+                      .result { font-weight: 700; }
+                    </style>
+                  </head>
+                  <body>
+                    <main class="calculator">
+                      <h1>BMI Calculator</h1>
+                      <form id="bmi-form">
+                        <label>Weight <input id="weight" type="number"></label>
+                        <label>Height <input id="height" type="number"></label>
+                        <button type="submit">Calculate</button>
+                      </form>
+                      <p id="result" class="result"></p>
+                    </main>
+                    <script>
+                      document.getElementById('bmi-form').addEventListener('submit', event => event.preventDefault());
+                      document.getElementById('weight');
+                      document.getElementById('height');
+                      document.getElementById('result');
+                    </script>
+                  </body>
+                </html>
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Create a self-contained BMI calculator webpage in index.html with inline CSS and JavaScript.",
+                loopResult(List.of(successfulWrite("index.html", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.problems().toString());
+        assertTrue(result.facts().stream()
+                .anyMatch(f -> f.contains("Static Web capability profile selected")), result.facts().toString());
+        assertTrue(result.facts().stream()
+                .anyMatch(f -> f.contains("self-contained HTML")), result.facts().toString());
+    }
+
+    @Test
     void genericMakeItFollowUpRunsWebCoherenceWhenMutatingSmallWebSurface() throws Exception {
         Files.writeString(workspace.resolve("index.html"), """
                 <!DOCTYPE html>

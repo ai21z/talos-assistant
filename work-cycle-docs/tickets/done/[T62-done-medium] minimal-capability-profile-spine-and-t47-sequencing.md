@@ -1,7 +1,8 @@
-# [T62-open-medium] Minimal Capability Profile Spine And T47 Sequencing
+# [T62-done-medium] Minimal Capability Profile Spine And T47 Sequencing
 
-Status: open
+Status: done
 Priority: medium
+Closed: 2026-05-02
 
 ## Evidence Summary
 
@@ -157,3 +158,23 @@ Commands:
 - Continue or reframe T47 as a Static Web repair-profile ticket.
 - Future document, config, code, and data capabilities can use the same spine
   after the static profile pattern proves useful.
+
+## Closure Notes
+
+- Added a minimal static capability spine under `dev.talos.runtime.capability`.
+- Added the `static-web` profile with artifact kind, operation, target surface,
+  verifier profile, and repair profile.
+- Routed Static Web verifier applicability and separate HTML/CSS/JS target-shape
+  expectations through the profile registry.
+- Moved structural web repair helpers behind `StaticWebCapabilityProfile`.
+- Allowed explicitly self-contained HTML web creation to verify as a
+  profile-owned single-file surface.
+- Updated T47 so its next implementation owner is the Static Web profile plus
+  verifier/repair adapters, not generic turn-control prompt expansion.
+
+Verification:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.runtime.capability.CapabilityProfileRegistryTest" --tests "dev.talos.runtime.verification.StaticTaskVerifierTest.selfContainedHtmlWebCreationPassesWhenStaticWebProfileAllowsSingleFile" --no-daemon
+.\gradlew.bat test --tests "dev.talos.runtime.capability.CapabilityProfileRegistryTest" --tests "dev.talos.runtime.verification.StaticTaskVerifierTest" --tests "dev.talos.runtime.repair.RepairPolicyTest" --no-daemon
+```

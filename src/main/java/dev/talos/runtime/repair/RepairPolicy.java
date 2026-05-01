@@ -1,5 +1,6 @@
 package dev.talos.runtime.repair;
 
+import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.toolcall.LoopState;
 import dev.talos.runtime.toolcall.ToolCallSupport;
@@ -53,8 +54,8 @@ public final class RepairPolicy {
         List<String> expectedTargets = contract.expectedTargets().stream()
                 .sorted()
                 .toList();
-        if (expectedTargets.isEmpty() && problems.stream().anyMatch(RepairPolicy::isStructuralWebProblem)) {
-            expectedTargets = inferStructuralWebTargets(messages, problems);
+        if (expectedTargets.isEmpty() && problems.stream().anyMatch(StaticWebCapabilityProfile::isStructuralProblem)) {
+            expectedTargets = StaticWebCapabilityProfile.inferStructuralTargets(messages, problems);
         }
         if (!expectedTargets.isEmpty()
                 && !previousTargets.isEmpty()
@@ -157,12 +158,12 @@ public final class RepairPolicy {
         for (String problem : problems) {
             targets.addAll(extractTargets(problem));
         }
-        boolean structuralWebRepair = problems.stream().anyMatch(RepairPolicy::isStructuralWebProblem);
+        boolean structuralWebRepair = problems.stream().anyMatch(StaticWebCapabilityProfile::isStructuralProblem);
         if ((targets.isEmpty() || structuralWebRepair) && expectedTargets != null) {
             targets.addAll(expectedTargets);
         }
         for (String target : targets) {
-            if (!isSmallWebFile(target)) continue;
+            if (!StaticWebCapabilityProfile.isSmallWebFile(target)) continue;
             steps.add(new RepairPlanStep(
                     RepairStepType.WRITE_COMPLETE_FILE,
                     target,
@@ -374,8 +375,8 @@ public final class RepairPolicy {
         for (String problem : problems == null ? List.<String>of() : problems) {
             targets.addAll(extractTargets(problem));
         }
-        if (problems != null && problems.stream().anyMatch(RepairPolicy::isStructuralWebProblem)) {
-            targets.addAll(inferStructuralWebTargets(messages, problems));
+        if (problems != null && problems.stream().anyMatch(StaticWebCapabilityProfile::isStructuralProblem)) {
+            targets.addAll(StaticWebCapabilityProfile.inferStructuralTargets(messages, problems));
         }
         return Set.copyOf(targets);
     }
@@ -392,80 +393,6 @@ public final class RepairPolicy {
             }
         }
         return false;
-    }
-
-    private static boolean isSmallWebFile(String target) {
-        String lower = target == null ? "" : target.toLowerCase(Locale.ROOT);
-        return lower.endsWith(".html")
-                || lower.endsWith(".htm")
-                || lower.endsWith(".css")
-                || lower.endsWith(".js")
-                || lower.endsWith(".jsx")
-                || lower.endsWith(".ts")
-                || lower.endsWith(".tsx");
-    }
-
-    private static boolean isStructuralWebProblem(String problem) {
-        if (problem == null || problem.isBlank()) return false;
-        String lower = problem.toLowerCase(Locale.ROOT);
-        return lower.contains("does not link")
-                || lower.contains("missing javascript")
-                || lower.contains("missing js")
-                || lower.contains("missing a submit")
-                || lower.contains("missing submit")
-                || lower.contains("missing calculate")
-                || lower.contains("missing form")
-                || lower.contains("missing input")
-                || lower.contains("selector mismatch")
-                || lower.contains("selector")
-                || lower.contains("duplicate id")
-                || lower.contains("duplicate ids")
-                || lower.contains("placeholder")
-                || lower.contains("missing javascript behavior")
-                || lower.contains("missing js behavior");
-    }
-
-    private static List<String> inferStructuralWebTargets(
-            List<ChatMessage> messages,
-            List<String> problems
-    ) {
-        Set<String> targets = new LinkedHashSet<>();
-        String combinedProblems = String.join("\n", problems == null ? List.of() : problems)
-                .toLowerCase(Locale.ROOT);
-        if (combinedProblems.contains("html")
-                || combinedProblems.contains("form")
-                || combinedProblems.contains("button")
-                || combinedProblems.contains("input")
-                || combinedProblems.contains("duplicate id")
-                || combinedProblems.contains("selector")) {
-            targets.add("index.html");
-        }
-        if (combinedProblems.contains("css")
-                || combinedProblems.contains("style.css")
-                || combinedProblems.contains("styles.css")) {
-            targets.add("styles.css");
-        }
-        if (combinedProblems.contains("javascript")
-                || combinedProblems.contains("script.js")
-                || combinedProblems.contains("scripts.js")
-                || combinedProblems.contains("placeholder")) {
-            targets.add("scripts.js");
-        }
-
-        String conversation = messages == null ? "" : messages.stream()
-                .filter(message -> message != null && message.content() != null)
-                .map(ChatMessage::content)
-                .reduce("", (left, right) -> left + "\n" + right)
-                .toLowerCase(Locale.ROOT);
-        if ((conversation.contains("3-file") || conversation.contains("three-file")
-                || conversation.contains("three file"))
-                && (conversation.contains("webpage") || conversation.contains("web page")
-                || conversation.contains("website") || conversation.contains("page"))) {
-            targets.add("index.html");
-            targets.add("styles.css");
-            targets.add("scripts.js");
-        }
-        return targets.stream().sorted().toList();
     }
 
     private static String targetPathForJson(String path) {
