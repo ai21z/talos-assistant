@@ -1561,6 +1561,67 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void unsupportedOnlyNamedTargetPreflightsBeforeDriftingModelReads(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("report.docx"), "fake-binary-docx-placeholder");
+            Files.writeString(workspace.resolve("README.md"), "README-SECRET should not be read.\n");
+            Files.writeString(workspace.resolve("notes.md"), "NOTES-SECRET should not be read.\n");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            registry.register(new dev.talos.tools.impl.ListDirTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}\n"
+                                    + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}\n"
+                                    + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"notes.md\"}}",
+                            "README says README-SECRET. Notes say NOTES-SECRET.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("What files are here?"));
+            messages.add(ChatMessage.assistant("Directory entries:\n- README.md\n- notes.md\n- report.docx"));
+            messages.add(ChatMessage.user("Summarize report.docx."));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-t90-unsupported-docx-preflight",
+                    "sid",
+                    2,
+                    "2026-05-02T00:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "scripted",
+                    "test-model",
+                    "Summarize report.docx.");
+            TurnAuditCapture.begin();
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+                var audit = TurnAuditCapture.end();
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertTrue(out.text().contains("[Document capability note:"), out.text());
+                assertTrue(out.text().contains("report.docx"), out.text());
+                assertFalse(out.text().contains("README-SECRET"), out.text());
+                assertFalse(out.text().contains("NOTES-SECRET"), out.text());
+                assertEquals("UNSUPPORTED_CAPABILITY_CHECK_REQUIRED", trace.promptAudit().evidenceObligation());
+                assertEquals(List.of("talos.read_file"),
+                        audit.toolCalls().stream().map(dev.talos.runtime.TurnRecord.ToolCallSummary::name).toList());
+                assertEquals(List.of("report.docx"),
+                        audit.toolCalls().stream().map(dev.talos.runtime.TurnRecord.ToolCallSummary::pathHint).toList());
+            } finally {
+                if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
+                LocalTurnTraceCapture.clear();
+            }
+        }
+
+        @Test
         void smallTalkTextFallbackToolCallIsNotExecuted(@TempDir Path workspace)
                 throws Exception {
             Files.writeString(workspace.resolve("notes.md"), "Hidden project token: ALPHA-742\n");
