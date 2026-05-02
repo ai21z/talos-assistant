@@ -229,6 +229,8 @@ class TaskContractResolverTest {
         for (String input : List.of(
                 "Hello friend",
                 "Hello friend, how are you?",
+                "Hello friend, how are you after the model command?",
+                "Hello friend, how are you after /model?",
                 "how are you are you good?",
                 "perfect just as I want it!",
                 "debug /trace",
@@ -248,6 +250,7 @@ class TaskContractResolverTest {
         for (String input : List.of(
                 "Hello friend, read notes.md",
                 "how are you and can you inspect this repo?",
+                "Hello friend, how are you after reading README.md?",
                 "perfect, now search my files for ALPHA-742",
                 "debug trace for this workspace",
                 "do not use the workspace, list the files here",

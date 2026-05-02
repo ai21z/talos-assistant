@@ -284,54 +284,61 @@ class AssistantTurnExecutorTest {
 
     @Test
     void modelSwitchStyleSmallTalkDoesNotExposeToolsOrExpiredContextInPromptAudit() {
-        ActiveTaskContext context = ActiveTaskContext.proposedChanges(
-                1, "trace-propose", List.of("README.md"),
-                "Replace the README title and add usage.");
-        SessionMemory memory = new SessionMemory();
-        memory.setActiveTaskContext(context);
-        memory.setArtifactGoal(ArtifactGoal.fromActiveContext(context));
-        for (int i = 0; i < 4; i++) {
-            memory.update("previous user " + i, "previous answer " + i);
-        }
-        var registry = new dev.talos.tools.ToolRegistry();
-        registry.register(new dev.talos.tools.impl.ReadFileTool());
-        var ctx = Context.builder(new Config())
-                .memory(memory)
-                .llm(LlmClient.scripted("Hello. I am doing well."))
-                .toolRegistry(registry)
-                .build();
-        var messages = new ArrayList<ChatMessage>();
-        messages.add(ChatMessage.system("system"));
-        messages.add(ChatMessage.user("Hello friend, how are you?"));
+        for (String prompt : List.of(
+                "Hello friend, how are you?",
+                "Hello friend, how are you after the model command?")) {
+            ActiveTaskContext context = ActiveTaskContext.proposedChanges(
+                    1, "trace-propose", List.of("README.md"),
+                    "Replace the README title and add usage.");
+            SessionMemory memory = new SessionMemory();
+            memory.setActiveTaskContext(context);
+            memory.setArtifactGoal(ArtifactGoal.fromActiveContext(context));
+            for (int i = 0; i < 4; i++) {
+                memory.update("previous user " + i, "previous answer " + i);
+            }
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var ctx = Context.builder(new Config())
+                    .memory(memory)
+                    .llm(LlmClient.scripted("Hello. I am doing well."))
+                    .toolRegistry(registry)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("system"));
+            messages.add(ChatMessage.user(prompt));
 
-        TurnAuditCapture.begin();
-        LocalTurnTraceCapture.begin(
-                "trc-model-switch-small-talk",
-                "sid",
-                6,
-                "2026-05-01T00:00:00Z",
-                "workspace-hash",
-                "auto",
-                "scripted",
-                "test-model",
-                "Hello friend, how are you?");
-        try {
-            AssistantTurnExecutor.execute(messages, WS, ctx, new AssistantTurnExecutor.Options());
-            var audit = TurnAuditCapture.end();
-            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+            TurnAuditCapture.begin();
+            LocalTurnTraceCapture.begin(
+                    "trc-model-switch-small-talk",
+                    "sid",
+                    6,
+                    "2026-05-01T00:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "scripted",
+                    "test-model",
+                    prompt);
+            try {
+                AssistantTurnExecutor.execute(messages, WS, ctx, new AssistantTurnExecutor.Options());
+                var audit = TurnAuditCapture.end();
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
-            assertEquals(TaskType.SMALL_TALK.name(), audit.policyTrace().taskType());
-            assertTrue(audit.policyTrace().nativeTools().isEmpty(), audit.policyTrace().nativeTools().toString());
-            assertNotNull(trace.promptAudit());
-            assertEquals(TaskType.SMALL_TALK.name(), trace.promptAudit().taskType());
-            assertEquals("DIRECT_ANSWER_ONLY", trace.promptAudit().actionObligation());
-            assertTrue(trace.promptAudit().nativeTools().isEmpty(), trace.promptAudit().nativeTools().toString());
-            assertTrue(trace.promptAudit().promptTools().isEmpty(), trace.promptAudit().promptTools().toString());
-            assertEquals("NONE_OR_NOT_DERIVED", trace.promptAudit().activeTaskContext());
-            assertEquals(ActiveTaskContext.State.NONE, memory.activeTaskContext().state());
-        } finally {
-            if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
-            LocalTurnTraceCapture.clear();
+                assertEquals(TaskType.SMALL_TALK.name(), audit.policyTrace().taskType(), prompt);
+                assertTrue(audit.policyTrace().nativeTools().isEmpty(),
+                        audit.policyTrace().nativeTools().toString());
+                assertNotNull(trace.promptAudit());
+                assertEquals(TaskType.SMALL_TALK.name(), trace.promptAudit().taskType(), prompt);
+                assertEquals("DIRECT_ANSWER_ONLY", trace.promptAudit().actionObligation(), prompt);
+                assertTrue(trace.promptAudit().nativeTools().isEmpty(),
+                        trace.promptAudit().nativeTools().toString());
+                assertTrue(trace.promptAudit().promptTools().isEmpty(),
+                        trace.promptAudit().promptTools().toString());
+                assertEquals("NONE_OR_NOT_DERIVED", trace.promptAudit().activeTaskContext(), prompt);
+                assertEquals(ActiveTaskContext.State.NONE, memory.activeTaskContext().state(), prompt);
+            } finally {
+                if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
+                LocalTurnTraceCapture.clear();
+            }
         }
     }
 
