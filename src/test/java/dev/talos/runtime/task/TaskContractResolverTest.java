@@ -336,15 +336,18 @@ class TaskContractResolverTest {
     }
 
     @Test
-    void noInspectionMethodologyPromptBecomesDirectAnswerOnlyContract() {
-        TaskContract contract = TaskContractResolver.fromUserRequest(
-                "Without inspecting the workspace, tell me how you would approach reviewing a Java CLI project.");
+    void noInspectionMethodologyPromptsBecomeDirectAnswerOnlyContracts() {
+        for (String input : List.of(
+                "Without inspecting the workspace, tell me how you would approach reviewing a Java CLI project.",
+                "Without inspecting the workspace, explain how you would review a Java CLI project.")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
 
-        assertEquals(TaskType.SMALL_TALK, contract.type());
-        assertFalse(contract.mutationRequested());
-        assertFalse(contract.mutationAllowed());
-        assertFalse(contract.verificationRequired());
-        assertTrue(contract.expectedTargets().isEmpty());
+            assertEquals(TaskType.SMALL_TALK, contract.type(), input);
+            assertFalse(contract.mutationRequested(), input);
+            assertFalse(contract.mutationAllowed(), input);
+            assertFalse(contract.verificationRequired(), input);
+            assertTrue(contract.expectedTargets().isEmpty(), input);
+        }
     }
 
     @Test

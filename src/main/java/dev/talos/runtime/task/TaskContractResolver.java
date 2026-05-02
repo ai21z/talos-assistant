@@ -141,6 +141,8 @@ public final class TaskContractResolver {
     private static final Set<String> NO_INSPECTION_DIRECT_ANSWER_MARKERS = Set.of(
             "how you would approach",
             "how would you approach",
+            "how you would review",
+            "how would you review",
             "approach reviewing",
             "approach review",
             "reviewing a",
