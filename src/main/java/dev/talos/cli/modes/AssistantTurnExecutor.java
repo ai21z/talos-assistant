@@ -446,12 +446,12 @@ public final class AssistantTurnExecutor {
             return new ReadEvidenceHandoffResult(answer, null, null);
         }
 
-        List<String> targets = readEvidenceHandoffTargets(contract, obligation, workspace);
-        if (targets.isEmpty()) {
+        if (obligation == EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED
+                && !hasExplicitProtectedReadIntent(contract, protectedExpectedTargets(contract, workspace))) {
             return new ReadEvidenceHandoffResult(answer, null, null);
         }
-        if (obligation == EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED
-                && !hasExplicitProtectedReadIntent(contract, targets)) {
+        List<String> targets = readEvidenceHandoffTargets(contract, obligation, workspace);
+        if (targets.isEmpty()) {
             return new ReadEvidenceHandoffResult(answer, null, null);
         }
 
@@ -505,9 +505,23 @@ public final class AssistantTurnExecutor {
         for (String target : contract.expectedTargets()) {
             if (target == null || target.isBlank()) continue;
             boolean protectedTarget = ProtectedPathPolicy.classify(workspace, target).protectedPath();
-            if (obligation == EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED && protectedTarget) {
+            if (obligation == EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED) {
                 targets.add(target);
             } else if (obligation == EvidenceObligation.READ_TARGET_REQUIRED && !protectedTarget) {
+                targets.add(target);
+            }
+        }
+        return List.copyOf(targets);
+    }
+
+    private static List<String> protectedExpectedTargets(TaskContract contract, Path workspace) {
+        if (contract == null || workspace == null || contract.expectedTargets().isEmpty()) {
+            return List.of();
+        }
+        LinkedHashSet<String> targets = new LinkedHashSet<>();
+        for (String target : contract.expectedTargets()) {
+            if (target == null || target.isBlank()) continue;
+            if (ProtectedPathPolicy.classify(workspace, target).protectedPath()) {
                 targets.add(target);
             }
         }
