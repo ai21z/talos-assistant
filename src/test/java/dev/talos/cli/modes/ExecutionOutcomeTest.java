@@ -315,7 +315,7 @@ class ExecutionOutcomeTest {
                 1, 0, false, 0, List.of(),
                 0, 0, 0, 0,
                 List.of(new ToolCallLoop.ToolOutcome(
-                        "talos.read_file", "report.docx", false, false, false,
+                        "read_file", "report.docx", false, false, false,
                         "", "Unsupported binary document format: report.docx (Microsoft Word .docx). "
                         + "Talos cannot extract Word document contents with the current local text-tool surface.",
                         null, ToolError.UNSUPPORTED_FORMAT
@@ -1013,6 +1013,27 @@ class ExecutionOutcomeTest {
                 });
             }
         }
+    }
+
+    @Test
+    void streamingNoToolDirectAnswerOnlyMethodologyIsNotUngrounded() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user(
+                "Without inspecting the workspace, explain how you would review a Java CLI project."));
+
+        String methodology = "I would start by clarifying the CLI's expected commands, then review "
+                + "the parser, command dispatch, filesystem boundaries, error handling, and tests. "
+                + "x".repeat(AssistantTurnExecutor.UNGROUNDED_MIN_CHARS);
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromNoTool(methodology, messages, null, true);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+        assertEquals(ExecutionOutcome.GroundingStatus.UNKNOWN, outcome.groundingStatus());
+        assertFalse(outcome.advisoryOnly());
+        assertFalse(outcome.finalAnswer().contains("Grounding check"), outcome.finalAnswer());
+        assertEquals(TaskCompletionStatus.READ_ONLY_ANSWERED, outcome.taskOutcome().completionStatus());
+        assertFalse(outcome.taskOutcome().hasWarning(TruthWarningType.STREAMING_NO_TOOL_UNGROUNDED));
     }
 
     @Test

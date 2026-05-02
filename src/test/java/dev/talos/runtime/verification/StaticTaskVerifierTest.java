@@ -578,6 +578,34 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void scriptOnlySelectorFixUsesSiblingWebSurfaceDespiteReadme() throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "# Public fixture\n");
+        Files.writeString(workspace.resolve("index.html"), """
+                <!DOCTYPE html>
+                <html>
+                  <head><link rel="stylesheet" href="styles.css"></head>
+                  <body><button class="cta-button">Go</button><script src="script.js"></script></body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), ".cta-button { color: red; }");
+        Files.writeString(workspace.resolve("script.js"), """
+                document.querySelector('.cta-button').addEventListener('click', () => console.log('ok'));
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Make script.js fix the selector bug by changing .missing-button to .cta-button.",
+                loopResult(List.of(successfulEdit("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.problems().toString());
+        assertTrue(result.problems().stream()
+                .noneMatch(p -> p.contains("web coherence could not be checked")), result.problems().toString());
+        assertTrue(result.facts().stream()
+                .anyMatch(f -> f.contains("HTML/CSS/JS selector coherence passed")), result.facts().toString());
+    }
+
+    @Test
     void htmlMustLinkPrimaryCssAndJavaScriptForWebCoherence() throws Exception {
         Files.writeString(workspace.resolve("index.html"), """
                 <!DOCTYPE html>
