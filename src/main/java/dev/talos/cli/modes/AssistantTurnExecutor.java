@@ -169,7 +169,7 @@ public final class AssistantTurnExecutor {
         if (directAnswer != null) {
             return directTurnOutput(directAnswer, ctx, opts);
         }
-        boolean useStreaming = shouldUseStreaming(ctx, currentTurnPlan.taskContract());
+        boolean useStreaming = shouldUseStreaming(ctx, currentTurnPlan, workspace);
 
         TurnTaskContractCapture.set(currentTurnPlan.taskContract());
         try {
@@ -388,14 +388,14 @@ public final class AssistantTurnExecutor {
                             extraMutationSuccesses, mrr.actionObligationFailed(), opts),
                     mrr.extraSummary());
         }
-        ProtectedReadHandoffResult protectedReadHandoff = protectedReadHandoffIfNeeded(
+        ReadEvidenceHandoffResult readEvidenceHandoff = readEvidenceHandoffIfNeeded(
                 mrr.answer(), messages, plan, workspace, ctx);
-        if (protectedReadHandoff.loopResult() != null) {
+        if (readEvidenceHandoff.loopResult() != null) {
             return new ToolLoopAnswerResolution(
                     shapeAnswerAfterToolLoop(
-                            protectedReadHandoff.answer(), messages, plan,
-                            protectedReadHandoff.loopResult(), workspace, 0, opts),
-                    protectedReadHandoff.extraSummary());
+                            readEvidenceHandoff.answer(), messages, plan,
+                            readEvidenceHandoff.loopResult(), workspace, 0, opts),
+                    readEvidenceHandoff.extraSummary());
         }
         ReadOnlyInspectionRetryResult inspectionRetry = readOnlyInspectionRetryIfNeeded(
                 mrr.answer(), messages, plan, workspace, ctx);
@@ -419,13 +419,13 @@ public final class AssistantTurnExecutor {
             String extraSummary
     ) {}
 
-    record ProtectedReadHandoffResult(
+    record ReadEvidenceHandoffResult(
             String answer,
             ToolCallLoop.LoopResult loopResult,
             String extraSummary
     ) {}
 
-    static ProtectedReadHandoffResult protectedReadHandoffIfNeeded(
+    static ReadEvidenceHandoffResult readEvidenceHandoffIfNeeded(
             String answer,
             List<ChatMessage> messages,
             CurrentTurnPlan plan,
@@ -435,22 +435,24 @@ public final class AssistantTurnExecutor {
         if (answer == null) answer = "";
         CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, ctx);
         TaskContract contract = safePlan.taskContract();
-        if (!requiresProtectedReadHandoff(safePlan, workspace)) {
-            return new ProtectedReadHandoffResult(answer, null, null);
+        EvidenceObligation obligation = selectedEvidenceObligation(safePlan, workspace);
+        if (!requiresReadEvidenceHandoff(obligation)) {
+            return new ReadEvidenceHandoffResult(answer, null, null);
         }
         if (contract.mutationRequested() || contract.mutationAllowed()) {
-            return new ProtectedReadHandoffResult(answer, null, null);
+            return new ReadEvidenceHandoffResult(answer, null, null);
         }
         if (ctx == null || ctx.llm() == null || ctx.toolCallLoop() == null || workspace == null) {
-            return new ProtectedReadHandoffResult(answer, null, null);
+            return new ReadEvidenceHandoffResult(answer, null, null);
         }
 
-        List<String> targets = protectedExpectedTargets(contract, workspace);
+        List<String> targets = readEvidenceHandoffTargets(contract, obligation, workspace);
         if (targets.isEmpty()) {
-            return new ProtectedReadHandoffResult(answer, null, null);
+            return new ReadEvidenceHandoffResult(answer, null, null);
         }
-        if (!hasExplicitProtectedReadIntent(contract, targets)) {
-            return new ProtectedReadHandoffResult(answer, null, null);
+        if (obligation == EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED
+                && !hasExplicitProtectedReadIntent(contract, targets)) {
+            return new ReadEvidenceHandoffResult(answer, null, null);
         }
 
         String handoffCalls = targets.stream()
@@ -464,36 +466,52 @@ public final class AssistantTurnExecutor {
                     workspace,
                     ctx);
             String mergedAnswer = loop.finalAnswer();
-            return new ProtectedReadHandoffResult(
+            return new ReadEvidenceHandoffResult(
                     mergedAnswer == null || mergedAnswer.isBlank() ? answer : mergedAnswer,
                     loop,
                     loop.summary());
         } catch (Exception e) {
-            LOG.warn("Protected read handoff failed: {}", e.getMessage());
-            return new ProtectedReadHandoffResult(answer, null, null);
+            LOG.warn("Read evidence handoff failed: {}", e.getMessage());
+            return new ReadEvidenceHandoffResult(answer, null, null);
         }
     }
 
-    private static boolean requiresProtectedReadHandoff(CurrentTurnPlan plan, Path workspace) {
-        if (plan == null) return false;
+    private static EvidenceObligation selectedEvidenceObligation(CurrentTurnPlan plan, Path workspace) {
+        if (plan == null) return EvidenceObligation.NONE;
         TaskContract contract = plan.taskContract();
-        if (contract == null) return false;
+        if (contract == null) return EvidenceObligation.NONE;
         EvidenceObligation recorded = EvidenceObligationPolicy.parse(plan.evidenceObligation());
         EvidenceObligation derived = EvidenceObligationPolicy.derive(
                 contract,
                 plan.phaseInitial(),
                 workspace);
-        return recorded == EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED
-                || derived == EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED;
+        return recorded == EvidenceObligation.NONE ? derived : recorded;
     }
 
-    private static List<String> protectedExpectedTargets(TaskContract contract, Path workspace) {
+    private static boolean requiresReadEvidenceHandoff(EvidenceObligation obligation) {
+        return obligation == EvidenceObligation.READ_TARGET_REQUIRED
+                || obligation == EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED;
+    }
+
+    private static List<String> readEvidenceHandoffTargets(
+            TaskContract contract,
+            EvidenceObligation obligation,
+            Path workspace
+    ) {
         if (contract == null || workspace == null || contract.expectedTargets().isEmpty()) {
             return List.of();
         }
-        return contract.expectedTargets().stream()
-                .filter(target -> ProtectedPathPolicy.classify(workspace, target).protectedPath())
-                .toList();
+        LinkedHashSet<String> targets = new LinkedHashSet<>();
+        for (String target : contract.expectedTargets()) {
+            if (target == null || target.isBlank()) continue;
+            boolean protectedTarget = ProtectedPathPolicy.classify(workspace, target).protectedPath();
+            if (obligation == EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED && protectedTarget) {
+                targets.add(target);
+            } else if (obligation == EvidenceObligation.READ_TARGET_REQUIRED && !protectedTarget) {
+                targets.add(target);
+            }
+        }
+        return List.copyOf(targets);
     }
 
     private static boolean hasExplicitProtectedReadIntent(TaskContract contract, List<String> targets) {
@@ -905,9 +923,11 @@ public final class AssistantTurnExecutor {
                 : ExecutionPhase.INSPECT;
     }
 
-    private static boolean shouldUseStreaming(Context ctx, TaskContract taskContract) {
+    private static boolean shouldUseStreaming(Context ctx, CurrentTurnPlan plan, Path workspace) {
         if (ctx == null || ctx.streamSink() == null) return false;
+        TaskContract taskContract = plan == null ? null : plan.taskContract();
         if (taskContract != null && taskContract.mutationAllowed()) return false;
+        if (requiresReadEvidenceHandoff(selectedEvidenceObligation(plan, workspace))) return false;
         return !requiresWorkspaceEvidence(taskContract);
     }
 
