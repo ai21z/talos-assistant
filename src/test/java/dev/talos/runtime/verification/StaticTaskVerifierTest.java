@@ -606,6 +606,74 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void scriptOnlySelectorFixUsesTargetAwareWebSurfaceDespiteMixedWorkspaceFiles() throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "# Public fixture\n");
+        Files.writeString(workspace.resolve("config.json"), "{\"name\":\"t57-fixture\"}\n");
+        Files.writeString(workspace.resolve("notes.md"), "ALPHA-742\n");
+        Files.writeString(workspace.resolve("report.docx"), "unsupported fixture\n");
+        Files.writeString(workspace.resolve("index.html"), """
+                <!DOCTYPE html>
+                <html>
+                  <head><link rel="stylesheet" href="styles.css"></head>
+                  <body><button class="cta-button">Go</button><script src="script.js"></script></body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), ".cta-button { color: red; }");
+        Files.writeString(workspace.resolve("script.js"), """
+                document.querySelector('.cta-button').addEventListener('click', () => console.log('ok'));
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Make script.js fix the selector bug by changing .missing-button to .cta-button.",
+                loopResult(List.of(successfulEdit("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.problems().toString());
+        assertTrue(result.problems().stream()
+                .noneMatch(p -> p.contains("web coherence could not be checked")), result.problems().toString());
+        assertTrue(result.facts().stream()
+                .anyMatch(f -> f.contains("HTML/CSS/JS selector coherence passed")), result.facts().toString());
+    }
+
+    @Test
+    void targetAwareWebSurfaceRefusesTooManyCandidateWebFiles() throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "# Public fixture\n");
+        Files.writeString(workspace.resolve("config.json"), "{\"name\":\"t57-fixture\"}\n");
+        Files.writeString(workspace.resolve("notes.md"), "ALPHA-742\n");
+        Files.writeString(workspace.resolve("index.html"), """
+                <!DOCTYPE html>
+                <html>
+                  <head>
+                    <link rel="stylesheet" href="styles.css">
+                    <link rel="stylesheet" href="theme.css">
+                    <link rel="stylesheet" href="print.css">
+                  </head>
+                  <body><button class="cta-button">Go</button><script src="script.js"></script><script src="app.js"></script></body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), ".cta-button { color: red; }");
+        Files.writeString(workspace.resolve("theme.css"), ".theme { color: blue; }");
+        Files.writeString(workspace.resolve("print.css"), ".print { color: black; }");
+        Files.writeString(workspace.resolve("script.js"), """
+                document.querySelector('.cta-button').addEventListener('click', () => console.log('ok'));
+                """);
+        Files.writeString(workspace.resolve("app.js"), "document.body.dataset.app = 'true';");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Make script.js fix the selector bug by changing .missing-button to .cta-button.",
+                loopResult(List.of(successfulEdit("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.facts().toString());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("web coherence could not be checked")), result.problems().toString());
+        assertTrue(result.facts().stream()
+                .noneMatch(f -> f.contains("Target-aware web surface selected")), result.facts().toString());
+    }
+
+    @Test
     void htmlMustLinkPrimaryCssAndJavaScriptForWebCoherence() throws Exception {
         Files.writeString(workspace.resolve("index.html"), """
                 <!DOCTYPE html>
