@@ -84,6 +84,25 @@ class UnifiedAssistantModeTest {
     }
 
     @Test
+    void noInspectionReviewMethodPromptRecordsNoToolPromptSurface() throws Exception {
+        LastPromptCapture.clear();
+        var mode = new UnifiedAssistantMode();
+
+        var result = mode.handle(
+                "Without inspecting the workspace, explain how you would review a Java CLI project.",
+                Path.of(".").toAbsolutePath().normalize(),
+                context("I would review CLI entrypoints, command routing, tests, and release evidence."));
+
+        assertTrue(result.isPresent());
+        var render = LastPromptCapture.latest().orElseThrow();
+
+        assertEquals("SMALL_TALK", render.taskType());
+        assertFalse(render.mutationAllowed());
+        assertTrue(render.tools().isEmpty(), render.tools().toString());
+        assertFalse(render.systemPrompt().contains("Available Tools"));
+    }
+
+    @Test
     void expandedCapabilityPromptUsesDeterministicNoToolAnswer() throws Exception {
         LastPromptCapture.clear();
         var mode = new UnifiedAssistantMode();
