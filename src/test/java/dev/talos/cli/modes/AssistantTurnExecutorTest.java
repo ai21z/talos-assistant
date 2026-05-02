@@ -750,6 +750,88 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void nonProtectedReadTargetNoToolAnswerRunsEvidenceRecovery(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("README.md"), "# Project\nActual read content.\n");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "I can summarize the README.",
+                            "README evidence gathered: Actual read content.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Read README.md and summarize it."));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-t77-read-evidence-recovery",
+                    "sid",
+                    1,
+                    "2026-05-02T00:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "scripted",
+                    "test-model",
+                    "Read README.md and summarize it.");
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertTrue(out.text().contains("README evidence gathered"), out.text());
+                assertFalse(out.text().contains("[Evidence incomplete:"), out.text());
+                assertTrue(out.text().contains("talos.read_file"), out.text());
+                assertEquals("READ_TARGET_REQUIRED", trace.promptAudit().evidenceObligation());
+                assertEquals("COMPLETE", trace.outcome().status());
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        }
+
+        @Test
+        void streamingReadEvidencePromptUsesBufferedRecoveryPath(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("README.md"), "# Project\nActual read content.\n");
+
+            var visibleChunks = new ArrayList<String>();
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "I can summarize the README.",
+                            "README evidence gathered: Actual read content.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .streamSink(visibleChunks::add)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Read README.md and summarize it."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertFalse(out.streamed(),
+                    "read-evidence turns should buffer so no unsupported no-tool prose is printed first");
+            assertTrue(visibleChunks.isEmpty(),
+                    "initial no-tool prose must not reach the stream sink before evidence recovery");
+            assertTrue(out.text().contains("README evidence gathered"), out.text());
+            assertFalse(out.text().contains("[Evidence incomplete:"), out.text());
+        }
+
+        @Test
         void failedNoToolMutationRetryDoesNotCompleteAsUnverified(@TempDir Path workspace)
                 throws Exception {
             Files.writeString(workspace.resolve("index.html"), "<h1>Old</h1>\n");
@@ -1096,6 +1178,67 @@ class AssistantTurnExecutorTest {
                 assertEquals(1, approvals.get(), "no-tool protected read must ask before reading");
                 assertTrue(out.text().contains("SECRET=manual-test"), out.text());
                 assertFalse(out.text().contains("Protected content was not read"), out.text());
+                assertEquals("PROTECTED_READ_APPROVAL_REQUIRED", trace.promptAudit().evidenceObligation());
+                assertEquals("COMPLETE", trace.outcome().status());
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        }
+
+        @Test
+        void streamingProtectedReadNoToolAnswerUsesBufferedRecoveryAndApproval(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve(".env"), "SECRET=manual-test\n");
+
+            var visibleChunks = new ArrayList<String>();
+            var approvals = new java.util.concurrent.atomic.AtomicInteger();
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null,
+                    (description, detail) -> {
+                        approvals.incrementAndGet();
+                        assertTrue(description.contains("protected read"), description);
+                        assertTrue(detail.contains(".env"), detail);
+                        return true;
+                    },
+                    registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "I cannot access local files directly.",
+                            "The approved file says SECRET=manual-test.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .streamSink(visibleChunks::add)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Read .env and tell me the value inside."));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-t77-protected-read-streaming-recovery",
+                    "sid",
+                    1,
+                    "2026-05-02T00:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "scripted",
+                    "test-model",
+                    "Read .env and tell me the value inside.");
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertFalse(out.streamed(),
+                        "protected read turns should buffer so approval can run before user-visible prose");
+                assertTrue(visibleChunks.isEmpty(),
+                        "initial no-tool prose must not consume the approval response slot");
+                assertEquals(1, approvals.get(), "protected read recovery must still ask approval");
+                assertTrue(out.text().contains("SECRET=manual-test"), out.text());
+                assertFalse(out.text().contains("not attempted"), out.text());
                 assertEquals("PROTECTED_READ_APPROVAL_REQUIRED", trace.promptAudit().evidenceObligation());
                 assertEquals("COMPLETE", trace.outcome().status());
             } finally {
@@ -1818,7 +1961,7 @@ class AssistantTurnExecutorTest {
                     .build();
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
-            messages.add(ChatMessage.user("Read index.html and summarize it."));
+            messages.add(ChatMessage.user("How does dependency injection work in Java?"));
 
             AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
                     messages, workspace, ctx, new AssistantTurnExecutor.Options());
@@ -1860,7 +2003,7 @@ class AssistantTurnExecutorTest {
 
             AssistantTurnExecutor.execute(new ArrayList<>(List.of(
                     ChatMessage.system("sys"),
-                    ChatMessage.user("Read index.html."))), workspace, ctx,
+                    ChatMessage.user("How does dependency injection work in Java?"))), workspace, ctx,
                     new AssistantTurnExecutor.Options());
             AssistantTurnExecutor.execute(new ArrayList<>(List.of(
                     ChatMessage.system("sys"),
