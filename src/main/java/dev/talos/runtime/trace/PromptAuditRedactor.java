@@ -2,7 +2,7 @@ package dev.talos.runtime.trace;
 
 /** Redaction helpers for prompt-audit previews. */
 public final class PromptAuditRedactor {
-    private static final int DEFAULT_PREVIEW_LIMIT = 240;
+    private static final int DEFAULT_PREVIEW_LIMIT = 800;
 
     private PromptAuditRedactor() {}
 
