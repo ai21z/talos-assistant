@@ -2,6 +2,7 @@ package dev.talos.cli.repl;
 
 import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ArtifactGoal;
+import dev.talos.runtime.context.ChangeSummaryContext;
 import dev.talos.spi.types.ChatMessage;
 
 import java.util.ArrayList;
@@ -44,11 +45,13 @@ public final class SessionMemory {
     private final List<ChatMessage> turns = new ArrayList<>();
     private ActiveTaskContext activeTaskContext;
     private ArtifactGoal artifactGoal;
+    private ChangeSummaryContext changeSummaryContext;
 
     public SessionMemory() {
         this.buffer = null;
         this.activeTaskContext = ActiveTaskContext.none();
         this.artifactGoal = ArtifactGoal.none();
+        this.changeSummaryContext = ChangeSummaryContext.none();
     }
 
     /** Returns the current memory content, or null if empty. */
@@ -69,12 +72,20 @@ public final class SessionMemory {
         return artifactGoal;
     }
 
+    public synchronized ChangeSummaryContext changeSummaryContext() {
+        return changeSummaryContext;
+    }
+
     public synchronized void setActiveTaskContext(ActiveTaskContext activeTaskContext) {
         this.activeTaskContext = activeTaskContext == null ? ActiveTaskContext.none() : activeTaskContext;
     }
 
     public synchronized void setArtifactGoal(ArtifactGoal artifactGoal) {
         this.artifactGoal = artifactGoal == null ? ArtifactGoal.none() : artifactGoal;
+    }
+
+    public synchronized void setChangeSummaryContext(ChangeSummaryContext changeSummaryContext) {
+        this.changeSummaryContext = changeSummaryContext == null ? ChangeSummaryContext.none() : changeSummaryContext;
     }
 
     public synchronized void clearActiveTaskContext() {
@@ -87,6 +98,7 @@ public final class SessionMemory {
         buffer = null;
         turns.clear();
         clearActiveTaskContext();
+        changeSummaryContext = ChangeSummaryContext.none();
     }
 
     /** Returns true if memory has content. */

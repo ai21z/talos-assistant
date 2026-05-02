@@ -9,6 +9,7 @@ import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.TurnAuditCapture;
 import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ArtifactGoal;
+import dev.talos.runtime.context.ChangeSummaryContext;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.ResponseObligationVerifier;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -4355,6 +4356,55 @@ class AssistantTurnExecutorTest {
             assertTrue(out.text().contains("scripts.js"), out.text());
             assertTrue(out.text().contains("styles.css"), out.text());
             assertTrue(out.text().contains("HTML does not link JavaScript file"), out.text());
+            assertFalse(out.text().contains(".env"), out.text());
+            assertFalse(out.text().contains("The audit changed .env and README.md."), out.text());
+        }
+
+        @Test
+        void changedFilesAuditQuestionPrefersRuntimeLedgerOverFailedVerifierProse() {
+            SessionMemory memory = new SessionMemory();
+            memory.setChangeSummaryContext(new ChangeSummaryContext(
+                    ChangeSummaryContext.SCHEMA_VERSION,
+                    List.of(
+                            new ChangeSummaryContext.FileChange("index.html", "talos.write_file", 18, "trc-bmi"),
+                            new ChangeSummaryContext.FileChange("styles.css", "talos.write_file", 18, "trc-bmi"),
+                            new ChangeSummaryContext.FileChange("script.js", "talos.write_file", 18, "trc-bmi")),
+                    List.of("scripts.js"),
+                    "FAILED",
+                    "TASK_INCOMPLETE",
+                    List.of(
+                            "scripts.js: expected target was not successfully mutated.",
+                            "Calculator/form task is missing a result output element.")));
+            var ctx = Context.builder(new Config())
+                    .memory(memory)
+                    .llm(LlmClient.scripted("The audit changed .env and README.md."))
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Create a complete static BMI calculator in this folder with index.html, styles.css, "
+                            + "and scripts.js. It should calculate BMI from height and weight."));
+            messages.add(ChatMessage.assistant("""
+                    [Task incomplete: Static verification failed - scripts.js: expected target was not successfully mutated.; Calculator/form task is missing a result output element.]
+
+                    The requested task is not verified complete. Applied changes below are workspace changes only; unresolved static problems remain.
+
+                    Unresolved static verification problems:
+                    - scripts.js: expected target was not successfully mutated.
+                    - Calculator/form task is missing a result output element.
+                    """));
+            messages.add(ChatMessage.user("What files changed during this audit? Do not read protected files."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, WS, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().startsWith("Recorded file changes"), out.text());
+            assertTrue(out.text().contains("index.html"), out.text());
+            assertTrue(out.text().contains("styles.css"), out.text());
+            assertTrue(out.text().contains("script.js"), out.text());
+            assertTrue(out.text().contains("scripts.js"), out.text());
+            assertTrue(out.text().contains("not verified complete"), out.text());
+            assertFalse(out.text().startsWith("No. The previous verified outcome"), out.text());
             assertFalse(out.text().contains(".env"), out.text());
             assertFalse(out.text().contains("The audit changed .env and README.md."), out.text());
         }
