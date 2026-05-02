@@ -1622,7 +1622,7 @@
         }
       },
       "prompts": [
-        "Without inspecting the workspace, tell me how you would approach reviewing a Java CLI project."
+        "Without inspecting the workspace, explain how you would review a Java CLI project."
       ],
       "expectedContract": "SMALL_TALK",
       "expectedToolsAllowed": [],
