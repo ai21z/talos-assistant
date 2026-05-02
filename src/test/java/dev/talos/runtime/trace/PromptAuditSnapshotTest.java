@@ -48,6 +48,43 @@ class PromptAuditSnapshotTest {
     }
 
     @Test
+    void redactsSecretLikeCurrentTurnFramePreviewAfterFormerCap() throws Exception {
+        String filler = "frame filler ".repeat(28);
+        List<ChatMessage> messages = new ArrayList<>();
+        messages.add(ChatMessage.system("system"));
+        messages.add(ChatMessage.system("[CurrentTurnCapability]\n"
+                + filler
+                + "\nAPI_KEY=super-secret\nAvailable: talos.read_file"));
+        messages.add(ChatMessage.user("Read README.md and summarize it."));
+
+        PromptAuditSnapshot snapshot = PromptAuditSnapshot.fromMessages(
+                new TaskContract(
+                        TaskType.READ_ONLY_QA,
+                        false,
+                        false,
+                        false,
+                        Set.of("README.md"),
+                        Set.of(),
+                        "Read README.md and summarize it."),
+                ExecutionPhase.INSPECT,
+                ExecutionPhase.INSPECT,
+                ActionObligation.INSPECT_REQUIRED,
+                messages,
+                List.of("talos.read_file"),
+                List.of("talos.read_file"),
+                List.of());
+
+        assertTrue(snapshot.currentTurnFramePreviewRedacted().contains("API_KEY=[redacted]"),
+                snapshot.currentTurnFramePreviewRedacted());
+        assertFalse(snapshot.currentTurnFramePreviewRedacted().contains("super-secret"),
+                snapshot.currentTurnFramePreviewRedacted());
+
+        String json = MAPPER.writeValueAsString(snapshot);
+        assertFalse(json.contains("super-secret"), "larger frame previews must stay redacted");
+        assertTrue(json.contains("API_KEY=[redacted]"));
+    }
+
+    @Test
     void recordsMessageLayoutAndHashesWithoutRawPromptText() throws Exception {
         List<ChatMessage> messages = new ArrayList<>();
         messages.add(ChatMessage.system("system"));

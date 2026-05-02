@@ -1,7 +1,9 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.TaskType;
 import dev.talos.tools.FileUndoStack;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.impl.FileEditTool;
@@ -13,6 +15,7 @@ import dev.talos.tools.impl.RetrieveTool;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -27,6 +30,9 @@ class NativeToolSpecPolicyTest {
                 NativeToolSpecPolicy.select(contract, ExecutionPhase.INSPECT, registry()));
 
         assertTrue(names.contains("talos.read_file"));
+        assertTrue(names.contains("talos.list_dir"));
+        assertTrue(names.contains("talos.grep"));
+        assertTrue(names.contains("talos.retrieve"));
         assertFalse(names.contains("talos.write_file"));
         assertFalse(names.contains("talos.edit_file"));
     }
@@ -53,12 +59,41 @@ class NativeToolSpecPolicyTest {
         List<String> names = NativeToolSpecPolicy.names(
                 NativeToolSpecPolicy.select(contract, ExecutionPhase.INSPECT, registry()));
 
-        assertTrue(names.contains("talos.read_file"), names.toString());
-        assertFalse(names.contains("talos.list_dir"), names.toString());
-        assertFalse(names.contains("talos.grep"), names.toString());
-        assertFalse(names.contains("talos.retrieve"), names.toString());
-        assertFalse(names.contains("talos.write_file"), names.toString());
-        assertFalse(names.contains("talos.edit_file"), names.toString());
+        assertOnlyReadFile(names);
+    }
+
+    @Test
+    void workspaceExplainWithExpectedTargetExposesOnlyReadFile() {
+        var contract = new TaskContract(
+                TaskType.WORKSPACE_EXPLAIN,
+                false,
+                false,
+                false,
+                Set.of("README.md"),
+                Set.of(),
+                "Review README.md and propose improvements.");
+
+        List<String> names = NativeToolSpecPolicy.names(
+                NativeToolSpecPolicy.select(contract, ExecutionPhase.INSPECT, registry()));
+
+        assertOnlyReadFile(names);
+    }
+
+    @Test
+    void verifyOnlyWithExpectedTargetExposesOnlyReadFile() {
+        var contract = new TaskContract(
+                TaskType.VERIFY_ONLY,
+                false,
+                false,
+                true,
+                Set.of("README.md"),
+                Set.of(),
+                "Verify README.md now matches the requested content.");
+
+        List<String> names = NativeToolSpecPolicy.names(
+                NativeToolSpecPolicy.select(contract, ExecutionPhase.VERIFY, registry()));
+
+        assertOnlyReadFile(names);
     }
 
     @Test
@@ -76,7 +111,7 @@ class NativeToolSpecPolicyTest {
     @Test
     void noInspectionMethodologyPromptExposesNoNativeTools() {
         var contract = TaskContractResolver.fromUserRequest(
-                "Without inspecting the workspace, tell me how you would approach reviewing a Java CLI project.");
+                "Without inspecting the workspace, explain how you would review a Java CLI project.");
 
         List<String> names = NativeToolSpecPolicy.names(
                 NativeToolSpecPolicy.select(contract, ExecutionPhase.INSPECT, registry()));
@@ -150,5 +185,14 @@ class NativeToolSpecPolicyTest {
         registry.register(new FileWriteTool(undoStack));
         registry.register(new FileEditTool(undoStack));
         return registry;
+    }
+
+    private static void assertOnlyReadFile(List<String> names) {
+        assertTrue(names.contains("talos.read_file"), names.toString());
+        assertFalse(names.contains("talos.list_dir"), names.toString());
+        assertFalse(names.contains("talos.grep"), names.toString());
+        assertFalse(names.contains("talos.retrieve"), names.toString());
+        assertFalse(names.contains("talos.write_file"), names.toString());
+        assertFalse(names.contains("talos.edit_file"), names.toString());
     }
 }
