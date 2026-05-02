@@ -391,7 +391,7 @@ public final class StaticTaskVerifier {
             return;
         }
 
-        SelectorFacts selectors = selectorFacts(root, primary);
+        SelectorFacts selectors = selectorFacts(root, primary, preferredWebTargetFiles(contract, mutatedPaths));
         if (selectors == null) {
             problems.add("web coherence could not be checked because primary web files could not be read.");
             return;
@@ -502,6 +502,29 @@ public final class StaticTaskVerifier {
         int dot = lower.lastIndexOf('.');
         String ext = dot >= 0 ? lower.substring(dot) : "";
         return SMALL_WORKSPACE_WEB_EXTS.contains(ext);
+    }
+
+    private static List<String> preferredWebTargetFiles(TaskContract contract, Collection<String> mutatedPaths) {
+        List<String> preferred = new ArrayList<>();
+        addPreferredWebTargetFiles(preferred, contract == null ? null : contract.expectedTargets());
+        addPreferredWebTargetFiles(preferred, mutatedPaths);
+        return preferred;
+    }
+
+    private static void addPreferredWebTargetFiles(List<String> preferred, Collection<String> targetHints) {
+        if (preferred == null || targetHints == null || targetHints.isEmpty()) return;
+        boolean caseInsensitive = expectedTargetMatchingIsCaseInsensitive();
+        for (String hint : targetHints) {
+            String normalized = normalizePath(hint);
+            if (normalized.isBlank()
+                    || normalized.contains("/")
+                    || !isSmallWorkspaceWebFile(normalized)) {
+                continue;
+            }
+            boolean alreadyPresent = preferred.stream()
+                    .anyMatch(existing -> expectedTargetMatches(existing, normalized, caseInsensitive));
+            if (!alreadyPresent) preferred.add(normalized);
+        }
     }
 
     public static List<String> missingPrimaryReads(Path workspace, Collection<String> readPaths) {
@@ -628,6 +651,14 @@ public final class StaticTaskVerifier {
     }
 
     private static SelectorFacts selectorFacts(Path root, List<String> primaryFiles) {
+        return selectorFacts(root, primaryFiles, List.of());
+    }
+
+    private static SelectorFacts selectorFacts(
+            Path root,
+            List<String> primaryFiles,
+            Collection<String> preferredAssetFiles
+    ) {
         try {
             String htmlFile = pickPrimary(primaryFiles, ".html", ".htm");
             if (htmlFile == null) return null;
@@ -639,8 +670,8 @@ public final class StaticTaskVerifier {
             List<String> linkedJsOccurrences = extractLinkedAssetOccurrences(html, HTML_SCRIPT_SRC, ".js");
             Set<String> linkedCssFiles = new LinkedHashSet<>(linkedCssOccurrences);
             Set<String> linkedJsFiles = new LinkedHashSet<>(linkedJsOccurrences);
-            String cssFile = pickLinkedOrPrimary(primaryFiles, linkedCssFiles, ".css");
-            String jsFile = pickLinkedOrPrimary(primaryFiles, linkedJsFiles, ".js");
+            String cssFile = pickLinkedPreferredOrPrimary(primaryFiles, linkedCssFiles, preferredAssetFiles, ".css");
+            String jsFile = pickLinkedPreferredOrPrimary(primaryFiles, linkedJsFiles, preferredAssetFiles, ".js");
             if (cssFile == null || jsFile == null) return null;
             String css = Files.readString(root.resolve(cssFile));
             String js = Files.readString(root.resolve(jsFile));
@@ -1085,12 +1116,32 @@ public final class StaticTaskVerifier {
         return null;
     }
 
-    private static String pickLinkedOrPrimary(List<String> files, Set<String> linkedFiles, String ext) {
+    private static String pickLinkedPreferredOrPrimary(
+            List<String> files,
+            Set<String> linkedFiles,
+            Collection<String> preferredFiles,
+            String ext
+    ) {
         if (files == null || files.isEmpty()) return null;
         if (linkedFiles != null) {
             for (String linked : linkedFiles) {
                 for (String file : files) {
                     if (file.equals(linked) && hasExtension(file, ext)) return file;
+                }
+            }
+        }
+        if (preferredFiles != null) {
+            boolean caseInsensitive = expectedTargetMatchingIsCaseInsensitive();
+            for (String preferred : preferredFiles) {
+                String normalized = normalizePath(preferred);
+                if (normalized.isBlank() || normalized.contains("/") || !hasExtension(normalized, ext)) {
+                    continue;
+                }
+                for (String file : files) {
+                    if (hasExtension(file, ext)
+                            && expectedTargetMatches(file, normalized, caseInsensitive)) {
+                        return file;
+                    }
                 }
             }
         }

@@ -699,6 +699,54 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void expectedJavaScriptTargetBeatsStaleSiblingWhenHtmlLinkIsMissing() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!DOCTYPE html>
+                <html>
+                  <head><link rel="stylesheet" href="styles.css"></head>
+                  <body>
+                    <main class="calculator">
+                      <form id="bmi-form">
+                        <input id="weight" type="number">
+                        <input id="height" type="number">
+                        <button type="submit">Calculate</button>
+                      </form>
+                      <p id="result"></p>
+                    </main>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), ".calculator { max-width: 28rem; }");
+        Files.writeString(workspace.resolve("script.js"), """
+                document.querySelector('.missing-button').addEventListener('click', () => console.log('stale'));
+                """);
+        Files.writeString(workspace.resolve("scripts.js"), """
+                document.getElementById('bmi-form').addEventListener('submit', event => event.preventDefault());
+                document.getElementById('weight');
+                document.getElementById('height');
+                document.getElementById('result');
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js.",
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("styles.css", VerificationStatus.PASS),
+                        successfulWrite("scripts.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("HTML does not link JavaScript file: `scripts.js`")),
+                result.problems().toString());
+        assertFalse(result.problems().stream().anyMatch(p -> p.contains("script.js")),
+                result.problems().toString());
+        assertFalse(result.problems().stream().anyMatch(p -> p.contains(".missing-button")),
+                result.problems().toString());
+    }
+
+    @Test
     void linkedCssFileIsPreferredOverLegacyCssNeighbor() throws Exception {
         Files.writeString(workspace.resolve("index.html"), """
                 <!DOCTYPE html>
