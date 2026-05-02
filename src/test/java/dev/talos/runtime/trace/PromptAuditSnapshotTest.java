@@ -3,6 +3,7 @@ package dev.talos.runtime.trace;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.ActionObligation;
+import dev.talos.runtime.policy.CurrentTurnCapabilityFrame;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.turn.CurrentTurnPlan;
@@ -99,6 +100,62 @@ class PromptAuditSnapshotTest {
         assertEquals(0, snapshot.historyMessageCount());
         assertTrue(snapshot.nativeTools().isEmpty());
         assertTrue(snapshot.promptTools().isEmpty());
+    }
+
+    @Test
+    void currentTurnFramePreviewPreservesDirectAnswerPolicyDirectives() {
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                new TaskContract(
+                        TaskType.SMALL_TALK,
+                        false,
+                        false,
+                        false,
+                        Set.of(),
+                        Set.of(),
+                        "Without inspecting the workspace, explain how you would review a Java CLI project."),
+                ExecutionPhase.INSPECT,
+                List.of(),
+                List.of(),
+                List.of());
+        List<ChatMessage> messages = List.of(
+                ChatMessage.system("system"),
+                ChatMessage.system(CurrentTurnCapabilityFrame.render(plan)),
+                ChatMessage.user("Without inspecting the workspace, explain how you would review a Java CLI project."));
+
+        PromptAuditSnapshot snapshot = PromptAuditSnapshot.fromPlan(plan, messages);
+
+        assertTrue(snapshot.currentTurnFramePreviewRedacted().contains("No workspace tools are visible"),
+                snapshot.currentTurnFramePreviewRedacted());
+        assertTrue(snapshot.currentTurnFramePreviewRedacted().contains("Do not call tools"),
+                snapshot.currentTurnFramePreviewRedacted());
+    }
+
+    @Test
+    void currentTurnFramePreviewPreservesDirectoryListingPolicyDirectives() {
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                new TaskContract(
+                        TaskType.DIRECTORY_LISTING,
+                        false,
+                        false,
+                        false,
+                        Set.of(),
+                        Set.of(),
+                        "List files only; do not show content from README.md or notes.md."),
+                ExecutionPhase.INSPECT,
+                List.of("talos.list_dir"),
+                List.of("talos.list_dir"),
+                List.of());
+        List<ChatMessage> messages = List.of(
+                ChatMessage.system("system"),
+                ChatMessage.system(CurrentTurnCapabilityFrame.render(plan)),
+                ChatMessage.user("List files only; do not show content from README.md or notes.md."));
+
+        PromptAuditSnapshot snapshot = PromptAuditSnapshot.fromPlan(plan, messages);
+
+        assertTrue(snapshot.currentTurnFramePreviewRedacted().contains("Use only talos.list_dir"),
+                snapshot.currentTurnFramePreviewRedacted());
+        assertTrue(snapshot.currentTurnFramePreviewRedacted().contains("do not inspect file contents"),
+                snapshot.currentTurnFramePreviewRedacted());
     }
 
     @Test
