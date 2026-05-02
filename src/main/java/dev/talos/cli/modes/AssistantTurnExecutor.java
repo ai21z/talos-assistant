@@ -14,6 +14,7 @@ import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ActiveTaskContextPolicy;
 import dev.talos.runtime.context.ArtifactGoal;
+import dev.talos.runtime.context.ChangeSummaryContext;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.ActionObligation;
 import dev.talos.runtime.policy.ActionObligationPolicy;
@@ -170,7 +171,7 @@ public final class AssistantTurnExecutor {
         PromptAuditSnapshot promptAudit = recordPromptAudit(currentTurnPlan, messages);
         emitPromptAuditIfEnabled(promptAudit, ctx);
         Context turnContext = ctx;
-        String directAnswer = deterministicDirectAnswerIfNeeded(messages, currentTurnPlan.taskContract());
+        String directAnswer = deterministicDirectAnswerIfNeeded(messages, currentTurnPlan.taskContract(), ctx);
         if (directAnswer != null) {
             return directTurnOutput(directAnswer, ctx, opts);
         }
@@ -1286,7 +1287,8 @@ public final class AssistantTurnExecutor {
 
     private static String deterministicDirectAnswerIfNeeded(
             List<ChatMessage> messages,
-            TaskContract contract
+            TaskContract contract,
+            Context ctx
     ) {
         String userRequest = latestUserRequest(messages);
         if (contract != null && contract.type() == TaskType.SMALL_TALK) {
@@ -1308,7 +1310,19 @@ public final class AssistantTurnExecutor {
                 && looksLikeAssistantCapabilityTurn(userRequest)) {
             return CapabilityAnswerPolicy.capabilityAnswer();
         }
+        String runtimeChangeSummary = runtimeChangeSummaryIfNeeded(ctx, userRequest);
+        if (runtimeChangeSummary != null) {
+            return runtimeChangeSummary;
+        }
         return verifiedFollowUpSummaryIfNeeded(messages, userRequest);
+    }
+
+    private static String runtimeChangeSummaryIfNeeded(Context ctx, String userRequest) {
+        if (!looksLikeChangeSummaryFollowUp(userRequest)) return null;
+        if (ctx == null || ctx.memory() == null) return null;
+        ChangeSummaryContext context = ctx.memory().changeSummaryContext();
+        if (context == null || !context.hasRecordedChanges()) return null;
+        return context.renderForChangeSummaryQuestion();
     }
 
     static boolean looksLikeAssistantIdentityTurn(String userRequest) {

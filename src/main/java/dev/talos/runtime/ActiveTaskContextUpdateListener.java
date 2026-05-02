@@ -2,6 +2,7 @@ package dev.talos.runtime;
 
 import dev.talos.cli.repl.SessionMemory;
 import dev.talos.runtime.context.ActiveTaskContextUpdater;
+import dev.talos.runtime.context.ChangeSummaryContext;
 
 /** Updates session active-task memory after completed turns. */
 public final class ActiveTaskContextUpdateListener implements SessionListener {
@@ -28,5 +29,8 @@ public final class ActiveTaskContextUpdateListener implements SessionListener {
                 memory.artifactGoal());
         memory.setActiveTaskContext(update.activeTaskContext());
         memory.setArtifactGoal(update.artifactGoal());
+        memory.setChangeSummaryContext(ChangeSummaryContext.updateAfterTurn(
+                memory.changeSummaryContext(),
+                result));
     }
 }

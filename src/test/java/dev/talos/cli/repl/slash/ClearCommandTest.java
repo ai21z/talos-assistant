@@ -4,6 +4,7 @@ import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
 import dev.talos.cli.repl.SessionMemory;
 import dev.talos.core.Config;
+import dev.talos.runtime.context.ChangeSummaryContext;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -28,6 +29,13 @@ class ClearCommandTest {
         var memory = new SessionMemory();
         memory.update("hello", "hi there");
         memory.update("how are you", "I'm fine");
+        memory.setChangeSummaryContext(new ChangeSummaryContext(
+                ChangeSummaryContext.SCHEMA_VERSION,
+                java.util.List.of(new ChangeSummaryContext.FileChange("README.md", "talos.write_file", 1, "trace-1")),
+                java.util.List.of(),
+                "PASSED",
+                "COMPLETED_VERIFIED",
+                java.util.List.of()));
         var ctx = Context.builder(new Config()).memory(memory).build();
         var cmd = new ClearCommand();
 
@@ -39,6 +47,7 @@ class ClearCommandTest {
         // Memory should be cleared
         assertFalse(memory.hasContent());
         assertTrue(memory.getTurns().isEmpty());
+        assertFalse(memory.changeSummaryContext().hasRecordedChanges());
     }
 
     @Test
