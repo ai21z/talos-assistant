@@ -4325,6 +4325,41 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void changedFilesAuditQuestionUsesPreviousVerifiedOutcomeWithoutProtectedReadGuess() {
+            var ctx = scriptedContext("The audit changed .env and README.md.");
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "No no I want a functioning 3-file BMI calculator. Update index.html and styles.css "
+                            + "and create scripts.js. Make it modern and responsive."));
+            messages.add(ChatMessage.assistant("""
+                    [Partial verification: static checks failed - HTML does not link JavaScript file: `scripts.js`]
+
+                    The turn remains partial. Some changes were applied, but unresolved static problems remain.
+
+                    Succeeded:
+                    - talos.write_file -> index.html
+                    - talos.write_file -> scripts.js
+
+                    Remaining static verification problems:
+                    - styles.css: expected target was not successfully mutated.
+                    - HTML does not link JavaScript file: `scripts.js`
+                    """));
+            messages.add(ChatMessage.user("What files changed during this audit? Do not read protected files."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, WS, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().startsWith("Partially."), out.text());
+            assertTrue(out.text().contains("index.html"), out.text());
+            assertTrue(out.text().contains("scripts.js"), out.text());
+            assertTrue(out.text().contains("styles.css"), out.text());
+            assertTrue(out.text().contains("HTML does not link JavaScript file"), out.text());
+            assertFalse(out.text().contains(".env"), out.text());
+            assertFalse(out.text().contains("The audit changed .env and README.md."), out.text());
+        }
+
+        @Test
         void repeatedStatusFollowUpDoesNotDuplicatePreviousVerifiedPreamble() {
             var ctx = scriptedContext("Yes, it is done now.");
             var messages = new ArrayList<ChatMessage>();
