@@ -29,6 +29,17 @@ class ConversationBoundaryPolicyTest {
     }
 
     @Test
+    void postModelCommandGreetingIsDirectAnswerOnly() {
+        for (String input : List.of(
+                "Hello friend, how are you after the model command?",
+                "Hello friend, how are you after /model?",
+                "Hey there, how are you after the slash command?")) {
+            assertEquals(DIRECT_CHAT, ConversationBoundaryPolicy.classification(input), input);
+            assertTrue(ConversationBoundaryPolicy.isDirectAnswerOnly(input), input);
+        }
+    }
+
+    @Test
     void privacyNoWorkspacePromptsAreDirectAnswerOnlyEvenWhenMentioningFiles() {
         for (String input : List.of(
                 "I am only chatting, please don't inspect my files. What can you do for me?",
@@ -92,6 +103,7 @@ class ConversationBoundaryPolicyTest {
                 "Hey, what is in this workspace?",
                 "Hello friend, read notes.md",
                 "how are you and can you inspect this repo?",
+                "Hello friend, how are you after reading README.md?",
                 "perfect, now search my files for ALPHA-742")) {
             assertEquals(NONE, ConversationBoundaryPolicy.classification(input), input);
             assertFalse(ConversationBoundaryPolicy.isDirectAnswerOnly(input), input);

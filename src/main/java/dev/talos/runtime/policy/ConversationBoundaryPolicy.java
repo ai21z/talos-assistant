@@ -103,6 +103,9 @@ public final class ConversationBoundaryPolicy {
                     + ".*\\bwhat\\s+command\\s+shows?\\b.{0,80}\\blast\\s+/?trace\\b.*"
                     + ")");
 
+    private static final Pattern FRIENDLY_HOW_ARE_YOU = Pattern.compile(
+            "^\\s*(?:hi|hello|hey|hey\\s+there|hello\\s+there|yo)\\b.{0,120}\\bhow\\s+are\\s+you\\b.*");
+
     private static final Pattern POSITIVE_WORKSPACE_QUERY = Pattern.compile(
             ".*(?:"
                     + "\\bwhat(?:'s|\\s+is)\\s+in\\s+(?:this\\s+|the\\s+)?"
@@ -138,7 +141,8 @@ public final class ConversationBoundaryPolicy {
         if (explicitMutation || hasWorkspaceIntent(normalized)) {
             return Classification.NONE;
         }
-        if (DIRECT_CHAT_PROMPTS.contains(normalized)) {
+        if (DIRECT_CHAT_PROMPTS.contains(normalized)
+                || FRIENDLY_HOW_ARE_YOU.matcher(normalized).matches()) {
             return Classification.DIRECT_CHAT;
         }
         return Classification.NONE;
