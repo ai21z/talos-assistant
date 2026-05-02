@@ -24,6 +24,18 @@ class EvidenceObligationVerifierTest {
     }
 
     @Test
+    void readTargetAliasSuccessSatisfiesRequiredTarget() {
+        var result = EvidenceObligationVerifier.verify(
+                EvidenceObligation.READ_TARGET_REQUIRED,
+                Set.of("config.json"),
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "read_file", "config.json", true, false, false,
+                        "{\"name\":\"t57-fixture\"}", "")));
+
+        assertEquals(EvidenceObligationVerifier.Status.SATISFIED, result.status());
+    }
+
+    @Test
     void readTargetExplicitFailureSatisfiesRequiredTarget() {
         var result = EvidenceObligationVerifier.verify(
                 EvidenceObligation.READ_TARGET_REQUIRED,

@@ -2,6 +2,7 @@ package dev.talos.runtime.policy;
 
 import dev.talos.core.ingest.UnsupportedDocumentFormats;
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.toolcall.ToolAliasPolicy;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.tools.ToolError;
 
@@ -71,7 +72,7 @@ public final class EvidenceObligationVerifier {
     private static Result verifyListDirectoryOnly(List<ToolCallLoop.ToolOutcome> outcomes) {
         boolean listedDirectory = false;
         for (ToolCallLoop.ToolOutcome outcome : outcomes) {
-            String toolName = outcome.toolName();
+            String toolName = canonicalToolName(outcome.toolName());
             if ("talos.list_dir".equals(toolName)) {
                 listedDirectory = true;
             }
@@ -113,7 +114,7 @@ public final class EvidenceObligationVerifier {
     ) {
         String expected = normalizePath(expectedTarget);
         for (ToolCallLoop.ToolOutcome outcome : outcomes) {
-            if (!"talos.read_file".equals(outcome.toolName())) continue;
+            if (!"talos.read_file".equals(canonicalToolName(outcome.toolName()))) continue;
             if (!expected.equals(normalizePath(outcome.pathHint()))) continue;
             if (outcome.denied()) {
                 return Result.blocked("Required read was blocked by approval.");
@@ -128,7 +129,7 @@ public final class EvidenceObligationVerifier {
 
     private static Result verifyAnyReadOnlyEvidence(List<ToolCallLoop.ToolOutcome> outcomes) {
         for (ToolCallLoop.ToolOutcome outcome : outcomes) {
-            if (EVIDENCE_TOOLS.contains(outcome.toolName())) {
+            if (EVIDENCE_TOOLS.contains(canonicalToolName(outcome.toolName()))) {
                 return Result.satisfied("Read-only workspace evidence was gathered.");
             }
         }
@@ -158,7 +159,7 @@ public final class EvidenceObligationVerifier {
         String expected = normalizePath(expectedTarget);
         boolean unsupportedTarget = UnsupportedDocumentFormats.isUnsupported(Path.of(expectedTarget));
         for (ToolCallLoop.ToolOutcome outcome : outcomes) {
-            if (!"talos.read_file".equals(outcome.toolName())) continue;
+            if (!"talos.read_file".equals(canonicalToolName(outcome.toolName()))) continue;
             if (!expected.equals(normalizePath(outcome.pathHint()))) continue;
             if (outcome.denied()) {
                 return Result.blocked("Unsupported capability check was blocked by approval.");
@@ -202,5 +203,13 @@ public final class EvidenceObligationVerifier {
             normalized = normalized.substring(0, normalized.length() - 1);
         }
         return normalized;
+    }
+
+    private static String canonicalToolName(String toolName) {
+        ToolAliasPolicy.Decision decision = ToolAliasPolicy.resolve(toolName);
+        if (decision.accepted() && decision.canonicalToolName() != null && !decision.canonicalToolName().isBlank()) {
+            return decision.canonicalToolName();
+        }
+        return toolName == null ? "" : toolName;
     }
 }

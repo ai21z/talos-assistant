@@ -27,6 +27,7 @@ import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
+import dev.talos.runtime.toolcall.ToolAliasPolicy;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.runtime.repair.RepairPolicy;
@@ -1396,6 +1397,10 @@ public final class AssistantTurnExecutor {
         if (!directoryListingAnswer.isBlank()) {
             return sanitizeAndTruncate(directoryListingAnswer, opts);
         }
+        String readTargetAnswer = readTargetAnswerIfApplicable(answer, messages, plan, loopResult);
+        if (!readTargetAnswer.isBlank()) {
+            return sanitizeAndTruncate(readTargetAnswer, opts);
+        }
         ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
                 answer, plan, messages, loopResult, workspace,
                 extraMutationSuccesses, failedActionObligation);
@@ -1425,6 +1430,38 @@ public final class AssistantTurnExecutor {
         return "Directory entries:\n- " + String.join("\n- ", entries);
     }
 
+    private static String readTargetAnswerIfApplicable(
+            String answer,
+            List<ChatMessage> messages,
+            CurrentTurnPlan plan,
+            ToolCallLoop.LoopResult loopResult
+    ) {
+        TaskContract contract = safePlanFromMessages(plan, messages, null).taskContract();
+        if (contract.type() != TaskType.READ_ONLY_QA || contract.expectedTargets().size() != 1) return "";
+        if (loopResult == null || loopResult.toolOutcomes() == null) return "";
+        String target = contract.expectedTargets().iterator().next();
+        String normalizedTarget = ToolCallSupport.normalizePath(target);
+        boolean targetRead = loopResult.toolOutcomes().stream()
+                .anyMatch(outcome -> "talos.read_file".equals(canonicalToolName(outcome.toolName()))
+                        && outcome.success()
+                        && normalizedTarget.equals(ToolCallSupport.normalizePath(outcome.pathHint())));
+        if (!targetRead || !needsReadTargetFallback(answer)) return "";
+        String body = latestToolResultBodyByCanonical(loopResult.messages(), "talos.read_file");
+        return body.isBlank() ? "" : "Read " + target + ":\n" + body;
+    }
+
+    private static boolean needsReadTargetFallback(String answer) {
+        if (answer == null || answer.isBlank()) return true;
+        String lower = answer.toLowerCase(Locale.ROOT);
+        return answer.contains("<function-name>")
+                || answer.contains("<args-json-object>")
+                || answer.contains("[Tool-call limit reached.")
+                || answer.contains("You already gathered this information")
+                || lower.contains("i cannot answer")
+                || ToolCallParser.looksLikeMalformedProtocolArrayDebris(answer)
+                || ToolCallParser.looksLikeMalformedToolProtocol(answer);
+    }
+
     private static boolean isContentInspectionTool(String toolName) {
         return "talos.read_file".equals(toolName)
                 || "talos.grep".equals(toolName)
@@ -1451,6 +1488,42 @@ public final class AssistantTurnExecutor {
             return body;
         }
         return "";
+    }
+
+    private static String latestToolResultBodyByCanonical(List<ChatMessage> messages, String canonicalToolName) {
+        if (messages == null || messages.isEmpty() || canonicalToolName == null || canonicalToolName.isBlank()) {
+            return "";
+        }
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            ChatMessage message = messages.get(i);
+            if (message == null || message.content() == null) continue;
+            String content = message.content().strip();
+            int prefixStart = content.indexOf("[tool_result:");
+            if (prefixStart < 0) continue;
+            int prefixEnd = content.indexOf(']', prefixStart);
+            if (prefixEnd < 0) continue;
+            String rawToolName = content.substring(prefixStart + "[tool_result:".length(), prefixEnd).strip();
+            if (!canonicalToolName.equals(canonicalToolName(rawToolName))) continue;
+            String body = content.substring(prefixEnd + 1).strip();
+            int end = body.indexOf("[/tool_result]");
+            if (end >= 0) {
+                body = body.substring(0, end).strip();
+            }
+            if (body.contains("[error]")
+                    || body.contains("You already gathered this information")) {
+                continue;
+            }
+            return body;
+        }
+        return "";
+    }
+
+    private static String canonicalToolName(String toolName) {
+        ToolAliasPolicy.Decision decision = ToolAliasPolicy.resolve(toolName);
+        if (decision.accepted() && decision.canonicalToolName() != null && !decision.canonicalToolName().isBlank()) {
+            return decision.canonicalToolName();
+        }
+        return toolName == null ? "" : toolName;
     }
 
     private static void emitMalformedProtocolReplacementIfNeeded(
@@ -2537,6 +2610,9 @@ public final class AssistantTurnExecutor {
         CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, ctx);
         String userRequest = safePlan.originalUserRequest();
         TaskContract contract = safePlan.taskContract();
+        if (contract.type() == TaskType.DIRECTORY_LISTING) {
+            return new InspectRetryResult(answer, null);
+        }
         if (!looksLikeInspectFirstRequest(userRequest) && !requiresWorkspaceEvidence(contract)) {
             return new InspectRetryResult(answer, null);
         }
@@ -3130,7 +3206,9 @@ public final class AssistantTurnExecutor {
     ) {
         if (answer == null || answer.isBlank()) return false;
         if (answer.length() < UNGROUNDED_MIN_CHARS) return false;
-        return looksLikeEvidenceRequest(latestUserRequest(plan, messages));
+        CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, null);
+        if (isDirectAnswerOnlyTurn(safePlan)) return false;
+        return looksLikeEvidenceRequest(latestUserRequest(safePlan, messages));
     }
 
     static String annotateStreamingNoToolMutationClaim(String answer, List<ChatMessage> messages) {
@@ -3258,6 +3336,7 @@ public final class AssistantTurnExecutor {
         if (answer == null || answer.isBlank()) return answer;
         if (answer.length() < UNGROUNDED_MIN_CHARS) return answer;
         if (ctx == null || ctx.llm() == null) return answer;
+        if (isDirectAnswerOnlyTurn(plan)) return answer;
 
         String userRequest = latestUserRequest(plan, messages);
         if (!looksLikeEvidenceRequest(userRequest)) return answer;
@@ -3287,6 +3366,12 @@ public final class AssistantTurnExecutor {
             LOG.warn("Grounding retry failed: {}. Annotating original.", e.getMessage());
         }
         return UNGROUNDED_ANNOTATION + answer;
+    }
+
+    private static boolean isDirectAnswerOnlyTurn(CurrentTurnPlan plan) {
+        if (plan == null) return false;
+        return plan.actionObligation() == ActionObligation.DIRECT_ANSWER_ONLY
+                || plan.taskContract().type() == TaskType.SMALL_TALK;
     }
 }
 

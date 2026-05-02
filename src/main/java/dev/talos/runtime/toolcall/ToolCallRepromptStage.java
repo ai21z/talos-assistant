@@ -7,6 +7,9 @@ import dev.talos.runtime.failure.FailurePolicy;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.repair.RepairInstruction;
 import dev.talos.runtime.repair.RepairPolicy;
+import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.verification.StaticTaskVerifier;
 import dev.talos.runtime.verification.WebDiagnosticIntent;
 import dev.talos.spi.EngineException;
@@ -72,6 +75,22 @@ public final class ToolCallRepromptStage {
             state.currentText = unsupportedDocument;
             state.currentNativeCalls = List.of();
             LOG.debug("Stopping tool-call loop after unsupported binary document read.");
+            return false;
+        }
+
+        String directoryListing = directoryListingStopAnswer(state, outcome);
+        if (directoryListing != null) {
+            state.currentText = directoryListing;
+            state.currentNativeCalls = List.of();
+            LOG.debug("Stopping directory-listing loop after successful list_dir evidence.");
+            return false;
+        }
+
+        String readTargetAnswer = readTargetStopAnswer(state, outcome);
+        if (readTargetAnswer != null) {
+            state.currentText = readTargetAnswer;
+            state.currentNativeCalls = List.of();
+            LOG.debug("Stopping read-target loop after required read_file evidence.");
             return false;
         }
 
@@ -312,6 +331,86 @@ public final class ToolCallRepromptStage {
 
     private static String deniedMutationStopMessage() {
         return "[Tool loop stopped because a mutating tool was not allowed for this turn.]";
+    }
+
+    private static String readTargetStopAnswer(
+            LoopState state,
+            ToolCallExecutionStage.IterationOutcome outcome
+    ) {
+        if (state == null || outcome == null) return null;
+        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        if (contract.type() != TaskType.READ_ONLY_QA || contract.expectedTargets().size() != 1) return null;
+        String target = contract.expectedTargets().iterator().next();
+        String normalizedTarget = ToolCallSupport.normalizePath(target);
+        boolean targetRead = state.toolOutcomes.stream()
+                .anyMatch(toolOutcome -> "talos.read_file".equals(canonicalToolName(toolOutcome.toolName()))
+                        && toolOutcome.success()
+                        && normalizedTarget.equals(ToolCallSupport.normalizePath(toolOutcome.pathHint())));
+        if (!targetRead) return null;
+        if (outcome.successesThisIteration() > 0 && outcome.failuresThisIteration() == 0) return null;
+        String body = latestSuccessfulToolResultBodyByCanonical(state.messages, "talos.read_file");
+        if (body == null || body.isBlank()) return null;
+        return "Read " + target + ":\n" + body;
+    }
+
+    private static String directoryListingStopAnswer(
+            LoopState state,
+            ToolCallExecutionStage.IterationOutcome outcome
+    ) {
+        if (state == null || outcome == null || outcome.successesThisIteration() <= 0) return null;
+        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        if (contract.type() != TaskType.DIRECTORY_LISTING) return null;
+        String body = latestSuccessfulToolResultBodyByCanonical(state.messages, "talos.list_dir");
+        if (body == null || body.isBlank()) return null;
+        return renderDirectoryEntries(body);
+    }
+
+    private static String renderDirectoryEntries(String toolBody) {
+        if (toolBody == null || toolBody.isBlank()) return null;
+        String[] lines = toolBody.replace("\r\n", "\n").replace('\r', '\n').split("\n");
+        StringBuilder out = new StringBuilder("Directory entries:");
+        boolean added = false;
+        for (String line : lines) {
+            String entry = line == null ? "" : line.strip();
+            if (entry.isBlank()) continue;
+            out.append("\n- ").append(entry);
+            added = true;
+        }
+        return added ? out.toString() : null;
+    }
+
+    private static String latestSuccessfulToolResultBodyByCanonical(List<ChatMessage> messages, String canonicalToolName) {
+        if (messages == null || messages.isEmpty() || canonicalToolName == null || canonicalToolName.isBlank()) {
+            return null;
+        }
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            ChatMessage message = messages.get(i);
+            if (message == null || message.content() == null) continue;
+            String content = message.content().strip();
+            int prefixStart = content.indexOf("[tool_result:");
+            if (prefixStart < 0) continue;
+            int prefixEnd = content.indexOf(']', prefixStart);
+            if (prefixEnd < 0) continue;
+            String rawToolName = content.substring(prefixStart + "[tool_result:".length(), prefixEnd).strip();
+            if (!canonicalToolName.equals(canonicalToolName(rawToolName))) continue;
+            String body = content.substring(prefixEnd + 1).strip();
+            int end = body.indexOf("[/tool_result]");
+            if (end >= 0) {
+                body = body.substring(0, end).strip();
+            }
+            if (body.startsWith("[error]")) continue;
+            if (body.contains("You already gathered this information")) continue;
+            return body;
+        }
+        return null;
+    }
+
+    private static String canonicalToolName(String toolName) {
+        ToolAliasPolicy.Decision decision = ToolAliasPolicy.resolve(toolName);
+        if (decision.accepted() && decision.canonicalToolName() != null && !decision.canonicalToolName().isBlank()) {
+            return decision.canonicalToolName();
+        }
+        return toolName == null ? "" : toolName;
     }
 
     private static String unsupportedDocumentStopAnswer(

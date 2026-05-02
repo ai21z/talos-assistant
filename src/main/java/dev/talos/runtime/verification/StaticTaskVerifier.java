@@ -42,6 +42,8 @@ public final class StaticTaskVerifier {
     private static final Set<String> SMALL_WORKSPACE_WEB_EXTS = Set.of(
             ".html", ".htm", ".css", ".js", ".ts", ".jsx", ".tsx"
     );
+    private static final int MAX_SMALL_WORKSPACE_VISIBLE_FILES = 6;
+    private static final int MAX_PRIMARY_WEB_FILES = 5;
 
     private static final Pattern HTML_CLASS_ATTR = Pattern.compile(
             "\\bclass\\s*=\\s*(['\"])(.*?)\\1", Pattern.CASE_INSENSITIVE);
@@ -407,22 +409,29 @@ public final class StaticTaskVerifier {
     public static List<String> obviousPrimaryFiles(Path workspace) {
         if (workspace == null || !Files.isDirectory(workspace)) return List.of();
         try {
-            List<Path> files = new ArrayList<>();
+            List<Path> visibleFiles = new ArrayList<>();
             try (var stream = Files.list(workspace)) {
-                stream.filter(Files::isRegularFile).forEach(files::add);
+                stream.filter(Files::isRegularFile)
+                        .filter(file -> {
+                            String name = file.getFileName() == null ? "" : file.getFileName().toString();
+                            return !name.isBlank() && !name.startsWith(".");
+                        })
+                        .forEach(visibleFiles::add);
             }
-            if (files.isEmpty() || files.size() > 5) return List.of();
-            List<String> out = new ArrayList<>();
-            for (Path file : files) {
+            if (visibleFiles.isEmpty()
+                    || visibleFiles.size() > MAX_SMALL_WORKSPACE_VISIBLE_FILES) return List.of();
+            List<String> webFiles = new ArrayList<>();
+            for (Path file : visibleFiles) {
                 String name = file.getFileName() == null ? "" : file.getFileName().toString();
-                if (name.isBlank() || name.startsWith(".")) continue;
                 String lower = name.toLowerCase(Locale.ROOT);
                 int dot = lower.lastIndexOf('.');
                 String ext = dot >= 0 ? lower.substring(dot) : "";
-                if (!SMALL_WORKSPACE_WEB_EXTS.contains(ext)) return List.of();
-                out.add(name.replace('\\', '/'));
+                if (SMALL_WORKSPACE_WEB_EXTS.contains(ext)) {
+                    webFiles.add(name.replace('\\', '/'));
+                }
             }
-            return out.isEmpty() ? List.of() : out.stream().sorted().toList();
+            if (webFiles.isEmpty() || webFiles.size() > MAX_PRIMARY_WEB_FILES) return List.of();
+            return webFiles.stream().sorted().toList();
         } catch (Exception e) {
             return List.of();
         }

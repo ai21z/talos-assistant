@@ -83,6 +83,47 @@ class AssistantTurnExecutorTest {
     }
 
     @Test
+    void directoryListingDoesNotTriggerPrimaryFileInspectionRetry(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "Directory listing fixture.\n");
+        Files.writeString(workspace.resolve("index.html"), "<h1>hello</h1>\n");
+        Files.writeString(workspace.resolve("notes.md"), "Hidden project token: ALPHA-742\n");
+
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("system"));
+        messages.add(ChatMessage.user("What files are in this folder?"));
+        var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                "Directory entries:\n- README.md\n- index.html\n- notes.md",
+                1,
+                1,
+                List.of("talos.list_dir"),
+                List.of(),
+                0,
+                0,
+                false,
+                0,
+                List.of(),
+                0,
+                0,
+                0,
+                0);
+        var ctx = Context.builder(new Config())
+                .llm(LlmClient.scripted("""
+                        {"name":"talos.read_file","arguments":{"path":"index.html"}}"""))
+                .toolCallLoop(new dev.talos.runtime.ToolCallLoop(new dev.talos.runtime.TurnProcessor(null)))
+                .build();
+
+        var result = AssistantTurnExecutor.inspectCompletenessRetryIfNeeded(
+                loopResult.finalAnswer(),
+                messages,
+                loopResult,
+                workspace,
+                ctx);
+
+        assertEquals(loopResult.finalAnswer(), result.answer());
+        assertNull(result.extraSummary());
+    }
+
+    @Test
     @DisplayName("records and prints redacted prompt audit in debug prompt mode")
     void recordsAndPrintsPromptAuditInDebugPromptMode() {
         StringBuilder stream = new StringBuilder();
@@ -836,6 +877,37 @@ class AssistantTurnExecutorTest {
             } finally {
                 LocalTurnTraceCapture.clear();
             }
+        }
+
+        @Test
+        void readTargetHandoffReplacesMalformedPostReadAnswerWithEvidence(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("config.json"), "{\"name\":\"t57-fixture\"}\n");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "I can read config.json.",
+                            "{\"name\": <function-name>, \"arguments\": <args-json-object>}")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Read config.json and tell me the name."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains("t57-fixture"), out.text());
+            assertFalse(out.text().contains("<function-name>"), out.text());
+            assertFalse(out.text().contains("<args-json-object>"), out.text());
+            assertFalse(out.text().contains("[Evidence incomplete:"), out.text());
         }
 
         @Test

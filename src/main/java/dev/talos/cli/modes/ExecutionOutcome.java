@@ -14,6 +14,7 @@ import dev.talos.runtime.policy.EvidenceObligationVerifier;
 import dev.talos.runtime.policy.ProtectedPathPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.toolcall.ToolAliasPolicy;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.runtime.verification.StaticTaskVerifier;
@@ -727,7 +728,7 @@ record ExecutionOutcome(
         if (loopResult == null || loopResult.toolOutcomes() == null) return false;
         for (ToolCallLoop.ToolOutcome outcome : loopResult.toolOutcomes()) {
             if (outcome == null) continue;
-            if (!"talos.read_file".equals(outcome.toolName())) continue;
+            if (!"talos.read_file".equals(canonicalToolName(outcome.toolName()))) continue;
             if (outcome.success()) continue;
             if (dev.talos.tools.ToolError.UNSUPPORTED_FORMAT.equals(outcome.errorCode())) {
                 return true;
@@ -764,7 +765,7 @@ record ExecutionOutcome(
         if (loopResult == null || loopResult.toolOutcomes() == null) return false;
         for (ToolCallLoop.ToolOutcome outcome : loopResult.toolOutcomes()) {
             if (outcome == null) continue;
-            if (!"talos.read_file".equals(outcome.toolName())) continue;
+            if (!"talos.read_file".equals(canonicalToolName(outcome.toolName()))) continue;
             if (!outcome.success() || outcome.denied()) continue;
             if (ProtectedPathPolicy.classify(workspace, outcome.pathHint()).protectedPath()
                     || looksProtectedPathHint(outcome.pathHint())) {
@@ -1110,6 +1111,14 @@ record ExecutionOutcome(
         if (value == null || value.isBlank()) return "no additional detail";
         String line = value.replace('\n', ' ').replace('\r', ' ').strip();
         return line.length() <= 240 ? line : line.substring(0, 237) + "...";
+    }
+
+    private static String canonicalToolName(String toolName) {
+        ToolAliasPolicy.Decision decision = ToolAliasPolicy.resolve(toolName);
+        if (decision.accepted() && decision.canonicalToolName() != null && !decision.canonicalToolName().isBlank()) {
+            return decision.canonicalToolName();
+        }
+        return toolName == null ? "" : toolName;
     }
 
     private static void recordLocalTraceOutcome(
