@@ -82,6 +82,9 @@ public final class AssistantTurnExecutor {
     private static final Set<String> CHANGE_SUMMARY_FOLLOW_UP_MARKERS = Set.of(
             "summarize what changed",
             "what changed",
+            "what files changed",
+            "which files changed",
+            "changed during this audit",
             "what did you change",
             "what was changed",
             "what did you do",
