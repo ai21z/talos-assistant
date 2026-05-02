@@ -1228,6 +1228,64 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void mixedProtectedAndPublicReadNoToolHandoffReadsAllExpectedTargetsAfterApproval(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve(".env"), "SECRET=manual-test\n");
+            Files.writeString(workspace.resolve("README.md"), "Public project notes.\n");
+
+            var approvals = new java.util.concurrent.atomic.AtomicInteger();
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null,
+                    (description, detail) -> {
+                        approvals.incrementAndGet();
+                        assertTrue(description.contains("protected read"), description);
+                        assertTrue(detail.contains(".env"), detail);
+                        return true;
+                    },
+                    registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "I can help with that.",
+                            "The approved files say SECRET=manual-test and Public project notes.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Read .env and README.md and tell me what both say."));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-t82-mixed-protected-public-read-handoff",
+                    "sid",
+                    1,
+                    "2026-05-02T00:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "scripted",
+                    "test-model",
+                    "Read .env and README.md and tell me what both say.");
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertEquals(1, approvals.get(), "mixed protected/public read should ask only for protected target");
+                assertTrue(out.text().contains("SECRET=manual-test"), out.text());
+                assertTrue(out.text().contains("Public project notes"), out.text());
+                assertTrue(out.text().contains("talos.read_file"), out.text());
+                assertFalse(out.text().contains("[Evidence incomplete:"), out.text());
+                assertEquals("PROTECTED_READ_APPROVAL_REQUIRED", trace.promptAudit().evidenceObligation());
+                assertEquals("COMPLETE", trace.outcome().status());
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        }
+
+        @Test
         void streamingProtectedReadNoToolAnswerUsesBufferedRecoveryAndApproval(@TempDir Path workspace)
                 throws Exception {
             Files.writeString(workspace.resolve(".env"), "SECRET=manual-test\n");
