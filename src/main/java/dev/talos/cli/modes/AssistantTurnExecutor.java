@@ -2,6 +2,7 @@ package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.DebugLevel;
+import dev.talos.core.ingest.UnsupportedDocumentFormats;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.MutationIntent;
 import dev.talos.runtime.ToolCallLoop;
@@ -169,6 +170,20 @@ public final class AssistantTurnExecutor {
         String directAnswer = deterministicDirectAnswerIfNeeded(messages, currentTurnPlan.taskContract());
         if (directAnswer != null) {
             return directTurnOutput(directAnswer, ctx, opts);
+        }
+        ReadEvidenceHandoffResult unsupportedPreflight = unsupportedCapabilityPreflightIfNeeded(
+                messages, currentTurnPlan, workspace, ctx);
+        if (unsupportedPreflight.loopResult() != null) {
+            appendExtraSummary(out, unsupportedPreflight.extraSummary());
+            out.append(shapeAnswerAfterToolLoop(
+                    unsupportedPreflight.answer(),
+                    messages,
+                    currentTurnPlan,
+                    unsupportedPreflight.loopResult(),
+                    workspace,
+                    0,
+                    opts));
+            return new TurnOutput(out.toString(), false);
         }
         boolean useStreaming = shouldUseStreaming(ctx, currentTurnPlan, workspace);
 
@@ -426,6 +441,29 @@ public final class AssistantTurnExecutor {
             String extraSummary
     ) {}
 
+    static ReadEvidenceHandoffResult unsupportedCapabilityPreflightIfNeeded(
+            List<ChatMessage> messages,
+            CurrentTurnPlan plan,
+            Path workspace,
+            Context ctx
+    ) {
+        CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, ctx);
+        if (selectedEvidenceObligation(safePlan, workspace)
+                != EvidenceObligation.UNSUPPORTED_CAPABILITY_CHECK_REQUIRED) {
+            return new ReadEvidenceHandoffResult("", null, null);
+        }
+        TaskContract contract = safePlan.taskContract();
+        if (!hasOnlyUnsupportedExpectedTargets(contract)) {
+            return new ReadEvidenceHandoffResult("", null, null);
+        }
+        TurnTaskContractCapture.set(contract);
+        try {
+            return readEvidenceHandoffIfNeeded("", messages, safePlan, workspace, ctx);
+        } finally {
+            TurnTaskContractCapture.clear();
+        }
+    }
+
     static ReadEvidenceHandoffResult readEvidenceHandoffIfNeeded(
             String answer,
             List<ChatMessage> messages,
@@ -491,7 +529,8 @@ public final class AssistantTurnExecutor {
 
     private static boolean requiresReadEvidenceHandoff(EvidenceObligation obligation) {
         return obligation == EvidenceObligation.READ_TARGET_REQUIRED
-                || obligation == EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED;
+                || obligation == EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED
+                || obligation == EvidenceObligation.UNSUPPORTED_CAPABILITY_CHECK_REQUIRED;
     }
 
     private static List<String> readEvidenceHandoffTargets(
@@ -508,11 +547,34 @@ public final class AssistantTurnExecutor {
             boolean protectedTarget = ProtectedPathPolicy.classify(workspace, target).protectedPath();
             if (obligation == EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED) {
                 targets.add(target);
+            } else if (obligation == EvidenceObligation.UNSUPPORTED_CAPABILITY_CHECK_REQUIRED
+                    && isUnsupportedExpectedTarget(target)) {
+                targets.add(target);
             } else if (obligation == EvidenceObligation.READ_TARGET_REQUIRED && !protectedTarget) {
                 targets.add(target);
             }
         }
         return List.copyOf(targets);
+    }
+
+    private static boolean hasOnlyUnsupportedExpectedTargets(TaskContract contract) {
+        if (contract == null || contract.expectedTargets().isEmpty()) return false;
+        boolean sawTarget = false;
+        for (String target : contract.expectedTargets()) {
+            if (target == null || target.isBlank()) continue;
+            sawTarget = true;
+            if (!isUnsupportedExpectedTarget(target)) return false;
+        }
+        return sawTarget;
+    }
+
+    private static boolean isUnsupportedExpectedTarget(String target) {
+        if (target == null || target.isBlank()) return false;
+        try {
+            return UnsupportedDocumentFormats.isUnsupported(Path.of(target));
+        } catch (RuntimeException ignored) {
+            return false;
+        }
     }
 
     private static List<String> protectedExpectedTargets(TaskContract contract, Path workspace) {

@@ -944,6 +944,69 @@
       "notes": "Guards T57 evidence obligation classification for unsupported document capability checks."
     },
     {
+      "id": "t90-unsupported-docx-mixed-workspace-preflight",
+      "category": "t90/unsupported-document-preflight",
+      "workspaceFixture": {
+        "files": {
+          "README.md": "README-T90-SECRET should not be read during unsupported document handling.\n",
+          "notes.md": "NOTES-T90-SECRET should not be read during unsupported document handling.\n",
+          "report.docx": "PK\u0003\u0004 binary-like docx placeholder\n"
+        }
+      },
+      "prompts": [
+        "Summarize report.docx."
+      ],
+      "expectedContract": "WORKSPACE_EXPLAIN",
+      "expectedToolsAllowed": [
+        "talos.read_file"
+      ],
+      "forbiddenOutputSubstrings": [
+        "README-T90-SECRET",
+        "NOTES-T90-SECRET"
+      ],
+      "requiredOutputSubstrings": [
+        "unsupported",
+        "document",
+        "Tool calls: 1"
+      ],
+      "traceAssertions": {
+        "contract": "WORKSPACE_EXPLAIN",
+        "mutationAllowed": false,
+        "nativeToolsContains": [
+          "talos.read_file"
+        ],
+        "nativeToolsExcludes": [
+          "talos.list_dir",
+          "talos.grep",
+          "talos.retrieve",
+          "talos.write_file",
+          "talos.edit_file"
+        ],
+        "promptAuditTaskType": "WORKSPACE_EXPLAIN",
+        "promptAuditEvidenceObligationContains": [
+          "UNSUPPORTED_CAPABILITY_CHECK_REQUIRED"
+        ],
+        "localTraceOutcomeContains": [
+          "ADVISORY_ONLY"
+        ],
+        "localTraceOutcomeExcludes": [
+          "READ_ONLY_ANSWERED",
+          "COMPLETE"
+        ],
+        "transcriptExcludes": [
+          "README-T90-SECRET",
+          "NOTES-T90-SECRET",
+          "Tool calls: 2",
+          "Tool calls: 3"
+        ]
+      },
+      "blockerConditions": [
+        "T90 regression: unsupported named document turn reads unrelated workspace files before the named unsupported target.",
+        "T90 regression: unsupported named document turn claims it summarized unsupported binary document content."
+      ],
+      "notes": "Guards T90 runtime preflight for unsupported-only named document targets in mixed small workspaces."
+    },
+    {
       "id": "t59-proposal-follow-up-apply-readme",
       "category": "t59/active-task-context",
       "manualRequired": true,
