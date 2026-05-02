@@ -370,6 +370,44 @@ class UnifiedAssistantModeTest {
                         && content.contains("Do not use talos.edit_file for these structural web repair targets")));
     }
 
+    @Test
+    void naturalReviewAndFixRepairFollowUpCarriesVerifierProblemsIntoPrompt() throws Exception {
+        LastPromptCapture.clear();
+        var mode = new UnifiedAssistantMode();
+        var memory = new SessionMemory();
+        memory.update(
+                "Create index.html, styles.css, and scripts.js for a BMI calculator.",
+                """
+                [Task incomplete: Static verification failed - HTML does not link JavaScript file: `scripts.js`]
+
+                The requested task is not verified complete.
+                Remaining static verification problems:
+                - styles.css: expected target was not successfully mutated.
+                - HTML does not link JavaScript file: `scripts.js`
+                - Calculator/form task is missing a submit/calculate button.
+                """);
+
+        var result = mode.handle(
+                "Review the BMI calculator you just created and fix any obvious issue "
+                        + "that would stop it from working in a browser.",
+                Path.of(".").toAbsolutePath().normalize(),
+                context("I will repair the browser-blocking issues.", memory));
+
+        assertTrue(result.isPresent());
+        var render = LastPromptCapture.latest().orElseThrow();
+
+        assertEquals("FILE_CREATE", render.taskType());
+        assertTrue(render.mutationAllowed());
+        assertTrue(render.tools().contains("talos.write_file"), render.tools().toString());
+        assertTrue(render.tools().contains("talos.edit_file"), render.tools().toString());
+        assertTrue(render.messages().stream()
+                .map(message -> message.content() == null ? "" : message.content())
+                .anyMatch(content -> content.contains("[Static verification repair context]")
+                        && content.contains("HTML does not link JavaScript file")
+                        && content.contains("submit/calculate button")
+                        && content.contains("index.html, scripts.js, styles.css")));
+    }
+
     private static Context context(String response) {
         return context(response, new SessionMemory());
     }

@@ -452,6 +452,8 @@ public final class TaskContractResolver {
                 || lower.contains("try one more time")
                 || lower.contains("try once more")
                 || lower.contains("fix the remaining")
+                || lower.contains("fix any obvious issue")
+                || lower.contains("fix any obvious issues")
                 || lower.contains("remaining static verification problems")
                 || lower.contains("static verification problems")
                 || lower.contains("complete it")

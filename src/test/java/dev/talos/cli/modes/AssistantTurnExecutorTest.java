@@ -632,6 +632,48 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void naturalRepairFollowUpWithoutCurrentMutationDoesNotSurfaceStaleSuccess(@TempDir Path workspace)
+                throws Exception {
+            var registry = new dev.talos.tools.ToolRegistry();
+            var undoStack = new dev.talos.tools.FileUndoStack();
+            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            registry.register(new dev.talos.tools.impl.FileEditTool(undoStack));
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "The BMI calculator is now working in the browser.",
+                            "The BMI calculator is now working in the browser.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Create index.html, styles.css, and scripts.js for a BMI calculator."));
+            messages.add(ChatMessage.assistant("""
+                    [Task incomplete: Static verification failed - HTML does not link JavaScript file: `scripts.js`]
+
+                    The requested task is not verified complete.
+                    Remaining static verification problems:
+                    - styles.css: expected target was not successfully mutated.
+                    - HTML does not link JavaScript file: `scripts.js`
+                    - Calculator/form task is missing a submit/calculate button.
+                    """));
+            messages.add(ChatMessage.user(
+                    "Review the BMI calculator you just created and fix any obvious issue "
+                            + "that would stop it from working in a browser."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().startsWith("[Action obligation failed:"), out.text());
+            assertFalse(out.text().contains("now working in the browser"), out.text());
+        }
+
+        @Test
         void workspaceExplainNoToolDeflectionRetriesWithReadTools(@TempDir Path workspace)
                 throws Exception {
             Files.writeString(workspace.resolve("index.html"), """
