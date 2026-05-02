@@ -27,6 +27,14 @@ public final class NativeToolSpecPolicy {
                     .map(NativeToolSpecPolicy::toSpec)
                     .toList();
         }
+        if (contract != null
+                && !contract.mutationAllowed()
+                && !contract.expectedTargets().isEmpty()) {
+            return registry.descriptors().stream()
+                    .filter(NativeToolSpecPolicy::isReadFile)
+                    .map(NativeToolSpecPolicy::toSpec)
+                    .toList();
+        }
 
         boolean mutationAllowed = contract != null
                 && contract.mutationAllowed()
@@ -54,6 +62,10 @@ public final class NativeToolSpecPolicy {
 
     private static boolean isListDir(ToolDescriptor descriptor) {
         return descriptor != null && "talos.list_dir".equals(descriptor.name());
+    }
+
+    private static boolean isReadFile(ToolDescriptor descriptor) {
+        return descriptor != null && "talos.read_file".equals(descriptor.name());
     }
 
     private static ToolSpec toSpec(ToolDescriptor descriptor) {

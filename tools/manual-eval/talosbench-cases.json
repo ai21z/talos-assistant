@@ -913,10 +913,7 @@
       "expectedToolsAllowed": [
         "talos.read_file"
       ],
-      "forbiddenOutputSubstrings": [
-        "talos.write_file",
-        "talos.edit_file"
-      ],
+      "forbiddenOutputSubstrings": [],
       "requiredOutputSubstrings": [
         "unsupported",
         "document"
@@ -924,6 +921,10 @@
       "traceAssertions": {
         "contract": "WORKSPACE_EXPLAIN",
         "mutationAllowed": false,
+        "nativeToolsExcludes": [
+          "talos.write_file",
+          "talos.edit_file"
+        ],
         "promptAuditTaskType": "WORKSPACE_EXPLAIN",
         "promptAuditEvidenceObligationContains": [
           "UNSUPPORTED_CAPABILITY_CHECK_REQUIRED"

@@ -47,6 +47,21 @@ class NativeToolSpecPolicyTest {
     }
 
     @Test
+    void namedTargetReadOnlyContractExposesOnlyReadFile() {
+        var contract = TaskContractResolver.fromUserRequest("Read config.json and tell me the name.");
+
+        List<String> names = NativeToolSpecPolicy.names(
+                NativeToolSpecPolicy.select(contract, ExecutionPhase.INSPECT, registry()));
+
+        assertTrue(names.contains("talos.read_file"), names.toString());
+        assertFalse(names.contains("talos.list_dir"), names.toString());
+        assertFalse(names.contains("talos.grep"), names.toString());
+        assertFalse(names.contains("talos.retrieve"), names.toString());
+        assertFalse(names.contains("talos.write_file"), names.toString());
+        assertFalse(names.contains("talos.edit_file"), names.toString());
+    }
+
+    @Test
     void smallTalkContractExposesNoNativeTools() {
         for (String prompt : List.of("hello", "hello who are you?", "what is talos?")) {
             var contract = TaskContractResolver.fromUserRequest(prompt);
