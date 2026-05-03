@@ -22,6 +22,10 @@ final class LlamaCppServerManager implements AutoCloseable {
     private static final Duration DEFAULT_READINESS_TIMEOUT = Duration.ofMinutes(2);
     private static final Duration DEFAULT_READINESS_POLL_INTERVAL = Duration.ofMillis(500);
     private static final int LOG_EXCERPT_BYTES = 1600;
+    private static final String DEFAULT_AGENT_PARALLEL = "1";
+    private static final String DEFAULT_AGENT_PREDICT = "2048";
+    private static final List<String> PARALLEL_FLAGS = List.of("--parallel", "-np");
+    private static final List<String> PREDICT_FLAGS = List.of("--predict", "--n-predict", "-n");
 
     private final LlamaCppConfig config;
     private final LlamaCppProcessLauncher launcher;
@@ -126,8 +130,34 @@ final class LlamaCppServerManager implements AutoCloseable {
             command.add("--chat-template-file");
             command.add(config.chatTemplateFile());
         }
+        appendManagedAgentDefault(command, config.serverArgs(), PARALLEL_FLAGS, "--parallel", DEFAULT_AGENT_PARALLEL);
+        appendManagedAgentDefault(command, config.serverArgs(), PREDICT_FLAGS, "--predict", DEFAULT_AGENT_PREDICT);
         command.addAll(config.serverArgs());
         return command;
+    }
+
+    private static void appendManagedAgentDefault(List<String> command,
+                                                  List<String> serverArgs,
+                                                  List<String> overrideFlags,
+                                                  String flag,
+                                                  String value) {
+        if (hasOverrideFlag(serverArgs, overrideFlags)) return;
+        command.add(flag);
+        command.add(value);
+    }
+
+    private static boolean hasOverrideFlag(List<String> serverArgs, List<String> flags) {
+        if (serverArgs == null || serverArgs.isEmpty()) return false;
+        for (String raw : serverArgs) {
+            String arg = raw == null ? "" : raw.trim();
+            if (arg.isBlank()) continue;
+            for (String flag : flags) {
+                if (arg.equals(flag) || arg.startsWith(flag + "=")) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private String managedValidationFailure() {

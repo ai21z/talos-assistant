@@ -26,6 +26,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CompatChatClientTest {
@@ -193,6 +194,25 @@ class CompatChatClientTest {
         }
     }
 
+    @Test
+    void chatHttp500ContextSizeThrowsResponseErrorInsteadOfAssistantText() throws Exception {
+        HttpServer server = startServer(new AtomicReference<>(""), new AtomicReference<>(""), """
+                {"error":{"message":"Context size has been exceeded."}}
+                """, "application/json", 500);
+        try {
+            CompatChatClient client = client(server);
+
+            EngineException.ResponseError error =
+                    assertThrows(EngineException.ResponseError.class, () -> client.chat(requestForStream()));
+
+            assertEquals(500, error.httpStatus());
+            assertTrue(error.getMessage().contains("Context size has been exceeded"));
+            assertFalse(error.getMessage().contains("complete"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
     private static ChatRequest requestForStream() {
         return new ChatRequest(
                 "llama_cpp",
@@ -216,13 +236,23 @@ class CompatChatClientTest {
             String response,
             String contentType
     ) throws IOException {
+        return startServer(pathRef, bodyRef, response, contentType, 200);
+    }
+
+    private static HttpServer startServer(
+            AtomicReference<String> pathRef,
+            AtomicReference<String> bodyRef,
+            String response,
+            String contentType,
+            int status
+    ) throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/v1/chat/completions", exchange -> {
             pathRef.set(exchange.getRequestURI().getPath());
             bodyRef.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             byte[] bytes = response.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("Content-Type", contentType);
-            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.sendResponseHeaders(status, bytes.length);
             exchange.getResponseBody().write(bytes);
             exchange.close();
         });
