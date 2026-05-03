@@ -88,6 +88,8 @@ public record EngineRuntimeConfig(
             Map<String, Object> llama = CfgUtil.map(engines.get("llama_cpp"));
             String model = stringAt(llama, "model", "");
             if (!model.isBlank()) return model;
+            String hfRepo = stringAt(llama, "hf_repo", "");
+            if (!hfRepo.isBlank()) return hfRepoName(hfRepo);
             String modelPath = stringAt(llama, "model_path", "");
             if (!modelPath.isBlank()) {
                 try {
@@ -100,6 +102,15 @@ public record EngineRuntimeConfig(
             return "talos-agent";
         }
         return "";
+    }
+
+    private static String hfRepoName(String repo) {
+        String value = Objects.toString(repo, "").trim();
+        int slash = value.lastIndexOf('/');
+        if (slash >= 0 && slash + 1 < value.length()) {
+            return value.substring(slash + 1);
+        }
+        return value;
     }
 
     private static String hostForBackend(Config cfg, String backend) {

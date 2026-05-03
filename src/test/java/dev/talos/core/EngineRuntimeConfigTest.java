@@ -37,6 +37,19 @@ class EngineRuntimeConfigTest {
     }
 
     @Test
+    void llamaCppHfRepoCanSupplyDisplayModelWhenAliasIsUnset() {
+        Config cfg = new Config();
+        cfg.data.put("llm", new LinkedHashMap<>(Map.of("default_backend", "llama_cpp")));
+        cfg.data.put("engines", Map.of("llama_cpp", Map.of(
+                "hf_repo", "ggml-org/gpt-oss-20b-GGUF")));
+
+        EngineRuntimeConfig runtime = EngineRuntimeConfig.from(cfg);
+
+        assertEquals("gpt-oss-20b-GGUF", runtime.model());
+        assertEquals("llama_cpp/gpt-oss-20b-GGUF", runtime.displayModel());
+    }
+
+    @Test
     void explicitOllamaSelectionStillUsesLegacyOllamaConfig() {
         Config cfg = new Config();
         cfg.data.put("llm", new LinkedHashMap<>(Map.of("default_backend", "ollama")));

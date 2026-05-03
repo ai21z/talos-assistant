@@ -94,8 +94,17 @@ final class LlamaCppServerManager implements AutoCloseable {
     List<String> buildCommand() {
         List<String> command = new ArrayList<>();
         command.add(config.serverPath());
-        command.add("-m");
-        command.add(config.modelPath());
+        if (config.hasHfSource()) {
+            command.add("--hf-repo");
+            command.add(config.hfRepo());
+            if (config.hfFile() != null && !config.hfFile().isBlank()) {
+                command.add("--hf-file");
+                command.add(config.hfFile());
+            }
+        } else {
+            command.add("-m");
+            command.add(config.modelPath());
+        }
         command.add("-c");
         command.add(String.valueOf(config.context()));
         command.add("--host");
@@ -128,10 +137,14 @@ final class LlamaCppServerManager implements AutoCloseable {
             return "llama_cpp server_path is missing or not a file: "
                     + Objects.toString(config.serverPath(), "");
         }
-        if (config.modelPath() == null || config.modelPath().isBlank()
-                || !Files.isRegularFile(Path.of(config.modelPath()))) {
-            return "llama_cpp model_path is missing or not a file: "
+        if (!config.hasHfSource()
+                && (config.modelPath() == null || config.modelPath().isBlank()
+                || !Files.isRegularFile(Path.of(config.modelPath())))) {
+            return "llama_cpp model_path or hf_repo is missing. model_path is not a file: "
                     + Objects.toString(config.modelPath(), "");
+        }
+        if (config.hasHfSource()) {
+            return "";
         }
         String unsupportedModel = unsupportedModelMetadataFailure(Path.of(config.modelPath()));
         if (!unsupportedModel.isBlank()) return unsupportedModel;
