@@ -1,6 +1,7 @@
 package dev.talos.core.llm;
 
 import dev.talos.core.Config;
+import dev.talos.spi.types.Capabilities;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.ChatRequestControls;
@@ -79,6 +80,48 @@ class LlmClientPromptDebugCaptureTest {
         assertEquals(List.of("expected-target-repair"), snapshot.controls().debugTags());
     }
 
+    @Test
+    void chatFullAppliesPerRequestControlsToEngineRequest() {
+        RecordingResolver resolver = new RecordingResolver(Capabilities.of(
+                true, true, false, 8192,
+                true, true, true,
+                false, false, false, false));
+        LlmClient client = new LlmClient(engineConfig(), resolver);
+
+        client.chatFull(
+                List.of(ChatMessage.user("Create scripts.js")),
+                5_000L,
+                List.of(writeSpec()),
+                new ChatRequestControls(
+                        ToolChoiceMode.REQUIRED,
+                        "",
+                        ResponseFormatMode.TEXT,
+                        "",
+                        List.of("action-obligation:MUTATING_TOOL_REQUIRED")));
+
+        var snapshot = PromptDebugCapture.latest().orElseThrow();
+        assertEquals(ToolChoiceMode.REQUIRED, snapshot.controls().toolChoice());
+        assertEquals(List.of("action-obligation:MUTATING_TOOL_REQUIRED"),
+                snapshot.controls().debugTags());
+    }
+
+    @Test
+    void exposesSelectedBackendRequiredToolChoiceCapability() {
+        LlmClient required = new LlmClient(engineConfig(), new RecordingResolver(Capabilities.of(
+                true, true, false, 8192,
+                true, true, true,
+                false, false, false, false)));
+        LlmClient unsupported = new LlmClient(engineConfig(), new RecordingResolver(Capabilities.of(
+                true, true, false, 8192,
+                true, false, false,
+                false, false, false, false)));
+        required.setModel("llama_cpp/agent.gguf");
+        unsupported.setModel("llama_cpp/agent.gguf");
+
+        assertTrue(required.supportsRequiredToolChoice());
+        assertEquals(false, unsupported.supportsRequiredToolChoice());
+    }
+
     private static ToolSpec writeSpec() {
         return new ToolSpec("talos.write_file", "Write", "{}");
     }
@@ -98,6 +141,15 @@ class LlmClientPromptDebugCaptureTest {
 
     private static final class RecordingResolver implements LlmEngineResolver {
         private final AtomicInteger chatCalls = new AtomicInteger();
+        private final Capabilities capabilities;
+
+        private RecordingResolver() {
+            this(Capabilities.of(true, true, false, 8192, true));
+        }
+
+        private RecordingResolver(Capabilities capabilities) {
+            this.capabilities = capabilities;
+        }
 
         @Override
         public void select(String backend, String model) {
@@ -108,6 +160,11 @@ class LlmClientPromptDebugCaptureTest {
         public Stream<TokenChunk> chatStream(ChatRequest request) {
             chatCalls.incrementAndGet();
             return Stream.of(TokenChunk.of("reply"), TokenChunk.eos());
+        }
+
+        @Override
+        public Capabilities capabilities() {
+            return capabilities;
         }
 
         @Override

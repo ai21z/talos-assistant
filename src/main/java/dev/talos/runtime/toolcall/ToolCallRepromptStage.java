@@ -14,6 +14,10 @@ import dev.talos.runtime.verification.StaticTaskVerifier;
 import dev.talos.runtime.verification.WebDiagnosticIntent;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ChatRequestControls;
+import dev.talos.spi.types.ResponseFormatMode;
+import dev.talos.spi.types.ToolChoiceMode;
+import dev.talos.spi.types.ToolSpec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -208,7 +212,10 @@ public final class ToolCallRepromptStage {
 
         try {
             LlmClient.StreamResult repromptResult =
-                    state.ctx.llm().chatFull(state.messages, state.ctx.nativeToolSpecs());
+                    state.ctx.llm().chatFull(
+                            state.messages,
+                            state.ctx.nativeToolSpecs(),
+                            repromptControls(state));
             state.currentText = repromptResult.text();
             state.currentNativeCalls = repromptResult.hasToolCalls()
                     ? new ArrayList<>(repromptResult.toolCalls()) : List.of();
@@ -240,7 +247,10 @@ public final class ToolCallRepromptStage {
             try {
                 Thread.sleep(400);
                 LlmClient.StreamResult retryResult =
-                        state.ctx.llm().chatFull(state.messages, state.ctx.nativeToolSpecs());
+                        state.ctx.llm().chatFull(
+                                state.messages,
+                                state.ctx.nativeToolSpecs(),
+                                repromptControls(state));
                 state.currentText = retryResult.text();
                 state.currentNativeCalls = retryResult.hasToolCalls()
                         ? new ArrayList<>(retryResult.toolCalls()) : List.of();
@@ -321,6 +331,34 @@ public final class ToolCallRepromptStage {
     public boolean hitIterationLimit(LoopState state) {
         return state.iterations >= state.maxIterations
                 && (!state.currentNativeCalls.isEmpty() || ToolCallParser.containsToolCalls(state.currentText));
+    }
+
+    private static ChatRequestControls repromptControls(LoopState state) {
+        if (state == null
+                || state.ctx == null
+                || state.ctx.llm() == null
+                || !state.hasPendingActionObligation()
+                || !state.ctx.llm().supportsRequiredToolChoice()
+                || !hasMutatingTool(state.ctx.nativeToolSpecs())) {
+            return ChatRequestControls.defaults();
+        }
+        return new ChatRequestControls(
+                ToolChoiceMode.REQUIRED,
+                "",
+                ResponseFormatMode.TEXT,
+                "",
+                List.of("pending-action-obligation"));
+    }
+
+    private static boolean hasMutatingTool(List<ToolSpec> specs) {
+        if (specs == null || specs.isEmpty()) return false;
+        for (ToolSpec spec : specs) {
+            String name = spec == null ? "" : spec.name();
+            if ("talos.write_file".equals(name) || "talos.edit_file".equals(name)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String failurePolicyStopMessage(FailureDecision decision) {

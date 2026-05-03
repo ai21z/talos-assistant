@@ -4,6 +4,7 @@ import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
 import dev.talos.core.EngineRuntimeConfig;
 import dev.talos.core.util.Sanitize;
+import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.PromptDebugCapture;
@@ -270,6 +271,16 @@ public final class LlmClient implements AutoCloseable {
     /** Get the current tool specifications (for testing). */
     public List<ToolSpec> getToolSpecs() {
         return toolSpecs;
+    }
+
+    public boolean supportsRequiredToolChoice() {
+        if (mode != TransportMode.ENGINE || engineResolver == null) return false;
+        if ("ollama".equalsIgnoreCase(backend)) return false;
+        try {
+            return engineResolver.capabilities().requiredToolChoice();
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /**
@@ -557,7 +568,16 @@ public final class LlmClient implements AutoCloseable {
             List<ChatMessage> messages,
             Consumer<String> onChunk,
             List<ToolSpec> requestToolSpecs) {
-        return chatStreamFull(messages, onChunk, defaultWallClockBudgetMs, requestToolSpecs);
+        return chatStreamFull(messages, onChunk, defaultWallClockBudgetMs,
+                requestToolSpecs, ChatRequestControls.defaults());
+    }
+
+    public StreamResult chatStreamFull(
+            List<ChatMessage> messages,
+            Consumer<String> onChunk,
+            List<ToolSpec> requestToolSpecs,
+            ChatRequestControls controls) {
+        return chatStreamFull(messages, onChunk, defaultWallClockBudgetMs, requestToolSpecs, controls);
     }
 
     /**
@@ -578,13 +598,21 @@ public final class LlmClient implements AutoCloseable {
     public StreamResult chatStreamFull(List<ChatMessage> messages,
                                        Consumer<String> onChunk,
                                        long wallClockMs) {
-        return chatStreamFull(messages, onChunk, wallClockMs, null);
+        return chatStreamFull(messages, onChunk, wallClockMs, null, ChatRequestControls.defaults());
     }
 
     public StreamResult chatStreamFull(List<ChatMessage> messages,
                                        Consumer<String> onChunk,
                                        long wallClockMs,
                                        List<ToolSpec> requestToolSpecs) {
+        return chatStreamFull(messages, onChunk, wallClockMs, requestToolSpecs, ChatRequestControls.defaults());
+    }
+
+    public StreamResult chatStreamFull(List<ChatMessage> messages,
+                                       Consumer<String> onChunk,
+                                       long wallClockMs,
+                                       List<ToolSpec> requestToolSpecs,
+                                       ChatRequestControls controls) {
         // P2 — clear any Ctrl-C from the previous turn so stale cancels
         // don't immediately short-circuit this call.
         externalCancelReset.run();
@@ -620,7 +648,7 @@ public final class LlmClient implements AutoCloseable {
         return callBudget.run(
                 activeStream -> engineAssembledWithMessagesFullTracked(
                         messages, trackingSink, Duration.ofSeconds(90), cancel,
-                        lastChunkAt, activeStream, requestToolSpecs, true),
+                        lastChunkAt, activeStream, requestToolSpecs, controls, true),
                 wallClockMs,
                 lastChunkAt,
                 "streaming chat",
@@ -636,7 +664,15 @@ public final class LlmClient implements AutoCloseable {
     }
 
     public StreamResult chatFull(List<ChatMessage> messages, List<ToolSpec> requestToolSpecs) {
-        return chatFull(messages, defaultWallClockBudgetMs, requestToolSpecs);
+        return chatFull(messages, defaultWallClockBudgetMs,
+                requestToolSpecs, ChatRequestControls.defaults());
+    }
+
+    public StreamResult chatFull(
+            List<ChatMessage> messages,
+            List<ToolSpec> requestToolSpecs,
+            ChatRequestControls controls) {
+        return chatFull(messages, defaultWallClockBudgetMs, requestToolSpecs, controls);
     }
 
     /**
@@ -644,12 +680,19 @@ public final class LlmClient implements AutoCloseable {
      * See {@link #chatStreamFull(List, Consumer, long)}.
      */
     public StreamResult chatFull(List<ChatMessage> messages, long wallClockMs) {
-        return chatFull(messages, wallClockMs, null);
+        return chatFull(messages, wallClockMs, null, ChatRequestControls.defaults());
     }
 
     public StreamResult chatFull(List<ChatMessage> messages,
                                  long wallClockMs,
                                  List<ToolSpec> requestToolSpecs) {
+        return chatFull(messages, wallClockMs, requestToolSpecs, ChatRequestControls.defaults());
+    }
+
+    public StreamResult chatFull(List<ChatMessage> messages,
+                                 long wallClockMs,
+                                 List<ToolSpec> requestToolSpecs,
+                                 ChatRequestControls controls) {
         // P2 — see chatStreamFull: clear stale cancel flag per call.
         externalCancelReset.run();
         if (scriptedResponses != null) {
@@ -674,7 +717,7 @@ public final class LlmClient implements AutoCloseable {
         return callBudget.run(
                 activeStream -> engineAssembledWithMessagesFullTracked(
                         messages, trackingSink, Duration.ofSeconds(90), cancel,
-                        lastChunkAt, activeStream, requestToolSpecs, false),
+                        lastChunkAt, activeStream, requestToolSpecs, controls, false),
                 wallClockMs,
                 lastChunkAt,
                 "non-streaming chat",
@@ -711,6 +754,7 @@ public final class LlmClient implements AutoCloseable {
                                                                 AtomicLong lastChunkAt,
                                                                 AtomicReference<AutoCloseable> activeStream,
                                                                 List<ToolSpec> requestToolSpecs,
+                                                                ChatRequestControls controls,
                                                                 boolean streamRequest) {
         // Wrap the cancel supplier so the engine loop also bails when the
         // watchdog completes the future exceptionally (the worker thread
@@ -724,7 +768,8 @@ public final class LlmClient implements AutoCloseable {
         // first chunk on a cold model.
         if (lastChunkAt != null) lastChunkAt.set(System.currentTimeMillis());
         return engineAssembledWithMessagesFull(
-                messages, trackingSink, timeout, wrapped, activeStream, requestToolSpecs, streamRequest);
+                messages, trackingSink, timeout, wrapped, activeStream,
+                requestToolSpecs, controls, streamRequest);
     }
 
     /**
@@ -738,6 +783,7 @@ public final class LlmClient implements AutoCloseable {
                                                          Supplier<Boolean> cancelled,
                                                          AtomicReference<AutoCloseable> activeStream,
                                                          List<ToolSpec> requestToolSpecs,
+                                                         ChatRequestControls controls,
                                                          boolean streamRequest) {
         // Sanitize message content while preserving tool-call structure
         // (toolCalls, toolCallId) — these carry native tool-call context that
@@ -753,7 +799,8 @@ public final class LlmClient implements AutoCloseable {
         return LlmRetryExecutor.execute(MAX_RETRIES, () -> {
             ChatRequest req = new ChatRequest(
                     backend, model, "", "", List.of(), timeout, sanitized,
-                    effectiveToolSpecs(requestToolSpecs));
+                    effectiveToolSpecs(requestToolSpecs),
+                    controls == null ? ChatRequestControls.defaults() : controls);
             PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(req, streamRequest));
             // Try-with-resources ensures the token stream's onClose hook
             // fires on every exit path (break, exception, normal return).

@@ -2,6 +2,7 @@ package dev.talos.core.llm;
 
 import dev.talos.core.Config;
 import dev.talos.spi.EngineRegistry;
+import dev.talos.spi.types.Capabilities;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.TokenChunk;
 
@@ -18,6 +19,11 @@ final class RegistryLlmEngineResolver implements LlmEngineResolver {
     @Override
     public void select(String backend, String model) {
         registry.select(backend, model);
+    }
+
+    @Override
+    public Capabilities capabilities() {
+        return registry.engine().caps();
     }
 
     @Override
