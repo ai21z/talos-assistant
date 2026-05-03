@@ -39,6 +39,7 @@ import dev.talos.runtime.verification.StaticTaskVerifier;
 import dev.talos.runtime.verification.WebDiagnosticIntent;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.PromptDebugCapture;
 import dev.talos.tools.ToolError;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -153,6 +154,7 @@ public final class AssistantTurnExecutor {
      */
     public static TurnOutput execute(List<ChatMessage> messages, Path workspace,
                               Context ctx, Options opts) {
+        PromptDebugCapture.clear();
         StringBuilder out = new StringBuilder();
         boolean streamed = false;
         TaskContract rawTaskContract = TaskContractResolver.fromMessages(messages);

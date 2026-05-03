@@ -1,6 +1,8 @@
 package dev.talos.cli.modes;
 
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.failure.FailureAction;
+import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.outcome.MutationOutcomeStatus;
 import dev.talos.runtime.outcome.TaskCompletionStatus;
 import dev.talos.runtime.outcome.TruthWarningType;
@@ -183,6 +185,53 @@ class ExecutionOutcomeTest {
         assertEquals(TaskCompletionStatus.FAILED, outcome.taskOutcome().completionStatus());
         assertEquals(MutationOutcomeStatus.FAILED, outcome.taskOutcome().mutationOutcome().status());
         assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.INVALID_MUTATION_ARGUMENTS));
+    }
+
+    @Test
+    void mutationRequestStoppedByFailurePolicyWithNoMutationIsNotComplete() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user(
+                "Create a complete static BMI calculator in index.html, styles.css, and scripts.js."));
+
+        var loopResult = new ToolCallLoop.LoopResult(
+                "[Tool loop stopped by failure policy: failure policy stopped the tool loop after 3 failed call(s) for path `index.html`. Review the latest tool errors before retrying.]",
+                3,
+                3,
+                List.of(
+                        "talos.write_file<|channel|>commentary",
+                        "talos_write_file<|channel|>commentary"),
+                List.of(),
+                3,
+                3,
+                false,
+                0,
+                List.of(),
+                0,
+                0,
+                0,
+                0,
+                FailureDecision.stop(
+                        FailureAction.STOP_WITH_PARTIAL,
+                        "failure policy stopped the tool loop after 3 failed call(s) for path `index.html`"),
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.write_file<|channel|>commentary",
+                        "index.html",
+                        false,
+                        false,
+                        false,
+                        "",
+                        "Unknown tool: talos.write_file<|channel|>commentary",
+                        null,
+                        ToolError.NOT_FOUND)));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                loopResult.finalAnswer(), messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.BLOCKED, outcome.completionStatus());
+        assertEquals(TaskCompletionStatus.BLOCKED_BY_POLICY, outcome.taskOutcome().completionStatus());
+        assertTrue(outcome.finalAnswer().contains("Tool loop stopped by failure policy"), outcome.finalAnswer());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.FAILED_ACTION_OBLIGATION));
     }
 
     @Test

@@ -19,6 +19,9 @@ import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ChatRequest;
+import dev.talos.spi.types.PromptDebugCapture;
+import dev.talos.spi.types.PromptDebugSnapshot;
 import dev.talos.spi.types.ToolSpec;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -159,6 +162,32 @@ class AssistantTurnExecutorTest {
         } finally {
             LocalTurnTraceCapture.clear();
         }
+    }
+
+    @Test
+    void directTurnClearsStalePromptDebugCapture() {
+        PromptDebugCapture.record(PromptDebugSnapshot.fromProviderBody(
+                new ChatRequest(
+                        "ollama",
+                        "stale-model",
+                        "",
+                        "",
+                        List.of(),
+                        null,
+                        List.of(ChatMessage.user("stale prompt")),
+                        List.of()),
+                false,
+                "{\"stale\":true}"));
+        var ctx = scriptedContext("this should not be used");
+        List<ChatMessage> messages = new ArrayList<>(List.of(
+                ChatMessage.system("system"),
+                ChatMessage.user("What can you do in this workspace? Answer briefly.")));
+
+        AssistantTurnExecutor.TurnOutput output = AssistantTurnExecutor.execute(
+                messages, WS, ctx, new AssistantTurnExecutor.Options());
+
+        assertTrue(output.text().contains("Talos can inspect this local workspace"), output.text());
+        assertTrue(PromptDebugCapture.latest().isEmpty(), "direct local answers must not leave stale provider captures");
     }
 
     @Test

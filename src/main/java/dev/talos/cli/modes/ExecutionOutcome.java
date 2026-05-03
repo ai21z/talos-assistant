@@ -151,6 +151,11 @@ record ExecutionOutcome(
         TaskContract contract = safePlan.taskContract();
         boolean mutationRequested = contract.mutationRequested();
         boolean unsupportedDocumentCapabilityLimited = hasUnsupportedDocumentCapabilityLimit(loopResult);
+        boolean failurePolicyStoppedWithoutMutation = failurePolicyStoppedWithoutMutation(
+                loopResult,
+                contract,
+                extraMutationSuccesses);
+        boolean failedMutationObligation = failedActionObligation || failurePolicyStoppedWithoutMutation;
 
         String shaped = AssistantTurnExecutor.overrideUnsupportedDocumentClaimsIfNeeded(
                 current, loopResult);
@@ -231,7 +236,7 @@ record ExecutionOutcome(
                 invalidMutation,
                 false,
                 readOnlyDeniedMutation,
-                failedActionObligation,
+                failedMutationObligation,
                 deniedMutation,
                 deniedProtectedRead,
                 partialMutation,
@@ -282,7 +287,7 @@ record ExecutionOutcome(
                 invalidMutation,
                 false,
                 readOnlyDeniedMutation,
-                failedActionObligation,
+                failedMutationObligation,
                 deniedMutation,
                 deniedProtectedRead,
                 partialMutation,
@@ -308,7 +313,7 @@ record ExecutionOutcome(
                         deniedMutation,
                         deniedProtectedRead,
                         readOnlyDeniedMutation,
-                        failedActionObligation,
+                        failedMutationObligation,
                         invalidMutation,
                         partialMutation,
                         falseMutationClaim,
@@ -735,6 +740,24 @@ record ExecutionOutcome(
             }
         }
         return false;
+    }
+
+    private static boolean failurePolicyStoppedWithoutMutation(
+            ToolCallLoop.LoopResult loopResult,
+            TaskContract contract,
+            int extraMutationSuccesses
+    ) {
+        if (loopResult == null || loopResult.failureDecision() == null) return false;
+        if (!loopResult.failureDecision().shouldStop()) return false;
+        if (contract == null || !contract.mutationRequested()) return false;
+        if (hasDeniedMutation(loopResult)) return false;
+        return loopResult.mutatingToolSuccesses() + Math.max(0, extraMutationSuccesses) <= 0;
+    }
+
+    private static boolean hasDeniedMutation(ToolCallLoop.LoopResult loopResult) {
+        if (loopResult == null || loopResult.toolOutcomes() == null) return false;
+        return loopResult.toolOutcomes().stream()
+                .anyMatch(outcome -> outcome.mutating() && outcome.denied());
     }
 
     private static String suppressProtectedHistoryContentIfNeeded(
