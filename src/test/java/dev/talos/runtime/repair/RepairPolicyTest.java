@@ -86,6 +86,42 @@ class RepairPolicyTest {
     }
 
     @Test
+    void staticVerificationRepairInstructionNamesMissingExpectedTargetAndSimilarWrongTarget() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user(
+                "Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js."));
+        messages.add(ChatMessage.assistant("""
+                [Task incomplete: Static verification failed - scripts.js: expected target was not successfully mutated.]
+
+                The requested task is not verified complete.
+                Unresolved static verification problems:
+                - scripts.js: expected target was not successfully mutated.
+                - Calculator/form task is missing a result output element.
+
+                Applied mutating tool calls:
+                - index.html: wrote index.html
+                - styles.css: wrote styles.css
+                - script.js: wrote script.js
+                """));
+        messages.add(ChatMessage.user("Fix the remaining static verification problems now."));
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        RepairPlan plan = RepairPolicy.planForStaticVerification(messages, contract)
+                .plan()
+                .orElseThrow();
+
+        assertTrue(plan.instruction().contains("Missing expected targets: scripts.js"),
+                plan.instruction());
+        assertTrue(plan.instruction().contains("script.js does not satisfy scripts.js"),
+                plan.instruction());
+        assertTrue(plan.instruction().contains("Full-file replacement targets: index.html, scripts.js, styles.css"),
+                plan.instruction());
+        assertFalse(plan.instruction().contains("Full-file replacement targets: index.html, script.js, scripts.js"),
+                plan.instruction());
+    }
+
+    @Test
     void staleReadmeStaticFailureDoesNotPlanRepairForFreshWebTargets() {
         List<ChatMessage> messages = readmeFailureMessages(
                 "Create index.html, styles.css, and scripts.js for a BMI calculator. Use talos.write_file.");
