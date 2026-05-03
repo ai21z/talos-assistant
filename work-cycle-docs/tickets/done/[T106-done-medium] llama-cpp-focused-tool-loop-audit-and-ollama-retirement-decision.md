@@ -1,6 +1,6 @@
 # T106 - llama.cpp Focused Tool-Loop Audit And Ollama Retirement Decision
 
-Status: Open
+Status: Done
 Priority: Medium
 Branch: v0.9.0-beta-dev
 Source: 2026-05-03 engine backend pivot
