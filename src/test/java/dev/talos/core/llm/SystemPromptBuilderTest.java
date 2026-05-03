@@ -24,6 +24,16 @@ class SystemPromptBuilderTest {
     }
 
     @Test
+    void defaultIdentityPromptIsBackendNeutral() {
+        String prompt = SystemPromptBuilder.forAsk().build();
+
+        assertFalse(prompt.contains("Ollama"),
+                "Default model-facing identity prompt should not name an engine-specific backend");
+        assertTrue(prompt.contains("configured local model engine"),
+                "Default identity prompt should preserve local-only semantics without naming Ollama");
+    }
+
+    @Test
     void ragModeProducesNonEmptyPrompt() {
         String prompt = SystemPromptBuilder.forRag().build();
         assertNotNull(prompt);
