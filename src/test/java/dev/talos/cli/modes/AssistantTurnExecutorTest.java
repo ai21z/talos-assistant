@@ -2025,6 +2025,27 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void directReviewAndFixTurnGetsMutatingCurrentTurnCapabilityFrame() {
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Review the BMI calculator you just created and fix any obvious issue "
+                            + "that would stop it from working in a browser."));
+
+            AssistantTurnExecutor.injectTaskContractInstruction(messages);
+
+            assertEquals(3, messages.size());
+            ChatMessage frame = messages.get(1);
+            assertEquals("system", frame.role());
+            assertTrue(frame.content().contains("[CurrentTurnCapability]"), frame.content());
+            assertTrue(frame.content().contains("type: FILE_EDIT"), frame.content());
+            assertTrue(frame.content().contains("mutationAllowed: true"), frame.content());
+            assertTrue(frame.content().contains("obligation: MUTATING_TOOL_REQUIRED"), frame.content());
+            assertTrue(frame.content().contains("talos.write_file"), frame.content());
+            assertTrue(frame.content().contains("talos.edit_file"), frame.content());
+        }
+
+        @Test
         void nullPlanInstructionFallbackKeepsDefaultMutationTools() {
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));

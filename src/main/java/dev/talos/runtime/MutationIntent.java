@@ -119,6 +119,10 @@ public final class MutationIntent {
             "\\b" + CORE_MUTATION_VERBS + "\\s+(?:only\\s+)?" + EXPLICIT_FILE_TARGET
                     + "(?=$|\\s|[`'\"),;:!?\\]])");
 
+    private static final Pattern REVIEW_THEN_MUTATION_REQUEST = Pattern.compile(
+            "\\b(?:review|inspect|check|diagnose|look\\s+at)\\b.{0,160}"
+                    + "\\b(?:and|then)\\s+(?:please\\s+)?" + CORE_MUTATION_VERBS + "\\b");
+
     private static final Pattern ADVISORY_MUTATION_QUESTION = Pattern.compile(
             "^" + PREFIX + "(?:should|would|could|can|may)\\s+(?:i|we)\\s+"
                     + CORE_MUTATION_VERBS + "\\b");
@@ -146,6 +150,7 @@ public final class MutationIntent {
         if (looksPriorChangeStatusQuestion(lower)) return "prior-change-status-question";
         if (looksAdvisoryMutationQuestion(lower)) return "advisory-mutation-question";
         if (looksInstructionalMutationQuestion(lower)) return "instructional-mutation-question";
+        if (looksReviewThenMutationRequest(lower)) return "explicit-review-and-fix-request";
         for (Pattern pattern : REQUEST_PATTERNS) {
             if (pattern.matcher(lower).find()) return "explicit-request-pattern";
         }
@@ -195,6 +200,10 @@ public final class MutationIntent {
 
     private static boolean looksExplicitFileTargetMutation(String lower) {
         return lower != null && MUTATION_VERB_WITH_FILE_TARGET.matcher(lower).find();
+    }
+
+    private static boolean looksReviewThenMutationRequest(String lower) {
+        return lower != null && REVIEW_THEN_MUTATION_REQUEST.matcher(lower).find();
     }
 
     private static boolean looksAdvisoryMutationQuestion(String lower) {

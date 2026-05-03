@@ -90,9 +90,24 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void directReviewAndFixPromptBecomesMutationAllowedContract() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Review the BMI calculator you just created and fix any obvious issue "
+                        + "that would stop it from working in a browser.");
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals("explicit-review-and-fix-request", contract.classificationReason());
+    }
+
+    @Test
     void retryStatusReviewAndAdvisoryEditPromptsStayReadOnlyContracts() {
         for (String input : List.of(
                 "Review README.md",
+                "Review the BMI calculator you just created and say whether any obvious issue "
+                        + "would stop it from working in a browser.",
                 "What happened after the denied attempt?",
                 "Should I edit README.md?",
                 "Can you explain how to edit README.md?",
