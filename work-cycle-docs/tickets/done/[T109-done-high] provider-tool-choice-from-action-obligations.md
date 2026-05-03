@@ -1,6 +1,6 @@
 # T109 - Provider Tool Choice From Action Obligations
 
-Status: Open
+Status: Done
 Priority: High
 Branch: v0.9.0-beta-dev
 Source: T106 focused managed llama.cpp audit

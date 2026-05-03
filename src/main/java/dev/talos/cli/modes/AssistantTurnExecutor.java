@@ -24,6 +24,7 @@ import dev.talos.runtime.policy.CurrentTurnCapabilityFrame;
 import dev.talos.runtime.policy.EvidenceObligation;
 import dev.talos.runtime.policy.EvidenceObligationPolicy;
 import dev.talos.runtime.policy.ProtectedPathPolicy;
+import dev.talos.runtime.policy.ProviderRequestControlPolicy;
 import dev.talos.runtime.policy.ResponseObligationVerifier;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -39,6 +40,7 @@ import dev.talos.runtime.verification.StaticTaskVerifier;
 import dev.talos.runtime.verification.WebDiagnosticIntent;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.PromptDebugCapture;
 import dev.talos.tools.ToolError;
 import org.slf4j.Logger;
@@ -197,7 +199,7 @@ public final class AssistantTurnExecutor {
         try {
             if (useStreaming) {
                 // ── Streaming path ──────────────────────────────────────────
-                LlmClient.StreamResult streamResult = chatStreamFull(ctx, messages);
+                LlmClient.StreamResult streamResult = chatStreamFull(ctx, messages, currentTurnPlan);
                 String answer = streamResult.text();
 
                 // Flush the stream filter so any pending non-tool text is emitted
@@ -255,7 +257,7 @@ public final class AssistantTurnExecutor {
                 // Use chatFull() so native tool calls are captured too
                 // (chat() returns only String, losing native tool calls).
                 CompletableFuture<LlmClient.StreamResult> fut = CompletableFuture.supplyAsync(
-                        () -> chatFull(turnContext, messages));
+                        () -> chatFull(turnContext, messages, currentTurnPlan));
                 LlmClient.StreamResult streamResult = fut.get(opts.llmTimeoutMs, TimeUnit.MILLISECONDS);
                 if (ctx.streamSink() != null && ctx.onStreamComplete() != null) {
                     try { ctx.onStreamComplete().run(); } catch (Exception ignored) { }
@@ -1130,11 +1132,44 @@ public final class AssistantTurnExecutor {
     }
 
     private static LlmClient.StreamResult chatStreamFull(Context ctx, List<ChatMessage> messages) {
-        return ctx.llm().chatStreamFull(messages, ctx.streamSink(), ctx.nativeToolSpecs());
+        return chatStreamFull(ctx, messages, compatibilityPlanFromMessages(messages, ctx));
+    }
+
+    private static LlmClient.StreamResult chatStreamFull(
+            Context ctx,
+            List<ChatMessage> messages,
+            CurrentTurnPlan plan
+    ) {
+        return ctx.llm().chatStreamFull(
+                messages,
+                ctx.streamSink(),
+                ctx.nativeToolSpecs(),
+                chatControlsForTurn(ctx, plan));
     }
 
     private static LlmClient.StreamResult chatFull(Context ctx, List<ChatMessage> messages) {
-        return ctx.llm().chatFull(messages, ctx.nativeToolSpecs());
+        return chatFull(ctx, messages, compatibilityPlanFromMessages(messages, ctx));
+    }
+
+    private static LlmClient.StreamResult chatFull(
+            Context ctx,
+            List<ChatMessage> messages,
+            CurrentTurnPlan plan
+    ) {
+        return ctx.llm().chatFull(
+                messages,
+                ctx.nativeToolSpecs(),
+                chatControlsForTurn(ctx, plan));
+    }
+
+    private static ChatRequestControls chatControlsForTurn(Context ctx, CurrentTurnPlan plan) {
+        boolean supportsRequired = ctx != null
+                && ctx.llm() != null
+                && ctx.llm().supportsRequiredToolChoice();
+        return ProviderRequestControlPolicy.forTurn(
+                plan,
+                ctx == null ? List.of() : ctx.nativeToolSpecs(),
+                supportsRequired);
     }
 
     public static void injectTaskContractInstruction(List<ChatMessage> messages) {
