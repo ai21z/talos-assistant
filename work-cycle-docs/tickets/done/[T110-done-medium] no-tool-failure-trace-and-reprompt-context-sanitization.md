@@ -1,6 +1,6 @@
 # T110 - No-Tool Failure Trace And Reprompt Context Sanitization
 
-Status: Open
+Status: Done
 Priority: Medium
 Branch: v0.9.0-beta-dev
 Source: T106 focused managed llama.cpp audit
@@ -36,11 +36,32 @@ reprompt context.
 
 ## Acceptance Criteria
 
-- Trace output no longer says `Status tag: ok` for blocked obligation failures.
-- Session data carries a machine-readable blocked/failure outcome.
-- Provider-body context for reprompts does not include unsupported model prose as
+- [x] Trace output no longer says `Status tag: ok` for blocked obligation failures.
+- [x] Session data carries a machine-readable blocked/failure outcome.
+- [x] Provider-body context for reprompts does not include unsupported model prose as
   authoritative assistant history.
-- Tests cover mutation no-tool and evidence no-tool cases.
+- [x] Tests cover mutation no-tool and evidence no-tool cases.
+
+## Implementation Notes
+
+- `/last trace` now prefers the local trace outcome when present, so blocked
+  mutation no-tool turns render `Status: BLOCKED`, `Outcome:
+  BLOCKED_BY_POLICY`, and `Status tag: BLOCKED` instead of persisted
+  `ok`/`NO_TOOL_RESPONSE`.
+- Evidence no-tool turns with a local `ADVISORY_ONLY` outcome render that
+  structured outcome instead of a generic no-tool response.
+- Mutation no-tool retry coverage now asserts that unsupported no-tool model
+  prose is not replayed as authoritative assistant history; the retry context
+  uses Talos-owned action-obligation summary text.
+
+## Verification Run
+
+```powershell
+./gradlew.bat test --tests "dev.talos.cli.repl.slash.ExplainLastTurnCommandTest" --no-daemon
+./gradlew.bat test --tests "dev.talos.cli.modes.AssistantTurnExecutorTest" --no-daemon
+./gradlew.bat test --tests "*ToolCall*" --tests "*AssistantTurnExecutor*" --tests "*ExplainLastTurnCommand*" --no-daemon
+./gradlew.bat test e2eTest --no-daemon
+```
 
 ## Suggested Verification
 
