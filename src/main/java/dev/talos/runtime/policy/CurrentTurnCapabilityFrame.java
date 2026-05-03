@@ -1,6 +1,8 @@
 package dev.talos.runtime.policy;
 
 import dev.talos.runtime.context.ActiveTaskContext;
+import dev.talos.runtime.expectation.LiteralContentExpectation;
+import dev.talos.runtime.expectation.TaskExpectation;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
@@ -11,6 +13,8 @@ import java.util.List;
 
 /** Renders a short current-turn-local capability frame from runtime state. */
 public final class CurrentTurnCapabilityFrame {
+    private static final int MAX_INLINE_EXACT_CONTENT_CHARS = 4_000;
+
     private CurrentTurnCapabilityFrame() {}
 
     public static String render(CurrentTurnPlan plan) {
@@ -23,7 +27,8 @@ public final class CurrentTurnCapabilityFrame {
                 plan.nativeTools(),
                 EvidenceObligationPolicy.parse(plan.evidenceObligation()),
                 plan.activeTaskContext(),
-                plan.artifactGoal());
+                plan.artifactGoal(),
+                plan.taskExpectations());
     }
 
     public static String render(TaskContract contract, ExecutionPhase phase, List<String> visibleTools) {
@@ -36,7 +41,8 @@ public final class CurrentTurnCapabilityFrame {
                         phase,
                         java.nio.file.Path.of("").toAbsolutePath()),
                 CurrentTurnPlan.NONE_OR_NOT_DERIVED,
-                CurrentTurnPlan.NONE_OR_NOT_DERIVED);
+                CurrentTurnPlan.NONE_OR_NOT_DERIVED,
+                List.of());
     }
 
     private static String render(
@@ -45,7 +51,8 @@ public final class CurrentTurnCapabilityFrame {
             List<String> visibleTools,
             EvidenceObligation evidenceObligation,
             String activeTaskContext,
-            String artifactGoal
+            String artifactGoal,
+            List<TaskExpectation> taskExpectations
     ) {
         TaskType type = contract == null || contract.type() == null ? TaskType.UNKNOWN : contract.type();
         ExecutionPhase safePhase = phase == null ? ExecutionPhase.INSPECT : phase;
@@ -70,6 +77,7 @@ public final class CurrentTurnCapabilityFrame {
                 .append("obligation: ").append(obligation.name()).append('\n')
                 .append("evidenceObligation: ").append(evidence.name()).append('\n');
         appendActiveTaskContext(frame, activeTaskContext, artifactGoal);
+        appendTaskExpectations(frame, taskExpectations);
 
         switch (obligation) {
             case MUTATING_TOOL_REQUIRED -> frame.append("""
@@ -135,6 +143,54 @@ public final class CurrentTurnCapabilityFrame {
         return value != null
                 && !value.isBlank()
                 && !CurrentTurnPlan.NONE_OR_NOT_DERIVED.equals(value);
+    }
+
+    private static void appendTaskExpectations(
+            StringBuilder frame,
+            List<TaskExpectation> taskExpectations
+    ) {
+        if (taskExpectations == null || taskExpectations.isEmpty()) {
+            return;
+        }
+        for (TaskExpectation expectation : taskExpectations) {
+            if (expectation instanceof LiteralContentExpectation literal) {
+                appendLiteralContentExpectation(frame, literal);
+            }
+        }
+    }
+
+    private static void appendLiteralContentExpectation(
+            StringBuilder frame,
+            LiteralContentExpectation literal
+    ) {
+        String delimiter = "TALOS_CURRENT_TURN_EXACT_CONTENT_"
+                + literal.expectedHash().substring(0, 12);
+        String expectedContent = literal.expectedContent();
+        frame.append("[ExactFileWrite]\n")
+                .append("target: ").append(literal.targetPath()).append('\n')
+                .append("sourcePattern: ").append(literal.sourcePattern()).append('\n')
+                .append("matchMode: ").append(literal.matchMode().name()).append('\n')
+                .append("expectedBytes: ").append(literal.expectedBytes()).append('\n')
+                .append("expectedChars: ").append(literal.expectedChars()).append('\n')
+                .append("expectedLines: ").append(literal.expectedLines()).append('\n')
+                .append("Use this exact current-turn content for the complete file write to ")
+                .append(literal.targetPath()).append(".\n")
+                .append("Do not reuse exact-write literals from earlier turns or unrelated history.\n");
+        if (expectedContent.length() <= MAX_INLINE_EXACT_CONTENT_CHARS) {
+            frame.append("expectedContent:\n")
+                    .append("<<<").append(delimiter).append('\n')
+                    .append(expectedContent);
+            if (!expectedContent.endsWith("\n")) {
+                frame.append('\n');
+            }
+            frame.append(delimiter).append('\n');
+        } else {
+            frame.append("expectedContentPreview: ")
+                    .append(PromptAuditRedactor.preview(expectedContent))
+                    .append('\n')
+                    .append("The complete exact payload is in the current user request; use that current-turn payload, ")
+                    .append("not history.\n");
+        }
     }
 
     private static boolean isActiveContextForModel(String value) {

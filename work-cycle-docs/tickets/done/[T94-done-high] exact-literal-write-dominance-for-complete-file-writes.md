@@ -1,6 +1,6 @@
 # T94 - Exact Literal Write Dominance For Complete-File Writes
 
-Status: Open
+Status: Done
 Priority: High
 Branch: v0.9.0-beta-dev
 Source: Clean Qwen/GPT-OSS audit follow-up
@@ -113,6 +113,28 @@ Commands:
 - Re-run the clean Qwen/GPT-OSS audit after the T93-T95 batch passes normal
   verification.
 
+## Implementation Result
+
+- Added runtime-owned `[ExactFileWrite]` guidance to the current-turn capability
+  frame for resolved literal complete-file expectations.
+- The frame now names the exact current target, source pattern, size/line stats,
+  and a bounded inline current-turn literal payload for small exact writes.
+- The exact-write frame explicitly says not to reuse exact-write literals from
+  earlier turns or unrelated history.
+- Added regression coverage for prior unrelated exact-write history followed by
+  current `index.html` exact `AFTER`.
+- Strengthened failed exact verification output coverage so model-authored
+  success prose remains suppressed after mismatch.
+
+Verification run:
+
+```powershell
+./gradlew.bat test --tests "dev.talos.runtime.policy.CurrentTurnCapabilityFrameTest.renderIncludesCurrentTurnExactLiteralWriteExpectation" --no-daemon
+./gradlew.bat test --tests "dev.talos.cli.modes.AssistantTurnExecutorTest*injectTaskContractInstructionUsesPlanAfterMessagesDrift" --no-daemon
+./gradlew.bat test --tests "dev.talos.runtime.policy.CurrentTurnCapabilityFrameTest" --tests "dev.talos.runtime.turn.CurrentTurnPlanTest" --tests "dev.talos.runtime.trace.PromptAuditSnapshotTest" --tests "dev.talos.cli.modes.ExecutionOutcomeTest" --tests "dev.talos.cli.modes.AssistantTurnExecutorTest" --no-daemon
+./gradlew.bat test e2eTest --no-daemon
+```
+
 ## Known Risks
 
 - More aggressive framing could bloat prompts if it is applied outside exact
@@ -123,4 +145,3 @@ Commands:
 
 - Consider narrower retry machinery only if prompt framing cannot reliably
   express the exact-payload invariant.
-

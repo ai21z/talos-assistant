@@ -86,6 +86,32 @@ class CurrentTurnCapabilityFrameTest {
     }
 
     @Test
+    void renderIncludesCurrentTurnExactLiteralWriteExpectation() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Overwrite index.html with exactly AFTER. Use talos.write_file.");
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                contract,
+                ExecutionPhase.APPLY,
+                List.of("talos.write_file"),
+                List.of("talos.write_file"),
+                List.of());
+
+        String frame = CurrentTurnCapabilityFrame.render(plan);
+
+        assertTrue(frame.contains("[ExactFileWrite]"), frame);
+        assertTrue(frame.contains("target: index.html"), frame);
+        assertTrue(frame.contains("sourcePattern: literal-overwrite-exactly"), frame);
+        assertTrue(frame.contains("expectedBytes: 5"), frame);
+        assertTrue(frame.contains("expectedChars: 5"), frame);
+        assertTrue(frame.contains("expectedLines: 1"), frame);
+        assertTrue(frame.contains("TALOS_CURRENT_TURN_EXACT_CONTENT"), frame);
+        assertTrue(frame.contains("\nAFTER\n"), frame);
+        assertTrue(frame.contains("Use this exact current-turn content for the complete file write"),
+                frame);
+        assertTrue(frame.contains("Do not reuse exact-write literals from earlier turns"), frame);
+    }
+
+    @Test
     void renderOmitsSuppressedContextDetailsFromModelGuidance() {
         TaskContract contract = new TaskContract(
                 TaskType.SMALL_TALK,

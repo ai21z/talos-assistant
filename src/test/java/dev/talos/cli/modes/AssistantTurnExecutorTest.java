@@ -2010,6 +2010,9 @@ class AssistantTurnExecutorTest {
         void injectTaskContractInstructionUsesPlanAfterMessagesDrift() {
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Overwrite README.md with exactly Line one. Use talos.write_file."));
+            messages.add(ChatMessage.assistant("Updated README.md."));
             messages.add(ChatMessage.user("Overwrite index.html with exactly AFTER. Use talos.write_file."));
 
             CurrentTurnPlan plan = CurrentTurnPlan.create(
@@ -2036,6 +2039,11 @@ class AssistantTurnExecutorTest {
             assertTrue(frame.contains("mutationAllowed: true"));
             assertTrue(frame.contains("visibleTools: talos.write_file"));
             assertTrue(frame.contains("obligation: MUTATING_TOOL_REQUIRED"));
+            assertTrue(frame.contains("[ExactFileWrite]"), frame);
+            assertTrue(frame.contains("target: index.html"), frame);
+            assertTrue(frame.contains("\nAFTER\n"), frame);
+            assertFalse(frame.contains("target: README.md"), frame);
+            assertFalse(frame.contains("\nLine one\n"), frame);
         }
 
         @Test
