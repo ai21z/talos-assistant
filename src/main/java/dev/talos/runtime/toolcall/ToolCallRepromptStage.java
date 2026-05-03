@@ -108,15 +108,22 @@ public final class ToolCallRepromptStage {
         // minute post-mutation bloviation observed on local 31B Q4 models.
         if (outcome.mutationsThisIteration() > 0 && outcome.failuresThisIteration() == 0) {
             List<String> remainingRepairTargets = remainingFullRewriteRepairTargets(state);
-            if (remainingRepairTargets.isEmpty()) {
+            List<String> remainingExpectedTargets = remainingExpectedMutationTargets(state);
+            if (remainingRepairTargets.isEmpty() && remainingExpectedTargets.isEmpty()) {
                 state.currentText = String.join("\n", outcome.mutationSummaries());
                 state.currentNativeCalls = List.of();
                 LOG.debug("P0: skipping re-prompt after {} successful mutation(s) this iteration",
                         outcome.mutationsThisIteration());
                 return false;
             }
-            LOG.debug("Continuing static repair after {} successful mutation(s); remaining full-write targets: {}",
-                    outcome.mutationsThisIteration(), remainingRepairTargets);
+            if (!remainingRepairTargets.isEmpty()) {
+                LOG.debug("Continuing static repair after {} successful mutation(s); remaining full-write targets: {}",
+                        outcome.mutationsThisIteration(), remainingRepairTargets);
+            }
+            if (!remainingExpectedTargets.isEmpty()) {
+                LOG.debug("Continuing mutation task after {} successful mutation(s); remaining expected targets: {}",
+                        outcome.mutationsThisIteration(), remainingExpectedTargets);
+            }
         }
 
         if (outcome.mutationsThisIteration() > 0 && outcome.failuresThisIteration() > 0) {
@@ -165,6 +172,19 @@ public final class ToolCallRepromptStage {
                             + ". Use talos.write_file with complete corrected file content for each remaining target. "
                             + "Do not claim completion until static verification passes."));
             repairProgressIndex = state.messages.size() - 1;
+        }
+
+        int expectedProgressIndex = -1;
+        List<String> remainingExpectedTargets = remainingExpectedMutationTargets(state);
+        if (!remainingExpectedTargets.isEmpty()) {
+            state.messages.add(ChatMessage.system(
+                    "[Expected target progress] Continue this mutation task. Remaining expected target paths "
+                            + "not successfully mutated in this turn: " + String.join(", ", remainingExpectedTargets)
+                            + ". Use the visible write/edit tools to mutate these exact paths before answering. "
+                            + "Similar filenames are not substitutes. For small static web files, prefer "
+                            + "talos.write_file with complete file content. Do not claim completion until "
+                            + "static verification passes."));
+            expectedProgressIndex = state.messages.size() - 1;
         }
 
         int anchorIndex = -1;
@@ -247,6 +267,14 @@ public final class ToolCallRepromptStage {
                         && m.content() != null
                         && m.content().startsWith("[Current task")) {
                     state.messages.remove(anchorIndex);
+                }
+            }
+            if (expectedProgressIndex >= 0 && expectedProgressIndex < state.messages.size()) {
+                ChatMessage m = state.messages.get(expectedProgressIndex);
+                if ("system".equals(m.role())
+                        && m.content() != null
+                        && m.content().startsWith("[Expected target progress]")) {
+                    state.messages.remove(expectedProgressIndex);
                 }
             }
             if (repairProgressIndex >= 0 && repairProgressIndex < state.messages.size()) {
@@ -512,5 +540,34 @@ public final class ToolCallRepromptStage {
                 .filter(path -> !successfullyMutated.contains(path))
                 .sorted()
                 .toList();
+    }
+
+    private static List<String> remainingExpectedMutationTargets(LoopState state) {
+        if (state == null || state.messages == null) return List.of();
+        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        if (contract == null || !contract.mutationAllowed()) {
+            return List.of();
+        }
+        String latestUserRequest = ToolCallSupport.latestUserRequestIn(state.messages);
+        Set<String> expectedTargets = TaskContractResolver.extractExpectedTargets(latestUserRequest);
+        if (expectedTargets.isEmpty()) {
+            return List.of();
+        }
+        Set<String> successfullyMutated = new java.util.HashSet<>();
+        for (dev.talos.runtime.ToolCallLoop.ToolOutcome outcome : state.toolOutcomes) {
+            if (outcome == null || !outcome.success() || !outcome.mutating()) continue;
+            String path = normalizeExpectedTargetKey(outcome.pathHint());
+            if (!path.isBlank()) successfullyMutated.add(path);
+        }
+        return expectedTargets.stream()
+                .map(ToolCallRepromptStage::normalizeExpectedTargetKey)
+                .filter(path -> !path.isBlank())
+                .filter(path -> !successfullyMutated.contains(path))
+                .sorted()
+                .toList();
+    }
+
+    private static String normalizeExpectedTargetKey(String path) {
+        return ToolCallSupport.normalizePath(path).toLowerCase(java.util.Locale.ROOT);
     }
 }

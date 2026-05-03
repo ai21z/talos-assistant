@@ -963,6 +963,27 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/82-multifile-web-create-continues-until-expected-targets.json] 82: multi-file web create continues until expected targets")
+    void multiFileWebCreateContinuesUntilExpectedTargets() {
+        var loaded = JsonScenarioLoader.load("scenarios/82-multifile-web-create-continues-until-expected-targets.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(3, 3, 0, 0)
+                    .assertAnswerContains("Static verification: passed")
+                    .assertFileContains("index.html", "<script src=\"scripts.js\"></script>")
+                    .assertFileContains("index.html", "id=\"bmiForm\"")
+                    .assertFileContains("styles.css", ".calculator")
+                    .assertFileContains("scripts.js", "getElementById('bmiForm')")
+                    .assertLocalTraceRecorded();
+            assertEquals("COMPLETE", result.localTrace().outcome().status());
+            assertEquals("COMPLETED_VERIFIED", result.localTrace().outcome().classification());
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/63-functional-web-task-missing-js-fails-verification.json] 63: functional web task missing JavaScript fails verification")
     void functionalWebTaskMissingJavascriptFailsVerification() {
         var loaded = JsonScenarioLoader.load("scenarios/63-functional-web-task-missing-js-fails-verification.json");
