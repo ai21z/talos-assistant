@@ -916,6 +916,10 @@ class ExecutionOutcomeTest {
                     outcome.finalAnswer());
             assertFalse(outcome.finalAnswer().contains("File write/readback passed"),
                     outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("Updated index.html."),
+                    outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("Applied mutating tool calls:"),
+                    outcome.finalAnswer());
             assertEquals(TaskCompletionStatus.FAILED, outcome.taskOutcome().completionStatus());
             assertEquals(TaskVerificationStatus.FAILED, outcome.taskOutcome().verificationResult().status());
         } finally {
