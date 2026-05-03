@@ -1,6 +1,6 @@
 # T97 - Current-Turn Expected-Target Steering For Exact And Web Writes
 
-Status: Open
+Status: Done
 Priority: Medium
 Branch: v0.9.0-beta-dev
 Source: T93-T95 clean two-model audit follow-up
@@ -121,3 +121,20 @@ local/manual-testing/t93-t95-clean-audit-20260503-034242/PROMPTS-CLEAN-TWO-MODEL
 ```
 
 with fresh audit/workspace directories and the Qwen/GPT-OSS model pair.
+
+## Completion Notes
+
+This ticket is closed by the existing post-T93/T99 frame, verifier, and repair-control work plus verification on 2026-05-03.
+
+Confirmed coverage:
+
+- `CurrentTurnCapabilityFrameTest.renderIncludesExpectedTargetsForMultiFileMutationTurns` verifies `[ExpectedTargets]`, `requiredTargets`, exact target spelling, and the `script.js` vs `scripts.js` warning.
+- `CurrentTurnCapabilityFrameTest.renderIncludesCurrentTurnExactLiteralWriteExpectation` verifies `[ExactFileWrite]`, exact payload metadata, whole-file equality wording, and no wrapping/reformatting guidance.
+- `StaticTaskVerifierTest.expectedScriptsJsTargetFailsWhenOnlySingularScriptJsWasMutated` verifies wrong-target `script.js` mutation does not satisfy expected `scripts.js`.
+- `RepairPolicyTest.staticVerificationRepairInstructionNamesMissingExpectedTargetAndSimilarWrongTarget` verifies repair framing names missing `scripts.js` and similar wrong `script.js`.
+
+Verification passed:
+
+- `.\gradlew.bat test --tests "dev.talos.runtime.policy.CurrentTurnCapabilityFrameTest" --no-daemon`
+- `.\gradlew.bat test --tests "dev.talos.runtime.verification.StaticTaskVerifierTest" --tests "dev.talos.runtime.repair.RepairPolicyTest" --no-daemon`
+- `.\gradlew.bat test e2eTest --no-daemon` passed earlier in this implementation batch after the T114 code change.
