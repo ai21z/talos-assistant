@@ -3,6 +3,7 @@ package dev.talos.cli.ui;
 import dev.talos.cli.CliUtil;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
+import dev.talos.core.EngineRuntimeConfig;
 import dev.talos.core.IndexPathResolver;
 import dev.talos.core.util.BuildInfo;
 import org.apache.lucene.index.DirectoryReader;
@@ -69,11 +70,7 @@ public final class CliStatusDashboard {
     }
 
     public static String resolveModel(Config cfg) {
-        String env = System.getenv("TALOS_OLLAMA_MODEL");
-        if (env != null && !env.isBlank()) return env;
-
-        Map<String, Object> oll = CfgUtil.map((cfg == null ? null : cfg.data.get("ollama")));
-        return String.valueOf(oll.getOrDefault("model", "unknown"));
+        return EngineRuntimeConfig.from(cfg).displayModel();
     }
 
     private static void append(StringBuilder out, String label, String value) {
@@ -99,15 +96,7 @@ public final class CliStatusDashboard {
     }
 
     private static String policyState(Config cfg) {
-        Map<String, Object> net = CfgUtil.map(cfg.data.get("net"));
-        boolean netEnabled = !(net.get("enabled") instanceof Boolean b) || b;
-
-        Map<String, Object> ollama = CfgUtil.map(cfg.data.get("ollama"));
-        boolean remoteAllowed = ollama.get("allow_remote") instanceof Boolean b && b;
-
-        String network = netEnabled ? "network on" : "network off";
-        String ollamaPolicy = remoteAllowed ? "remote Ollama allowed" : "local Ollama only";
-        return network + "; " + ollamaPolicy;
+        return EngineRuntimeConfig.from(cfg).policyLabel();
     }
 
     private static String blankDefault(String value, String fallback) {

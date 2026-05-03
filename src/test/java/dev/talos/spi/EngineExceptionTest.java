@@ -23,10 +23,10 @@ class EngineExceptionTest {
     }
 
     @Test
-    void modelNotFound_guidance_tells_user_to_pull() {
+    void modelNotFound_guidance_is_backend_neutral() {
         var ex = new EngineException.ModelNotFound("llama3:latest");
-        assertTrue(ex.guidance().contains("ollama pull"));
-        assertTrue(ex.guidance().contains("llama3:latest"));
+        assertTrue(ex.guidance().contains("selected backend"));
+        assertTrue(ex.guidance().contains("talos status --verbose"));
     }
 
     @Test
@@ -47,7 +47,7 @@ class EngineExceptionTest {
 
         assertEquals(0, ex.httpStatus());
         assertTrue(ex.getMessage().contains("127.0.0.1:11434"));
-        assertTrue(ex.guidance().contains("ollama serve"));
+        assertTrue(ex.guidance().contains("talos status --verbose"));
         assertSame(cause, ex.getCause());
     }
 

@@ -7,11 +7,11 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 class EmbeddingsFactoryTest {
     @Test
-    void defaultConfigResolvesBgeM3() {
+    void defaultConfigResolvesCompatEmbeddingProfile() {
         Config cfg = new Config();
         EmbeddingProfile profile = EmbeddingsFactory.profileFrom(cfg);
-        assertSame(EmbeddingProfile.BGE_M3, profile,
-                "Default config should resolve to the BGE_M3 built-in profile");
+        assertEquals("compat", profile.provider());
+        assertEquals("talos-embed", profile.model());
     }
     @Test
     void legacyOllamaEmbedKeyResolvesBgeM3() {
@@ -19,6 +19,7 @@ class EmbeddingsFactoryTest {
         @SuppressWarnings("unchecked")
         Map<String, Object> ollama = (Map<String, Object>) cfg.data.computeIfAbsent("ollama", k -> new LinkedHashMap<>());
         ollama.put("embed", "bge-m3");
+        cfg.data.put("embed", new LinkedHashMap<>(Map.of("provider", "ollama")));
         EmbeddingProfile profile = EmbeddingsFactory.profileFrom(cfg);
         assertSame(EmbeddingProfile.BGE_M3, profile);
     }
@@ -33,13 +34,14 @@ class EmbeddingsFactoryTest {
         cfg.data.put("embed", embedSection);
         EmbeddingProfile profile = EmbeddingsFactory.profileFrom(cfg);
         assertEquals("custom-embed", profile.model());
-        assertEquals("ollama", profile.provider());
+        assertEquals("compat", profile.provider());
     }
     @Test
     void qwen3ModelNameResolvesBuiltInProfile() {
         Config cfg = new Config();
         Map<String, Object> embedSection = new LinkedHashMap<>();
         embedSection.put("model", "Qwen/Qwen3-Embedding-8B");
+        embedSection.put("provider", "ollama");
         cfg.data.put("embed", embedSection);
         EmbeddingProfile profile = EmbeddingsFactory.profileFrom(cfg);
         assertSame(EmbeddingProfile.QWEN3_EMBED_8B, profile,
@@ -77,8 +79,8 @@ class EmbeddingsFactoryTest {
                 "Overridden dimensions must produce a new profile");
         assertEquals(2048, profile.dimensions(),
                 "Resolved profile must preserve the config dimensions override");
-        assertEquals("ollama", profile.provider(),
-                "Non-overridden provider should default to ollama");
+        assertEquals("compat", profile.provider(),
+                "Non-overridden provider should default to compat");
         assertTrue(profile.instructionAware(),
                 "Should inherit instruction-aware from built-in");
     }
@@ -148,6 +150,9 @@ class EmbeddingsFactoryTest {
     @Test
     void forQueryDoesNotWrapForBgeM3() {
         Config cfg = localOnlyConfig();
+        cfg.data.put("embed", new LinkedHashMap<>(Map.of(
+                "provider", "ollama",
+                "model", "bge-m3")));
         Embeddings emb = EmbeddingsFactory.forQuery(cfg);
         assertFalse(emb instanceof InstructionEmbeddings,
                 "bge-m3 queries should not be wrapped with instruction prefix");
@@ -155,6 +160,9 @@ class EmbeddingsFactoryTest {
     @Test
     void forDocumentDoesNotWrapForBgeM3() {
         Config cfg = localOnlyConfig();
+        cfg.data.put("embed", new LinkedHashMap<>(Map.of(
+                "provider", "ollama",
+                "model", "bge-m3")));
         Embeddings emb = EmbeddingsFactory.forDocument(cfg);
         assertFalse(emb instanceof InstructionEmbeddings,
                 "bge-m3 documents should not be wrapped with instruction prefix");
@@ -191,27 +199,43 @@ class EmbeddingsFactoryTest {
         assertEquals(profile.fingerprint(), profile.cacheNamespace(),
                 "Cache namespace must equal fingerprint for safe isolation");
     }
-    // ── Fail-fast for unsupported providers ─────────────────────────────
+    // ── Provider selection ─────────────────────────────────────────────
     @Test
-    void forQueryThrowsForUnsupportedProvider() {
+    void forQueryCreatesCompatProvider() {
         Config cfg = localOnlyConfig();
         Map<String, Object> embedSection = new LinkedHashMap<>();
-        embedSection.put("model", "Qwen/Qwen3-Embedding-8B");
-        embedSection.put("provider", "vllm");
+        embedSection.put("model", "compat-model");
+        embedSection.put("provider", "compat");
+        embedSection.put("host", "http://127.0.0.1:8080");
         cfg.data.put("embed", embedSection);
-        var ex = assertThrows(UnsupportedOperationException.class,
-                () -> EmbeddingsFactory.forQuery(cfg));
-        assertTrue(ex.getMessage().contains("vllm"), "Error should mention the unsupported provider");
+        Embeddings emb = EmbeddingsFactory.forQuery(cfg);
+        assertInstanceOf(CompatEmbeddingsClient.class, emb);
     }
+
     @Test
-    void forDocumentThrowsForUnsupportedProvider() {
+    void disabledProviderConstructsClearDisabledEmbedder() {
+        Config cfg = localOnlyConfig();
+        Map<String, Object> embedSection = new LinkedHashMap<>();
+        embedSection.put("model", "none");
+        embedSection.put("provider", "disabled");
+        cfg.data.put("embed", embedSection);
+        Embeddings emb = EmbeddingsFactory.forDocument(cfg);
+        assertInstanceOf(DisabledEmbeddings.class, emb);
+        var ex = assertThrows(UnsupportedOperationException.class, () -> emb.embed("hello"));
+        assertTrue(ex.getMessage().contains("disabled"));
+    }
+
+    @Test
+    void forDocumentThrowsForUnsupportedProviderWithoutOllamaOnlyClaim() {
         Config cfg = localOnlyConfig();
         Map<String, Object> embedSection = new LinkedHashMap<>();
         embedSection.put("model", "some-model");
-        embedSection.put("provider", "openai_compat");
+        embedSection.put("provider", "vllm");
         cfg.data.put("embed", embedSection);
-        assertThrows(UnsupportedOperationException.class,
+        var ex = assertThrows(UnsupportedOperationException.class,
                 () -> EmbeddingsFactory.forDocument(cfg));
+        assertTrue(ex.getMessage().contains("vllm"));
+        assertFalse(ex.getMessage().contains("Only 'ollama' is implemented"));
     }
     @Test
     void profileResolutionAloneDoesNotThrowForUnsupportedProvider() {

@@ -5,7 +5,8 @@ import dev.talos.cli.repl.Result;
 import dev.talos.core.Config;
 import dev.talos.core.cache.CacheDb;
 import dev.talos.core.embed.CachingEmbeddings;
-import dev.talos.core.embed.EmbeddingsClient;
+import dev.talos.core.embed.EmbeddingProfile;
+import dev.talos.core.embed.EmbeddingsFactory;
 import dev.talos.core.index.LuceneStore;
 import dev.talos.core.ingest.FileWalker;
 import dev.talos.spi.Embeddings;
@@ -135,11 +136,11 @@ public final class BenchCommand implements Command {
             long embedStart = System.currentTimeMillis();
             Config cfg = ctx.cfg();
 
-            // Create embeddings client with specified model
-            Embeddings rawEmb = new EmbeddingsClient(cfg);
+            EmbeddingProfile profile = EmbeddingsFactory.profileFrom(cfg);
+            Embeddings rawEmb = EmbeddingsFactory.forDocument(cfg);
 
             try (CacheDb cache = new CacheDb();
-                 CachingEmbeddings cachedEmb = new CachingEmbeddings(rawEmb, cache, "ollama/" + embedModel)) {
+                 CachingEmbeddings cachedEmb = new CachingEmbeddings(rawEmb, cache, profile.cacheNamespace())) {
 
                 AtomicInteger embedCount = new AtomicInteger();
 

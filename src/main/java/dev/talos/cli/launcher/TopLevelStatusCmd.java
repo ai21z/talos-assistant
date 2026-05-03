@@ -2,7 +2,11 @@ package dev.talos.cli.launcher;
 
 import dev.talos.core.Config;
 import dev.talos.core.CfgUtil;
+import dev.talos.core.EngineRuntimeConfig;
 import dev.talos.cli.ui.CliStatusDashboard;
+import dev.talos.spi.EngineRegistry;
+import dev.talos.spi.types.Capabilities;
+import dev.talos.spi.types.Health;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
@@ -11,7 +15,6 @@ import picocli.CommandLine;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
-import java.util.Objects;
 
 @CommandLine.Command(name = "status", description = "Show current configuration and workspace status")
 public class TopLevelStatusCmd implements Runnable {
@@ -99,26 +102,7 @@ public class TopLevelStatusCmd implements Runnable {
         }
         System.out.println("  Vectors     : " + (vectors ? "ON" : "OFF"));
 
-        // Ollama configuration
-        var ollama = CfgUtil.map(cfg.data.get("ollama"));
-        if (ollama != null) {
-            String host = Objects.toString(ollama.getOrDefault("host", System.getenv("TALOS_OLLAMA_HOST")));
-            if (host == null || host.isBlank()) {
-                host = "http://127.0.0.1:11434";
-            }
-
-            String model = System.getenv("TALOS_OLLAMA_MODEL");
-            if (model == null) model = Objects.toString(ollama.getOrDefault("model", "qwen2.5-coder:14b"));
-
-            System.out.println("  Ollama host : " + host);
-            System.out.println("  Chat model  : " + model);
-
-            if (verbose) {
-                // Embeddings: check availability
-                String embedModel = Objects.toString(ollama.getOrDefault("embed", "bge-m3"));
-                System.out.println("  Embed model : " + embedModel);
-            }
-        }
+        System.out.print(renderEngineStatus(cfg));
 
         if (verbose) {
             System.out.println("\nConfiguration:");
@@ -126,6 +110,38 @@ public class TopLevelStatusCmd implements Runnable {
             System.out.println("  Strict mode:        " + cfg.getReport().strictMode);
             System.out.println("  Defaulted keys:     " + cfg.getReport().defaultedKeys.size());
         }
+    }
+
+    static String renderEngineStatus(Config cfg) {
+        EngineRuntimeConfig runtime = EngineRuntimeConfig.from(cfg);
+        StringBuilder out = new StringBuilder();
+        out.append("  Backend     : ").append(runtime.backend()).append("\n");
+        if ("ollama".equals(runtime.backend())) {
+            out.append("  Ollama host : ").append(runtime.hostLabel()).append("\n");
+        } else {
+            out.append("  Engine host : ").append(runtime.hostLabel()).append("\n");
+        }
+        out.append("  Chat model  : ").append(runtime.model()).append("\n");
+        out.append("  Embeddings  : ").append(runtime.embeddingLabel()).append("\n");
+
+        try (EngineRegistry registry = new EngineRegistry(cfg)) {
+            registry.select(runtime.backend(), runtime.model());
+            Health health = registry.engine().health();
+            Capabilities caps = registry.engine().caps();
+            out.append("  Health      : ")
+                    .append(health.ok() ? "OK" : "DOWN")
+                    .append(health.message().isBlank() ? "" : " - " + health.message())
+                    .append("\n");
+            out.append("  Capabilities: chat=")
+                    .append(caps.chat())
+                    .append(", stream=").append(caps.stream())
+                    .append(", tools=").append(caps.nativeTools())
+                    .append(", required_tool=").append(caps.requiredToolChoice())
+                    .append("\n");
+        } catch (Exception e) {
+            out.append("  Health      : DOWN - ").append(e.getMessage()).append("\n");
+        }
+        return out.toString();
     }
 
     private int getDocCount(Path indexDir) {

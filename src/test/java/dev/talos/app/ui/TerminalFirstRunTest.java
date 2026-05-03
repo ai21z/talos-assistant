@@ -53,5 +53,11 @@ class TerminalFirstRunTest {
             // reference will break
             assertNotNull(TerminalFirstRun.class);
         }
+
+        @Test void setupSummary_is_backend_neutral() {
+            String summary = TerminalFirstRun.setupSummary();
+            assertTrue(summary.contains("llama.cpp"));
+            assertFalse(summary.contains("requires Ollama"));
+        }
     }
 }

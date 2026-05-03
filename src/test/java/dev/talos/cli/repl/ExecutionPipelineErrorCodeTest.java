@@ -67,7 +67,7 @@ class ExecutionPipelineErrorCodeTest {
         Result.Error err = (Result.Error) r;
         assertEquals(404, err.code);
         assertTrue(err.message.contains("llama3"));
-        assertTrue(err.message.contains("ollama pull"));
+        assertTrue(err.message.contains("selected backend"));
     }
 
     @Test
@@ -75,7 +75,7 @@ class ExecutionPipelineErrorCodeTest {
         Result r = pipe.run(() -> { throw new EngineException.ConnectionFailed("localhost", null); }, minimalCtx(), "t");
         assertInstanceOf(Result.Error.class, r);
         assertEquals(503, ((Result.Error) r).code);
-        assertTrue(((Result.Error) r).message.contains("ollama serve"));
+        assertTrue(((Result.Error) r).message.contains("talos status --verbose"));
     }
 
     @Test

@@ -1,6 +1,7 @@
 package dev.talos.spi;
 
 import dev.talos.core.Config;
+import dev.talos.core.EngineRuntimeConfig;
 import dev.talos.spi.types.ModelRef;
 
 import java.util.*;
@@ -37,11 +38,9 @@ public final class EngineRegistry implements AutoCloseable {
         }
 
         // Defaults from config (mirrors how LlmClient seeds values)
-        Map<String, Object> llm = map(this.cfg.data.get("llm"));
-        this.activeBackend = String.valueOf(llm.getOrDefault("default_backend", "ollama"));
-
-        Map<String, Object> ollama = map(this.cfg.data.get("ollama"));
-        this.activeModel = String.valueOf(ollama.getOrDefault("model", "qwen2.5-coder:14b"));
+        EngineRuntimeConfig runtime = EngineRuntimeConfig.from(this.cfg);
+        this.activeBackend = runtime.backend();
+        this.activeModel = runtime.model();
     }
 
     /** Switch backend and/or model. Engine will be recreated lazily on next engine() call if backend changed. */
@@ -139,10 +138,9 @@ public final class EngineRegistry implements AutoCloseable {
     }
 
     private void ensureDefaults() {
-        if (activeBackend == null || activeBackend.isBlank()) activeBackend = "ollama";
+        if (activeBackend == null || activeBackend.isBlank()) activeBackend = "llama_cpp";
         if (activeModel == null || activeModel.isBlank()) {
-            Map<String, Object> ollama = map(cfg.data.get("ollama"));
-            activeModel = String.valueOf(ollama.getOrDefault("model", "qwen2.5-coder:14b"));
+            activeModel = EngineRuntimeConfig.from(cfg).model();
         }
     }
 

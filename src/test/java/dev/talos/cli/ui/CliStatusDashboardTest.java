@@ -47,7 +47,7 @@ class CliStatusDashboardTest {
     }
 
     @Test
-    void snapshot_summarizes_local_policy() {
+    void snapshot_summarizes_local_engine_policy() {
         Config cfg = new Config();
         cfg.data.put("net", java.util.Map.of("enabled", false));
 
@@ -55,11 +55,30 @@ class CliStatusDashboardTest {
                 workspace,
                 cfg,
                 "auto",
-                "model",
+                CliStatusDashboard.resolveModel(cfg),
                 "off",
                 "next"));
 
         assertTrue(output.contains("network off"));
+        assertTrue(output.contains("local engine only"));
+        assertTrue(output.contains("llama_cpp"));
+        assertTrue(output.contains("talos-agent"));
+        assertTrue(!output.contains("Ollama"));
+    }
+
+    @Test
+    void snapshot_summarizes_explicit_ollama_policy() {
+        Config cfg = new Config();
+        cfg.data.put("llm", java.util.Map.of("default_backend", "ollama"));
+
+        String output = CliStatusDashboard.render(CliStatusDashboard.snapshot(
+                workspace,
+                cfg,
+                "auto",
+                CliStatusDashboard.resolveModel(cfg),
+                "off",
+                "next"));
+
         assertTrue(output.contains("local Ollama only"));
     }
 }

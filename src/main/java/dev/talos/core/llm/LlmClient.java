@@ -2,6 +2,7 @@ package dev.talos.core.llm;
 
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
+import dev.talos.core.EngineRuntimeConfig;
 import dev.talos.core.util.Sanitize;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
@@ -137,17 +138,9 @@ public final class LlmClient implements AutoCloseable {
         this.mode = "engine".equalsIgnoreCase(transport) ? TransportMode.ENGINE : TransportMode.PLACEHOLDER;
 
         // ---- defaults compatible with existing tests ----
-        Map<String, Object> ollama = CfgUtil.map(this.cfg.data.get("ollama"));
-        // Respect TALOS_OLLAMA_MODEL env var (same precedence as OllamaEngineProvider)
-        String envModel = System.getenv("TALOS_OLLAMA_MODEL");
-        String cfgModel;
-        if (envModel != null && !envModel.isBlank()) {
-            cfgModel = envModel.trim();
-        } else {
-            cfgModel = String.valueOf(ollama.getOrDefault("model", "qwen2.5-coder:14b"));
-        }
-        this.model = sanitizeModelName(cfgModel);
-        this.backend = Objects.toString(CfgUtil.map(this.cfg.data.get("llm")).getOrDefault("default_backend", "ollama"));
+        EngineRuntimeConfig runtime = EngineRuntimeConfig.from(this.cfg);
+        this.model = sanitizeModelName(runtime.model());
+        this.backend = runtime.backend();
 
         // ---- limits.response_max_chars (honor exactly, min=1) ----
         Map<String, Object> limits = CfgUtil.map(this.cfg.data.get("limits"));

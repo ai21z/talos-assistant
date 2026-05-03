@@ -85,7 +85,14 @@ rag:
 
 llm:
   transport: "engine"
-  default_backend: "ollama"
+  default_backend: "llama_cpp"
+  model: "talos-agent"
+
+embed:
+  provider: "compat"
+  model: "talos-embed"
+  host: ""
+  allow_remote: false
 
 ollama:
   host: "http://127.0.0.1:11434"
