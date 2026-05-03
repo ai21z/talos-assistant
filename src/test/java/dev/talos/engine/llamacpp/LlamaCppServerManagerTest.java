@@ -97,6 +97,93 @@ class LlamaCppServerManagerTest {
     }
 
     @Test
+    void managedModeDefaultsToSingleAgentSlotAndBoundedPrediction() throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort()));
+            FakeLauncher launcher = new FakeLauncher();
+            LlamaCppServerManager manager = new LlamaCppServerManager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
+
+            manager.ensureStarted();
+
+            List<String> command = launcher.commands.get(0);
+            assertContainsPair(command, "--parallel", "1");
+            assertContainsPair(command, "--predict", "2048");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void managedModeHonorsParallelAndPredictionOverridesFromServerArgs() throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "server_args", List.of("-np", "2", "-n", "512")));
+            FakeLauncher launcher = new FakeLauncher();
+            LlamaCppServerManager manager = new LlamaCppServerManager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
+
+            manager.ensureStarted();
+
+            List<String> command = launcher.commands.get(0);
+            assertContainsPair(command, "-np", "2");
+            assertContainsPair(command, "-n", "512");
+            assertFalse(command.contains("--parallel"), "must not add default --parallel when -np is configured: " + command);
+            assertFalse(command.contains("--predict"), "must not add default --predict when -n is configured: " + command);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void managedModeRecognizesEqualsFormServerArgOverrides() throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "server_args", List.of("--parallel=3", "--n-predict=1024")));
+            FakeLauncher launcher = new FakeLauncher();
+            LlamaCppServerManager manager = new LlamaCppServerManager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
+
+            manager.ensureStarted();
+
+            List<String> command = launcher.commands.get(0);
+            assertTrue(command.contains("--parallel=3"));
+            assertTrue(command.contains("--n-predict=1024"));
+            assertFalse(command.contains("--parallel"), "must not add default --parallel when --parallel= is configured: " + command);
+            assertFalse(command.contains("--predict"), "must not add default --predict when --n-predict= is configured: " + command);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void managedModeLaunchesHuggingFaceRepoSourceWithoutLocalModelPath() throws Exception {
         Path exe = touch("llama-server.exe");
         HttpServer server = startHealthServer(200, "ok");
