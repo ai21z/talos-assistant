@@ -5,6 +5,8 @@ import dev.talos.core.Config;
 import dev.talos.core.util.Sanitize;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
+import dev.talos.spi.types.PromptDebugCapture;
+import dev.talos.spi.types.PromptDebugSnapshot;
 import dev.talos.spi.types.TokenChunk;
 import dev.talos.spi.types.ToolSpec;
 
@@ -463,6 +465,7 @@ public final class LlmClient implements AutoCloseable {
 
         return LlmRetryExecutor.execute(MAX_RETRIES, () -> {
             ChatRequest req = new ChatRequest(backend, model, sys, usr, sn, timeout, List.of(), toolSpecs);
+            PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(req, onChunk != null));
             return assembleFromStream(engineResolver.chatStream(req), onChunk, cancelled);
         });
     }
@@ -522,6 +525,7 @@ public final class LlmClient implements AutoCloseable {
 
         return LlmRetryExecutor.execute(MAX_RETRIES, () -> {
             ChatRequest req = new ChatRequest(backend, model, "", "", List.of(), timeout, sanitized, toolSpecs);
+            PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(req, onChunk != null));
             return assembleFromStream(engineResolver.chatStream(req), onChunk, cancelled);
         });
     }
@@ -623,7 +627,7 @@ public final class LlmClient implements AutoCloseable {
         return callBudget.run(
                 activeStream -> engineAssembledWithMessagesFullTracked(
                         messages, trackingSink, Duration.ofSeconds(90), cancel,
-                        lastChunkAt, activeStream, requestToolSpecs),
+                        lastChunkAt, activeStream, requestToolSpecs, true),
                 wallClockMs,
                 lastChunkAt,
                 "streaming chat",
@@ -677,7 +681,7 @@ public final class LlmClient implements AutoCloseable {
         return callBudget.run(
                 activeStream -> engineAssembledWithMessagesFullTracked(
                         messages, trackingSink, Duration.ofSeconds(90), cancel,
-                        lastChunkAt, activeStream, requestToolSpecs),
+                        lastChunkAt, activeStream, requestToolSpecs, false),
                 wallClockMs,
                 lastChunkAt,
                 "non-streaming chat",
@@ -713,7 +717,8 @@ public final class LlmClient implements AutoCloseable {
                                                                 Supplier<Boolean> cancelled,
                                                                 AtomicLong lastChunkAt,
                                                                 AtomicReference<AutoCloseable> activeStream,
-                                                                List<ToolSpec> requestToolSpecs) {
+                                                                List<ToolSpec> requestToolSpecs,
+                                                                boolean streamRequest) {
         // Wrap the cancel supplier so the engine loop also bails when the
         // watchdog completes the future exceptionally (the worker thread
         // is then on borrowed time; we want it to drop out quickly).
@@ -726,7 +731,7 @@ public final class LlmClient implements AutoCloseable {
         // first chunk on a cold model.
         if (lastChunkAt != null) lastChunkAt.set(System.currentTimeMillis());
         return engineAssembledWithMessagesFull(
-                messages, trackingSink, timeout, wrapped, activeStream, requestToolSpecs);
+                messages, trackingSink, timeout, wrapped, activeStream, requestToolSpecs, streamRequest);
     }
 
     /**
@@ -739,7 +744,8 @@ public final class LlmClient implements AutoCloseable {
                                                          Duration timeout,
                                                          Supplier<Boolean> cancelled,
                                                          AtomicReference<AutoCloseable> activeStream,
-                                                         List<ToolSpec> requestToolSpecs) {
+                                                         List<ToolSpec> requestToolSpecs,
+                                                         boolean streamRequest) {
         // Sanitize message content while preserving tool-call structure
         // (toolCalls, toolCallId) — these carry native tool-call context that
         // OllamaEngine.serializeChatMessage needs for proper /api/chat formatting.
@@ -755,6 +761,7 @@ public final class LlmClient implements AutoCloseable {
             ChatRequest req = new ChatRequest(
                     backend, model, "", "", List.of(), timeout, sanitized,
                     effectiveToolSpecs(requestToolSpecs));
+            PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(req, streamRequest));
             // Try-with-resources ensures the token stream's onClose hook
             // fires on every exit path (break, exception, normal return).
             // For the Ollama transport that onClose closes the underlying

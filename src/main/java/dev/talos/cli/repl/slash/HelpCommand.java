@@ -115,6 +115,7 @@ public final class HelpCommand implements Command {
 
     private String fullInventory() {
         Map<CommandGroup, List<CommandSpec>> grouped = reg.allSpecs().stream()
+                .filter(spec -> !spec.hidden())
                 .collect(Collectors.groupingBy(CommandSpec::group));
 
         var sb = new StringBuilder();
@@ -165,6 +166,7 @@ public final class HelpCommand implements Command {
         sb.append("  ").append(intro).append('\n').append('\n');
 
         List<CommandSpec> specs = reg.allSpecs().stream()
+                .filter(spec -> !spec.hidden())
                 .filter(spec -> spec.group() == group)
                 .sorted(Comparator.comparing(CommandSpec::name))
                 .toList();
@@ -196,6 +198,7 @@ public final class HelpCommand implements Command {
     private Optional<CommandSpec> findSpec(String nameOrAlias) {
         String q = normalize(nameOrAlias);
         return reg.allSpecs().stream()
+                .filter(s -> !s.hidden())
                 .filter(s -> s.name().equals(q) || s.aliases().contains(q))
                 .findFirst();
     }

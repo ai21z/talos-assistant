@@ -9,7 +9,9 @@ import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.trace.PromptAuditRedactor;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 
+import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 
 /** Renders a short current-turn-local capability frame from runtime state. */
 public final class CurrentTurnCapabilityFrame {
@@ -76,6 +78,7 @@ public final class CurrentTurnCapabilityFrame {
                 .append("visibleTools: ").append(tools).append('\n')
                 .append("obligation: ").append(obligation.name()).append('\n')
                 .append("evidenceObligation: ").append(evidence.name()).append('\n');
+        appendExpectedTargets(frame, contract, mutationAllowed);
         appendActiveTaskContext(frame, activeTaskContext, artifactGoal);
         appendTaskExpectations(frame, taskExpectations);
 
@@ -114,6 +117,43 @@ public final class CurrentTurnCapabilityFrame {
         }
         frame.append('\n').append(evidenceGuidance(evidence));
         return frame.toString();
+    }
+
+    private static void appendExpectedTargets(
+            StringBuilder frame,
+            TaskContract contract,
+            boolean mutationAllowed
+    ) {
+        if (!mutationAllowed || contract == null || contract.expectedTargets().isEmpty()) {
+            return;
+        }
+        List<String> targets = orderedExpectedTargets(contract);
+        frame.append("[ExpectedTargets]\n")
+                .append("requiredTargets: ").append(String.join(", ", targets)).append('\n')
+                .append("You must write or edit these exact target paths for this turn.\n")
+                .append("Similar filenames are not substitutes for required target paths.\n")
+                .append("script.js and scripts.js are different target paths; preserve the exact requested spelling.\n")
+                .append("Do not complete this turn by mutating only a similar sibling filename.\n");
+    }
+
+    private static List<String> orderedExpectedTargets(TaskContract contract) {
+        Set<String> expected = contract.expectedTargets();
+        String request = contract.originalUserRequest() == null
+                ? ""
+                : contract.originalUserRequest().toLowerCase(java.util.Locale.ROOT);
+        return expected.stream()
+                .sorted(Comparator
+                        .comparingInt((String target) -> targetIndex(request, target))
+                        .thenComparing(Comparator.naturalOrder()))
+                .toList();
+    }
+
+    private static int targetIndex(String requestLower, String target) {
+        if (requestLower == null || requestLower.isBlank() || target == null) {
+            return Integer.MAX_VALUE;
+        }
+        int index = requestLower.indexOf(target.toLowerCase(java.util.Locale.ROOT));
+        return index < 0 ? Integer.MAX_VALUE : index;
     }
 
     private static void appendActiveTaskContext(
@@ -175,6 +215,10 @@ public final class CurrentTurnCapabilityFrame {
                 .append("expectedLines: ").append(literal.expectedLines()).append('\n')
                 .append("Use this exact current-turn content for the complete file write to ")
                 .append(literal.targetPath()).append(".\n")
+                .append("The complete file content for ").append(literal.targetPath())
+                .append(" must equal the expectedContent payload exactly.\n")
+                .append("Do not wrap it in HTML, Markdown, code fences, prose, or inferred surrounding content.\n")
+                .append("For talos.write_file, the content argument must be exactly the payload below.\n")
                 .append("Do not reuse exact-write literals from earlier turns or unrelated history.\n");
         if (expectedContent.length() <= MAX_INLINE_EXACT_CONTENT_CHARS) {
             frame.append("expectedContent:\n")

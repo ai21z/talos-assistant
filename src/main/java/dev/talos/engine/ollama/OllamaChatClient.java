@@ -6,6 +6,8 @@ import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatMessage.NativeToolCall;
 import dev.talos.spi.types.ChatRequest;
+import dev.talos.spi.types.PromptDebugCapture;
+import dev.talos.spi.types.PromptDebugSnapshot;
 import dev.talos.spi.types.TokenChunk;
 import dev.talos.spi.types.ToolSpec;
 import org.slf4j.Logger;
@@ -64,6 +66,7 @@ final class OllamaChatClient {
         body.put("system", sys);
         body.put("stream", false);
         String json = mapper.writeValueAsString(body);
+        PromptDebugCapture.record(PromptDebugSnapshot.fromProviderBody(req, false, json));
 
         HttpRequest httpReq = HttpRequest.newBuilder()
                 .uri(URI.create(host + "/api/generate"))
@@ -109,6 +112,7 @@ final class OllamaChatClient {
         body.put("system", sys);
         body.put("stream", true);
         String json = mapper.writeValueAsString(body);
+        PromptDebugCapture.record(PromptDebugSnapshot.fromProviderBody(req, true, json));
 
         HttpRequest httpReq = HttpRequest.newBuilder()
                 .uri(URI.create(host + "/api/generate"))
@@ -289,6 +293,7 @@ final class OllamaChatClient {
         }
 
         String json = mapper.writeValueAsString(body);
+        PromptDebugCapture.record(PromptDebugSnapshot.fromProviderBody(req, false, json));
 
         HttpRequest httpReq = HttpRequest.newBuilder()
                 .uri(URI.create(host + "/api/chat"))
@@ -342,6 +347,7 @@ final class OllamaChatClient {
         }
 
         String json = mapper.writeValueAsString(body);
+        PromptDebugCapture.record(PromptDebugSnapshot.fromProviderBody(req, true, json));
 
         HttpRequest httpReq = HttpRequest.newBuilder()
                 .uri(URI.create(host + "/api/chat"))
