@@ -823,7 +823,10 @@ class ExecutionOutcomeTest {
             assertTrue(outcome.finalAnswer().contains("The requested task is not verified complete."));
             assertTrue(outcome.finalAnswer().contains("script.js: expected target was not successfully mutated."));
             assertTrue(outcome.finalAnswer().contains("Expected web-app build to successfully mutate a JavaScript file."));
-            assertTrue(outcome.finalAnswer().contains("[ok] Created index.html"));
+            assertTrue(outcome.finalAnswer().contains("Applied mutating tool calls:"));
+            assertTrue(outcome.finalAnswer().contains("index.html: wrote index.html"));
+            assertTrue(outcome.finalAnswer().contains("styles.css: wrote styles.css"));
+            assertFalse(outcome.finalAnswer().contains("[ok] Created index.html"));
             assertEquals(TaskCompletionStatus.FAILED, outcome.taskOutcome().completionStatus());
             assertEquals(TaskVerificationStatus.FAILED, outcome.taskOutcome().verificationResult().status());
             assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.STATIC_VERIFICATION_FAILED));
@@ -925,6 +928,54 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void failedStaticVerificationReplacesSuccessAndManualProse() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-failed-static-dominance-");
+        try {
+            Files.writeString(ws.resolve("script.js"), "document.querySelector('.missing-button');");
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js. "
+                    + "It should calculate BMI from height and weight."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Updated script.js successfully.", 1, 1,
+                    List.of("talos.write_file"), List.of(),
+                    0, 0, false, 1, List.of(),
+                    0, 0, 0, 0,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.write_file", "script.js", true, true, false,
+                            "wrote script.js", "", dev.talos.tools.VerificationStatus.PASS
+                    )));
+            String modelAnswer = """
+                    The BMI calculator is complete and ready to use.
+
+                    Save these files, then open index.html in your browser.
+                    """;
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    modelAnswer, messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.FAILED, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.FAILED, outcome.verificationStatus());
+            assertTrue(outcome.finalAnswer().startsWith("[Task incomplete: Static verification failed -"),
+                    outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("not verified complete"), outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("calculator is complete"), outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("ready to use"), outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("Save these files"), outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("open index.html in your browser"), outcome.finalAnswer());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void planContractKeepsExactLiteralVerificationAfterRetryMessagesAppend() throws Exception {
         Path ws = Files.createTempDirectory("talos-execution-outcome-plan-literal-drift-");
         try {
@@ -1003,6 +1054,8 @@ class ExecutionOutcomeTest {
             assertTrue(outcome.finalAnswer().contains("Static verification: passed"),
                     outcome.finalAnswer());
             assertTrue(outcome.finalAnswer().contains("Exact content verification passed"),
+                    outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("Updated index.html."),
                     outcome.finalAnswer());
             assertEquals(TaskCompletionStatus.COMPLETED_VERIFIED, outcome.taskOutcome().completionStatus());
             assertEquals(TaskVerificationStatus.PASSED, outcome.taskOutcome().verificationResult().status());
