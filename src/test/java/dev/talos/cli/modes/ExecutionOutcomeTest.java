@@ -235,6 +235,112 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void pendingActionObligationFailureDominatesVerifiedMutationOutcomeAndTrace() throws Exception {
+        Path ws = Files.createTempDirectory("talos-pending-obligation-outcome-");
+        try {
+            Files.writeString(ws.resolve("index.html"), """
+                    <!doctype html>
+                    <html>
+                      <head><link rel="stylesheet" href="styles.css"></head>
+                      <body>
+                        <form id="bmi-form">
+                          <input id="height" type="number">
+                          <input id="weight" type="number">
+                          <button type="submit">Calculate BMI</button>
+                        </form>
+                        <output id="result"></output>
+                        <script src="scripts.js"></script>
+                      </body>
+                    </html>
+                    """);
+            Files.writeString(ws.resolve("styles.css"), "form { display: grid; gap: 0.5rem; }\n");
+            Files.writeString(ws.resolve("scripts.js"), """
+                    document.getElementById('bmi-form').addEventListener('submit', (event) => {
+                      event.preventDefault();
+                      const height = Number(document.getElementById('height').value) / 100;
+                      const weight = Number(document.getElementById('weight').value);
+                      document.getElementById('result').textContent = `BMI: ${(weight / (height * height)).toFixed(1)}`;
+                    });
+                    """);
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js."));
+
+            String answer = """
+                    [Action obligation failed: pending static repair progress was not satisfied.]
+
+                    Remaining target(s): script.js.
+                    The model returned prose instead of the required write/edit tool call, so Talos stopped this turn deterministically.
+                    """;
+            var loopResult = new ToolCallLoop.LoopResult(
+                    answer,
+                    3,
+                    3,
+                    List.of("talos.write_file", "talos.write_file", "talos.write_file"),
+                    List.of(),
+                    0,
+                    0,
+                    false,
+                    3,
+                    List.of(),
+                    0,
+                    0,
+                    0,
+                    0,
+                    FailureDecision.stop(
+                            FailureAction.ASK_USER,
+                            "Pending action obligation STATIC_REPAIR_TARGETS_REMAINING was ignored after a static repair progress reprompt."),
+                    List.of(
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.write_file", "index.html", true, true, false,
+                                    "wrote index.html", "", dev.talos.tools.VerificationStatus.PASS),
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.write_file", "styles.css", true, true, false,
+                                    "wrote styles.css", "", dev.talos.tools.VerificationStatus.PASS),
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.write_file", "scripts.js", true, true, false,
+                                    "wrote scripts.js", "", dev.talos.tools.VerificationStatus.PASS)));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-pending-obligation",
+                    "sid",
+                    1,
+                    "2026-05-03T12:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "test",
+                    "model",
+                    "Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js.");
+            try {
+                ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                        loopResult.finalAnswer(), messages, loopResult, ws, 0);
+
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+                assertEquals(ExecutionOutcome.CompletionStatus.BLOCKED, outcome.completionStatus());
+                assertEquals(TaskCompletionStatus.BLOCKED_BY_POLICY, outcome.taskOutcome().completionStatus());
+                assertEquals(ExecutionOutcome.VerificationStatus.NOT_RUN, outcome.verificationStatus());
+                assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.FAILED_ACTION_OBLIGATION));
+                assertTrue(outcome.finalAnswer().startsWith("[Action obligation failed:"), outcome.finalAnswer());
+                assertFalse(outcome.finalAnswer().contains("Static verification: passed"), outcome.finalAnswer());
+                assertNotNull(trace);
+                assertNotNull(trace.outcome());
+                assertEquals("BLOCKED", trace.outcome().status());
+                assertEquals("BLOCKED_BY_POLICY", trace.outcome().classification());
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void planContractKeepsDeniedMutationClassificationAfterRetryMessagesAppend() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));

@@ -151,11 +151,14 @@ record ExecutionOutcome(
         TaskContract contract = safePlan.taskContract();
         boolean mutationRequested = contract.mutationRequested();
         boolean unsupportedDocumentCapabilityLimited = hasUnsupportedDocumentCapabilityLimit(loopResult);
+        boolean pendingActionObligationFailure = pendingActionObligationFailure(loopResult);
         boolean failurePolicyStoppedWithoutMutation = failurePolicyStoppedWithoutMutation(
                 loopResult,
                 contract,
                 extraMutationSuccesses);
-        boolean failedMutationObligation = failedActionObligation || failurePolicyStoppedWithoutMutation;
+        boolean failedMutationObligation = failedActionObligation
+                || pendingActionObligationFailure
+                || failurePolicyStoppedWithoutMutation;
 
         String shaped = AssistantTurnExecutor.overrideUnsupportedDocumentClaimsIfNeeded(
                 current, loopResult);
@@ -752,6 +755,15 @@ record ExecutionOutcome(
         if (contract == null || !contract.mutationRequested()) return false;
         if (hasDeniedMutation(loopResult)) return false;
         return loopResult.mutatingToolSuccesses() + Math.max(0, extraMutationSuccesses) <= 0;
+    }
+
+    private static boolean pendingActionObligationFailure(ToolCallLoop.LoopResult loopResult) {
+        if (loopResult == null || loopResult.failureDecision() == null) return false;
+        if (!loopResult.failureDecision().shouldStop()) return false;
+        String reason = loopResult.failureDecision().reason();
+        if (reason != null && reason.startsWith("Pending action obligation ")) return true;
+        String answer = loopResult.finalAnswer();
+        return answer != null && answer.startsWith("[Action obligation failed:");
     }
 
     private static boolean hasDeniedMutation(ToolCallLoop.LoopResult loopResult) {

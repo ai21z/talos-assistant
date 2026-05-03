@@ -167,12 +167,16 @@ public final class RepairPolicy {
     private static List<RepairPlanStep> planSteps(List<String> problems, List<String> expectedTargets) {
         List<RepairPlanStep> steps = new ArrayList<>();
         Set<String> targets = new LinkedHashSet<>();
-        for (String problem : problems) {
-            targets.addAll(extractTargets(problem));
-        }
         boolean structuralWebRepair = problems.stream().anyMatch(StaticWebCapabilityProfile::isStructuralProblem);
-        if ((targets.isEmpty() || structuralWebRepair) && expectedTargets != null) {
+        if (structuralWebRepair && expectedTargets != null && !expectedTargets.isEmpty()) {
             targets.addAll(expectedTargets);
+        } else {
+            for (String problem : problems) {
+                targets.addAll(extractTargets(problem));
+            }
+            if (targets.isEmpty() && expectedTargets != null) {
+                targets.addAll(expectedTargets);
+            }
         }
         for (String target : targets) {
             if (!StaticWebCapabilityProfile.isSmallWebFile(target)) continue;

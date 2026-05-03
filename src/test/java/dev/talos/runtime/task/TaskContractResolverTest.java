@@ -703,6 +703,30 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void reviewAndFixAfterActionObligationFailureInheritsExpectedTargets() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.user(
+                "Create index.html, styles.css, and scripts.js for a BMI calculator."));
+        messages.add(ChatMessage.assistant("""
+                [Action obligation failed: pending static repair progress was not satisfied.]
+
+                Remaining target(s): script.js.
+                The model returned prose instead of the required write/edit tool call, so Talos stopped this turn deterministically.
+                """));
+        messages.add(ChatMessage.user(
+                "Review the BMI calculator you just created and fix any obvious issue "
+                        + "that would stop it from working in a browser."));
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        assertEquals(TaskType.FILE_CREATE, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("index.html", "styles.css", "scripts.js"), contract.expectedTargets());
+    }
+
+    @Test
     void statusQuestionAfterIncompleteMutationRemainsVerifyOnly() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.user(
