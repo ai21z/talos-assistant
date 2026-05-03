@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -21,6 +22,8 @@ import java.util.Objects;
 final class LlamaCppServerManager implements AutoCloseable {
     private static final Duration DEFAULT_READINESS_TIMEOUT = Duration.ofMinutes(2);
     private static final Duration DEFAULT_READINESS_POLL_INTERVAL = Duration.ofMillis(500);
+    private static final Duration DEFAULT_SHUTDOWN_TIMEOUT = Duration.ofSeconds(5);
+    private static final Duration DEFAULT_FORCED_SHUTDOWN_TIMEOUT = Duration.ofSeconds(2);
     private static final int LOG_EXCERPT_BYTES = 1600;
     private static final String DEFAULT_AGENT_PARALLEL = "1";
     private static final String DEFAULT_AGENT_PREDICT = "2048";
@@ -79,13 +82,21 @@ final class LlamaCppServerManager implements AutoCloseable {
         Path logPath = logPath();
         try {
             prepareLog(logPath);
+            appendLifecycleLog(logPath, "Talos managed llama.cpp server starting on "
+                    + config.listenHost() + ":" + config.port());
             process = launcher.start(command, logPath);
+            appendLifecycleLog(logPath, "Talos managed llama.cpp server process launched");
             lastLaunchFailure = "";
         } catch (IOException e) {
             lastLaunchFailure = "failed to launch llama.cpp server: " + e.getMessage();
             throw new EngineException.ConnectionFailed("llama_cpp launch: " + e.getMessage(), e);
         }
-        waitForReadiness(logPath);
+        try {
+            waitForReadiness(logPath);
+        } catch (RuntimeException e) {
+            stopManagedProcess(logPath, "readiness failed");
+            throw e;
+        }
     }
 
     Health health() {
@@ -273,6 +284,20 @@ final class LlamaCppServerManager implements AutoCloseable {
                 StandardOpenOption.TRUNCATE_EXISTING);
     }
 
+    private static void appendLifecycleLog(Path logPath, String message) {
+        if (logPath == null || message == null || message.isBlank()) return;
+        try {
+            Files.createDirectories(logPath.getParent());
+            Files.writeString(logPath,
+                    "[" + Instant.now() + "] " + message + System.lineSeparator(),
+                    StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.APPEND);
+        } catch (Exception ignored) {
+            // Lifecycle diagnostics are best-effort and must not mask engine errors.
+        }
+    }
+
     private static String logExcerptSuffix(Path logPath) {
         String excerpt = logExcerpt(logPath);
         return excerpt.isBlank() ? "No llama.cpp server log excerpt available." : "Log excerpt: " + excerpt;
@@ -294,10 +319,43 @@ final class LlamaCppServerManager implements AutoCloseable {
 
     @Override
     public synchronized void close() {
+        stopManagedProcess(logPath(), "close");
+    }
+
+    private void stopManagedProcess(Path logPath, String reason) {
         if (process != null) {
-            process.destroy();
+            LlamaCppProcess ownedProcess = process;
+            appendLifecycleLog(logPath, "Talos managed llama.cpp server stopping: " + Objects.toString(reason, ""));
+            try {
+                if (ownedProcess.isAlive()) {
+                    ownedProcess.destroy();
+                    if (!waitForExit(ownedProcess, DEFAULT_SHUTDOWN_TIMEOUT) && ownedProcess.isAlive()) {
+                        appendLifecycleLog(logPath, "Talos managed llama.cpp server still alive; forcing stop");
+                        ownedProcess.destroyForcibly();
+                        waitForExit(ownedProcess, DEFAULT_FORCED_SHUTDOWN_TIMEOUT);
+                    }
+                }
+            } finally {
+                if (ownedProcess.isAlive()) {
+                    appendLifecycleLog(logPath, "Talos managed llama.cpp server may still be running after stop attempt");
+                } else {
+                    appendLifecycleLog(logPath, "Talos managed llama.cpp server stopped");
+                }
+            }
             process = null;
             ready = false;
+        }
+    }
+
+    private static boolean waitForExit(LlamaCppProcess process, Duration timeout) {
+        if (process == null || !process.isAlive()) return true;
+        try {
+            return process.waitFor(timeout);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (Exception ignored) {
+            return !process.isAlive();
         }
     }
 }

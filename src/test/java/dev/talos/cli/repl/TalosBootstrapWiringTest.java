@@ -178,5 +178,21 @@ class TalosBootstrapWiringTest {
         assertEquals(1, prompts.size(), "approval should read exactly one scripted response");
         assertTrue(prompts.getFirst().contains("Allow?"));
     }
+
+    @Test
+    void bootstrapClosesLlmClientWhenRuntimeSessionCloses() {
+        ReplRouter router = TalosBootstrap.create(
+                stubSession(), new Config(),
+                new java.io.PrintStream(java.io.OutputStream.nullOutputStream()),
+                WS);
+
+        assertFalse(router.context().llm().isClosed(),
+                "freshly bootstrapped LlmClient should be open before session shutdown");
+
+        router.getRuntimeSession().close();
+
+        assertTrue(router.context().llm().isClosed(),
+                "runtime session close must close the context-owned LlmClient so managed engines release processes");
+    }
 }
 
