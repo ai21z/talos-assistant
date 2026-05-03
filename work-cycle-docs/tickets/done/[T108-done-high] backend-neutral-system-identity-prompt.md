@@ -1,6 +1,6 @@
 # T108 - Backend-Neutral System Identity Prompt
 
-Status: Open
+Status: Done
 Priority: High
 Branch: v0.9.0-beta-dev
 Source: T106 focused managed llama.cpp audit
