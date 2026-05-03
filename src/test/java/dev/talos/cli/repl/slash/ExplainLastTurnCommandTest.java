@@ -436,6 +436,74 @@ class ExplainLastTurnCommandTest {
     }
 
     @Test
+    void traceViewUsesLocalOutcomeForBlockedNoToolMutation() {
+        TurnRecord turn = record(
+                11,
+                "Change index.html to say hello.",
+                "[Action obligation failed: no file was changed in this turn.]",
+                List.of(),
+                0,
+                0,
+                0,
+                "ok");
+        LocalTurnTrace trace = LocalTurnTrace.builder(
+                        "trc-blocked-no-tool",
+                        "sid",
+                        11,
+                        "2026-05-03T00:00:00Z")
+                .outcome(
+                        "BLOCKED",
+                        "UNKNOWN",
+                        "UNKNOWN",
+                        "NONE",
+                        "BLOCKED_BY_POLICY")
+                .build();
+
+        String text = ExplainLastTurnCommand.renderTrace(turn, trace);
+
+        assertTrue(text.contains("Status:    BLOCKED"), text);
+        assertTrue(text.contains("Outcome:   BLOCKED_BY_POLICY"), text);
+        assertTrue(text.contains("Status tag: BLOCKED"), text);
+        assertFalse(text.contains("Status:    ok"), text);
+        assertFalse(text.contains("Outcome:   NO_TOOL_RESPONSE"), text);
+        assertFalse(text.contains("Status tag: ok"), text);
+    }
+
+    @Test
+    void traceViewUsesLocalOutcomeForAdvisoryNoToolEvidence() {
+        TurnRecord turn = record(
+                12,
+                "Read README.md and summarize it.",
+                "[Evidence incomplete: required workspace evidence was not gathered in this turn.]",
+                List.of(),
+                0,
+                0,
+                0,
+                "ok");
+        LocalTurnTrace trace = LocalTurnTrace.builder(
+                        "trc-advisory-no-tool",
+                        "sid",
+                        12,
+                        "2026-05-03T00:00:00Z")
+                .outcome(
+                        "ADVISORY_ONLY",
+                        "UNKNOWN",
+                        "UNKNOWN",
+                        "NONE",
+                        "ADVISORY_ONLY")
+                .build();
+
+        String text = ExplainLastTurnCommand.renderTrace(turn, trace);
+
+        assertTrue(text.contains("Status:    ADVISORY_ONLY"), text);
+        assertTrue(text.contains("Outcome:   ADVISORY_ONLY"), text);
+        assertTrue(text.contains("Status tag: ADVISORY_ONLY"), text);
+        assertFalse(text.contains("Status:    ok"), text);
+        assertFalse(text.contains("Outcome:   NO_TOOL_RESPONSE"), text);
+        assertFalse(text.contains("Status tag: ok"), text);
+    }
+
+    @Test
     void executeRejectsUnknownView() {
         var cmd = new ExplainLastTurnCommand(Path.of("/ws"), new JsonSessionStore(tempDir));
 

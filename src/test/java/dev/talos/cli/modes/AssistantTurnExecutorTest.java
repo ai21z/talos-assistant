@@ -516,9 +516,10 @@ class AssistantTurnExecutorTest {
             var processor = new dev.talos.runtime.TurnProcessor(
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            String unsupportedNoToolProse = "Create `script.js` with the following JavaScript code.";
             var ctx = Context.builder(new Config())
                     .llm(LlmClient.scripted(List.of(
-                            "Create `script.js` with the following JavaScript code.",
+                            unsupportedNoToolProse,
                             "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"script.js\","
                                     + "\"content\":\"document.body.dataset.ready = 'true';\"}}",
                             "Created script.js.")))
@@ -539,6 +540,16 @@ class AssistantTurnExecutorTest {
                     Files.readString(workspace.resolve("script.js")));
             assertTrue(out.text().contains("[Used 1 tool(s): talos.write_file"),
                     "retry tool execution summary should be visible");
+            assertFalse(messages.stream()
+                            .filter(message -> "assistant".equals(message.role()))
+                            .anyMatch(message -> unsupportedNoToolProse.equals(message.content())),
+                    "unsupported no-tool prose must not be replayed as assistant history for the retry");
+            assertTrue(messages.stream()
+                            .filter(message -> "assistant".equals(message.role()))
+                            .anyMatch(message -> message.content().contains(
+                                    "[Action obligation check: the previous model response did not issue "
+                                            + "required write/edit tool calls.]")),
+                    "retry context should contain the runtime-owned no-tool summary");
         }
 
         @Test

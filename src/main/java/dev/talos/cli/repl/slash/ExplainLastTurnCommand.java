@@ -103,11 +103,15 @@ public final class ExplainLastTurnCommand implements Command {
     }
 
     static String render(TurnRecord turn) {
+        return render(turn, null);
+    }
+
+    static String render(TurnRecord turn, LocalTurnTrace localTrace) {
         StringBuilder sb = new StringBuilder();
         sb.append("Last Turn\n\n");
         sb.append("  Turn:      ").append(turn.turnNumber()).append('\n');
-        sb.append("  Status:    ").append(blankDefault(turn.status(), "unknown")).append('\n');
-        sb.append("  Outcome:   ").append(inferOutcome(turn)).append('\n');
+        sb.append("  Status:    ").append(effectiveStatus(turn, localTrace)).append('\n');
+        sb.append("  Outcome:   ").append(inferOutcome(turn, localTrace)).append('\n');
         sb.append("  Duration:  ").append(turn.durationMs()).append("ms\n");
         sb.append("  Approvals: required=").append(turn.approvalsRequired())
                 .append(" granted=").append(turn.approvalsGranted())
@@ -200,12 +204,12 @@ public final class ExplainLastTurnCommand implements Command {
 
     static String renderTrace(TurnRecord turn, LocalTurnTrace localTrace) {
         StringBuilder sb = new StringBuilder();
-        sb.append(render(turn));
+        sb.append(render(turn, localTrace));
         sb.append("\nTrace Detail\n");
         appendPolicyTrace(sb, turn.policyTrace());
         sb.append("  Retrieval: ").append(blankDefault(turn.retrievalTraceSummary(), "none recorded")).append('\n');
         sb.append("  Tool calls: ").append(turn.toolCalls().size()).append('\n');
-        sb.append("  Status tag: ").append(blankDefault(turn.status(), "unknown")).append('\n');
+        sb.append("  Status tag: ").append(effectiveStatus(turn, localTrace)).append('\n');
         if (localTrace != null) {
             appendLocalTrace(sb, localTrace);
         }
@@ -382,6 +386,33 @@ public final class ExplainLastTurnCommand implements Command {
     }
 
     static String inferOutcome(TurnRecord turn) {
+        return inferOutcome(turn, null);
+    }
+
+    static String inferOutcome(TurnRecord turn, LocalTurnTrace localTrace) {
+        if (localTrace != null
+                && localTrace.outcome() != null
+                && !localTrace.outcome().classification().isBlank()) {
+            return localTrace.outcome().classification();
+        }
+        if (localTrace != null
+                && localTrace.outcome() != null
+                && !localTrace.outcome().status().isBlank()) {
+            return localTrace.outcome().status();
+        }
+        return inferOutcomeFromTurn(turn);
+    }
+
+    private static String effectiveStatus(TurnRecord turn, LocalTurnTrace localTrace) {
+        if (localTrace != null
+                && localTrace.outcome() != null
+                && !localTrace.outcome().status().isBlank()) {
+            return localTrace.outcome().status();
+        }
+        return blankDefault(turn == null ? null : turn.status(), "unknown");
+    }
+
+    private static String inferOutcomeFromTurn(TurnRecord turn) {
         if (turn == null) return "UNKNOWN";
         String status = turn.status() == null ? "" : turn.status().toLowerCase(Locale.ROOT);
         if ("error".equals(status)) return "ERROR";
