@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -40,6 +41,7 @@ public final class LlmClient implements AutoCloseable {
     private final TransportMode mode;
     private final LlmEngineResolver engineResolver;
     private final LlmCallBudget callBudget;
+    private final AtomicBoolean closed = new AtomicBoolean(false);
     private volatile String backend;          // ENGINE mode: current backend id (e.g., "ollama")
     private volatile String model;            // model name (or backend-qualified accepted via setModel)
     private final long responseMaxChars;
@@ -954,7 +956,12 @@ public final class LlmClient implements AutoCloseable {
         return s;
     }
 
+    public boolean isClosed() {
+        return closed.get();
+    }
+
     @Override public void close() {
+        if (!closed.compareAndSet(false, true)) return;
         if (engineResolver != null) try { engineResolver.close(); } catch (Exception ignored) {}
         try { callBudget.close(); } catch (Exception ignored) {}
     }

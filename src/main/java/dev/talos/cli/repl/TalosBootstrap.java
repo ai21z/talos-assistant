@@ -250,6 +250,11 @@ public final class TalosBootstrap {
                 }
             });
         }
+        runtimeSession.addCloseListener(new dev.talos.runtime.SessionListener() {
+            @Override public void onSessionEnd() {
+                try { llm.close(); } catch (Exception ignored) { }
+            }
+        });
 
         // ── Stream sink ───────────────────────────────────────────────────
         // Wrapped in ToolCallStreamFilter to suppress text-form tool-call protocol

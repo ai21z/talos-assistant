@@ -448,6 +448,98 @@ class LlamaCppServerManagerTest {
         }
     }
 
+    @Test
+    void failedReadinessDestroysManagedOwnedProcess() throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        HttpServer server = startHealthServer(503, "loading");
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort()));
+            FakeLauncher launcher = new FakeLauncher();
+            LlamaCppServerManager manager = new LlamaCppServerManager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofMillis(40), Duration.ofMillis(5), tempDir.resolve("logs"));
+
+            assertThrows(EngineException.ConnectionFailed.class, manager::ensureStarted);
+
+            assertTrue(launcher.process.destroyed,
+                    "managed process must be cleaned up when readiness fails after launch");
+            assertFalse(launcher.process.alive,
+                    "readiness failure cleanup must leave the fake managed process stopped");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void closeForcesManagedProcessThatIgnoresGracefulDestroy() throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort()));
+            FakeLauncher launcher = new FakeLauncher();
+            launcher.process.destroyLeavesAlive = true;
+            LlamaCppServerManager manager = new LlamaCppServerManager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
+
+            manager.ensureStarted();
+            manager.close();
+
+            assertTrue(launcher.process.destroyed,
+                    "close should first request graceful process termination");
+            assertTrue(launcher.process.forceDestroyed,
+                    "close should force-stop a managed process that remains alive");
+            assertFalse(launcher.process.alive,
+                    "close must leave the managed process stopped");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void managedLifecycleWritesStartAndStopDiagnosticsToLog() throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        HttpServer server = startHealthServer(200, "ok");
+        Path logDir = tempDir.resolve("logs");
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort()));
+            FakeLauncher launcher = new FakeLauncher();
+            LlamaCppServerManager manager = new LlamaCppServerManager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), logDir);
+
+            manager.ensureStarted();
+            manager.close();
+
+            String log = Files.readString(logDir.resolve("llama_cpp-" + server.getAddress().getPort() + ".log"),
+                    StandardCharsets.UTF_8);
+            assertTrue(log.contains("Talos managed llama.cpp server starting"),
+                    "managed server log should include Talos-owned startup diagnostics");
+            assertTrue(log.contains("Talos managed llama.cpp server stopped"),
+                    "managed server log should include Talos-owned shutdown diagnostics");
+        } finally {
+            server.stop(0);
+        }
+    }
+
     private Path touch(String filename) throws IOException {
         Path path = tempDir.resolve(filename);
         Files.writeString(path, "fake", StandardCharsets.UTF_8);
@@ -535,12 +627,22 @@ class LlamaCppServerManagerTest {
     private static final class FakeProcess implements LlamaCppProcess {
         private boolean alive = true;
         private boolean destroyed;
+        private boolean destroyLeavesAlive;
+        private boolean forceDestroyed;
 
         @Override public boolean isAlive() { return alive; }
 
         @Override
         public void destroy() {
             destroyed = true;
+            if (!destroyLeavesAlive) {
+                alive = false;
+            }
+        }
+
+        @Override
+        public void destroyForcibly() {
+            forceDestroyed = true;
             alive = false;
         }
     }
