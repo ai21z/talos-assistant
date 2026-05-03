@@ -1,16 +1,16 @@
 # T107 - Managed llama.cpp Readiness And Load-Failure Handling
 
-Status: Open
+Status: Done
 Priority: High
 Branch: v0.9.0-beta-dev
 Source: T106 focused managed llama.cpp audit
 
 ## Evidence Summary
 
-The T106 audit showed that Talos launches `llama-server.exe`, then immediately
-sends chat requests before the server is ready. With `qwen2.5-vl-7b`, direct
-llama.cpp probing returned HTTP 503 twice, then `/health` returned HTTP 200 and
-chat worked. The Talos-managed run exposed a cold-start
+The T106 setup probe showed that Talos launches `llama-server.exe`, then immediately
+sends chat requests before the server is ready. With an available local GGUF
+setup probe, direct llama.cpp probing returned HTTP 503 twice, then `/health`
+returned HTTP 200 and chat worked. The Talos-managed run exposed a cold-start
 `ConnectionFailed: Cannot connect to backend at http://127.0.0.1:18080`.
 
 With `qwen3-coder-30b-a3b`, llama.cpp exited during model load because Vulkan

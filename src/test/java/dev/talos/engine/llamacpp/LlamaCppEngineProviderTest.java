@@ -17,6 +17,7 @@ import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -73,7 +74,7 @@ class LlamaCppEngineProviderTest {
                     "model", "talos-agent"));
             LlamaCppEngine engine = new LlamaCppEngine(
                     LlamaCppConfig.from(cfg),
-                    new LlamaCppServerManager(LlamaCppConfig.from(cfg), command -> {
+                    new LlamaCppServerManager(LlamaCppConfig.from(cfg), (command, logPath) -> {
                         throw new AssertionError("connect-only must not launch");
                     }, HttpClient.newHttpClient()),
                     HttpClient.newHttpClient());
@@ -88,6 +89,46 @@ class LlamaCppEngineProviderTest {
                     List.of(ChatMessage.user("hello"))));
 
             assertEquals("hello from llama.cpp", response);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void managedChatWaitsForHealthBeforeSendingCompatChat() throws Exception {
+        AtomicInteger healthCalls = new AtomicInteger();
+        AtomicInteger chatCalls = new AtomicInteger();
+        HttpServer server = startSequencedServer(healthCalls, chatCalls, List.of(503, 503, 200));
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", tempFilePath("llama-server.exe"),
+                    "model_path", tempFilePath("agent.gguf"),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "model", "talos-agent"));
+            LlamaCppConfig llamaCfg = LlamaCppConfig.from(cfg);
+            LlamaCppEngine engine = new LlamaCppEngine(
+                    llamaCfg,
+                    new LlamaCppServerManager(llamaCfg, (command, logPath) -> new LlamaCppProcess() {
+                        @Override public boolean isAlive() { return true; }
+                        @Override public void destroy() {}
+                    }, HttpClient.newHttpClient(), Duration.ofSeconds(2), Duration.ofMillis(10),
+                            java.nio.file.Files.createTempDirectory("talos-llama-test-logs")),
+                    HttpClient.newHttpClient());
+
+            String response = engine.chat(new ChatRequest(
+                    "llama_cpp",
+                    "talos-agent",
+                    "",
+                    "",
+                    List.of(),
+                    Duration.ofSeconds(5),
+                    List.of(ChatMessage.user("hello"))));
+
+            assertEquals("hello after ready", response);
+            assertEquals(1, chatCalls.get());
+            assertTrue(healthCalls.get() >= 3, "chat must wait for readiness health checks");
         } finally {
             server.stop(0);
         }
@@ -154,5 +195,37 @@ class LlamaCppEngineProviderTest {
         });
         server.start();
         return server;
+    }
+
+    private static HttpServer startSequencedServer(AtomicInteger healthCalls,
+                                                   AtomicInteger chatCalls,
+                                                   List<Integer> healthStatuses) throws IOException {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/health", exchange -> {
+            int index = healthCalls.getAndIncrement();
+            int status = healthStatuses.get(Math.min(index, healthStatuses.size() - 1));
+            byte[] bytes = (status == 200 ? "ok" : "loading").getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(status, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        server.createContext("/v1/chat/completions", exchange -> {
+            chatCalls.incrementAndGet();
+            byte[] bytes = """
+                    {"choices":[{"message":{"role":"assistant","content":"hello after ready"}}]}
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        server.start();
+        return server;
+    }
+
+    private static String tempFilePath(String name) throws IOException {
+        java.nio.file.Path path = java.nio.file.Files.createTempFile(name, ".tmp");
+        java.nio.file.Files.writeString(path, "fake", StandardCharsets.UTF_8);
+        return path.toString();
     }
 }

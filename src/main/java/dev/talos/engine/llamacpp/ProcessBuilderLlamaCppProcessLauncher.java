@@ -1,13 +1,17 @@
 package dev.talos.engine.llamacpp;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.List;
 
 final class ProcessBuilderLlamaCppProcessLauncher implements LlamaCppProcessLauncher {
     @Override
-    public LlamaCppProcess start(List<String> command) throws IOException {
+    public LlamaCppProcess start(List<String> command, Path logPath) throws IOException {
         ProcessBuilder builder = new ProcessBuilder(command);
         builder.redirectErrorStream(true);
+        if (logPath != null) {
+            builder.redirectOutput(ProcessBuilder.Redirect.appendTo(logPath.toFile()));
+        }
         Process process = builder.start();
         return new ProcessAdapter(process);
     }
