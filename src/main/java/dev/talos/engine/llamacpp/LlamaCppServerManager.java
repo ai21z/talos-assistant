@@ -9,30 +9,62 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
 final class LlamaCppServerManager implements AutoCloseable {
+    private static final Duration DEFAULT_READINESS_TIMEOUT = Duration.ofMinutes(2);
+    private static final Duration DEFAULT_READINESS_POLL_INTERVAL = Duration.ofMillis(500);
+    private static final int LOG_EXCERPT_BYTES = 1600;
+
     private final LlamaCppConfig config;
     private final LlamaCppProcessLauncher launcher;
     private final HttpClient http;
+    private final Duration readinessTimeout;
+    private final Duration readinessPollInterval;
+    private final Path logDir;
 
     private LlamaCppProcess process;
     private String lastLaunchFailure = "";
+    private boolean ready;
 
     LlamaCppServerManager(LlamaCppConfig config, LlamaCppProcessLauncher launcher, HttpClient http) {
+        this(config, launcher, http,
+                DEFAULT_READINESS_TIMEOUT,
+                DEFAULT_READINESS_POLL_INTERVAL,
+                defaultLogDir());
+    }
+
+    LlamaCppServerManager(LlamaCppConfig config,
+                          LlamaCppProcessLauncher launcher,
+                          HttpClient http,
+                          Duration readinessTimeout,
+                          Duration readinessPollInterval,
+                          Path logDir) {
         this.config = Objects.requireNonNull(config);
         this.launcher = launcher == null ? new ProcessBuilderLlamaCppProcessLauncher() : launcher;
         this.http = http == null ? HttpClient.newHttpClient() : http;
+        this.readinessTimeout = readinessTimeout == null ? DEFAULT_READINESS_TIMEOUT : readinessTimeout;
+        this.readinessPollInterval = readinessPollInterval == null
+                ? DEFAULT_READINESS_POLL_INTERVAL
+                : readinessPollInterval;
+        this.logDir = logDir == null ? defaultLogDir() : logDir;
     }
 
     synchronized void ensureStarted() {
         if (!config.managed()) return;
-        if (process != null && process.isAlive()) return;
+        if (process != null && process.isAlive()) {
+            if (ready) return;
+            waitForReadiness(logPath());
+            return;
+        }
+        ready = false;
 
         String validation = managedValidationFailure();
         if (!validation.isBlank()) {
@@ -40,13 +72,16 @@ final class LlamaCppServerManager implements AutoCloseable {
         }
 
         List<String> command = buildCommand();
+        Path logPath = logPath();
         try {
-            process = launcher.start(command);
+            prepareLog(logPath);
+            process = launcher.start(command, logPath);
             lastLaunchFailure = "";
         } catch (IOException e) {
             lastLaunchFailure = "failed to launch llama.cpp server: " + e.getMessage();
             throw new EngineException.ConnectionFailed("llama_cpp launch: " + e.getMessage(), e);
         }
+        waitForReadiness(logPath);
     }
 
     Health health() {
@@ -120,11 +155,92 @@ final class LlamaCppServerManager implements AutoCloseable {
         }
     }
 
+    private void waitForReadiness(Path logPath) {
+        long deadline = System.nanoTime() + Math.max(1L, readinessTimeout.toNanos());
+        String lastHealth = "not checked";
+
+        while (System.nanoTime() <= deadline) {
+            if (process == null || !process.isAlive()) {
+                lastLaunchFailure = "llama.cpp server exited before readiness. "
+                        + logExcerptSuffix(logPath);
+                throw new EngineException.ConnectionFailed(lastLaunchFailure, null);
+            }
+
+            Health health = httpHealth();
+            if (health.ok()) {
+                lastLaunchFailure = "";
+                ready = true;
+                return;
+            }
+            lastHealth = health.message();
+            sleepPollInterval();
+        }
+
+        lastLaunchFailure = "llama.cpp server did not become ready within "
+                + readinessTimeout.toSeconds()
+                + "s; last health: " + lastHealth
+                + ". " + logExcerptSuffix(logPath);
+        throw new EngineException.ConnectionFailed(lastLaunchFailure, null);
+    }
+
+    private void sleepPollInterval() {
+        try {
+            Thread.sleep(Math.max(1L, readinessPollInterval.toMillis()));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            lastLaunchFailure = "interrupted while waiting for llama.cpp readiness";
+            throw new EngineException.ConnectionFailed(lastLaunchFailure, e);
+        }
+    }
+
+    private Path logPath() {
+        return logDir.resolve("llama_cpp-" + config.port() + ".log");
+    }
+
+    private static Path defaultLogDir() {
+        String home = System.getProperty("user.home");
+        if (home == null || home.isBlank()) {
+            home = System.getenv("USERPROFILE");
+        }
+        Path base = home == null || home.isBlank()
+                ? Path.of(".").toAbsolutePath().normalize()
+                : Path.of(home);
+        return base.resolve(".talos").resolve("logs");
+    }
+
+    private static void prepareLog(Path logPath) throws IOException {
+        if (logPath == null) return;
+        Files.createDirectories(logPath.getParent());
+        Files.writeString(logPath, "", StandardCharsets.UTF_8,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING);
+    }
+
+    private static String logExcerptSuffix(Path logPath) {
+        String excerpt = logExcerpt(logPath);
+        return excerpt.isBlank() ? "No llama.cpp server log excerpt available." : "Log excerpt: " + excerpt;
+    }
+
+    private static String logExcerpt(Path logPath) {
+        if (logPath == null || !Files.isRegularFile(logPath)) return "";
+        try {
+            byte[] bytes = Files.readAllBytes(logPath);
+            int start = Math.max(0, bytes.length - LOG_EXCERPT_BYTES);
+            return new String(bytes, start, bytes.length - start, StandardCharsets.UTF_8)
+                    .replace('\r', ' ')
+                    .replace('\n', ' ')
+                    .trim();
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
     @Override
     public synchronized void close() {
         if (process != null) {
             process.destroy();
             process = null;
+            ready = false;
         }
     }
 }

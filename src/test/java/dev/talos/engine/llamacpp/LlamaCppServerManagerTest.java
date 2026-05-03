@@ -13,6 +13,8 @@ import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -28,35 +30,41 @@ class LlamaCppServerManagerTest {
     void managedModeLaunchesConfiguredExecutableWithExpectedArguments() throws Exception {
         Path exe = touch("llama-server.exe");
         Path model = touch("agent.gguf");
-        Config cfg = config(Map.ofEntries(
-                Map.entry("mode", "managed"),
-                Map.entry("server_path", exe.toString()),
-                Map.entry("model_path", model.toString()),
-                Map.entry("model", "talos-agent"),
-                Map.entry("host", "http://127.0.0.1"),
-                Map.entry("port", 18080),
-                Map.entry("context", 4096),
-                Map.entry("jinja", true),
-                Map.entry("chat_template", "chatml"),
-                Map.entry("server_args", List.of("--no-webui", "--log-disable"))));
-        FakeLauncher launcher = new FakeLauncher();
-        LlamaCppServerManager manager = new LlamaCppServerManager(
-                LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient());
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            Config cfg = config(Map.ofEntries(
+                    Map.entry("mode", "managed"),
+                    Map.entry("server_path", exe.toString()),
+                    Map.entry("model_path", model.toString()),
+                    Map.entry("model", "talos-agent"),
+                    Map.entry("host", "http://127.0.0.1"),
+                    Map.entry("port", server.getAddress().getPort()),
+                    Map.entry("context", 4096),
+                    Map.entry("jinja", true),
+                    Map.entry("chat_template", "chatml"),
+                    Map.entry("server_args", List.of("--no-webui", "--log-disable"))));
+            FakeLauncher launcher = new FakeLauncher();
+            LlamaCppServerManager manager = new LlamaCppServerManager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
-        manager.ensureStarted();
+            manager.ensureStarted();
 
-        assertEquals(1, launcher.commands.size());
-        List<String> command = launcher.commands.get(0);
-        assertEquals(exe.toString(), command.get(0));
-        assertContainsPair(command, "-m", model.toString());
-        assertContainsPair(command, "-c", "4096");
-        assertContainsPair(command, "--host", "127.0.0.1");
-        assertContainsPair(command, "--port", "18080");
-        assertContainsPair(command, "--alias", "talos-agent");
-        assertContainsPair(command, "--chat-template", "chatml");
-        assertTrue(command.contains("--jinja"));
-        assertTrue(command.contains("--no-webui"));
-        assertTrue(command.contains("--log-disable"));
+            assertEquals(1, launcher.commands.size());
+            List<String> command = launcher.commands.get(0);
+            assertEquals(exe.toString(), command.get(0));
+            assertContainsPair(command, "-m", model.toString());
+            assertContainsPair(command, "-c", "4096");
+            assertContainsPair(command, "--host", "127.0.0.1");
+            assertContainsPair(command, "--port", String.valueOf(server.getAddress().getPort()));
+            assertContainsPair(command, "--alias", "talos-agent");
+            assertContainsPair(command, "--chat-template", "chatml");
+            assertTrue(command.contains("--jinja"));
+            assertTrue(command.contains("--no-webui"));
+            assertTrue(command.contains("--log-disable"));
+        } finally {
+            server.stop(0);
+        }
     }
 
     @Test
@@ -72,6 +80,66 @@ class LlamaCppServerManagerTest {
         manager.ensureStarted();
 
         assertTrue(launcher.commands.isEmpty());
+    }
+
+    @Test
+    void managedModeWaitsThroughLoadingHealthUntilReady() throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        AtomicInteger healthCalls = new AtomicInteger();
+        HttpServer server = startSequencedHealthServer(healthCalls, List.of(503, 503, 200));
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort()));
+            FakeLauncher launcher = new FakeLauncher();
+            LlamaCppServerManager manager = new LlamaCppServerManager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
+
+            manager.ensureStarted();
+
+            assertEquals(1, launcher.commands.size());
+            assertTrue(healthCalls.get() >= 3, "managed startup must wait until health is ready");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void managedModeReportsProcessExitBeforeReadinessWithLogExcerpt() throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        HttpServer server = startSequencedHealthServer(new AtomicInteger(), List.of(503, 503, 503));
+        Path logDir = tempDir.resolve("logs");
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", 18080));
+            FakeLauncher launcher = new FakeLauncher();
+            launcher.process.alive = false;
+            launcher.logContentOnStart = "llama_model_load: failed to load model\nout of device memory\n";
+            LlamaCppServerManager manager = new LlamaCppServerManager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), logDir);
+
+            EngineException.ConnectionFailed error =
+                    assertThrows(EngineException.ConnectionFailed.class, manager::ensureStarted);
+            Health health = manager.health();
+
+            assertTrue(error.getMessage().contains("exited before readiness"));
+            assertTrue(error.getMessage().contains("out of device memory"));
+            assertFalse(health.ok());
+            assertTrue(health.message().contains("failed to load model"));
+        } finally {
+            server.stop(0);
+        }
     }
 
     @Test
@@ -150,18 +218,26 @@ class LlamaCppServerManagerTest {
     void closeDestroysOnlyManagedOwnedProcess() throws Exception {
         Path exe = touch("llama-server.exe");
         Path model = touch("agent.gguf");
-        Config cfg = config(Map.of(
-                "mode", "managed",
-                "server_path", exe.toString(),
-                "model_path", model.toString()));
-        FakeLauncher launcher = new FakeLauncher();
-        LlamaCppServerManager manager = new LlamaCppServerManager(
-                LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient());
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort()));
+            FakeLauncher launcher = new FakeLauncher();
+            LlamaCppServerManager manager = new LlamaCppServerManager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
 
-        manager.ensureStarted();
-        manager.close();
+            manager.ensureStarted();
+            manager.close();
 
-        assertTrue(launcher.process.destroyed);
+            assertTrue(launcher.process.destroyed);
+        } finally {
+            server.stop(0);
+        }
     }
 
     private Path touch(String filename) throws IOException {
@@ -197,15 +273,34 @@ class LlamaCppServerManagerTest {
         return server;
     }
 
+    private static HttpServer startSequencedHealthServer(AtomicInteger calls, List<Integer> statuses) throws IOException {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/health", exchange -> {
+            int index = calls.getAndIncrement();
+            int status = statuses.get(Math.min(index, statuses.size() - 1));
+            byte[] bytes = (status == 200 ? "ok" : "loading").getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(status, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        server.start();
+        return server;
+    }
+
     private static final class FakeLauncher implements LlamaCppProcessLauncher {
         private final List<List<String>> commands = new ArrayList<>();
         private final FakeProcess process = new FakeProcess();
         private IOException failure;
+        private String logContentOnStart = "";
 
         @Override
-        public LlamaCppProcess start(List<String> command) throws IOException {
+        public LlamaCppProcess start(List<String> command, Path logPath) throws IOException {
             commands.add(List.copyOf(command));
             if (failure != null) throw failure;
+            if (logPath != null && !logContentOnStart.isBlank()) {
+                Files.createDirectories(logPath.getParent());
+                Files.writeString(logPath, logContentOnStart, StandardCharsets.UTF_8);
+            }
             return process;
         }
     }
