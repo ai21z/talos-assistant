@@ -5,6 +5,8 @@ import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.core.security.Sandbox;
+import dev.talos.runtime.trace.LocalTurnTrace;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.*;
 import dev.talos.tools.impl.FileEditTool;
@@ -1068,6 +1070,139 @@ class ToolCallLoopTest {
 
         assertFalse(result.finalAnswer().contains("<tool_call>"),
                 "Final answer should have tool_call blocks stripped");
+    }
+
+    // ── T99: pending target obligations ─────────────────────────────
+
+    @Test
+    void expectedTargetProgressNoToolProseBecomesDeterministicBreach() {
+        var loop = createLoop(writeFileTool());
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user("Create index.html, styles.css, and scripts.js for a BMI calculator.")));
+        var ctx = Context.builder(new Config())
+                .llm(LlmClient.scripted(List.of("All done, ready to use. Open it in your browser.")))
+                .build();
+        String llmResponse = """
+                <tool_call>{"name":"talos.write_file","parameters":{"path":"index.html","content":"<html></html>"}}</tool_call>
+                <tool_call>{"name":"talos.write_file","parameters":{"path":"styles.css","content":"body{}"}}</tool_call>
+                <tool_call>{"name":"talos.write_file","parameters":{"path":"script.js","content":"console.log('wrong target');"}}</tool_call>
+                """;
+
+        LocalTurnTraceCapture.begin("trc-t99-expected", "session", 1,
+                "2026-05-03T00:00:00Z", "ws", "test", "ollama", "qwen", "create bmi");
+        ToolCallLoop.LoopResult result;
+        LocalTurnTrace trace;
+        try {
+            result = loop.run(llmResponse, messages, WS, ctx);
+            trace = LocalTurnTraceCapture.complete();
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+
+        assertTrue(result.failureDecision().shouldStop(), result.failureDecision().reason());
+        assertTrue(result.failureDecision().reason().contains("EXPECTED_TARGETS_REMAINING"),
+                result.failureDecision().reason());
+        assertTrue(result.finalAnswer().contains("scripts.js"), result.finalAnswer());
+        assertFalse(result.finalAnswer().toLowerCase().contains("ready to use"), result.finalAnswer());
+        assertFalse(result.finalAnswer().toLowerCase().contains("open it in your browser"), result.finalAnswer());
+
+        var breached = trace.events().stream()
+                .filter(event -> "PENDING_ACTION_OBLIGATION_BREACHED".equals(event.type()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("EXPECTED_TARGETS_REMAINING", breached.data().get("kind"));
+        assertEquals(List.of("scripts.js"), breached.data().get("targets"));
+    }
+
+    @Test
+    void staticRepairProgressNoToolProseBecomesDeterministicBreach() {
+        var loop = createLoop(writeFileTool());
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.system("""
+                        [Static verification repair context]
+                        Expected targets: index.html, scripts.js, styles.css
+
+                        Previous static verification problems:
+                        - HTML does not link JavaScript file: `scripts.js`
+
+                        Repair plan:
+                        - index.html: You must use talos.write_file with complete corrected file content for index.html.
+                        - scripts.js: You must use talos.write_file with complete corrected file content for scripts.js.
+                        - styles.css: You must use talos.write_file with complete corrected file content for styles.css.
+
+                        Full-file replacement targets: index.html, scripts.js, styles.css
+                        """),
+                ChatMessage.user("Fix the remaining static verification problems.")));
+        var ctx = Context.builder(new Config())
+                .llm(LlmClient.scripted(List.of("Complete. Everything is ready to use.")))
+                .build();
+        String llmResponse = """
+                <tool_call>{"name":"talos.write_file","parameters":{"path":"index.html","content":"<html></html>"}}</tool_call>
+                """;
+
+        LocalTurnTraceCapture.begin("trc-t99-repair", "session", 1,
+                "2026-05-03T00:00:00Z", "ws", "test", "ollama", "qwen", "repair bmi");
+        ToolCallLoop.LoopResult result;
+        LocalTurnTrace trace;
+        try {
+            result = loop.run(llmResponse, messages, WS, ctx);
+            trace = LocalTurnTraceCapture.complete();
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+
+        assertTrue(result.failureDecision().shouldStop(), result.failureDecision().reason());
+        assertTrue(result.failureDecision().reason().contains("STATIC_REPAIR_TARGETS_REMAINING"),
+                result.failureDecision().reason());
+        assertTrue(result.finalAnswer().contains("scripts.js"), result.finalAnswer());
+        assertTrue(result.finalAnswer().contains("styles.css"), result.finalAnswer());
+        assertFalse(result.finalAnswer().toLowerCase().contains("ready to use"), result.finalAnswer());
+        assertFalse(result.finalAnswer().toLowerCase().contains("complete."), result.finalAnswer());
+
+        var breached = trace.events().stream()
+                .filter(event -> "PENDING_ACTION_OBLIGATION_BREACHED".equals(event.type()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("STATIC_REPAIR_TARGETS_REMAINING", breached.data().get("kind"));
+        assertEquals(List.of("scripts.js", "styles.css"), breached.data().get("targets"));
+    }
+
+    @Test
+    void expectedTargetProgressToolCallKeepsHappyPathOpen() {
+        var loop = createLoop(writeFileTool());
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user("Create index.html, styles.css, and scripts.js for a BMI calculator.")));
+        var ctx = Context.builder(new Config())
+                .llm(LlmClient.scripted(List.of(
+                        "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"scripts.js\",\"content\":\"console.log('ok');\"}}")))
+                .build();
+        String llmResponse = """
+                <tool_call>{"name":"talos.write_file","parameters":{"path":"index.html","content":"<html></html>"}}</tool_call>
+                <tool_call>{"name":"talos.write_file","parameters":{"path":"styles.css","content":"body{}"}}</tool_call>
+                """;
+
+        LocalTurnTraceCapture.begin("trc-t99-happy", "session", 1,
+                "2026-05-03T00:00:00Z", "ws", "test", "ollama", "qwen", "create bmi");
+        ToolCallLoop.LoopResult result;
+        LocalTurnTrace trace;
+        try {
+            result = loop.run(llmResponse, messages, WS, ctx);
+            trace = LocalTurnTraceCapture.complete();
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+
+        assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
+        assertEquals(3, result.mutatingToolSuccesses());
+        assertTrue(result.toolOutcomes().stream()
+                .anyMatch(outcome -> outcome.success() && "scripts.js".equals(outcome.pathHint())));
+        assertTrue(trace.events().stream()
+                .anyMatch(event -> "PENDING_ACTION_OBLIGATION_RAISED".equals(event.type())));
+        assertTrue(trace.events().stream()
+                .noneMatch(event -> "PENDING_ACTION_OBLIGATION_BREACHED".equals(event.type())));
     }
 
     // ── Helpers ─────────────────────────────────────────────────────

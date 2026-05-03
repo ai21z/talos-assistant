@@ -1,7 +1,7 @@
 # T97 - Current-Turn Expected-Target Steering For Exact And Web Writes
 
 Status: Open
-Priority: High
+Priority: Medium
 Branch: v0.9.0-beta-dev
 Source: T93-T95 clean two-model audit follow-up
 
@@ -34,6 +34,19 @@ Observed evidence:
     `local/manual-testing/qwen-gptoss-clean-audit-20260503-021152/TEST-OUTPUT-GPT-OSS-20B.txt:1776`,
     `:1848`, `:1878`, `:1957`
 
+## Current Root-Cause Update
+
+The later full Qwen/GPT-OSS audit and prompt-construction review showed that
+the main remaining failure is not missing wording in the current-turn frame.
+The expected-target and exact-write prompt frames reach the model. The primary
+action-loop fix is now tracked by:
+
+- `work-cycle-docs/tickets/open/[T99-open-high] tool-loop-pending-expected-and-repair-target-obligation-gate.md`
+
+Keep this ticket open only as a secondary wording/steering follow-up. Do not
+start this before T99 unless a new audit shows the current-turn frame itself is
+missing, stale, or malformed.
+
 ## Classification
 
 Primary taxonomy bucket: `CURRENT_TURN_FRAME`
@@ -44,14 +57,13 @@ Secondary buckets:
 - `REPAIR_CONTROL`
 - `MODEL_COMPETENCE`
 
-Blocker level: release-gate follow-up before a full T61-style audit
+Blocker level: wording follow-up, secondary to T99
 
 Why this level:
 
-Runtime containment is correct, but the focused audit still has model failures
-on two milestone-gate behaviors: exact complete-file writes and explicit
-multi-file web targets. A full T61-style audit would be noisy until current-turn
-target steering is stronger or the team explicitly accepts this model weakness.
+Runtime containment is correct, and later prompt-debug audits showed that the
+current-turn frames are present. Remaining audited failures are better explained
+by action-loop/runtime-control limits than by missing frame wording.
 
 ## Goal
 

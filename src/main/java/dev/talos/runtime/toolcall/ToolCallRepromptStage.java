@@ -186,6 +186,17 @@ public final class ToolCallRepromptStage {
                             + "static verification passes."));
             expectedProgressIndex = state.messages.size() - 1;
         }
+        boolean obligationGateActive = outcome.mutationsThisIteration() > 0
+                || state.hasPendingActionObligation();
+        if (obligationGateActive && !remainingRepairTargets.isEmpty()) {
+            state.setPendingActionObligation(
+                    PendingActionObligation.staticRepairTargets(remainingRepairTargets));
+        } else if (obligationGateActive && !remainingExpectedTargets.isEmpty()) {
+            state.setPendingActionObligation(
+                    PendingActionObligation.expectedTargets(remainingExpectedTargets));
+        } else {
+            state.clearPendingActionObligation();
+        }
 
         int anchorIndex = -1;
         String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
@@ -203,6 +214,9 @@ public final class ToolCallRepromptStage {
                     ? new ArrayList<>(repromptResult.toolCalls()) : List.of();
             if (state.currentText == null) state.currentText = "";
             if (state.currentText.isEmpty() && state.currentNativeCalls.isEmpty()) {
+                if (state.failPendingActionObligationAfterNoExecutableToolCalls()) {
+                    return false;
+                }
                 if (!state.pendingMutationSummaries.isEmpty()) {
                     state.currentText = String.join("\n", state.pendingMutationSummaries);
                 } else {
