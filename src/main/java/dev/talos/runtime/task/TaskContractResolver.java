@@ -227,7 +227,7 @@ public final class TaskContractResolver {
                 && MutationIntent.isExplicitMutationClassificationReason(classificationReason);
         TaskType type = priorChangeStatusQuestion
                 ? TaskType.VERIFY_ONLY
-                : classify(lower, mutationRequested);
+                : classify(lower, mutationRequested, classificationReason);
         boolean mutationAllowed = mutationRequested
                 && (type == TaskType.FILE_EDIT || type == TaskType.FILE_CREATE);
         boolean verificationRequired = mutationAllowed || type == TaskType.VERIFY_ONLY;
@@ -330,8 +330,11 @@ public final class TaskContractResolver {
         return fragment.substring(0, end);
     }
 
-    private static TaskType classify(String lower, boolean mutationRequested) {
+    private static TaskType classify(String lower, boolean mutationRequested, String classificationReason) {
         if (mutationRequested) {
+            if ("explicit-review-and-fix-request".equals(classificationReason)) {
+                return TaskType.FILE_EDIT;
+            }
             return containsAny(lower, CREATE_MARKERS) ? TaskType.FILE_CREATE : TaskType.FILE_EDIT;
         }
         if (looksExplicitNoInspectionDirectAnswer(lower)) {
