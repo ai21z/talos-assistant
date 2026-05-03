@@ -44,6 +44,15 @@ public record PromptDebugSnapshot(
         return from(request, stream, "OLLAMA_HTTP_BODY", providerBodyJson);
     }
 
+    public static PromptDebugSnapshot fromProviderBody(
+            ChatRequest request,
+            boolean stream,
+            String providerBodyJson,
+            String stage
+    ) {
+        return from(request, stream, stage, providerBodyJson);
+    }
+
     private static PromptDebugSnapshot from(
             ChatRequest request,
             boolean stream,

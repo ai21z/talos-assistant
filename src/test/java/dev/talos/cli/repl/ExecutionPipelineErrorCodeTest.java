@@ -40,6 +40,12 @@ class ExecutionPipelineErrorCodeTest {
     }
 
     @Test
+    void classifyError_malformedResponse_returns_502() {
+        assertEquals(502, ExecutionPipeline.classifyError(
+                new EngineException.MalformedResponse("compat chat response", "bad provider body")));
+    }
+
+    @Test
     void classifyError_timeout_returns_408() {
         assertEquals(408, ExecutionPipeline.classifyError(new TimeoutException()));
     }

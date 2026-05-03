@@ -98,6 +98,18 @@ class EngineExceptionTest {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    //  MalformedResponse
+    // ═══════════════════════════════════════════════════════════════════════
+
+    @Test
+    void malformedResponse_carries_context_without_http_status() {
+        var ex = new EngineException.MalformedResponse("compat chat response", "{\"unexpected\":true}");
+        assertEquals(0, ex.httpStatus());
+        assertTrue(ex.getMessage().contains("compat chat response"));
+        assertTrue(ex.getMessage().contains("unexpected"));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     //  Sealed hierarchy
     // ═══════════════════════════════════════════════════════════════════════
 
@@ -107,6 +119,7 @@ class EngineExceptionTest {
         assertInstanceOf(EngineException.class, new EngineException.ConnectionFailed("h", null));
         assertInstanceOf(EngineException.class, new EngineException.Transient("t", 503));
         assertInstanceOf(EngineException.class, new EngineException.ResponseError(500, "b"));
+        assertInstanceOf(EngineException.class, new EngineException.MalformedResponse("shape", "body"));
     }
 
     @Test
@@ -122,6 +135,7 @@ class EngineExceptionTest {
         assertNotNull(new EngineException.ModelNotFound("m").guidance());
         assertNotNull(new EngineException.ConnectionFailed("h", null).guidance());
         assertNotNull(new EngineException.Transient("t", 503).guidance());
+        assertNotNull(new EngineException.MalformedResponse("shape", "body").guidance());
     }
 }
 

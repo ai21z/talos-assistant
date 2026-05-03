@@ -74,6 +74,7 @@ public final class ExecutionPipeline {
      * <ul>
      *   <li>404 — model not found</li>
      *   <li>408 — timeout</li>
+     *   <li>502 — malformed backend response</li>
      *   <li>503 — connection failed or transient backend error</li>
      *   <li>400 — illegal argument / validation</li>
      *   <li>500 — everything else (unexpected)</li>
@@ -83,6 +84,7 @@ public final class ExecutionPipeline {
         if (ex instanceof EngineException.ModelNotFound)    return 404;
         if (ex instanceof EngineException.ConnectionFailed) return 503;
         if (ex instanceof EngineException.Transient)        return 503;
+        if (ex instanceof EngineException.MalformedResponse) return 502;
         if (ex instanceof EngineException.ResponseError re) return re.httpStatus() > 0 ? re.httpStatus() : 500;
         if (ex instanceof TimeoutException)                 return 408;
         if (ex instanceof IllegalArgumentException)         return 400;

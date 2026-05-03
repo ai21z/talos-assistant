@@ -13,7 +13,8 @@ public sealed class EngineException extends RuntimeException
         permits EngineException.ModelNotFound,
                 EngineException.ConnectionFailed,
                 EngineException.Transient,
-                EngineException.ResponseError {
+                EngineException.ResponseError,
+                EngineException.MalformedResponse {
 
     private final int httpStatus;
     private final String guidance;
@@ -79,6 +80,27 @@ public sealed class EngineException extends RuntimeException
         public ResponseError(int httpStatus, String body, Throwable cause) {
             super("Engine error (HTTP " + httpStatus + ")" + (body != null ? ": " + truncate(body, 200) : ""),
                     cause, httpStatus, "");
+        }
+    }
+
+    /** Backend returned HTTP success with a response shape the engine cannot use. */
+    public static final class MalformedResponse extends EngineException {
+        public MalformedResponse(String context, String body) {
+            super("Malformed engine response"
+                    + (context == null || context.isBlank() ? "" : " for " + context)
+                    + (body != null ? ": " + truncate(body, 200) : ""),
+                    null,
+                    0,
+                    "The local model server returned an unsupported response shape.");
+        }
+
+        public MalformedResponse(String context, String body, Throwable cause) {
+            super("Malformed engine response"
+                    + (context == null || context.isBlank() ? "" : " for " + context)
+                    + (body != null ? ": " + truncate(body, 200) : ""),
+                    cause,
+                    0,
+                    "The local model server returned an unsupported response shape.");
         }
     }
 
