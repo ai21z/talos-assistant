@@ -133,7 +133,21 @@ final class LlamaCppServerManager implements AutoCloseable {
             return "llama_cpp model_path is missing or not a file: "
                     + Objects.toString(config.modelPath(), "");
         }
+        String unsupportedModel = unsupportedModelMetadataFailure(Path.of(config.modelPath()));
+        if (!unsupportedModel.isBlank()) return unsupportedModel;
         return "";
+    }
+
+    private String unsupportedModelMetadataFailure(Path modelPath) {
+        String architecture = GgufMetadata.architecture(modelPath).orElse("");
+        if (!"gptoss".equalsIgnoreCase(architecture)) return "";
+
+        String model = config.catalogFallbackModel();
+        return "llama_cpp model '" + model + "' at " + modelPath
+                + " uses unsupported GGUF architecture 'gptoss'. "
+                + "The managed llama.cpp runtime expects GPT-OSS GGUF architecture 'gpt-oss' "
+                + "with matching GPT-OSS tensor metadata. Use a llama.cpp-compatible GPT-OSS 20B GGUF "
+                + "or update the model artifact. No fallback model was selected.";
     }
 
     private Health httpHealth() {
