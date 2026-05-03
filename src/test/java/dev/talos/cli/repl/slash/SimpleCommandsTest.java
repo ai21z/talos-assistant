@@ -487,6 +487,23 @@ class SimpleCommandsTest {
             assertInstanceOf(Result.Error.class, r);
         }
 
+        @Test void hidden_command_is_executable_but_not_listed_or_documented() throws Exception {
+            var reg = registry();
+            reg.register(hiddenCommand("prompt-debug"));
+            var cmd = new HelpCommand(reg);
+
+            assertTrue(reg.has("prompt-debug"));
+            assertInstanceOf(Result.Ok.class, reg.execute("prompt-debug", "", ctx));
+
+            String defaultHelp = cmd.execute("", ctx).toString();
+            String fullHelp = cmd.execute("all", ctx).toString();
+            Result topic = cmd.execute("prompt-debug", ctx);
+
+            assertFalse(defaultHelp.contains("prompt-debug"), defaultHelp);
+            assertFalse(fullHelp.contains("prompt-debug"), fullHelp);
+            assertInstanceOf(Result.Error.class, topic);
+        }
+
         @Test void help_null_args_shows_all() {
             var cmd = new HelpCommand(registry());
             Result r = cmd.execute(null, ctx);
@@ -598,6 +615,26 @@ class SimpleCommandsTest {
         @Override public void setDebug(boolean on) { this.debugLevel = on ? DebugLevel.BRIEF : DebugLevel.OFF; }
         @Override public DebugLevel getDebugLevel() { return debugLevel; }
         @Override public void setDebugLevel(DebugLevel level) { this.debugLevel = level == null ? DebugLevel.OFF : level; }
+    }
+
+    private static Command hiddenCommand(String name) {
+        return new Command() {
+            @Override
+            public CommandSpec spec() {
+                return new CommandSpec(
+                        name,
+                        java.util.List.of(),
+                        "/" + name,
+                        "Internal command",
+                        CommandGroup.DEBUG,
+                        true);
+            }
+
+            @Override
+            public Result execute(String args, Context ctx) {
+                return new Result.Ok("hidden");
+            }
+        };
     }
 }
 

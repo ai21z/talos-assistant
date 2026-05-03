@@ -108,7 +108,35 @@ class CurrentTurnCapabilityFrameTest {
         assertTrue(frame.contains("\nAFTER\n"), frame);
         assertTrue(frame.contains("Use this exact current-turn content for the complete file write"),
                 frame);
+        assertTrue(frame.contains("complete file content for index.html must equal the expectedContent payload exactly"),
+                frame);
+        assertTrue(frame.contains("Do not wrap it in HTML"), frame);
+        assertTrue(frame.contains("content argument must be exactly the payload"), frame);
         assertTrue(frame.contains("Do not reuse exact-write literals from earlier turns"), frame);
+    }
+
+    @Test
+    void renderIncludesExpectedTargetsForMultiFileMutationTurns() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js. "
+                        + "It should calculate BMI from height and weight.");
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                contract,
+                ExecutionPhase.APPLY,
+                List.of("talos.write_file", "talos.edit_file"),
+                List.of("talos.write_file", "talos.edit_file"),
+                List.of());
+
+        String frame = CurrentTurnCapabilityFrame.render(plan);
+
+        assertTrue(frame.contains("[ExpectedTargets]"), frame);
+        assertTrue(frame.contains("requiredTargets:"), frame);
+        assertTrue(frame.contains("index.html"), frame);
+        assertTrue(frame.contains("styles.css"), frame);
+        assertTrue(frame.contains("scripts.js"), frame);
+        assertTrue(frame.contains("You must write or edit these exact target paths"), frame);
+        assertTrue(frame.contains("Similar filenames are not substitutes"), frame);
+        assertTrue(frame.contains("script.js and scripts.js are different target paths"), frame);
     }
 
     @Test

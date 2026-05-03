@@ -52,6 +52,8 @@ public final class SlashCommandCompleter implements Completer {
 
         List<CommandSpec> specs = registry.allSpecs();
         for (CommandSpec spec : specs) {
+            if (spec.hidden()) continue;
+
             // Primary name
             if (spec.name().toLowerCase().startsWith(prefix)) {
                 candidates.add(toCandidate(spec.name(), spec));

@@ -34,6 +34,7 @@ class SlashCommandCompleterTest {
         registry.register(stubCommand("models", List.of(), "List models", CommandGroup.MODELS));
         registry.register(stubCommand("status", List.of(), "Show status", CommandGroup.SESSION));
         registry.register(stubCommand("quit", List.of("q", "exit"), "Quit Talos", CommandGroup.SESSION));
+        registry.register(hiddenCommand("prompt-debug", List.of("pd"), "Internal prompt debug", CommandGroup.DEBUG));
         completer = new SlashCommandCompleter(registry);
     }
 
@@ -210,6 +211,15 @@ class SlashCommandCompleterTest {
         assertTrue(candidates.isEmpty(), "Unknown prefix should produce no candidates");
     }
 
+    @Test
+    void hiddenCommandsDoNotAppearInCompletion() {
+        List<Candidate> candidates = complete("/p");
+        List<String> values = candidates.stream().map(Candidate::value).toList();
+
+        assertFalse(values.contains("/prompt-debug"), "Hidden command should not appear");
+        assertFalse(values.contains("/pd"), "Hidden aliases should not appear");
+    }
+
     // ── Helper ────────────────────────────────────────────────────────
 
     private List<Candidate> complete(String input) {
@@ -235,6 +245,21 @@ class SlashCommandCompleterTest {
             @Override
             public CommandSpec spec() {
                 return new CommandSpec(name, aliases, "/" + name, summary, group);
+            }
+
+            @Override
+            public Result execute(String args, Context ctx) {
+                return new Result.Ok("stub");
+            }
+        };
+    }
+
+    private static Command hiddenCommand(String name, List<String> aliases,
+                                         String summary, CommandGroup group) {
+        return new Command() {
+            @Override
+            public CommandSpec spec() {
+                return new CommandSpec(name, aliases, "/" + name, summary, group, true);
             }
 
             @Override

@@ -7,11 +7,16 @@ public record CommandSpec(
         List<String> aliases,
         String usage,
         String summary,
-        CommandGroup group
+        CommandGroup group,
+        boolean hidden
 ) {
     // Backward compatibility constructor
     public CommandSpec(String name, List<String> aliases, String usage, String summary) {
         this(name, aliases, usage, summary, CommandGroup.SESSION);
+    }
+
+    public CommandSpec(String name, List<String> aliases, String usage, String summary, CommandGroup group) {
+        this(name, aliases, usage, summary, group, false);
     }
 
     /** Returns the display name of the command group (e.g., "Basics", "RAG"). */
