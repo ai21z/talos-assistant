@@ -2465,6 +2465,76 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void response_error_under_mutation_records_backend_failure_outcome() {
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scriptedFailure(new EngineException.ResponseError(
+                            400,
+                            "request exceeds the available context size")))
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("system"));
+            messages.add(ChatMessage.user("Overwrite index.html with exactly AFTER. Use talos.write_file."));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-engine-response-error",
+                    "sid",
+                    1,
+                    "2026-05-03T00:00:00Z",
+                    "workspace-hash",
+                    "test",
+                    "llama_cpp",
+                    "qwen2.5-coder-14b",
+                    "Overwrite index.html with exactly AFTER. Use talos.write_file.");
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, WS, ctx, new AssistantTurnExecutor.Options());
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertTrue(out.text().contains("Engine error"), out.text());
+                assertNoSuccessProse(out.text());
+                assertEquals("FAILED", trace.outcome().status());
+                assertEquals("BACKEND_RESPONSE_ERROR", trace.outcome().classification());
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        }
+
+        @Test
+        void connection_failure_under_mutation_records_backend_failure_outcome() {
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scriptedFailure(new EngineException.ConnectionFailed(
+                            "llama.cpp server exited before readiness",
+                            null)))
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("system"));
+            messages.add(ChatMessage.user("Overwrite index.html with exactly AFTER. Use talos.write_file."));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-engine-connection-failed",
+                    "sid",
+                    1,
+                    "2026-05-03T00:00:00Z",
+                    "workspace-hash",
+                    "test",
+                    "llama_cpp",
+                    "gpt-oss-20b",
+                    "Overwrite index.html with exactly AFTER. Use talos.write_file.");
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, WS, ctx, new AssistantTurnExecutor.Options());
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertTrue(out.text().contains("Model engine not reachable"), out.text());
+                assertNoSuccessProse(out.text());
+                assertEquals("FAILED", trace.outcome().status());
+                assertEquals("BACKEND_CONNECTION_FAILED", trace.outcome().classification());
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        }
+
+        @Test
         void engine_exception_subtypes_are_all_sealed_and_accounted_for() {
             // Structural test: verify the sealed hierarchy matches what execute() catches.
             // This ensures new subtypes added to EngineException won't slip through.
@@ -2572,6 +2642,14 @@ class AssistantTurnExecutorTest {
         msgs.add(ChatMessage.system("You are a helpful assistant."));
         msgs.add(ChatMessage.user("What is 2+2?"));
         return msgs;
+    }
+
+    private static void assertNoSuccessProse(String text) {
+        String lower = text == null ? "" : text.toLowerCase();
+        assertFalse(lower.contains("complete"), text);
+        assertFalse(lower.contains("ready to use"), text);
+        assertFalse(lower.contains("open in browser"), text);
+        assertFalse(lower.contains("save these files"), text);
     }
 
     // ── Deflection detection tests ───────────────────────────────────

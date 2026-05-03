@@ -504,6 +504,40 @@ class ExplainLastTurnCommandTest {
     }
 
     @Test
+    void traceViewUsesLocalOutcomeForBackendFailure() {
+        TurnRecord turn = record(
+                13,
+                "Overwrite index.html with exactly AFTER.",
+                "[Engine error: Engine error (HTTP 400)]",
+                List.of(),
+                0,
+                0,
+                0,
+                "ok");
+        LocalTurnTrace trace = LocalTurnTrace.builder(
+                        "trc-backend-response-error",
+                        "sid",
+                        13,
+                        "2026-05-03T00:00:00Z")
+                .outcome(
+                        "FAILED",
+                        "NOT_RUN",
+                        "UNKNOWN",
+                        "BACKEND_ERROR",
+                        "BACKEND_RESPONSE_ERROR")
+                .build();
+
+        String text = ExplainLastTurnCommand.renderTrace(turn, trace);
+
+        assertTrue(text.contains("Status:    FAILED"), text);
+        assertTrue(text.contains("Outcome:   BACKEND_RESPONSE_ERROR"), text);
+        assertTrue(text.contains("Status tag: FAILED"), text);
+        assertTrue(text.contains("Outcome: FAILED (BACKEND_RESPONSE_ERROR)"), text);
+        assertFalse(text.contains("Status:    ok"), text);
+        assertFalse(text.contains("Outcome:   NO_TOOL_RESPONSE"), text);
+    }
+
+    @Test
     void executeRejectsUnknownView() {
         var cmd = new ExplainLastTurnCommand(Path.of("/ws"), new JsonSessionStore(tempDir));
 
