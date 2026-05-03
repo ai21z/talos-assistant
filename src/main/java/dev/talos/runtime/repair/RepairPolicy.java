@@ -72,7 +72,11 @@ public final class RepairPolicy {
                 .sorted()
                 .toList();
         boolean structuralWebRepair = problems.stream().anyMatch(StaticWebCapabilityProfile::isStructuralProblem);
-        List<RepairPlanStep> steps = planSteps(problems, expectedTargets);
+        List<RepairPlanStep> steps = planSteps(
+                problems,
+                expectedTargets,
+                missingExpectedTargets,
+                similarWrongTargets);
         String instruction = renderStaticVerificationInstruction(
                 problems,
                 expectedTargets,
@@ -164,7 +168,12 @@ public final class RepairPolicy {
                 + "cannot form the exact edit, stop and say no edit was applied.";
     }
 
-    private static List<RepairPlanStep> planSteps(List<String> problems, List<String> expectedTargets) {
+    private static List<RepairPlanStep> planSteps(
+            List<String> problems,
+            List<String> expectedTargets,
+            List<String> missingExpectedTargets,
+            List<WrongTargetPair> similarWrongTargets
+    ) {
         List<RepairPlanStep> steps = new ArrayList<>();
         Set<String> targets = new LinkedHashSet<>();
         boolean structuralWebRepair = problems.stream().anyMatch(StaticWebCapabilityProfile::isStructuralProblem);
@@ -178,6 +187,7 @@ public final class RepairPolicy {
                 targets.addAll(expectedTargets);
             }
         }
+        removeWrongSimilarEvidenceTargets(targets, missingExpectedTargets, similarWrongTargets);
         for (String target : targets) {
             if (!StaticWebCapabilityProfile.isSmallWebFile(target)) continue;
             steps.add(new RepairPlanStep(
@@ -196,6 +206,31 @@ public final class RepairPolicy {
                 "Run static post-apply verification before claiming the task is complete.",
                 false));
         return List.copyOf(steps);
+    }
+
+    private static void removeWrongSimilarEvidenceTargets(
+            Set<String> targets,
+            List<String> missingExpectedTargets,
+            List<WrongTargetPair> similarWrongTargets
+    ) {
+        if (targets == null || targets.isEmpty()
+                || similarWrongTargets == null || similarWrongTargets.isEmpty()) {
+            return;
+        }
+        Set<String> missingKeys = new LinkedHashSet<>();
+        for (String target : missingExpectedTargets == null ? List.<String>of() : missingExpectedTargets) {
+            String normalized = normalizeTargetKey(target);
+            if (!normalized.isBlank()) missingKeys.add(normalized);
+        }
+        Set<String> wrongSimilarKeys = new LinkedHashSet<>();
+        for (WrongTargetPair pair : similarWrongTargets) {
+            String normalized = normalizeTargetKey(pair.appliedTarget());
+            if (!normalized.isBlank() && !missingKeys.contains(normalized)) {
+                wrongSimilarKeys.add(normalized);
+            }
+        }
+        if (wrongSimilarKeys.isEmpty()) return;
+        targets.removeIf(target -> wrongSimilarKeys.contains(normalizeTargetKey(target)));
     }
 
     private static String renderStaticVerificationInstruction(
