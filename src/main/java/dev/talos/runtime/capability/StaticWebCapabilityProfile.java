@@ -90,6 +90,8 @@ public final class StaticWebCapabilityProfile {
                 || lower.contains("missing calculate")
                 || lower.contains("missing form")
                 || lower.contains("missing input")
+                || lower.contains("missing result")
+                || lower.contains("result output")
                 || lower.contains("selector mismatch")
                 || lower.contains("selector")
                 || lower.contains("duplicate id")

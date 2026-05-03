@@ -274,7 +274,17 @@ public final class StaticTaskVerifier {
             boolean matched = normalizedMutations.stream()
                     .anyMatch(mutated -> expectedTargetMatches(expected, mutated, caseInsensitive));
             if (!matched) {
-                problems.add(expected + ": expected target was not successfully mutated.");
+                List<String> similarWrongTargets = similarWrongMutationTargets(
+                        expected,
+                        normalizedMutations,
+                        caseInsensitive);
+                String problem = expected + ": expected target was not successfully mutated.";
+                if (!similarWrongTargets.isEmpty()) {
+                    problem += " Changed similar target(s) "
+                            + renderObserved(new LinkedHashSet<>(similarWrongTargets))
+                            + " does not satisfy `" + expected + "`.";
+                }
+                problems.add(problem);
             }
         }
         if (problems.stream().noneMatch(p -> p.contains("expected target was not successfully mutated"))) {
@@ -1177,6 +1187,47 @@ public final class StaticTaskVerifier {
             return expected.equalsIgnoreCase(mutated);
         }
         return expected.equals(mutated);
+    }
+
+    private static List<String> similarWrongMutationTargets(
+            String expectedTarget,
+            Set<String> mutatedPaths,
+            boolean caseInsensitive
+    ) {
+        if (expectedTarget == null || mutatedPaths == null || mutatedPaths.isEmpty()) return List.of();
+        List<String> out = new ArrayList<>();
+        for (String mutated : mutatedPaths) {
+            if (expectedTargetMatches(expectedTarget, mutated, caseInsensitive)) continue;
+            if (looksLikeSingularPluralSibling(expectedTarget, mutated)) {
+                out.add(mutated);
+            }
+        }
+        return out.stream().sorted().toList();
+    }
+
+    private static boolean looksLikeSingularPluralSibling(String leftPath, String rightPath) {
+        String left = normalizePath(leftPath).toLowerCase(Locale.ROOT);
+        String right = normalizePath(rightPath).toLowerCase(Locale.ROOT);
+        if (left.isBlank() || right.isBlank()) return false;
+
+        int leftSlash = left.lastIndexOf('/');
+        int rightSlash = right.lastIndexOf('/');
+        String leftDir = leftSlash >= 0 ? left.substring(0, leftSlash + 1) : "";
+        String rightDir = rightSlash >= 0 ? right.substring(0, rightSlash + 1) : "";
+        if (!leftDir.equals(rightDir)) return false;
+
+        String leftName = leftSlash >= 0 ? left.substring(leftSlash + 1) : left;
+        String rightName = rightSlash >= 0 ? right.substring(rightSlash + 1) : right;
+        int leftDot = leftName.lastIndexOf('.');
+        int rightDot = rightName.lastIndexOf('.');
+        if (leftDot <= 0 || rightDot <= 0) return false;
+        String leftExt = leftName.substring(leftDot);
+        String rightExt = rightName.substring(rightDot);
+        if (!leftExt.equals(rightExt)) return false;
+
+        String leftStem = leftName.substring(0, leftDot);
+        String rightStem = rightName.substring(0, rightDot);
+        return leftStem.equals(rightStem + "s") || rightStem.equals(leftStem + "s");
     }
 
     private static boolean expectedTargetMatchingIsCaseInsensitive() {

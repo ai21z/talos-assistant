@@ -57,6 +57,11 @@ public final class RepairPolicy {
         if (expectedTargets.isEmpty() && problems.stream().anyMatch(StaticWebCapabilityProfile::isStructuralProblem)) {
             expectedTargets = StaticWebCapabilityProfile.inferStructuralTargets(messages, problems);
         }
+        List<String> appliedMutationTargets = extractAppliedMutationTargets(previous);
+        List<String> missingExpectedTargets = missingExpectedTargets(problems, expectedTargets);
+        List<WrongTargetPair> similarWrongTargets = similarWrongTargets(
+                missingExpectedTargets,
+                appliedMutationTargets);
         if (!expectedTargets.isEmpty()
                 && !previousTargets.isEmpty()
                 && !targetsOverlap(expectedTargets, previousTargets)) {
@@ -72,7 +77,9 @@ public final class RepairPolicy {
                 problems,
                 expectedTargets,
                 steps,
-                structuralWebRepair);
+                structuralWebRepair,
+                missingExpectedTargets,
+                similarWrongTargets);
 
         return RepairDecision.planned(new RepairPlan(
                 "repair-static-verification-v1",
@@ -191,7 +198,9 @@ public final class RepairPolicy {
             List<String> problems,
             List<String> expectedTargets,
             List<RepairPlanStep> steps,
-            boolean structuralWebRepair
+            boolean structuralWebRepair,
+            List<String> missingExpectedTargets,
+            List<WrongTargetPair> similarWrongTargets
     ) {
         StringBuilder out = new StringBuilder();
         out.append("[Static verification repair context]\n")
@@ -202,6 +211,27 @@ public final class RepairPolicy {
                         ? "(not available from current task contract)"
                         : String.join(", ", expectedTargets))
                 .append("\n\n");
+
+        if (missingExpectedTargets != null && !missingExpectedTargets.isEmpty()) {
+            out.append("Missing expected targets: ")
+                    .append(String.join(", ", missingExpectedTargets))
+                    .append("\n");
+        }
+        if (similarWrongTargets != null && !similarWrongTargets.isEmpty()) {
+            out.append("Similar changed targets that do not satisfy missing expected targets:\n");
+            for (WrongTargetPair pair : similarWrongTargets) {
+                out.append("- ").append(pair.appliedTarget())
+                        .append(" does not satisfy ")
+                        .append(pair.expectedTarget())
+                        .append("; write or update ")
+                        .append(pair.expectedTarget())
+                        .append(" explicitly.\n");
+            }
+        }
+        if ((missingExpectedTargets != null && !missingExpectedTargets.isEmpty())
+                || (similarWrongTargets != null && !similarWrongTargets.isEmpty())) {
+            out.append("\n");
+        }
 
         out.append("Previous static verification problems:\n");
         for (String problem : problems.subList(0, Math.min(8, problems.size()))) {
@@ -391,6 +421,84 @@ public final class RepairPolicy {
         return Set.copyOf(targets);
     }
 
+    private static List<String> extractAppliedMutationTargets(String previous) {
+        if (previous == null || previous.isBlank()) return List.of();
+        Set<String> targets = new LinkedHashSet<>();
+        boolean inAppliedSection = false;
+        for (String rawLine : previous.split("\\R")) {
+            String line = rawLine.strip();
+            String lower = line.toLowerCase(Locale.ROOT);
+            if (lower.startsWith("applied mutating tool calls:")
+                    || lower.startsWith("succeeded:")) {
+                inAppliedSection = true;
+                continue;
+            }
+            if (!inAppliedSection) continue;
+            if (line.isBlank()) {
+                if (!targets.isEmpty()) break;
+                continue;
+            }
+            if (line.startsWith("-")) {
+                targets.addAll(extractTargets(line));
+                continue;
+            }
+            if (!targets.isEmpty()) break;
+        }
+        return targets.stream().sorted().toList();
+    }
+
+    private static List<String> missingExpectedTargets(
+            List<String> problems,
+            List<String> expectedTargets
+    ) {
+        if (problems == null || problems.isEmpty()) return List.of();
+        Set<String> missing = new LinkedHashSet<>();
+        for (String problem : problems) {
+            if (problem == null) continue;
+            String lower = problem.toLowerCase(Locale.ROOT);
+            if (!lower.contains("expected target was not successfully mutated")) continue;
+            int colon = problem.indexOf(':');
+            if (colon > 0) {
+                missing.addAll(extractTargets(problem.substring(0, colon)));
+            }
+            if (expectedTargets != null) {
+                for (String expected : expectedTargets) {
+                    if (lower.contains(normalizeTargetKey(expected))) {
+                        missing.add(normalizeTarget(expected));
+                    }
+                }
+            }
+        }
+        return missing.stream()
+                .filter(target -> !target.isBlank())
+                .sorted()
+                .toList();
+    }
+
+    private static List<WrongTargetPair> similarWrongTargets(
+            List<String> missingExpectedTargets,
+            List<String> appliedMutationTargets
+    ) {
+        if (missingExpectedTargets == null || missingExpectedTargets.isEmpty()
+                || appliedMutationTargets == null || appliedMutationTargets.isEmpty()) {
+            return List.of();
+        }
+        List<WrongTargetPair> out = new ArrayList<>();
+        for (String expected : missingExpectedTargets) {
+            for (String applied : appliedMutationTargets) {
+                if (normalizeTargetKey(expected).equals(normalizeTargetKey(applied))) continue;
+                if (looksLikeSingularPluralSibling(expected, applied)) {
+                    out.add(new WrongTargetPair(expected, applied));
+                }
+            }
+        }
+        return out.stream()
+                .sorted(Comparator
+                        .comparing(WrongTargetPair::expectedTarget)
+                        .thenComparing(WrongTargetPair::appliedTarget))
+                .toList();
+    }
+
     private static boolean targetsOverlap(List<String> expectedTargets, Set<String> previousTargets) {
         Set<String> previous = new LinkedHashSet<>();
         for (String target : previousTargets == null ? Set.<String>of() : previousTargets) {
@@ -426,9 +534,36 @@ public final class RepairPolicy {
         return normalizeTarget(raw).toLowerCase(Locale.ROOT);
     }
 
+    private static boolean looksLikeSingularPluralSibling(String leftPath, String rightPath) {
+        String left = normalizeTargetKey(leftPath);
+        String right = normalizeTargetKey(rightPath);
+        if (left.isBlank() || right.isBlank()) return false;
+
+        int leftSlash = left.lastIndexOf('/');
+        int rightSlash = right.lastIndexOf('/');
+        String leftDir = leftSlash >= 0 ? left.substring(0, leftSlash + 1) : "";
+        String rightDir = rightSlash >= 0 ? right.substring(0, rightSlash + 1) : "";
+        if (!leftDir.equals(rightDir)) return false;
+
+        String leftName = leftSlash >= 0 ? left.substring(leftSlash + 1) : left;
+        String rightName = rightSlash >= 0 ? right.substring(rightSlash + 1) : right;
+        int leftDot = leftName.lastIndexOf('.');
+        int rightDot = rightName.lastIndexOf('.');
+        if (leftDot <= 0 || rightDot <= 0) return false;
+        String leftExt = leftName.substring(leftDot);
+        String rightExt = rightName.substring(rightDot);
+        if (!leftExt.equals(rightExt)) return false;
+
+        String leftStem = leftName.substring(0, leftDot);
+        String rightStem = rightName.substring(0, rightDot);
+        return leftStem.equals(rightStem + "s") || rightStem.equals(leftStem + "s");
+    }
+
     private static String singleLine(String value) {
         if (value == null) return "";
         String line = value.replace('\n', ' ').replace('\r', ' ').strip();
         return line.length() <= 300 ? line : line.substring(0, 297) + "...";
     }
+
+    private record WrongTargetPair(String expectedTarget, String appliedTarget) {}
 }

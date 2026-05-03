@@ -1,6 +1,6 @@
 # T95 - Static Web Expected-Target Repair Framing
 
-Status: Open
+Status: Done
 Priority: Medium
 Branch: v0.9.0-beta-dev
 Source: Clean Qwen/GPT-OSS audit follow-up
@@ -52,9 +52,11 @@ wrong-target mutation. The runtime-owned changed-files summary should stay
 authoritative while repair framing names the expected target that was not
 mutated.
 
-Likely code/document areas:
+Likely code areas:
 
-- `src/main/kotlin/dev/talos/runtime/verification/StaticTaskVerifier.kt`
+- `src/main/java/dev/talos/runtime/verification/StaticTaskVerifier.java`
+- `src/main/java/dev/talos/runtime/repair/RepairPolicy.java`
+- `src/main/java/dev/talos/runtime/capability/StaticWebCapabilityProfile.java`
 - static verification result or repair prompt framing
 - assistant turn executor repair context tests
 
@@ -115,6 +117,28 @@ Commands:
 - Re-run the clean Qwen/GPT-OSS audit after the T93-T95 batch passes normal
   verification.
 
+## Implementation Result
+
+- Static verification now keeps `scripts.js` and `script.js` strict, and adds a
+  narrow singular/plural sibling diagnostic when a similar wrong target was
+  mutated.
+- Static repair framing now extracts missing expected targets from the previous
+  verifier failure and names them in a dedicated `Missing expected targets`
+  section.
+- Repair framing also compares the runtime-owned applied mutation list against
+  missing expected targets and says, for example, `script.js does not satisfy
+  scripts.js`.
+- `missing result output` is treated as a structural web repair signal so the
+  repair plan preserves coherent HTML/CSS/JS rewrite behavior.
+
+Verification run:
+
+```powershell
+./gradlew.bat test --tests "dev.talos.runtime.verification.StaticTaskVerifierTest.expectedScriptsJsTargetFailsWhenOnlySingularScriptJsWasMutated" --tests "dev.talos.runtime.repair.RepairPolicyTest.staticVerificationRepairInstructionNamesMissingExpectedTargetAndSimilarWrongTarget" --no-daemon
+./gradlew.bat test --tests "dev.talos.runtime.verification.StaticTaskVerifierTest" --tests "dev.talos.runtime.repair.RepairPolicyTest" --tests "dev.talos.cli.modes.AssistantTurnExecutorTest" --tests "dev.talos.cli.modes.UnifiedAssistantModeTest" --no-daemon
+./gradlew.bat test e2eTest --no-daemon
+```
+
 ## Known Risks
 
 - Repair framing can become too verbose if it repeats the full verifier report.
@@ -126,4 +150,3 @@ Commands:
 - T96 README proposal apply strategy hardening remains optional and should only
   be opened or implemented after T93-T95 unless it falls naturally out of the
   same code path.
-
