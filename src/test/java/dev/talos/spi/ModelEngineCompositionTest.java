@@ -36,6 +36,43 @@ class ModelEngineCompositionTest {
         assertEquals(2, embedOut.vectors().size());
     }
 
+    @Test
+    void capabilityFactoriesDefaultProviderControlFlagsToFalse() {
+        Capabilities caps = Capabilities.of(true, true, false, 1024, true);
+
+        assertTrue(caps.nativeTools());
+        assertFalse(caps.requiredToolChoice());
+        assertFalse(caps.namedToolChoice());
+        assertFalse(caps.jsonObjectResponse());
+        assertFalse(caps.jsonSchemaResponse());
+        assertFalse(caps.serverModelCatalog());
+        assertFalse(caps.managedProcess());
+    }
+
+    @Test
+    void capabilityFullFactoryReportsProviderControlFlags() {
+        Capabilities caps = Capabilities.of(
+                true,
+                true,
+                true,
+                32768,
+                true,
+                true,
+                true,
+                true,
+                true,
+                true,
+                true);
+
+        assertTrue(caps.nativeTools());
+        assertTrue(caps.requiredToolChoice());
+        assertTrue(caps.namedToolChoice());
+        assertTrue(caps.jsonObjectResponse());
+        assertTrue(caps.jsonSchemaResponse());
+        assertTrue(caps.serverModelCatalog());
+        assertTrue(caps.managedProcess());
+    }
+
     private static final class StubEngine implements ModelEngine {
         @Override public String id() { return "stub"; }
         @Override public Capabilities caps() { return Capabilities.of(true, true, false, 1024, false); }

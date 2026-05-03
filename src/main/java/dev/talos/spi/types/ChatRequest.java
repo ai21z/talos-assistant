@@ -26,6 +26,11 @@ public final class ChatRequest {
      */
     public final List<ToolSpec> tools;
 
+    /**
+     * Provider-neutral request controls such as tool choice and response format.
+     */
+    public final ChatRequestControls controls;
+
     public ChatRequest(String backend, String model, String systemPrompt, String userPrompt,
                        List<Map<String,String>> snippets, Duration timeout) {
         this(backend, model, systemPrompt, userPrompt, snippets, timeout, List.of(), List.of());
@@ -40,6 +45,14 @@ public final class ChatRequest {
     public ChatRequest(String backend, String model, String systemPrompt, String userPrompt,
                        List<Map<String,String>> snippets, Duration timeout,
                        List<ChatMessage> messages, List<ToolSpec> tools) {
+        this(backend, model, systemPrompt, userPrompt, snippets, timeout, messages, tools,
+                ChatRequestControls.defaults());
+    }
+
+    public ChatRequest(String backend, String model, String systemPrompt, String userPrompt,
+                       List<Map<String,String>> snippets, Duration timeout,
+                       List<ChatMessage> messages, List<ToolSpec> tools,
+                       ChatRequestControls controls) {
         this.backend = Objects.requireNonNullElse(backend, "");
         this.model = Objects.requireNonNullElse(model, "");
         this.systemPrompt = Objects.requireNonNullElse(systemPrompt, "");
@@ -48,6 +61,7 @@ public final class ChatRequest {
         this.timeout = timeout == null ? Duration.ofSeconds(60) : timeout;
         this.messages = messages == null ? List.of() : List.copyOf(messages);
         this.tools = tools == null ? List.of() : List.copyOf(tools);
+        this.controls = controls == null ? ChatRequestControls.defaults() : controls;
     }
 
     public String flattenedContext() {

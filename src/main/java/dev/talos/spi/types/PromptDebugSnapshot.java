@@ -18,6 +18,7 @@ public record PromptDebugSnapshot(
         Instant capturedAt,
         List<ChatMessage> messages,
         List<ToolSpec> tools,
+        ChatRequestControls controls,
         String providerBodyJson
 ) {
     public PromptDebugSnapshot {
@@ -27,6 +28,7 @@ public record PromptDebugSnapshot(
         capturedAt = capturedAt == null ? Instant.now() : capturedAt;
         messages = messages == null ? List.of() : List.copyOf(messages);
         tools = tools == null ? List.of() : List.copyOf(tools);
+        controls = controls == null ? ChatRequestControls.defaults() : controls;
         providerBodyJson = Objects.requireNonNullElse(providerBodyJson, "");
     }
 
@@ -59,6 +61,7 @@ public record PromptDebugSnapshot(
                 Instant.now(),
                 safe.messages,
                 safe.tools,
+                safe.controls,
                 providerBodyJson);
     }
 }
