@@ -272,9 +272,17 @@ public final class ToolCallLoop {
         while (state.iterations < maxIterations) {
             ToolCallParseStage.ParsedCalls parsed =
                     parseStage.parse(state.currentText, state.currentNativeCalls, state.iterations + 1);
-            if (!parsed.useNativePath() && !parsed.useTextPath()) break;
+            if (!parsed.useNativePath() && !parsed.useTextPath()) {
+                if (state.failPendingActionObligationAfterNoExecutableToolCalls()) {
+                    break;
+                }
+                break;
+            }
             state.iterations++;
             if (parsed.calls().isEmpty()) {
+                if (state.failPendingActionObligationAfterNoExecutableToolCalls()) {
+                    break;
+                }
                 if (shouldSuppressUnfinishedToolContinuation(state.currentText, state.totalToolsInvoked)) {
                     LOG.warn("Suppressing unfinished tool-call continuation after {} executed tool(s)",
                             state.totalToolsInvoked);
