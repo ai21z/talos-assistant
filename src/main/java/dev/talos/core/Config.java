@@ -205,6 +205,21 @@ public class Config {
         if (!ollama.containsKey("host"))  { ollama.put("host", "http://localhost:11434"); defaulted("ollama.host"); }
         if (!ollama.containsKey("model")) { ollama.put("model", "qwen2.5-coder:14b");   defaulted("ollama.model"); }
 
+        // ----- llm -----
+        Map<String,Object> llm = map(data.get("llm"));
+        if (llm == null) { llm = new LinkedHashMap<>(); data.put("llm", llm); defaulted("llm"); }
+        putIfAbsent(llm, "transport", "engine", "llm.transport");
+        putIfAbsent(llm, "default_backend", "llama_cpp", "llm.default_backend");
+        putIfAbsent(llm, "model", "talos-agent", "llm.model");
+
+        // ----- embed -----
+        Map<String,Object> embed = map(data.get("embed"));
+        if (embed == null) { embed = new LinkedHashMap<>(); data.put("embed", embed); defaulted("embed"); }
+        putIfAbsent(embed, "provider", "compat", "embed.provider");
+        putIfAbsent(embed, "model", "talos-embed", "embed.model");
+        putIfAbsent(embed, "host", "", "embed.host");
+        putIfAbsent(embed, "allow_remote", Boolean.FALSE, "embed.allow_remote");
+
         // ----- net -----
         Map<String,Object> net = map(data.get("net"));
         if (net == null) { net = new LinkedHashMap<>(); data.put("net", net); defaulted("net"); }

@@ -16,9 +16,8 @@ import java.nio.file.Paths;
  *
  * <p>Steps:
  * <ol>
- *   <li>Detect Ollama — prompt to install if missing</li>
- *   <li>Detect default model — prompt to pull if missing</li>
- *   <li>Write config defaults — confirm and proceed</li>
+ *   <li>Describe active local engine configuration</li>
+ *   <li>Point users at llama.cpp server/model path settings</li>
  *   <li>Write sentinel file to skip on next launch</li>
  * </ol>
  */
@@ -29,7 +28,7 @@ public final class TerminalFirstRun {
     private static final Path SENTINEL =
             Paths.get(System.getProperty("user.home"), ".talos", "first_run_done");
 
-    private static final String DEFAULT_MODEL = "qwen2.5-coder:14b";
+    private static final String DEFAULT_MODEL = "talos-agent";
 
     private TerminalFirstRun() {}
 
@@ -49,71 +48,15 @@ public final class TerminalFirstRun {
         System.out.println("  ╰──────────────────────────────────────╯");
         System.out.println();
 
-        // Step 1: Detect Ollama
-        boolean ollamaInstalled = checkOllamaInstalled();
-        if (ollamaInstalled) {
-            String version = getOllamaVersion();
-            System.out.println("  ✓ Ollama detected" + (version != null ? " (" + version.trim() + ")" : ""));
-        } else {
-            System.out.println("  ✗ Ollama not found");
-            System.out.println();
-            System.out.println("  Talos requires Ollama to run local AI models.");
-            System.out.println("  Install from: https://ollama.com/download");
-            System.out.println();
-            if (isWindows()) {
-                System.out.println("  Or run:  winget install Ollama.Ollama");
-            } else {
-                System.out.println("  Or run:  curl -fsSL https://ollama.com/install.sh | sh");
-            }
-            System.out.println();
-            System.out.print("  Install Ollama now and press Enter to continue (or 'q' to quit): ");
-            String input = readLine();
-            if (input != null && input.trim().equalsIgnoreCase("q")) {
-                System.out.println("  Setup cancelled. Run Talos again after installing Ollama.");
-                return false;
-            }
-
-            // Re-check
-            ollamaInstalled = checkOllamaInstalled();
-            if (!ollamaInstalled) {
-                System.out.println("  ! Ollama still not detected. You can continue, but LLM features won't work.");
-                System.out.println();
-            } else {
-                System.out.println("  ✓ Ollama detected");
-            }
-        }
+        System.out.println(setupSummary());
         System.out.println();
 
-        // Step 2: Detect model
-        if (ollamaInstalled) {
-            boolean modelAvailable = checkModelAvailable(DEFAULT_MODEL);
-            if (modelAvailable) {
-                System.out.println("  ✓ Model '" + DEFAULT_MODEL + "' is available");
-            } else {
-                System.out.println("  ✗ Model '" + DEFAULT_MODEL + "' not found locally");
-                System.out.println();
-                System.out.print("  Pull '" + DEFAULT_MODEL + "' now? [Y/n]: ");
-                String input = readLine();
-                if (input == null || input.isBlank() || input.trim().toLowerCase().startsWith("y")) {
-                    System.out.println("  Pulling " + DEFAULT_MODEL + "... (this may take a few minutes)");
-                    boolean pulled = pullModel(DEFAULT_MODEL);
-                    if (pulled) {
-                        System.out.println("  ✓ Model pulled successfully");
-                    } else {
-                        System.out.println("  ! Pull failed. You can pull manually: ollama pull " + DEFAULT_MODEL);
-                    }
-                } else {
-                    System.out.println("  Skipped. Pull later with: ollama pull " + DEFAULT_MODEL);
-                }
-            }
-        }
-        System.out.println();
-
-        // Step 3: Write config & sentinel
+        // Step 1: Write config & sentinel
         System.out.println("  Configuration:");
+        System.out.println("    Backend:   llama_cpp");
         System.out.println("    Model:     " + DEFAULT_MODEL);
-        System.out.println("    Embeddings: bge-m3");
-        System.out.println("    Host:      http://127.0.0.1:11434");
+        System.out.println("    Engine:    configure engines.llama_cpp.server_path and model_path");
+        System.out.println("    Embeddings: compat/talos-embed");
         System.out.println();
 
         writeSentinel();
@@ -124,6 +67,12 @@ public final class TerminalFirstRun {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────
+
+    public static String setupSummary() {
+        return "  Talos uses local model engines. The default path is llama.cpp on Windows.\n"
+                + "  Configure engines.llama_cpp.server_path and engines.llama_cpp.model_path in ~/.talos/config.yaml.\n"
+                + "  Ollama can still be selected explicitly as a legacy backend.";
+    }
 
     static boolean checkOllamaInstalled() {
         try {

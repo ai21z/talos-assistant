@@ -13,7 +13,7 @@ import java.util.Objects;
  * Use {@link #fingerprint()} for index compatibility checks and
  * {@link #cacheNamespace()} for embedding cache key isolation.
  *
- * @param provider             backend id: "ollama", "vllm", "openai_compat"
+ * @param provider             backend id: "compat", "llama_cpp", "ollama", etc.
  * @param model                model identifier as the backend knows it
  * @param dimensions           expected vector dimensionality (0 = auto-detect at runtime)
  * @param instructionAware     whether query/document embedding requires instruction prefixes

@@ -3,10 +3,12 @@ package dev.talos.cli.launcher;
 import dev.talos.cli.ManifestVersionProvider;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
+import dev.talos.core.EngineRuntimeConfig;
 import dev.talos.core.context.ContextPacker;
 import dev.talos.core.context.ContextResult;
 import dev.talos.core.context.TokenBudget;
-import dev.talos.core.embed.EmbeddingsClient;
+import dev.talos.core.embed.EmbeddingsFactory;
+import dev.talos.spi.Embeddings;
 import dev.talos.core.rag.RagService;
 import dev.talos.core.util.Sanitize;
 import dev.talos.cli.ui.TerminalCapabilities;
@@ -68,23 +70,19 @@ public class DiagnoseCmd implements Runnable {
             System.out.println("  ENV overrides:  " + report.envOverridesApplied);
             System.out.println();
 
-            // 2. Ollama connection
-            Map<String, Object> ollama = CfgUtil.map(cfg.data.get("ollama"));
-            String ollamaHost = String.valueOf(ollama.getOrDefault("host", "http://127.0.0.1:11434"));
-            String ollamaModel = String.valueOf(ollama.getOrDefault("model", "qwen2.5-coder:14b"));
-            System.out.println("Ollama:");
-            System.out.println("  Host:  " + ollamaHost);
-            System.out.println("  Model: " + ollamaModel);
+            // 2. Active engine
+            System.out.print(renderEngineSection(cfg, unicodeSafe));
             System.out.println();
 
             // 2b. Embedding health check
-            String embedModel = String.valueOf(ollama.getOrDefault("embed", "bge-m3"));
+            EngineRuntimeConfig runtime = EngineRuntimeConfig.from(cfg);
             System.out.println("Embedding Health:");
-            System.out.println("  Model: " + embedModel);
+            System.out.println("  Provider: " + runtime.embeddingProvider());
+            System.out.println("  Model:    " + runtime.embeddingModel());
             try {
-                EmbeddingsClient embedClient = new EmbeddingsClient(cfg);
+                Embeddings embedClient = EmbeddingsFactory.forQuery(cfg);
                 float[] probe = embedClient.embed("hello world");
-                if (probe != null && probe.length > 0 && EmbeddingsClient.isValidVector(probe)) {
+                if (probe != null && probe.length > 0 && dev.talos.core.embed.EmbeddingsClient.isValidVector(probe)) {
                     System.out.println("  Status:    OK");
                     System.out.println("  Dimension: " + probe.length);
                 } else {
@@ -201,7 +199,7 @@ public class DiagnoseCmd implements Runnable {
                     System.err.println("FAIL: Retrieved " + retrievedCount + " snippets but answer is empty!");
                     System.err.println("Possible causes:");
                     System.err.println("  - Model context window exceeded (reduce --k)");
-                    System.err.println("  - Model not responding (check Ollama service)");
+                    System.err.println("  - Model not responding (check selected engine service)");
                     System.err.println("  - Network disabled (check config)");
                     System.exit(1);
                 }
@@ -223,6 +221,17 @@ public class DiagnoseCmd implements Runnable {
 
     private static String term(String text, boolean unicodeSafe) {
         return Sanitize.sanitizeForTerminalOutput(text, unicodeSafe);
+    }
+
+    static String renderEngineSection(Config cfg, boolean unicodeSafe) {
+        EngineRuntimeConfig runtime = EngineRuntimeConfig.from(cfg);
+        StringBuilder out = new StringBuilder();
+        out.append("Engine:\n");
+        out.append("  Backend: ").append(runtime.backend()).append("\n");
+        out.append("  Model:   ").append(runtime.model()).append("\n");
+        out.append("  Host:    ").append(runtime.hostLabel()).append("\n");
+        out.append("  Policy:  ").append(term(runtime.policyLabel(), unicodeSafe)).append("\n");
+        return out.toString();
     }
 }
 

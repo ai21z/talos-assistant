@@ -14,11 +14,9 @@ import java.util.Objects;
  * the query client wraps the raw transport with the appropriate instruction
  * prefix.
  * <p>
- * <strong>PR1 scope:</strong> Only the Ollama transport is implemented.
- * Requesting a non-Ollama provider (e.g. {@code vllm}) will throw
- * {@link UnsupportedOperationException} rather than silently falling
- * back to the wrong transport. Future PRs will add OpenAI-compatible
- * transport selection based on {@code embed.provider} in config.
+ * Supports explicit transport selection through {@code embed.provider}.
+ * Ollama remains available as a legacy provider, while compat providers use
+ * OpenAI-compatible local embedding endpoints.
  */
 public final class EmbeddingsFactory {
     private EmbeddingsFactory() {}
@@ -27,7 +25,7 @@ public final class EmbeddingsFactory {
      * <p>
      * Reads {@code embed.model} first (new canonical key), falling back to
      * {@code ollama.embed} (legacy key), then to the bge-m3 built-in default.
-     * Provider is read from {@code embed.provider}, defaulting to {@code "ollama"}.
+     * Provider is read from {@code embed.provider}, defaulting to {@code "compat"}.
      * <p>
      * When the resolved model name matches a known built-in profile, the
      * built-in is used as <em>defaults</em> — not as an unconditional
@@ -41,14 +39,16 @@ public final class EmbeddingsFactory {
         Map<String, Object> embedCfg = CfgUtil.map(cfg.data.get("embed"));
         Map<String, Object> ollamaCfg = CfgUtil.map(cfg.data.get("ollama"));
 
-        // Model: embed.model > ollama.embed > "bge-m3"
+        // Provider: embed.provider > "compat"
+        String provider = stringOr(embedCfg.get("provider"), "compat");
+
+        // Model: embed.model > provider-specific fallback
         String model = stringOr(embedCfg.get("model"), null);
         if (model == null) {
-            model = stringOr(ollamaCfg.get("embed"), "bge-m3");
+            model = "ollama".equals(provider)
+                    ? stringOr(ollamaCfg.get("embed"), "bge-m3")
+                    : "talos-embed";
         }
-
-        // Provider: embed.provider > "ollama"
-        String provider = stringOr(embedCfg.get("provider"), "ollama");
 
         // Find built-in defaults for this model (may be null for unknown models)
         EmbeddingProfile builtIn = findBuiltIn(model);
@@ -122,22 +122,25 @@ public final class EmbeddingsFactory {
     /**
      * Construct the raw transport-level embeddings client.
      * <p>
-     * PR1: only the Ollama transport ({@link EmbeddingsClient}) is implemented.
-     * Any other provider value fails fast with a clear error rather than
-     * silently falling back to Ollama — which would create a mismatch
-     * between the profile identity and the actual transport.
-     *
-     * @throws UnsupportedOperationException if {@code profile.provider()} is
-     *         not {@code "ollama"}
+     * Construct the configured transport. Provider mismatches fail clearly
+     * instead of falling back to another backend silently.
      */
     private static Embeddings createRawClient(Config cfg, EmbeddingProfile profile) {
-        if (!"ollama".equals(profile.provider())) {
-            throw new UnsupportedOperationException(
-                    "Embedding provider '" + profile.provider() + "' is not yet supported. "
-                    + "Only 'ollama' is implemented in this version. "
-                    + "To use " + profile.model() + ", an OpenAI-compatible transport is required (planned for PR2).");
+        String provider = profile.provider();
+        if ("ollama".equals(provider)) {
+            return new EmbeddingsClient(cfg);
         }
-        return new EmbeddingsClient(cfg);
+        if ("compat".equals(provider)
+                || "openai_compat".equals(provider)
+                || "llama_cpp".equals(provider)) {
+            return new CompatEmbeddingsClient(cfg);
+        }
+        if ("disabled".equals(provider)) {
+            return new DisabledEmbeddings(provider, profile.model());
+        }
+        throw new UnsupportedOperationException(
+                "Embedding provider '" + provider + "' is not supported by this build. "
+                + "Supported providers: compat, openai_compat, llama_cpp, ollama, disabled.");
     }
     private static String stringOr(Object o, String fallback) {
         if (o == null) return fallback;

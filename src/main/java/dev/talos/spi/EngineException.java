@@ -43,7 +43,7 @@ public sealed class EngineException extends RuntimeException
 
         public ModelNotFound(String model, Throwable cause) {
             super("Model not found: " + model, cause, 404,
-                    "Run:  ollama pull " + (model == null ? "<model>" : model));
+                    "Configure or download the model for the selected backend, then run talos status --verbose.");
             this.model = model == null ? "" : model;
         }
 
@@ -54,7 +54,7 @@ public sealed class EngineException extends RuntimeException
     public static final class ConnectionFailed extends EngineException {
         public ConnectionFailed(String host, Throwable cause) {
             super("Cannot connect to backend at " + host, cause, 0,
-                    "Is Ollama running? Try:  ollama serve");
+                    "Check the selected model engine with talos status --verbose.");
         }
     }
 

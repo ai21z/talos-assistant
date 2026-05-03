@@ -101,12 +101,14 @@ class TalosBannerTest {
     @Test
     void resolveModel_with_empty_config_returns_unknown() {
         Config empty = new Config();
+        empty.data.remove("llm");
+        empty.data.remove("engines");
         empty.data.remove("ollama");
         String model = TalosBanner.resolveModel(empty);
-        String envModel = System.getenv("TALOS_OLLAMA_MODEL");
+        String envModel = System.getenv("TALOS_MODEL");
         if (envModel != null && !envModel.isBlank()) {
             // env var takes priority over config
-            assertEquals(envModel, model, "Should use TALOS_OLLAMA_MODEL env var");
+            assertEquals(envModel, model, "Should use TALOS_MODEL env var");
         } else {
             assertEquals("unknown", model);
         }
