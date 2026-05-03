@@ -443,10 +443,10 @@ class JsonScenarioPackTest {
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
             result.assertApprovalCounts(2, 2, 0, 2)
-                    .assertAnswerContains("Task incomplete: Static verification failed")
-                    .assertAnswerContains("The requested task is not verified complete.")
-                    .assertAnswerContains("script.js: expected target was not successfully mutated.")
-                    .assertAnswerContains("Expected web-app build to successfully mutate a JavaScript file.")
+                    .assertAnswerContains("Action obligation failed: pending expected target progress was not satisfied")
+                    .assertAnswerContains("Remaining target(s): script.js")
+                    .assertAnswerContains("Talos stopped this turn deterministically")
+                    .assertAnswerNotContains("Created the BMI calculator website files")
                     .assertAnswerNotContains("Static verification: passed")
                     .assertFileContains("index.html", "BMI Calculator")
                     .assertFileContains("style.css", ".calculator")

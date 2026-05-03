@@ -122,6 +122,43 @@ class RepairPolicyTest {
     }
 
     @Test
+    void explicitStructuralWebTaskDoesNotCarryStaleSiblingRepairTarget() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user(
+                "Make script.js fix the selector bug by changing .missing-button to .cta-button."));
+        messages.add(ChatMessage.assistant("""
+                [Task incomplete: Static verification failed - HTML does not link CSS file: `styles.css`; HTML does not link JavaScript file: `script.js`]
+
+                The requested task is not verified complete.
+                Unresolved static verification problems:
+                - HTML does not link CSS file: `styles.css`
+                - HTML does not link JavaScript file: `script.js`
+                - JavaScript references missing class selectors: `.cta-button`
+                - JavaScript references missing IDs: `#result`
+
+                Applied mutating tool calls:
+                - script.js: Edited script.js
+                """));
+        messages.add(ChatMessage.user(
+                "Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js."));
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        RepairPlan plan = RepairPolicy.planForStaticVerification(messages, contract)
+                .plan()
+                .orElseThrow();
+
+        assertEquals(List.of("index.html", "scripts.js", "styles.css"), plan.expectedTargets());
+        assertTrue(plan.instruction().contains("Full-file replacement targets: index.html, scripts.js, styles.css"),
+                plan.instruction());
+        assertFalse(plan.instruction().contains("Full-file replacement targets: index.html, script.js, scripts.js"),
+                plan.instruction());
+        assertFalse(plan.steps().stream()
+                        .anyMatch(step -> "script.js".equals(step.targetPath())),
+                plan.instruction());
+    }
+
+    @Test
     void staleReadmeStaticFailureDoesNotPlanRepairForFreshWebTargets() {
         List<ChatMessage> messages = readmeFailureMessages(
                 "Create index.html, styles.css, and scripts.js for a BMI calculator. Use talos.write_file.");

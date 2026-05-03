@@ -513,6 +513,7 @@ public final class TaskContractResolver {
         String lower = assistantResponse.toLowerCase(Locale.ROOT);
         return lower.contains("task incomplete")
                 || lower.contains("not verified complete")
+                || lower.contains("action obligation failed")
                 || lower.contains("partial verification")
                 || lower.contains("the turn remains partial")
                 || lower.contains("static verification failed")

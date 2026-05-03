@@ -3,7 +3,7 @@
   "fixture": "doc-repo",
   "v1Pack": true,
   "claims": [
-    "failed-static-verification-produces-incomplete-outcome",
+    "pending-expected-target-breach-produces-deterministic-incomplete-outcome",
     "missing-expected-web-target-is-not-hidden-behind-success-summary"
   ],
   "runner": "executor",
