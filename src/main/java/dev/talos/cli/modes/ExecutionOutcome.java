@@ -263,7 +263,7 @@ record ExecutionOutcome(
             if (completionStatus == CompletionStatus.PARTIAL) {
                 current = partialStaticVerificationFailedAnnotation(taskVerification) + current;
             } else {
-                current = staticVerificationFailedAnnotation(taskVerification) + current;
+                current = staticVerificationFailedReplacement(taskVerification, loopResult);
             }
         } else if (verificationStatus == VerificationStatus.UNAVAILABLE) {
             current = staticVerificationUnavailableAnnotation(taskVerification) + current;
@@ -1073,6 +1073,53 @@ record ExecutionOutcome(
         }
         out.append("\n\n");
         return out.toString();
+    }
+
+    private static String staticVerificationFailedReplacement(
+            TaskVerificationResult result,
+            ToolCallLoop.LoopResult loopResult
+    ) {
+        StringBuilder out = new StringBuilder();
+        out.append("[Task incomplete: Static verification failed - ")
+                .append(verificationSummary(result))
+                .append("]\n\n")
+                .append("The requested task is not verified complete. ")
+                .append("Applied changes, if any, are workspace changes only; unresolved static problems remain.");
+        List<String> problems = result == null ? List.of() : result.problems();
+        if (!problems.isEmpty()) {
+            out.append("\n\nUnresolved static verification problems:");
+            for (String problem : problems.subList(0, Math.min(5, problems.size()))) {
+                out.append("\n- ").append(singleLine(problem));
+            }
+            if (problems.size() > 5) {
+                out.append("\n- ... ").append(problems.size() - 5).append(" more");
+            }
+        }
+        List<ToolCallLoop.ToolOutcome> applied = successfulMutatingOutcomes(loopResult);
+        if (!applied.isEmpty()) {
+            out.append("\n\nApplied mutating tool calls:");
+            for (ToolCallLoop.ToolOutcome outcome : applied.subList(0, Math.min(5, applied.size()))) {
+                out.append("\n- ")
+                        .append(outcome.pathHint().isBlank() ? outcome.toolName() : outcome.pathHint())
+                        .append(": ")
+                        .append(outcome.summary().isBlank() ? "mutation applied" : singleLine(outcome.summary()));
+            }
+            if (applied.size() > 5) {
+                out.append("\n- ... ").append(applied.size() - 5).append(" more");
+            }
+        }
+        out.append("\n\nThe assistant success summary was replaced with this runtime verification result because verification failed.");
+        return out.toString().stripTrailing();
+    }
+
+    private static List<ToolCallLoop.ToolOutcome> successfulMutatingOutcomes(
+            ToolCallLoop.LoopResult loopResult
+    ) {
+        if (loopResult == null || loopResult.toolOutcomes() == null) return List.of();
+        return loopResult.toolOutcomes().stream()
+                .filter(ToolCallLoop.ToolOutcome::mutating)
+                .filter(ToolCallLoop.ToolOutcome::success)
+                .toList();
     }
 
     private static String partialStaticVerificationFailedAnnotation(TaskVerificationResult result) {

@@ -1,6 +1,6 @@
 # T93 - Failure-Dominant Output For Failed Verification And Partial Mutation
 
-Status: Open
+Status: Done
 Priority: High
 Branch: v0.9.0-beta-dev
 Source: Clean Qwen/GPT-OSS audit follow-up
@@ -52,7 +52,8 @@ mutation outcomes, not left to the model.
 
 Likely code/document areas:
 
-- `src/main/kotlin/dev/talos/cli/modes/AssistantTurnExecutor.kt`
+- `src/main/java/dev/talos/cli/modes/ExecutionOutcome.java`
+- `src/main/java/dev/talos/cli/modes/AssistantTurnExecutor.java`
 - runtime outcome rendering and verification summary code
 - focused assistant turn executor tests
 
@@ -76,13 +77,27 @@ should replace or sanitize assistant prose so the user sees a concise
 failure-dominant summary. Successful verified outputs should still preserve
 concise success summaries.
 
+Implemented:
+
+- Replaced the non-partial failed-static-verification append path with a
+  runtime-owned failure summary in `ExecutionOutcome`.
+- The replacement names the failed verifier summary, unresolved static problems,
+  and applied mutating tool calls without appending model-authored success or
+  manual browser/save instructions.
+- Existing partial mutation summaries remain runtime-owned and continue to be
+  shown under the partial verification failure block.
+- Verified successful outputs still retain concise assistant success summaries.
+
 ## Acceptance Criteria
 
-- Failed verifier output is failure-dominant.
-- Success/manual prose after failed verification is suppressed or replaced.
-- Tests cover model text containing success prose after failed verification.
-- Existing successful verified outputs still preserve concise success summaries.
-- No regressions to privacy, permissions, checkpointing, trace redaction, or
+- Done: failed verifier output is failure-dominant.
+- Done: success/manual prose after failed verification is suppressed or
+  replaced.
+- Done: tests cover model text containing success prose after failed
+  verification.
+- Done: existing successful verified outputs still preserve concise success
+  summaries.
+- Done: no regressions to privacy, permissions, checkpointing, trace redaction, or
   outcome truth.
 
 ## Tests / Evidence
@@ -93,6 +108,14 @@ Required deterministic regression:
   success/manual prose is rendered failure-dominant.
 - Neighbor test: verified success answer keeps concise success content.
 
+Added:
+
+- `ExecutionOutcomeTest.failedStaticVerificationReplacesSuccessAndManualProse`
+- Strengthened `ExecutionOutcomeTest.literalMatchAfterSuccessfulWriteIsVerifiedComplete`
+- Updated `ExecutionOutcomeTest.postApplyBroadWebAppMissingScriptIsDowngradedAsIncomplete`
+  to assert runtime-owned applied mutation facts instead of appended success
+  prose.
+
 Commands:
 
 ```powershell
@@ -100,6 +123,19 @@ Commands:
 ./gradlew.bat test --no-daemon
 ./gradlew.bat e2eTest --no-daemon
 ```
+
+Verification run:
+
+```powershell
+./gradlew.bat test --tests "dev.talos.cli.modes.ExecutionOutcomeTest.failedStaticVerificationReplacesSuccessAndManualProse" --no-daemon
+./gradlew.bat test --tests "dev.talos.cli.modes.ExecutionOutcomeTest" --no-daemon
+./gradlew.bat test --tests "dev.talos.cli.modes.ExecutionOutcomeTest" --tests "dev.talos.cli.modes.AssistantTurnExecutorTest" --no-daemon
+./gradlew.bat test e2eTest --no-daemon
+```
+
+Result: all commands passed after the implementation. The new regression failed
+before the implementation because the final answer still contained
+`calculator is complete`.
 
 ## Work-Test Cycle Notes
 
@@ -111,12 +147,11 @@ Commands:
 ## Known Risks
 
 - Over-sanitizing could erase useful model explanations on genuinely successful
-  verified outputs.
+  verified outputs. Covered by a verified-success neighbor assertion.
 - Under-sanitizing leaves misleading success prose after a failed runtime
-  outcome.
+  outcome. Covered by the new failed-verifier regression.
 
 ## Known Follow-Ups
 
 - If sanitizer logic needs many ad hoc phrases, split outcome rendering into a
   clearer runtime-owned failure renderer.
-
