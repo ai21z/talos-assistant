@@ -105,6 +105,8 @@ engines:
     mode: "managed"               # managed or connect_only
     server_path: ""               # path to llama-server.exe
     model_path: ""                # path to local GGUF model
+    hf_repo: ""                   # optional Hugging Face GGUF repo for llama-server --hf-repo
+    hf_file: ""                   # optional GGUF filename within hf_repo
     model: "talos-agent"          # API model alias used by chat requests
     host: "http://127.0.0.1"
     port: 8080

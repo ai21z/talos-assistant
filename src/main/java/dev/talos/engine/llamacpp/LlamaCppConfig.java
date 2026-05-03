@@ -14,6 +14,8 @@ record LlamaCppConfig(
         Mode mode,
         String serverPath,
         String modelPath,
+        String hfRepo,
+        String hfFile,
         String model,
         String host,
         int port,
@@ -38,6 +40,8 @@ record LlamaCppConfig(
         Mode mode = parseMode(Objects.toString(block.getOrDefault("mode", "managed")));
         String serverPath = stringAt(block, "server_path", "");
         String modelPath = stringAt(block, "model_path", "");
+        String hfRepo = stringAt(block, "hf_repo", "");
+        String hfFile = stringAt(block, "hf_file", "");
         String model = stringAt(block, "model", "");
         String host = stringAt(block, "host", "http://127.0.0.1");
         int port = CfgUtil.intAt(block, "port", portFromHost(host, 8080));
@@ -54,6 +58,8 @@ record LlamaCppConfig(
                 mode,
                 serverPath,
                 modelPath,
+                hfRepo,
+                hfFile,
                 model,
                 host,
                 port,
@@ -66,6 +72,10 @@ record LlamaCppConfig(
 
     boolean managed() {
         return mode == Mode.MANAGED;
+    }
+
+    boolean hasHfSource() {
+        return hfRepo != null && !hfRepo.isBlank();
     }
 
     String baseUrl() {
@@ -100,7 +110,17 @@ record LlamaCppConfig(
                 return modelPath;
             }
         }
+        if (hfRepo != null && !hfRepo.isBlank()) return hfRepoName(hfRepo);
         return "local-llama-cpp";
+    }
+
+    private static String hfRepoName(String repo) {
+        String value = Objects.toString(repo, "").trim();
+        int slash = value.lastIndexOf('/');
+        if (slash >= 0 && slash + 1 < value.length()) {
+            return value.substring(slash + 1);
+        }
+        return value;
     }
 
     private static Mode parseMode(String raw) {

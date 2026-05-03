@@ -97,6 +97,52 @@ class LlamaCppServerManagerTest {
     }
 
     @Test
+    void managedModeLaunchesHuggingFaceRepoSourceWithoutLocalModelPath() throws Exception {
+        Path exe = touch("llama-server.exe");
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            Config cfg = config(Map.ofEntries(
+                    Map.entry("mode", "managed"),
+                    Map.entry("server_path", exe.toString()),
+                    Map.entry("hf_repo", "ggml-org/gpt-oss-20b-GGUF"),
+                    Map.entry("hf_file", "gpt-oss-20b-mxfp4.gguf"),
+                    Map.entry("model", "gpt-oss-20b"),
+                    Map.entry("host", "http://127.0.0.1"),
+                    Map.entry("port", server.getAddress().getPort()),
+                    Map.entry("context", 8192),
+                    Map.entry("jinja", true)));
+            FakeLauncher launcher = new FakeLauncher();
+            LlamaCppServerManager manager = new LlamaCppServerManager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
+
+            manager.ensureStarted();
+
+            assertEquals(1, launcher.commands.size());
+            List<String> command = launcher.commands.get(0);
+            assertFalse(command.contains("-m"), "HF source must not also require a local -m model path: " + command);
+            assertContainsPair(command, "--hf-repo", "ggml-org/gpt-oss-20b-GGUF");
+            assertContainsPair(command, "--hf-file", "gpt-oss-20b-mxfp4.gguf");
+            assertContainsPair(command, "--alias", "gpt-oss-20b");
+            assertContainsPair(command, "-c", "8192");
+            assertTrue(command.contains("--jinja"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void catalogFallbackModelUsesHuggingFaceRepoWhenNoAliasOrModelPath() {
+        Config cfg = config(Map.of(
+                "mode", "managed",
+                "hf_repo", "ggml-org/gpt-oss-20b-GGUF"));
+
+        LlamaCppConfig config = LlamaCppConfig.from(cfg);
+
+        assertEquals("gpt-oss-20b-GGUF", config.catalogFallbackModel());
+    }
+
+    @Test
     void connectOnlyKeepsConfiguredContextWindowForExternalServer() {
         Config cfg = config(Map.of(
                 "mode", "connect_only",
@@ -212,7 +258,7 @@ class LlamaCppServerManagerTest {
         Health health = manager.health();
 
         assertFalse(health.ok());
-        assertTrue(health.message().contains("model_path"));
+        assertTrue(health.message().contains("model_path or hf_repo"));
     }
 
     @Test
