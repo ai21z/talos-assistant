@@ -414,6 +414,10 @@ public final class TurnProcessor {
                 TurnAuditCapture.recordToolCall(
                         call.toolName(), path == null ? "" : path, false,
                         preApprovalBlockReason(call, preApprovalValidation));
+                LocalTurnTraceCapture.recordToolCallBlocked(
+                        tracePhase,
+                        call,
+                        preApprovalBlockReason(call, preApprovalValidation));
                 return preApprovalValidation;
             }
         }
@@ -597,6 +601,11 @@ public final class TurnProcessor {
             return forbiddenTargetValidation;
         }
 
+        ToolResult expectedTargetValidation = validateExpectedTargetBeforeApproval(call, taskContract);
+        if (expectedTargetValidation != null) {
+            return expectedTargetValidation;
+        }
+
         if (isWriteFileTool(call.toolName())) {
             String path = resolveParam(call, "path", "file_path", "filepath", "file", "filename");
             if (path == null || path.isBlank()) {
@@ -648,6 +657,31 @@ public final class TurnProcessor {
         }
 
         return null;
+    }
+
+    private static ToolResult validateExpectedTargetBeforeApproval(ToolCall call, TaskContract taskContract) {
+        if (call == null
+                || taskContract == null
+                || !taskContract.mutationAllowed()
+                || taskContract.expectedTargets().isEmpty()
+                || !ToolCallSupport.isMutatingTool(call.toolName())) {
+            return null;
+        }
+        String path = resolveParam(call, "path", "file_path", "filepath", "file", "filename");
+        if (path == null || path.isBlank()) {
+            return null;
+        }
+        for (String expected : taskContract.expectedTargets()) {
+            if (sameExpectedTarget(path, expected)) {
+                return null;
+            }
+        }
+        return ToolResult.fail(ToolError.invalidParams(
+                "Target outside expected targets before approval: `" + path
+                        + "` is outside the current expected target set: "
+                        + String.join(", ", orderedExpectedTargets(taskContract))
+                        + ". Similar filenames are not substitutes for required target paths. "
+                        + "No approval was requested and no file was changed."));
     }
 
     private static ToolResult validateSandboxPathBeforeApproval(ToolCall call, Session session, Context ctx) {
@@ -723,6 +757,10 @@ public final class TurnProcessor {
         }
         if (message != null && message.startsWith("Target forbidden before approval")) {
             return "forbidden target before approval"
+                    + (message.isBlank() ? "" : ": " + shortReason(message));
+        }
+        if (message != null && message.startsWith("Target outside expected targets before approval")) {
+            return "expected target scope before approval"
                     + (message.isBlank() ? "" : ": " + shortReason(message));
         }
         if (isEditFileTool(name)) {
@@ -820,6 +858,22 @@ public final class TurnProcessor {
         String f = normalizeScopedTarget(forbidden);
         if (c.isBlank() || f.isBlank()) return false;
         return c.equals(f) || c.endsWith("/" + f);
+    }
+
+    private static boolean sameExpectedTarget(String candidate, String expected) {
+        String c = normalizeScopedTarget(candidate);
+        String e = normalizeScopedTarget(expected);
+        if (c.isBlank() || e.isBlank()) return false;
+        return c.equals(e);
+    }
+
+    private static List<String> orderedExpectedTargets(TaskContract taskContract) {
+        if (taskContract == null || taskContract.expectedTargets().isEmpty()) return List.of();
+        return taskContract.expectedTargets().stream()
+                .map(TurnProcessor::normalizeScopedTarget)
+                .filter(path -> !path.isBlank())
+                .sorted()
+                .toList();
     }
 
     private static String normalizeScopedTarget(String path) {

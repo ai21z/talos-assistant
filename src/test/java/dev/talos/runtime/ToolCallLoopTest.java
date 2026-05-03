@@ -5,11 +5,13 @@ import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.core.security.Sandbox;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.*;
 import dev.talos.tools.impl.FileEditTool;
+import dev.talos.tools.impl.FileWriteTool;
 import dev.talos.tools.impl.ReadFileTool;
 import org.junit.jupiter.api.Test;
 
@@ -1203,6 +1205,75 @@ class ToolCallLoopTest {
                 .anyMatch(event -> "PENDING_ACTION_OBLIGATION_RAISED".equals(event.type())));
         assertTrue(trace.events().stream()
                 .noneMatch(event -> "PENDING_ACTION_OBLIGATION_BREACHED".equals(event.type())));
+    }
+
+    @Test
+    void offTargetExpectedMutationStopsLoopWithoutSuccessProseOrFileChange() throws Exception {
+        Path ws = Files.createTempDirectory("talos-expected-target-scope-loop-");
+        try {
+            var registry = new ToolRegistry();
+            registry.register(new FileWriteTool());
+            final int[] approvals = {0};
+            var processor = new TurnProcessor(
+                    ModeController.defaultController(),
+                    (description, detail) -> {
+                        approvals[0]++;
+                        return true;
+                    },
+                    registry);
+            var loop = new ToolCallLoop(processor, 10);
+
+            String request = "Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of("should not be called")))
+                    .build();
+            String initial = """
+                    Complete and ready to use.
+                    {"name":"talos.write_file","arguments":{"path":"notes.md","content":"off target"}}
+                    """;
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            LocalTurnTraceCapture.begin("trc-t119-off-target", "session", 1,
+                    "2026-05-04T00:00:00Z", "ws", "test", "llama_cpp", "gpt-oss", request);
+            ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
+            try {
+                result = loop.run(initial, messages, ws, ctx);
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+                LocalTurnTraceCapture.clear();
+            }
+
+            assertEquals(1, result.iterations());
+            assertEquals(1, result.toolsInvoked());
+            assertEquals(0, result.mutatingToolSuccesses());
+            assertEquals(0, approvals[0], "off-target mutation must not reach approval");
+            assertFalse(Files.exists(ws.resolve("notes.md")),
+                    "off-target file must not be written");
+            assertTrue(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertTrue(result.failureDecision().reason().contains("outside the current expected target set"),
+                    result.failureDecision().reason());
+            String finalLower = result.finalAnswer().toLowerCase(java.util.Locale.ROOT);
+            assertFalse(finalLower.contains("complete"), result.finalAnswer());
+            assertFalse(finalLower.contains("ready to use"), result.finalAnswer());
+
+            var blocked = trace.events().stream()
+                    .filter(event -> "TOOL_CALL_BLOCKED".equals(event.type()))
+                    .filter(event -> String.valueOf(event.data().get("reason"))
+                            .contains("outside the current expected target set"))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("notes.md", blocked.data().get("pathHint"));
+        } finally {
+            deleteRecursive(ws);
+        }
     }
 
     // ── Helpers ─────────────────────────────────────────────────────

@@ -23,6 +23,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -329,6 +330,89 @@ class TurnProcessorTest {
         assertTrue(result.success(), result.errorMessage());
         assertEquals(1, approvals.get());
         assertTrue(Files.exists(workspace.resolve("styles.css")));
+    }
+
+    @Test
+    void expectedTargetScopeRejectsOffTargetWritesBeforeApproval(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "original readme\n");
+        Files.writeString(workspace.resolve("notes.md"), "private marker must stay private\n");
+        Files.writeString(workspace.resolve("script.js"), "console.log('old sibling');\n");
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+        String request = "Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js.";
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+
+        for (String target : List.of("README.md", "notes.md", "script.js")) {
+            ToolResult result = tp.executeTool(session,
+                    new ToolCall("talos.write_file", Map.of(
+                            "path", target,
+                            "content", "off target mutation")), ctx);
+
+            assertFalse(result.success(), target);
+            assertEquals(ToolError.INVALID_PARAMS, result.error().code(), target);
+            assertTrue(result.errorMessage().contains("outside the current expected target set"),
+                    result.errorMessage());
+            assertTrue(result.errorMessage().contains("index.html"), result.errorMessage());
+            assertTrue(result.errorMessage().contains("styles.css"), result.errorMessage());
+            assertTrue(result.errorMessage().contains("scripts.js"), result.errorMessage());
+            assertTrue(result.errorMessage().contains("No approval was requested"), result.errorMessage());
+        }
+
+        assertEquals(0, approvals.get(), "off-target writes must not reach approval");
+        assertEquals("original readme\n", Files.readString(workspace.resolve("README.md")));
+        assertEquals("private marker must stay private\n", Files.readString(workspace.resolve("notes.md")));
+        assertEquals("console.log('old sibling');\n", Files.readString(workspace.resolve("script.js")));
+    }
+
+    @Test
+    void expectedTargetScopeRejectsOffTargetEditBeforeApproval(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("script.js"), "console.log('wrong sibling');\n");
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+        String request = "Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js.";
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.edit_file", Map.of(
+                        "path", "script.js",
+                        "old_string", "console.log('wrong sibling');\n",
+                        "new_string", "console.log('mutated');\n")), ctx);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.INVALID_PARAMS, result.error().code());
+        assertTrue(result.errorMessage().contains("outside the current expected target set"),
+                result.errorMessage());
+        assertTrue(result.errorMessage().contains("script.js"), result.errorMessage());
+        assertTrue(result.errorMessage().contains("scripts.js"), result.errorMessage());
+        assertTrue(result.errorMessage().contains("No approval was requested"), result.errorMessage());
+        assertEquals(0, approvals.get());
+        assertEquals("console.log('wrong sibling');\n", Files.readString(workspace.resolve("script.js")));
+    }
+
+    @Test
+    void expectedTargetScopeAllowsExactExpectedTarget(@TempDir Path workspace) {
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+        String request = "Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js.";
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.write_file", Map.of(
+                        "path", "scripts.js",
+                        "content", "console.log('expected target');\n")), ctx);
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(1, approvals.get());
+        assertTrue(Files.exists(workspace.resolve("scripts.js")));
     }
 
     @Test
