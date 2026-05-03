@@ -2459,10 +2459,10 @@ class AssistantTurnExecutorTest {
             // This ensures new subtypes added to EngineException won't slip through.
             var subtypes = EngineException.class.getPermittedSubclasses();
             assertNotNull(subtypes, "EngineException should be sealed");
-            // execute() catches: ConnectionFailed, ModelNotFound, Transient, EngineException (base)
-            // All 4 permitted subtypes should be in the sealed list
-            assertEquals(4, subtypes.length,
-                    "EngineException should have exactly 4 subtypes (if this changes, update execute())");
+            // execute() catches: ConnectionFailed, ModelNotFound, Transient, EngineException (base).
+            // ResponseError and MalformedResponse are intentionally covered by the base catch.
+            assertEquals(5, subtypes.length,
+                    "EngineException should have exactly 5 subtypes (if this changes, update execute())");
         }
     }
 
