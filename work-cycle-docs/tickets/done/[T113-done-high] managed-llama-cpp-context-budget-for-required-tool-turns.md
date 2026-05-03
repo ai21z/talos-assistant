@@ -1,6 +1,6 @@
 # T113 - Managed llama.cpp Context Budget For Required-Tool Turns
 
-Status: open
+Status: done
 Severity: high
 Area: backend/llama-cpp, prompt-runtime
 
@@ -31,6 +31,17 @@ This blocks the normal prompt-construction probes before model behavior can be e
 
 ## Verification
 
-- Unit tests for context option/profile selection or preflight diagnostics.
-- Managed llama.cpp Qwen smoke/audit run with `qwen2.5-coder:14b`.
-- Full test/e2e verification before closing.
+- Added unit coverage for managed context floor, connect-only context passthrough, effective capabilities, and context-overflow trace classification.
+- Targeted tests:
+  - `.\gradlew.bat test --tests "dev.talos.engine.llamacpp.LlamaCppServerManagerTest" --no-daemon`
+  - `.\gradlew.bat test --tests "dev.talos.cli.modes.AssistantTurnExecutorTest*llama_cpp_context_overflow_records_context_budget_failure_outcome" --no-daemon`
+  - `.\gradlew.bat test --tests "dev.talos.engine.llamacpp.LlamaCppEngineProviderTest" --no-daemon`
+  - `.\gradlew.bat test --tests "dev.talos.engine.llamacpp.*" --tests "dev.talos.cli.modes.AssistantTurnExecutorTest*ErrorHandling*" --no-daemon`
+- Full verification:
+  - `.\gradlew.bat test e2eTest --no-daemon`
+  - `.\gradlew.bat installDist --no-daemon`
+- Managed llama.cpp Qwen smoke:
+  - Model: `qwen2.5-coder:14b`
+  - Artifact: `local/manual-testing/t113-qwen-context-smoke-20260503-205542/FINDINGS-T113-QWEN-CONTEXT-SMOKE.md`
+  - The smoke intentionally configured `context: 4096`; managed llama.cpp launched with `n_ctx = 8192`.
+  - The BMI create probe did not produce `request exceeds the available context size`.

@@ -23,6 +23,9 @@ record LlamaCppConfig(
         String chatTemplateFile,
         List<String> serverArgs
 ) {
+    static final int DEFAULT_CONTEXT = 8192;
+    static final int MIN_MANAGED_AGENT_CONTEXT = 8192;
+
     enum Mode {
         MANAGED,
         CONNECT_ONLY
@@ -38,7 +41,10 @@ record LlamaCppConfig(
         String model = stringAt(block, "model", "");
         String host = stringAt(block, "host", "http://127.0.0.1");
         int port = CfgUtil.intAt(block, "port", portFromHost(host, 8080));
-        int context = CfgUtil.intAt(block, "context", 8192);
+        int configuredContext = CfgUtil.intAt(block, "context", DEFAULT_CONTEXT);
+        int context = mode == Mode.MANAGED
+                ? Math.max(configuredContext, MIN_MANAGED_AGENT_CONTEXT)
+                : Math.max(256, configuredContext);
         boolean jinja = CfgUtil.boolAt(block, "jinja", true);
         String chatTemplate = stringAt(block, "chat_template", "");
         String chatTemplateFile = stringAt(block, "chat_template_file", "");

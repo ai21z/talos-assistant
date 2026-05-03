@@ -39,7 +39,7 @@ class LlamaCppServerManagerTest {
                     Map.entry("model", "talos-agent"),
                     Map.entry("host", "http://127.0.0.1"),
                     Map.entry("port", server.getAddress().getPort()),
-                    Map.entry("context", 4096),
+                    Map.entry("context", 12288),
                     Map.entry("jinja", true),
                     Map.entry("chat_template", "chatml"),
                     Map.entry("server_args", List.of("--no-webui", "--log-disable"))));
@@ -54,7 +54,7 @@ class LlamaCppServerManagerTest {
             List<String> command = launcher.commands.get(0);
             assertEquals(exe.toString(), command.get(0));
             assertContainsPair(command, "-m", model.toString());
-            assertContainsPair(command, "-c", "4096");
+            assertContainsPair(command, "-c", "12288");
             assertContainsPair(command, "--host", "127.0.0.1");
             assertContainsPair(command, "--port", String.valueOf(server.getAddress().getPort()));
             assertContainsPair(command, "--alias", "talos-agent");
@@ -65,6 +65,46 @@ class LlamaCppServerManagerTest {
         } finally {
             server.stop(0);
         }
+    }
+
+    @Test
+    void managedModeRaisesSmallConfiguredContextToAgentMinimum() throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = touch("agent.gguf");
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort(),
+                    "context", 4096));
+            FakeLauncher launcher = new FakeLauncher();
+            LlamaCppServerManager manager = new LlamaCppServerManager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
+
+            manager.ensureStarted();
+
+            assertEquals(1, launcher.commands.size());
+            assertContainsPair(launcher.commands.get(0), "-c", "8192");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void connectOnlyKeepsConfiguredContextWindowForExternalServer() {
+        Config cfg = config(Map.of(
+                "mode", "connect_only",
+                "host", "http://127.0.0.1",
+                "port", 18080,
+                "context", 4096));
+
+        LlamaCppConfig config = LlamaCppConfig.from(cfg);
+
+        assertEquals(4096, config.context());
     }
 
     @Test

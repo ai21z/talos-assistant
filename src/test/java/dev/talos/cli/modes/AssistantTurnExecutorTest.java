@@ -2469,7 +2469,7 @@ class AssistantTurnExecutorTest {
             var ctx = Context.builder(new Config())
                     .llm(LlmClient.scriptedFailure(new EngineException.ResponseError(
                             400,
-                            "request exceeds the available context size")))
+                            "invalid request payload")))
                     .build();
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("system"));
@@ -2494,6 +2494,41 @@ class AssistantTurnExecutorTest {
                 assertNoSuccessProse(out.text());
                 assertEquals("FAILED", trace.outcome().status());
                 assertEquals("BACKEND_RESPONSE_ERROR", trace.outcome().classification());
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        }
+
+        @Test
+        void llama_cpp_context_overflow_records_context_budget_failure_outcome() {
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scriptedFailure(new EngineException.ResponseError(
+                            400,
+                            "request (4383 tokens) exceeds the available context size (4096 tokens)")))
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("system"));
+            messages.add(ChatMessage.user("Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js."));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-context-budget",
+                    "sid",
+                    1,
+                    "2026-05-03T00:00:00Z",
+                    "workspace-hash",
+                    "test",
+                    "llama_cpp",
+                    "qwen2.5-coder-14b",
+                    "Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js.");
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, WS, ctx, new AssistantTurnExecutor.Options());
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertTrue(out.text().contains("Engine error"), out.text());
+                assertNoSuccessProse(out.text());
+                assertEquals("FAILED", trace.outcome().status());
+                assertEquals("CONTEXT_BUDGET_EXCEEDED", trace.outcome().classification());
             } finally {
                 LocalTurnTraceCapture.clear();
             }
