@@ -50,6 +50,28 @@ class LlamaCppEngineProviderTest {
     }
 
     @Test
+    void managedCapsReportRaisedAgentMinimumContext() {
+        Config cfg = config(Map.of(
+                "mode", "managed",
+                "context", 4096));
+
+        Capabilities caps = new LlamaCppEngineProvider().create(cfg).caps();
+
+        assertEquals(8192, caps.contextWindow());
+    }
+
+    @Test
+    void connectOnlyCapsReportConfiguredExternalContext() {
+        Config cfg = config(Map.of(
+                "mode", "connect_only",
+                "context", 4096));
+
+        Capabilities caps = new LlamaCppEngineProvider().create(cfg).caps();
+
+        assertEquals(4096, caps.contextWindow());
+    }
+
+    @Test
     void providerIsDiscoverableThroughEngineRegistry() {
         EngineRegistry registry = new EngineRegistry(config(Map.of("mode", "connect_only")));
         try {

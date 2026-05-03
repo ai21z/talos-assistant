@@ -108,7 +108,7 @@ engines:
     model: "talos-agent"          # API model alias used by chat requests
     host: "http://127.0.0.1"
     port: 8080
-    context: 8192
+    context: 8192                   # Managed mode uses at least 8192 for agent tool turns.
     jinja: true
     chat_template: ""
     chat_template_file: ""

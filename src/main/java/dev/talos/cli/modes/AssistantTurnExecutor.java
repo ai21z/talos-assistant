@@ -368,12 +368,24 @@ public final class AssistantTurnExecutor {
 
     private static String engineFailureClassification(EngineException ex) {
         if (ex instanceof EngineException.ResponseError) {
+            if (isContextBudgetFailure(ex)) {
+                return "CONTEXT_BUDGET_EXCEEDED";
+            }
             return "BACKEND_RESPONSE_ERROR";
         }
         if (ex instanceof EngineException.MalformedResponse) {
             return "BACKEND_MALFORMED_RESPONSE";
         }
         return "BACKEND_ENGINE_ERROR";
+    }
+
+    private static boolean isContextBudgetFailure(EngineException ex) {
+        String message = ex == null ? "" : Objects.toString(ex.getMessage(), "").toLowerCase(Locale.ROOT);
+        return message.contains("exceeds")
+                && (message.contains("available context size")
+                || message.contains("context size")
+                || message.contains("context window")
+                || message.contains("context budget"));
     }
 
     /** Apply mode-specific sanitization then truncate if over budget. */
