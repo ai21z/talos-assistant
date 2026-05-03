@@ -327,7 +327,12 @@ public final class AssistantTurnExecutor {
         if (ex instanceof EngineException.ConnectionFailed cf) {
             recordBackendFailureOutcome("BACKEND_CONNECTION_FAILED");
             LOG.warn("Model engine not reachable: {}", cf.getMessage());
-            out.append("\n[Model engine not reachable - ").append(cf.guidance()).append("]\n");
+            String detail = actionableConnectionFailureDetail(cf);
+            out.append("\n[Model engine not reachable - ");
+            if (!detail.isBlank()) {
+                out.append(detail).append(' ');
+            }
+            out.append(cf.guidance()).append("]\n");
             return;
         }
         if (ex instanceof EngineException.ModelNotFound mnf) {
@@ -386,6 +391,17 @@ public final class AssistantTurnExecutor {
                 || message.contains("context size")
                 || message.contains("context window")
                 || message.contains("context budget"));
+    }
+
+    private static String actionableConnectionFailureDetail(EngineException.ConnectionFailed ex) {
+        String message = ex == null ? "" : Objects.toString(ex.getMessage(), "");
+        String lower = message.toLowerCase(Locale.ROOT);
+        if (!lower.contains("unsupported gguf architecture")
+                && !lower.contains("no fallback model was selected")) {
+            return "";
+        }
+        String prefix = "Cannot connect to backend at ";
+        return message.startsWith(prefix) ? message.substring(prefix.length()) : message;
     }
 
     /** Apply mode-specific sanitization then truncate if over budget. */

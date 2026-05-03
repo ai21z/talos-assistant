@@ -2570,6 +2570,46 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void unsupported_model_connection_failure_is_visible_and_failure_dominant() {
+            String diagnostic = "llama_cpp model 'gpt-oss-20b' at C:\\models\\gpt-oss.gguf "
+                    + "uses unsupported GGUF architecture 'gptoss'. No fallback model was selected.";
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scriptedFailure(new EngineException.ConnectionFailed(
+                            diagnostic,
+                            null)))
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("system"));
+            messages.add(ChatMessage.user("Overwrite index.html with exactly AFTER. Use talos.write_file."));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-unsupported-model",
+                    "sid",
+                    1,
+                    "2026-05-03T00:00:00Z",
+                    "workspace-hash",
+                    "test",
+                    "llama_cpp",
+                    "gpt-oss-20b",
+                    "Overwrite index.html with exactly AFTER. Use talos.write_file.");
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, WS, ctx, new AssistantTurnExecutor.Options());
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertTrue(out.text().contains("unsupported GGUF architecture 'gptoss'"), out.text());
+                assertTrue(out.text().contains("gpt-oss-20b"), out.text());
+                assertTrue(out.text().contains("C:\\models\\gpt-oss.gguf"), out.text());
+                assertTrue(out.text().contains("No fallback model was selected"), out.text());
+                assertNoSuccessProse(out.text());
+                assertEquals("FAILED", trace.outcome().status());
+                assertEquals("BACKEND_CONNECTION_FAILED", trace.outcome().classification());
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        }
+
+        @Test
         void engine_exception_subtypes_are_all_sealed_and_accounted_for() {
             // Structural test: verify the sealed hierarchy matches what execute() catches.
             // This ensures new subtypes added to EngineException won't slip through.

@@ -11,6 +11,8 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -214,6 +216,39 @@ class LlamaCppServerManagerTest {
     }
 
     @Test
+    void managedModeRejectsUnsupportedOllamaGptOssGgufBeforeLaunch() throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path model = writeGgufWithArchitecture("gptoss");
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            Config cfg = config(Map.of(
+                    "mode", "managed",
+                    "server_path", exe.toString(),
+                    "model_path", model.toString(),
+                    "model", "gpt-oss-20b",
+                    "host", "http://127.0.0.1",
+                    "port", server.getAddress().getPort()));
+            FakeLauncher launcher = new FakeLauncher();
+            LlamaCppServerManager manager = new LlamaCppServerManager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
+
+            EngineException.ConnectionFailed error =
+                    assertThrows(EngineException.ConnectionFailed.class, manager::ensureStarted);
+            Health health = manager.health();
+
+            assertTrue(launcher.commands.isEmpty(), "unsupported GGUF variant must fail before process launch");
+            assertTrue(error.getMessage().contains("unsupported GGUF architecture 'gptoss'"), error.getMessage());
+            assertTrue(error.getMessage().contains("gpt-oss-20b"), error.getMessage());
+            assertTrue(error.getMessage().contains(model.toString()), error.getMessage());
+            assertFalse(health.ok());
+            assertTrue(health.message().contains("unsupported GGUF architecture 'gptoss'"), health.message());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void failedLaunchIsRecordedForHealth() throws Exception {
         Path exe = touch("llama-server.exe");
         Path model = touch("agent.gguf");
@@ -283,6 +318,25 @@ class LlamaCppServerManagerTest {
     private Path touch(String filename) throws IOException {
         Path path = tempDir.resolve(filename);
         Files.writeString(path, "fake", StandardCharsets.UTF_8);
+        return path;
+    }
+
+    private Path writeGgufWithArchitecture(String architecture) throws IOException {
+        Path path = tempDir.resolve("model-" + architecture + ".gguf");
+        byte[] key = "general.architecture".getBytes(StandardCharsets.UTF_8);
+        byte[] value = architecture.getBytes(StandardCharsets.UTF_8);
+        ByteBuffer buffer = ByteBuffer.allocate(4 + 4 + 8 + 8 + 8 + key.length + 4 + 8 + value.length)
+                .order(ByteOrder.LITTLE_ENDIAN);
+        buffer.put((byte) 'G').put((byte) 'G').put((byte) 'U').put((byte) 'F');
+        buffer.putInt(3);
+        buffer.putLong(0);
+        buffer.putLong(1);
+        buffer.putLong(key.length);
+        buffer.put(key);
+        buffer.putInt(8);
+        buffer.putLong(value.length);
+        buffer.put(value);
+        Files.write(path, buffer.array());
         return path;
     }
 
