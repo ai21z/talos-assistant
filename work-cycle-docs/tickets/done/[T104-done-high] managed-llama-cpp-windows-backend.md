@@ -1,6 +1,6 @@
 # T104 - Managed llama.cpp Windows Backend
 
-Status: Open
+Status: Done
 Priority: High
 Branch: v0.9.0-beta-dev
 Source: 2026-05-03 engine backend pivot
