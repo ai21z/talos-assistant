@@ -93,6 +93,20 @@ ollama:
   embed: "bge-m3"
   allow_remote: false  # Set to true to allow non-localhost Ollama hosts
 
+engines:
+  llama_cpp:
+    mode: "managed"               # managed or connect_only
+    server_path: ""               # path to llama-server.exe
+    model_path: ""                # path to local GGUF model
+    model: "talos-agent"          # API model alias used by chat requests
+    host: "http://127.0.0.1"
+    port: 8080
+    context: 8192
+    jinja: true
+    chat_template: ""
+    chat_template_file: ""
+    server_args: []
+
 net:
   enabled: true
 
