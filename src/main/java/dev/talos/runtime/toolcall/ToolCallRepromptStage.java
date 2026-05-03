@@ -46,7 +46,9 @@ public final class ToolCallRepromptStage {
         }
 
         if (outcome.pathPolicyBlockedThisIteration()) {
-            state.currentText = "[Tool loop stopped because a mutating path was blocked by workspace policy before approval.]";
+            state.currentText = state.failureDecision.shouldStop()
+                    ? failurePolicyStopMessage(state.failureDecision)
+                    : "[Tool loop stopped because a mutating path was blocked by workspace policy before approval.]";
             state.currentNativeCalls = List.of();
             LOG.debug("Stopping tool-call loop after pre-approval path policy block; not re-prompting.");
             return false;

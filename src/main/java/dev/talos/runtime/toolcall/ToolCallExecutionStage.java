@@ -239,6 +239,11 @@ public final class ToolCallExecutionStage {
             }
             if (isPreApprovalPathPolicyBlock(result) && ToolCallSupport.isMutatingTool(effective.toolName())) {
                 pathPolicyBlockedThisIter = true;
+                if (isExpectedTargetScopeBlock(result)) {
+                    state.failureDecision = dev.talos.runtime.failure.FailureDecision.stop(
+                            dev.talos.runtime.failure.FailureAction.ASK_USER,
+                            result.errorMessage());
+                }
             }
             if (isUserApprovalDenial(result) && ToolCallSupport.isMutatingTool(effective.toolName())) {
                 approvalDeniedThisIter = true;
@@ -430,7 +435,15 @@ public final class ToolCallExecutionStage {
         String message = result.errorMessage();
         return message != null
                 && (message.startsWith("Path not allowed before approval")
-                || message.startsWith("Invalid path before approval"));
+                || message.startsWith("Invalid path before approval")
+                || message.startsWith("Target outside expected targets before approval"));
+    }
+
+    private static boolean isExpectedTargetScopeBlock(ToolResult result) {
+        if (result == null || result.success() || result.error() == null) return false;
+        if (!ToolError.INVALID_PARAMS.equals(result.error().code())) return false;
+        String message = result.errorMessage();
+        return message != null && message.startsWith("Target outside expected targets before approval");
     }
 
     private void appendResultMessage(LoopState state, boolean nativePath, int callIndex, String content) {

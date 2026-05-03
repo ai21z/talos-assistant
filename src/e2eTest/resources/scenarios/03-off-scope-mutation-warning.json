@@ -7,6 +7,6 @@
   ],
   "runner": "loop",
   "approvalPolicy": "APPROVE_ALL",
-  "userPrompt": "Redesign this website by updating index.html.",
+  "userPrompt": "Redesign this website.",
   "scriptedResponse": "```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"math_operations.py\",\"content\":\"print('wrong scope')\\n\"}}\n```"
 }
