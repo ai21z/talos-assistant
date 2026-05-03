@@ -38,6 +38,13 @@ public final class PromptDebugInspector {
         out.append("- Backend/model: ").append(snapshot.backend()).append('/')
                 .append(snapshot.model()).append('\n');
         out.append("- Stream: ").append(snapshot.stream()).append('\n');
+        out.append("- Tool choice: ").append(snapshot.controls().toolChoice());
+        if (!snapshot.controls().namedTool().isBlank()) {
+            out.append(" (").append(snapshot.controls().namedTool()).append(')');
+        }
+        out.append('\n');
+        out.append("- Response format: ").append(snapshot.controls().responseFormat()).append('\n');
+        out.append("- Debug tags: ").append(debugTags(snapshot.controls().debugTags())).append('\n');
         out.append("- Captured: ").append(snapshot.capturedAt()).append('\n');
         out.append("- Messages: ").append(snapshot.messages().size())
                 .append(" total, ").append(countRole(snapshot.messages(), "system"))
@@ -116,6 +123,11 @@ public final class PromptDebugInspector {
     private static String toolNames(List<ToolSpec> tools) {
         if (tools == null || tools.isEmpty()) return "(none)";
         return tools.stream().map(ToolSpec::name).collect(Collectors.joining(", "));
+    }
+
+    private static String debugTags(List<String> tags) {
+        if (tags == null || tags.isEmpty()) return "(none)";
+        return tags.stream().collect(Collectors.joining(", "));
     }
 
     private static String joinOrNone(TaskContract contract) {

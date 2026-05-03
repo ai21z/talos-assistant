@@ -3,9 +3,13 @@ package dev.talos.core.llm;
 import dev.talos.core.Config;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
+import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.PromptDebugCapture;
+import dev.talos.spi.types.PromptDebugSnapshot;
+import dev.talos.spi.types.ResponseFormatMode;
 import dev.talos.spi.types.TokenChunk;
 import dev.talos.spi.types.ToolSpec;
+import dev.talos.spi.types.ToolChoiceMode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -46,6 +50,33 @@ class LlmClientPromptDebugCaptureTest {
         assertTrue(snapshot.messages().stream().anyMatch(m -> m.content().contains("[CurrentTurnCapability]")));
         assertTrue(snapshot.messages().stream().anyMatch(m -> m.content().contains("AFTER")));
         assertTrue(snapshot.messages().stream().anyMatch(m -> m.content().contains("Line one")));
+    }
+
+    @Test
+    void promptDebugSnapshotCarriesRequestControls() {
+        ChatRequest request = new ChatRequest(
+                "llama_cpp",
+                "agent.gguf",
+                "",
+                "",
+                List.of(),
+                null,
+                List.of(ChatMessage.user("repair scripts.js")),
+                List.of(writeSpec()),
+                new ChatRequestControls(
+                        ToolChoiceMode.NAMED,
+                        "talos.write_file",
+                        ResponseFormatMode.JSON_SCHEMA,
+                        "{\"type\":\"object\"}",
+                        List.of("expected-target-repair")));
+
+        PromptDebugSnapshot snapshot = PromptDebugSnapshot.fromChatRequest(request, true);
+
+        assertEquals(ToolChoiceMode.NAMED, snapshot.controls().toolChoice());
+        assertEquals("talos.write_file", snapshot.controls().namedTool());
+        assertEquals(ResponseFormatMode.JSON_SCHEMA, snapshot.controls().responseFormat());
+        assertEquals("{\"type\":\"object\"}", snapshot.controls().jsonSchema());
+        assertEquals(List.of("expected-target-repair"), snapshot.controls().debugTags());
     }
 
     private static ToolSpec writeSpec() {
