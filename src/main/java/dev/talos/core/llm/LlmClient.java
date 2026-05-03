@@ -121,6 +121,7 @@ public final class LlmClient implements AutoCloseable {
     // talos-harness-main-plan.md §8 N4 and §10 discussion item 2 for
     // the design decision (option (a): minimal factory).
     private volatile java.util.List<String> scriptedResponses = null;
+    private volatile RuntimeException scriptedFailure = null;
     private final java.util.concurrent.atomic.AtomicInteger scriptedCursor =
             new java.util.concurrent.atomic.AtomicInteger(0);
 
@@ -226,6 +227,19 @@ public final class LlmClient implements AutoCloseable {
     /** Single-response variant of {@link #scripted(java.util.List)}. */
     public static LlmClient scripted(String response) {
         return scripted(java.util.List.of(response == null ? "" : response));
+    }
+
+    /**
+     * Test-only factory: returns an LlmClient that throws {@code failure}
+     * from structured full/stream chat entrypoints. This lets executor tests
+     * exercise backend exception handling without opening a real engine.
+     */
+    public static LlmClient scriptedFailure(RuntimeException failure) {
+        LlmClient c = new LlmClient(new Config());
+        c.scriptedFailure = failure == null
+                ? new RuntimeException("scripted LLM failure")
+                : failure;
+        return c;
     }
 
     /**
@@ -616,6 +630,9 @@ public final class LlmClient implements AutoCloseable {
         // P2 — clear any Ctrl-C from the previous turn so stale cancels
         // don't immediately short-circuit this call.
         externalCancelReset.run();
+        if (scriptedFailure != null) {
+            throw scriptedFailure;
+        }
         if (scriptedResponses != null) {
             String r = nextScriptedResponse();
             if (onChunk != null && !r.isEmpty()) onChunk.accept(r);
@@ -695,6 +712,9 @@ public final class LlmClient implements AutoCloseable {
                                  ChatRequestControls controls) {
         // P2 — see chatStreamFull: clear stale cancel flag per call.
         externalCancelReset.run();
+        if (scriptedFailure != null) {
+            throw scriptedFailure;
+        }
         if (scriptedResponses != null) {
             return new StreamResult(nextScriptedResponse(), List.of());
         }

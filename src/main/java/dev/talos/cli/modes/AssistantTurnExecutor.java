@@ -297,31 +297,83 @@ public final class AssistantTurnExecutor {
                 }
             }
         } catch (java.util.concurrent.TimeoutException te) {
+            recordBackendFailureOutcome("LLM_TIMEOUT");
             out.append("\n[Timeout: LLM response took too long]\n");
+        } catch (java.util.concurrent.ExecutionException ex) {
+            Throwable cause = ex.getCause();
+            if (cause instanceof EngineException engineException) {
+                appendEngineException(out, engineException);
+            } else {
+                appendGenericLlmFailure(out, cause == null ? ex : cause);
+            }
         } catch (EngineException.ConnectionFailed cf) {
-            LOG.warn("Ollama not reachable: {}", cf.getMessage());
-            out.append("\n[Ollama not reachable — ").append(cf.guidance()).append("]\n");
+            appendEngineException(out, cf);
         } catch (EngineException.ModelNotFound mnf) {
-            LOG.warn("Model not found: {}", mnf.model());
-            out.append("\n[Model '").append(mnf.model()).append("' not found. ")
-               .append(mnf.guidance()).append("]\n");
+            appendEngineException(out, mnf);
         } catch (EngineException.Transient tr) {
-            LOG.warn("Transient engine error: {}", tr.getMessage());
-            out.append("\n[").append(tr.guidance()).append("]\n");
+            appendEngineException(out, tr);
         } catch (EngineException ee) {
-            LOG.warn("Engine error: {}", ee.getMessage());
-            out.append("\n[Engine error: ").append(ee.getMessage()).append("]\n");
+            appendEngineException(out, ee);
         } catch (Exception e) {
-            String detail = e.getMessage();
-            LOG.warn("LLM call failed: {}", detail);
-            out.append("\n[Error during LLM call")
-               .append(detail != null && !detail.isBlank() ? ": " + detail : "")
-               .append("]\n");
+            appendGenericLlmFailure(out, e);
         } finally {
             TurnTaskContractCapture.clear();
         }
 
         return new TurnOutput(out.toString(), streamed);
+    }
+
+    private static void appendEngineException(StringBuilder out, EngineException ex) {
+        if (ex instanceof EngineException.ConnectionFailed cf) {
+            recordBackendFailureOutcome("BACKEND_CONNECTION_FAILED");
+            LOG.warn("Model engine not reachable: {}", cf.getMessage());
+            out.append("\n[Model engine not reachable - ").append(cf.guidance()).append("]\n");
+            return;
+        }
+        if (ex instanceof EngineException.ModelNotFound mnf) {
+            recordBackendFailureOutcome("BACKEND_MODEL_NOT_FOUND");
+            LOG.warn("Model not found: {}", mnf.model());
+            out.append("\n[Model '").append(mnf.model()).append("' not found. ")
+                    .append(mnf.guidance()).append("]\n");
+            return;
+        }
+        if (ex instanceof EngineException.Transient tr) {
+            recordBackendFailureOutcome("BACKEND_TRANSIENT_ERROR");
+            LOG.warn("Transient engine error: {}", tr.getMessage());
+            out.append("\n[").append(tr.guidance()).append("]\n");
+            return;
+        }
+        recordBackendFailureOutcome(engineFailureClassification(ex));
+        LOG.warn("Engine error: {}", ex.getMessage());
+        out.append("\n[Engine error: ").append(ex.getMessage()).append("]\n");
+    }
+
+    private static void appendGenericLlmFailure(StringBuilder out, Throwable e) {
+        recordBackendFailureOutcome("LLM_CALL_FAILED");
+        String detail = e == null ? null : e.getMessage();
+        LOG.warn("LLM call failed: {}", detail);
+        out.append("\n[Error during LLM call")
+                .append(detail != null && !detail.isBlank() ? ": " + detail : "")
+                .append("]\n");
+    }
+
+    private static void recordBackendFailureOutcome(String classification) {
+        LocalTurnTraceCapture.recordOutcome(
+                "FAILED",
+                "NOT_RUN",
+                "UNKNOWN",
+                "BACKEND_ERROR",
+                classification);
+    }
+
+    private static String engineFailureClassification(EngineException ex) {
+        if (ex instanceof EngineException.ResponseError) {
+            return "BACKEND_RESPONSE_ERROR";
+        }
+        if (ex instanceof EngineException.MalformedResponse) {
+            return "BACKEND_MALFORMED_RESPONSE";
+        }
+        return "BACKEND_ENGINE_ERROR";
     }
 
     /** Apply mode-specific sanitization then truncate if over budget. */
