@@ -122,6 +122,44 @@ class RepairPolicyTest {
     }
 
     @Test
+    void staticVerificationRepairDoesNotPromoteWrongSimilarTargetWhenOnlyExpectedTargetIsMissing() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user(
+                "Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js."));
+        messages.add(ChatMessage.assistant("""
+                [Task incomplete: Static verification failed - scripts.js: expected target was not successfully mutated. Changed similar target(s) `script.js` does not satisfy `scripts.js`.]
+
+                The requested task is not verified complete.
+                Unresolved static verification problems:
+                - scripts.js: expected target was not successfully mutated. Changed similar target(s) `script.js` does not satisfy `scripts.js`.
+
+                Applied mutating tool calls:
+                - index.html: Updated index.html (20 lines, 553 bytes)
+                - styles.css: Updated styles.css (49 lines, 696 bytes)
+                - script.js: Updated script.js (11 lines, 531 bytes)
+                """));
+        messages.add(ChatMessage.user("Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js. It should calculate BMI from height and weight."));
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        RepairPlan plan = RepairPolicy.planForStaticVerification(messages, contract)
+                .plan()
+                .orElseThrow();
+
+        assertTrue(plan.instruction().contains("Missing expected targets: scripts.js"),
+                plan.instruction());
+        assertTrue(plan.instruction().contains("script.js does not satisfy scripts.js"),
+                plan.instruction());
+        assertTrue(plan.instruction().contains("Full-file replacement targets: scripts.js"),
+                plan.instruction());
+        assertFalse(plan.instruction().contains("Full-file replacement targets: script.js, scripts.js"),
+                plan.instruction());
+        assertFalse(plan.steps().stream()
+                        .anyMatch(step -> "script.js".equals(step.targetPath())),
+                plan.instruction());
+    }
+
+    @Test
     void explicitStructuralWebTaskDoesNotCarryStaleSiblingRepairTarget() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));
