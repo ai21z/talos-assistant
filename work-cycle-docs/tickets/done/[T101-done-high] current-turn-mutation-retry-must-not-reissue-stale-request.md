@@ -1,6 +1,6 @@
 # T101 - Current-Turn Mutation Retry Must Not Reissue Stale Request
 
-Status: Open
+Status: Done
 Priority: High
 Branch: v0.9.0-beta-dev
 Source: T100 focused clean Qwen/GPT-OSS re-audit
@@ -109,3 +109,32 @@ After implementation, rerun:
 ```text
 local/manual-testing/t100-focused-clean-audit-20260503-154258/PROMPTS-T100-FOCUSED-TWO-MODEL.md
 ```
+
+## Implementation Result
+
+- `AssistantTurnExecutor` now only includes `The previous mutation request to
+  reissue is` in the missing-mutation retry prompt when the current contract is
+  an inherited repair follow-up.
+- Fresh explicit mutation turns now retry the current user request directly,
+  even if history contains an older incomplete mutation.
+- Ambiguous repair follow-ups such as `Review ... and fix ...` can still
+  reissue the previous mutation request.
+
+## Verification Run
+
+- `./gradlew.bat test --tests "*mutationRetryForFreshExplicitRequestDoesNotReissueOlderMutationRequest" --no-daemon`
+  - First run failed before the fix because the retry prompt included the stale
+    `script.js` request.
+  - Passed after the fix.
+- `./gradlew.bat test --tests "*mutationRetryForFreshExplicitRequestDoesNotReissueOlderMutationRequest" --tests "*mutationRetryForRepairFollowUpCanReissuePreviousMutationRequest" --no-daemon`
+- `./gradlew.bat test --tests "dev.talos.cli.modes.AssistantTurnExecutorTest" --tests "dev.talos.runtime.task.TaskContractResolverTest" --no-daemon`
+- `./gradlew.bat test --tests "dev.talos.runtime.ToolCallLoopTest" --tests "dev.talos.cli.modes.ExecutionOutcomeTest" --no-daemon`
+- `./gradlew.bat e2eTest --no-daemon`
+- `./gradlew.bat clean test e2eTest installDist --no-daemon`
+- `python local/manual-testing/t101-focused-clean-audit-20260503-161159/run_t101_focused_two_model_audit.py`
+  - Findings:
+    `local/manual-testing/t101-focused-clean-audit-20260503-161159/FINDINGS-T101-FOCUSED-TWO-MODEL.md`
+  - Qwen live path confirmed the fresh BMI retry prompt used the current BMI
+    request and did not reissue the stale `script.js` selector request.
+  - Repair-follow-up retry still reissued the previous BMI create request, as
+    intended.

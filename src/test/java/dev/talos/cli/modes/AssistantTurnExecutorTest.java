@@ -2814,6 +2814,128 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void mutationRetryForFreshExplicitRequestDoesNotReissueOlderMutationRequest() {
+            var processor = new dev.talos.runtime.TurnProcessor(null);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted("I still will not call tools."))
+                    .toolCallLoop(new dev.talos.runtime.ToolCallLoop(processor, 3))
+                    .build();
+
+            String staleRequest = "Make script.js fix the selector bug by changing .missing-button to .cta-button.";
+            String currentRequest = "Create a complete static BMI calculator in this folder with "
+                    + "index.html, styles.css, and scripts.js. It should calculate BMI from height and weight.";
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(staleRequest));
+            messages.add(ChatMessage.assistant("""
+                    [Task incomplete: Static verification failed - HTML does not link JavaScript file: `script.js`]
+
+                    Applied mutating tool calls:
+                    - script.js: Edited script.js
+                    """));
+            messages.add(ChatMessage.user(currentRequest));
+
+            CurrentTurnPlan plan = CurrentTurnPlan.create(
+                    TaskContractResolver.fromMessages(messages),
+                    ExecutionPhase.APPLY,
+                    List.of("talos.write_file", "talos.edit_file"),
+                    List.of("talos.write_file", "talos.edit_file"),
+                    List.of());
+            var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                    "Created the BMI calculator website files.",
+                    1,
+                    0,
+                    List.of(),
+                    messages,
+                    0,
+                    0,
+                    false,
+                    0,
+                    List.of(),
+                    0,
+                    0,
+                    0,
+                    0);
+
+            AssistantTurnExecutor.mutationRequestRetryIfNeeded(
+                    loopResult.finalAnswer(), messages, plan, loopResult, WS, ctx);
+
+            String retryPrompt = messages.stream()
+                    .filter(message -> "user".equals(message.role()))
+                    .map(ChatMessage::content)
+                    .filter(content -> content != null
+                            && content.contains("The current-turn obligation was not satisfied"))
+                    .findFirst()
+                    .orElseThrow();
+
+            assertTrue(retryPrompt.contains("The user's request was:"), retryPrompt);
+            assertTrue(retryPrompt.contains(currentRequest), retryPrompt);
+            assertFalse(retryPrompt.contains("The previous mutation request to reissue is"), retryPrompt);
+            assertFalse(retryPrompt.contains(staleRequest), retryPrompt);
+        }
+
+        @Test
+        void mutationRetryForRepairFollowUpCanReissuePreviousMutationRequest() {
+            var processor = new dev.talos.runtime.TurnProcessor(null);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted("I still will not call tools."))
+                    .toolCallLoop(new dev.talos.runtime.ToolCallLoop(processor, 3))
+                    .build();
+
+            String previousRequest = "Create a complete static BMI calculator in this folder with "
+                    + "index.html, styles.css, and scripts.js. It should calculate BMI from height and weight.";
+            String followUp = "Review the BMI calculator you just created and fix any obvious issue "
+                    + "that would stop it from working in a browser.";
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(previousRequest));
+            messages.add(ChatMessage.assistant("""
+                    [Action obligation failed: pending static repair progress was not satisfied.]
+
+                    Remaining target(s): scripts.js.
+                    """));
+            messages.add(ChatMessage.user(followUp));
+
+            CurrentTurnPlan plan = CurrentTurnPlan.create(
+                    TaskContractResolver.fromMessages(messages),
+                    ExecutionPhase.APPLY,
+                    List.of("talos.write_file", "talos.edit_file"),
+                    List.of("talos.write_file", "talos.edit_file"),
+                    List.of());
+            var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                    "Looks fine to me.",
+                    1,
+                    0,
+                    List.of(),
+                    messages,
+                    0,
+                    0,
+                    false,
+                    0,
+                    List.of(),
+                    0,
+                    0,
+                    0,
+                    0);
+
+            AssistantTurnExecutor.mutationRequestRetryIfNeeded(
+                    loopResult.finalAnswer(), messages, plan, loopResult, WS, ctx);
+
+            String retryPrompt = messages.stream()
+                    .filter(message -> "user".equals(message.role()))
+                    .map(ChatMessage::content)
+                    .filter(content -> content != null
+                            && content.contains("The current-turn obligation was not satisfied"))
+                    .findFirst()
+                    .orElseThrow();
+
+            assertTrue(retryPrompt.contains("The current user message is a retry/repair follow-up"), retryPrompt);
+            assertTrue(retryPrompt.contains(followUp), retryPrompt);
+            assertTrue(retryPrompt.contains("The previous mutation request to reissue is"), retryPrompt);
+            assertTrue(retryPrompt.contains(previousRequest), retryPrompt);
+        }
+
+        @Test
         void mutationRetryDoesNotFireFromSyntheticToolResultTail() {
             var ctx = scriptedContext("retry should not be called");
             var messages = new ArrayList<ChatMessage>();

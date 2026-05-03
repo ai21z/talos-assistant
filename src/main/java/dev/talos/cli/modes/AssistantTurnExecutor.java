@@ -2382,7 +2382,9 @@ public final class AssistantTurnExecutor {
         if (!ResponseObligationVerifier.unsatisfiedNoToolResponse(obligation, answer)) {
             return new MutationRetryResult(answer, 0, null);
         }
-        String priorMutationRequest = previousMutationUserRequest(messages, userRequest);
+        String priorMutationRequest = retryShouldReissuePriorMutationRequest(retryContract)
+                ? previousMutationUserRequest(messages, userRequest)
+                : null;
 
         LOG.info("Missing-mutation retry fired: user asked for a change but 0 mutating "
                 + "tool calls succeeded. Re-prompting with an explicit write nudge.");
@@ -2497,6 +2499,12 @@ public final class AssistantTurnExecutor {
         return "The user's request was:\n\n«"
                 + pinForRetryPrompt(userRequest)
                 + "»\n\n";
+    }
+
+    private static boolean retryShouldReissuePriorMutationRequest(TaskContract retryContract) {
+        return retryContract != null
+                && "repair-follow-up-inherits-previous-mutation-contract"
+                .equals(retryContract.classificationReason());
     }
 
     private static String previousMutationUserRequest(List<ChatMessage> messages, String latestUserRequest) {
