@@ -1,0 +1,17 @@
+{
+  "name": "multi-file web create continues until expected targets are mutated",
+  "fixture": "broken-bmi-site",
+  "v1Pack": true,
+  "claims": [
+    "initial-create-does-not-stop-after-one-expected-target",
+    "multi-file-create-continues-to-remaining-expected-targets",
+    "multi-file-create-verifies-after-all-expected-targets"
+  ],
+  "runner": "executor",
+  "approvalPolicy": "APPROVE_ALL",
+  "userPrompt": "Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js. It should calculate BMI from height and weight.",
+  "scriptedResponses": [
+    "```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"index.html\",\"content\":\"<!doctype html>\\n<html lang=\\\"en\\\">\\n<head>\\n  <meta charset=\\\"utf-8\\\">\\n  <title>BMI Calculator</title>\\n  <link rel=\\\"stylesheet\\\" href=\\\"styles.css\\\">\\n</head>\\n<body>\\n  <main class=\\\"calculator\\\">\\n    <h1>BMI Calculator</h1>\\n    <form id=\\\"bmiForm\\\">\\n      <label for=\\\"weight\\\">Weight</label>\\n      <input id=\\\"weight\\\" type=\\\"number\\\">\\n      <label for=\\\"height\\\">Height</label>\\n      <input id=\\\"height\\\" type=\\\"number\\\">\\n      <button type=\\\"submit\\\">Calculate BMI</button>\\n    </form>\\n    <p id=\\\"result\\\"></p>\\n  </main>\\n  <script src=\\\"scripts.js\\\"></script>\\n</body>\\n</html>\"}}\n```",
+    "```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"styles.css\",\"content\":\"body { font-family: Arial, sans-serif; margin: 2rem; background: #f5f7fb; }\\n.calculator { max-width: 460px; margin: 0 auto; padding: 2rem; background: white; border-radius: 8px; }\\nbutton { cursor: pointer; }\\n#result { font-weight: 700; }\"}}\n```\n```json\n{\"name\":\"talos.write_file\",\"parameters\":{\"path\":\"scripts.js\",\"content\":\"document.getElementById('bmiForm').addEventListener('submit', (event) => {\\n  event.preventDefault();\\n  const weight = Number(document.getElementById('weight').value);\\n  const height = Number(document.getElementById('height').value);\\n  const result = document.getElementById('result');\\n  if (!weight || !height) { result.textContent = 'Enter weight and height.'; return; }\\n  const bmi = weight / ((height / 100) ** 2);\\n  result.textContent = `Your BMI is ${bmi.toFixed(1)}`;\\n});\"}}\n```"
+  ]
+}
