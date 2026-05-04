@@ -2,7 +2,7 @@
 
 Date: 2026-05-04
 Branch: `v0.9.0-beta-dev`
-Status: written for user review before ticket creation
+Status: approved for ticket creation and sequencing
 
 ## Purpose
 
@@ -94,6 +94,14 @@ The weak points are also real:
   rename, copy, and batch operations need bundle checkpoints.
 - Shell/command execution is not available yet, and should not be added without
   a command policy.
+- OOP/design-pattern discipline is implicit, not explicit. The current
+  architecture has many good policy objects, records, and interfaces, but the
+  next growth phase needs a written low-coupling/high-cohesion doctrine so new
+  tools do not recreate the current executor coupling problem.
+- Java platform policy needs a measured update path. Talos currently builds on
+  Java 21 LTS with Gradle 8.14 and JavaFX 21. Java 25 is now an LTS release,
+  but the migration requires Gradle and JavaFX compatibility work and should be
+  handled as a spike before changing the product baseline.
 
 The architecture should improve these weak points before the tool surface grows.
 
@@ -259,6 +267,181 @@ The path should be incremental:
 2. migrate tool metadata;
 3. move one policy boundary at a time out of the executor;
 4. add new tools only through the new spine.
+
+## Engineering Design Doctrine
+
+Capability growth must follow explicit engineering design rules. These rules
+are not academic preferences; they are how Talos avoids turning every new tool
+into more prompt glue and more executor complexity.
+
+### Low Coupling And High Cohesion
+
+Each unit should have one clear reason to change:
+
+- task classification changes should affect task/capability policy, not file
+  tool implementations;
+- tool schema changes should affect tool descriptors and metadata, not outcome
+  rendering;
+- filesystem behavior should live behind workspace operation services, not in
+  prompt assembly;
+- final answer shaping should live in outcome rendering, not tool execution;
+- backend request quirks should live in engine adapters, not runtime policy.
+
+Cross-package dependencies should point inward toward stable domain records and
+interfaces. CLI/UI code may depend on runtime services, but runtime services
+should not depend on CLI rendering details.
+
+### Ports And Adapters
+
+Talos should keep side effects behind ports:
+
+- model engines behind `ChatModelEngine`;
+- workspace file operations behind tool/workspace operation services;
+- checkpoint persistence behind `CheckpointStore`;
+- future command execution behind a command runner interface;
+- future document processing behind document capability ports.
+
+Adapters may deal with Java APIs, local files, subprocesses, HTTP, and provider
+dialects. Domain policies should stay deterministic and easy to unit test.
+
+### Policy Objects And Pure Functions
+
+Policies should be small and mostly pure:
+
+- capability resolution;
+- tool-surface selection;
+- evidence sufficiency;
+- permission decisions;
+- protected path decisions;
+- provider request controls;
+- outcome dominance.
+
+Given the same inputs, these policies should return the same outputs without
+reading files, calling models, or mutating state. This lets tests cover Talos'
+control plane without expensive model audits.
+
+### Command Pattern For Workspace Operations
+
+Workspace changes should be represented as operation objects before they are
+applied.
+
+Examples:
+
+- create directory;
+- write file;
+- move path;
+- copy path;
+- rename path;
+- delete path;
+- apply batch.
+
+Each operation should support:
+
+- validation;
+- preview;
+- approval summary;
+- checkpoint planning;
+- apply;
+- structured result.
+
+This prevents the model from being the only place where multi-file intent
+exists.
+
+### Strategy Pattern For Profiles
+
+Verifier, repair, artifact, and evidence behavior should be profile-owned.
+
+Examples:
+
+- static web profile;
+- markdown/docs profile;
+- generic workspace profile;
+- code project profile;
+- command verification profile.
+
+New domains should add a strategy/profile instead of adding broad `if` chains
+to `AssistantTurnExecutor`.
+
+### Immutable Value Objects
+
+Runtime facts should be immutable records where practical:
+
+- current turn plan;
+- capability resolution;
+- tool operation metadata;
+- workspace operation plan;
+- workspace operation result;
+- evidence result;
+- verification result.
+
+This follows the direction already started with records such as
+`CurrentTurnPlan` and keeps retry/repair paths from silently mutating the facts
+of the original user request.
+
+### Side Effects At The Edges
+
+The model loop, filesystem, checkpoint store, prompt-debug writer, and future
+command runner are side-effecting edges. They should be invoked by orchestration
+services after deterministic policies have decided what is allowed.
+
+Do not put policy decisions inside side-effecting helpers unless the policy is
+strictly local to that adapter.
+
+### Refactoring Rule
+
+Refactoring should be tied to capability boundaries, not broad cleanup.
+
+Acceptable refactors:
+
+- extract `ToolSurfacePlanner` while migrating tool metadata;
+- extract `EvidenceGate` while fixing evidence sufficiency;
+- extract `OutcomeRenderer` while fixing protected-read postconditions;
+- extract `WorkspaceOperationService` while adding workspace operations.
+
+Avoid:
+
+- large file moves without behavior tests;
+- renaming packages for aesthetics;
+- rewriting `AssistantTurnExecutor` all at once;
+- adding abstractions before a concrete capability needs them.
+
+## Java Platform Policy
+
+Talos currently uses:
+
+- Java toolchain: 21 (`gradle.properties: javaVersion=21`);
+- Gradle wrapper: 8.14;
+- JavaFX: 21.0.3;
+- Lucene: 10.2.2.
+
+Java 25 is now an LTS release. Oracle's Java SE roadmap lists Java SE 8, 11,
+17, 21, and 25 as LTS releases, with Java 29 planned as the next LTS in
+September 2027:
+
+- https://www.oracle.com/europe/java/technologies/java-se-support-roadmap.html
+
+This does not mean Talos should immediately switch to Java 25. The migration
+has dependency constraints:
+
+- Gradle's compatibility matrix says Java 25 support starts at Gradle 9.1.0
+  for toolchains and running Gradle:
+  https://docs.gradle.org/current/userguide/compatibility.html
+- JavaFX 25 requires JDK 23 or later:
+  https://docs.oracle.com/en/java/java-components/javafx/25/release-notes
+
+Therefore, Java 25 should be handled as a readiness spike before becoming the
+baseline.
+
+The spike should answer:
+
+- Can Talos build and test cleanly with Gradle 9.1+?
+- Do JavaFX dependencies and Windows packaging still work?
+- Do `build`, `installDist`, unit tests, e2e tests, and manual llama.cpp flows
+  pass?
+- Does Java 25 improve or simplify code enough to justify a baseline change?
+- What is the user install impact on Windows?
+
+Until that spike passes, Java 21 remains the stable baseline.
 
 ## Supported Capability Surface
 
@@ -731,6 +914,38 @@ Architecture fix:
 - classify command risk, cwd, timeout, environment, network, output limits, and
   write effects.
 
+### Weak Point 7: God-Class And Large-Service Pressure
+
+Current state:
+
+- `AssistantTurnExecutor` is the largest pressure point;
+- other large services include `ExecutionOutcome`, `StaticTaskVerifier`,
+  `TurnProcessor`, `LlmClient`, `ToolCallRepromptStage`, and
+  `TaskContractResolver`.
+
+Architecture fix:
+
+- make decomposition a planned architecture track, not incidental cleanup;
+- extract services only at stable capability boundaries;
+- require tests around each extracted policy/service;
+- prevent new capability work from adding more responsibilities to
+  `AssistantTurnExecutor`.
+
+### Weak Point 8: Java LTS Drift
+
+Current state:
+
+- Talos runs on Java 21 LTS;
+- Java 25 is now LTS;
+- current Gradle and JavaFX versions must be checked before changing the
+  baseline.
+
+Architecture fix:
+
+- add a Java 25 readiness spike before any baseline migration;
+- keep Java 21 as the stable baseline until Gradle, JavaFX, Windows packaging,
+  tests, and llama.cpp manual flows are validated on Java 25.
+
 ## Ticket Breakdown
 
 This sequence starts with current weak points, then adds the architecture needed
@@ -789,7 +1004,50 @@ Acceptance:
 - A local opt-in mode, if added, clearly labels protected content inclusion.
 - Existing prompt-debug usefulness is preserved for non-protected content.
 
-### T126 - Capability Spine Core Types
+### T126 - Architecture Quality Guardrails And Refactoring Map
+
+Severity: high
+
+Scope:
+
+- Add explicit architectural guardrails for new capability/tool work.
+- Define package ownership, dependency direction, and allowed coupling.
+- Identify god-class extraction seams for `AssistantTurnExecutor`,
+  `ExecutionOutcome`, `StaticTaskVerifier`, and nearby large services.
+- Define when to use ports/adapters, policy objects, command pattern, strategy
+  profiles, immutable records, and side-effect boundaries.
+
+Acceptance:
+
+- Written architecture/refactoring map is committed.
+- New ticket template requires capability, risk, approval, checkpoint,
+  verification, trace, and ownership notes.
+- Decomposition candidates are ordered by risk and product value.
+- No behavior-changing refactor is done in this ticket.
+
+### T127 - Java 25 Migration Readiness Spike
+
+Severity: medium/high
+
+Scope:
+
+- Evaluate Java 25 LTS migration feasibility.
+- Check Gradle 9.1+ compatibility, JavaFX 25 compatibility, Windows install
+  impact, Lucene/runtime impact, and current test/build behavior.
+- Do not change the required Java baseline unless the spike proves it safe.
+
+Acceptance:
+
+- Written readiness report cites official Java, Gradle, and JavaFX compatibility
+  sources.
+- Local trial branch or patch validates `build`, `installDist`, unit tests, and
+  e2e tests where feasible.
+- Recommendation is one of:
+  - stay on Java 21 for now;
+  - support Java 25 as optional;
+  - migrate baseline to Java 25 with a separate implementation ticket.
+
+### T128 - Capability Spine Core Types
 
 Severity: high
 
@@ -805,7 +1063,7 @@ Acceptance:
   approval/checkpoint requirements, and trace event kind.
 - Tests verify metadata for existing tools.
 
-### T127 - Tool Metadata Migration And Tool Surface Planner
+### T129 - Tool Metadata Migration And Tool Surface Planner
 
 Severity: high
 
@@ -821,7 +1079,7 @@ Acceptance:
 - Prompt audit still reports native and prompt tools.
 - `AssistantTurnExecutor` loses some direct tool-surface responsibility.
 
-### T128 - Workspace Operation Plan And Bundle Checkpoint Design
+### T130 - Workspace Operation Plan And Bundle Checkpoint Design
 
 Severity: high
 
@@ -837,7 +1095,7 @@ Acceptance:
 - Bundle checkpoint can represent source/destination/deleted paths.
 - Single-file checkpoints continue working.
 
-### T129 - Workspace Operations V1
+### T131 - Workspace Operations V1
 
 Severity: high
 
@@ -858,7 +1116,7 @@ Acceptance:
 - Runtime-owned summary lists created/moved/copied/renamed paths.
 - Tests cover path traversal, overwrite handling, and failure-dominant output.
 
-### T130 - Batch Workspace Apply
+### T132 - Batch Workspace Apply
 
 Severity: medium/high
 
@@ -873,7 +1131,7 @@ Acceptance:
 - Partial failure reports exact applied and failed paths.
 - Bundle checkpoint id is recorded.
 
-### T131 - AssistantTurnExecutor Decomposition Phase 1
+### T133 - AssistantTurnExecutor Decomposition Phase 1
 
 Severity: high
 
@@ -891,7 +1149,7 @@ Acceptance:
 - File size/responsibility meaningfully reduced.
 - Extracted service has focused tests.
 
-### T132 - Command Execution Architecture Design
+### T134 - Command Execution Architecture Design
 
 Severity: medium
 
@@ -907,6 +1165,21 @@ Acceptance:
 - Ticket sequence for command execution exists.
 
 ## Release Gates
+
+Before adding broad new workspace tools:
+
+- architecture quality guardrails should be written and accepted;
+- each new tool must declare capability metadata;
+- new side effects must sit behind workspace operation services or equivalent
+  ports;
+- `AssistantTurnExecutor` should not gain new tool-specific policy branches.
+
+Before changing the Java baseline:
+
+- Java 25 readiness spike must pass;
+- Gradle wrapper and JavaFX compatibility must be validated;
+- Windows install path must be checked;
+- full build/test/install verification must pass on the proposed baseline.
 
 Before adding shell/command execution:
 
@@ -948,12 +1221,17 @@ Proceed in this order:
 1. Fix the two current T61-D correctness gaps: read-only evidence sufficiency
    and approved protected-read postcondition.
 2. Add prompt-debug protected-content redaction.
-3. Add the capability spine core types.
-4. Migrate existing tools to capability metadata and a `ToolSurfacePlanner`.
-5. Add workspace operation planning and bundle checkpoints.
-6. Add workspace operation tools.
-7. Decompose `AssistantTurnExecutor` incrementally.
-8. Design command execution only after the workspace operation layer is stable.
+3. Lock architecture quality guardrails and a refactoring map.
+4. Run a Java 25 readiness spike, but keep Java 21 as baseline until proven
+   safe.
+5. Add the capability spine core types.
+6. Migrate existing tools to capability metadata and a `ToolSurfacePlanner`.
+7. Add workspace operation planning and bundle checkpoints.
+8. Add workspace operation tools.
+9. Add batch workspace apply.
+10. Decompose `AssistantTurnExecutor` incrementally at capability boundaries.
+11. Design command execution only after the workspace operation layer is
+    stable.
 
 This keeps Talos aligned with its name: a strong local assistant, built from
 controlled, observable, durable parts rather than prompt luck.
