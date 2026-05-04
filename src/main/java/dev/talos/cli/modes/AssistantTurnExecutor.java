@@ -2556,12 +2556,27 @@ public final class AssistantTurnExecutor {
                             "ATTEMPTED_AFTER_RETRY",
                             "retry response issued tool calls but no mutation completed");
                 } else {
-                    LocalTurnTraceCapture.recordActionObligation(
-                            obligation.name(),
-                            "FAILED",
-                            "retry response issued tool calls but no write/edit tool calls");
+                    boolean repairInspectionOnly = isRepairInspectionOnlyRetry(safePlan, retryLoop);
+                    String failureReason = repairInspectionOnly
+                            ? "repair/fix retry response used only read-only inspection tools"
+                            : "retry response issued tool calls but no write/edit tool calls";
+                    String failureKind = repairInspectionOnly ? "REPAIR_INSPECTION_ONLY" : "";
+                    if (repairInspectionOnly) {
+                        LocalTurnTraceCapture.recordActionObligation(
+                                obligation.name(),
+                                "FAILED",
+                                failureReason,
+                                failureKind);
+                    } else {
+                        LocalTurnTraceCapture.recordActionObligation(
+                                obligation.name(),
+                                "FAILED",
+                                failureReason);
+                    }
                     return new MutationRetryResult(
-                            ResponseObligationVerifier.deterministicNoActionAnswer(),
+                            repairInspectionOnly
+                                    ? ResponseObligationVerifier.deterministicRepairInspectionOnlyAnswer()
+                                    : ResponseObligationVerifier.deterministicNoActionAnswer(),
                             0,
                             summary,
                             retryLoop,
@@ -2599,6 +2614,37 @@ public final class AssistantTurnExecutor {
                 null,
                 null,
                 true);
+    }
+
+    private static boolean isRepairInspectionOnlyRetry(
+            CurrentTurnPlan plan,
+            ToolCallLoop.LoopResult retryLoop
+    ) {
+        if (plan == null || retryLoop == null || retryLoop.toolsInvoked() <= 0) return false;
+        if (!isRepairOrFixContract(plan.taskContract())) return false;
+        if (retryLoop.toolOutcomes() == null || retryLoop.toolOutcomes().isEmpty()) {
+            return retryLoop.toolNames().stream().anyMatch(ToolCallSupport::isReadOnlyTool)
+                    && retryLoop.toolNames().stream().noneMatch(ToolCallSupport::isMutatingTool);
+        }
+        boolean sawReadOnly = false;
+        for (ToolCallLoop.ToolOutcome outcome : retryLoop.toolOutcomes()) {
+            if (outcome == null) continue;
+            String toolName = outcome.toolName();
+            if (ToolCallSupport.isMutatingTool(toolName) || outcome.mutating()) {
+                return false;
+            }
+            if (ToolCallSupport.isReadOnlyTool(toolName)) {
+                sawReadOnly = true;
+            }
+        }
+        return sawReadOnly;
+    }
+
+    private static boolean isRepairOrFixContract(TaskContract contract) {
+        if (contract == null) return false;
+        String reason = contract.classificationReason();
+        return "explicit-review-and-fix-request".equals(reason)
+                || "repair-follow-up-inherits-previous-mutation-contract".equals(reason);
     }
 
     private static String mutationRetryRequestContext(String userRequest, String priorMutationRequest) {

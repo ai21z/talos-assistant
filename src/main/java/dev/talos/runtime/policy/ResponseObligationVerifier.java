@@ -53,4 +53,10 @@ public final class ResponseObligationVerifier {
                 + "Talos can apply approved file changes in this workspace, but the model did not issue "
                 + "the required write/edit tool calls on this turn, so no files were changed.";
     }
+
+    public static String deterministicRepairInspectionOnlyAnswer() {
+        return "[Action obligation failed: repair/fix turn inspected files but did not change them.]\n\n"
+                + "Talos required a write/edit tool call for this repair turn. The retry used only "
+                + "read-only inspection tools, so no files were changed.";
+    }
 }
