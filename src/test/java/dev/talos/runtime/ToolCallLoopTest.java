@@ -1276,6 +1276,133 @@ class ToolCallLoopTest {
         }
     }
 
+    // ── T122: repair read-only loop budget ─────────────────────────
+
+    @Test
+    void repairReadOnlyLoopStopsBeforeIterationLimitWithInspectionOnlyBreach() throws Exception {
+        Path ws = Files.createTempDirectory("talos-repair-read-only-budget-");
+        try {
+            Files.writeString(ws.resolve("index.html"), "<script src=\"scripts.js\"></script>\n");
+            Files.writeString(ws.resolve("styles.css"), "body{}\n");
+            Files.writeString(ws.resolve("scripts.js"), "console.log('old');\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 10);
+
+            String request = "Review the BMI calculator and fix any obvious issue that would stop it from working in a browser.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of(
+                            readFileCall("styles.css"),
+                            readFileCall("scripts.js"),
+                            readFileCall("index.html", 200),
+                            readFileCall("styles.css", 200),
+                            readFileCall("scripts.js", 200),
+                            readFileCall("index.html", 400),
+                            readFileCall("styles.css", 400),
+                            readFileCall("scripts.js", 400),
+                            readFileCall("index.html", 800),
+                            readFileCall("styles.css", 800),
+                            readFileCall("scripts.js", 800))))
+                    .build();
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            LocalTurnTraceCapture.begin("trc-t122-read-only-budget", "session", 1,
+                    "2026-05-04T00:00:00Z", "ws", "test", "llama_cpp", "gpt-oss", request);
+            ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
+            try {
+                result = loop.run(readFileCall("index.html"), messages, ws, ctx);
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+                LocalTurnTraceCapture.clear();
+            }
+
+            assertTrue(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertTrue(result.failureDecision().reason().contains("REPAIR_INSPECTION_ONLY"),
+                    result.failureDecision().reason());
+            assertFalse(result.hitIterLimit(), "repair read-only budget should stop before generic loop limit");
+            assertTrue(result.iterations() < 10, "repair read-only budget should stop before max iterations");
+            assertEquals(0, result.mutatingToolSuccesses());
+            assertTrue(result.toolOutcomes().stream().noneMatch(ToolCallLoop.ToolOutcome::mutating));
+            assertEquals("console.log('old');\n", Files.readString(ws.resolve("scripts.js")));
+
+            String finalLower = result.finalAnswer().toLowerCase(java.util.Locale.ROOT);
+            assertTrue(finalLower.contains("repair/fix turn inspected files but did not change them"),
+                    result.finalAnswer());
+            assertFalse(finalLower.contains("complete"), result.finalAnswer());
+            assertFalse(finalLower.contains("ready to use"), result.finalAnswer());
+
+            var breached = trace.events().stream()
+                    .filter(event -> "ACTION_OBLIGATION_EVALUATED".equals(event.type()))
+                    .filter(event -> "REPAIR_INSPECTION_ONLY".equals(event.data().get("failureKind")))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("MUTATING_TOOL_REQUIRED", breached.data().get("obligation"));
+            assertEquals("FAILED", breached.data().get("status"));
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
+    void repairReadOnlyBudgetAllowsReadThenMutation() throws Exception {
+        Path ws = Files.createTempDirectory("talos-repair-read-then-mutate-");
+        try {
+            Files.writeString(ws.resolve("index.html"), "<script src=\"scripts.js\"></script>\n");
+            Files.writeString(ws.resolve("styles.css"), "body{}\n");
+            Files.writeString(ws.resolve("scripts.js"), "console.log('old');\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 10);
+
+            String request = "Review the BMI calculator and fix any obvious issue that would stop it from working in a browser.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+            String writeScripts = """
+                    {"name":"talos.write_file","arguments":{"path":"scripts.js","content":"console.log('fixed');\\n"}}
+                    """;
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of(
+                            readFileCall("styles.css"),
+                            readFileCall("scripts.js"),
+                            writeScripts,
+                            "should not be called")))
+                    .build();
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            ToolCallLoop.LoopResult result;
+            try {
+                result = loop.run(readFileCall("index.html"), messages, ws, ctx);
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertFalse(result.hitIterLimit());
+            assertEquals(1, result.mutatingToolSuccesses());
+            assertEquals("console.log('fixed');\n", Files.readString(ws.resolve("scripts.js")));
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────
 
     private static ToolCallLoop createLoop(TalosTool... tools) {
@@ -1289,6 +1416,15 @@ class ToolCallLoopTest {
         return Context.builder(new Config())
                 .llm(LlmClient.scripted(List.of("")))
                 .build();
+    }
+
+    private static String readFileCall(String path) {
+        return "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"" + path + "\"}}";
+    }
+
+    private static String readFileCall(String path, int maxLines) {
+        return "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"" + path
+                + "\",\"max_lines\":" + maxLines + "}}";
     }
 
     private static TalosTool echoTool() {

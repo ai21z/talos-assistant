@@ -2071,10 +2071,12 @@ public final class AssistantTurnExecutor {
     }
 
     static String summarizePartialMutationOutcomesIfNeeded(String answer,
-                                                           ToolCallLoop.LoopResult loopResult,
-                                                           int extraMutationSuccesses) {
+                                                            ToolCallLoop.LoopResult loopResult,
+                                                            int extraMutationSuccesses) {
         if (loopResult == null) return answer;
         if (extraMutationSuccesses > 0) return answer;
+        if (answer != null && answer.startsWith(
+                "[Action obligation failed: static repair used the wrong mutation tool.]")) return answer;
 
         List<ToolCallLoop.ToolOutcome> outcomes = loopResult.toolOutcomes();
         if (outcomes == null || outcomes.isEmpty()) return answer;
@@ -2539,7 +2541,24 @@ public final class AssistantTurnExecutor {
                     mergedAnswer = summarizeDeniedMutationOutcomesIfNeeded(
                             mergedAnswer, safePlan, messages, retryLoop, 0);
                 }
-                if (retryLoop.mutatingToolSuccesses() > 0) {
+                if (isStaticRepairWrongToolRetry(retryLoop)) {
+                    List<String> targets = staticRepairWrongToolTargets(retryLoop);
+                    String targetReason = targets.isEmpty() ? "" : " for " + String.join(", ", targets);
+                    boolean partialMutation = retryLoop.mutatingToolSuccesses() > 0;
+                    LocalTurnTraceCapture.recordActionObligation(
+                            obligation.name(),
+                            "FAILED",
+                            "static repair required talos.write_file but retry used talos.edit_file"
+                                    + targetReason,
+                            "STATIC_REPAIR_WRONG_TOOL");
+                    return new MutationRetryResult(
+                            ResponseObligationVerifier.deterministicStaticRepairWrongToolAnswer(
+                                    targets, partialMutation),
+                            0,
+                            summary,
+                            retryLoop,
+                            true);
+                } else if (retryLoop.mutatingToolSuccesses() > 0) {
                     LOG.info("Missing-mutation retry succeeded: {} mutation(s) performed.",
                             retryLoop.mutatingToolSuccesses());
                     LocalTurnTraceCapture.recordActionObligation(
@@ -2552,22 +2571,6 @@ public final class AssistantTurnExecutor {
                             "BLOCKED_AFTER_RETRY",
                             "retry response issued mutating tool calls but policy blocked them");
                 } else if (retryIssuedMutatingTool) {
-                    if (isStaticRepairWrongToolRetry(retryLoop)) {
-                        List<String> targets = staticRepairWrongToolTargets(retryLoop);
-                        String targetReason = targets.isEmpty() ? "" : " for " + String.join(", ", targets);
-                        LocalTurnTraceCapture.recordActionObligation(
-                                obligation.name(),
-                                "FAILED",
-                                "static repair required talos.write_file but retry used talos.edit_file"
-                                        + targetReason,
-                                "STATIC_REPAIR_WRONG_TOOL");
-                        return new MutationRetryResult(
-                                ResponseObligationVerifier.deterministicStaticRepairWrongToolAnswer(targets),
-                                0,
-                                summary,
-                                retryLoop,
-                                true);
-                    }
                     LocalTurnTraceCapture.recordActionObligation(
                             obligation.name(),
                             "ATTEMPTED_AFTER_RETRY",

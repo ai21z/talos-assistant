@@ -7,9 +7,11 @@ import dev.talos.runtime.failure.FailurePolicy;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.repair.RepairInstruction;
 import dev.talos.runtime.repair.RepairPolicy;
+import dev.talos.runtime.policy.ResponseObligationVerifier;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.verification.StaticTaskVerifier;
 import dev.talos.runtime.verification.WebDiagnosticIntent;
 import dev.talos.spi.EngineException;
@@ -29,6 +31,7 @@ import java.util.Set;
 @SuppressWarnings("resource") // LoopState.ctx owns the shared LlmClient for the active REPL session.
 public final class ToolCallRepromptStage {
     private static final Logger LOG = LoggerFactory.getLogger(ToolCallRepromptStage.class);
+    private static final int REPAIR_READ_ONLY_TOOL_BUDGET = 6;
 
     public boolean reprompt(LoopState state, ToolCallExecutionStage.IterationOutcome outcome) {
         if (outcome.approvalDeniedThisIteration()) {
@@ -137,6 +140,22 @@ public final class ToolCallRepromptStage {
                     + "this iteration) so the model can retry the failed call(s)",
                     outcome.mutationsThisIteration(), outcome.failuresThisIteration());
             // fall through to the re-prompt path below
+        }
+
+        if (repairReadOnlyBudgetExceeded(state)) {
+            String reason = "REPAIR_INSPECTION_ONLY: repair/fix turn inspected files with "
+                    + state.toolNames.size()
+                    + " read-only tool call(s) but did not call write/edit before the read-only repair budget was exhausted.";
+            state.failureDecision = FailureDecision.stop(FailureAction.ASK_USER, reason);
+            state.currentText = ResponseObligationVerifier.deterministicRepairInspectionOnlyAnswer();
+            state.currentNativeCalls = List.of();
+            LocalTurnTraceCapture.recordActionObligation(
+                    "MUTATING_TOOL_REQUIRED",
+                    "FAILED",
+                    reason,
+                    "REPAIR_INSPECTION_ONLY");
+            LOG.debug("Stopping repair/fix loop after read-only inspection budget without mutation.");
+            return false;
         }
 
         FailureDecision failureDecision = FailurePolicy.defaults(state.maxIterations)
@@ -361,6 +380,38 @@ public final class ToolCallRepromptStage {
             }
         }
         return false;
+    }
+
+    private static boolean repairReadOnlyBudgetExceeded(LoopState state) {
+        if (state == null || state.toolNames.isEmpty()) return false;
+        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        boolean staticRepairMutation = hasStaticRepairContext(state)
+                && contract != null
+                && contract.mutationAllowed()
+                && contract.mutationRequested();
+        if (!isRepairOrFixMutationContract(contract) && !staticRepairMutation) return false;
+        if (state.mutationSinceStart || state.mutatingToolSuccesses > 0) return false;
+        if (state.failedCalls > 0) return false;
+        for (dev.talos.runtime.ToolCallLoop.ToolOutcome outcome : state.toolOutcomes) {
+            if (outcome == null || !outcome.success() || outcome.mutating()) return false;
+        }
+        int readOnlyCalls = 0;
+        for (String toolName : state.toolNames) {
+            if (!ToolCallSupport.isReadOnlyTool(toolName)) return false;
+            readOnlyCalls++;
+        }
+        return readOnlyCalls >= REPAIR_READ_ONLY_TOOL_BUDGET;
+    }
+
+    private static boolean isRepairOrFixMutationContract(TaskContract contract) {
+        if (contract == null || !contract.mutationAllowed() || !contract.mutationRequested()) return false;
+        String reason = contract.classificationReason();
+        return "explicit-review-and-fix-request".equals(reason)
+                || "repair-follow-up-inherits-previous-mutation-contract".equals(reason);
+    }
+
+    private static boolean hasStaticRepairContext(LoopState state) {
+        return state != null && !RepairPolicy.fullRewriteTargetsFromRepairContext(state.messages).isEmpty();
     }
 
     private static String failurePolicyStopMessage(FailureDecision decision) {

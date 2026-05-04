@@ -57,17 +57,27 @@ public final class ResponseObligationVerifier {
 
     public static String deterministicRepairInspectionOnlyAnswer() {
         return "[Action obligation failed: repair/fix turn inspected files but did not change them.]\n\n"
-                + "Talos required a write/edit tool call for this repair turn. The retry used only "
-                + "read-only inspection tools, so no files were changed.";
+                + "Talos required a write/edit tool call for this repair turn. The repair attempt used "
+                + "only read-only inspection tools, so no files were changed.";
     }
 
     public static String deterministicStaticRepairWrongToolAnswer(List<String> targets) {
+        return deterministicStaticRepairWrongToolAnswer(targets, false);
+    }
+
+    public static String deterministicStaticRepairWrongToolAnswer(
+            List<String> targets,
+            boolean partialMutation
+    ) {
         String targetText = targets == null || targets.isEmpty()
                 ? "the static repair target"
                 : String.join(", ", targets);
+        String mutationText = partialMutation
+                ? "Some files may have changed before this failure, but the required repair target "
+                + "was not completed."
+                : "No approval was requested and no file was changed.";
         return "[Action obligation failed: static repair used the wrong mutation tool.]\n\n"
                 + "Static verification repair required complete talos.write_file replacement for "
-                + targetText + ", but the retry used talos.edit_file. No approval was requested "
-                + "and no file was changed.";
+                + targetText + ", but the retry used talos.edit_file. " + mutationText;
     }
 }
