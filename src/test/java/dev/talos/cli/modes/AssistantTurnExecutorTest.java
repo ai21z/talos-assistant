@@ -1217,6 +1217,94 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void repairFixRetryWithStaticFullRewriteTargetEditFileGetsTypedWrongToolBreach(
+                @TempDir Path workspace) throws Exception {
+            Files.writeString(workspace.resolve("index.html"), """
+                    <!doctype html>
+                    <html>
+                    <head><link rel="stylesheet" href="styles.css"></head>
+                    <body><script src="scripts.js"></script></body>
+                    </html>
+                    """);
+            Files.writeString(workspace.resolve("styles.css"), "body{}\n");
+            Files.writeString(workspace.resolve("scripts.js"), "console.log('old');\n");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            registry.register(new dev.talos.tools.impl.FileWriteTool());
+            registry.register(new dev.talos.tools.impl.FileEditTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "I reviewed the BMI calculator and it is ready to use.",
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"scripts.js\"}}",
+                            "{\"name\":\"talos.edit_file\",\"arguments\":{\"path\":\"scripts.js\","
+                                    + "\"old_string\":\"console.log('old');\","
+                                    + "\"new_string\":\"console.log('fixed');\"}}",
+                            "I fixed scripts.js and everything is complete.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Create a complete static BMI calculator in this folder with index.html, "
+                            + "styles.css, and scripts.js. It should calculate BMI from height and weight."));
+            messages.add(ChatMessage.assistant("""
+                    [Task incomplete: Static verification failed - HTML does not link JavaScript file: `scripts.js`]
+
+                    The requested task is not verified complete.
+                    Remaining static verification problems:
+                    - HTML does not link JavaScript file: `scripts.js`
+                    - Calculator/form task is missing a submit/calculate button.
+                    """));
+            messages.add(ChatMessage.user(
+                    "Review the BMI calculator you just created and fix any obvious issue "
+                            + "that would stop it from working in a browser."));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-t121-static-repair-wrong-tool",
+                    "sid",
+                    1,
+                    "2026-05-04T00:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "scripted",
+                    "test-model",
+                    "Review the BMI calculator you just created and fix any obvious issue "
+                            + "that would stop it from working in a browser.");
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertTrue(out.text().contains("static repair used the wrong mutation tool"),
+                        out.text());
+                assertTrue(out.text().contains("talos.write_file"), out.text());
+                assertTrue(out.text().contains("scripts.js"), out.text());
+                assertFalse(out.text().toLowerCase(java.util.Locale.ROOT).contains("ready to use"),
+                        out.text());
+                assertFalse(out.text().toLowerCase(java.util.Locale.ROOT).contains("everything is complete"),
+                        out.text());
+                assertEquals("console.log('old');\n", Files.readString(workspace.resolve("scripts.js")));
+                assertEquals("BLOCKED", trace.outcome().status());
+                assertEquals("BLOCKED_BY_POLICY", trace.outcome().classification());
+
+                var failed = trace.events().stream()
+                        .filter(event -> "ACTION_OBLIGATION_EVALUATED".equals(event.type()))
+                        .filter(event -> "FAILED".equals(event.data().get("status")))
+                        .reduce((first, second) -> second)
+                        .orElseThrow();
+                assertEquals("STATIC_REPAIR_WRONG_TOOL", failed.data().get("failureKind"));
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        }
+
+        @Test
         void invalidMutationRetryAfterReadOnlyToolLoopFailsOutcome(@TempDir Path workspace)
                 throws Exception {
             Files.writeString(workspace.resolve("index.html"), "<h1>Old</h1>\n");
