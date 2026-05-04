@@ -2358,6 +2358,7 @@ public final class AssistantTurnExecutor {
                                                            List<ChatMessage> messages,
                                                            ToolCallLoop.LoopResult loopResult,
                                                            int extraMutationSuccesses) {
+        if (answer != null && answer.startsWith("[Action obligation failed:")) return answer;
         if (loopResult == null) return answer;
         if (extraMutationSuccesses > 0) return answer;
         if (loopResult.mutatingToolSuccesses() > 0) return answer;
@@ -2551,6 +2552,22 @@ public final class AssistantTurnExecutor {
                             "BLOCKED_AFTER_RETRY",
                             "retry response issued mutating tool calls but policy blocked them");
                 } else if (retryIssuedMutatingTool) {
+                    if (isStaticRepairWrongToolRetry(retryLoop)) {
+                        List<String> targets = staticRepairWrongToolTargets(retryLoop);
+                        String targetReason = targets.isEmpty() ? "" : " for " + String.join(", ", targets);
+                        LocalTurnTraceCapture.recordActionObligation(
+                                obligation.name(),
+                                "FAILED",
+                                "static repair required talos.write_file but retry used talos.edit_file"
+                                        + targetReason,
+                                "STATIC_REPAIR_WRONG_TOOL");
+                        return new MutationRetryResult(
+                                ResponseObligationVerifier.deterministicStaticRepairWrongToolAnswer(targets),
+                                0,
+                                summary,
+                                retryLoop,
+                                true);
+                    }
                     LocalTurnTraceCapture.recordActionObligation(
                             obligation.name(),
                             "ATTEMPTED_AFTER_RETRY",
@@ -2638,6 +2655,22 @@ public final class AssistantTurnExecutor {
             }
         }
         return sawReadOnly;
+    }
+
+    private static boolean isStaticRepairWrongToolRetry(ToolCallLoop.LoopResult retryLoop) {
+        if (retryLoop == null || retryLoop.toolOutcomes() == null) return false;
+        return retryLoop.toolOutcomes().stream()
+                .anyMatch(ToolCallLoop.ToolOutcome::fullRewriteRepairRedirect);
+    }
+
+    private static List<String> staticRepairWrongToolTargets(ToolCallLoop.LoopResult retryLoop) {
+        if (retryLoop == null || retryLoop.toolOutcomes() == null) return List.of();
+        return retryLoop.toolOutcomes().stream()
+                .filter(ToolCallLoop.ToolOutcome::fullRewriteRepairRedirect)
+                .map(ToolCallLoop.ToolOutcome::pathHint)
+                .filter(path -> path != null && !path.isBlank())
+                .distinct()
+                .toList();
     }
 
     private static boolean isRepairOrFixContract(TaskContract contract) {
