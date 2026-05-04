@@ -1,7 +1,7 @@
 # T120 - Repair-Turn Mutation Obligation After Inspection Loop
 
 Severity: medium
-Status: open
+Status: done
 
 ## Problem
 
@@ -35,12 +35,20 @@ Relevant trace:
 
 ## Acceptance
 
-- A scripted tool-loop test covers a repair/fix turn where the model performs repeated read-only tools and no mutation.
-- Runtime records a typed repair/mutation-obligation failure instead of generic prose completion.
-- Failure output is failure-dominant and contains no model-authored success prose.
-- No infinite retry loop.
-- Happy path remains unchanged when the model reads and then writes an allowed repair target.
-- Existing T119 off-target expected-target blocks still pass.
+- Done: a scripted executor test covers a repair/fix turn where the model performs read-only tools and no mutation.
+- Done: runtime records `failureKind=REPAIR_INSPECTION_ONLY` on the failed action-obligation event.
+- Done: failure output is failure-dominant and contains no model-authored success prose.
+- Done: the retry remains bounded to the existing missing-mutation retry path; no infinite retry loop was added.
+- Done: happy paths remain unchanged when the model reads and then writes an allowed repair target.
+- Done: existing T119 off-target expected-target blocks still pass.
+
+## Verification
+
+- `./gradlew.bat --no-daemon test --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$NonStreaming.repairFixRetryWithOnlyInspectionToolsGetsTypedRepairBreach'`
+- `./gradlew.bat --no-daemon test --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$NonStreaming'`
+- `./gradlew.bat --no-daemon test --tests dev.talos.runtime.ToolCallLoopTest --tests dev.talos.runtime.TurnProcessorTest`
+- `./gradlew.bat --no-daemon test`
+- `./gradlew.bat --no-daemon build`
 
 ## Non-Goals
 

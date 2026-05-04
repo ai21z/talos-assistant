@@ -227,6 +227,24 @@ public final class LocalTurnTraceCapture {
                 "reason", safe(reason))));
     }
 
+    public static void recordActionObligation(
+            String obligation,
+            String status,
+            String reason,
+            String failureKind
+    ) {
+        Bag bag = HOLDER.get();
+        if (bag == null) return;
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("obligation", safe(obligation));
+        data.put("status", safe(status));
+        data.put("reason", safe(reason));
+        if (failureKind != null && !failureKind.isBlank()) {
+            data.put("failureKind", failureKind.strip());
+        }
+        bag.builder.event(TurnTraceEvent.simple("ACTION_OBLIGATION_EVALUATED", now(), data));
+    }
+
     public static void recordPendingActionObligation(
             String status,
             String kind,
