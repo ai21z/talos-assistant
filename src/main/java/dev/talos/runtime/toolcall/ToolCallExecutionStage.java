@@ -2,6 +2,8 @@ package dev.talos.runtime.toolcall;
 
 import dev.talos.runtime.TurnProcessor;
 import dev.talos.runtime.repair.RepairPolicy;
+import dev.talos.runtime.workspace.WorkspaceOperationPlan;
+import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolCall;
@@ -101,6 +103,7 @@ public final class ToolCallExecutionStage {
             ToolCall effective = ToolCallSupport.repairMissingPath(call);
 
             String pathHint = ToolCallSupport.resolvePathHint(effective);
+            WorkspaceOperationPlan workspaceOperationPlan = workspaceOperationPlan(effective);
             emitProgress(effective.toolName(), "executing", pathHint);
             LOG.debug("  Executing tool: {} (params: {})", effective.toolName(), effective.parameters());
 
@@ -258,7 +261,8 @@ public final class ToolCallExecutionStage {
                     result.success() ? toolOutcomeSummary(effective.toolName(), result.output()) : "",
                     result.success() ? "" : result.errorMessage(),
                     result.verification(),
-                    result.error() == null ? "" : result.error().code()));
+                    result.error() == null ? "" : result.error().code(),
+                    workspaceOperationPlan));
 
             if (!result.success()) {
                 state.failedCalls++;
@@ -346,6 +350,15 @@ public final class ToolCallExecutionStage {
             }
         }
         return paths;
+    }
+
+    private static WorkspaceOperationPlan workspaceOperationPlan(ToolCall call) {
+        if (call == null || !WorkspaceOperationPlanner.isWorkspaceOperationTool(call.toolName())) return null;
+        try {
+            return WorkspaceOperationPlanner.checkpointPlan(call).orElse(null);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     private static void recordSuccessfulRead(LoopState state, String pathHint) {

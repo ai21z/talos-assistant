@@ -70,7 +70,8 @@ public final class WorkspaceOperationPlanner {
         return requirePath(call, "path", "dir", "directory")
                 .map(path -> WorkspaceOperationPlan.batch(
                         WorkspaceOperationPlan.OperationKind.CREATE_DIRECTORY,
-                        List.of(WorkspaceOperationPlan.PathEffect.absentBefore(path, true)),
+                        List.of(WorkspaceOperationPlan.PathEffect.absentBefore(
+                                path, true, WorkspaceOperationPlan.OperationKind.CREATE_DIRECTORY)),
                         ToolRiskLevel.WRITE,
                         true,
                         WorkspaceOperationPlan.OverwritePolicy.NOT_APPLICABLE,
@@ -108,8 +109,10 @@ public final class WorkspaceOperationPlanner {
         return Optional.of(WorkspaceOperationPlan.batch(
                 WorkspaceOperationPlan.OperationKind.RENAME_PATH,
                 List.of(
-                        WorkspaceOperationPlan.PathEffect.source(source.get(), true),
-                        WorkspaceOperationPlan.PathEffect.destination(destination, true)),
+                        WorkspaceOperationPlan.PathEffect.source(
+                                source.get(), true, WorkspaceOperationPlan.OperationKind.RENAME_PATH),
+                        WorkspaceOperationPlan.PathEffect.destination(
+                                destination, true, WorkspaceOperationPlan.OperationKind.RENAME_PATH)),
                 ToolRiskLevel.WRITE,
                 true,
                 overwritePolicy(call),

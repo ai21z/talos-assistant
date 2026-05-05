@@ -8,6 +8,7 @@ import dev.talos.runtime.toolcall.ToolCallExecutionStage;
 import dev.talos.runtime.toolcall.ToolCallParseStage;
 import dev.talos.runtime.toolcall.ToolCallRepromptStage;
 import dev.talos.runtime.toolcall.ToolCallSupport;
+import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatMessage.NativeToolCall;
 import dev.talos.tools.ToolCall;
@@ -166,7 +167,8 @@ public final class ToolCallLoop {
             String summary,
             String errorMessage,
             dev.talos.tools.VerificationStatus fileVerificationStatus,
-            String errorCode
+            String errorCode,
+            WorkspaceOperationPlan workspaceOperationPlan
     ) {
         public ToolOutcome {
             toolName = toolName == null ? "" : toolName;
@@ -174,6 +176,21 @@ public final class ToolCallLoop {
             summary = summary == null ? "" : summary;
             errorMessage = errorMessage == null ? "" : errorMessage;
             errorCode = errorCode == null ? "" : errorCode;
+        }
+
+        public ToolOutcome(
+                String toolName,
+                String pathHint,
+                boolean success,
+                boolean mutating,
+                boolean denied,
+                String summary,
+                String errorMessage,
+                dev.talos.tools.VerificationStatus fileVerificationStatus,
+                String errorCode
+        ) {
+            this(toolName, pathHint, success, mutating, denied, summary, errorMessage,
+                    fileVerificationStatus, errorCode, null);
         }
 
         public ToolOutcome(

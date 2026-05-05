@@ -1,7 +1,7 @@
 # T146 - Workspace Operation Verification For Organize And Batch Tools
 
 Severity: high
-Status: open
+Status: done
 
 ## Problem
 
@@ -47,3 +47,15 @@ succeeded but did not expose target paths to verification.
 - No delete operation.
 - No generic shell or command profile expansion.
 - No large verifier rewrite outside workspace operation semantics.
+
+## Result
+
+- Tool-loop outcomes now carry workspace operation plan metadata for
+  organize/batch tools.
+- Static verification now verifies operation-specific final-state facts:
+  copy sources remain, copy destinations exist, move/rename sources are absent,
+  destinations exist, and mkdir targets are directories.
+- Batch plan metadata exposes per-operation source/destination effects while
+  preserving checkpoint behavior for write targets.
+- Added focused verifier and batch tests for copy/move/rename, batch apply, and
+  partial batch failure path reporting.

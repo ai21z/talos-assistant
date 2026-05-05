@@ -43,13 +43,20 @@ public final class WorkspaceBatchPlanParser {
         for (WorkspaceBatchOperation operation : operations) {
             switch (operation.kind()) {
                 case MKDIR -> effects.add(WorkspaceOperationPlan.PathEffect.absentBefore(
-                        operation.targetPath(), true));
+                        operation.targetPath(), true, WorkspaceOperationPlan.OperationKind.CREATE_DIRECTORY));
                 case MOVE_PATH, RENAME_PATH -> {
-                    effects.add(WorkspaceOperationPlan.PathEffect.source(operation.sourcePath(), true));
-                    effects.add(WorkspaceOperationPlan.PathEffect.destination(operation.destinationPath(), true));
+                    WorkspaceOperationPlan.OperationKind kind = operation.kind() == WorkspaceBatchOperation.Kind.MOVE_PATH
+                            ? WorkspaceOperationPlan.OperationKind.MOVE_PATH
+                            : WorkspaceOperationPlan.OperationKind.RENAME_PATH;
+                    effects.add(WorkspaceOperationPlan.PathEffect.source(operation.sourcePath(), true, kind));
+                    effects.add(WorkspaceOperationPlan.PathEffect.destination(operation.destinationPath(), true, kind));
                 }
-                case COPY_PATH -> effects.add(WorkspaceOperationPlan.PathEffect.destination(
-                        operation.destinationPath(), true));
+                case COPY_PATH -> {
+                    effects.add(WorkspaceOperationPlan.PathEffect.source(
+                            operation.sourcePath(), false, WorkspaceOperationPlan.OperationKind.COPY_PATH));
+                    effects.add(WorkspaceOperationPlan.PathEffect.destination(
+                            operation.destinationPath(), true, WorkspaceOperationPlan.OperationKind.COPY_PATH));
+                }
             }
         }
 
