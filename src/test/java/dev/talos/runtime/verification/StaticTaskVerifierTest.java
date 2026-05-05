@@ -637,6 +637,52 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void staticWebRepairContextFilesDoNotAllNeedMutationWhenFinalSurfacePasses() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                <head>
+                  <meta charset="utf-8">
+                  <title>Talos Button Fixture</title>
+                  <link rel="stylesheet" href="styles.css">
+                </head>
+                <body>
+                  <main>
+                    <button id="run-button">Run</button>
+                    <p id="result">Waiting</p>
+                  </main>
+                  <script src="script.js"></script>
+                </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), """
+                body { font-family: system-ui, sans-serif; }
+                main { max-width: 32rem; margin: 2rem auto; }
+                button { padding: 0.5rem 0.75rem; }
+                """);
+        Files.writeString(workspace.resolve("script.js"), """
+                document.querySelector('#run-button').addEventListener('click', () => {
+                  document.querySelector('#result').textContent = 'Clicked';
+                });
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Fix the static web button fixture. The existing index.html loads script.js; "
+                        + "the button with id run-button should set #result to Clicked. "
+                        + "Keep filenames index.html, styles.css, and script.js. Do not create scripts.js.",
+                loopResult(List.of(successfulEdit("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.problems().toString());
+        assertTrue(result.problems().stream()
+                        .noneMatch(p -> p.contains("expected target was not successfully mutated")),
+                result.problems().toString());
+        assertTrue(result.facts().stream()
+                .anyMatch(f -> f.contains("HTML/CSS/JS selector coherence passed")), result.facts().toString());
+    }
+
+    @Test
     void targetAwareWebSurfaceRefusesTooManyCandidateWebFiles() throws Exception {
         Files.writeString(workspace.resolve("README.md"), "# Public fixture\n");
         Files.writeString(workspace.resolve("config.json"), "{\"name\":\"t57-fixture\"}\n");
