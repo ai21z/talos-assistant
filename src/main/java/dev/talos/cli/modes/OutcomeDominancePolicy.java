@@ -13,6 +13,9 @@ final class OutcomeDominancePolicy {
             boolean malformedProtocolDebris,
             boolean readOnlyDeniedMutation,
             boolean failedActionObligation,
+            boolean commandFailed,
+            boolean commandDenied,
+            boolean commandSucceeded,
             boolean deniedMutation,
             boolean deniedProtectedRead,
             boolean partialMutation,
@@ -53,6 +56,50 @@ final class OutcomeDominancePolicy {
                     malformedProtocolDebris,
                     readOnlyDeniedMutation,
                     failedActionObligation,
+                    false,
+                    false,
+                    false,
+                    deniedMutation,
+                    deniedProtectedRead,
+                    partialMutation,
+                    falseMutationClaim,
+                    inspectUnderCompleted,
+                    ungroundedAdvisory,
+                    false,
+                    missingEvidence,
+                    protectedReadApprovalMissing,
+                    false,
+                    verificationStatus);
+        }
+
+        Facts(
+                TaskContract contract,
+                boolean invalidMutationArguments,
+                boolean malformedProtocolDebris,
+                boolean readOnlyDeniedMutation,
+                boolean failedActionObligation,
+                boolean commandFailed,
+                boolean commandDenied,
+                boolean commandSucceeded,
+                boolean deniedMutation,
+                boolean deniedProtectedRead,
+                boolean partialMutation,
+                boolean falseMutationClaim,
+                boolean inspectUnderCompleted,
+                boolean ungroundedAdvisory,
+                boolean missingEvidence,
+                boolean protectedReadApprovalMissing,
+                ExecutionOutcome.VerificationStatus verificationStatus
+        ) {
+            this(
+                    contract,
+                    invalidMutationArguments,
+                    malformedProtocolDebris,
+                    readOnlyDeniedMutation,
+                    failedActionObligation,
+                    commandFailed,
+                    commandDenied,
+                    commandSucceeded,
                     deniedMutation,
                     deniedProtectedRead,
                     partialMutation,
@@ -92,10 +139,22 @@ final class OutcomeDominancePolicy {
                     false,
                     false,
                     false,
+                    false,
+                    false,
+                    false,
                     ExecutionOutcome.VerificationStatus.NOT_RUN);
         }
 
         if (facts.malformedProtocolDebris() || facts.invalidMutationArguments()) {
+            return failed();
+        }
+        if (facts.commandDenied()) {
+            return new Decision(
+                    ExecutionOutcome.CompletionStatus.BLOCKED,
+                    TaskCompletionStatus.BLOCKED_BY_APPROVAL,
+                    false);
+        }
+        if (facts.commandFailed()) {
             return failed();
         }
         if (facts.readOnlyDeniedMutation() || facts.failedActionObligation()) {
@@ -124,6 +183,12 @@ final class OutcomeDominancePolicy {
         }
         if (facts.verificationStatus() == ExecutionOutcome.VerificationStatus.FAILED) {
             return failed();
+        }
+        if (facts.commandSucceeded() && facts.contract() != null && facts.contract().verificationRequired()) {
+            return new Decision(
+                    ExecutionOutcome.CompletionStatus.COMPLETE,
+                    TaskCompletionStatus.COMPLETED_VERIFIED,
+                    false);
         }
         if (verificationRequiredButNotRun(facts)) {
             return advisory();

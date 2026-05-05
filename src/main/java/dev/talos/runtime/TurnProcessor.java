@@ -4,6 +4,7 @@ import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
 import dev.talos.core.retrieval.RetrievalTrace;
+import dev.talos.runtime.command.CommandPlan;
 import dev.talos.runtime.phase.PhasePolicy;
 import dev.talos.runtime.command.CommandToolPlanner;
 import dev.talos.runtime.checkpoint.CheckpointCaptureResult;
@@ -301,6 +302,7 @@ public final class TurnProcessor {
             return ToolResult.fail(ToolError.notFound("Unknown tool: " + call.toolName()));
         }
 
+        boolean commandTool = CommandToolPlanner.isRunCommandTool(call.toolName());
         ToolRiskLevel risk = tool.descriptor().riskLevel();
         String path = resolvePathParam(call);
         String userRequest = TurnUserRequestCapture.get();
@@ -341,6 +343,13 @@ public final class TurnProcessor {
                 TurnAuditCapture.recordToolCall(
                         call.toolName(), path == null ? "" : path, false,
                         "phase " + ctx.executionPhaseState().phase() + " denied " + call.toolName());
+                if (commandTool) {
+                    String reason = "Phase policy blocked " + call.toolName()
+                            + " during " + ctx.executionPhaseState().phase();
+                    LocalTurnTraceCapture.recordCommandPolicyDecision(
+                            tracePhase, call, "DENY", "PHASE_POLICY");
+                    LocalTurnTraceCapture.recordCommandDenied(tracePhase, call, reason);
+                }
                 return phaseRejection;
             }
         }
@@ -422,7 +431,29 @@ public final class TurnProcessor {
                         tracePhase,
                         call,
                         preApprovalBlockReason(call, preApprovalValidation));
+                if (commandTool) {
+                    String reason = preApprovalBlockReason(call, preApprovalValidation);
+                    LocalTurnTraceCapture.recordCommandPolicyDecision(
+                            tracePhase, call, "DENY", "PRE_APPROVAL_VALIDATION");
+                    LocalTurnTraceCapture.recordCommandDenied(tracePhase, call, reason);
+                }
                 return preApprovalValidation;
+            }
+        }
+
+        if (commandTool) {
+            try {
+                CommandPlan commandPlan = CommandToolPlanner.planGradleV1(
+                        call,
+                        session.workspace(),
+                        dev.talos.runtime.command.CommandProfileRegistry.defaultRegistry());
+                LocalTurnTraceCapture.recordCommandPlanCreated(tracePhase, call, commandPlan);
+            } catch (Exception e) {
+                String reason = CommandToolPlanner.invalidMessage(e.getMessage());
+                LocalTurnTraceCapture.recordCommandPolicyDecision(
+                        tracePhase, call, "DENY", "PLAN_REJECTED");
+                LocalTurnTraceCapture.recordCommandDenied(tracePhase, call, reason);
+                return ToolResult.fail(ToolError.invalidParams(reason));
             }
         }
 
@@ -461,16 +492,33 @@ public final class TurnProcessor {
                 permissionDecision.relativePath(),
                 permissionDecision.protectedPath(),
                 permissionDecision.rememberEligible());
+        if (commandTool) {
+            LocalTurnTraceCapture.recordCommandPolicyDecision(
+                    tracePhase,
+                    call,
+                    permissionDecision.action().name(),
+                    permissionDecision.reasonCode());
+        }
 
         if (permissionDecision.action() == PermissionAction.DENY) {
             if (risk.requiresApproval()) {
                 TurnAuditCapture.recordApprovalDenied();
                 LocalTurnTraceCapture.recordApprovalDenied(tracePhase, call);
+                if (commandTool) {
+                    LocalTurnTraceCapture.recordCommandApprovalDenied(tracePhase, call);
+                }
             }
             TurnAuditCapture.recordToolCall(
                     call.toolName(), path == null ? "" : path, false,
                     "permission policy denied " + call.toolName()
                             + " (" + permissionDecision.reasonCode() + ")");
+            if (commandTool) {
+                LocalTurnTraceCapture.recordCommandDenied(
+                        tracePhase,
+                        call,
+                        "Permission policy denied " + call.toolName()
+                                + " (" + permissionDecision.reasonCode() + ")");
+            }
             return ToolResult.fail(ToolError.denied(
                     "Permission policy denied the " + call.toolName()
                             + " call. " + permissionDecision.userMessage()));
@@ -479,6 +527,9 @@ public final class TurnProcessor {
         if (permissionDecision.action() == PermissionAction.ASK) {
             TurnAuditCapture.recordApprovalRequired();
             LocalTurnTraceCapture.recordApprovalRequired(tracePhase, call);
+            if (commandTool) {
+                LocalTurnTraceCapture.recordCommandApprovalRequired(tracePhase, call);
+            }
 
             String desc = approvalDescription(call, risk, permissionDecision);
             String detail = buildApprovalDetail(
@@ -492,6 +543,13 @@ public final class TurnProcessor {
             if (response == ApprovalResponse.DENIED) {
                 TurnAuditCapture.recordApprovalDenied();
                 LocalTurnTraceCapture.recordApprovalDenied(tracePhase, call);
+                if (commandTool) {
+                    LocalTurnTraceCapture.recordCommandApprovalDenied(tracePhase, call);
+                    LocalTurnTraceCapture.recordCommandDenied(
+                            tracePhase,
+                            call,
+                            "User did not approve " + call.toolName());
+                }
                 TurnAuditCapture.recordToolCall(
                         call.toolName(), path == null ? "" : path, false,
                         "approval denied by user for " + call.toolName());
@@ -510,6 +568,9 @@ public final class TurnProcessor {
             // Approved — record and optionally propagate the remember choice.
             TurnAuditCapture.recordApprovalGranted();
             LocalTurnTraceCapture.recordApprovalGranted(tracePhase, call);
+            if (commandTool) {
+                LocalTurnTraceCapture.recordCommandApprovalGranted(tracePhase, call);
+            }
             if (response == ApprovalResponse.APPROVED_REMEMBER
                     && permissionDecision.rememberEligible()) {
                 approvalPolicy.rememberApproval(session.workspace(), call, risk);
@@ -518,6 +579,9 @@ public final class TurnProcessor {
             // AUTO_ALLOW by policy for a mutating call.
             TurnAuditCapture.recordApprovalGranted();
             LocalTurnTraceCapture.recordApprovalGranted(tracePhase, call);
+            if (commandTool) {
+                LocalTurnTraceCapture.recordCommandApprovalGranted(tracePhase, call);
+            }
         }
 
         if (ToolCallSupport.isMutatingTool(call.toolName())) {
