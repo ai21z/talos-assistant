@@ -2,7 +2,6 @@ package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.DebugLevel;
-import dev.talos.core.ingest.UnsupportedDocumentFormats;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.MutationIntent;
 import dev.talos.runtime.ToolCallLoop;
@@ -22,8 +21,7 @@ import dev.talos.runtime.policy.CapabilityAnswerPolicy;
 import dev.talos.runtime.policy.ConversationBoundaryPolicy;
 import dev.talos.runtime.policy.CurrentTurnCapabilityFrame;
 import dev.talos.runtime.policy.EvidenceObligation;
-import dev.talos.runtime.policy.EvidenceObligationPolicy;
-import dev.talos.runtime.policy.ProtectedPathPolicy;
+import dev.talos.runtime.policy.EvidenceGate;
 import dev.talos.runtime.policy.ProviderRequestControlPolicy;
 import dev.talos.runtime.policy.ResponseObligationVerifier;
 import dev.talos.runtime.task.TaskContract;
@@ -538,12 +536,12 @@ public final class AssistantTurnExecutor {
             Context ctx
     ) {
         CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, ctx);
-        if (selectedEvidenceObligation(safePlan, workspace)
+        if (EvidenceGate.selectObligation(safePlan, workspace)
                 != EvidenceObligation.UNSUPPORTED_CAPABILITY_CHECK_REQUIRED) {
             return new ReadEvidenceHandoffResult("", null, null);
         }
         TaskContract contract = safePlan.taskContract();
-        if (!hasOnlyUnsupportedExpectedTargets(contract)) {
+        if (!EvidenceGate.hasOnlyUnsupportedExpectedTargets(contract)) {
             return new ReadEvidenceHandoffResult("", null, null);
         }
         TurnTaskContractCapture.set(contract);
@@ -564,8 +562,8 @@ public final class AssistantTurnExecutor {
         if (answer == null) answer = "";
         CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, ctx);
         TaskContract contract = safePlan.taskContract();
-        EvidenceObligation obligation = selectedEvidenceObligation(safePlan, workspace);
-        if (!requiresReadEvidenceHandoff(obligation)) {
+        EvidenceObligation obligation = EvidenceGate.selectObligation(safePlan, workspace);
+        if (!EvidenceGate.requiresReadEvidenceHandoff(obligation)) {
             return new ReadEvidenceHandoffResult(answer, null, null);
         }
         if (contract.mutationRequested() || contract.mutationAllowed()) {
@@ -576,10 +574,12 @@ public final class AssistantTurnExecutor {
         }
 
         if (obligation == EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED
-                && !hasExplicitProtectedReadIntent(contract, protectedExpectedTargets(contract, workspace))) {
+                && !EvidenceGate.hasExplicitProtectedReadIntent(
+                        contract,
+                        EvidenceGate.protectedExpectedTargets(contract, workspace))) {
             return new ReadEvidenceHandoffResult(answer, null, null);
         }
-        List<String> targets = readEvidenceHandoffTargets(contract, obligation, workspace);
+        List<String> targets = EvidenceGate.handoffTargets(contract, obligation, workspace);
         if (targets.isEmpty()) {
             return new ReadEvidenceHandoffResult(answer, null, null);
         }
@@ -603,174 +603,6 @@ public final class AssistantTurnExecutor {
             LOG.warn("Read evidence handoff failed: {}", e.getMessage());
             return new ReadEvidenceHandoffResult(answer, null, null);
         }
-    }
-
-    private static EvidenceObligation selectedEvidenceObligation(CurrentTurnPlan plan, Path workspace) {
-        if (plan == null) return EvidenceObligation.NONE;
-        TaskContract contract = plan.taskContract();
-        if (contract == null) return EvidenceObligation.NONE;
-        EvidenceObligation recorded = EvidenceObligationPolicy.parse(plan.evidenceObligation());
-        EvidenceObligation derived = EvidenceObligationPolicy.derive(
-                contract,
-                plan.phaseInitial(),
-                workspace);
-        return recorded == EvidenceObligation.NONE ? derived : recorded;
-    }
-
-    private static boolean requiresReadEvidenceHandoff(EvidenceObligation obligation) {
-        return obligation == EvidenceObligation.READ_TARGET_REQUIRED
-                || obligation == EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED
-                || obligation == EvidenceObligation.UNSUPPORTED_CAPABILITY_CHECK_REQUIRED;
-    }
-
-    private static List<String> readEvidenceHandoffTargets(
-            TaskContract contract,
-            EvidenceObligation obligation,
-            Path workspace
-    ) {
-        if (contract == null || workspace == null || contract.expectedTargets().isEmpty()) {
-            return List.of();
-        }
-        LinkedHashSet<String> targets = new LinkedHashSet<>();
-        for (String target : contract.expectedTargets()) {
-            if (target == null || target.isBlank()) continue;
-            boolean protectedTarget = ProtectedPathPolicy.classify(workspace, target).protectedPath();
-            if (obligation == EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED) {
-                targets.add(target);
-            } else if (obligation == EvidenceObligation.UNSUPPORTED_CAPABILITY_CHECK_REQUIRED
-                    && isUnsupportedExpectedTarget(target)) {
-                targets.add(target);
-            } else if (obligation == EvidenceObligation.READ_TARGET_REQUIRED && !protectedTarget) {
-                targets.add(target);
-            }
-        }
-        return List.copyOf(targets);
-    }
-
-    private static boolean hasOnlyUnsupportedExpectedTargets(TaskContract contract) {
-        if (contract == null || contract.expectedTargets().isEmpty()) return false;
-        boolean sawTarget = false;
-        for (String target : contract.expectedTargets()) {
-            if (target == null || target.isBlank()) continue;
-            sawTarget = true;
-            if (!isUnsupportedExpectedTarget(target)) return false;
-        }
-        return sawTarget;
-    }
-
-    private static boolean isUnsupportedExpectedTarget(String target) {
-        if (target == null || target.isBlank()) return false;
-        try {
-            return UnsupportedDocumentFormats.isUnsupported(Path.of(target));
-        } catch (RuntimeException ignored) {
-            return false;
-        }
-    }
-
-    private static List<String> protectedExpectedTargets(TaskContract contract, Path workspace) {
-        if (contract == null || workspace == null || contract.expectedTargets().isEmpty()) {
-            return List.of();
-        }
-        LinkedHashSet<String> targets = new LinkedHashSet<>();
-        for (String target : contract.expectedTargets()) {
-            if (target == null || target.isBlank()) continue;
-            if (ProtectedPathPolicy.classify(workspace, target).protectedPath()) {
-                targets.add(target);
-            }
-        }
-        return List.copyOf(targets);
-    }
-
-    private static boolean hasExplicitProtectedReadIntent(TaskContract contract, List<String> targets) {
-        if (contract == null || targets == null || targets.isEmpty()) return false;
-        String request = contract.originalUserRequest();
-        if (request == null || request.isBlank()) return false;
-        String lowerRequest = request.toLowerCase(Locale.ROOT).replace('\\', '/');
-        for (String target : targets) {
-            if (targetHasExplicitReadIntent(lowerRequest, target)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean targetHasExplicitReadIntent(String lowerRequest, String target) {
-        if (lowerRequest == null || lowerRequest.isBlank() || target == null || target.isBlank()) {
-            return false;
-        }
-        String normalizedTarget = target.toLowerCase(Locale.ROOT).replace('\\', '/');
-        int from = 0;
-        while (from < lowerRequest.length()) {
-            int index = lowerRequest.indexOf(normalizedTarget, from);
-            if (index < 0) return false;
-            int beforeStart = Math.max(0, index - 80);
-            int afterEnd = Math.min(lowerRequest.length(), index + normalizedTarget.length() + 80);
-            String before = lowerRequest.substring(beforeStart, index);
-            String after = lowerRequest.substring(index + normalizedTarget.length(), afterEnd);
-            if (!hasLocalTargetNegation(before)
-                    && (hasReadIntentMarker(before) || hasReadIntentMarker(after))) {
-                return true;
-            }
-            from = index + normalizedTarget.length();
-        }
-        return false;
-    }
-
-    private static boolean hasLocalTargetNegation(String value) {
-        if (value == null || value.isBlank()) return false;
-        return value.contains("do not want")
-                || value.contains("do not need")
-                || value.contains("don't want")
-                || value.contains("don't need")
-                || value.contains("dont want")
-                || value.contains("dont need")
-                || value.contains("not want")
-                || value.contains("not the")
-                || value.contains("without ")
-                || value.contains("exclude")
-                || value.contains("skip")
-                || value.contains("avoid")
-                || value.contains("not ");
-    }
-
-    private static boolean hasReadIntentMarker(String value) {
-        if (value == null || value.isBlank()) return false;
-        return containsWord(value, "read")
-                || containsWord(value, "open")
-                || containsWord(value, "inspect")
-                || containsWord(value, "show")
-                || containsWord(value, "display")
-                || containsWord(value, "summarize")
-                || containsWord(value, "print")
-                || containsWord(value, "cat")
-                || value.contains("tell me")
-                || value.contains("value inside")
-                || value.contains("what does")
-                || value.contains("what is in")
-                || value.contains("content")
-                || value.contains("contents");
-    }
-
-    private static boolean containsWord(String value, String word) {
-        if (value == null || word == null || word.isBlank()) return false;
-        int from = 0;
-        while (from < value.length()) {
-            int index = value.indexOf(word, from);
-            if (index < 0) return false;
-            int before = index - 1;
-            int after = index + word.length();
-            boolean leftBoundary = before < 0 || !isWordChar(value.charAt(before));
-            boolean rightBoundary = after >= value.length() || !isWordChar(value.charAt(after));
-            if (leftBoundary && rightBoundary) return true;
-            from = index + word.length();
-        }
-        return false;
-    }
-
-    private static boolean isWordChar(char c) {
-        return (c >= 'a' && c <= 'z')
-                || (c >= '0' && c <= '9')
-                || c == '_';
     }
 
     private static String readFileToolCallJson(String target) {
@@ -1094,7 +926,7 @@ public final class AssistantTurnExecutor {
         if (ctx == null || ctx.streamSink() == null) return false;
         TaskContract taskContract = plan == null ? null : plan.taskContract();
         if (taskContract != null && taskContract.mutationAllowed()) return false;
-        if (requiresReadEvidenceHandoff(selectedEvidenceObligation(plan, workspace))) return false;
+        if (EvidenceGate.requiresReadEvidenceHandoff(EvidenceGate.selectObligation(plan, workspace))) return false;
         return !requiresWorkspaceEvidence(taskContract);
     }
 

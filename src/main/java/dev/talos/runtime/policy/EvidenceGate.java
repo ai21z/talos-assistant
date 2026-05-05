@@ -1,0 +1,194 @@
+package dev.talos.runtime.policy;
+
+import dev.talos.core.ingest.UnsupportedDocumentFormats;
+import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.turn.CurrentTurnPlan;
+
+import java.nio.file.Path;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+
+/**
+ * Pure evidence-obligation policy for current-turn handoff decisions.
+ *
+ * <p>This class decides whether an existing turn plan requires a read-evidence
+ * handoff and which targets can be read. It does not call the model or execute
+ * tools; callers own orchestration.
+ */
+public final class EvidenceGate {
+    private EvidenceGate() {}
+
+    public static EvidenceObligation selectObligation(CurrentTurnPlan plan, Path workspace) {
+        if (plan == null) return EvidenceObligation.NONE;
+        TaskContract contract = plan.taskContract();
+        if (contract == null) return EvidenceObligation.NONE;
+        EvidenceObligation recorded = EvidenceObligationPolicy.parse(plan.evidenceObligation());
+        EvidenceObligation derived = EvidenceObligationPolicy.derive(
+                contract,
+                phase(plan),
+                workspace);
+        return recorded == EvidenceObligation.NONE ? derived : recorded;
+    }
+
+    public static boolean requiresReadEvidenceHandoff(EvidenceObligation obligation) {
+        return obligation == EvidenceObligation.READ_TARGET_REQUIRED
+                || obligation == EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED
+                || obligation == EvidenceObligation.UNSUPPORTED_CAPABILITY_CHECK_REQUIRED;
+    }
+
+    public static List<String> handoffTargets(
+            TaskContract contract,
+            EvidenceObligation obligation,
+            Path workspace
+    ) {
+        if (contract == null || workspace == null || contract.expectedTargets().isEmpty()) {
+            return List.of();
+        }
+        LinkedHashSet<String> targets = new LinkedHashSet<>();
+        for (String target : contract.expectedTargets()) {
+            if (target == null || target.isBlank()) continue;
+            boolean protectedTarget = ProtectedPathPolicy.classify(workspace, target).protectedPath();
+            if (obligation == EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED) {
+                targets.add(target);
+            } else if (obligation == EvidenceObligation.UNSUPPORTED_CAPABILITY_CHECK_REQUIRED
+                    && isUnsupportedExpectedTarget(target)) {
+                targets.add(target);
+            } else if (obligation == EvidenceObligation.READ_TARGET_REQUIRED && !protectedTarget) {
+                targets.add(target);
+            }
+        }
+        return List.copyOf(targets);
+    }
+
+    public static boolean hasOnlyUnsupportedExpectedTargets(TaskContract contract) {
+        if (contract == null || contract.expectedTargets().isEmpty()) return false;
+        boolean sawTarget = false;
+        for (String target : contract.expectedTargets()) {
+            if (target == null || target.isBlank()) continue;
+            sawTarget = true;
+            if (!isUnsupportedExpectedTarget(target)) return false;
+        }
+        return sawTarget;
+    }
+
+    public static List<String> protectedExpectedTargets(TaskContract contract, Path workspace) {
+        if (contract == null || workspace == null || contract.expectedTargets().isEmpty()) {
+            return List.of();
+        }
+        LinkedHashSet<String> targets = new LinkedHashSet<>();
+        for (String target : contract.expectedTargets()) {
+            if (target == null || target.isBlank()) continue;
+            if (ProtectedPathPolicy.classify(workspace, target).protectedPath()) {
+                targets.add(target);
+            }
+        }
+        return List.copyOf(targets);
+    }
+
+    public static boolean hasExplicitProtectedReadIntent(TaskContract contract, List<String> targets) {
+        if (contract == null || targets == null || targets.isEmpty()) return false;
+        String request = contract.originalUserRequest();
+        if (request == null || request.isBlank()) return false;
+        String lowerRequest = request.toLowerCase(Locale.ROOT).replace('\\', '/');
+        for (String target : targets) {
+            if (targetHasExplicitReadIntent(lowerRequest, target)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static boolean isUnsupportedExpectedTarget(String target) {
+        if (target == null || target.isBlank()) return false;
+        try {
+            return UnsupportedDocumentFormats.isUnsupported(Path.of(target));
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private static ExecutionPhase phase(CurrentTurnPlan plan) {
+        return plan.phaseInitial() == null ? ExecutionPhase.INSPECT : plan.phaseInitial();
+    }
+
+    private static boolean targetHasExplicitReadIntent(String lowerRequest, String target) {
+        if (lowerRequest == null || lowerRequest.isBlank() || target == null || target.isBlank()) {
+            return false;
+        }
+        String normalizedTarget = target.toLowerCase(Locale.ROOT).replace('\\', '/');
+        int from = 0;
+        while (from < lowerRequest.length()) {
+            int index = lowerRequest.indexOf(normalizedTarget, from);
+            if (index < 0) return false;
+            int beforeStart = Math.max(0, index - 80);
+            int afterEnd = Math.min(lowerRequest.length(), index + normalizedTarget.length() + 80);
+            String before = lowerRequest.substring(beforeStart, index);
+            String after = lowerRequest.substring(index + normalizedTarget.length(), afterEnd);
+            if (!hasLocalTargetNegation(before)
+                    && (hasReadIntentMarker(before) || hasReadIntentMarker(after))) {
+                return true;
+            }
+            from = index + normalizedTarget.length();
+        }
+        return false;
+    }
+
+    private static boolean hasLocalTargetNegation(String value) {
+        if (value == null || value.isBlank()) return false;
+        return value.contains("do not want")
+                || value.contains("do not need")
+                || value.contains("don't want")
+                || value.contains("don't need")
+                || value.contains("dont want")
+                || value.contains("dont need")
+                || value.contains("not want")
+                || value.contains("not the")
+                || value.contains("without ")
+                || value.contains("exclude")
+                || value.contains("skip")
+                || value.contains("avoid")
+                || value.contains("not ");
+    }
+
+    private static boolean hasReadIntentMarker(String value) {
+        if (value == null || value.isBlank()) return false;
+        return containsWord(value, "read")
+                || containsWord(value, "open")
+                || containsWord(value, "inspect")
+                || containsWord(value, "show")
+                || containsWord(value, "display")
+                || containsWord(value, "summarize")
+                || containsWord(value, "print")
+                || containsWord(value, "cat")
+                || value.contains("tell me")
+                || value.contains("value inside")
+                || value.contains("what does")
+                || value.contains("what is in")
+                || value.contains("content")
+                || value.contains("contents");
+    }
+
+    private static boolean containsWord(String value, String word) {
+        if (value == null || word == null || word.isBlank()) return false;
+        int from = 0;
+        while (from < value.length()) {
+            int index = value.indexOf(word, from);
+            if (index < 0) return false;
+            int before = index - 1;
+            int after = index + word.length();
+            boolean leftBoundary = before < 0 || !isWordChar(value.charAt(before));
+            boolean rightBoundary = after >= value.length() || !isWordChar(value.charAt(after));
+            if (leftBoundary && rightBoundary) return true;
+            from = index + word.length();
+        }
+        return false;
+    }
+
+    private static boolean isWordChar(char c) {
+        return (c >= 'a' && c <= 'z')
+                || (c >= '0' && c <= '9')
+                || c == '_';
+    }
+}
