@@ -1,7 +1,7 @@
 # T127 - Java 25 Migration Readiness Spike
 
 Severity: medium
-Status: open
+Status: done
 
 ## Problem
 
