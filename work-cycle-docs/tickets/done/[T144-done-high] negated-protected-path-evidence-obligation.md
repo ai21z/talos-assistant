@@ -1,7 +1,7 @@
 # T144 - Negated Protected Path Evidence Obligation
 
 Severity: high
-Status: open
+Status: done
 
 ## Problem
 
@@ -46,3 +46,12 @@ included `.env` in `expectedTargets`, and the final outcome became
 - No broad natural-language parser rewrite.
 - No weakening protected-read approval.
 - No prompt wording patch only.
+
+## Result
+
+- Added direct negated-read target extraction so prompts like "do not read .env"
+  remove that path from expected evidence targets.
+- Preserved direct protected-read target extraction for prompts that actually
+  ask to read `.env`.
+- Covered negated protected path, direct protected read, and mixed public plus
+  negated protected targets in `TaskContractResolverTest`.
