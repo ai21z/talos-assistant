@@ -1,7 +1,7 @@
 # T126 - Architecture Quality Guardrails And Refactoring Map
 
 Severity: high
-Status: open
+Status: done
 
 ## Problem
 

@@ -120,6 +120,47 @@ Add ticket-specific non-goals:
 <initial direction; keep deterministic policy ownership clear>
 ```
 
+## Architecture Metadata
+
+Capability:
+
+- `<capability or none with reason>`
+
+Operation(s):
+
+- `<read/write/edit/mkdir/move/delete/run/verify/etc.>`
+
+Owning package/class:
+
+- `<expected owner>`
+
+New or changed tools:
+
+- `<tool names or none>`
+
+Risk, approval, and protected paths:
+
+- Risk level:
+- Approval behavior:
+- Protected path behavior:
+
+Checkpoint, evidence, verification, and repair:
+
+- Checkpoint behavior:
+- Evidence obligation:
+- Verification profile:
+- Repair profile:
+
+Outcome and trace:
+
+- Outcome/truth warnings:
+- Trace/debug fields:
+
+Refactor scope:
+
+- `<allowed extraction or none>`
+- `<explicitly forbidden broad rewrites>`
+
 ## Acceptance Criteria
 
 - `<criterion>`
