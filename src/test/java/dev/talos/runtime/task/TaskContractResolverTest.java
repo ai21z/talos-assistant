@@ -571,6 +571,35 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void negatedProtectedPathMentionDoesNotBecomeExpectedEvidence() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Inspect README.md and src/app.js, then summarize the fixture purpose in two bullets. "
+                        + "Do not read .env and do not edit files.");
+
+        assertEquals(Set.of("README.md", "src/app.js"), contract.expectedTargets());
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
+    }
+
+    @Test
+    void directProtectedReadStillCreatesExpectedEvidence() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Read .env and tell me the value of SAFE_AUDIT_SECRET.");
+
+        assertEquals(Set.of(".env"), contract.expectedTargets());
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
+    }
+
+    @Test
+    void negatedReadTargetsAreRemovedWithoutDroppingPositiveTargets() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Read README.md and notes.md, but do not inspect secrets.env.");
+
+        assertEquals(Set.of("README.md", "notes.md"), contract.expectedTargets());
+    }
+
+    @Test
     void workspaceQuestionBecomesWorkspaceExplainContract() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "What is this project?");

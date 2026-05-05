@@ -44,6 +44,10 @@ public final class TaskContractResolver {
                     + "(?:the\\s+)?(?:file\\s+)?(?:content|contents)?\\s*(?:from|of|in)?)"
                     + "\\s+(.{0,240})");
 
+    private static final Pattern DIRECT_NEGATED_READ_TARGET_SPAN = Pattern.compile(
+            "(?i)\\b(?:do\\s+not|don't|dont)\\s+"
+                    + "(?:show|display|include|read|inspect|open|summarize)\\s+(.{0,240})");
+
     private static final Pattern NEGATED_TARGET_PREFERENCE_SPAN = Pattern.compile(
             "(?i)\\b(?:do\\s+not|don't|dont)\\s+(?:want|need)\\s+"
                     + "(?:the\\s+)?(?:file\\s+)?(.{0,160})");
@@ -310,6 +314,15 @@ public final class TaskContractResolver {
         Matcher spanMatcher = NEGATED_READ_TARGET_SPAN.matcher(userRequest);
         while (spanMatcher.find()) {
             String span = firstSentenceFragment(spanMatcher.group(1));
+            Matcher targetMatcher = TARGET_FILE.matcher(span);
+            while (targetMatcher.find()) {
+                String target = normalizeTarget(targetMatcher.group(1));
+                if (!target.isBlank()) out.add(target);
+            }
+        }
+        Matcher directMatcher = DIRECT_NEGATED_READ_TARGET_SPAN.matcher(userRequest);
+        while (directMatcher.find()) {
+            String span = firstSentenceFragment(directMatcher.group(1));
             Matcher targetMatcher = TARGET_FILE.matcher(span);
             while (targetMatcher.find()) {
                 String target = normalizeTarget(targetMatcher.group(1));
