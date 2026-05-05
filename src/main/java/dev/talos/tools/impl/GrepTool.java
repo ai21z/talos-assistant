@@ -49,7 +49,9 @@ public final class GrepTool implements TalosTool {
                   "include":{"type":"string","description":"Glob for filenames, e.g. *.java (optional)"},
                   "max_results":{"type":"integer","description":"Max matching lines (default 50)"},
                   "regex":{"type":"string","description":"'true' to use regex (default plain text)"}
-                },"required":["pattern"]}""");
+                },"required":["pattern"]}""",
+                ToolRiskLevel.READ_ONLY,
+                ToolOperationMetadata.inspect(NAME, java.util.Map.of(), "WORKSPACE_GREP"));
     }
 
     @Override

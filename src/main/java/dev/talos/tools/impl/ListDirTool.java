@@ -5,6 +5,7 @@ import dev.talos.tools.*;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 import java.util.stream.Stream;
 
 /**
@@ -41,7 +42,12 @@ public final class ListDirTool implements TalosTool {
                   "path":{"type":"string","description":"Relative path to the directory in the workspace"},
                   "max_depth":{"type":"integer","description":"Max directory depth (default 1, max 5)"},
                   "max_entries":{"type":"integer","description":"Max entries to return (default 200)"}
-                },"required":["path"]}""");
+                },"required":["path"]}""",
+                ToolRiskLevel.READ_ONLY,
+                ToolOperationMetadata.inspect(
+                        NAME,
+                        Map.of("path", ToolOperationMetadata.PathRole.TARGET_DIRECTORY),
+                        "DIRECTORY_LISTED"));
     }
 
     @Override

@@ -1,5 +1,6 @@
 package dev.talos.tools.impl;
 
+import dev.talos.core.capability.CapabilityKind;
 import dev.talos.tools.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -8,6 +9,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.Map;
 
 /**
  * Tool that performs a targeted string replacement within a workspace file.
@@ -56,7 +58,16 @@ public final class FileEditTool implements TalosTool {
                   "old_string":{"type":"string","description":"Exact file content to find and replace, character-for-character including whitespace and newlines. NOTE: talos.read_file output includes line-number prefixes like '1 | ' - do NOT include those prefixes in old_string. Copy only the actual file content, not the display formatting. Must appear exactly once in the file."},
                   "new_string":{"type":"string","description":"Replacement text (may be empty to delete the matched text)"}
                 },"required":["path","old_string","new_string"]}""",
-                ToolRiskLevel.WRITE);
+                ToolRiskLevel.WRITE,
+                ToolOperationMetadata.workspaceMutation(
+                        NAME,
+                        CapabilityKind.EDIT,
+                        ToolRiskLevel.WRITE,
+                        Map.of("path", ToolOperationMetadata.PathRole.TARGET_FILE),
+                        false,
+                        true,
+                        "FILE_EDITED",
+                        "CONTENT_VERIFY"));
     }
 
     @Override
