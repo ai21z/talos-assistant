@@ -1,7 +1,7 @@
 # T130 - Workspace Operation Plan And Bundle Checkpoints
 
 Severity: high
-Status: open
+Status: done
 
 ## Problem
 
@@ -31,6 +31,24 @@ Current checkpointing is centered on one file mutation. Workspace organization t
 - No public move/copy/delete tools yet unless explicitly split.
 - No shell command checkpoints.
 - No broad checkpoint store rewrite beyond the operation-plan need.
+
+## Architecture Metadata
+
+- Capability: workspace operation planning/checkpointing.
+- Operation(s): internal plan/result records and bundle checkpoint capture.
+- Owning package/class: `dev.talos.runtime.workspace`, `dev.talos.runtime.checkpoint`.
+- New or changed tools: no new tools.
+- Risk level: plans carry read/write/destructive risk metadata; public behavior unchanged.
+- Approval behavior: unchanged; plans carry approval summaries for later tools.
+- Protected path behavior: unchanged.
+- Checkpoint behavior: `CheckpointService` and `FileBundleCheckpointStore` can capture multi-path operation plans; single-file checkpoint API remains.
+- Evidence obligation: none.
+- Verification profile: none.
+- Repair profile: none.
+- Outcome/truth warnings: operation results can carry applied/partial/blocked/failed/skipped state for later rendering.
+- Trace/debug fields: checkpoint ids remain available through existing capture result.
+- Refactor scope: additive internal API plus shared checkpoint capture helper.
+- Non-goals: no public move/copy/delete tools, no shell command checkpoints, no broad checkpoint rewrite.
 
 ## Verification
 

@@ -1,6 +1,7 @@
 package dev.talos.runtime.checkpoint;
 
 import dev.talos.core.Config;
+import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.tools.ToolCall;
 
 import java.nio.file.Path;
@@ -31,6 +32,20 @@ public final class CheckpointService {
             return CheckpointCaptureResult.skipped("Checkpointing is disabled.");
         }
         return store.captureBeforeMutation(workspace, config, call, traceId, turnNumber);
+    }
+
+    public CheckpointCaptureResult captureBeforeOperation(
+            Path workspace,
+            Config config,
+            WorkspaceOperationPlan plan,
+            String traceId,
+            int turnNumber
+    ) {
+        CheckpointConfig cfg = CheckpointConfig.from(config);
+        if (!cfg.enabled()) {
+            return CheckpointCaptureResult.skipped("Checkpointing is disabled.");
+        }
+        return store.captureBeforeOperation(workspace, config, plan, traceId, turnNumber);
     }
 
     public CheckpointRestoreResult restore(Path workspace, String checkpointId) {

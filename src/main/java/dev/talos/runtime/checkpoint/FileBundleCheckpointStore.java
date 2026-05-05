@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.core.Config;
 import dev.talos.runtime.JsonSessionStore;
+import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.tools.ToolCall;
 
 import java.io.IOException;
@@ -11,11 +12,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HexFormat;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 public final class FileBundleCheckpointStore implements CheckpointStore {
@@ -38,7 +42,6 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
         if (workspace == null || call == null) {
             return CheckpointCaptureResult.failure("Checkpoint requires workspace and tool call.");
         }
-        CheckpointConfig cfg = CheckpointConfig.from(config);
         String pathParam = pathParam(call);
         if (pathParam.isBlank()) {
             return CheckpointCaptureResult.failure("Checkpoint requires a target path.");
@@ -53,11 +56,69 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
             return CheckpointCaptureResult.failure("Checkpoint target is a directory: " + pathParam);
         }
 
+        return captureRelativePaths(
+                ws,
+                config,
+                List.of(pathParam),
+                traceId,
+                turnNumber,
+                "file-bundle");
+    }
+
+    @Override
+    public CheckpointCaptureResult captureBeforeOperation(
+            Path workspace,
+            Config config,
+            WorkspaceOperationPlan plan,
+            String traceId,
+            int turnNumber
+    ) {
+        if (workspace == null || plan == null) {
+            return CheckpointCaptureResult.failure("Bundle checkpoint requires workspace and operation plan.");
+        }
+        List<String> checkpointPaths = plan.checkpointPaths();
+        if (checkpointPaths.isEmpty()) {
+            return CheckpointCaptureResult.skipped("Operation plan has no checkpoint paths.");
+        }
+        return captureRelativePaths(
+                workspace.toAbsolutePath().normalize(),
+                config,
+                checkpointPaths,
+                traceId,
+                turnNumber,
+                "workspace-operation");
+    }
+
+    private CheckpointCaptureResult captureRelativePaths(
+            Path ws,
+            Config config,
+            List<String> relativePaths,
+            String traceId,
+            int turnNumber,
+            String backend
+    ) {
+        if (ws == null || relativePaths == null || relativePaths.isEmpty()) {
+            return CheckpointCaptureResult.failure("Checkpoint requires at least one target path.");
+        }
+        CheckpointConfig cfg = CheckpointConfig.from(config);
+        Set<String> normalizedPaths = new LinkedHashSet<>();
+        for (String rel : relativePaths) {
+            if (rel != null && !rel.isBlank()) {
+                normalizedPaths.add(rel.replace('\\', '/'));
+            }
+        }
+        if (normalizedPaths.isEmpty()) {
+            return CheckpointCaptureResult.failure("Checkpoint requires at least one target path.");
+        }
+
         try {
-            boolean existed = Files.exists(target);
-            byte[] bytes = existed ? Files.readAllBytes(target) : new byte[0];
-            if (bytes.length > cfg.maxFileBytes()) {
-                return CheckpointCaptureResult.failure("Checkpoint target exceeds max_file_bytes: " + pathParam);
+            List<Path> targets = new ArrayList<>();
+            for (String requestedRel : normalizedPaths) {
+                Path target = ws.resolve(requestedRel).normalize();
+                if (!startsWithWorkspace(target, ws)) {
+                    return CheckpointCaptureResult.failure("Checkpoint target escapes workspace: " + requestedRel);
+                }
+                targets.add(target);
             }
 
             String workspaceId = JsonSessionStore.sessionIdFor(ws);
@@ -66,11 +127,11 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
             Path blobs = dir.resolve("blobs");
             Files.createDirectories(blobs);
 
-            String rel = normalizeRelative(ws.relativize(target));
-            String blobSha = "";
-            if (existed) {
-                blobSha = sha256(bytes);
-                Files.write(blobs.resolve(blobSha), bytes);
+            List<Map<String, Object>> files = new ArrayList<>();
+            long byteCount = 0L;
+            for (Path target : targets) {
+                CaptureStats stats = capturePath(ws, target, blobs, cfg, files);
+                byteCount += stats.byteCount();
             }
 
             Map<String, Object> metadata = new LinkedHashMap<>();
@@ -80,28 +141,20 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
             metadata.put("createdAt", Instant.now().toString());
             metadata.put("turnNumber", turnNumber);
             metadata.put("traceId", traceId == null ? "" : traceId);
-            metadata.put("backend", "file-bundle");
+            metadata.put("backend", backend == null || backend.isBlank() ? "file-bundle" : backend);
             metadata.put("status", "CREATED");
-            metadata.put("fileCount", 1);
-            metadata.put("byteCount", bytes.length);
-
-            Map<String, Object> file = new LinkedHashMap<>();
-            file.put("relativePath", rel);
-            file.put("pathHash", sha256(rel.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-            file.put("existedBefore", existed);
-            file.put("blobSha256", blobSha);
-            file.put("sizeBytes", bytes.length);
-            file.put("captureStatus", existed ? "CAPTURED" : "RECORDED_ABSENT");
+            metadata.put("fileCount", files.size());
+            metadata.put("byteCount", byteCount);
 
             Map<String, Object> manifest = new LinkedHashMap<>();
             manifest.put("schemaVersion", 1);
             manifest.put("checkpointId", checkpointId);
-            manifest.put("files", List.of(file));
+            manifest.put("files", files);
 
             MAPPER.writerWithDefaultPrettyPrinter().writeValue(dir.resolve("metadata.json").toFile(), metadata);
             MAPPER.writerWithDefaultPrettyPrinter().writeValue(dir.resolve("manifest.json").toFile(), manifest);
 
-            return CheckpointCaptureResult.captured(checkpointId, 1);
+            return CheckpointCaptureResult.captured(checkpointId, files.size());
         } catch (Exception e) {
             return CheckpointCaptureResult.failure("Failed to create checkpoint: " + e.getMessage());
         }
@@ -142,6 +195,12 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
                 }
                 boolean existedBefore = Boolean.TRUE.equals(entry.get("existedBefore"));
                 if (existedBefore) {
+                    String entryType = String.valueOf(entry.getOrDefault("entryType", "FILE"));
+                    if ("DIRECTORY".equals(entryType)) {
+                        Files.createDirectories(target);
+                        restored++;
+                        continue;
+                    }
                     String blobSha = String.valueOf(entry.getOrDefault("blobSha256", ""));
                     if (blobSha.isBlank()) {
                         failed++;
@@ -153,7 +212,7 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
                     Files.write(target, bytes);
                     restored++;
                 } else {
-                    Files.deleteIfExists(target);
+                    deletePathIfExists(target);
                     deleted++;
                 }
             }
@@ -176,6 +235,19 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
         return CheckpointRestoreResult.success(checkpointId, restored, deleted);
     }
 
+    private static void deletePathIfExists(Path target) throws IOException {
+        if (!Files.exists(target)) return;
+        if (Files.isDirectory(target)) {
+            try (var stream = Files.walk(target)) {
+                for (Path path : stream.sorted(Comparator.reverseOrder()).toList()) {
+                    Files.deleteIfExists(path);
+                }
+            }
+        } else {
+            Files.deleteIfExists(target);
+        }
+    }
+
     @Override
     public List<String> listIds(Path workspace) {
         if (workspace == null) return List.of();
@@ -195,6 +267,72 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
 
     private Path checkpointDir(String workspaceId, String checkpointId) {
         return root.resolve(workspaceId).resolve("checkpoints").resolve(checkpointId);
+    }
+
+    private static CaptureStats capturePath(
+            Path workspace,
+            Path target,
+            Path blobs,
+            CheckpointConfig cfg,
+            List<Map<String, Object>> files
+    ) throws Exception {
+        String rel = normalizeRelative(workspace.relativize(target));
+        if (!Files.exists(target)) {
+            files.add(fileEntry(rel, "PATH", false, "", 0, "RECORDED_ABSENT"));
+            return new CaptureStats(0);
+        }
+        if (Files.isDirectory(target)) {
+            files.add(fileEntry(rel, "DIRECTORY", true, "", 0, "DIRECTORY_RECORDED"));
+            long bytes = 0;
+            try (var stream = Files.walk(target)) {
+                for (Path file : stream
+                        .filter(Files::isRegularFile)
+                        .sorted()
+                        .toList()) {
+                    CaptureStats stats = captureExistingFile(workspace, file, blobs, cfg, files);
+                    bytes += stats.byteCount();
+                }
+            }
+            return new CaptureStats(bytes);
+        }
+        return captureExistingFile(workspace, target, blobs, cfg, files);
+    }
+
+    private static CaptureStats captureExistingFile(
+            Path workspace,
+            Path target,
+            Path blobs,
+            CheckpointConfig cfg,
+            List<Map<String, Object>> files
+    ) throws Exception {
+        byte[] bytes = Files.readAllBytes(target);
+        String rel = normalizeRelative(workspace.relativize(target));
+        if (bytes.length > cfg.maxFileBytes()) {
+            throw new IOException("Checkpoint target exceeds max_file_bytes: " + rel);
+        }
+        String blobSha = sha256(bytes);
+        Files.write(blobs.resolve(blobSha), bytes);
+        files.add(fileEntry(rel, "FILE", true, blobSha, bytes.length, "CAPTURED"));
+        return new CaptureStats(bytes.length);
+    }
+
+    private static Map<String, Object> fileEntry(
+            String rel,
+            String entryType,
+            boolean existed,
+            String blobSha,
+            long sizeBytes,
+            String captureStatus
+    ) throws Exception {
+        Map<String, Object> file = new LinkedHashMap<>();
+        file.put("relativePath", rel);
+        file.put("pathHash", sha256(rel.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        file.put("entryType", entryType);
+        file.put("existedBefore", existed);
+        file.put("blobSha256", blobSha == null ? "" : blobSha);
+        file.put("sizeBytes", sizeBytes);
+        file.put("captureStatus", captureStatus);
+        return file;
     }
 
     private static String newCheckpointId() {
@@ -234,4 +372,6 @@ public final class FileBundleCheckpointStore implements CheckpointStore {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         return HexFormat.of().formatHex(digest.digest(bytes));
     }
+
+    private record CaptureStats(long byteCount) {}
 }
