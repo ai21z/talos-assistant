@@ -46,8 +46,8 @@ public record WorkspaceOperationPlan(
                 "",
                 OperationKind.MOVE_PATH,
                 List.of(
-                        PathEffect.source(source, true),
-                        PathEffect.destination(destination, true)),
+                        PathEffect.source(source, true, OperationKind.MOVE_PATH),
+                        PathEffect.destination(destination, true, OperationKind.MOVE_PATH)),
                 ToolRiskLevel.WRITE,
                 true,
                 overwritePolicy,
@@ -68,8 +68,8 @@ public record WorkspaceOperationPlan(
                 "",
                 OperationKind.COPY_PATH,
                 List.of(
-                        PathEffect.source(source, false),
-                        PathEffect.destination(destination, true)),
+                        PathEffect.source(source, false, OperationKind.COPY_PATH),
+                        PathEffect.destination(destination, true, OperationKind.COPY_PATH)),
                 ToolRiskLevel.WRITE,
                 true,
                 overwritePolicy,
@@ -169,30 +169,54 @@ public record WorkspaceOperationPlan(
         MERGE_DIRECTORIES
     }
 
-    public record PathEffect(String path, PathRole role, boolean checkpointBefore) {
+    public record PathEffect(String path, PathRole role, boolean checkpointBefore, OperationKind operationKind) {
         public PathEffect {
             path = normalizePath(path);
             role = role == null ? PathRole.TARGET : role;
+        }
+
+        public PathEffect(String path, PathRole role, boolean checkpointBefore) {
+            this(path, role, checkpointBefore, null);
         }
 
         public static PathEffect source(String path, boolean checkpointBefore) {
             return new PathEffect(path, PathRole.SOURCE, checkpointBefore);
         }
 
+        public static PathEffect source(String path, boolean checkpointBefore, OperationKind operationKind) {
+            return new PathEffect(path, PathRole.SOURCE, checkpointBefore, operationKind);
+        }
+
         public static PathEffect destination(String path, boolean checkpointBefore) {
             return new PathEffect(path, PathRole.DESTINATION, checkpointBefore);
+        }
+
+        public static PathEffect destination(String path, boolean checkpointBefore, OperationKind operationKind) {
+            return new PathEffect(path, PathRole.DESTINATION, checkpointBefore, operationKind);
         }
 
         public static PathEffect target(String path, boolean checkpointBefore) {
             return new PathEffect(path, PathRole.TARGET, checkpointBefore);
         }
 
+        public static PathEffect target(String path, boolean checkpointBefore, OperationKind operationKind) {
+            return new PathEffect(path, PathRole.TARGET, checkpointBefore, operationKind);
+        }
+
         public static PathEffect deleted(String path, boolean checkpointBefore) {
             return new PathEffect(path, PathRole.DELETED, checkpointBefore);
         }
 
+        public static PathEffect deleted(String path, boolean checkpointBefore, OperationKind operationKind) {
+            return new PathEffect(path, PathRole.DELETED, checkpointBefore, operationKind);
+        }
+
         public static PathEffect absentBefore(String path, boolean checkpointBefore) {
             return new PathEffect(path, PathRole.ABSENT_BEFORE, checkpointBefore);
+        }
+
+        public static PathEffect absentBefore(String path, boolean checkpointBefore, OperationKind operationKind) {
+            return new PathEffect(path, PathRole.ABSENT_BEFORE, checkpointBefore, operationKind);
         }
     }
 }

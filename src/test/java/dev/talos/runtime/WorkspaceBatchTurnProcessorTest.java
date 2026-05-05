@@ -100,6 +100,30 @@ class WorkspaceBatchTurnProcessorTest {
         assertFalse(Files.exists(workspace.resolve(".env")));
     }
 
+    @Test
+    void partialBatchFailureReportsAppliedAndFailedOperationPaths(@TempDir Path workspace) throws Exception {
+        TurnProcessor processor = processor(gateApproves(new AtomicInteger()),
+                new CheckpointService(new FileBundleCheckpointStore(workspace.resolve(".checkpoints"))));
+        Config config = config(true);
+
+        TurnUserRequestCapture.set("Create docs and move missing.txt to docs/missing.txt.");
+        ToolResult result = processor.executeTool(
+                new Session(workspace, config),
+                new ToolCall("talos.apply_workspace_batch", Map.of("operations_json", """
+                        [
+                          {"op":"mkdir","path":"docs"},
+                          {"op":"move_path","from":"missing.txt","to":"docs/missing.txt"}
+                        ]
+                        """)),
+                context(workspace, config));
+
+        assertFalse(result.success());
+        assertTrue(result.errorMessage().contains("Batch partially applied."), result.errorMessage());
+        assertTrue(result.errorMessage().contains("Applied: docs"), result.errorMessage());
+        assertTrue(result.errorMessage().contains("Failed: missing.txt -> docs/missing.txt"), result.errorMessage());
+        assertTrue(Files.isDirectory(workspace.resolve("docs")));
+    }
+
     private static TurnProcessor processor(ApprovalGate gate, CheckpointService checkpointService) {
         ToolRegistry registry = new ToolRegistry();
         registry.register(new BatchWorkspaceApplyTool());

@@ -29,6 +29,14 @@ class WorkspaceBatchPlanParserTest {
 
         WorkspaceOperationPlan checkpointPlan = plan.checkpointPlan();
         assertEquals(WorkspaceOperationPlan.OperationKind.BATCH_APPLY, checkpointPlan.operationKind());
+        assertTrue(checkpointPlan.pathEffects().stream()
+                        .anyMatch(effect -> effect.role() == WorkspaceOperationPlan.PathRole.SOURCE
+                                && effect.path().equals("README.md")),
+                "copy source should be exposed to verification metadata");
+        assertTrue(checkpointPlan.pathEffects().stream()
+                        .anyMatch(effect -> effect.role() == WorkspaceOperationPlan.PathRole.DESTINATION
+                                && effect.path().equals("docs/README.md")),
+                "copy destination should be exposed to verification metadata");
         assertTrue(checkpointPlan.checkpointPaths().contains("docs"));
         assertTrue(checkpointPlan.checkpointPaths().contains("source.txt"));
         assertTrue(checkpointPlan.checkpointPaths().contains("dest.txt"));
