@@ -40,6 +40,8 @@ public record MutationOutcome(
         List<ToolCallLoop.ToolOutcome> failed = mutating.stream()
                 .filter(outcome -> !outcome.success() && !outcome.denied())
                 .filter(outcome -> !isRecoveredInvalidEditFailure(outcome, successful))
+                .filter(outcome -> !MutationFailureRecovery.isRecoveredDuplicateWorkspaceOperationFailure(
+                        outcome, mutating))
                 .toList();
 
         int totalSuccesses = successful.size() + Math.max(0, extraSuccesses);

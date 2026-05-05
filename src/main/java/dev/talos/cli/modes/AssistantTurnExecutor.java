@@ -14,6 +14,7 @@ import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ActiveTaskContextPolicy;
 import dev.talos.runtime.context.ArtifactGoal;
 import dev.talos.runtime.context.ChangeSummaryContext;
+import dev.talos.runtime.outcome.MutationFailureRecovery;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.ActionObligation;
 import dev.talos.runtime.policy.ActionObligationPolicy;
@@ -1909,6 +1910,7 @@ public final class AssistantTurnExecutor {
         List<ToolCallLoop.ToolOutcome> failures = mutating.stream()
                 .filter(o -> !o.success())
                 .filter(o -> !isRecoveredInvalidEditFailure(o, mutating))
+                .filter(o -> !MutationFailureRecovery.isRecoveredDuplicateWorkspaceOperationFailure(o, mutating))
                 .toList();
         if (successes.isEmpty() || failures.isEmpty()) return answer;
 
