@@ -6,6 +6,7 @@ import dev.talos.core.Config;
 import dev.talos.core.security.Sandbox;
 import dev.talos.tools.*;
 import dev.talos.tools.impl.FileWriteTool;
+import dev.talos.tools.impl.MakeDirectoryTool;
 import dev.talos.tools.impl.ReadFileTool;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -160,6 +161,82 @@ class TurnProcessorPermissionPolicyTest {
         assertTrue(result.success(), result.errorMessage());
         assertEquals(0, gateCalls.get(), "ordinary read-only workspace tools should remain usable");
         assertTrue(result.output().contains("hello"));
+    }
+
+    @Test
+    void mkdirParentOfExpectedFileTargetIsAllowedBeforeApproval(@TempDir Path workspace) {
+        AtomicInteger gateCalls = new AtomicInteger();
+        Config config = new Config();
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new MakeDirectoryTool());
+        registry.register(new FileWriteTool());
+        TurnProcessor processor = new TurnProcessor(
+                ModeController.defaultController(), gateApproves(gateCalls), registry);
+
+        TurnUserRequestCapture.set(
+                "Create docs/notes with talos.mkdir, then create docs/notes/implementation-plan.md.");
+        Session session = new Session(workspace, config);
+        Context context = context(workspace, config);
+
+        ToolResult mkdir = processor.executeTool(
+                session,
+                new ToolCall("talos.mkdir", Map.of("path", "docs/notes")),
+                context);
+        ToolResult write = processor.executeTool(
+                session,
+                new ToolCall("talos.write_file", Map.of(
+                        "path", "docs/notes/implementation-plan.md",
+                        "content", "# Plan\n")),
+                context);
+
+        assertTrue(mkdir.success(), mkdir.errorMessage());
+        assertTrue(write.success(), write.errorMessage());
+        assertTrue(Files.isDirectory(workspace.resolve("docs/notes")));
+        assertEquals("# Plan\n", assertDoesNotThrow(
+                () -> Files.readString(workspace.resolve("docs/notes/implementation-plan.md"))));
+        assertEquals(2, gateCalls.get(), "mkdir and write should still require approval");
+    }
+
+    @Test
+    void mkdirOnlyExplicitDirectoryRequestRemainsAllowed(@TempDir Path workspace) {
+        AtomicInteger gateCalls = new AtomicInteger();
+        Config config = new Config();
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new MakeDirectoryTool());
+        TurnProcessor processor = new TurnProcessor(
+                ModeController.defaultController(), gateApproves(gateCalls), registry);
+
+        TurnUserRequestCapture.set("Create docs/notes with talos.mkdir.");
+        ToolResult result = processor.executeTool(
+                new Session(workspace, config),
+                new ToolCall("talos.mkdir", Map.of("path", "docs/notes")),
+                context(workspace, config));
+
+        assertTrue(result.success(), result.errorMessage());
+        assertTrue(Files.isDirectory(workspace.resolve("docs/notes")));
+        assertEquals(1, gateCalls.get());
+    }
+
+    @Test
+    void unrelatedMkdirStillBlockedBeforeApproval(@TempDir Path workspace) {
+        AtomicInteger gateCalls = new AtomicInteger();
+        Config config = new Config();
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new MakeDirectoryTool());
+        TurnProcessor processor = new TurnProcessor(
+                ModeController.defaultController(), gateApproves(gateCalls), registry);
+
+        TurnUserRequestCapture.set("Create docs/notes/implementation-plan.md.");
+        ToolResult result = processor.executeTool(
+                new Session(workspace, config),
+                new ToolCall("talos.mkdir", Map.of("path", "tmp/unrelated")),
+                context(workspace, config));
+
+        assertFalse(result.success());
+        assertTrue(result.errorMessage().contains("Target outside expected targets before approval"),
+                result.errorMessage());
+        assertFalse(Files.exists(workspace.resolve("tmp/unrelated")));
+        assertEquals(0, gateCalls.get(), "unrelated target must block before approval");
     }
 
     private static TurnProcessor processor(Config config, ApprovalGate gate, TalosTool tool) {

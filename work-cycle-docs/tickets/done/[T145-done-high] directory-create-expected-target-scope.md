@@ -1,7 +1,7 @@
 # T145 - Directory Create Expected-Target Scope
 
 Severity: high
-Status: open
+Status: done
 
 ## Problem
 
@@ -46,3 +46,11 @@ expected file target.
 - No delete support.
 - No broad target extraction rewrite beyond directory-parent semantics.
 - No weakening sandbox or protected path policy.
+
+## Result
+
+- Allowed `talos.mkdir` to pass expected-target pre-approval scope when the
+  requested directory is a parent directory of an expected file target.
+- Kept unrelated `talos.mkdir` paths blocked before approval.
+- Added live `TurnProcessor.executeTool` tests covering parent mkdir plus
+  write, mkdir-only explicit directory request, and unrelated mkdir blocking.

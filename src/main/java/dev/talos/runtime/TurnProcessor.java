@@ -770,7 +770,7 @@ public final class TurnProcessor {
             return null;
         }
         for (String expected : taskContract.expectedTargets()) {
-            if (sameExpectedTarget(path, expected)) {
+            if (sameExpectedTarget(call.toolName(), path, expected)) {
                 return null;
             }
         }
@@ -964,6 +964,15 @@ public final class TurnProcessor {
                 || "listdirectory".equals(normalized);
     }
 
+    private static boolean isMkdirTool(String toolName) {
+        String normalized = normalizeToolName(toolName);
+        return "mkdir".equals(normalized)
+                || "make_dir".equals(normalized)
+                || "make_directory".equals(normalized)
+                || "create_dir".equals(normalized)
+                || "create_directory".equals(normalized);
+    }
+
     private static String normalizeToolName(String toolName) {
         return ToolAliasPolicy.localCanonicalName(toolName);
     }
@@ -975,11 +984,11 @@ public final class TurnProcessor {
         return c.equals(f) || c.endsWith("/" + f);
     }
 
-    private static boolean sameExpectedTarget(String candidate, String expected) {
+    private static boolean sameExpectedTarget(String toolName, String candidate, String expected) {
         String c = normalizeScopedTarget(candidate);
         String e = normalizeScopedTarget(expected);
         if (c.isBlank() || e.isBlank()) return false;
-        return c.equals(e);
+        return c.equals(e) || (isMkdirTool(toolName) && e.startsWith(c + "/"));
     }
 
     private static List<String> orderedExpectedTargets(TaskContract taskContract) {
