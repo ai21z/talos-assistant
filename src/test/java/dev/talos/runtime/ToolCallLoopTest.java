@@ -1314,6 +1314,176 @@ class ToolCallLoopTest {
         }
     }
 
+    // ── T151: static web repair recovery ────────────────────────────
+
+    @Test
+    void staticWebVerifierPassStopsWithoutExpectedContextTargetBreach() throws Exception {
+        Path ws = Files.createTempDirectory("talos-static-web-context-pass-");
+        try {
+            Files.writeString(ws.resolve("index.html"), """
+                    <!doctype html>
+                    <html>
+                    <head>
+                      <link rel="stylesheet" href="styles.css">
+                    </head>
+                    <body>
+                      <button id="run-button">Run</button>
+                      <p id="result">Waiting</p>
+                      <script src="script.js"></script>
+                    </body>
+                    </html>
+                    """);
+            Files.writeString(ws.resolve("styles.css"), "body { font-family: sans-serif; }\n");
+            Files.writeString(ws.resolve("script.js"), """
+                    document.querySelector('.missing-button').addEventListener('click', () => {
+                      document.querySelector('#result').textContent = 'Clicked';
+                    });
+                    """);
+
+            var registry = new ToolRegistry();
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 10);
+
+            String request = "Fix the static web button fixture. The existing index.html loads script.js; "
+                    + "the button with id run-button should set #result to Clicked. "
+                    + "Keep filenames index.html, styles.css, and script.js. Do not create scripts.js.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of(
+                            "Complete. Everything is ready to use.")))
+                    .build();
+
+            String correctedScript = """
+                    document.getElementById('run-button').addEventListener('click', () => {
+                      document.getElementById('result').textContent = 'Clicked';
+                    });
+                    """;
+            String initial = """
+                    {"name":"talos.write_file","arguments":{"path":"script.js","content":"%s"}}
+                    """.formatted(jsonEscape(correctedScript));
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            LocalTurnTraceCapture.begin("trc-t151-static-context-pass", "session", 1,
+                    "2026-05-05T00:00:00Z", "ws", "test", "llama_cpp", "qwen", request);
+            ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
+            try {
+                result = loop.run(initial, messages, ws, ctx);
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+                LocalTurnTraceCapture.clear();
+            }
+
+            assertEquals(1, result.iterations(),
+                    "Verified static web repair should stop after the successful mutation.");
+            assertFalse(result.hitIterLimit(), "Verifier-passed static web repair must not run to the loop cap.");
+            assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertEquals(1, result.mutatingToolSuccesses());
+            assertEquals(correctedScript, Files.readString(ws.resolve("script.js")));
+            assertTrue(trace.events().stream()
+                            .noneMatch(event -> "PENDING_ACTION_OBLIGATION_BREACHED".equals(event.type())),
+                    "index.html/styles.css context targets must not become a pending-obligation breach "
+                            + "when static web verification already passes.");
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
+    void staticWebOldStringFailureAfterReadRecoversThroughFullWriteReplacement() throws Exception {
+        Path ws = Files.createTempDirectory("talos-static-web-edit-rewrite-");
+        try {
+            Files.writeString(ws.resolve("index.html"), """
+                    <!doctype html>
+                    <html>
+                    <head>
+                      <link rel="stylesheet" href="styles.css">
+                    </head>
+                    <body>
+                      <button id="run-button">Run</button>
+                      <p id="result">Waiting</p>
+                      <script src="script.js"></script>
+                    </body>
+                    </html>
+                    """);
+            Files.writeString(ws.resolve("styles.css"), "body { font-family: sans-serif; }\n");
+            Files.writeString(ws.resolve("script.js"), """
+                    document.querySelector('.missing-button').addEventListener('click', () => {
+                      document.querySelector('#result').textContent = 'Clicked';
+                    });
+                    """);
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileEditTool(new FileUndoStack()));
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 10);
+
+            String request = "Fix the static web button fixture. The existing index.html loads script.js; "
+                    + "the button with id run-button should set #result to Clicked. "
+                    + "Keep filenames index.html, styles.css, and script.js. Do not create scripts.js.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+
+            String badEdit = """
+                    {"name":"talos.edit_file","arguments":{"path":"script.js","old_string":"document.querySelector('.missing-button').addEventListener('click', function () {","new_string":"document.querySelector('#run-button').addEventListener('click', function () {"}}
+                    """;
+            String repeatedEdit = """
+                    {"name":"talos.edit_file","arguments":{"path":"script.js","old_string":"document.querySelector('.missing-button').addEventListener('click', function(){","new_string":"document.querySelector('#run-button').addEventListener('click', function(){"}}
+                    """;
+            String correctedScript = """
+                    document.getElementById('run-button').addEventListener('click', () => {
+                      document.getElementById('result').textContent = 'Clicked';
+                    });
+                    """;
+            String rewrite = """
+                    {"name":"talos.write_file","arguments":{"path":"script.js","content":"%s"}}
+                    """.formatted(jsonEscape(correctedScript));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of(badEdit, repeatedEdit, rewrite, "done")))
+                    .build();
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            LocalTurnTraceCapture.begin("trc-t151-static-edit-rewrite", "session", 1,
+                    "2026-05-05T00:00:00Z", "ws", "test", "llama_cpp", "gpt-oss", request);
+            ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
+            try {
+                result = loop.run(readFileCall("script.js"), messages, ws, ctx);
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+                LocalTurnTraceCapture.clear();
+            }
+
+            assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertFalse(result.summary().contains("failed"),
+                    "Recovered static web edit failures should not make the normal tool summary look failed.");
+            assertEquals(correctedScript, Files.readString(ws.resolve("script.js")));
+            assertTrue(result.toolOutcomes().stream().anyMatch(ToolCallLoop.ToolOutcome::fullRewriteRepairRedirect),
+                    "After a static web old_string failure, repeated edit_file should be redirected to write_file.");
+            assertTrue(trace.events().stream()
+                            .anyMatch(event -> "REPAIR_DECISION_RECORDED".equals(event.type())
+                                    && String.valueOf(event.data().get("summary"))
+                                            .contains("static-web-edit-rewrite")),
+                    "Trace should record the static web edit-to-write recovery decision.");
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
     // ── T122: repair read-only loop budget ─────────────────────────
 
     @Test
@@ -1463,6 +1633,22 @@ class ToolCallLoopTest {
     private static String readFileCall(String path, int maxLines) {
         return "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"" + path
                 + "\",\"max_lines\":" + maxLines + "}}";
+    }
+
+    private static String jsonEscape(String value) {
+        StringBuilder escaped = new StringBuilder(value.length() + 8);
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            switch (c) {
+                case '"' -> escaped.append("\\\"");
+                case '\\' -> escaped.append("\\\\");
+                case '\n' -> escaped.append("\\n");
+                case '\r' -> escaped.append("\\r");
+                case '\t' -> escaped.append("\\t");
+                default -> escaped.append(c);
+            }
+        }
+        return escaped.toString();
     }
 
     private static TalosTool echoTool() {

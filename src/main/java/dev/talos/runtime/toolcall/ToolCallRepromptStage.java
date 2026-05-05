@@ -4,6 +4,7 @@ import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.failure.FailureAction;
 import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.failure.FailurePolicy;
+import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.repair.RepairInstruction;
 import dev.talos.runtime.repair.RepairPolicy;
@@ -13,6 +14,8 @@ import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.verification.StaticTaskVerifier;
+import dev.talos.runtime.verification.TaskVerificationResult;
+import dev.talos.runtime.verification.TaskVerificationStatus;
 import dev.talos.runtime.verification.WebDiagnosticIntent;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.spi.EngineException;
@@ -117,6 +120,13 @@ public final class ToolCallRepromptStage {
         // for all-success iterations — that path still avoids the 5-15
         // minute post-mutation bloviation observed on local 31B Q4 models.
         if (outcome.mutationsThisIteration() > 0 && outcome.failuresThisIteration() == 0) {
+            if (staticWebVerificationAlreadyPasses(state)) {
+                state.currentText = String.join("\n", outcome.mutationSummaries());
+                state.currentNativeCalls = List.of();
+                state.clearPendingActionObligation();
+                LOG.debug("Stopping static web repair after verifier-passed mutation before expected-target progress.");
+                return false;
+            }
             List<String> remainingRepairTargets = remainingFullRewriteRepairTargets(state);
             List<String> remainingExpectedTargets = remainingExpectedMutationTargets(state);
             if (remainingRepairTargets.isEmpty() && remainingExpectedTargets.isEmpty()) {
@@ -632,7 +642,9 @@ public final class ToolCallRepromptStage {
 
     private static List<String> remainingFullRewriteRepairTargets(LoopState state) {
         if (state == null) return List.of();
-        Set<String> required = RepairPolicy.fullRewriteTargetsFromRepairContext(state.messages);
+        Set<String> required = new java.util.LinkedHashSet<>(
+                RepairPolicy.fullRewriteTargetsFromRepairContext(state.messages));
+        required.addAll(state.staticWebFullRewriteRequiredTargets);
         if (required.isEmpty()) return List.of();
         Set<String> successfullyMutated = new java.util.HashSet<>();
         for (dev.talos.runtime.ToolCallLoop.ToolOutcome outcome : state.toolOutcomes) {
@@ -654,8 +666,14 @@ public final class ToolCallRepromptStage {
         if (contract == null || !contract.mutationAllowed()) {
             return List.of();
         }
+        if (!RepairPolicy.fullRewriteTargetsFromRepairContext(state.messages).isEmpty()
+                || !state.staticWebFullRewriteRequiredTargets.isEmpty()) {
+            return List.of();
+        }
         String latestUserRequest = ToolCallSupport.latestUserRequestIn(state.messages);
-        Set<String> expectedTargets = TaskContractResolver.extractExpectedTargets(latestUserRequest);
+        Set<String> expectedTargets = contract.expectedTargets().isEmpty()
+                ? TaskContractResolver.extractExpectedTargets(latestUserRequest)
+                : contract.expectedTargets();
         if (expectedTargets.isEmpty()) {
             return List.of();
         }
@@ -699,5 +717,39 @@ public final class ToolCallRepromptStage {
 
     private static String normalizeExpectedTargetKey(String path) {
         return ToolCallSupport.normalizePath(path).toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private static boolean staticWebVerificationAlreadyPasses(LoopState state) {
+        if (state == null || state.workspace == null) return false;
+        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        if (contract == null || !contract.mutationAllowed() || !contract.verificationRequired()) {
+            return false;
+        }
+        if (state.mutatingToolSuccesses <= 0) return false;
+        ToolCallLoop.LoopResult snapshot = new ToolCallLoop.LoopResult(
+                state.currentText,
+                state.iterations,
+                state.totalToolsInvoked,
+                List.copyOf(state.toolNames),
+                state.messages,
+                state.failedCalls,
+                state.retriedCalls,
+                false,
+                state.mutatingToolSuccesses,
+                List.copyOf(state.pathsReadThisTurn),
+                state.cushionFiresRedundantRead,
+                0,
+                state.cushionFiresB3EditShortCircuit,
+                state.cushionFiresE1Suggestion,
+                state.failureDecision,
+                List.copyOf(state.toolOutcomes));
+        TaskVerificationResult verification = StaticTaskVerifier.verify(
+                state.workspace,
+                contract,
+                snapshot,
+                0);
+        if (verification.status() != TaskVerificationStatus.PASSED) return false;
+        String summary = verification.summary() == null ? "" : verification.summary();
+        return summary.contains("Static web coherence checks passed");
     }
 }

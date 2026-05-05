@@ -54,7 +54,11 @@ public record MutationOutcome(
             List<ToolCallLoop.ToolOutcome> successes
     ) {
         if (failure == null || successes == null || successes.isEmpty()) return false;
-        if (!failure.invalidEmptyEditArguments()) return false;
+        if (!failure.invalidEmptyEditArguments()
+                && !failure.fullRewriteRepairRedirect()
+                && !failure.oldStringNotFoundEditFailure()) {
+            return false;
+        }
         String failedPath = normalizePath(failure.pathHint());
         if (failedPath.isBlank()) return false;
         return successes.stream()
