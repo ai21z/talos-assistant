@@ -1,6 +1,10 @@
 package dev.talos.runtime.task;
 
+import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.toolcall.ToolSurfacePlanner;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.tools.ToolRegistry;
+import dev.talos.tools.impl.BatchWorkspaceApplyTool;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -167,6 +171,52 @@ class TaskContractResolverTest {
             assertTrue(contract.mutationRequested(), input);
             assertTrue(contract.mutationAllowed(), input);
             assertTrue(contract.verificationRequired(), input);
+        }
+    }
+
+    @Test
+    void explicitBatchWorkspaceApplyPromptsBecomeMutationAllowedContracts() {
+        for (String input : List.of(
+                "Use talos.apply_workspace_batch only. Apply operations_json for exactly these operations: "
+                        + "[{\"op\":\"mkdir\",\"path\":\"docs\"}].",
+                "Apply operations_json for exactly these operations: "
+                        + "[{\"op\":\"copy_path\",\"from\":\"a.txt\",\"to\":\"b.txt\"}].",
+                "Apply these operations with the batch workspace tool: mkdir docs, copy notes.md to docs/notes.md.")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertTrue(contract.type() == TaskType.FILE_EDIT || contract.type() == TaskType.FILE_CREATE,
+                    input + " -> " + contract.type());
+            assertTrue(contract.mutationRequested(), input);
+            assertTrue(contract.mutationAllowed(), input);
+            assertTrue(contract.verificationRequired(), input);
+            assertEquals("explicit-batch-workspace-apply-request", contract.classificationReason(), input);
+        }
+    }
+
+    @Test
+    void explicitBatchWorkspaceApplyPromptExposesBatchToolInApplySurface() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Use talos.apply_workspace_batch only. Apply operations_json for exactly these operations: "
+                        + "[{\"op\":\"mkdir\",\"path\":\"docs\"}].");
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new BatchWorkspaceApplyTool());
+
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(contract, ExecutionPhase.APPLY, registry);
+
+        assertTrue(plan.nativeToolNames().contains("talos.apply_workspace_batch"));
+    }
+
+    @Test
+    void advisoryBatchWorkspaceApplyQuestionsStayReadOnly() {
+        for (String input : List.of(
+                "Explain what talos.apply_workspace_batch does.",
+                "What does operations_json mean for talos.apply_workspace_batch?",
+                "Can you show me how to use talos.apply_workspace_batch?")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertFalse(contract.mutationRequested(), input);
+            assertFalse(contract.mutationAllowed(), input);
+            assertFalse(contract.type() == TaskType.FILE_EDIT || contract.type() == TaskType.FILE_CREATE, input);
         }
     }
 

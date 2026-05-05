@@ -1,7 +1,7 @@
 # T147 - Explicit Batch Workspace Apply Intent Classification
 
 Severity: medium
-Status: open
+Status: done
 
 ## Problem
 
@@ -42,3 +42,13 @@ read-only inspection.
 - No new batch operation kinds.
 - No delete support.
 - No command profile expansion.
+
+## Result
+
+- Added an explicit batch workspace apply mutation-intent classifier for
+  `talos.apply_workspace_batch`, `apply operations_json`, and "apply these
+  operations" prompts.
+- Preserved advisory/read-only classification for explanations about the batch
+  tool and `operations_json`.
+- Added resolver/tool-surface tests proving the apply surface exposes
+  `talos.apply_workspace_batch` only after the contract is mutation-enabled.
