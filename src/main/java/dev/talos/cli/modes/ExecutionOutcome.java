@@ -85,6 +85,15 @@ record ExecutionOutcome(
         UNAVAILABLE
     }
 
+    private record ApprovedProtectedReadPostcondition(
+            String answer,
+            boolean repaired
+    ) {
+        ApprovedProtectedReadPostcondition {
+            answer = answer == null ? "" : answer;
+        }
+    }
+
     static ExecutionOutcome fromToolLoop(
             String answer,
             List<ChatMessage> messages,
@@ -221,6 +230,7 @@ record ExecutionOutcome(
         boolean protectedReadApprovalMissing = protectedReadApprovalMissing(
                 evidenceObligation,
                 evidenceResult);
+        boolean approvedProtectedReadPostcondition = false;
         if (missingEvidence) {
             current = suppressDerivedContentForMissingEvidence(
                     current,
@@ -228,6 +238,10 @@ record ExecutionOutcome(
                     evidenceObligation,
                     evidenceResult);
         } else {
+            ApprovedProtectedReadPostcondition protectedReadPostcondition =
+                    enforceApprovedProtectedReadPostcondition(current, loopResult, workspace);
+            current = protectedReadPostcondition.answer();
+            approvedProtectedReadPostcondition = protectedReadPostcondition.repaired();
             current = suppressProtectedHistoryContentIfNeeded(
                     current,
                     messages,
@@ -249,6 +263,7 @@ record ExecutionOutcome(
                 unsupportedDocumentCapabilityLimited,
                 missingEvidence,
                 protectedReadApprovalMissing,
+                approvedProtectedReadPostcondition,
                 VerificationStatus.NOT_RUN);
         CompletionStatus completionStatus = preVerificationDecision.completionStatus();
         if (missingEvidence && completionStatus == CompletionStatus.ADVISORY_ONLY) {
@@ -300,6 +315,7 @@ record ExecutionOutcome(
                 unsupportedDocumentCapabilityLimited,
                 missingEvidence,
                 protectedReadApprovalMissing,
+                approvedProtectedReadPostcondition,
                 verificationStatus);
         completionStatus = finalDecision.completionStatus();
         if (!missingEvidence
@@ -325,7 +341,8 @@ record ExecutionOutcome(
                         webDiagnosticGroundedOverride,
                         selectorGroundedOverride,
                         verificationStatus,
-                        missingEvidence),
+                        missingEvidence,
+                        approvedProtectedReadPostcondition),
                 loopResult == null ? List.of() : loopResult.toolOutcomes()
         );
 
@@ -461,6 +478,7 @@ record ExecutionOutcome(
                 false,
                 missingEvidence,
                 protectedReadApprovalMissing,
+                false,
                 VerificationStatus.NOT_RUN);
         CompletionStatus completionStatus = decision.completionStatus();
         if (missingEvidence && completionStatus == CompletionStatus.ADVISORY_ONLY) {
@@ -565,6 +583,7 @@ record ExecutionOutcome(
             boolean unsupportedCapabilityLimited,
             boolean missingEvidence,
             boolean protectedReadApprovalMissing,
+            boolean approvedProtectedReadPostcondition,
             VerificationStatus verificationStatus
     ) {
         return OutcomeDominancePolicy.decide(new OutcomeDominancePolicy.Facts(
@@ -582,6 +601,7 @@ record ExecutionOutcome(
                 unsupportedCapabilityLimited,
                 missingEvidence,
                 protectedReadApprovalMissing,
+                approvedProtectedReadPostcondition,
                 verificationStatus));
     }
 
@@ -598,7 +618,8 @@ record ExecutionOutcome(
             boolean webDiagnosticGroundedOverride,
             boolean selectorGroundedOverride,
             VerificationStatus verificationStatus,
-            boolean missingEvidence
+            boolean missingEvidence,
+            boolean approvedProtectedReadPostcondition
     ) {
         List<TruthWarning> warnings = new ArrayList<>();
         if (deniedMutation) {
@@ -666,6 +687,11 @@ record ExecutionOutcome(
             warnings.add(TruthWarning.of(
                     TruthWarningType.MISSING_EVIDENCE,
                     "Required workspace evidence was not gathered in this turn."));
+        }
+        if (approvedProtectedReadPostcondition) {
+            warnings.add(TruthWarning.of(
+                    TruthWarningType.APPROVED_PROTECTED_READ_POSTCONDITION,
+                    "A generic model refusal after an approved protected read was replaced with current read evidence."));
         }
         return List.copyOf(warnings);
     }
@@ -793,21 +819,123 @@ record ExecutionOutcome(
         return answer;
     }
 
+    private static ApprovedProtectedReadPostcondition enforceApprovedProtectedReadPostcondition(
+            String answer,
+            ToolCallLoop.LoopResult loopResult,
+            Path workspace
+    ) {
+        List<ToolCallLoop.ToolOutcome> protectedReads = successfulCurrentProtectedReadOutcomes(
+                loopResult,
+                workspace);
+        if (protectedReads.isEmpty()) {
+            return new ApprovedProtectedReadPostcondition(answer, false);
+        }
+
+        String status = "PASSED";
+        String reason = "approved protected read answer used current read evidence";
+        String current = answer == null ? "" : answer;
+        boolean repaired = false;
+        if (isGenericProtectedReadRefusal(current)
+                && !answerContainsCurrentProtectedReadEvidence(current, protectedReads)) {
+            current = approvedProtectedReadEvidenceAnswer(protectedReads);
+            status = "REPAIRED";
+            reason = "generic model refusal replaced with current approved read evidence";
+            repaired = true;
+        }
+        LocalTurnTraceCapture.recordProtectedReadPostcondition(
+                status,
+                protectedReads.stream().map(ToolCallLoop.ToolOutcome::pathHint).toList(),
+                reason);
+        return new ApprovedProtectedReadPostcondition(current, repaired);
+    }
+
     private static boolean hasSuccessfulCurrentProtectedRead(
             ToolCallLoop.LoopResult loopResult,
             Path workspace
     ) {
-        if (loopResult == null || loopResult.toolOutcomes() == null) return false;
+        return !successfulCurrentProtectedReadOutcomes(loopResult, workspace).isEmpty();
+    }
+
+    private static List<ToolCallLoop.ToolOutcome> successfulCurrentProtectedReadOutcomes(
+            ToolCallLoop.LoopResult loopResult,
+            Path workspace
+    ) {
+        if (loopResult == null || loopResult.toolOutcomes() == null) return List.of();
+        List<ToolCallLoop.ToolOutcome> out = new ArrayList<>();
         for (ToolCallLoop.ToolOutcome outcome : loopResult.toolOutcomes()) {
             if (outcome == null) continue;
             if (!"talos.read_file".equals(canonicalToolName(outcome.toolName()))) continue;
             if (!outcome.success() || outcome.denied()) continue;
             if (ProtectedPathPolicy.classify(workspace, outcome.pathHint()).protectedPath()
                     || looksProtectedPathHint(outcome.pathHint())) {
+                out.add(outcome);
+            }
+        }
+        return List.copyOf(out);
+    }
+
+    private static boolean isGenericProtectedReadRefusal(String answer) {
+        if (answer == null || answer.isBlank()) return true;
+        String lower = answer.toLowerCase(Locale.ROOT);
+        return lower.contains("can't provide")
+                || lower.contains("cannot provide")
+                || lower.contains("can't share")
+                || lower.contains("cannot share")
+                || lower.contains("can't reveal")
+                || lower.contains("cannot reveal")
+                || lower.contains("can't disclose")
+                || lower.contains("cannot disclose")
+                || lower.contains("not allowed to provide")
+                || lower.contains("not able to provide")
+                || lower.contains("can't assist with that")
+                || lower.contains("cannot assist with that")
+                || lower.contains("can't access local files")
+                || lower.contains("cannot access local files")
+                || (lower.contains("i'm sorry") && (lower.contains("can't") || lower.contains("cannot")));
+    }
+
+    private static boolean answerContainsCurrentProtectedReadEvidence(
+            String answer,
+            List<ToolCallLoop.ToolOutcome> protectedReads
+    ) {
+        if (answer == null || answer.isBlank()) return false;
+        String normalizedAnswer = normalizeSensitiveSnippet(answer).toLowerCase(Locale.ROOT);
+        for (ToolCallLoop.ToolOutcome outcome : protectedReads) {
+            String evidence = protectedReadEvidenceSummary(outcome.summary());
+            if (evidence.length() < 4) continue;
+            String normalizedEvidence = normalizeSensitiveSnippet(evidence).toLowerCase(Locale.ROOT);
+            if (!normalizedEvidence.isBlank() && normalizedAnswer.contains(normalizedEvidence)) {
                 return true;
             }
         }
         return false;
+    }
+
+    private static String approvedProtectedReadEvidenceAnswer(
+            List<ToolCallLoop.ToolOutcome> protectedReads
+    ) {
+        StringBuilder out = new StringBuilder();
+        out.append("[Approved protected read postcondition: model refusal replaced with current approved read evidence.]")
+                .append("\n\n")
+                .append("Current approved protected read evidence:");
+        int limit = Math.min(5, protectedReads.size());
+        for (ToolCallLoop.ToolOutcome outcome : protectedReads.subList(0, limit)) {
+            out.append("\n- ")
+                    .append(outcome.pathHint().isBlank() ? "<protected file>" : outcome.pathHint())
+                    .append(": ")
+                    .append(protectedReadEvidenceSummary(outcome.summary()));
+        }
+        if (protectedReads.size() > limit) {
+            out.append("\n- ... ").append(protectedReads.size() - limit).append(" more protected reads");
+        }
+        return out.toString();
+    }
+
+    private static String protectedReadEvidenceSummary(String summary) {
+        String value = singleLine(summary);
+        if (value.isBlank()) return "content was read, but no short summary was available";
+        String withoutLineNumber = value.replaceFirst("^\\d+\\s*\\|\\s*", "");
+        return withoutLineNumber.isBlank() ? value : withoutLineNumber;
     }
 
     private static boolean looksProtectedPathHint(String pathHint) {

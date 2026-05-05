@@ -266,6 +266,24 @@ public final class LocalTurnTraceCapture {
                 "reason", safe(reason))));
     }
 
+    public static void recordProtectedReadPostcondition(
+            String status,
+            List<String> paths,
+            String reason
+    ) {
+        Bag bag = HOLDER.get();
+        if (bag == null) return;
+        List<String> pathHints = paths == null
+                ? List.of()
+                : paths.stream()
+                        .map(TraceRedactor::pathHint)
+                        .toList();
+        bag.builder.event(TurnTraceEvent.simple("PROTECTED_READ_POSTCONDITION_CHECKED", now(), Map.of(
+                "status", safe(status),
+                "pathHints", pathHints,
+                "reason", safe(reason))));
+    }
+
     public static void recordPromptAudit(PromptAuditSnapshot snapshot) {
         Bag bag = HOLDER.get();
         if (bag == null || snapshot == null || !snapshot.hasPromptAuditData()) return;
