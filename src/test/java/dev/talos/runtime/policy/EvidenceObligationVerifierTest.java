@@ -70,6 +70,34 @@ class EvidenceObligationVerifierTest {
     }
 
     @Test
+    void protectedReadFailedPathVariantThenSuccessfulReadSatisfiesObligation() {
+        var result = EvidenceObligationVerifier.verify(
+                EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED,
+                Set.of(".env"),
+                List.of(
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", " .env", false, false, false,
+                                "", "File not found:  .env", null, ToolError.NOT_FOUND),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", ".env", true, false, false,
+                                "SAFE_AUDIT_SECRET=fake", "")));
+
+        assertEquals(EvidenceObligationVerifier.Status.SATISFIED, result.status());
+    }
+
+    @Test
+    void protectedReadFailedOnlyPathVariantRemainsUnsatisfied() {
+        var result = EvidenceObligationVerifier.verify(
+                EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED,
+                Set.of(".env"),
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.read_file", " .env", false, false, false,
+                        "", "File not found:  .env", null, ToolError.NOT_FOUND)));
+
+        assertEquals(EvidenceObligationVerifier.Status.UNSATISFIED, result.status());
+    }
+
+    @Test
     void protectedReadWithoutToolAttemptIsSpecific() {
         var result = EvidenceObligationVerifier.verify(
                 EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED,

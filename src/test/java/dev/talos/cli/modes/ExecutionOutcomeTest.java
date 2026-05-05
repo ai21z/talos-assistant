@@ -1698,6 +1698,57 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void failedProtectedPathVariantThenApprovedReadSatisfiesPostcondition() throws Exception {
+        Path ws = Files.createTempDirectory("talos-protected-read-path-variant-");
+        try {
+            Files.writeString(ws.resolve(".env"), "SAFE_AUDIT_SECRET=fake\n");
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Read .env and tell me what it says."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "The .env file contains SAFE_AUDIT_SECRET=fake.",
+                    2,
+                    2,
+                    List.of("talos.read_file", "talos.read_file"),
+                    List.of(),
+                    2,
+                    1,
+                    false,
+                    0,
+                    List.of(".env"),
+                    0,
+                    0,
+                    0,
+                    0,
+                    List.of(
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.read_file", " .env", false, false, false,
+                                    "", "File not found:  .env", null, ToolError.NOT_FOUND),
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.read_file", ".env", true, false, false,
+                                    "1 | SAFE_AUDIT_SECRET=fake", "")));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    loopResult.finalAnswer(), messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+            assertEquals(TaskCompletionStatus.READ_ONLY_ANSWERED, outcome.taskOutcome().completionStatus());
+            assertTrue(outcome.finalAnswer().contains("SAFE_AUDIT_SECRET=fake"), outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().startsWith("[Protected read incomplete:"),
+                    outcome.finalAnswer());
+            assertFalse(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void traceOutcomeClassificationMatchesDominantTaskOutcome() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));
