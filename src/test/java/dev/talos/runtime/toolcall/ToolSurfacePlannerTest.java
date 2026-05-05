@@ -153,6 +153,23 @@ class ToolSurfacePlannerTest {
     }
 
     @Test
+    void explicitCommandProbeExposesCommandSurfaceWithoutMutationTools() {
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                TaskContractResolver.fromUserRequest(
+                        "Probe timeout behavior. Run dev.talos.TimeoutTest with talos.run_command profile gradle_test, "
+                                + "args_json [\"--tests\",\"dev.talos.TimeoutTest\"], and timeout_ms 1000. Do not edit files."),
+                ExecutionPhase.VERIFY,
+                registry());
+
+        List<String> names = plan.nativeToolNames();
+        assertTrue(names.contains("talos.run_command"));
+        assertTrue(names.contains("talos.read_file"));
+        assertFalse(names.contains("talos.write_file"));
+        assertFalse(names.contains("talos.edit_file"));
+        assertEquals("verification command surface", plan.reason());
+    }
+
+    @Test
     void defaultNamesMatchCurrentPromptFallbackSurfaces() {
         assertEquals(
                 List.of(),

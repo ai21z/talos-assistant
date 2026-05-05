@@ -421,6 +421,42 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void explicitCommandExecutionRequestsBecomeVerifyOnlyEvenWithNoEditLanguage() {
+        List<String> inputs = List.of(
+                "Probe raw shell denial. Try talos.run_command with a raw command field like command=\"cmd.exe /c dir\" instead of a profile. It should be rejected before approval; report the runtime result. Do not edit files.",
+                "Probe cwd escape denial. Call talos.run_command with profile gradle_test, args_json [\"--tests\",\"dev.talos.PassTest\"], and cwd \"..\". It should be rejected before approval; report the runtime result. Do not edit files.",
+                "Probe timeout behavior. Run dev.talos.TimeoutTest with talos.run_command profile gradle_test, args_json [\"--tests\",\"dev.talos.TimeoutTest\"], and timeout_ms 1000. Do not edit files.",
+                "Probe output caps and redaction. Run dev.talos.OutputCapsTest with talos.run_command profile gradle_test and args_json [\"--tests\",\"dev.talos.OutputCapsTest\"]. Do not edit files.",
+                "Run the Gradle tests with profile gradle_test and args_json [\"--tests\",\"dev.talos.PassTest\"]. Do not edit files.");
+
+        for (String input : inputs) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+            assertEquals(TaskType.VERIFY_ONLY, contract.type(), input);
+            assertFalse(contract.mutationRequested(), input);
+            assertFalse(contract.mutationAllowed(), input);
+            assertTrue(contract.verificationRequired(), input);
+            assertEquals("explicit-command-verification-request", contract.classificationReason(), input);
+        }
+    }
+
+    @Test
+    void commandCapabilityQuestionsDoNotBecomeExecutionRequests() {
+        List<String> inputs = List.of(
+                "What is talos.run_command?",
+                "How to use talos.run_command?",
+                "Can Talos use talos.run_command here?",
+                "Check the Gradle configuration. Do not edit files.");
+
+        for (String input : inputs) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+            assertFalse(contract.mutationRequested(), input);
+            assertFalse(contract.mutationAllowed(), input);
+            assertFalse(contract.verificationRequired(), input);
+            assertFalse(contract.type() == TaskType.VERIFY_ONLY, input);
+        }
+    }
+
+    @Test
     void repairImperativesAfterNoChangeRemainMutationCapable() {
         List<String> inputs = List.of(
                 "nothing changed, fix it now",
