@@ -1,7 +1,7 @@
 # T129 - Tool Metadata Migration And Tool Surface Planner
 
 Severity: high
-Status: open
+Status: done
 
 ## Problem
 
@@ -32,6 +32,24 @@ Tool-surface decisions are currently spread across runtime/executor paths. As Ta
 - No new tools.
 - No command execution.
 - No broad executor rewrite.
+
+## Architecture Metadata
+
+- Capability: capability spine/tool surface.
+- Operation(s): native tool-surface planning.
+- Owning package/class: `dev.talos.runtime.toolcall.ToolSurfacePlanner`.
+- New or changed tools: no new tools.
+- Risk level: read/write metadata is consumed; destructive tools are not exposed by generic mutation apply.
+- Approval behavior: unchanged.
+- Protected path behavior: unchanged; protected read still receives read-file-only surface when target-bound.
+- Checkpoint behavior: unchanged.
+- Evidence obligation: unchanged.
+- Verification profile: unchanged.
+- Repair profile: unchanged; repair/evidence constrained surfaces continue through existing contracts.
+- Outcome/truth warnings: unchanged.
+- Trace/debug fields: prompt audit still receives native tool names through the existing plan path.
+- Refactor scope: `NativeToolSpecPolicy` delegates to planner; executor fallback visible-tool list delegates to planner.
+- Non-goals: no new tools, no command execution, no broad executor rewrite.
 
 ## Verification
 
