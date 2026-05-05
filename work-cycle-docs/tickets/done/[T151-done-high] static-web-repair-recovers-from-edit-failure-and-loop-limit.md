@@ -1,6 +1,6 @@
 # T151 - Static Web Repair Recovers From Edit Failure And Loop-Limit Success
 
-Status: open
+Status: done
 Priority: high
 
 ## Evidence Summary
@@ -230,6 +230,42 @@ Add broader commands if runtime code changes:
 - Use focused tests first.
 - Run a focused static web repair re-audit with both llama.cpp models before the broader product workflow rerun.
 - Do not start T61 until this ticket is closed and the broader product workflow rerun is clean enough.
+
+## Closeout Evidence
+
+Implementation summary:
+
+- Static web repair now tracks dynamic full-rewrite-required targets when an `edit_file` old-string miss happens after fresh read evidence.
+- Follow-up static web repair attempts redirect those targets toward complete `write_file` replacement instead of repeating brittle exact edits.
+- Static web verification pass can stop the tool loop cleanly before stale expected-target context or loop-limit noise turns a verified repair into a warning result.
+- Runtime outcome summaries suppress recovered edit failures only when a later successful mutation repaired the same path.
+
+Deterministic verification:
+
+```powershell
+.\gradlew.bat --no-daemon test --tests dev.talos.runtime.ToolCallLoopTest.staticWebVerifierPassStopsWithoutExpectedContextTargetBreach --tests dev.talos.runtime.ToolCallLoopTest.staticWebOldStringFailureAfterReadRecoversThroughFullWriteReplacement
+.\gradlew.bat --no-daemon test --tests dev.talos.runtime.ToolCallLoopTest --tests dev.talos.runtime.toolcall.ToolCallRepromptStageTest --tests dev.talos.runtime.outcome.MutationOutcomeTest --tests dev.talos.runtime.verification.StaticTaskVerifierTest
+.\gradlew.bat --no-daemon test
+.\gradlew.bat --no-daemon e2eTest --tests dev.talos.harness.JsonScenarioPackTest.repairAfterStaticVerificationFailureUsesVerifierContext --tests dev.talos.harness.JsonScenarioPackTest.structuralWebRepairRedirectsEditFileToWriteFile --tests dev.talos.harness.JsonScenarioPackTest.structuralWebRepairContinuesUntilPlannedWriteTargets --tests dev.talos.harness.JsonScenarioPackTest.repairFollowupAfterIncompleteOutcomeApplies
+.\gradlew.bat --no-daemon e2eTest
+.\gradlew.bat --no-daemon check
+.\gradlew.bat --no-daemon installDist
+```
+
+Manual audit evidence:
+
+- Focused T151 audit:
+  - `local/manual-testing/t151-static-web-repair-recovery-audit-20260505-231845/FINDINGS-T151-STATIC-WEB-REPAIR-RECOVERY-AUDIT.md`
+  - Qwen and GPT-OSS both repaired `script.js` to use `#run-button` and static verification passed.
+  - No loop-limit warning and no failure-policy stop.
+- Broader product workflow re-audit:
+  - `local/manual-testing/llama-cpp-product-workflow-reaudit-20260505-232041/FINDINGS-LLAMA-CPP-PRODUCT-WORKFLOW-REAUDIT.md`
+  - Qwen and GPT-OSS passed inspect, workspace creation, copy/move, batch write, static web repair, Gradle verification, raw shell containment, unsupported delete-like containment, unsupported binary honesty, and protected read approval.
+
+T61 readiness decision:
+
+- This ticket no longer blocks T61.
+- The broader product workflow is clean enough to proceed to the larger T61-style audit.
 
 ## Known Risks
 

@@ -50,6 +50,7 @@ public final class LoopState {
     public final Map<String, Integer> staleEditFailuresByPath = new HashMap<>();
     public final Set<String> staleEditRepairPromptedPaths = new HashSet<>();
     public String staleEditRereadIgnoredPath;
+    public final Set<String> staticWebFullRewriteRequiredTargets = new HashSet<>();
     public final Set<String> pathsReadThisTurn = new HashSet<>();
     public final Map<String, String> successfulReadCalls = new HashMap<>();
     public boolean mutationSinceStart;

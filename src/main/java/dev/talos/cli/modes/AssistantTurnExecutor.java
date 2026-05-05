@@ -1940,7 +1940,11 @@ public final class AssistantTurnExecutor {
             List<ToolCallLoop.ToolOutcome> orderedMutatingOutcomes
     ) {
         if (failure == null || orderedMutatingOutcomes == null || orderedMutatingOutcomes.isEmpty()) return false;
-        if (!failure.invalidEmptyEditArguments() && !failure.fullRewriteRepairRedirect()) return false;
+        if (!failure.invalidEmptyEditArguments()
+                && !failure.fullRewriteRepairRedirect()
+                && !failure.oldStringNotFoundEditFailure()) {
+            return false;
+        }
         String failedPath = ToolCallSupport.normalizePath(failure.pathHint());
         if (failedPath.isBlank()) return false;
         boolean sawFailure = false;

@@ -145,8 +145,9 @@ public final class ToolCallLoop {
             var unique = new java.util.LinkedHashSet<>(toolNames != null ? toolNames : List.of());
             String names = unique.isEmpty() ? "" : ": " + String.join(", ", unique);
             String base = "[Used " + toolsInvoked + " tool(s)" + names + " | " + iterations + " iteration(s)]";
-            if (failedCalls > 0) {
-                base += " [" + failedCalls + " failed]";
+            int displayFailedCalls = displayFailedCalls();
+            if (displayFailedCalls > 0) {
+                base += " [" + displayFailedCalls + " failed]";
             }
             if (hitIterLimit) {
                 base += " [iteration limit reached]";
@@ -155,6 +156,40 @@ public final class ToolCallLoop {
                 base += " [failure policy stopped]";
             }
             return base;
+        }
+
+        private int displayFailedCalls() {
+            if (failedCalls <= 0 || toolOutcomes.isEmpty()) return Math.max(0, failedCalls);
+            int recovered = 0;
+            for (int i = 0; i < toolOutcomes.size(); i++) {
+                ToolOutcome failure = toolOutcomes.get(i);
+                if (!isRecoveredEditFailureShape(failure)) continue;
+                String failedPath = normalizeSummaryPath(failure.pathHint());
+                if (failedPath.isBlank()) continue;
+                for (int j = i + 1; j < toolOutcomes.size(); j++) {
+                    ToolOutcome later = toolOutcomes.get(j);
+                    if (later != null
+                            && later.mutating()
+                            && later.success()
+                            && failedPath.equals(normalizeSummaryPath(later.pathHint()))) {
+                        recovered++;
+                        break;
+                    }
+                }
+            }
+            return Math.max(0, failedCalls - recovered);
+        }
+
+        private static boolean isRecoveredEditFailureShape(ToolOutcome outcome) {
+            return outcome != null
+                    && (outcome.invalidEmptyEditArguments()
+                    || outcome.fullRewriteRepairRedirect()
+                    || outcome.oldStringNotFoundEditFailure());
+        }
+
+        private static String normalizeSummaryPath(String path) {
+            if (path == null || path.isBlank()) return "";
+            return path.replace('\\', '/').replaceFirst("^\\./+", "").toLowerCase(java.util.Locale.ROOT);
         }
     }
 
@@ -249,6 +284,14 @@ public final class ToolCallLoop {
             if (!ToolError.INVALID_PARAMS.equals(errorCode)) return false;
             String lower = errorMessage.toLowerCase(java.util.Locale.ROOT);
             return lower.contains("static verification repair requires a complete talos.write_file replacement");
+        }
+
+        public boolean oldStringNotFoundEditFailure() {
+            if (!"talos.edit_file".equals(toolName)) return false;
+            if (!mutating || success || denied) return false;
+            if (!ToolError.INVALID_PARAMS.equals(errorCode)) return false;
+            String lower = errorMessage.toLowerCase(java.util.Locale.ROOT);
+            return lower.contains("old_string not found");
         }
     }
 
