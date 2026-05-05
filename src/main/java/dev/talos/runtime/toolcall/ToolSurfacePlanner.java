@@ -54,6 +54,7 @@ public final class ToolSurfacePlanner {
         if (contract.type() == TaskType.DIRECTORY_LISTING) return List.of("talos.list_dir");
         if (contract.mutationAllowed() && phase == ExecutionPhase.APPLY) {
             return List.of(
+                    "talos.apply_workspace_batch",
                     "talos.copy_path",
                     "talos.edit_file",
                     "talos.grep",

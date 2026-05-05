@@ -12,6 +12,7 @@ import dev.talos.tools.ToolOperationMetadata;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.ToolResult;
 import dev.talos.tools.ToolRiskLevel;
+import dev.talos.tools.impl.BatchWorkspaceApplyTool;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
 import dev.talos.tools.impl.GrepTool;
@@ -83,6 +84,7 @@ class ToolSurfacePlannerTest {
         assertTrue(names.contains("talos.retrieve"));
         assertTrue(names.contains("talos.write_file"));
         assertTrue(names.contains("talos.edit_file"));
+        assertTrue(names.contains("talos.apply_workspace_batch"));
         assertTrue(names.contains("talos.mkdir"));
         assertTrue(names.contains("talos.move_path"));
         assertTrue(names.contains("talos.copy_path"));
@@ -153,7 +155,7 @@ class ToolSurfacePlannerTest {
                         ExecutionPhase.INSPECT));
 
         assertEquals(
-                List.of("talos.copy_path", "talos.edit_file", "talos.grep", "talos.list_dir",
+                List.of("talos.apply_workspace_batch", "talos.copy_path", "talos.edit_file", "talos.grep", "talos.list_dir",
                         "talos.mkdir", "talos.move_path", "talos.read_file", "talos.rename_path",
                         "talos.retrieve", "talos.write_file"),
                 ToolSurfacePlanner.defaultVisibleToolNames(
@@ -170,6 +172,7 @@ class ToolSurfacePlannerTest {
         registry.register(new RetrieveTool(null));
         registry.register(new FileWriteTool(undoStack));
         registry.register(new FileEditTool(undoStack));
+        registry.register(new BatchWorkspaceApplyTool());
         registry.register(new MakeDirectoryTool());
         registry.register(new MovePathTool());
         registry.register(new CopyPathTool());

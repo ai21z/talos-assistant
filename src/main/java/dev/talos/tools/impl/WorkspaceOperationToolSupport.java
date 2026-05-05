@@ -70,6 +70,12 @@ final class WorkspaceOperationToolSupport {
         }
     }
 
+    static String firstLine(String value) {
+        if (value == null || value.isBlank()) return "";
+        int newline = value.indexOf('\n');
+        return newline < 0 ? value.strip() : value.substring(0, newline).strip();
+    }
+
     static void copyDirectory(Path source, Path destination, boolean overwrite) throws IOException {
         try (var stream = Files.walk(source)) {
             for (Path current : stream.sorted().toList()) {

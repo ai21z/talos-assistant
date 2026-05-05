@@ -1,5 +1,7 @@
 package dev.talos.runtime.policy;
 
+import dev.talos.runtime.toolcall.ToolAliasPolicy;
+import dev.talos.runtime.workspace.WorkspaceBatchPlanParser;
 import dev.talos.tools.ToolCall;
 
 import java.nio.file.Path;
@@ -31,6 +33,13 @@ public final class ProtectedPathPolicy {
     public static List<ResourceDecision> classifyAll(Path workspace, ToolCall call) {
         if (call == null) return List.of(ResourceDecision.noPath());
         var decisions = new java.util.ArrayList<ResourceDecision>();
+        if ("apply_workspace_batch".equals(ToolAliasPolicy.localCanonicalName(call.toolName()))) {
+            for (String value : WorkspaceBatchPlanParser.pathValues(call)) {
+                if (value != null && !value.isBlank()) {
+                    decisions.add(classify(workspace, value));
+                }
+            }
+        }
         for (String key : PATH_KEYS) {
             String value = call.param(key);
             if (value != null && !value.isBlank()) {

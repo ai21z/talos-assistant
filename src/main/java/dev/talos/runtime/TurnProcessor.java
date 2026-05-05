@@ -18,6 +18,7 @@ import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.toolcall.ToolAliasPolicy;
 import dev.talos.runtime.toolcall.ToolCallSupport;
+import dev.talos.runtime.workspace.WorkspaceBatchPlanParser;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
 import dev.talos.tools.*;
@@ -739,16 +740,18 @@ public final class TurnProcessor {
         if (!ToolCallSupport.isMutatingTool(call.toolName())) {
             return null;
         }
-        String path = resolveParam(call, "path", "file_path", "filepath", "file", "filename");
-        if (path == null || path.isBlank()) {
+        List<PathParam> params = pathParams(call);
+        if (params.isEmpty()) {
             return null;
         }
-        for (String forbidden : taskContract.forbiddenTargets()) {
-            if (sameScopedTarget(path, forbidden)) {
-                return ToolResult.fail(ToolError.invalidParams(
-                        "Target forbidden before approval: `" + path
-                                + "` was explicitly excluded by the user's current request. "
-                                + "No approval was requested and no file was changed."));
+        for (PathParam param : params) {
+            for (String forbidden : taskContract.forbiddenTargets()) {
+                if (sameScopedTarget(param.value(), forbidden)) {
+                    return ToolResult.fail(ToolError.invalidParams(
+                            "Target forbidden before approval: `" + param.value()
+                                    + "` was explicitly excluded by the user's current request. "
+                                    + "No approval was requested and no file was changed."));
+                }
             }
         }
         return null;
@@ -756,6 +759,13 @@ public final class TurnProcessor {
 
     private static List<PathParam> pathParams(ToolCall call) {
         var params = new java.util.ArrayList<PathParam>();
+        if ("apply_workspace_batch".equals(ToolAliasPolicy.localCanonicalName(call.toolName()))) {
+            for (String value : WorkspaceBatchPlanParser.pathValues(call)) {
+                if (value != null && !value.isBlank()) {
+                    params.add(new PathParam("operations_json", value));
+                }
+            }
+        }
         for (String key : pathParameterKeys()) {
             String value = call.param(key);
             if (value != null && !value.isBlank()) {
@@ -947,6 +957,15 @@ public final class TurnProcessor {
 
         if (path != null && !path.isBlank()) {
             sb.append("target: ").append(path);
+        } else if ("apply_workspace_batch".equals(ToolAliasPolicy.localCanonicalName(call.toolName()))) {
+            try {
+                WorkspaceBatchPlanParser.parse(call)
+                        .ifPresentOrElse(
+                                plan -> sb.append("batch: ").append(plan.previewSummary()),
+                                () -> sb.append("batch: missing operations_json"));
+            } catch (IllegalArgumentException e) {
+                sb.append("batch: invalid operations_json");
+            }
         } else {
             sb.append("(warning: no target path specified - may fail)");
         }

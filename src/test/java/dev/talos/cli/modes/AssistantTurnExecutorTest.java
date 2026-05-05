@@ -2379,7 +2379,8 @@ class AssistantTurnExecutorTest {
 
             assertTrue(frame.contains("type: FILE_CREATE"));
             assertTrue(frame.contains("obligation: MUTATING_TOOL_REQUIRED"));
-            assertTrue(frame.contains("visibleTools: talos.copy_path"));
+            assertTrue(frame.contains("visibleTools: talos.apply_workspace_batch"));
+            assertTrue(frame.contains("talos.copy_path"));
             assertTrue(frame.contains("talos.mkdir"));
             assertTrue(frame.contains("talos.move_path"));
             assertTrue(frame.contains("talos.rename_path"));
