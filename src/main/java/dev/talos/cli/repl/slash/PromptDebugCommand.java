@@ -65,7 +65,7 @@ public final class PromptDebugCommand implements Command {
                 .append(md.toAbsolutePath().normalize()).append('\n');
         if (!snapshot.providerBodyJson().isBlank()) {
             Path json = dir.resolve("prompt-debug-" + ts + ".provider-body.json");
-            Files.writeString(json, snapshot.providerBodyJson(), StandardCharsets.UTF_8);
+            Files.writeString(json, PromptDebugInspector.redactedProviderBodyJson(snapshot), StandardCharsets.UTF_8);
             result.append("Saved provider body JSON to: ")
                     .append(json.toAbsolutePath().normalize()).append('\n');
         }

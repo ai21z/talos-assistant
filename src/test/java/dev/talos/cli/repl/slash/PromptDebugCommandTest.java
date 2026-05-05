@@ -14,8 +14,11 @@ import dev.talos.spi.types.ToolChoiceMode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -93,5 +96,84 @@ class PromptDebugCommandTest {
         assertTrue(info.text.contains("styles.css"), info.text);
         assertTrue(info.text.contains("scripts.js"), info.text);
         assertFalse(info.text.contains("SECRET_VALUE"), info.text);
+    }
+
+    @Test
+    void lastRedactsProtectedToolResultsAndKeepsPublicToolResults() throws Exception {
+        PromptDebugCapture.record(protectedToolResultSnapshot());
+        PromptDebugCommand command = new PromptDebugCommand();
+
+        Result result = command.execute("last", ctx);
+
+        Result.TrustedInfo info = assertInstanceOf(Result.TrustedInfo.class, result);
+        assertTrue(info.text.contains("[protected tool result redacted by prompt-debug policy]"), info.text);
+        assertFalse(info.text.contains("SECRET=manual-test"), info.text);
+        assertFalse(info.text.contains("MODE=dev"), info.text);
+        assertTrue(info.text.contains("Public project notes."), info.text);
+    }
+
+    @Test
+    void saveWritesRedactedProviderBodyJsonByDefault() throws Exception {
+        PromptDebugCapture.record(protectedToolResultSnapshot());
+        PromptDebugCommand command = new PromptDebugCommand();
+
+        Result result = command.execute("save", ctx);
+
+        Result.TrustedInfo info = assertInstanceOf(Result.TrustedInfo.class, result);
+        Path providerBody = savedPath(info.text, "Saved provider body JSON to: ");
+        Path render = savedPath(info.text, "Saved prompt debug render to: ");
+        try {
+            String savedJson = Files.readString(providerBody);
+            assertTrue(savedJson.contains("[protected tool result redacted by prompt-debug policy]"), savedJson);
+            assertFalse(savedJson.contains("SECRET=manual-test"), savedJson);
+            assertFalse(savedJson.contains("MODE=dev"), savedJson);
+            assertTrue(savedJson.contains("Public project notes."), savedJson);
+        } finally {
+            Files.deleteIfExists(providerBody);
+            Files.deleteIfExists(render);
+        }
+    }
+
+    private static PromptDebugSnapshot protectedToolResultSnapshot() {
+        var envCall = new ChatMessage.NativeToolCall(
+                "call-env",
+                "talos.read_file",
+                Map.of("path", ".env"));
+        var readmeCall = new ChatMessage.NativeToolCall(
+                "call-readme",
+                "talos.read_file",
+                Map.of("path", "README.md"));
+        String providerBody = """
+                {"model":"qwen2.5-coder:14b","messages":[
+                  {"role":"assistant","content":"","tool_calls":[
+                    {"id":"call-env","function":{"name":"talos.read_file","arguments":{"path":".env"}}},
+                    {"id":"call-readme","function":{"name":"talos.read_file","arguments":{"path":"README.md"}}}
+                  ]},
+                  {"role":"tool","tool_call_id":"call-env","content":"1 | SECRET=manual-test\\n2 | MODE=dev\\n"},
+                  {"role":"tool","tool_call_id":"call-readme","content":"1 | Public project notes.\\n"}
+                ]}
+                """;
+        return new PromptDebugSnapshot(
+                "OLLAMA_HTTP_BODY",
+                "ollama",
+                "qwen2.5-coder:14b",
+                false,
+                null,
+                List.of(
+                        ChatMessage.assistantWithToolCalls("", List.of(envCall, readmeCall)),
+                        ChatMessage.toolResult("call-env", "1 | SECRET=manual-test\n2 | MODE=dev\n"),
+                        ChatMessage.toolResult("call-readme", "1 | Public project notes.\n")),
+                List.of(new ToolSpec("talos.read_file", "Read", "{}")),
+                ChatRequestControls.defaults(),
+                providerBody);
+    }
+
+    private static Path savedPath(String text, String prefix) {
+        for (String line : text.split("\\R")) {
+            if (line.startsWith(prefix)) {
+                return Path.of(line.substring(prefix.length()).strip());
+            }
+        }
+        throw new AssertionError("Missing saved path line: " + prefix + "\n" + text);
     }
 }
