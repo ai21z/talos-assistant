@@ -11,6 +11,7 @@ import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
+import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -93,6 +94,7 @@ public final class UnifiedAssistantMode implements Mode {
         TaskContract taskContract = TaskContractResolver.fromMessages(contractMessages);
         boolean smallTalk = taskContract.type() == TaskType.SMALL_TALK;
         boolean directoryListing = taskContract.type() == TaskType.DIRECTORY_LISTING;
+        ExecutionPhase initialPhase = CurrentTurnPlan.defaultPhaseFor(taskContract);
         SystemPromptBuilder promptBuilder = SystemPromptBuilder.forUnified()
                 .withNativeTools(nativeTools)
                 .withHistory(hasHistory)
@@ -101,15 +103,13 @@ public final class UnifiedAssistantMode implements Mode {
             promptBuilder
                     .withTools(ctx.toolRegistry())
                     .withWorkspace(workspace)
-                    .withReadOnlyToolMode(!taskContract.mutationAllowed());
+                    .withReadOnlyToolMode(!taskContract.mutationAllowed())
+                    .withCommandToolMode(initialPhase == ExecutionPhase.VERIFY);
         }
         String system = promptBuilder.build();
 
         // Build structured conversation messages: system + history + user
         List<ChatMessage> messages = buildMessages(system, rawLine, history);
-        ExecutionPhase initialPhase = taskContract.mutationAllowed()
-                ? ExecutionPhase.APPLY
-                : ExecutionPhase.INSPECT;
         Context turnCtx = ctx.withNativeToolSpecs(
                 NativeToolSpecPolicy.select(taskContract, initialPhase, ctx.toolRegistry()));
         AssistantTurnExecutor.injectTaskContractInstruction(

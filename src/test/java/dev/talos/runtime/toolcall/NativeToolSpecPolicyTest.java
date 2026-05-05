@@ -17,6 +17,7 @@ import dev.talos.tools.impl.CopyPathTool;
 import dev.talos.tools.impl.RenamePathTool;
 import dev.talos.tools.impl.ReadFileTool;
 import dev.talos.tools.impl.RetrieveTool;
+import dev.talos.tools.impl.RunCommandTool;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -158,6 +159,7 @@ class NativeToolSpecPolicyTest {
         assertTrue(names.contains("talos.move_path"));
         assertTrue(names.contains("talos.copy_path"));
         assertTrue(names.contains("talos.rename_path"));
+        assertTrue(names.contains("talos.run_command"));
     }
 
     @Test
@@ -190,6 +192,19 @@ class NativeToolSpecPolicyTest {
         assertFalse(names.contains("talos.edit_file"));
     }
 
+    @Test
+    void verifyOnlyCommandContractExposesRunCommandWithoutMutationTools() {
+        var contract = TaskContractResolver.fromUserRequest("Verify that Gradle tests pass.");
+
+        List<String> names = NativeToolSpecPolicy.names(
+                NativeToolSpecPolicy.select(contract, ExecutionPhase.VERIFY, registry()));
+
+        assertTrue(names.contains("talos.run_command"), names.toString());
+        assertTrue(names.contains("talos.read_file"), names.toString());
+        assertFalse(names.contains("talos.write_file"), names.toString());
+        assertFalse(names.contains("talos.edit_file"), names.toString());
+    }
+
     private static ToolRegistry registry() {
         ToolRegistry registry = new ToolRegistry();
         FileUndoStack undoStack = new FileUndoStack();
@@ -204,6 +219,8 @@ class NativeToolSpecPolicyTest {
         registry.register(new MovePathTool());
         registry.register(new CopyPathTool());
         registry.register(new RenamePathTool());
+        registry.register(new RunCommandTool(plan -> new dev.talos.runtime.command.CommandResult(
+                plan, 0, 1, false, false, "", "", false, false, false, "")));
         return registry;
     }
 

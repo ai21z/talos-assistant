@@ -32,4 +32,22 @@ public record CommandPlan(
         idleTimeoutMs = idleTimeoutMs > 0 ? idleTimeoutMs : CommandProfile.DEFAULT_IDLE_TIMEOUT_MS;
         outputLimits = outputLimits == null ? CommandOutputLimits.defaults() : outputLimits;
     }
+
+    public CommandPlan withTimeoutMs(long timeoutMs) {
+        return new CommandPlan(
+                profileId,
+                displayName,
+                executable,
+                argv,
+                cwd,
+                risk,
+                networkAccess,
+                interactive,
+                expectedWrites,
+                requiresApproval,
+                requiresCheckpoint,
+                timeoutMs,
+                idleTimeoutMs,
+                outputLimits);
+    }
 }

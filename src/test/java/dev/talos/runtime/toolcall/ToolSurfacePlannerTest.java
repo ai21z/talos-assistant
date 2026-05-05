@@ -23,6 +23,7 @@ import dev.talos.tools.impl.CopyPathTool;
 import dev.talos.tools.impl.RenamePathTool;
 import dev.talos.tools.impl.ReadFileTool;
 import dev.talos.tools.impl.RetrieveTool;
+import dev.talos.tools.impl.RunCommandTool;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -89,6 +90,7 @@ class ToolSurfacePlannerTest {
         assertTrue(names.contains("talos.move_path"));
         assertTrue(names.contains("talos.copy_path"));
         assertTrue(names.contains("talos.rename_path"));
+        assertTrue(names.contains("talos.run_command"));
         assertFalse(names.contains("talos.metadata_delete"));
         assertEquals("mutation apply surface", plan.reason());
     }
@@ -135,6 +137,22 @@ class ToolSurfacePlannerTest {
     }
 
     @Test
+    void verifyOrientedDevTaskExposesCommandSurface() {
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                TaskContractResolver.fromUserRequest("Verify that the Gradle build passes."),
+                ExecutionPhase.VERIFY,
+                registry());
+
+        List<String> names = plan.nativeToolNames();
+        assertTrue(names.contains("talos.read_file"));
+        assertTrue(names.contains("talos.grep"));
+        assertTrue(names.contains("talos.run_command"));
+        assertFalse(names.contains("talos.write_file"));
+        assertFalse(names.contains("talos.edit_file"));
+        assertEquals("verification command surface", plan.reason());
+    }
+
+    @Test
     void defaultNamesMatchCurrentPromptFallbackSurfaces() {
         assertEquals(
                 List.of(),
@@ -156,11 +174,17 @@ class ToolSurfacePlannerTest {
 
         assertEquals(
                 List.of("talos.apply_workspace_batch", "talos.copy_path", "talos.edit_file", "talos.grep", "talos.list_dir",
-                        "talos.mkdir", "talos.move_path", "talos.read_file", "talos.rename_path",
+                        "talos.mkdir", "talos.move_path", "talos.read_file", "talos.rename_path", "talos.run_command",
                         "talos.retrieve", "talos.write_file"),
                 ToolSurfacePlanner.defaultVisibleToolNames(
                         TaskContractResolver.fromUserRequest("create a README.md file"),
                         ExecutionPhase.APPLY));
+
+        assertEquals(
+                List.of("talos.grep", "talos.list_dir", "talos.read_file", "talos.retrieve", "talos.run_command"),
+                ToolSurfacePlanner.defaultVisibleToolNames(
+                        TaskContractResolver.fromUserRequest("verify that the Gradle build passes"),
+                        ExecutionPhase.VERIFY));
     }
 
     private static ToolRegistry registry() {
@@ -177,6 +201,8 @@ class ToolSurfacePlannerTest {
         registry.register(new MovePathTool());
         registry.register(new CopyPathTool());
         registry.register(new RenamePathTool());
+        registry.register(new RunCommandTool(plan -> new dev.talos.runtime.command.CommandResult(
+                plan, 0, 1, false, false, "", "", false, false, false, "")));
         return registry;
     }
 

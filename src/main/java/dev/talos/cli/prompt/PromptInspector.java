@@ -10,6 +10,7 @@ import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
+import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
 
 import java.nio.file.Path;
@@ -44,6 +45,7 @@ public final class PromptInspector {
                 && contract.type() == TaskType.SMALL_TALK;
         boolean directoryListing = "unified".equals(resolvedMode)
                 && contract.type() == TaskType.DIRECTORY_LISTING;
+        ExecutionPhase initialPhase = CurrentTurnPlan.defaultPhaseFor(contract);
 
         SystemPromptBuilder builder = builderFor(resolvedMode)
                 .withNativeTools(nativeTools)
@@ -54,7 +56,8 @@ public final class PromptInspector {
                 builder
                         .withTools(ctx == null ? null : ctx.toolRegistry())
                         .withWorkspace(workspace)
-                        .withReadOnlyToolMode(!contract.mutationAllowed());
+                        .withReadOnlyToolMode(!contract.mutationAllowed())
+                        .withCommandToolMode(initialPhase == ExecutionPhase.VERIFY);
             }
         } else {
             builder
@@ -234,9 +237,7 @@ public final class PromptInspector {
             return NativeToolSpecPolicy.names(ctx.nativeToolSpecs());
         }
         if ("unified".equals(resolvePromptMode(resolvedMode)) && contract != null) {
-            ExecutionPhase phase = contract.mutationAllowed()
-                    ? ExecutionPhase.APPLY
-                    : ExecutionPhase.INSPECT;
+            ExecutionPhase phase = CurrentTurnPlan.defaultPhaseFor(contract);
             return NativeToolSpecPolicy.names(
                     NativeToolSpecPolicy.select(contract, phase, ctx.toolRegistry()));
         }

@@ -8,6 +8,7 @@ import dev.talos.tools.impl.GrepTool;
 import dev.talos.tools.impl.ListDirTool;
 import dev.talos.tools.impl.ReadFileTool;
 import dev.talos.tools.impl.RetrieveTool;
+import dev.talos.tools.impl.RunCommandTool;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
@@ -92,6 +93,26 @@ class ToolOperationMetadataTest {
                 true,
                 true,
                 "FILE_EDITED");
+    }
+
+    @Test
+    void commandToolAsksButDoesNotDeclareSourceMutationOrCheckpoint() {
+        ToolOperationMetadata metadata = new RunCommandTool(plan -> new dev.talos.runtime.command.CommandResult(
+                plan, 0, 1, false, false, "", "", false, false, false, ""))
+                .descriptor()
+                .operationMetadata();
+
+        assertMetadata(
+                metadata,
+                "talos.run_command",
+                CapabilityKind.EXECUTE,
+                ToolRiskLevel.WRITE,
+                Map.of(),
+                false,
+                false,
+                true,
+                false,
+                "COMMAND_EXECUTED");
     }
 
     @Test

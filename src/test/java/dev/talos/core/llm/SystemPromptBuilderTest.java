@@ -1,6 +1,7 @@
 package dev.talos.core.llm;
 
 import dev.talos.tools.*;
+import dev.talos.tools.impl.RunCommandTool;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
@@ -443,6 +444,61 @@ class SystemPromptBuilderTest {
                 "Native read-only mode should filter mutating tool descriptors");
         assertFalse(prompt.contains("runtime handles tool invocation format automatically — just decide WHICH tool"),
                 "Native read-only mode should not use the writable native preamble");
+    }
+
+    @Test
+    void verificationCommandModeKeepsRunCommandAndOmitsMutationTools() {
+        var registry = new ToolRegistry();
+        registry.register(stubTool("talos.read_file", "Read a workspace file", ToolRiskLevel.READ_ONLY));
+        registry.register(stubTool("talos.write_file", "Create or overwrite a file", ToolRiskLevel.WRITE));
+        registry.register(new RunCommandTool());
+
+        String prompt = SystemPromptBuilder.forUnified()
+                .withTools(registry)
+                .withReadOnlyToolMode(true)
+                .withCommandToolMode(true)
+                .build();
+
+        assertTrue(prompt.contains("verification-oriented"),
+                "Verification command mode should use verification-oriented guidance");
+        assertTrue(prompt.contains("approved command verification tools"),
+                "Verification command mode should explain command tools are constrained");
+        assertTrue(prompt.contains("- **talos.read_file**"),
+                "Verification command mode should keep inspection tool descriptors");
+        assertTrue(prompt.contains("- **talos.run_command**"),
+                "Verification command mode should expose approved command profiles");
+        assertFalse(prompt.contains("- **talos.write_file**"),
+                "Verification command mode should not expose source mutation tools");
+        assertFalse(prompt.contains("FILE CREATION AND MODIFICATION"),
+                "Verification command mode should not use the writable tool preamble");
+    }
+
+    @Test
+    void nativeVerificationCommandModeKeepsRunCommandAndOmitsMutationTools() {
+        var registry = new ToolRegistry();
+        registry.register(stubTool("talos.grep", "Search workspace files", ToolRiskLevel.READ_ONLY));
+        registry.register(stubTool("talos.edit_file", "Replace a unique string", ToolRiskLevel.WRITE));
+        registry.register(new RunCommandTool());
+
+        String prompt = SystemPromptBuilder.forUnified()
+                .withTools(registry)
+                .withNativeTools(true)
+                .withReadOnlyToolMode(true)
+                .withCommandToolMode(true)
+                .build();
+
+        assertTrue(prompt.contains("verification-oriented"),
+                "Native verification command mode should use verification-oriented guidance");
+        assertTrue(prompt.contains("runtime handles tool invocation format automatically"),
+                "Native verification command mode should preserve native tool-call guidance");
+        assertTrue(prompt.contains("- **talos.grep**"),
+                "Native verification command mode should keep inspection tools");
+        assertTrue(prompt.contains("- **talos.run_command**"),
+                "Native verification command mode should expose run_command");
+        assertFalse(prompt.contains("- **talos.edit_file**"),
+                "Native verification command mode should filter mutation tools");
+        assertFalse(prompt.contains("FILE CREATION AND MODIFICATION"),
+                "Native verification command mode should not use writable guidance");
     }
 
     @Test

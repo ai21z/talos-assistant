@@ -46,6 +46,9 @@ public final class ToolSurfacePlanner {
         if (mutationAllowed) {
             return select(registry, ToolSurfacePlanner::isApplyOperation, "mutation apply surface");
         }
+        if (verificationCommandSurface(contract, phase)) {
+            return select(registry, ToolSurfacePlanner::isVerificationOperation, "verification command surface");
+        }
         return select(registry, ToolSurfacePlanner::isReadOnlyOperation, "read-only metadata surface");
     }
 
@@ -63,8 +66,12 @@ public final class ToolSurfacePlanner {
                     "talos.move_path",
                     "talos.read_file",
                     "talos.rename_path",
+                    "talos.run_command",
                     "talos.retrieve",
                     "talos.write_file");
+        }
+        if (verificationCommandSurface(contract, phase)) {
+            return List.of("talos.grep", "talos.list_dir", "talos.read_file", "talos.retrieve", "talos.run_command");
         }
         return List.of("talos.grep", "talos.list_dir", "talos.read_file", "talos.retrieve");
     }
@@ -99,9 +106,33 @@ public final class ToolSurfacePlanner {
         ToolOperationMetadata metadata = metadata(descriptor);
         if (metadata == null) return false;
         if (isReadOnlyOperation(descriptor)) return true;
+        if (isCommandOperation(descriptor)) return true;
         return metadata.mutatesWorkspace()
                 && !metadata.destructive()
                 && metadata.riskLevel() == ToolRiskLevel.WRITE;
+    }
+
+    private static boolean isVerificationOperation(ToolDescriptor descriptor) {
+        return isReadOnlyOperation(descriptor) || isCommandOperation(descriptor);
+    }
+
+    private static boolean isCommandOperation(ToolDescriptor descriptor) {
+        ToolOperationMetadata metadata = metadata(descriptor);
+        return metadata != null
+                && metadata.capabilityKind() == CapabilityKind.EXECUTE
+                && metadata.riskLevel() == ToolRiskLevel.WRITE
+                && metadata.requiresApproval()
+                && !metadata.mutatesWorkspace()
+                && !metadata.requiresCheckpoint()
+                && !metadata.destructive();
+    }
+
+    private static boolean verificationCommandSurface(TaskContract contract, ExecutionPhase phase) {
+        return contract != null
+                && contract.verificationRequired()
+                && !contract.mutationAllowed()
+                && contract.expectedTargets().isEmpty()
+                && phase == ExecutionPhase.VERIFY;
     }
 
     private static boolean isDirectoryListingTool(ToolDescriptor descriptor) {

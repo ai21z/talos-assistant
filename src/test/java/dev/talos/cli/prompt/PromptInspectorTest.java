@@ -8,6 +8,7 @@ import dev.talos.tools.FileUndoStack;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.ReadFileTool;
 import dev.talos.tools.impl.FileWriteTool;
+import dev.talos.tools.impl.RunCommandTool;
 import dev.talos.tools.ToolRegistry;
 import org.junit.jupiter.api.Test;
 
@@ -137,6 +138,29 @@ class PromptInspectorTest {
     }
 
     @Test
+    void renderNextVerificationPromptShowsCommandSurfaceWithoutMutationTools() {
+        PromptRender render = PromptInspector.renderNext(
+                "auto",
+                "Verify that Gradle tests pass.",
+                Path.of(".").toAbsolutePath().normalize(),
+                commandToolContext(new Config()));
+
+        assertEquals("VERIFY_ONLY", render.taskType());
+        assertFalse(render.mutationAllowed());
+        assertTrue(render.tools().contains("talos.run_command"));
+        assertTrue(render.tools().contains("talos.read_file"));
+        assertFalse(render.tools().contains("talos.write_file"));
+        assertFalse(render.tools().contains("talos.edit_file"));
+        assertTrue(render.systemPrompt().contains("verification-oriented"));
+        assertTrue(render.systemPrompt().contains("approved command verification tools"));
+        assertTrue(render.messages().stream()
+                .anyMatch(message -> message.content() != null
+                        && message.content().contains("type: VERIFY_ONLY")
+                        && message.content().contains("phase: VERIFY")
+                        && message.content().contains("talos.run_command")));
+    }
+
+    @Test
     void renderNextMutationPromptShowsWritableEffectiveTools() {
         PromptRender render = PromptInspector.renderNext(
                 "auto",
@@ -225,6 +249,19 @@ class PromptInspectorTest {
         registry.register(new ReadFileTool());
         registry.register(new FileWriteTool(undoStack));
         registry.register(new FileEditTool(undoStack));
+        return Context.builder(cfg)
+                .toolRegistry(registry)
+                .build();
+    }
+
+    private static Context commandToolContext(Config cfg) {
+        ToolRegistry registry = new ToolRegistry();
+        FileUndoStack undoStack = new FileUndoStack();
+        registry.register(new ReadFileTool());
+        registry.register(new FileWriteTool(undoStack));
+        registry.register(new FileEditTool(undoStack));
+        registry.register(new RunCommandTool(plan -> new dev.talos.runtime.command.CommandResult(
+                plan, 0, 1, false, false, "", "", false, false, false, "")));
         return Context.builder(cfg)
                 .toolRegistry(registry)
                 .build();

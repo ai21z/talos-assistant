@@ -47,6 +47,7 @@ public final class SystemPromptBuilder {
     private boolean hasHistory;
     private boolean nativeTools;
     private boolean readOnlyToolMode;
+    private boolean commandToolMode;
     private boolean directoryListingToolMode;
     private java.nio.file.Path workspace;
 
@@ -97,6 +98,12 @@ public final class SystemPromptBuilder {
      */
     public SystemPromptBuilder withReadOnlyToolMode(boolean readOnlyToolMode) {
         this.readOnlyToolMode = readOnlyToolMode;
+        return this;
+    }
+
+    /** Include approved command verification tools alongside inspection tools. */
+    public SystemPromptBuilder withCommandToolMode(boolean commandToolMode) {
+        this.commandToolMode = commandToolMode;
         return this;
     }
 
@@ -222,6 +229,8 @@ public final class SystemPromptBuilder {
 
         if (directoryListingToolMode) {
             sb.append(DEFAULT_DIRECTORY_LISTING_TASK_CONTRACT);
+        } else if (readOnlyToolMode && commandToolMode) {
+            sb.append(DEFAULT_VERIFICATION_TASK_CONTRACT);
         } else if (readOnlyToolMode) {
             sb.append(DEFAULT_READ_ONLY_TASK_CONTRACT);
         }
@@ -262,7 +271,8 @@ public final class SystemPromptBuilder {
                     .toList();
         } else if (readOnlyToolMode) {
             descriptors = descriptors.stream()
-                    .filter(td -> !td.riskLevel().requiresApproval())
+                    .filter(td -> !td.riskLevel().requiresApproval()
+                            || (commandToolMode && "talos.run_command".equals(td.name())))
                     .toList();
         }
         if (descriptors.isEmpty()) {
@@ -278,6 +288,10 @@ public final class SystemPromptBuilder {
             sb.append(DEFAULT_DIRECTORY_LISTING_TOOLS_PREAMBLE_NATIVE);
         } else if (directoryListingToolMode) {
             sb.append(DEFAULT_DIRECTORY_LISTING_TOOLS_PREAMBLE);
+        } else if (readOnlyToolMode && commandToolMode && nativeTools) {
+            sb.append(DEFAULT_VERIFICATION_TOOLS_PREAMBLE_NATIVE);
+        } else if (readOnlyToolMode && commandToolMode) {
+            sb.append(DEFAULT_VERIFICATION_TOOLS_PREAMBLE);
         } else if (readOnlyToolMode && nativeTools) {
             sb.append(DEFAULT_READ_ONLY_TOOLS_PREAMBLE_NATIVE);
         } else if (readOnlyToolMode) {
@@ -424,6 +438,13 @@ public final class SystemPromptBuilder {
             - Inspect with read-only tools, then describe findings and possible fixes without applying them.
             - Wait for an explicit change request before using mutating tools.""";
 
+    private static final String DEFAULT_VERIFICATION_TASK_CONTRACT = """
+            Current Turn Contract
+            - This specific user turn is verification-oriented.
+            - Do not call talos.write_file or talos.edit_file in this turn.
+            - You may call listed inspection tools and approved command verification profiles.
+            - Command execution is runtime-approved, bounded, and profile-based; never invent shell commands.""";
+
     private static final String DEFAULT_DIRECTORY_LISTING_TASK_CONTRACT = """
             Current Turn Contract
             - This specific user turn asks only to list directory entries.
@@ -447,6 +468,41 @@ public final class SystemPromptBuilder {
             - Wait for tool results before answering. Do not fabricate results.
             - Only call tools listed below. Do not invent names.
             - Never call the same tool with the same parameters twice in one turn.""";
+
+    private static final String DEFAULT_VERIFICATION_TOOLS_PREAMBLE = """
+            Available Tools
+            This turn is verification-oriented. Only inspection tools and approved command verification tools are listed.
+            Do not call write/edit tools. Do not invent shell commands.
+
+            To invoke a tool, emit a tool call as a JSON object in EXACTLY this format:
+
+            ```json
+            {"name": "tool_name", "parameters": {"key": "value"}}
+            ```
+
+            When to call:
+            - Workspace evidence -> talos.list_dir, talos.read_file, talos.grep, or talos.retrieve.
+            - Build/test verification -> talos.run_command with an approved Gradle profile.
+
+            Rules:
+            - Wait for tool results before answering. Do not fabricate results.
+            - Only call tools listed below. Do not invent names.
+            - Never provide raw shell, cmd.exe, PowerShell, package install, network, or git write commands.""";
+
+    private static final String DEFAULT_VERIFICATION_TOOLS_PREAMBLE_NATIVE = """
+            Available Tools
+            This turn is verification-oriented. Only inspection tools and approved command verification tools are listed.
+            Do not call write/edit tools. Do not invent shell commands.
+            The runtime handles tool invocation format automatically - decide which listed tool to call and with what parameters.
+
+            When to call:
+            - Workspace evidence -> talos.list_dir, talos.read_file, talos.grep, or talos.retrieve.
+            - Build/test verification -> talos.run_command with an approved Gradle profile.
+
+            Rules:
+            - Wait for tool results before answering. Do not fabricate results.
+            - Only call tools listed below. Do not invent names.
+            - Never provide raw shell, cmd.exe, PowerShell, package install, network, or git write commands.""";
 
     private static final String DEFAULT_DIRECTORY_LISTING_TOOLS_PREAMBLE = """
             Available Tools
@@ -500,6 +556,7 @@ public final class SystemPromptBuilder {
                 + ", tools=" + (toolRegistry != null && !toolRegistry.isEmpty())
                 + ", nativeTools=" + nativeTools
                 + ", readOnlyToolMode=" + readOnlyToolMode
+                + ", commandToolMode=" + commandToolMode
                 + ", directoryListingToolMode=" + directoryListingToolMode
                 + ", history=" + hasHistory + "]";
     }

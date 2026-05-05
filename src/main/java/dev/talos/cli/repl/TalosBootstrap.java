@@ -42,6 +42,7 @@ import dev.talos.tools.impl.CopyPathTool;
 import dev.talos.tools.impl.RenamePathTool;
 import dev.talos.tools.impl.ReadFileTool;
 import dev.talos.tools.impl.RetrieveTool;
+import dev.talos.tools.impl.RunCommandTool;
 import org.jline.reader.LineReader;
 
 import java.io.PrintStream;
@@ -152,6 +153,7 @@ public final class TalosBootstrap {
         toolRegistry.register(new MovePathTool());
         toolRegistry.register(new CopyPathTool());
         toolRegistry.register(new RenamePathTool());
+        toolRegistry.register(new RunCommandTool());
         toolRegistry.register(new GrepTool());
         toolRegistry.register(new ListDirTool());
         toolRegistry.register(new RetrieveTool(rag));
