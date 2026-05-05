@@ -12,6 +12,7 @@ import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.*;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
+import dev.talos.tools.impl.ListDirTool;
 import dev.talos.tools.impl.ReadFileTool;
 import org.junit.jupiter.api.Test;
 
@@ -83,6 +84,43 @@ class ToolCallLoopTest {
         assertEquals(1, result.toolsInvoked());
         // Messages should have assistant + tool_result + final assistant
         assertTrue(messages.size() >= 4, "Should have added assistant and tool result messages");
+    }
+
+    @Test
+    void listDirToolOutcomeRetainsListedEntriesForEvidence() throws Exception {
+        Path ws = Files.createTempDirectory("talos-list-dir-evidence-");
+        try {
+            Files.writeString(ws.resolve("README.md"), "fixture\n");
+            Files.writeString(ws.resolve("index.html"), "<button>Go</button>\n");
+            Files.writeString(ws.resolve("script.js"), "console.log('go');\n");
+
+            var loop = createLoop(new ListDirTool());
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("system"),
+                    ChatMessage.user("inspect this website")));
+            String llmResponse = """
+                    ```json
+                    {"name":"talos.list_dir","parameters":{"path":"."}}
+                    ```""";
+            Context ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of("")))
+                    .build();
+
+            var result = loop.run(llmResponse, messages, ws, ctx);
+
+            assertEquals(1, result.toolOutcomes().size());
+            String summary = result.toolOutcomes().getFirst().summary();
+            assertTrue(summary.contains("README.md"), summary);
+            assertTrue(summary.contains("index.html"), summary);
+            assertTrue(summary.contains("script.js"), summary);
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
     }
 
     // ── Tool execution produces result text ─────────────────────────

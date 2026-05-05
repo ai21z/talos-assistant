@@ -1729,4 +1729,66 @@ class ExecutionOutcomeTest {
         assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
         assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
     }
+
+    @Test
+    void staticWebDiagnosisWithOnlyDirectoryListingIsEvidenceIncomplete() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user(
+                "Check whether this website has mismatches between HTML classes/IDs "
+                        + "and selectors used in CSS or JavaScript. Do not change anything yet."));
+
+        var loopResult = new ToolCallLoop.LoopResult(
+                "I need to inspect index.html, script.js, and styles.css next.",
+                1, 1,
+                List.of("talos.list_dir"), List.of(),
+                0, 0, false, 0, List.of(),
+                0, 0, 0, 0,
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.list_dir", ".", true, false, false,
+                        "index.html\nscript.js\nstyles.css\n", "")));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                loopResult.finalAnswer(), messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
+        assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
+        assertTrue(outcome.finalAnswer().startsWith(
+                "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"));
+        assertFalse(outcome.finalAnswer().contains("I need to inspect"), outcome.finalAnswer());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+    }
+
+    @Test
+    void staticWebDiagnosisWithStaticSourceReadsIsNotEvidenceIncomplete() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user(
+                "Check whether this website has mismatches between HTML classes/IDs "
+                        + "and selectors used in CSS or JavaScript. Do not change anything yet."));
+
+        var loopResult = new ToolCallLoop.LoopResult(
+                "There are no mismatches.",
+                3, 3,
+                List.of("talos.read_file", "talos.read_file", "talos.read_file"), List.of(),
+                0, 0, false, 0,
+                List.of("index.html", "style.css", "script.js"),
+                0, 0, 0, 0,
+                List.of(
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", "index.html", true, false, false,
+                                "read index", ""),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", "style.css", true, false, false,
+                                "read css", ""),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", "script.js", true, false, false,
+                                "read js", "")));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                loopResult.finalAnswer(), messages, loopResult, null, 0);
+
+        assertFalse(outcome.finalAnswer().startsWith("[Evidence incomplete:"), outcome.finalAnswer());
+        assertFalse(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+    }
 }

@@ -51,6 +51,17 @@ class EvidenceObligationPolicyTest {
     }
 
     @Test
+    void staticWebDiagnosisRequiresStaticWebDiagnosisEvidence() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Check whether this website has mismatches between HTML classes/IDs "
+                        + "and selectors used in CSS or JavaScript. Do not change anything yet.");
+
+        assertEquals(
+                EvidenceObligation.STATIC_WEB_DIAGNOSIS_REQUIRED,
+                EvidenceObligationPolicy.derive(contract, ExecutionPhase.INSPECT, WORKSPACE));
+    }
+
+    @Test
     void unsupportedDocumentTargetRequiresCapabilityCheck() {
         TaskContract contract = TaskContractResolver.fromUserRequest("Read report.docx and summarize it.");
 

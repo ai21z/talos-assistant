@@ -1,7 +1,7 @@
 # T123 - Read-Only Evidence Sufficiency For Static Workspace Diagnosis
 
 Severity: high
-Status: open
+Status: done
 
 ## Problem
 

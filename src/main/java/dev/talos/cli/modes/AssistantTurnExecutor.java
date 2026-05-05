@@ -446,8 +446,9 @@ public final class AssistantTurnExecutor {
                 answer, messages, plan, loopResult, workspace, ctx);
         answer = irr.answer();
 
-        ToolCallLoop.LoopResult outcomeLoopResult =
-                mrr.retryLoopResult() == null ? loopResult : mrr.retryLoopResult();
+        ToolCallLoop.LoopResult outcomeLoopResult = mrr.retryLoopResult() != null
+                ? mrr.retryLoopResult()
+                : irr.loopResult() != null ? irr.loopResult() : loopResult;
         int outcomeExtraMutationSuccesses =
                 mrr.retryLoopResult() == null ? mrr.mutationsInRetry() : 0;
 
@@ -2745,7 +2746,11 @@ public final class AssistantTurnExecutor {
                 .anyMatch(outcome -> outcome.mutating() && outcome.denied());
     }
 
-    record InspectRetryResult(String answer, String extraSummary) {}
+    record InspectRetryResult(
+            String answer,
+            ToolCallLoop.LoopResult loopResult,
+            String extraSummary
+    ) {}
 
     private static final Set<String> SELECTOR_MISMATCH_MARKERS = Set.of(
             "mismatches between html classes/ids and the selectors used in css or javascript",
@@ -2891,21 +2896,21 @@ public final class AssistantTurnExecutor {
             Path workspace, Context ctx) {
         if (answer == null) answer = "";
         if (loopResult == null || ctx == null || ctx.llm() == null || ctx.toolCallLoop() == null) {
-            return new InspectRetryResult(answer, null);
+            return new InspectRetryResult(answer, null, null);
         }
         CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, ctx);
         String userRequest = safePlan.originalUserRequest();
         TaskContract contract = safePlan.taskContract();
         if (contract.type() == TaskType.DIRECTORY_LISTING) {
-            return new InspectRetryResult(answer, null);
+            return new InspectRetryResult(answer, null, null);
         }
         if (!looksLikeInspectFirstRequest(userRequest) && !requiresWorkspaceEvidence(contract)) {
-            return new InspectRetryResult(answer, null);
+            return new InspectRetryResult(answer, null, null);
         }
         List<String> missing = missingPrimaryReads(workspace, loopResult);
-        if (missing.isEmpty()) return new InspectRetryResult(answer, null);
-        if (loopResult.mutatingToolSuccesses() > 0) return new InspectRetryResult(answer, null);
-        if (answer.isBlank()) return new InspectRetryResult(answer, null);
+        if (missing.isEmpty()) return new InspectRetryResult(answer, null, null);
+        if (loopResult.mutatingToolSuccesses() > 0) return new InspectRetryResult(answer, null, null);
+        if (answer.isBlank()) return new InspectRetryResult(answer, null, null);
 
         LOG.info("Inspect-completeness retry fired: tiny workspace, inspect-first request, "
                 + "missing reads for {}", missing);
@@ -2927,15 +2932,16 @@ public final class AssistantTurnExecutor {
                 String mergedAnswer = retryLoop.finalAnswer();
                 return new InspectRetryResult(
                         mergedAnswer == null || mergedAnswer.isBlank() ? answer : mergedAnswer,
+                        retryLoop,
                         retryLoop.summary());
             }
             if (!retryText.isBlank() && !retryText.equals(answer)) {
-                return new InspectRetryResult(retryText, null);
+                return new InspectRetryResult(retryText, null, null);
             }
         } catch (Exception e) {
             LOG.warn("Inspect-completeness retry failed: {}", e.getMessage());
         }
-        return new InspectRetryResult(answer, null);
+        return new InspectRetryResult(answer, null, null);
     }
 
     static String overrideSelectorMismatchAnalysisIfNeeded(

@@ -17,6 +17,7 @@ import java.util.Set;
 
 public final class ToolCallExecutionStage {
     private static final Logger LOG = LoggerFactory.getLogger(ToolCallExecutionStage.class);
+    private static final int LIST_DIR_EVIDENCE_SUMMARY_CHARS = 4_000;
 
     /**
      * Outcome of one tool-call iteration.
@@ -254,7 +255,7 @@ public final class ToolCallExecutionStage {
                     result.success(),
                     ToolCallSupport.isMutatingTool(effective.toolName()),
                     denied,
-                    result.success() ? ToolCallSupport.firstSentenceSummary(result.output()) : "",
+                    result.success() ? toolOutcomeSummary(effective.toolName(), result.output()) : "",
                     result.success() ? "" : result.errorMessage(),
                     result.verification(),
                     result.error() == null ? "" : result.error().code()));
@@ -319,6 +320,18 @@ public final class ToolCallExecutionStage {
         if (pathHint != null && !pathHint.isBlank()) {
             state.failureCountsByPath.merge(ToolCallSupport.normalizePath(pathHint), 1, Integer::sum);
         }
+    }
+
+    private static String toolOutcomeSummary(String toolName, String output) {
+        if (!"talos.list_dir".equals(toolName)) {
+            return ToolCallSupport.firstSentenceSummary(output);
+        }
+        String value = output == null ? "" : output.strip();
+        if (value.length() <= LIST_DIR_EVIDENCE_SUMMARY_CHARS) {
+            return value;
+        }
+        return value.substring(0, LIST_DIR_EVIDENCE_SUMMARY_CHARS)
+                + "\n... (tool outcome summary truncated)";
     }
 
     private static Set<String> staleRereadRequiredPaths(LoopState state) {

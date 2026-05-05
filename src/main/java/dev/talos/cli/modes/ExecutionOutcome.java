@@ -916,6 +916,9 @@ record ExecutionOutcome(
             case WORKSPACE_INSPECTION_REQUIRED ->
                     "I did not inspect the workspace this turn, so I cannot list files, "
                             + "show file contents, or claim changed files from this turn.";
+            case STATIC_WEB_DIAGNOSIS_REQUIRED ->
+                    "I did not inspect the required static web files this turn, so I cannot "
+                            + "diagnose the page from grounded HTML, CSS, or JavaScript evidence.";
             case VERIFY_FROM_TRACE_OR_EVIDENCE ->
                     "I did not gather trace or workspace evidence this turn, so I cannot "
                             + "verify the requested status from this turn.";
