@@ -1,5 +1,6 @@
 package dev.talos.tools.impl;
 
+import dev.talos.core.capability.CapabilityKind;
 import dev.talos.tools.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -8,6 +9,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.Map;
 
 /**
  * Tool that creates or overwrites a file within the workspace.
@@ -50,7 +52,16 @@ public final class FileWriteTool implements TalosTool {
                   "path":{"type":"string","description":"Relative file path to write (REQUIRED, generate this FIRST)"},
                   "content":{"type":"string","description":"Full content to write to the file"}
                 },"required":["path","content"]}""",
-                ToolRiskLevel.WRITE);
+                ToolRiskLevel.WRITE,
+                ToolOperationMetadata.workspaceMutation(
+                        NAME,
+                        CapabilityKind.CREATE,
+                        ToolRiskLevel.WRITE,
+                        Map.of("path", ToolOperationMetadata.PathRole.TARGET_FILE),
+                        false,
+                        true,
+                        "FILE_WRITTEN",
+                        "CONTENT_VERIFY"));
     }
 
     @Override

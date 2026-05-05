@@ -1,7 +1,7 @@
 # T128 - Capability Spine Core Types
 
 Severity: high
-Status: open
+Status: done
 
 ## Problem
 
@@ -33,6 +33,24 @@ Talos tools are currently mostly flat descriptors: name, schema, description, an
 - No new workspace operation tools.
 - No tool-surface migration yet.
 - No AssistantTurnExecutor decomposition beyond what is necessary for metadata wiring.
+
+## Architecture Metadata
+
+- Capability: capability spine.
+- Operation(s): metadata declaration only.
+- Owning package/class: `dev.talos.core.capability`, `dev.talos.tools`, `dev.talos.runtime.capability`.
+- New or changed tools: no new tools; existing `read_file`, `list_dir`, `grep`, `retrieve`, `write_file`, and `edit_file` expose metadata.
+- Risk level: unchanged; metadata mirrors existing read/write risk.
+- Approval behavior: unchanged; metadata records approval requirement for later planners.
+- Protected path behavior: unchanged.
+- Checkpoint behavior: unchanged; metadata records checkpoint expectation for mutating tools.
+- Evidence obligation: unchanged; `CapabilityResolution` adds a typed field for later policy use.
+- Verification profile: unchanged; metadata records verifier hook ids where applicable.
+- Repair profile: unchanged.
+- Outcome/truth warnings: unchanged.
+- Trace/debug fields: metadata records trace event kind for each tool.
+- Refactor scope: descriptor metadata wiring only.
+- Non-goals: no behavior migration, no new workspace operations, no executor decomposition.
 
 ## Verification
 

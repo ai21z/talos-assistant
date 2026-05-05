@@ -6,6 +6,7 @@ import dev.talos.tools.*;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 
 /**
  * Tool that reads a workspace file and returns its content.
@@ -39,7 +40,12 @@ public final class ReadFileTool implements TalosTool {
                   "path":{"type":"string","description":"Relative path to the file in the workspace"},
                   "max_lines":{"type":"integer","description":"Max lines to return (default 500)"},
                   "offset":{"type":"integer","description":"1-based starting line (default 1)"}
-                },"required":["path"]}""");
+                },"required":["path"]}""",
+                ToolRiskLevel.READ_ONLY,
+                ToolOperationMetadata.inspect(
+                        NAME,
+                        Map.of("path", ToolOperationMetadata.PathRole.TARGET_FILE),
+                        "FILE_READ"));
     }
 
     @Override
