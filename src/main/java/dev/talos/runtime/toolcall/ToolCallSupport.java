@@ -27,6 +27,7 @@ public final class ToolCallSupport {
             "write_file", "file_write", "writefile",
             "create_file", "file_create", "createfile",
             "edit_file", "file_edit", "editfile",
+            "apply_workspace_batch", "workspace_batch", "batch_apply", "apply_batch",
             "mkdir", "make_dir", "make_directory", "create_dir", "create_directory",
             "move_path", "move", "mv",
             "copy_path", "copy", "cp",

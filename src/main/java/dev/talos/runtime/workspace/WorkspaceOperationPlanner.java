@@ -15,7 +15,8 @@ public final class WorkspaceOperationPlanner {
 
     public static boolean isWorkspaceOperationTool(String toolName) {
         String canonical = ToolAliasPolicy.localCanonicalName(toolName);
-        return "mkdir".equals(canonical)
+        return "apply_workspace_batch".equals(canonical)
+                || "mkdir".equals(canonical)
                 || "move_path".equals(canonical)
                 || "copy_path".equals(canonical)
                 || "rename_path".equals(canonical);
@@ -24,6 +25,7 @@ public final class WorkspaceOperationPlanner {
     public static Optional<WorkspaceOperationPlan> checkpointPlan(ToolCall call) {
         if (call == null) return Optional.empty();
         return switch (ToolAliasPolicy.localCanonicalName(call.toolName())) {
+            case "apply_workspace_batch" -> batchPlan(call);
             case "mkdir" -> mkdirPlan(call);
             case "move_path" -> movePlan(call);
             case "copy_path" -> copyPlan(call);
@@ -35,6 +37,7 @@ public final class WorkspaceOperationPlanner {
     public static Optional<String> validateBeforeApproval(ToolCall call) {
         if (call == null || !isWorkspaceOperationTool(call.toolName())) return Optional.empty();
         return switch (ToolAliasPolicy.localCanonicalName(call.toolName())) {
+            case "apply_workspace_batch" -> validateBatch(call);
             case "mkdir" -> requirePath(call, "path", "dir", "directory").isPresent()
                     ? Optional.empty()
                     : Optional.of("Invalid talos.mkdir call: missing required parameter `path`. "
@@ -44,6 +47,23 @@ public final class WorkspaceOperationPlanner {
             case "rename_path" -> validateRename(call);
             default -> Optional.empty();
         };
+    }
+
+    private static Optional<WorkspaceOperationPlan> batchPlan(ToolCall call) {
+        return WorkspaceBatchPlanParser.parse(call)
+                .map(WorkspaceBatchPlan::checkpointPlan);
+    }
+
+    private static Optional<String> validateBatch(ToolCall call) {
+        try {
+            return WorkspaceBatchPlanParser.parse(call).isPresent()
+                    ? Optional.empty()
+                    : Optional.of("Invalid talos.apply_workspace_batch call: missing required parameter "
+                            + "`operations_json`. No approval was requested and no file was changed.");
+        } catch (IllegalArgumentException e) {
+            return Optional.of("Invalid talos.apply_workspace_batch call: " + e.getMessage()
+                    + ". No approval was requested and no file was changed.");
+        }
     }
 
     private static Optional<WorkspaceOperationPlan> mkdirPlan(ToolCall call) {

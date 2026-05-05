@@ -314,10 +314,12 @@ class ToolRegistryTest {
         registry.register(new dev.talos.tools.impl.MovePathTool());
         registry.register(new dev.talos.tools.impl.CopyPathTool());
         registry.register(new dev.talos.tools.impl.RenamePathTool());
+        registry.register(new dev.talos.tools.impl.BatchWorkspaceApplyTool());
 
         assertEquals("talos.mkdir", registry.get("mkdir").name());
         assertEquals("talos.move_path", registry.get("mv").name());
         assertEquals("talos.copy_path", registry.get("cp").name());
         assertEquals("talos.rename_path", registry.get("rename").name());
+        assertEquals("talos.apply_workspace_batch", registry.get("batch_apply").name());
     }
 }

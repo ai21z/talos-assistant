@@ -17,6 +17,7 @@ public final class ToolAliasPolicy {
             "talos.read_file",
             "talos.write_file",
             "talos.edit_file",
+            "talos.apply_workspace_batch",
             "talos.mkdir",
             "talos.move_path",
             "talos.copy_path",
@@ -36,6 +37,7 @@ public final class ToolAliasPolicy {
     private static final Set<String> MUTATING_CANONICAL = Set.of(
             "talos.write_file",
             "talos.edit_file",
+            "talos.apply_workspace_batch",
             "talos.mkdir",
             "talos.move_path",
             "talos.copy_path",
@@ -181,6 +183,8 @@ public final class ToolAliasPolicy {
                 "file_read", "read_file", "readfile");
         addAliases(out, BackendToolProfile.TALOS, "talos.edit_file",
                 "file_edit", "edit_file", "editfile");
+        addAliases(out, BackendToolProfile.TALOS, "talos.apply_workspace_batch",
+                "apply_workspace_batch", "workspace_batch", "batch_apply", "apply_batch");
         addAliases(out, BackendToolProfile.TALOS, "talos.mkdir",
                 "mkdir", "make_dir", "make_directory", "create_dir", "create_directory");
         addAliases(out, BackendToolProfile.TALOS, "talos.move_path",
@@ -205,6 +209,8 @@ public final class ToolAliasPolicy {
         addAliases(out, profile, "talos.write_file", namespace + ":write_file", namespace + ".write_file");
         addAliases(out, profile, "talos.read_file", namespace + ":read_file", namespace + ".read_file");
         addAliases(out, profile, "talos.edit_file", namespace + ":edit_file", namespace + ".edit_file");
+        addAliases(out, profile, "talos.apply_workspace_batch",
+                namespace + ":apply_workspace_batch", namespace + ".apply_workspace_batch");
         addAliases(out, profile, "talos.mkdir", namespace + ":mkdir", namespace + ".mkdir");
         addAliases(out, profile, "talos.move_path", namespace + ":move_path", namespace + ".move_path");
         addAliases(out, profile, "talos.copy_path", namespace + ":copy_path", namespace + ".copy_path");

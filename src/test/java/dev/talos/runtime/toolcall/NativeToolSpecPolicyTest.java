@@ -6,6 +6,7 @@ import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.tools.FileUndoStack;
 import dev.talos.tools.ToolRegistry;
+import dev.talos.tools.impl.BatchWorkspaceApplyTool;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
 import dev.talos.tools.impl.GrepTool;
@@ -152,6 +153,7 @@ class NativeToolSpecPolicyTest {
         assertTrue(names.contains("talos.read_file"));
         assertTrue(names.contains("talos.write_file"));
         assertTrue(names.contains("talos.edit_file"));
+        assertTrue(names.contains("talos.apply_workspace_batch"));
         assertTrue(names.contains("talos.mkdir"));
         assertTrue(names.contains("talos.move_path"));
         assertTrue(names.contains("talos.copy_path"));
@@ -169,6 +171,7 @@ class NativeToolSpecPolicyTest {
         assertTrue(names.contains("talos.read_file"));
         assertTrue(names.contains("talos.write_file"));
         assertTrue(names.contains("talos.edit_file"));
+        assertTrue(names.contains("talos.apply_workspace_batch"));
         assertTrue(names.contains("talos.mkdir"));
         assertTrue(names.contains("talos.move_path"));
         assertTrue(names.contains("talos.copy_path"));
@@ -196,6 +199,7 @@ class NativeToolSpecPolicyTest {
         registry.register(new RetrieveTool(null));
         registry.register(new FileWriteTool(undoStack));
         registry.register(new FileEditTool(undoStack));
+        registry.register(new BatchWorkspaceApplyTool());
         registry.register(new MakeDirectoryTool());
         registry.register(new MovePathTool());
         registry.register(new CopyPathTool());

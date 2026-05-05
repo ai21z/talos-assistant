@@ -9,6 +9,7 @@ import dev.talos.core.util.Sanitize;
 import dev.talos.core.rag.RagService;
 import dev.talos.tools.FileUndoStack;
 import dev.talos.tools.ToolRegistry;
+import dev.talos.tools.impl.BatchWorkspaceApplyTool;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
 import dev.talos.tools.impl.GrepTool;
@@ -74,6 +75,7 @@ public class PromptRenderCmd implements Runnable {
         registry.register(new ReadFileTool());
         registry.register(new FileWriteTool(undoStack));
         registry.register(new FileEditTool(undoStack));
+        registry.register(new BatchWorkspaceApplyTool());
         registry.register(new MakeDirectoryTool());
         registry.register(new MovePathTool());
         registry.register(new CopyPathTool());

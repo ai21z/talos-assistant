@@ -54,7 +54,8 @@ class ToolCallSupportTest {
                 "talos.mkdir", "mkdir",
                 "talos.move_path", "mv",
                 "talos.copy_path", "cp",
-                "talos.rename_path", "rename")) {
+                "talos.rename_path", "rename",
+                "talos.apply_workspace_batch", "batch_apply")) {
             assertTrue(ToolCallSupport.isMutatingTool(name), name);
         }
     }
