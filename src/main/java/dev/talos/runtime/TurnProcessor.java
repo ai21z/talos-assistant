@@ -18,6 +18,8 @@ import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.toolcall.ToolAliasPolicy;
 import dev.talos.runtime.toolcall.ToolCallSupport;
+import dev.talos.runtime.workspace.WorkspaceOperationPlan;
+import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
 import dev.talos.tools.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -352,7 +354,7 @@ public final class TurnProcessor {
         // "LLM call failed" — killing the whole turn. A placeholder path is
         // definitionally wrong for any file tool; refuse here and return a directed
         // error so the model retries with the actual workspace path.
-        for (String k : List.of("path", "file_path", "filepath", "file", "filename", "from", "to")) {
+        for (String k : pathParameterKeys()) {
             String v = call.param(k);
             if (TemplatePlaceholderGuard.looksLikeTemplatePlaceholder(v)) {
                 String msg = TemplatePlaceholderGuard.rejectionMessage(call.toolName(), k, v);
@@ -512,12 +514,7 @@ public final class TurnProcessor {
         }
 
         if (ToolCallSupport.isMutatingTool(call.toolName())) {
-            CheckpointCaptureResult checkpoint = checkpointService.captureBeforeMutation(
-                    session.workspace(),
-                    session.config(),
-                    call,
-                    LocalTurnTraceCapture.currentTraceId(),
-                    LocalTurnTraceCapture.currentTurnNumber());
+            CheckpointCaptureResult checkpoint = captureCheckpointBeforeMutation(session, call);
             LocalTurnTraceCapture.recordCheckpoint(
                     checkpoint.status(),
                     checkpoint.checkpointId(),
@@ -578,11 +575,29 @@ public final class TurnProcessor {
      * parameter names (e.g. {@code file_path} instead of {@code path}).
      */
     private static String resolvePathParam(ToolCall call) {
-        for (String key : List.of("path", "file_path", "filepath", "file", "filename")) {
+        for (String key : pathParameterKeys()) {
             String value = call.param(key);
             if (value != null && !value.isBlank()) return value;
         }
         return null;
+    }
+
+    private CheckpointCaptureResult captureCheckpointBeforeMutation(Session session, ToolCall call) {
+        Optional<WorkspaceOperationPlan> operationPlan = WorkspaceOperationPlanner.checkpointPlan(call);
+        if (operationPlan.isPresent()) {
+            return checkpointService.captureBeforeOperation(
+                    session.workspace(),
+                    session.config(),
+                    operationPlan.get(),
+                    LocalTurnTraceCapture.currentTraceId(),
+                    LocalTurnTraceCapture.currentTurnNumber());
+        }
+        return checkpointService.captureBeforeMutation(
+                session.workspace(),
+                session.config(),
+                call,
+                LocalTurnTraceCapture.currentTraceId(),
+                LocalTurnTraceCapture.currentTurnNumber());
     }
 
     private static ToolResult validateBeforeApproval(
@@ -604,6 +619,12 @@ public final class TurnProcessor {
         ToolResult expectedTargetValidation = validateExpectedTargetBeforeApproval(call, taskContract);
         if (expectedTargetValidation != null) {
             return expectedTargetValidation;
+        }
+
+        Optional<String> workspaceOperationValidation =
+                WorkspaceOperationPlanner.validateBeforeApproval(call);
+        if (workspaceOperationValidation.isPresent()) {
+            return ToolResult.fail(ToolError.invalidParams(workspaceOperationValidation.get()));
         }
 
         if (isWriteFileTool(call.toolName())) {
@@ -735,13 +756,21 @@ public final class TurnProcessor {
 
     private static List<PathParam> pathParams(ToolCall call) {
         var params = new java.util.ArrayList<PathParam>();
-        for (String key : List.of("path", "file_path", "filepath", "file", "filename", "from", "to")) {
+        for (String key : pathParameterKeys()) {
             String value = call.param(key);
             if (value != null && !value.isBlank()) {
                 params.add(new PathParam(key, value));
             }
         }
         return params;
+    }
+
+    private static List<String> pathParameterKeys() {
+        return List.of(
+                "path", "file_path", "filepath", "file", "filename",
+                "from", "to", "source", "source_path", "src",
+                "destination", "destination_path", "dest", "target",
+                "dir", "directory");
     }
 
     private static String preApprovalBlockReason(ToolCall call, ToolResult result) {

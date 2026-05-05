@@ -47,4 +47,15 @@ class ToolCallSupportTest {
         assertFalse(ToolCallSupport.isReadOnlyTool("tool_use:write_file"));
         assertFalse(ToolCallSupport.isMutatingTool("tool_use:list_dir"));
     }
+
+    @Test
+    void workspaceOperationToolsAreClassifiedAsMutating() {
+        for (String name : java.util.List.of(
+                "talos.mkdir", "mkdir",
+                "talos.move_path", "mv",
+                "talos.copy_path", "cp",
+                "talos.rename_path", "rename")) {
+            assertTrue(ToolCallSupport.isMutatingTool(name), name);
+        }
+    }
 }

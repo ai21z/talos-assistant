@@ -11,7 +11,11 @@ public final class ProtectedPathPolicy {
     private ProtectedPathPolicy() {}
 
     private static final List<String> PATH_KEYS =
-            List.of("path", "file_path", "filepath", "file", "filename", "from", "to");
+            List.of(
+                    "path", "file_path", "filepath", "file", "filename",
+                    "from", "to", "source", "source_path", "src",
+                    "destination", "destination_path", "dest", "target",
+                    "dir", "directory");
 
     private static final List<String> PRIVATE_KEY_FILENAMES =
             List.of("id_rsa", "id_dsa", "id_ecdsa", "id_ed25519");
@@ -20,14 +24,20 @@ public final class ProtectedPathPolicy {
             List.of(".pem", ".key", ".p12", ".pfx");
 
     public static ResourceDecision classify(Path workspace, ToolCall call) {
-        if (call == null) return ResourceDecision.noPath();
+        List<ResourceDecision> decisions = classifyAll(workspace, call);
+        return decisions.isEmpty() ? ResourceDecision.noPath() : decisions.get(0);
+    }
+
+    public static List<ResourceDecision> classifyAll(Path workspace, ToolCall call) {
+        if (call == null) return List.of(ResourceDecision.noPath());
+        var decisions = new java.util.ArrayList<ResourceDecision>();
         for (String key : PATH_KEYS) {
             String value = call.param(key);
             if (value != null && !value.isBlank()) {
-                return classify(workspace, value);
+                decisions.add(classify(workspace, value));
             }
         }
-        return ResourceDecision.noPath();
+        return decisions.isEmpty() ? List.of(ResourceDecision.noPath()) : List.copyOf(decisions);
     }
 
     public static ResourceDecision classify(Path workspace, String rawPath) {
