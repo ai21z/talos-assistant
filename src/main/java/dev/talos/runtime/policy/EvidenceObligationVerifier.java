@@ -151,16 +151,24 @@ public final class EvidenceObligationVerifier {
             boolean requireSuccess
     ) {
         String expected = normalizePath(expectedTarget);
+        boolean matchedTarget = false;
+        boolean successfulRead = false;
         for (ToolCallLoop.ToolOutcome outcome : outcomes) {
             if (!"talos.read_file".equals(canonicalToolName(outcome.toolName()))) continue;
             if (!expected.equals(normalizePath(outcome.pathHint()))) continue;
+            matchedTarget = true;
             if (outcome.denied()) {
                 return Result.blocked("Required read was blocked by approval.");
             }
-            if (requireSuccess && !outcome.success()) {
-                return Result.unsatisfied("Required successful read evidence was not gathered.");
+            if (outcome.success()) {
+                successfulRead = true;
             }
+        }
+        if (matchedTarget && (!requireSuccess || successfulRead)) {
             return Result.satisfied("Required read evidence was gathered.");
+        }
+        if (matchedTarget && requireSuccess) {
+            return Result.unsatisfied("Required successful read evidence was not gathered.");
         }
         return Result.unsatisfied("Required read evidence was not gathered for " + expectedTarget + ".");
     }

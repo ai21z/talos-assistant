@@ -1,7 +1,7 @@
 # T148 - Protected Read Success After Failed Path Variant
 
 Severity: high
-Status: open
+Status: done
 
 ## Problem
 
@@ -38,3 +38,12 @@ read incomplete message.
 - No weakening protected path approval.
 - No prompt-debug protected-content opt-in changes.
 - No model-specific workaround.
+
+## Result
+
+- Aggregated protected-read attempts across the turn so a failed path variant
+  does not hide a later successful approved read of the required protected
+  target.
+- Preserved denied-read blocking and failed-only protected read failure.
+- Added verifier-level and final outcome regressions for the GPT-OSS-shaped
+  leading-space `.env` attempt followed by a correct `.env` read.
