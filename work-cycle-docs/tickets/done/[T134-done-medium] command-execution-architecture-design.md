@@ -1,7 +1,7 @@
 # T134 - Command Execution Architecture Design
 
 Severity: medium
-Status: open
+Status: done
 
 ## Problem
 
@@ -32,5 +32,19 @@ Talos eventually needs approval-gated command execution to become a strong devel
 
 ## Verification
 
-- Documentation review.
-- `git diff --check`.
+- Documentation created:
+  `docs/architecture/10-command-execution-architecture-design.md`
+- External references checked:
+  OWASP LLM06 Excessive Agency, OWASP LLM02 Sensitive Information Disclosure, MITRE CWE-78, Microsoft PowerShell script injection guidance, Oracle Java ProcessBuilder API, OpenAI agent safety guidance, model provider computer-use guidance.
+- Local architecture cross-reference checked:
+  `TurnProcessor`, `DeclarativePermissionPolicy`, `ProtectedPathPolicy`, `Sandbox`, `ApprovalGate`, `CheckpointService`, `ToolOperationMetadata`, `LocalTurnTraceCapture`, and the capability-growth guardrails.
+- `git diff --check` passed with only existing line-ending warnings.
+
+## Completion Notes
+
+- Designed command execution as typed command profiles, not generic shell.
+- Defined V1-supported use cases, explicit non-goals, risk classification,
+  permission/approval behavior, cwd limits, timeout and output caps,
+  environment redaction, network policy, checkpoint rules, trace events,
+  result shape, verification matrix, and follow-up implementation tickets.
+- No production `run_command` tool was added.
