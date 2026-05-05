@@ -1,7 +1,7 @@
 # T139 - Command Outcome And Trace Integration
 
 Severity: high
-Status: open
+Status: done
 
 ## Problem
 

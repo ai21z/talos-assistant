@@ -20,7 +20,8 @@ public final class EvidenceObligationVerifier {
             "talos.list_dir",
             "talos.read_file",
             "talos.grep",
-            "talos.retrieve"
+            "talos.retrieve",
+            "talos.run_command"
     );
     private static final Set<String> CONTENT_INSPECTION_TOOLS = Set.of(
             "talos.read_file",

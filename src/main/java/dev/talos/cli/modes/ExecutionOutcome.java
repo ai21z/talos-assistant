@@ -14,6 +14,7 @@ import dev.talos.runtime.policy.EvidenceObligationVerifier;
 import dev.talos.runtime.policy.ProtectedPathPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.toolcall.ToolAliasPolicy;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.turn.CurrentTurnPlan;
@@ -94,6 +95,17 @@ record ExecutionOutcome(
         }
     }
 
+    private record CommandToolConclusion(
+            ToolCallLoop.ToolOutcome outcome,
+            boolean succeeded,
+            boolean failed,
+            boolean denied
+    ) {
+        static CommandToolConclusion none() {
+            return new CommandToolConclusion(null, false, false, false);
+        }
+    }
+
     static ExecutionOutcome fromToolLoop(
             String answer,
             List<ChatMessage> messages,
@@ -168,6 +180,11 @@ record ExecutionOutcome(
         boolean failedMutationObligation = failedActionObligation
                 || pendingActionObligationFailure
                 || failurePolicyStoppedWithoutMutation;
+        CommandToolConclusion commandConclusion = commandConclusion(loopResult);
+        boolean commandFailed = commandConclusion.failed();
+        boolean commandDenied = commandConclusion.denied();
+        boolean commandSucceeded = commandConclusion.succeeded();
+        boolean commandVerificationSucceeded = commandSucceeded && commandSatisfiesVerifyOnlyRequest(contract);
 
         String shaped = AssistantTurnExecutor.overrideUnsupportedDocumentClaimsIfNeeded(
                 current, loopResult);
@@ -222,6 +239,12 @@ record ExecutionOutcome(
         boolean inspectUnderCompleted = !Objects.equals(current, shaped);
         current = shaped;
 
+        if (commandDenied || commandFailed) {
+            current = commandFailureReplacement(commandConclusion);
+        } else if (commandVerificationSucceeded) {
+            current = commandSuccessReplacement(commandConclusion);
+        }
+
         EvidenceObligation evidenceObligation = evidenceObligation(safePlan);
         EvidenceObligationVerifier.Result evidenceResult = verifyEvidence(
                 safePlan,
@@ -254,6 +277,9 @@ record ExecutionOutcome(
                 false,
                 readOnlyDeniedMutation,
                 failedMutationObligation,
+                commandFailed,
+                commandDenied,
+                commandVerificationSucceeded,
                 deniedMutation,
                 deniedProtectedRead,
                 partialMutation,
@@ -306,6 +332,9 @@ record ExecutionOutcome(
                 false,
                 readOnlyDeniedMutation,
                 failedMutationObligation,
+                commandFailed,
+                commandDenied,
+                commandVerificationSucceeded,
                 deniedMutation,
                 deniedProtectedRead,
                 partialMutation,
@@ -333,6 +362,8 @@ record ExecutionOutcome(
                         deniedProtectedRead,
                         readOnlyDeniedMutation,
                         failedMutationObligation,
+                        commandFailed,
+                        commandDenied,
                         invalidMutation,
                         partialMutation,
                         falseMutationClaim,
@@ -474,6 +505,9 @@ record ExecutionOutcome(
                 false,
                 false,
                 false,
+                false,
+                false,
+                false,
                 advisoryOnly,
                 false,
                 missingEvidence,
@@ -572,6 +606,9 @@ record ExecutionOutcome(
             boolean malformedProtocolDebris,
             boolean readOnlyDeniedMutation,
             boolean failedActionObligation,
+            boolean commandFailed,
+            boolean commandDenied,
+            boolean commandSucceeded,
             boolean deniedMutation,
             boolean deniedProtectedRead,
             boolean partialMutation,
@@ -590,6 +627,9 @@ record ExecutionOutcome(
                 malformedProtocolDebris,
                 readOnlyDeniedMutation,
                 failedActionObligation,
+                commandFailed,
+                commandDenied,
+                commandSucceeded,
                 deniedMutation,
                 deniedProtectedRead,
                 partialMutation,
@@ -608,6 +648,8 @@ record ExecutionOutcome(
             boolean deniedProtectedRead,
             boolean readOnlyDeniedMutation,
             boolean failedActionObligation,
+            boolean commandFailed,
+            boolean commandDenied,
             boolean invalidMutation,
             boolean partialMutation,
             boolean falseMutationClaim,
@@ -631,6 +673,16 @@ record ExecutionOutcome(
             warnings.add(TruthWarning.of(
                     TruthWarningType.FAILED_ACTION_OBLIGATION,
                     "A required mutating action was not performed after retry."));
+        }
+        if (commandFailed) {
+            warnings.add(TruthWarning.of(
+                    TruthWarningType.COMMAND_FAILED,
+                    "A requested verification command failed or timed out."));
+        }
+        if (commandDenied) {
+            warnings.add(TruthWarning.of(
+                    TruthWarningType.COMMAND_DENIED,
+                    "A requested verification command was not run because approval or policy blocked it."));
         }
         if (deniedProtectedRead) {
             warnings.add(TruthWarning.of(
@@ -788,6 +840,58 @@ record ExecutionOutcome(
         if (reason != null && reason.startsWith("Pending action obligation ")) return true;
         String answer = loopResult.finalAnswer();
         return answer != null && answer.startsWith("[Action obligation failed:");
+    }
+
+    private static CommandToolConclusion commandConclusion(ToolCallLoop.LoopResult loopResult) {
+        if (loopResult == null || loopResult.toolOutcomes() == null) return CommandToolConclusion.none();
+        ToolCallLoop.ToolOutcome firstSuccess = null;
+        for (ToolCallLoop.ToolOutcome outcome : loopResult.toolOutcomes()) {
+            if (outcome == null || !"talos.run_command".equals(canonicalToolName(outcome.toolName()))) continue;
+            if (!outcome.success()) {
+                return new CommandToolConclusion(outcome, false, !outcome.denied(), outcome.denied());
+            }
+            if (firstSuccess == null) {
+                firstSuccess = outcome;
+            }
+        }
+        return firstSuccess == null
+                ? CommandToolConclusion.none()
+                : new CommandToolConclusion(firstSuccess, true, false, false);
+    }
+
+    private static String commandFailureReplacement(CommandToolConclusion conclusion) {
+        ToolCallLoop.ToolOutcome outcome = conclusion == null ? null : conclusion.outcome();
+        String detail = outcome == null ? "" : singleLine(outcome.errorMessage());
+        if (conclusion != null && conclusion.denied()) {
+            return "[Command not run: talos.run_command was blocked before execution.]\n\n"
+                    + (detail.isBlank()
+                    ? "No command result is available because the command was not approved or policy blocked it."
+                    : detail);
+        }
+        String prefix = detail.toLowerCase(Locale.ROOT).startsWith("command timed out:")
+                ? "[Command timed out: talos.run_command did not finish successfully.]"
+                : "[Command failed: talos.run_command did not finish successfully.]";
+        return prefix + "\n\n"
+                + (detail.isBlank() ? "The command returned a failed result." : detail);
+    }
+
+    private static String commandSuccessReplacement(CommandToolConclusion conclusion) {
+        ToolCallLoop.ToolOutcome outcome = conclusion == null ? null : conclusion.outcome();
+        String summary = outcome == null ? "" : singleLine(outcome.summary());
+        if (summary.isBlank()) {
+            summary = "Command succeeded: talos.run_command completed";
+        }
+        if (!summary.endsWith(".") && !summary.endsWith("!") && !summary.endsWith("?")) {
+            summary += ".";
+        }
+        return summary;
+    }
+
+    private static boolean commandSatisfiesVerifyOnlyRequest(TaskContract contract) {
+        return contract != null
+                && contract.type() == TaskType.VERIFY_ONLY
+                && contract.verificationRequired()
+                && !contract.mutationRequested();
     }
 
     private static boolean hasDeniedMutation(ToolCallLoop.LoopResult loopResult) {

@@ -8,6 +8,7 @@ import dev.talos.runtime.command.CommandResult;
 import dev.talos.runtime.command.CommandRunner;
 import dev.talos.runtime.command.CommandToolPlanner;
 import dev.talos.runtime.command.ProcessCommandRunner;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.tools.TalosTool;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolContext;
@@ -85,10 +86,16 @@ public final class RunCommandTool implements TalosTool {
         try {
             plan = CommandToolPlanner.planGradleV1(call, ctx.workspace(), registry);
         } catch (CommandPlanRejectedException | IllegalArgumentException e) {
+            LocalTurnTraceCapture.recordCommandDenied(
+                    "",
+                    call,
+                    CommandToolPlanner.invalidMessage(e.getMessage()));
             return ToolResult.fail(ToolError.invalidParams(CommandToolPlanner.invalidMessage(e.getMessage())));
         }
 
+        LocalTurnTraceCapture.recordCommandStarted("", call, plan);
         CommandResult result = runner.run(plan);
+        LocalTurnTraceCapture.recordCommandFinished("", call, result);
         if (result.success()) {
             return ToolResult.ok(renderSuccess(result));
         }

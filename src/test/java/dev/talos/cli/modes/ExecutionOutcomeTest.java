@@ -188,6 +188,151 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void failedCommandDominatesModelSuccessProse() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Verify that the Gradle tests pass."));
+
+        var plan = dev.talos.runtime.turn.CurrentTurnPlan.create(
+                dev.talos.runtime.task.TaskContractResolver.fromMessages(messages),
+                dev.talos.runtime.phase.ExecutionPhase.VERIFY,
+                List.of("talos.run_command"),
+                List.of("talos.run_command"),
+                List.of());
+        var loopResult = new ToolCallLoop.LoopResult(
+                "All tests passed. The work is complete and ready to use.",
+                1, 1,
+                List.of("talos.run_command"),
+                List.of(),
+                1, 0, false, 0, List.of(),
+                0, 0, 0, 0,
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.run_command", "", false, false, false,
+                        "", "Command failed: gradle_test exited with code 1 after 25ms.\n"
+                        + "profile: gradle_test\nstdout:\nFAILED", null, ToolError.INTERNAL_ERROR
+                )));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                loopResult.finalAnswer(), plan, messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.FAILED, outcome.completionStatus());
+        assertEquals(TaskCompletionStatus.FAILED, outcome.taskOutcome().completionStatus());
+        assertTrue(outcome.finalAnswer().startsWith("[Command failed:"), outcome.finalAnswer());
+        String lower = outcome.finalAnswer().toLowerCase(java.util.Locale.ROOT);
+        assertFalse(lower.contains("all tests passed"), outcome.finalAnswer());
+        assertFalse(lower.contains("complete"), outcome.finalAnswer());
+        assertFalse(lower.contains("ready to use"), outcome.finalAnswer());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.COMMAND_FAILED));
+    }
+
+    @Test
+    void deniedCommandDominatesModelSuccessProse() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Verify that the Gradle tests pass."));
+
+        var plan = dev.talos.runtime.turn.CurrentTurnPlan.create(
+                dev.talos.runtime.task.TaskContractResolver.fromMessages(messages),
+                dev.talos.runtime.phase.ExecutionPhase.VERIFY,
+                List.of("talos.run_command"),
+                List.of("talos.run_command"),
+                List.of());
+        var loopResult = new ToolCallLoop.LoopResult(
+                "All tests passed and everything is complete.",
+                1, 1,
+                List.of("talos.run_command"),
+                List.of(),
+                1, 0, false, 0, List.of(),
+                0, 0, 0, 0,
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.run_command", "", false, false, true,
+                        "", "User did not approve the talos.run_command call.",
+                        null, ToolError.DENIED
+                )));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                loopResult.finalAnswer(), plan, messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.BLOCKED, outcome.completionStatus());
+        assertEquals(TaskCompletionStatus.BLOCKED_BY_APPROVAL, outcome.taskOutcome().completionStatus());
+        assertTrue(outcome.finalAnswer().startsWith("[Command not run:"), outcome.finalAnswer());
+        String lower = outcome.finalAnswer().toLowerCase(java.util.Locale.ROOT);
+        assertFalse(lower.contains("all tests passed"), outcome.finalAnswer());
+        assertFalse(lower.contains("complete"), outcome.finalAnswer());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.COMMAND_DENIED));
+    }
+
+    @Test
+    void successfulVerifyCommandUsesRuntimeOwnedSummary() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Verify that the Gradle tests pass."));
+
+        var plan = dev.talos.runtime.turn.CurrentTurnPlan.create(
+                dev.talos.runtime.task.TaskContractResolver.fromMessages(messages),
+                dev.talos.runtime.phase.ExecutionPhase.VERIFY,
+                List.of("talos.run_command"),
+                List.of("talos.run_command"),
+                List.of());
+        var loopResult = new ToolCallLoop.LoopResult(
+                "All tests passed and everything is complete.",
+                1, 1,
+                List.of("talos.run_command"),
+                List.of(),
+                0, 0, false, 0, List.of(),
+                0, 0, 0, 0,
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.run_command", "", true, false, false,
+                        "Command succeeded: gradle_test exited with code 0 after 31ms",
+                        "", null, ""
+                )));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                loopResult.finalAnswer(), plan, messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+        assertEquals(TaskCompletionStatus.COMPLETED_VERIFIED, outcome.taskOutcome().completionStatus());
+        assertEquals(
+                "Command succeeded: gradle_test exited with code 0 after 31ms.",
+                outcome.finalAnswer());
+        assertFalse(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+    }
+
+    @Test
+    void successfulCommandDoesNotCompleteUnperformedMutationRequest() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Edit index.html to add the CTA button, then run the tests."));
+
+        var plan = dev.talos.runtime.turn.CurrentTurnPlan.create(
+                dev.talos.runtime.task.TaskContractResolver.fromMessages(messages),
+                dev.talos.runtime.phase.ExecutionPhase.APPLY,
+                List.of("talos.write_file", "talos.run_command"),
+                List.of("talos.write_file", "talos.run_command"),
+                List.of());
+        var loopResult = new ToolCallLoop.LoopResult(
+                "I updated index.html and the tests passed.",
+                1, 1,
+                List.of("talos.run_command"),
+                List.of(),
+                0, 0, false, 0, List.of(),
+                0, 0, 0, 0,
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.run_command", "", true, false, false,
+                        "Command succeeded: gradle_test exited with code 0 after 31ms",
+                        "", null, ""
+                )));
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                loopResult.finalAnswer(), plan, messages, loopResult, null, 0);
+
+        assertFalse(outcome.completionStatus() == ExecutionOutcome.CompletionStatus.COMPLETE,
+                outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().equals(
+                "Command succeeded: gradle_test exited with code 0 after 31ms."));
+    }
+
+    @Test
     void mutationRequestStoppedByFailurePolicyWithNoMutationIsNotComplete() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));
