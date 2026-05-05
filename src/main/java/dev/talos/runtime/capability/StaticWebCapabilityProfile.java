@@ -20,7 +20,8 @@ public final class StaticWebCapabilityProfile {
         if (!shouldVerifyCoherence(contract, workspace, mutatedPaths)) {
             return CapabilityProfile.none();
         }
-        return CapabilityProfile.staticWeb(operationFor(contract), targetSurfaceFor(contract));
+        ArtifactOperation operation = operationFor(contract);
+        return CapabilityProfile.staticWeb(operation, targetSurfaceFor(contract, operation));
     }
 
     public static boolean shouldVerifyCoherence(TaskContract contract, Path workspace, Set<String> mutatedPaths) {
@@ -185,7 +186,7 @@ public final class StaticWebCapabilityProfile {
         return ArtifactOperation.READ_ONLY;
     }
 
-    private static TargetSurface targetSurfaceFor(TaskContract contract) {
+    private static TargetSurface targetSurfaceFor(TaskContract contract, ArtifactOperation operation) {
         if (contract == null || contract.originalUserRequest() == null) {
             return TargetSurface.FUNCTIONAL_WEB;
         }
@@ -199,7 +200,7 @@ public final class StaticWebCapabilityProfile {
                 && (lower.contains("javascript") || lower.contains("script")))) {
             return TargetSurface.SELF_CONTAINED_HTML;
         }
-        if (requiresSeparateAssetMutations(contract)) {
+        if (operation == ArtifactOperation.CREATE && requiresSeparateAssetMutations(contract)) {
             return TargetSurface.HTML_CSS_JS;
         }
         return TargetSurface.FUNCTIONAL_WEB;

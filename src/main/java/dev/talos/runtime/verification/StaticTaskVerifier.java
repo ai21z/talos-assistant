@@ -2,6 +2,7 @@ package dev.talos.runtime.verification;
 
 import dev.talos.runtime.TemplatePlaceholderGuard;
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.capability.ArtifactOperation;
 import dev.talos.runtime.capability.CapabilityProfile;
 import dev.talos.runtime.capability.CapabilityProfileRegistry;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
@@ -145,12 +146,13 @@ public final class StaticTaskVerifier {
         mutatedPaths.addAll(workspaceOperationVerification.mutationTargets());
         expectedTargetExemptions.addAll(workspaceOperationVerification.expectedTargetExemptions());
 
-        verifyExpectedTargets(contract, mutatedPaths, expectedTargetExemptions,
+        CapabilityProfile profile = CapabilityProfileRegistry.select(contract, root, mutatedPaths);
+        boolean webCoherenceRequired = profile.staticWeb();
+
+        verifyExpectedTargets(contract, root, profile, mutatedPaths, expectedTargetExemptions,
                 workspaceOperationVerification.expectedTargetAliases(), facts, problems);
         boolean expectationRequired = verifyTaskExpectations(contract, root, facts, problems);
 
-        CapabilityProfile profile = CapabilityProfileRegistry.select(contract, root, mutatedPaths);
-        boolean webCoherenceRequired = profile.staticWeb();
         if (webCoherenceRequired) {
             String profileFact = StaticWebCapabilityProfile.profileFact(profile);
             if (!profileFact.isBlank()) facts.add(profileFact);
@@ -449,6 +451,8 @@ public final class StaticTaskVerifier {
 
     private static void verifyExpectedTargets(
             TaskContract contract,
+            Path root,
+            CapabilityProfile profile,
             Set<String> mutatedPaths,
             Set<String> expectedTargetExemptions,
             Set<String> expectedTargetAliases,
@@ -472,6 +476,7 @@ public final class StaticTaskVerifier {
             if (!normalized.isBlank()) normalizedAliases.add(normalized);
         }
         boolean caseInsensitive = expectedTargetMatchingIsCaseInsensitive();
+        Set<String> satisfiedContextTargets = new LinkedHashSet<>();
         for (String target : contract.expectedTargets()) {
             String expected = normalizePath(target);
             if (expected.isBlank()) continue;
@@ -482,6 +487,10 @@ public final class StaticTaskVerifier {
                     .anyMatch(mutated -> expectedTargetMatches(expected, mutated, caseInsensitive))
                     || normalizedAliases.stream()
                     .anyMatch(alias -> expectedTargetMatches(expected, alias, caseInsensitive));
+            if (!matched && staticWebRepairContextTargetSatisfied(profile, root, expected, normalizedMutations)) {
+                satisfiedContextTargets.add(expected);
+                continue;
+            }
             if (!matched) {
                 List<String> similarWrongTargets = similarWrongMutationTargets(
                         expected,
@@ -497,9 +506,37 @@ public final class StaticTaskVerifier {
             }
         }
         if (problems.stream().noneMatch(p -> p.contains("expected target was not successfully mutated"))) {
-            facts.add("Expected mutation target(s) were updated: "
-                    + String.join(", ", contract.expectedTargets()) + ".");
+            if (satisfiedContextTargets.isEmpty()) {
+                facts.add("Expected mutation target(s) were updated: "
+                        + String.join(", ", contract.expectedTargets()) + ".");
+            } else {
+                facts.add("Expected mutation target(s) and static web context target(s) were satisfied: "
+                        + String.join(", ", contract.expectedTargets()) + ".");
+            }
         }
+    }
+
+    private static boolean staticWebRepairContextTargetSatisfied(
+            CapabilityProfile profile,
+            Path root,
+            String expected,
+            Set<String> normalizedMutations
+    ) {
+        if (profile == null || !profile.staticWeb()) return false;
+        if (profile.operation() != ArtifactOperation.REPAIR
+                && profile.operation() != ArtifactOperation.EDIT) return false;
+        if (StaticWebCapabilityProfile.requiresSeparateAssetMutations(profile)) return false;
+        if (!StaticWebCapabilityProfile.isSmallWebFile(expected)) return false;
+        if (normalizedMutations == null || normalizedMutations.stream()
+                .noneMatch(StaticWebCapabilityProfile::isSmallWebFile)) return false;
+        if (root == null) return false;
+        Path target;
+        try {
+            target = root.resolve(expected).normalize();
+        } catch (InvalidPathException e) {
+            return false;
+        }
+        return target.startsWith(root) && Files.isRegularFile(target);
     }
 
     private static void verifyMutationTarget(
