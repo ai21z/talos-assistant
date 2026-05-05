@@ -1482,6 +1482,77 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void approvedProtectedReadRefusalIsRuntimeRepairedAndAdvisory() throws Exception {
+        Path ws = Files.createTempDirectory("talos-approved-protected-read-postcondition-");
+        try {
+            Files.writeString(ws.resolve(".env"), "SECRET=manual-test\n");
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Read .env and tell me what it says."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "I'm sorry, but I can't provide that.",
+                    1,
+                    1,
+                    List.of("talos.read_file"),
+                    List.of(),
+                    1,
+                    0,
+                    false,
+                    0,
+                    List.of(".env"),
+                    0,
+                    0,
+                    0,
+                    0,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.read_file", ".env", true, false, false,
+                            "1 | SECRET=manual-test", "")));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-approved-protected-read-postcondition",
+                    "sid",
+                    1,
+                    "2026-05-05T12:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "test",
+                    "model",
+                    "Read .env and tell me what it says.");
+            try {
+                ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                        loopResult.finalAnswer(), messages, loopResult, ws, 0);
+
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
+                assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
+                assertTrue(outcome.finalAnswer().contains("SECRET=manual-test"), outcome.finalAnswer());
+                assertFalse(outcome.finalAnswer().contains("can't provide"), outcome.finalAnswer());
+                assertFalse(outcome.finalAnswer().toLowerCase(java.util.Locale.ROOT).contains("complete"),
+                        outcome.finalAnswer());
+                assertTrue(outcome.taskOutcome().hasWarning(
+                        TruthWarningType.APPROVED_PROTECTED_READ_POSTCONDITION));
+                assertNotNull(trace);
+                assertEquals("ADVISORY_ONLY", trace.outcome().classification());
+                assertTrue(trace.warnings().stream().anyMatch(warning ->
+                        "APPROVED_PROTECTED_READ_POSTCONDITION".equals(warning.code())));
+                assertTrue(trace.events().stream().anyMatch(event ->
+                        "PROTECTED_READ_POSTCONDITION_CHECKED".equals(event.type())));
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void traceOutcomeClassificationMatchesDominantTaskOutcome() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));

@@ -1606,6 +1606,65 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void approvedProtectedReadRefusalUsesRuntimePostcondition(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve(".env"), "SECRET=manual-test\n");
+
+            var approvals = new java.util.concurrent.atomic.AtomicInteger();
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null,
+                    (description, detail) -> {
+                        approvals.incrementAndGet();
+                        assertTrue(description.contains("protected read"), description);
+                        assertTrue(detail.contains(".env"), detail);
+                        return true;
+                    },
+                    registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "I can help with that.",
+                            "I'm sorry, but I can't provide that.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Read .env and tell me what it says."));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-t124-protected-read-refusal-postcondition",
+                    "sid",
+                    1,
+                    "2026-05-05T00:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "scripted",
+                    "test-model",
+                    "Read .env and tell me what it says.");
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertEquals(1, approvals.get(), "protected read still requires explicit approval");
+                assertTrue(out.text().contains("SECRET=manual-test"), out.text());
+                assertFalse(out.text().contains("can't provide"), out.text());
+                assertFalse(out.text().toLowerCase(java.util.Locale.ROOT).contains("complete"), out.text());
+                assertEquals("ADVISORY_ONLY", trace.outcome().classification());
+                assertTrue(trace.warnings().stream().anyMatch(warning ->
+                        "APPROVED_PROTECTED_READ_POSTCONDITION".equals(warning.code())));
+                assertTrue(trace.events().stream().anyMatch(event ->
+                        "PROTECTED_READ_POSTCONDITION_CHECKED".equals(event.type())));
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        }
+
+        @Test
         void mixedProtectedAndPublicReadNoToolHandoffReadsAllExpectedTargetsAfterApproval(@TempDir Path workspace)
                 throws Exception {
             Files.writeString(workspace.resolve(".env"), "SECRET=manual-test\n");

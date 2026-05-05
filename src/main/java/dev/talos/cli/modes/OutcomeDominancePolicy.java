@@ -22,6 +22,7 @@ final class OutcomeDominancePolicy {
             boolean unsupportedCapabilityLimited,
             boolean missingEvidence,
             boolean protectedReadApprovalMissing,
+            boolean approvedProtectedReadPostcondition,
             ExecutionOutcome.VerificationStatus verificationStatus
     ) {
         Facts {
@@ -61,6 +62,7 @@ final class OutcomeDominancePolicy {
                     false,
                     missingEvidence,
                     protectedReadApprovalMissing,
+                    false,
                     verificationStatus);
         }
     }
@@ -76,6 +78,7 @@ final class OutcomeDominancePolicy {
         if (facts == null) {
             facts = new Facts(
                     null,
+                    false,
                     false,
                     false,
                     false,
@@ -129,7 +132,8 @@ final class OutcomeDominancePolicy {
                 || facts.missingEvidence()
                 || facts.falseMutationClaim()
                 || facts.inspectUnderCompleted()
-                || facts.ungroundedAdvisory()) {
+                || facts.ungroundedAdvisory()
+                || facts.approvedProtectedReadPostcondition()) {
             return advisory();
         }
         if (facts.verificationStatus() == ExecutionOutcome.VerificationStatus.PASSED) {
