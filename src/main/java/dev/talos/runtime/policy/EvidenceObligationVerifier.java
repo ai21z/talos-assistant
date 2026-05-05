@@ -63,6 +63,7 @@ public final class EvidenceObligationVerifier {
             case LIST_DIRECTORY_ONLY -> verifyListDirectoryOnly(safeOutcomes);
             case READ_TARGET_REQUIRED -> verifyReadTargets(targets, safeOutcomes, false);
             case PROTECTED_READ_APPROVAL_REQUIRED -> verifyProtectedRead(targets, safeOutcomes);
+            case STATIC_WEB_DIAGNOSIS_REQUIRED -> verifyStaticWebDiagnosis(targets, safeOutcomes);
             case WORKSPACE_INSPECTION_REQUIRED, VERIFY_FROM_TRACE_OR_EVIDENCE ->
                     verifyAnyReadOnlyEvidence(safeOutcomes);
             case UNSUPPORTED_CAPABILITY_CHECK_REQUIRED -> verifyUnsupportedCapability(targets, safeOutcomes);
@@ -83,6 +84,42 @@ public final class EvidenceObligationVerifier {
         return listedDirectory
                 ? Result.satisfied("Directory listing evidence was gathered.")
                 : Result.unsatisfied("Directory listing evidence was not gathered.");
+    }
+
+    private static Result verifyStaticWebDiagnosis(
+            Set<String> expectedTargets,
+            List<ToolCallLoop.ToolOutcome> outcomes
+    ) {
+        if (outcomes.isEmpty()) {
+            return Result.unsatisfied("Static web diagnosis evidence was not gathered.");
+        }
+
+        Set<String> indexTargets = staticIndexTargets(expectedTargets);
+        if (!indexTargets.isEmpty()) {
+            Result indexResult = aggregateTargetResults(
+                    indexTargets,
+                    target -> verifySuccessfulReadTarget(target, outcomes),
+                    "Static web diagnosis read index.html.");
+            if (indexResult.status() == Status.BLOCKED) {
+                return indexResult;
+            }
+            if (indexResult.status() != Status.SATISFIED) {
+                return Result.unsatisfied("Static web diagnosis requires reading index.html.");
+            }
+            return Result.satisfied("Static web diagnosis evidence was gathered.");
+        }
+
+        if (listDirShowsIndexHtml(outcomes)) {
+            Result indexResult = verifySuccessfulIndexRead(outcomes);
+            if (indexResult.status() != Status.SATISFIED) {
+                return indexResult;
+            }
+            return Result.satisfied("Static web diagnosis evidence was gathered.");
+        }
+
+        return hasStaticWebContentInspection(outcomes)
+                ? Result.satisfied("Static web diagnosis evidence was gathered.")
+                : Result.unsatisfied("Static web diagnosis requires reading relevant HTML, CSS, or JavaScript.");
     }
 
     private static Result verifyReadTargets(
@@ -125,6 +162,88 @@ public final class EvidenceObligationVerifier {
             return Result.satisfied("Required read evidence was gathered.");
         }
         return Result.unsatisfied("Required read evidence was not gathered for " + expectedTarget + ".");
+    }
+
+    private static Result verifySuccessfulReadTarget(
+            String expectedTarget,
+            List<ToolCallLoop.ToolOutcome> outcomes
+    ) {
+        String expected = normalizePath(expectedTarget);
+        for (ToolCallLoop.ToolOutcome outcome : outcomes) {
+            if (!"talos.read_file".equals(canonicalToolName(outcome.toolName()))) continue;
+            if (!expected.equals(normalizePath(outcome.pathHint()))) continue;
+            if (outcome.denied()) {
+                return Result.blocked("Static web diagnosis read was blocked by approval.");
+            }
+            if (!outcome.success()) {
+                return Result.unsatisfied("Static web diagnosis required successful read evidence.");
+            }
+            return Result.satisfied("Static web diagnosis read index.html.");
+        }
+        return Result.unsatisfied("Static web diagnosis requires reading index.html.");
+    }
+
+    private static Result verifySuccessfulIndexRead(List<ToolCallLoop.ToolOutcome> outcomes) {
+        for (ToolCallLoop.ToolOutcome outcome : outcomes) {
+            if (!"talos.read_file".equals(canonicalToolName(outcome.toolName()))) continue;
+            if (!isIndexHtmlTarget(outcome.pathHint())) continue;
+            if (outcome.denied()) {
+                return Result.blocked("Static web diagnosis read was blocked by approval.");
+            }
+            if (!outcome.success()) {
+                return Result.unsatisfied("Static web diagnosis required successful index.html read evidence.");
+            }
+            return Result.satisfied("Static web diagnosis read index.html.");
+        }
+        return Result.unsatisfied("Static web diagnosis requires reading index.html when it is present.");
+    }
+
+    private static Set<String> staticIndexTargets(Set<String> expectedTargets) {
+        if (expectedTargets == null || expectedTargets.isEmpty()) return Set.of();
+        java.util.LinkedHashSet<String> out = new java.util.LinkedHashSet<>();
+        for (String target : expectedTargets) {
+            if (isIndexHtmlTarget(target)) out.add(target);
+        }
+        return Set.copyOf(out);
+    }
+
+    private static boolean listDirShowsIndexHtml(List<ToolCallLoop.ToolOutcome> outcomes) {
+        for (ToolCallLoop.ToolOutcome outcome : outcomes) {
+            if (!"talos.list_dir".equals(canonicalToolName(outcome.toolName()))) continue;
+            if (!outcome.success()) continue;
+            String output = outcome.summary() == null ? "" : outcome.summary();
+            for (String line : output.split("\\R")) {
+                if (isIndexHtmlTarget(line.strip())) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasStaticWebContentInspection(List<ToolCallLoop.ToolOutcome> outcomes) {
+        for (ToolCallLoop.ToolOutcome outcome : outcomes) {
+            String toolName = canonicalToolName(outcome.toolName());
+            if (!CONTENT_INSPECTION_TOOLS.contains(toolName)) continue;
+            if (outcome.denied() || !outcome.success()) continue;
+            if ("talos.read_file".equals(toolName) && !isStaticWebTarget(outcome.pathHint())) continue;
+            return true;
+        }
+        return false;
+    }
+
+    private static boolean isStaticWebTarget(String path) {
+        String normalized = normalizePath(path).toLowerCase(java.util.Locale.ROOT);
+        return normalized.endsWith(".html")
+                || normalized.endsWith(".htm")
+                || normalized.endsWith(".css")
+                || normalized.endsWith(".js")
+                || normalized.endsWith(".jsx")
+                || normalized.endsWith(".ts")
+                || normalized.endsWith(".tsx");
+    }
+
+    private static boolean isIndexHtmlTarget(String path) {
+        String normalized = normalizePath(path).toLowerCase(java.util.Locale.ROOT);
+        return normalized.equals("index.html") || normalized.endsWith("/index.html");
     }
 
     private static Result verifyAnyReadOnlyEvidence(List<ToolCallLoop.ToolOutcome> outcomes) {

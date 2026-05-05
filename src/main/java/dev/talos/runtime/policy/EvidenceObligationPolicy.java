@@ -30,6 +30,9 @@ public final class EvidenceObligationPolicy {
         if (!contract.mutationAllowed() && hasProtectedExpectedTarget(contract, workspace)) {
             return EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED;
         }
+        if (hasStaticWebDiagnosisObligation(contract, type)) {
+            return EvidenceObligation.STATIC_WEB_DIAGNOSIS_REQUIRED;
+        }
         if (!contract.mutationAllowed() && !contract.expectedTargets().isEmpty()) {
             return EvidenceObligation.READ_TARGET_REQUIRED;
         }
@@ -64,5 +67,36 @@ public final class EvidenceObligationPolicy {
             }
         }
         return false;
+    }
+
+    private static boolean hasStaticWebDiagnosisObligation(TaskContract contract, TaskType type) {
+        if (type != TaskType.DIAGNOSE_ONLY) return false;
+        for (String target : contract.expectedTargets()) {
+            if (isStaticWebTarget(target)) return true;
+        }
+        String lower = contract.originalUserRequest().toLowerCase(Locale.ROOT);
+        return lower.contains("website")
+                || lower.contains("web page")
+                || lower.contains("webpage")
+                || lower.contains("static page")
+                || lower.contains("static web")
+                || lower.contains("html")
+                || lower.contains("css")
+                || lower.contains("javascript")
+                || lower.contains("script")
+                || lower.contains("selector")
+                || lower.contains("button");
+    }
+
+    private static boolean isStaticWebTarget(String target) {
+        if (target == null || target.isBlank()) return false;
+        String lower = target.replace('\\', '/').toLowerCase(Locale.ROOT);
+        return lower.endsWith(".html")
+                || lower.endsWith(".htm")
+                || lower.endsWith(".css")
+                || lower.endsWith(".js")
+                || lower.endsWith(".jsx")
+                || lower.endsWith(".ts")
+                || lower.endsWith(".tsx");
     }
 }

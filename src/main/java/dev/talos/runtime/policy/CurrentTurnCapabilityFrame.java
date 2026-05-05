@@ -258,6 +258,9 @@ public final class CurrentTurnCapabilityFrame {
                     "Evidence: list directory entries only; do not inspect file contents.";
             case WORKSPACE_INSPECTION_REQUIRED ->
                     "Evidence: inspect the workspace with read-only tools before answering.";
+            case STATIC_WEB_DIAGNOSIS_REQUIRED ->
+                    "Evidence: inspect static web source files before diagnosing the page. "
+                            + "If index.html is present, read it before answering.";
             case VERIFY_FROM_TRACE_OR_EVIDENCE ->
                     "Evidence: answer from prior trace/status evidence or fresh read-only verification.";
             case UNSUPPORTED_CAPABILITY_CHECK_REQUIRED ->

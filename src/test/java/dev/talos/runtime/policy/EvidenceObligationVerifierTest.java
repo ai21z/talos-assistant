@@ -165,4 +165,62 @@ class EvidenceObligationVerifierTest {
 
         assertEquals(EvidenceObligationVerifier.Status.UNSATISFIED, result.status());
     }
+
+    @Test
+    void staticWebDiagnosisRejectsDirectoryListingOnlyWhenIndexIsPresent() {
+        var result = EvidenceObligationVerifier.verify(
+                EvidenceObligation.STATIC_WEB_DIAGNOSIS_REQUIRED,
+                Set.of(),
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.list_dir", ".", true, false, false,
+                        "index.html\nscript.js\nstyles.css\n", "")));
+
+        assertEquals(EvidenceObligationVerifier.Status.UNSATISFIED, result.status());
+        assertEquals("Static web diagnosis requires reading index.html when it is present.", result.message());
+    }
+
+    @Test
+    void staticWebDiagnosisAcceptsIndexReadWhenIndexIsPresent() {
+        var result = EvidenceObligationVerifier.verify(
+                EvidenceObligation.STATIC_WEB_DIAGNOSIS_REQUIRED,
+                Set.of(),
+                List.of(
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.list_dir", ".", true, false, false,
+                                "index.html\nscript.js\nstyles.css\n", ""),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", "index.html", true, false, false,
+                                "<button id=\"go\">Go</button><script src=\"script.js\"></script>", "")));
+
+        assertEquals(EvidenceObligationVerifier.Status.SATISFIED, result.status());
+    }
+
+    @Test
+    void staticWebDiagnosisRequiresExpectedIndexReadEvenAfterOtherWebReads() {
+        var result = EvidenceObligationVerifier.verify(
+                EvidenceObligation.STATIC_WEB_DIAGNOSIS_REQUIRED,
+                Set.of("index.html"),
+                List.of(
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", "script.js", true, false, false,
+                                "document.querySelector('.missing-button')", ""),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", "styles.css", true, false, false,
+                                "button { color: red; }", "")));
+
+        assertEquals(EvidenceObligationVerifier.Status.UNSATISFIED, result.status());
+        assertEquals("Static web diagnosis requires reading index.html.", result.message());
+    }
+
+    @Test
+    void staticWebDiagnosisAcceptsContentInspectionWhenNoIndexPresenceIsKnown() {
+        var result = EvidenceObligationVerifier.verify(
+                EvidenceObligation.STATIC_WEB_DIAGNOSIS_REQUIRED,
+                Set.of(),
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.read_file", "script.js", true, false, false,
+                        "document.querySelector('.missing-button')", "")));
+
+        assertEquals(EvidenceObligationVerifier.Status.SATISFIED, result.status());
+    }
 }
