@@ -1,7 +1,7 @@
 # T140 - Focused Command Execution Audit
 
 Severity: medium
-Status: open
+Status: done
 
 ## Problem
 
@@ -34,3 +34,15 @@ T61-style audit or broader command profile expansion.
 
 - Clean two-model focused audit artifacts.
 - Findings report with go/no-go recommendation.
+
+## Result
+
+Completed in:
+
+- `local/manual-testing/llama-cpp-command-audit-20260505-104828/`
+- `local/manual-testing/llama-cpp-command-audit-20260505-104828/FINDINGS-LLAMA-CPP-COMMAND-AUDIT.md`
+
+The audit confirmed T139's command success, failure, approval-denial, tracing,
+redaction, and output dominance paths. It also found a separate classification
+bug where explicit command probe turns could lose `talos.run_command`; that was
+split into T141.

@@ -66,6 +66,20 @@ public final class TaskContractResolver {
             "this site"
     );
 
+    private static final Set<String> COMMAND_EXECUTION_ACTION_MARKERS = Set.of(
+            "run ", "execute ", "call ", "try ", "probe ", "verify ", "check ",
+            "use talos.run_command with"
+    );
+
+    private static final Set<String> COMMAND_TOOL_MARKERS = Set.of(
+            "talos.run_command", "run_command", "profile gradle_", "args_json", "timeout_ms"
+    );
+
+    private static final Set<String> GRADLE_COMMAND_MARKERS = Set.of(
+            "gradle", "gradle_test", "gradle_check", "gradle_build", "gradle_install_dist",
+            "gradle_e2e_test", "dev.talos."
+    );
+
     private static final Pattern SIMPLE_DIRECTORY_LISTING = Pattern.compile(
             "(?i)^\\s*(?:"
                     + "(?:what|which)\\s+(?:files|folders|directories|items|entries)\\s+"
@@ -225,7 +239,12 @@ public final class TaskContractResolver {
         String classificationReason = MutationIntent.classificationReason(original);
         boolean mutationRequested = !priorChangeStatusQuestion
                 && MutationIntent.isExplicitMutationClassificationReason(classificationReason);
+        boolean commandVerificationRequest = !priorChangeStatusQuestion
+                && !mutationRequested
+                && looksExplicitCommandVerificationRequest(lower);
         TaskType type = priorChangeStatusQuestion
+                ? TaskType.VERIFY_ONLY
+                : commandVerificationRequest
                 ? TaskType.VERIFY_ONLY
                 : classify(lower, mutationRequested, classificationReason);
         boolean mutationAllowed = mutationRequested
@@ -249,7 +268,9 @@ public final class TaskContractResolver {
                 expectedTargets,
                 forbiddenTargets,
                 original,
-                classificationReason);
+                commandVerificationRequest
+                        ? "explicit-command-verification-request"
+                        : classificationReason);
     }
 
     public static Set<String> extractExpectedTargets(String userRequest) {
@@ -365,6 +386,29 @@ public final class TaskContractResolver {
 
     private static boolean looksSmallTalkOnly(String lower) {
         return lower != null && SMALL_TALK_ONLY.matcher(lower).matches();
+    }
+
+    private static boolean looksExplicitCommandVerificationRequest(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        if (lower.contains("what is talos.run_command")
+                || lower.contains("what does talos.run_command")
+                || lower.contains("how does talos.run_command")
+                || lower.contains("how to use talos.run_command")
+                || lower.contains("can talos use talos.run_command")) {
+            return false;
+        }
+        if (!containsAny(lower, COMMAND_EXECUTION_ACTION_MARKERS)) return false;
+        if (containsAny(lower, COMMAND_TOOL_MARKERS)) return true;
+        return containsAny(lower, GRADLE_COMMAND_MARKERS)
+                && looksGradleBuildOrTestVerification(lower);
+    }
+
+    private static boolean looksGradleBuildOrTestVerification(String lower) {
+        return lower.contains("test")
+                || lower.contains("build")
+                || lower.contains("gradle check")
+                || lower.contains("passes")
+                || lower.contains("pass ");
     }
 
     private static boolean looksAssistantIdentityQuestion(String lower) {
