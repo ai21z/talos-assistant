@@ -1,5 +1,8 @@
 package dev.talos.cli.prompt;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.talos.core.security.Redactor;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -8,17 +11,27 @@ import dev.talos.spi.types.PromptDebugSnapshot;
 import dev.talos.spi.types.ToolSpec;
 
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /** Formats internal prompt-debug captures for Talos maintainers. */
 public final class PromptDebugInspector {
     private static final Redactor REDACTOR = new Redactor(Map.of(
             "redact", Map.of("paths", false, "ips", false)));
+    private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
+    public static final String PROTECTED_TOOL_RESULT_REDACTION =
+            "[protected tool result redacted by prompt-debug policy]";
+    private static final Pattern TOOL_RESULT_BLOCK = Pattern.compile(
+            "(?s)\\[tool_result:\\s*([^\\]]+)\\](.*?)\\[/tool_result\\]");
+    private static final Pattern PROTECTED_CONTENT_SIGNAL = Pattern.compile(
+            "(?i)\\b(api[_-]?key|token|secret|password|passwd|pwd|credential|credentials|bearer)\\b\\s*[:=]");
 
     private PromptDebugInspector() {}
 
@@ -64,23 +77,29 @@ public final class PromptDebugInspector {
         }
 
         out.append("## Structured Messages\n\n");
+        Set<String> protectedToolCallIds = protectedToolCallIds(snapshot.messages());
         for (int i = 0; i < snapshot.messages().size(); i++) {
             ChatMessage message = snapshot.messages().get(i);
             out.append("### Message ").append(i + 1).append(" - ")
                     .append(Objects.toString(message.role(), "")).append("\n\n");
             out.append("```text\n")
-                    .append(redact(message.content()))
+                    .append(redactMessageContent(message, protectedToolCallIds))
                     .append("\n```\n\n");
         }
 
         if (!snapshot.providerBodyJson().isBlank()) {
             out.append("## Provider Body JSON\n\n");
             out.append("```json\n")
-                    .append(redact(snapshot.providerBodyJson()))
+                    .append(redactedProviderBodyJson(snapshot))
                     .append("\n```\n");
         }
 
         return out.toString();
+    }
+
+    public static String redactedProviderBodyJson(PromptDebugSnapshot snapshot) {
+        if (snapshot == null || snapshot.providerBodyJson().isBlank()) return "";
+        return redactProviderBodyJson(snapshot.providerBodyJson());
     }
 
     private static long countRole(List<ChatMessage> messages, String role) {
@@ -146,6 +165,141 @@ public final class PromptDebugInspector {
         }
         int index = requestLower.indexOf(target.toLowerCase(Locale.ROOT));
         return index < 0 ? Integer.MAX_VALUE : index;
+    }
+
+    private static Set<String> protectedToolCallIds(List<ChatMessage> messages) {
+        if (messages == null || messages.isEmpty()) return Set.of();
+        Set<String> out = new HashSet<>();
+        for (ChatMessage message : messages) {
+            if (message == null || !message.hasNativeToolCalls()) continue;
+            for (ChatMessage.NativeToolCall call : message.toolCalls()) {
+                if (isProtectedReadCall(call) && call.id() != null && !call.id().isBlank()) {
+                    out.add(call.id());
+                }
+            }
+        }
+        return Set.copyOf(out);
+    }
+
+    private static String redactMessageContent(ChatMessage message, Set<String> protectedToolCallIds) {
+        if (message == null) return "";
+        String content = Objects.toString(message.content(), "");
+        boolean protectedNativeToolResult = "tool".equals(message.role())
+                && message.toolCallId() != null
+                && protectedToolCallIds.contains(message.toolCallId());
+        if (protectedNativeToolResult || ("tool".equals(message.role()) && hasProtectedContentSignal(content))) {
+            return PROTECTED_TOOL_RESULT_REDACTION;
+        }
+        return redact(redactProtectedToolResultBlocks(content));
+    }
+
+    private static String redactProviderBodyJson(String providerBodyJson) {
+        try {
+            JsonNode root = JSON_MAPPER.readTree(providerBodyJson);
+            JsonNode copy = root.deepCopy();
+            redactProviderMessages(copy);
+            return redact(JSON_MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(copy));
+        } catch (Exception ignored) {
+            return redact(redactProtectedToolResultBlocks(providerBodyJson));
+        }
+    }
+
+    private static void redactProviderMessages(JsonNode root) {
+        JsonNode messages = root == null ? null : root.path("messages");
+        if (messages == null || !messages.isArray()) return;
+        Set<String> protectedIds = new HashSet<>();
+        for (JsonNode message : messages) {
+            String role = message.path("role").asText("");
+            if ("assistant".equals(role)) {
+                JsonNode toolCalls = message.path("tool_calls");
+                if (toolCalls.isArray()) {
+                    for (JsonNode call : toolCalls) {
+                        if (isProtectedReadToolCall(call)) {
+                            String id = call.path("id").asText("");
+                            if (!id.isBlank()) protectedIds.add(id);
+                        }
+                    }
+                }
+            } else if ("tool".equals(role) && message instanceof ObjectNode objectNode) {
+                String content = message.path("content").asText("");
+                String toolCallId = message.path("tool_call_id").asText("");
+                if (protectedIds.contains(toolCallId) || hasProtectedContentSignal(content)) {
+                    objectNode.put("content", PROTECTED_TOOL_RESULT_REDACTION);
+                }
+            }
+        }
+    }
+
+    private static String redactProtectedToolResultBlocks(String value) {
+        if (value == null || value.isBlank()) return Objects.toString(value, "");
+        Matcher matcher = TOOL_RESULT_BLOCK.matcher(value);
+        StringBuilder out = new StringBuilder();
+        while (matcher.find()) {
+            String toolName = matcher.group(1) == null ? "" : matcher.group(1).strip();
+            String body = matcher.group(2) == null ? "" : matcher.group(2);
+            if (hasProtectedContentSignal(body)) {
+                String replacement = "[tool_result: " + toolName + "]\n"
+                        + PROTECTED_TOOL_RESULT_REDACTION
+                        + "\n[/tool_result]";
+                matcher.appendReplacement(out, Matcher.quoteReplacement(replacement));
+            } else {
+                matcher.appendReplacement(out, Matcher.quoteReplacement(matcher.group()));
+            }
+        }
+        matcher.appendTail(out);
+        return out.toString();
+    }
+
+    private static boolean isProtectedReadCall(ChatMessage.NativeToolCall call) {
+        if (call == null || !"talos.read_file".equals(call.name())) return false;
+        Object path = firstPathValue(call.arguments());
+        return looksProtectedPath(path == null ? "" : String.valueOf(path));
+    }
+
+    private static boolean isProtectedReadToolCall(JsonNode call) {
+        if (call == null || call.isMissingNode()) return false;
+        JsonNode function = call.path("function");
+        if (!"talos.read_file".equals(function.path("name").asText(""))) return false;
+        JsonNode arguments = function.path("arguments");
+        return looksProtectedPath(firstPathValue(arguments));
+    }
+
+    private static Object firstPathValue(Map<String, Object> arguments) {
+        if (arguments == null || arguments.isEmpty()) return null;
+        for (String key : List.of("path", "file_path", "filepath", "file", "filename")) {
+            Object value = arguments.get(key);
+            if (value != null) return value;
+        }
+        return null;
+    }
+
+    private static String firstPathValue(JsonNode arguments) {
+        if (arguments == null || arguments.isMissingNode()) return "";
+        for (String key : List.of("path", "file_path", "filepath", "file", "filename")) {
+            JsonNode value = arguments.path(key);
+            if (!value.isMissingNode() && !value.asText("").isBlank()) return value.asText("");
+        }
+        return "";
+    }
+
+    private static boolean looksProtectedPath(String path) {
+        if (path == null || path.isBlank()) return false;
+        String normalized = path.strip().replace('\\', '/').toLowerCase(Locale.ROOT);
+        return normalized.equals(".env")
+                || normalized.startsWith(".env.")
+                || normalized.endsWith("/.env")
+                || normalized.contains("/.env.")
+                || normalized.contains("secret")
+                || normalized.contains("token")
+                || normalized.contains("credential")
+                || normalized.contains("password")
+                || normalized.contains("private_key")
+                || normalized.contains("private-key");
+    }
+
+    private static boolean hasProtectedContentSignal(String content) {
+        if (content == null || content.isBlank()) return false;
+        return PROTECTED_CONTENT_SIGNAL.matcher(content).find();
     }
 
     private static String redact(String value) {
