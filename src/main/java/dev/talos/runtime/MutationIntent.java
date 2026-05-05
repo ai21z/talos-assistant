@@ -123,6 +123,11 @@ public final class MutationIntent {
             "\\b(?:review|inspect|check|diagnose|look\\s+at)\\b.{0,160}"
                     + "\\b(?:and|then)\\s+(?:please\\s+)?" + CORE_MUTATION_VERBS + "\\b");
 
+    private static final Pattern EXPLICIT_BATCH_WORKSPACE_APPLY_REQUEST = Pattern.compile(
+            "\\b(?:use\\s+)?(?:talos\\.)?apply_workspace_batch\\b.{0,160}\\bapply\\b"
+                    + "|\\bapply\\s+operations_json\\b"
+                    + "|\\bapply\\s+(?:these|the|exactly\\s+these)\\s+operations\\b");
+
     private static final Pattern ADVISORY_MUTATION_QUESTION = Pattern.compile(
             "^" + PREFIX + "(?:should|would|could|can|may)\\s+(?:i|we)\\s+"
                     + CORE_MUTATION_VERBS + "\\b");
@@ -151,6 +156,7 @@ public final class MutationIntent {
         if (looksAdvisoryMutationQuestion(lower)) return "advisory-mutation-question";
         if (looksInstructionalMutationQuestion(lower)) return "instructional-mutation-question";
         if (looksReviewThenMutationRequest(lower)) return "explicit-review-and-fix-request";
+        if (looksExplicitBatchWorkspaceApplyRequest(lower)) return "explicit-batch-workspace-apply-request";
         for (Pattern pattern : REQUEST_PATTERNS) {
             if (pattern.matcher(lower).find()) return "explicit-request-pattern";
         }
@@ -204,6 +210,10 @@ public final class MutationIntent {
 
     private static boolean looksReviewThenMutationRequest(String lower) {
         return lower != null && REVIEW_THEN_MUTATION_REQUEST.matcher(lower).find();
+    }
+
+    private static boolean looksExplicitBatchWorkspaceApplyRequest(String lower) {
+        return lower != null && EXPLICIT_BATCH_WORKSPACE_APPLY_REQUEST.matcher(lower).find();
     }
 
     private static boolean looksAdvisoryMutationQuestion(String lower) {
