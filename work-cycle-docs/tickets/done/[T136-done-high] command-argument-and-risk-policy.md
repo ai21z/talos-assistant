@@ -1,7 +1,7 @@
 # T136 - Command Argument And Risk Policy
 
 Severity: high
-Status: open
+Status: done
 
 ## Problem
 
@@ -36,5 +36,21 @@ command strings.
 
 ## Verification
 
-- Focused unit tests for accepted and denied argument shapes.
-- `.\gradlew.bat --no-daemon build installDist`.
+- Red focused test first failed on missing `CommandRiskClassifier`.
+- Focused T136/T135 tests passed:
+  `.\gradlew.bat --no-daemon test --tests dev.talos.runtime.command.CommandArgumentPolicyTest --tests dev.talos.runtime.command.CommandProfileRegistryTest`
+- Full verification passed:
+  `.\gradlew.bat --no-daemon build installDist`
+
+## Completion Notes
+
+- Added `CommandArgumentPolicy` with profile-specific validation.
+- Added `CommandRiskClassifier`.
+- Routed `CommandProfileRegistry.plan(...)` through argument validation.
+- Gradle profiles accept only `--tests`, `--stacktrace`, and `--info` caller
+  args.
+- Git read-only profiles reject caller args except `git_diff`, which accepts
+  workspace-contained pathspecs only.
+- Shell syntax, network tokens, destructive tokens, and workspace-escape
+  pathspecs fail closed before planning.
+- No process runner, approval UI, or `talos.run_command` tool was added.

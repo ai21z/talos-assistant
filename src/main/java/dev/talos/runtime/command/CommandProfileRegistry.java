@@ -49,13 +49,10 @@ public final class CommandProfileRegistry {
         }
         Path workspaceRoot = workspaceRoot(workspace);
         Path resolvedCwd = resolveCwd(workspaceRoot, cwd);
+        List<String> validatedArgs = CommandArgumentPolicy.validate(
+                profile, callerArgs, workspaceRoot, resolvedCwd);
         List<String> argv = new ArrayList<>(profile.fixedArgs());
-        if (callerArgs != null) {
-            callerArgs.stream()
-                    .filter(arg -> arg != null && !arg.isBlank())
-                    .map(String::strip)
-                    .forEach(argv::add);
-        }
+        argv.addAll(validatedArgs);
         return new CommandPlan(
                 profile.id(),
                 profile.displayName(),
