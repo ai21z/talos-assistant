@@ -3,6 +3,7 @@ package dev.talos.runtime.phase;
 import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolResult;
 import dev.talos.tools.ToolRiskLevel;
+import dev.talos.runtime.toolcall.ToolAliasPolicy;
 
 /** Sidecar runtime policy for phase-aware tool execution. */
 public final class PhasePolicy {
@@ -12,10 +13,14 @@ public final class PhasePolicy {
         READ,
         SEARCH,
         RETRIEVE,
+        COMMAND,
         MUTATE
     }
 
     public static ToolCategory categorize(String toolName, ToolRiskLevel risk) {
+        if ("run_command".equals(ToolAliasPolicy.localCanonicalName(toolName))) {
+            return ToolCategory.COMMAND;
+        }
         if (risk != null && risk.requiresApproval()) {
             return ToolCategory.MUTATE;
         }
@@ -30,7 +35,9 @@ public final class PhasePolicy {
         ExecutionPhase effectivePhase = phase == null ? ExecutionPhase.APPLY : phase;
         ToolCategory effectiveCategory = category == null ? ToolCategory.READ : category;
         return switch (effectivePhase) {
-            case INSPECT, VERIFY -> effectiveCategory != ToolCategory.MUTATE;
+            case INSPECT -> effectiveCategory != ToolCategory.MUTATE
+                    && effectiveCategory != ToolCategory.COMMAND;
+            case VERIFY -> effectiveCategory != ToolCategory.MUTATE;
             case APPLY -> true;
             case RESPOND -> false;
         };

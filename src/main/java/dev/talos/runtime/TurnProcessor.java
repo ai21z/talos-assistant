@@ -5,6 +5,7 @@ import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
 import dev.talos.core.retrieval.RetrievalTrace;
 import dev.talos.runtime.phase.PhasePolicy;
+import dev.talos.runtime.command.CommandToolPlanner;
 import dev.talos.runtime.checkpoint.CheckpointCaptureResult;
 import dev.talos.runtime.checkpoint.CheckpointService;
 import dev.talos.runtime.policy.DeclarativePermissionPolicy;
@@ -480,7 +481,12 @@ public final class TurnProcessor {
             LocalTurnTraceCapture.recordApprovalRequired(tracePhase, call);
 
             String desc = approvalDescription(call, risk, permissionDecision);
-            String detail = buildApprovalDetail(call, path, scopeWarning, permissionDecision.userMessage());
+            String detail = buildApprovalDetail(
+                    call,
+                    path,
+                    scopeWarning,
+                    permissionDecision.userMessage(),
+                    session.workspace());
             ApprovalResponse response = approvalGate.approveFull(desc, detail);
 
             if (response == ApprovalResponse.DENIED) {
@@ -626,6 +632,12 @@ public final class TurnProcessor {
                 WorkspaceOperationPlanner.validateBeforeApproval(call);
         if (workspaceOperationValidation.isPresent()) {
             return ToolResult.fail(ToolError.invalidParams(workspaceOperationValidation.get()));
+        }
+
+        Optional<String> commandValidation =
+                CommandToolPlanner.validateBeforeApproval(call, session.workspace());
+        if (commandValidation.isPresent()) {
+            return ToolResult.fail(ToolError.invalidParams(commandValidation.get()));
         }
 
         if (isWriteFileTool(call.toolName())) {
@@ -941,7 +953,8 @@ public final class TurnProcessor {
             ToolCall call,
             String path,
             String scopeWarning,
-            String permissionMessage
+            String permissionMessage,
+            java.nio.file.Path workspace
     ) {
         var sb = new StringBuilder();
 
@@ -955,7 +968,13 @@ public final class TurnProcessor {
             sb.append("    ");
         }
 
-        if (path != null && !path.isBlank()) {
+        if (CommandToolPlanner.isRunCommandTool(call.toolName())) {
+            try {
+                sb.append(CommandToolPlanner.approvalDetail(call, workspace));
+            } catch (RuntimeException e) {
+                sb.append("command: invalid talos.run_command request");
+            }
+        } else if (path != null && !path.isBlank()) {
             sb.append("target: ").append(path);
         } else if ("apply_workspace_batch".equals(ToolAliasPolicy.localCanonicalName(call.toolName()))) {
             try {

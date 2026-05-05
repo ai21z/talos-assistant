@@ -1,7 +1,7 @@
 # T138 - Run Command V1 Gradle Profiles
 
 Severity: high
-Status: open
+Status: done
 
 ## Problem
 
@@ -33,6 +33,7 @@ small `talos.run_command` V1 for Gradle verification profiles only.
 
 ## Verification
 
-- Focused tool and TurnProcessor tests.
-- Installed Talos smoke test for one passing and one failing Gradle command.
-- `.\gradlew.bat --no-daemon build installDist`.
+- Focused tool, prompt, phase, native-surface, and TurnProcessor tests passed.
+- Installed Talos prompt-render smoke exposed `talos.run_command` for verification turns without write/edit tools.
+- Installed distribution jar smoke ran one passing and one failing `gradle_test` command through `RunCommandTool`.
+- `.\gradlew.bat --no-daemon build installDist` passed.

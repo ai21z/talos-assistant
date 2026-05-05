@@ -43,4 +43,20 @@ class PhasePolicyTest {
                 ExecutionPhase.VERIFY,
                 PhasePolicy.categorize("talos.edit_file", ToolRiskLevel.WRITE)));
     }
+
+    @Test
+    void commandExecutionIsAllowedOnlyForApplyOrVerify() {
+        assertFalse(PhasePolicy.allows(
+                ExecutionPhase.INSPECT,
+                PhasePolicy.categorize("talos.run_command", ToolRiskLevel.WRITE)));
+        assertTrue(PhasePolicy.allows(
+                ExecutionPhase.APPLY,
+                PhasePolicy.categorize("talos.run_command", ToolRiskLevel.WRITE)));
+        assertTrue(PhasePolicy.allows(
+                ExecutionPhase.VERIFY,
+                PhasePolicy.categorize("talos.run_command", ToolRiskLevel.WRITE)));
+        assertFalse(PhasePolicy.allows(
+                ExecutionPhase.RESPOND,
+                PhasePolicy.categorize("talos.run_command", ToolRiskLevel.WRITE)));
+    }
 }

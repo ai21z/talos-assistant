@@ -74,6 +74,7 @@ public final class DeclarativePermissionPolicy implements PermissionPolicy {
         }
 
         boolean rememberEligible = risk == ToolRiskLevel.WRITE
+                && resource.hasPath()
                 && resource.insideWorkspace()
                 && !resource.protectedPath();
         String reason = risk == ToolRiskLevel.DESTRUCTIVE

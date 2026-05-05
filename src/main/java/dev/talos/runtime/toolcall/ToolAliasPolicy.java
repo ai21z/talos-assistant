@@ -23,6 +23,7 @@ public final class ToolAliasPolicy {
             "talos.copy_path",
             "talos.rename_path",
             "talos.list_dir",
+            "talos.run_command",
             "talos.grep",
             "talos.retrieve"
     );
@@ -193,6 +194,8 @@ public final class ToolAliasPolicy {
                 "copy_path", "copy", "cp");
         addAliases(out, BackendToolProfile.TALOS, "talos.rename_path",
                 "rename_path", "rename");
+        addAliases(out, BackendToolProfile.TALOS, "talos.run_command",
+                "run_command", "command_run", "runcommand");
         addAliases(out, BackendToolProfile.TALOS, "talos.list_dir",
                 "list_dir", "list_directory", "dir_list", "ls", "listdir", "listdirectory");
         addAliases(out, BackendToolProfile.TALOS, "talos.grep",
@@ -215,6 +218,7 @@ public final class ToolAliasPolicy {
         addAliases(out, profile, "talos.move_path", namespace + ":move_path", namespace + ".move_path");
         addAliases(out, profile, "talos.copy_path", namespace + ":copy_path", namespace + ".copy_path");
         addAliases(out, profile, "talos.rename_path", namespace + ":rename_path", namespace + ".rename_path");
+        addAliases(out, profile, "talos.run_command", namespace + ":run_command", namespace + ".run_command");
         addAliases(out, profile, "talos.list_dir", namespace + ":list_dir", namespace + ".list_dir");
         addAliases(out, profile, "talos.grep", namespace + ":grep", namespace + ".grep");
         addAliases(out, profile, "talos.retrieve", namespace + ":retrieve", namespace + ".retrieve");

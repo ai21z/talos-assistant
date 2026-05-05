@@ -20,6 +20,7 @@ import dev.talos.tools.impl.CopyPathTool;
 import dev.talos.tools.impl.RenamePathTool;
 import dev.talos.tools.impl.ReadFileTool;
 import dev.talos.tools.impl.RetrieveTool;
+import dev.talos.tools.impl.RunCommandTool;
 import picocli.CommandLine;
 
 import java.nio.file.Files;
@@ -80,6 +81,7 @@ public class PromptRenderCmd implements Runnable {
         registry.register(new MovePathTool());
         registry.register(new CopyPathTool());
         registry.register(new RenamePathTool());
+        registry.register(new RunCommandTool());
         registry.register(new GrepTool());
         registry.register(new ListDirTool());
         registry.register(new RetrieveTool(rag));

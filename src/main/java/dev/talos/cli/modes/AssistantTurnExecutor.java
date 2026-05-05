@@ -763,9 +763,7 @@ public final class AssistantTurnExecutor {
 
     private static void initializeExecutionPhaseForTurn(TaskContract contract, Context ctx) {
         if (ctx == null || ctx.executionPhaseState() == null) return;
-        ExecutionPhase initial = contract != null && contract.mutationAllowed()
-                ? ExecutionPhase.APPLY
-                : ExecutionPhase.INSPECT;
+        ExecutionPhase initial = CurrentTurnPlan.defaultPhaseFor(contract);
         ctx.executionPhaseState().moveTo(initial);
     }
 
@@ -1088,9 +1086,7 @@ public final class AssistantTurnExecutor {
 
     public static void injectTaskContractInstruction(List<ChatMessage> messages) {
         TaskContract contract = TaskContractResolver.fromMessages(messages);
-        ExecutionPhase phase = contract.mutationAllowed()
-                ? ExecutionPhase.APPLY
-                : ExecutionPhase.INSPECT;
+        ExecutionPhase phase = CurrentTurnPlan.defaultPhaseFor(contract);
         List<String> visibleTools = defaultVisibleToolNames(contract, phase);
         injectTaskContractInstruction(messages, CurrentTurnPlan.compatibility(
                 contract, phase, visibleTools, visibleTools, List.of()));
@@ -1128,9 +1124,7 @@ public final class AssistantTurnExecutor {
             List<String> visibleTools
     ) {
         TaskContract safeContract = contract == null ? TaskContractResolver.fromMessages(messages) : contract;
-        ExecutionPhase safePhase = phase == null
-                ? (safeContract.mutationAllowed() ? ExecutionPhase.APPLY : ExecutionPhase.INSPECT)
-                : phase;
+        ExecutionPhase safePhase = phase == null ? CurrentTurnPlan.defaultPhaseFor(safeContract) : phase;
         injectTaskContractInstruction(messages, CurrentTurnPlan.compatibility(
                 safeContract, safePhase, visibleTools, visibleTools, List.of()));
     }

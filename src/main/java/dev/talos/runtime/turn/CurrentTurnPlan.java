@@ -111,7 +111,14 @@ public record CurrentTurnPlan(
         return create(contract, phase, nativeTools, promptTools, blockedTools);
     }
 
+    public static ExecutionPhase defaultPhaseFor(TaskContract contract) {
+        if (contract == null) return ExecutionPhase.INSPECT;
+        if (contract.mutationAllowed()) return ExecutionPhase.APPLY;
+        if (contract.verificationRequired()) return ExecutionPhase.VERIFY;
+        return ExecutionPhase.INSPECT;
+    }
+
     private static ExecutionPhase defaultPhase(TaskContract contract) {
-        return contract.mutationAllowed() ? ExecutionPhase.APPLY : ExecutionPhase.INSPECT;
+        return defaultPhaseFor(contract);
     }
 }

@@ -538,9 +538,7 @@ record ExecutionOutcome(
 
     private static CurrentTurnPlan compatibilityPlan(List<ChatMessage> messages) {
         TaskContract contract = TaskContractResolver.fromMessages(messages);
-        ExecutionPhase phase = contract.mutationAllowed()
-                ? ExecutionPhase.APPLY
-                : ExecutionPhase.INSPECT;
+        ExecutionPhase phase = CurrentTurnPlan.defaultPhaseFor(contract);
         return CurrentTurnPlan.compatibility(contract, phase, List.of(), List.of(), List.of());
     }
 
