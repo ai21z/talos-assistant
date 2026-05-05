@@ -32,6 +32,7 @@ import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
 import dev.talos.runtime.toolcall.ToolAliasPolicy;
 import dev.talos.runtime.toolcall.ToolCallSupport;
+import dev.talos.runtime.toolcall.ToolSurfacePlanner;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
@@ -1341,18 +1342,7 @@ public final class AssistantTurnExecutor {
     }
 
     private static List<String> defaultVisibleToolNames(TaskContract contract, ExecutionPhase phase) {
-        if (contract == null || contract.type() == TaskType.SMALL_TALK) return List.of();
-        if (contract.type() == TaskType.DIRECTORY_LISTING) return List.of("talos.list_dir");
-        if (contract.mutationAllowed() && phase == ExecutionPhase.APPLY) {
-            return List.of(
-                    "talos.edit_file",
-                    "talos.grep",
-                    "talos.list_dir",
-                    "talos.read_file",
-                    "talos.retrieve",
-                    "talos.write_file");
-        }
-        return List.of("talos.grep", "talos.list_dir", "talos.read_file", "talos.retrieve");
+        return ToolSurfacePlanner.defaultVisibleToolNames(contract, phase);
     }
 
     static void injectStaticVerificationRepairInstruction(

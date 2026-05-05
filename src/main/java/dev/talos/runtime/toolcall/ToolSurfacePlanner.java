@@ -1,0 +1,141 @@
+package dev.talos.runtime.toolcall;
+
+import dev.talos.core.capability.CapabilityKind;
+import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.task.TaskType;
+import dev.talos.spi.types.ToolSpec;
+import dev.talos.tools.ToolDescriptor;
+import dev.talos.tools.ToolOperationMetadata;
+import dev.talos.tools.ToolRegistry;
+import dev.talos.tools.ToolRiskLevel;
+
+import java.util.List;
+
+/**
+ * Plans the native tool surface for one turn from the current task contract,
+ * execution phase, and tool operation metadata.
+ */
+public final class ToolSurfacePlanner {
+    private ToolSurfacePlanner() {}
+
+    public static Plan plan(
+            TaskContract contract,
+            ExecutionPhase phase,
+            ToolRegistry registry
+    ) {
+        if (registry == null || registry.isEmpty()) {
+            return new Plan(List.of(), "no registry tools");
+        }
+        if (contract != null && contract.type() == TaskType.SMALL_TALK) {
+            return new Plan(List.of(), "small-talk");
+        }
+        if (contract != null && contract.type() == TaskType.DIRECTORY_LISTING) {
+            return select(registry, ToolSurfacePlanner::isDirectoryListingTool, "directory listing");
+        }
+        if (contract != null
+                && !contract.mutationAllowed()
+                && !contract.expectedTargets().isEmpty()) {
+            return select(registry, ToolSurfacePlanner::isFileReadTool, "expected target read");
+        }
+
+        boolean mutationAllowed = contract != null
+                && contract.mutationAllowed()
+                && phase == ExecutionPhase.APPLY;
+
+        if (mutationAllowed) {
+            return select(registry, ToolSurfacePlanner::isApplyOperation, "mutation apply surface");
+        }
+        return select(registry, ToolSurfacePlanner::isReadOnlyOperation, "read-only metadata surface");
+    }
+
+    public static List<String> defaultVisibleToolNames(TaskContract contract, ExecutionPhase phase) {
+        if (contract == null || contract.type() == TaskType.SMALL_TALK) return List.of();
+        if (contract.type() == TaskType.DIRECTORY_LISTING) return List.of("talos.list_dir");
+        if (contract.mutationAllowed() && phase == ExecutionPhase.APPLY) {
+            return List.of(
+                    "talos.edit_file",
+                    "talos.grep",
+                    "talos.list_dir",
+                    "talos.read_file",
+                    "talos.retrieve",
+                    "talos.write_file");
+        }
+        return List.of("talos.grep", "talos.list_dir", "talos.read_file", "talos.retrieve");
+    }
+
+    public static List<String> names(List<ToolSpec> specs) {
+        if (specs == null || specs.isEmpty()) return List.of();
+        return specs.stream()
+                .map(ToolSpec::name)
+                .sorted()
+                .toList();
+    }
+
+    private static Plan select(ToolRegistry registry, java.util.function.Predicate<ToolDescriptor> predicate,
+                               String reason) {
+        List<ToolSpec> specs = registry.descriptors().stream()
+                .filter(predicate)
+                .map(ToolSurfacePlanner::toSpec)
+                .toList();
+        return new Plan(specs, reason);
+    }
+
+    private static boolean isReadOnlyOperation(ToolDescriptor descriptor) {
+        ToolOperationMetadata metadata = metadata(descriptor);
+        return metadata != null
+                && metadata.riskLevel() != null
+                && !metadata.riskLevel().requiresApproval()
+                && !metadata.mutatesWorkspace()
+                && !metadata.destructive();
+    }
+
+    private static boolean isApplyOperation(ToolDescriptor descriptor) {
+        ToolOperationMetadata metadata = metadata(descriptor);
+        if (metadata == null) return false;
+        if (isReadOnlyOperation(descriptor)) return true;
+        return metadata.mutatesWorkspace()
+                && !metadata.destructive()
+                && metadata.riskLevel() == ToolRiskLevel.WRITE;
+    }
+
+    private static boolean isDirectoryListingTool(ToolDescriptor descriptor) {
+        ToolOperationMetadata metadata = metadata(descriptor);
+        if (metadata == null || metadata.capabilityKind() != CapabilityKind.INSPECT) return false;
+        return metadata.pathRoles().containsValue(ToolOperationMetadata.PathRole.TARGET_DIRECTORY);
+    }
+
+    private static boolean isFileReadTool(ToolDescriptor descriptor) {
+        ToolOperationMetadata metadata = metadata(descriptor);
+        if (metadata == null || metadata.capabilityKind() != CapabilityKind.INSPECT) return false;
+        return metadata.pathRoles().containsValue(ToolOperationMetadata.PathRole.TARGET_FILE);
+    }
+
+    private static ToolOperationMetadata metadata(ToolDescriptor descriptor) {
+        if (descriptor == null) return null;
+        ToolOperationMetadata metadata = descriptor.operationMetadata();
+        if (metadata != null) return metadata;
+        ToolRiskLevel risk = descriptor.riskLevel() == null
+                ? ToolRiskLevel.READ_ONLY
+                : descriptor.riskLevel();
+        return ToolOperationMetadata.defaultFor(descriptor.name(), risk);
+    }
+
+    private static ToolSpec toSpec(ToolDescriptor descriptor) {
+        return new ToolSpec(
+                descriptor.name(),
+                descriptor.description(),
+                descriptor.parametersSchema());
+    }
+
+    public record Plan(List<ToolSpec> nativeToolSpecs, String reason) {
+        public Plan {
+            nativeToolSpecs = List.copyOf(nativeToolSpecs == null ? List.of() : nativeToolSpecs);
+            reason = reason == null ? "" : reason;
+        }
+
+        public List<String> nativeToolNames() {
+            return names(nativeToolSpecs);
+        }
+    }
+}
