@@ -21,7 +21,11 @@ class MutationIntentTest {
                 "Rewrite scripts.js so the button works.",
                 "Can you make me a simple BMI calculator webpage here?",
                 "I am not technical, I just want a page I can open and use. Can you make it?",
-                "Can you fix the files in this folder for me?")) {
+                "Can you fix the files in this folder for me?",
+                "Move public.txt to archive/public.txt.",
+                "Copy docs/plan.md to docs/archive/plan.md.",
+                "Rename old.txt to new.txt.",
+                "Mkdir docs/reports.")) {
             assertTrue(MutationIntent.looksExplicitMutationRequest(input), input);
         }
     }

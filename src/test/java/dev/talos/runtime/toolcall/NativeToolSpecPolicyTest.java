@@ -10,6 +10,10 @@ import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
 import dev.talos.tools.impl.GrepTool;
 import dev.talos.tools.impl.ListDirTool;
+import dev.talos.tools.impl.MakeDirectoryTool;
+import dev.talos.tools.impl.MovePathTool;
+import dev.talos.tools.impl.CopyPathTool;
+import dev.talos.tools.impl.RenamePathTool;
 import dev.talos.tools.impl.ReadFileTool;
 import dev.talos.tools.impl.RetrieveTool;
 import org.junit.jupiter.api.Test;
@@ -148,6 +152,10 @@ class NativeToolSpecPolicyTest {
         assertTrue(names.contains("talos.read_file"));
         assertTrue(names.contains("talos.write_file"));
         assertTrue(names.contains("talos.edit_file"));
+        assertTrue(names.contains("talos.mkdir"));
+        assertTrue(names.contains("talos.move_path"));
+        assertTrue(names.contains("talos.copy_path"));
+        assertTrue(names.contains("talos.rename_path"));
     }
 
     @Test
@@ -161,6 +169,10 @@ class NativeToolSpecPolicyTest {
         assertTrue(names.contains("talos.read_file"));
         assertTrue(names.contains("talos.write_file"));
         assertTrue(names.contains("talos.edit_file"));
+        assertTrue(names.contains("talos.mkdir"));
+        assertTrue(names.contains("talos.move_path"));
+        assertTrue(names.contains("talos.copy_path"));
+        assertTrue(names.contains("talos.rename_path"));
     }
 
     @Test
@@ -184,6 +196,10 @@ class NativeToolSpecPolicyTest {
         registry.register(new RetrieveTool(null));
         registry.register(new FileWriteTool(undoStack));
         registry.register(new FileEditTool(undoStack));
+        registry.register(new MakeDirectoryTool());
+        registry.register(new MovePathTool());
+        registry.register(new CopyPathTool());
+        registry.register(new RenamePathTool());
         return registry;
     }
 

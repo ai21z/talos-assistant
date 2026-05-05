@@ -17,6 +17,10 @@ public final class ToolAliasPolicy {
             "talos.read_file",
             "talos.write_file",
             "talos.edit_file",
+            "talos.mkdir",
+            "talos.move_path",
+            "talos.copy_path",
+            "talos.rename_path",
             "talos.list_dir",
             "talos.grep",
             "talos.retrieve"
@@ -31,7 +35,11 @@ public final class ToolAliasPolicy {
 
     private static final Set<String> MUTATING_CANONICAL = Set.of(
             "talos.write_file",
-            "talos.edit_file"
+            "talos.edit_file",
+            "talos.mkdir",
+            "talos.move_path",
+            "talos.copy_path",
+            "talos.rename_path"
     );
 
     private static final Map<String, AliasTarget> ALIASES = aliases();
@@ -173,6 +181,14 @@ public final class ToolAliasPolicy {
                 "file_read", "read_file", "readfile");
         addAliases(out, BackendToolProfile.TALOS, "talos.edit_file",
                 "file_edit", "edit_file", "editfile");
+        addAliases(out, BackendToolProfile.TALOS, "talos.mkdir",
+                "mkdir", "make_dir", "make_directory", "create_dir", "create_directory");
+        addAliases(out, BackendToolProfile.TALOS, "talos.move_path",
+                "move_path", "move", "mv");
+        addAliases(out, BackendToolProfile.TALOS, "talos.copy_path",
+                "copy_path", "copy", "cp");
+        addAliases(out, BackendToolProfile.TALOS, "talos.rename_path",
+                "rename_path", "rename");
         addAliases(out, BackendToolProfile.TALOS, "talos.list_dir",
                 "list_dir", "list_directory", "dir_list", "ls", "listdir", "listdirectory");
         addAliases(out, BackendToolProfile.TALOS, "talos.grep",
@@ -189,6 +205,10 @@ public final class ToolAliasPolicy {
         addAliases(out, profile, "talos.write_file", namespace + ":write_file", namespace + ".write_file");
         addAliases(out, profile, "talos.read_file", namespace + ":read_file", namespace + ".read_file");
         addAliases(out, profile, "talos.edit_file", namespace + ":edit_file", namespace + ".edit_file");
+        addAliases(out, profile, "talos.mkdir", namespace + ":mkdir", namespace + ".mkdir");
+        addAliases(out, profile, "talos.move_path", namespace + ":move_path", namespace + ".move_path");
+        addAliases(out, profile, "talos.copy_path", namespace + ":copy_path", namespace + ".copy_path");
+        addAliases(out, profile, "talos.rename_path", namespace + ":rename_path", namespace + ".rename_path");
         addAliases(out, profile, "talos.list_dir", namespace + ":list_dir", namespace + ".list_dir");
         addAliases(out, profile, "talos.grep", namespace + ":grep", namespace + ".grep");
         addAliases(out, profile, "talos.retrieve", namespace + ":retrieve", namespace + ".retrieve");

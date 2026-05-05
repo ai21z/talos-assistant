@@ -26,15 +26,25 @@ public final class ToolCallSupport {
     private static final Set<String> MUTATING_TOOLS = Set.of(
             "write_file", "file_write", "writefile",
             "create_file", "file_create", "createfile",
-            "edit_file", "file_edit", "editfile"
+            "edit_file", "file_edit", "editfile",
+            "mkdir", "make_dir", "make_directory", "create_dir", "create_directory",
+            "move_path", "move", "mv",
+            "copy_path", "copy", "cp",
+            "rename_path", "rename"
     );
     private static final Set<String> PATH_REQUIRED_TOOLS = Set.of(
             "write_file", "file_write", "writefile",
             "create_file", "file_create", "createfile",
-            "edit_file", "file_edit", "editfile"
+            "edit_file", "file_edit", "editfile",
+            "mkdir", "make_dir", "make_directory", "create_dir", "create_directory",
+            "move_path", "move", "mv",
+            "copy_path", "copy", "cp",
+            "rename_path", "rename"
     );
     private static final List<String> PATH_PARAM_KEYS = List.of(
-            "path", "file_path", "filepath", "file", "filename"
+            "path", "file_path", "filepath", "file", "filename",
+            "from", "to", "source", "source_path", "destination", "destination_path",
+            "dir", "directory"
     );
 
     private ToolCallSupport() {}
@@ -274,7 +284,10 @@ public final class ToolCallSupport {
     }
 
     public static String resolvePathHint(ToolCall call) {
-        for (String key : List.of("path", "file_path", "filepath", "file", "filename", "dir", "pattern")) {
+        for (String key : List.of(
+                "path", "file_path", "filepath", "file", "filename",
+                "from", "to", "source", "source_path", "destination", "destination_path",
+                "dir", "directory", "pattern")) {
             String v = call.param(key);
             if (v != null && !v.isBlank()) return v;
         }

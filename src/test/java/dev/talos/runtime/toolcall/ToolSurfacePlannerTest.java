@@ -16,6 +16,10 @@ import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
 import dev.talos.tools.impl.GrepTool;
 import dev.talos.tools.impl.ListDirTool;
+import dev.talos.tools.impl.MakeDirectoryTool;
+import dev.talos.tools.impl.MovePathTool;
+import dev.talos.tools.impl.CopyPathTool;
+import dev.talos.tools.impl.RenamePathTool;
 import dev.talos.tools.impl.ReadFileTool;
 import dev.talos.tools.impl.RetrieveTool;
 import org.junit.jupiter.api.Test;
@@ -79,6 +83,10 @@ class ToolSurfacePlannerTest {
         assertTrue(names.contains("talos.retrieve"));
         assertTrue(names.contains("talos.write_file"));
         assertTrue(names.contains("talos.edit_file"));
+        assertTrue(names.contains("talos.mkdir"));
+        assertTrue(names.contains("talos.move_path"));
+        assertTrue(names.contains("talos.copy_path"));
+        assertTrue(names.contains("talos.rename_path"));
         assertFalse(names.contains("talos.metadata_delete"));
         assertEquals("mutation apply surface", plan.reason());
     }
@@ -145,8 +153,9 @@ class ToolSurfacePlannerTest {
                         ExecutionPhase.INSPECT));
 
         assertEquals(
-                List.of("talos.edit_file", "talos.grep", "talos.list_dir",
-                        "talos.read_file", "talos.retrieve", "talos.write_file"),
+                List.of("talos.copy_path", "talos.edit_file", "talos.grep", "talos.list_dir",
+                        "talos.mkdir", "talos.move_path", "talos.read_file", "talos.rename_path",
+                        "talos.retrieve", "talos.write_file"),
                 ToolSurfacePlanner.defaultVisibleToolNames(
                         TaskContractResolver.fromUserRequest("create a README.md file"),
                         ExecutionPhase.APPLY));
@@ -161,6 +170,10 @@ class ToolSurfacePlannerTest {
         registry.register(new RetrieveTool(null));
         registry.register(new FileWriteTool(undoStack));
         registry.register(new FileEditTool(undoStack));
+        registry.register(new MakeDirectoryTool());
+        registry.register(new MovePathTool());
+        registry.register(new CopyPathTool());
+        registry.register(new RenamePathTool());
         return registry;
     }
 

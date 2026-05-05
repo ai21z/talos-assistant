@@ -106,6 +106,7 @@ public final class ToolCallStreamFilter implements Consumer<String> {
     private static final Pattern INCOMPLETE_BARE_TOOL_JSON = Pattern.compile(
             "\"(?:name|function|tool_name|tool)\"\\s*:\\s*\"(?:talos[.:/_-])?"
                     + "(?:read_file|write_file|edit_file|list_dir|grep|retrieve|"
+                    + "mkdir|move_path|copy_path|rename_path|"
                     + "file_write|file_read|file_edit|list_directory|dir_list|ls|"
                     + "search|writefile|readfile|editfile|listdir|listdirectory|grepsearch)\"",
             Pattern.DOTALL | Pattern.CASE_INSENSITIVE

@@ -22,27 +22,31 @@ public final class DeclarativePermissionPolicy implements PermissionPolicy {
                     ResourceDecision.noPath());
         }
 
-        ResourceDecision resource = ProtectedPathPolicy.classify(request.workspace(), request.call());
+        java.util.List<ResourceDecision> resources = ProtectedPathPolicy.classifyAll(
+                request.workspace(), request.call());
+        ResourceDecision resource = primaryResource(resources);
         ToolRiskLevel risk = request.effectiveRisk();
 
-        if (resource.workspaceEscape()) {
+        ResourceDecision workspaceEscape = firstWorkspaceEscape(resources);
+        if (workspaceEscape != null) {
             return PermissionDecision.deny("WORKSPACE_ESCAPE",
                     "Permission policy denied the tool call because the target path escapes the workspace.",
-                    resource);
+                    workspaceEscape);
         }
 
-        if (risk.requiresApproval() && resource.protectedPath()) {
+        ResourceDecision protectedResource = firstProtectedPath(resources);
+        if (risk.requiresApproval() && protectedResource != null) {
             return PermissionDecision.deny("PROTECTED_PATH_DENY",
-                    "Permission policy denied mutation of protected path `" + resource.relativePath()
+                    "Permission policy denied mutation of protected path `" + protectedResource.relativePath()
                             + "`. No approval was requested and no file was changed.",
-                    resource);
+                    protectedResource);
         }
 
-        if (!risk.requiresApproval() && resource.protectedPath() && isSpecificReadTool(request.call().toolName())) {
+        if (!risk.requiresApproval() && protectedResource != null && isSpecificReadTool(request.call().toolName())) {
             return PermissionDecision.ask("PROTECTED_PATH_ASK",
                     "Permission policy requires approval before reading protected path `"
-                            + resource.relativePath() + "`.",
-                    resource,
+                            + protectedResource.relativePath() + "`.",
+                    protectedResource,
                     false);
         }
 
@@ -79,6 +83,30 @@ public final class DeclarativePermissionPolicy implements PermissionPolicy {
                 "Permission policy requires approval before running " + request.call().toolName() + ".",
                 resource,
                 rememberEligible);
+    }
+
+    private static ResourceDecision primaryResource(java.util.List<ResourceDecision> resources) {
+        if (resources == null || resources.isEmpty()) return ResourceDecision.noPath();
+        for (ResourceDecision resource : resources) {
+            if (resource != null && resource.hasPath()) return resource;
+        }
+        return resources.get(0) == null ? ResourceDecision.noPath() : resources.get(0);
+    }
+
+    private static ResourceDecision firstWorkspaceEscape(java.util.List<ResourceDecision> resources) {
+        if (resources == null) return null;
+        for (ResourceDecision resource : resources) {
+            if (resource != null && resource.workspaceEscape()) return resource;
+        }
+        return null;
+    }
+
+    private static ResourceDecision firstProtectedPath(java.util.List<ResourceDecision> resources) {
+        if (resources == null) return null;
+        for (ResourceDecision resource : resources) {
+            if (resource != null && resource.protectedPath()) return resource;
+        }
+        return null;
     }
 
     private static PermissionDecision explicitDecision(

@@ -306,4 +306,18 @@ class ToolRegistryTest {
 
         assertNull(registry.get("unknown_provider.write_file"));
     }
+
+    @Test
+    void workspaceOperationAliasesResolveToCanonicalTools() {
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new dev.talos.tools.impl.MakeDirectoryTool());
+        registry.register(new dev.talos.tools.impl.MovePathTool());
+        registry.register(new dev.talos.tools.impl.CopyPathTool());
+        registry.register(new dev.talos.tools.impl.RenamePathTool());
+
+        assertEquals("talos.mkdir", registry.get("mkdir").name());
+        assertEquals("talos.move_path", registry.get("mv").name());
+        assertEquals("talos.copy_path", registry.get("cp").name());
+        assertEquals("talos.rename_path", registry.get("rename").name());
+    }
 }

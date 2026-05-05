@@ -156,7 +156,11 @@ class TaskContractResolverTest {
     void rewriteAndReplaceRepairPhrasingBecomesMutationAllowedContract() {
         for (String input : List.of(
                 "Replace index.html with a corrected complete version.",
-                "Rewrite scripts.js so the button works.")) {
+                "Rewrite scripts.js so the button works.",
+                "Move public.txt to archive/public.txt.",
+                "Copy docs/plan.md to docs/archive/plan.md.",
+                "Rename old.txt to new.txt.",
+                "Mkdir docs/reports.")) {
             TaskContract contract = TaskContractResolver.fromUserRequest(input);
 
             assertEquals(TaskType.FILE_EDIT, contract.type(), input);

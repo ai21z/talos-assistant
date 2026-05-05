@@ -23,7 +23,7 @@ public final class MutationIntent {
     private static final String CORE_MUTATION_VERBS =
             "(edit|modify|change|update|fix|repair|overwrite|rewrite|replace|redesign|"
                     + "restyle|re-style|re-design|write|create|save|"
-                    + "apply|add|remove|delete|refactor|put|implement)";
+                    + "apply|add|remove|delete|move|copy|rename|mkdir|refactor|put|implement)";
 
     private static final String BUILD_ARTIFACT_VERBS =
             "(make|build|generate|set\\s+up|setup|scaffold)";
