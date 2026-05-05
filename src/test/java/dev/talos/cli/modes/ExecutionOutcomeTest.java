@@ -9,6 +9,7 @@ import dev.talos.runtime.outcome.TruthWarningType;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.verification.TaskVerificationStatus;
+import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolError;
 import org.junit.jupiter.api.Test;
@@ -808,6 +809,92 @@ class ExecutionOutcomeTest {
             assertEquals(MutationOutcomeStatus.SUCCEEDED, outcome.taskOutcome().mutationOutcome().status());
             assertEquals(TaskCompletionStatus.COMPLETED_UNVERIFIED, outcome.taskOutcome().completionStatus());
             assertEquals(0, outcome.taskOutcome().mutationOutcome().failed().size());
+            assertFalse(outcome.taskOutcome().hasWarning(TruthWarningType.PARTIAL_MUTATION));
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
+    void satisfiedWorkspaceOperationPostconditionsRecoverLaterDuplicateFailures() throws Exception {
+        Path ws = Files.createTempDirectory("talos-workspace-operation-duplicate-recovery-");
+        try {
+            Files.createDirectories(ws.resolve("docs/notes"));
+            Files.createDirectories(ws.resolve("scratch"));
+            Files.writeString(ws.resolve("README.md"), "# Fixture\n");
+            Files.writeString(ws.resolve("docs/notes/README-copy.md"), "# Fixture\n");
+            Files.writeString(ws.resolve("docs/tasks.md"), "todo\n");
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Organize these files using workspace operation tools only: copy README.md to "
+                            + "docs/notes/README-copy.md, move scratch/todo.md to docs/todo.md, "
+                            + "then rename docs/todo.md to tasks.md."));
+
+            WorkspaceOperationPlan copyPlan = WorkspaceOperationPlan.copyPath(
+                    "README.md",
+                    "docs/notes/README-copy.md",
+                    WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS,
+                    false);
+            WorkspaceOperationPlan movePlan = WorkspaceOperationPlan.movePath(
+                    "scratch/todo.md",
+                    "docs/todo.md",
+                    WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS);
+            WorkspaceOperationPlan renamePlan = WorkspaceOperationPlan.batch(
+                    WorkspaceOperationPlan.OperationKind.RENAME_PATH,
+                    List.of(
+                            WorkspaceOperationPlan.PathEffect.source(
+                                    "docs/todo.md", true, WorkspaceOperationPlan.OperationKind.RENAME_PATH),
+                            WorkspaceOperationPlan.PathEffect.destination(
+                                    "docs/tasks.md", true, WorkspaceOperationPlan.OperationKind.RENAME_PATH)),
+                    dev.talos.tools.ToolRiskLevel.WRITE,
+                    true,
+                    WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS,
+                    false,
+                    "Rename docs/todo.md to docs/tasks.md.",
+                    "Rename: docs/todo.md -> docs/tasks.md");
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Organized the workspace.", 2, 6,
+                    List.of(
+                            "talos.copy_path", "talos.move_path", "talos.rename_path",
+                            "talos.copy_path", "talos.move_path", "talos.rename_path"),
+                    List.of(), 3, 0, false, 3, List.of(),
+                    0, 0, 0, 0,
+                    List.of(
+                            workspaceOutcome("talos.copy_path", "docs/notes/README-copy.md", true,
+                                    "Copied README.md -> docs/notes/README-copy.md", "", "", copyPlan),
+                            workspaceOutcome("talos.move_path", "docs/todo.md", true,
+                                    "Moved scratch/todo.md -> docs/todo.md", "", "", movePlan),
+                            workspaceOutcome("talos.rename_path", "docs/tasks.md", true,
+                                    "Renamed docs/todo.md -> docs/tasks.md", "", "", renamePlan),
+                            workspaceOutcome("talos.copy_path", "docs/notes/README-copy.md", false,
+                                    "", "Destination already exists: docs/notes/README-copy.md.",
+                                    ToolError.INVALID_PARAMS, copyPlan),
+                            workspaceOutcome("talos.move_path", "docs/todo.md", false,
+                                    "", "Source not found: scratch/todo.md",
+                                    ToolError.NOT_FOUND, movePlan),
+                            workspaceOutcome("talos.rename_path", "docs/tasks.md", false,
+                                    "", "Source not found: docs/todo.md",
+                                    ToolError.NOT_FOUND, renamePlan)
+                    ));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "Organized the workspace.", messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+            assertFalse(outcome.partialMutation());
+            assertEquals(ExecutionOutcome.VerificationStatus.READBACK_ONLY, outcome.verificationStatus());
+            assertFalse(outcome.finalAnswer().startsWith(AssistantTurnExecutor.PARTIAL_MUTATION_ANNOTATION),
+                    outcome.finalAnswer());
+            assertEquals(MutationOutcomeStatus.SUCCEEDED, outcome.taskOutcome().mutationOutcome().status());
+            assertEquals(0, outcome.taskOutcome().mutationOutcome().failed().size());
+            assertEquals(TaskCompletionStatus.COMPLETED_UNVERIFIED, outcome.taskOutcome().completionStatus());
             assertFalse(outcome.taskOutcome().hasWarning(TruthWarningType.PARTIAL_MUTATION));
         } finally {
             try (var walk = Files.walk(ws)) {
@@ -2057,5 +2144,27 @@ class ExecutionOutcomeTest {
 
         assertFalse(outcome.finalAnswer().startsWith("[Evidence incomplete:"), outcome.finalAnswer());
         assertFalse(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+    }
+
+    private static ToolCallLoop.ToolOutcome workspaceOutcome(
+            String toolName,
+            String pathHint,
+            boolean success,
+            String summary,
+            String errorMessage,
+            String errorCode,
+            WorkspaceOperationPlan plan
+    ) {
+        return new ToolCallLoop.ToolOutcome(
+                toolName,
+                pathHint,
+                success,
+                true,
+                false,
+                summary,
+                errorMessage,
+                null,
+                errorCode,
+                plan);
     }
 }

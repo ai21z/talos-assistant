@@ -14,6 +14,7 @@ import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.verification.StaticTaskVerifier;
 import dev.talos.runtime.verification.WebDiagnosticIntent;
+import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequestControls;
@@ -658,18 +659,42 @@ public final class ToolCallRepromptStage {
         if (expectedTargets.isEmpty()) {
             return List.of();
         }
-        Set<String> successfullyMutated = new java.util.HashSet<>();
+        Set<String> satisfiedTargets = new java.util.HashSet<>();
         for (dev.talos.runtime.ToolCallLoop.ToolOutcome outcome : state.toolOutcomes) {
             if (outcome == null || !outcome.success() || !outcome.mutating()) continue;
-            String path = normalizeExpectedTargetKey(outcome.pathHint());
-            if (!path.isBlank()) successfullyMutated.add(path);
+            addSatisfiedExpectedTargetKeys(satisfiedTargets, outcome);
         }
         return expectedTargets.stream()
                 .map(ToolCallRepromptStage::normalizeExpectedTargetKey)
                 .filter(path -> !path.isBlank())
-                .filter(path -> !successfullyMutated.contains(path))
+                .filter(path -> !satisfiedTargets.contains(path))
                 .sorted()
                 .toList();
+    }
+
+    private static void addSatisfiedExpectedTargetKeys(
+            Set<String> satisfiedTargets,
+            dev.talos.runtime.ToolCallLoop.ToolOutcome outcome
+    ) {
+        if (satisfiedTargets == null || outcome == null) return;
+        WorkspaceOperationPlan plan = outcome.workspaceOperationPlan();
+        if (plan != null && !plan.pathEffects().isEmpty()) {
+            for (WorkspaceOperationPlan.PathEffect effect : plan.pathEffects()) {
+                addExpectedTargetPathKeys(satisfiedTargets, effect.path());
+            }
+            return;
+        }
+        addExpectedTargetPathKeys(satisfiedTargets, outcome.pathHint());
+    }
+
+    private static void addExpectedTargetPathKeys(Set<String> satisfiedTargets, String path) {
+        String normalized = normalizeExpectedTargetKey(path);
+        if (normalized.isBlank()) return;
+        satisfiedTargets.add(normalized);
+        int slash = normalized.lastIndexOf('/');
+        if (slash >= 0 && slash + 1 < normalized.length()) {
+            satisfiedTargets.add(normalized.substring(slash + 1));
+        }
     }
 
     private static String normalizeExpectedTargetKey(String path) {
