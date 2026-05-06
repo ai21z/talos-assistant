@@ -871,13 +871,24 @@ public final class StaticTaskVerifier {
     }
 
     public static WebDiagnostics currentWebDiagnostics(Path workspace, TaskContract contract) {
+        return currentWebDiagnostics(workspace, contract, Set.of());
+    }
+
+    public static WebDiagnostics currentWebDiagnostics(
+            Path workspace,
+            TaskContract contract,
+            Collection<String> targetHints
+    ) {
         List<String> primary = obviousPrimaryFiles(workspace);
+        if (!hasPrimaryWebSurface(primary)) {
+            primary = targetAwarePrimaryFiles(workspace, targetHints);
+        }
         if (!hasPrimaryWebSurface(primary)) {
             return new WebDiagnostics("", "", "", List.of(
                     "web coherence could not be checked because HTML, CSS, and JavaScript primary files were not all present."));
         }
         Path root = workspace.toAbsolutePath().normalize();
-        SelectorFacts facts = selectorFacts(root, primary, preferredWebTargetFiles(contract, Set.of()));
+        SelectorFacts facts = selectorFacts(root, primary, preferredWebTargetFiles(contract, targetHints));
         if (facts == null) {
             return new WebDiagnostics("", "", "", List.of(
                     "web coherence could not be checked because primary web files could not be read."));

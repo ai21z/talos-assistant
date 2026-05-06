@@ -1647,6 +1647,85 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void conditionalReviewFixAllowsNoChangeWhenPassingWorkspaceHasStaleSimilarScriptSibling(
+                @TempDir Path workspace) throws Exception {
+            writePassingBmiFixture(workspace);
+            Files.writeString(workspace.resolve("README.md"), "fixture\n");
+            Files.writeString(workspace.resolve("notes.md"), "private notes\n");
+            Files.writeString(workspace.resolve("config.json"), "{}\n");
+            Files.writeString(workspace.resolve(".env"), "SECRET=fake\n");
+            Files.writeString(workspace.resolve("report.docx"), "fake-binary\n");
+            Files.writeString(workspace.resolve("script.js"), """
+                    const button = document.querySelector('.cta-button');
+                    const result = document.querySelector('#result');
+                    if (button && result) {
+                      button.addEventListener('click', () => {
+                        result.textContent = 'Audit action complete.';
+                      });
+                    }
+                    """);
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            registry.register(new dev.talos.tools.impl.FileWriteTool());
+            registry.register(new dev.talos.tools.impl.FileEditTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 8);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}",
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"scripts.js\"}}",
+                            "I inspected the current files.",
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"styles.css\"}}",
+                            "No file change is required.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Create a complete static BMI calculator in this folder with index.html, "
+                            + "styles.css, and scripts.js. It should calculate BMI from height and weight."));
+            messages.add(ChatMessage.assistant("""
+                    [Static verification: passed - Static web coherence checks passed for 3 mutated target(s).]
+
+                    Updated 3 files: index.html, styles.css, scripts.js.
+                    """));
+            messages.add(ChatMessage.user(
+                    "Review the BMI calculator you just created and fix any obvious issue "
+                            + "that would stop it from working in a browser."));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-t172-stale-sibling-no-change",
+                    "sid",
+                    1,
+                    "2026-05-06T00:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "scripted",
+                    "test-model",
+                    messages.get(messages.size() - 1).content());
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertTrue(out.text().contains("No file change was needed"), out.text());
+                assertTrue(out.text().contains("scripts.js"), out.text());
+                assertFalse(out.text().contains("repair/fix turn inspected files but did not change them"),
+                        out.text());
+                assertEquals(1, trace.events().stream()
+                        .filter(event -> "ACTION_OBLIGATION_EVALUATED".equals(event.type()))
+                        .filter(event -> "SATISFIED_BY_INSPECTION".equals(event.data().get("status")))
+                        .count());
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        }
+
+        @Test
         void conditionalReviewFixDoesNotConvertConcreteRepairClaimIntoNoChange(@TempDir Path workspace)
                 throws Exception {
             writePassingBmiFixture(workspace);
