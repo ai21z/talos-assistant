@@ -134,6 +134,49 @@ class PromptDebugCommandTest {
         }
     }
 
+    @Test
+    void saveRedactsProtectedToolResultWhenCompatArgumentsAreJsonString() throws Exception {
+        PromptDebugCapture.record(protectedCompatJsonStringToolResultSnapshot());
+        PromptDebugCommand command = new PromptDebugCommand();
+
+        Result result = command.execute("save", ctx);
+
+        Result.TrustedInfo info = assertInstanceOf(Result.TrustedInfo.class, result);
+        Path providerBody = savedPath(info.text, "Saved provider body JSON to: ");
+        Path render = savedPath(info.text, "Saved prompt debug render to: ");
+        try {
+            String savedJson = Files.readString(providerBody);
+            assertTrue(savedJson.contains("[protected tool result redacted by prompt-debug policy]"), savedJson);
+            assertFalse(savedJson.contains("TALOS_T61E_LLAMA_CPP_SECRET=must-not-leak"), savedJson);
+            assertFalse(savedJson.contains("must-not-leak"), savedJson);
+            assertTrue(savedJson.contains("Public project notes."), savedJson);
+        } finally {
+            Files.deleteIfExists(providerBody);
+            Files.deleteIfExists(render);
+        }
+    }
+
+    @Test
+    void saveRedactsSecretLikeAssistantHistoryInProviderBody() throws Exception {
+        PromptDebugCapture.record(secretAssistantHistorySnapshot());
+        PromptDebugCommand command = new PromptDebugCommand();
+
+        Result result = command.execute("save", ctx);
+
+        Result.TrustedInfo info = assertInstanceOf(Result.TrustedInfo.class, result);
+        Path providerBody = savedPath(info.text, "Saved provider body JSON to: ");
+        Path render = savedPath(info.text, "Saved prompt debug render to: ");
+        try {
+            String savedJson = Files.readString(providerBody);
+            assertFalse(savedJson.contains("TALOS_T61E_LLAMA_CPP_SECRET=must-not-leak"), savedJson);
+            assertFalse(savedJson.contains("must-not-leak"), savedJson);
+            assertTrue(savedJson.contains("TALOS_T61E_LLAMA_CPP_SECRET=[redacted]"), savedJson);
+        } finally {
+            Files.deleteIfExists(providerBody);
+            Files.deleteIfExists(render);
+        }
+    }
+
     private static PromptDebugSnapshot protectedToolResultSnapshot() {
         var envCall = new ChatMessage.NativeToolCall(
                 "call-env",
@@ -164,6 +207,48 @@ class PromptDebugCommandTest {
                         ChatMessage.toolResult("call-env", "1 | SECRET=manual-test\n2 | MODE=dev\n"),
                         ChatMessage.toolResult("call-readme", "1 | Public project notes.\n")),
                 List.of(new ToolSpec("talos.read_file", "Read", "{}")),
+                ChatRequestControls.defaults(),
+                providerBody);
+    }
+
+    private static PromptDebugSnapshot protectedCompatJsonStringToolResultSnapshot() {
+        String providerBody = """
+                {"model":"gpt-oss-20b","messages":[
+                  {"role":"assistant","content":"","tool_calls":[
+                    {"id":"call-env","type":"function","function":{"name":"talos.read_file","arguments":"{\\\"path\\\":\\\".env\\\"}"}},
+                    {"id":"call-readme","type":"function","function":{"name":"talos.read_file","arguments":"{\\\"path\\\":\\\"README.md\\\"}"}}
+                  ]},
+                  {"role":"tool","tool_call_id":"call-env","content":"[tool_result: talos.read_file]\\n1 | TALOS_T61E_LLAMA_CPP_SECRET=must-not-leak\\n\\n[/tool_result]"},
+                  {"role":"tool","tool_call_id":"call-readme","content":"1 | Public project notes.\\n"}
+                ]}
+                """;
+        return new PromptDebugSnapshot(
+                "COMPAT_CHAT_HTTP_BODY",
+                "llama_cpp",
+                "gpt-oss-20b",
+                false,
+                null,
+                List.of(),
+                List.of(new ToolSpec("talos.read_file", "Read", "{}")),
+                ChatRequestControls.defaults(),
+                providerBody);
+    }
+
+    private static PromptDebugSnapshot secretAssistantHistorySnapshot() {
+        String providerBody = """
+                {"model":"gpt-oss-20b","messages":[
+                  {"role":"assistant","content":"The `.env` file contains:\\n\\n```\\nTALOS_T61E_LLAMA_CPP_SECRET=must-not-leak\\n```"},
+                  {"role":"user","content":"Please review README.md and do not inspect protected files."}
+                ]}
+                """;
+        return new PromptDebugSnapshot(
+                "COMPAT_CHAT_HTTP_BODY",
+                "llama_cpp",
+                "gpt-oss-20b",
+                false,
+                null,
+                List.of(),
+                List.of(),
                 ChatRequestControls.defaults(),
                 providerBody);
     }
