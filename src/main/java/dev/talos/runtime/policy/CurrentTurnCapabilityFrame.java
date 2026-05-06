@@ -78,7 +78,7 @@ public final class CurrentTurnCapabilityFrame {
                 .append("visibleTools: ").append(tools).append('\n')
                 .append("obligation: ").append(obligation.name()).append('\n')
                 .append("evidenceObligation: ").append(evidence.name()).append('\n');
-        appendExpectedTargets(frame, contract, mutationAllowed);
+        appendExpectedTargets(frame, contract, mutationAllowed, obligation);
         appendActiveTaskContext(frame, activeTaskContext, artifactGoal);
         appendTaskExpectations(frame, taskExpectations);
 
@@ -89,6 +89,12 @@ public final class CurrentTurnCapabilityFrame {
                     Runtime handles approval, permissions, checkpointing, and verification.
                     Do not say you lack filesystem or workspace access.
                     Do not provide manual snippets instead of acting unless a narrow clarification is genuinely required.""");
+            case CONDITIONAL_REVIEW_FIX -> frame.append("""
+                    This is a conditional review-and-fix turn.
+                    Inspect the relevant files first using read-only tools.
+                    Only call talos.write_file or talos.edit_file after evidence shows an obvious issue, or when you are applying a concrete repair.
+                    If inspection finds no current browser-blocking issue, say: No file change is required.
+                    Do not make a harmless or no-op edit just to satisfy mutation.""");
             case LIST_DIR_ONLY -> frame.append("""
                     This turn asks only for directory entries.
                     Use only talos.list_dir.
@@ -144,15 +150,24 @@ public final class CurrentTurnCapabilityFrame {
     private static void appendExpectedTargets(
             StringBuilder frame,
             TaskContract contract,
-            boolean mutationAllowed
+            boolean mutationAllowed,
+            ActionObligation obligation
     ) {
         if (!mutationAllowed || contract == null || contract.expectedTargets().isEmpty()) {
             return;
         }
         List<String> targets = orderedExpectedTargets(contract);
         frame.append("[ExpectedTargets]\n")
-                .append("requiredTargets: ").append(String.join(", ", targets)).append('\n')
-                .append("You must write or edit these exact target paths for this turn.\n")
+                .append("requiredTargets: ").append(String.join(", ", targets)).append('\n');
+        if (obligation == ActionObligation.CONDITIONAL_REVIEW_FIX) {
+            frame.append("Inspect these exact target paths when they are relevant to the review.\n")
+                    .append("If evidence shows a repair is needed, write or edit these exact target paths.\n")
+                    .append("Similar filenames are not substitutes for required target paths.\n")
+                    .append("script.js and scripts.js are different target paths; preserve the exact requested spelling.\n")
+                    .append("Do not complete a needed repair by mutating only a similar sibling filename.\n");
+            return;
+        }
+        frame.append("You must write or edit these exact target paths for this turn.\n")
                 .append("Similar filenames are not substitutes for required target paths.\n")
                 .append("script.js and scripts.js are different target paths; preserve the exact requested spelling.\n")
                 .append("Do not complete this turn by mutating only a similar sibling filename.\n");

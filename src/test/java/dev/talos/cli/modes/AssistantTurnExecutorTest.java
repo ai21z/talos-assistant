@@ -1647,6 +1647,43 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void conditionalReviewFixDoesNotConvertConcreteRepairClaimIntoNoChange(@TempDir Path workspace)
+                throws Exception {
+            writePassingBmiFixture(workspace);
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            registry.register(new dev.talos.tools.impl.FileWriteTool());
+            registry.register(new dev.talos.tools.impl.FileEditTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 8);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}",
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"styles.css\"}}",
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"scripts.js\"}}",
+                            "I found an obvious issue in scripts.js that needs to be fixed.",
+                            "I still will not edit files.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Review the BMI calculator you just created and fix any obvious issue "
+                            + "that would stop it from working in a browser."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains("[Action obligation failed:"), out.text());
+            assertFalse(out.text().contains("No file change was needed"), out.text());
+            assertTrue(Files.readString(workspace.resolve("scripts.js")).contains("weight / (height * height)"));
+        }
+
+        @Test
         void conditionalReviewFixStillRequiresMutationWhenCurrentStaticWebHasBlocker(@TempDir Path workspace)
                 throws Exception {
             writePassingBmiFixture(workspace);
@@ -1696,6 +1733,50 @@ class AssistantTurnExecutorTest {
             assertTrue(out.text().contains("[Action obligation failed:"), out.text());
             assertFalse(out.text().contains("No file change was needed"), out.text());
             assertTrue(Files.readString(workspace.resolve("index.html")).contains("script.js"));
+        }
+
+        @Test
+        void conditionalReviewFixCanInspectThenApplyConcreteRepair(@TempDir Path workspace)
+                throws Exception {
+            writePassingBmiFixture(workspace);
+            Files.writeString(workspace.resolve("scripts.js"), """
+                    const form = document.getElementById('bmi-form');
+                    const result = document.getElementById('result');
+                    form.addEventListener('submit', event => {
+                      event.preventDefault();
+                      result.textContent = 'BMI: pending';
+                    });
+                    """);
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            registry.register(new dev.talos.tools.impl.FileWriteTool());
+            registry.register(new dev.talos.tools.impl.FileEditTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 8);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"scripts.js\"}}",
+                            """
+                            {"name":"talos.edit_file","arguments":{"path":"scripts.js","old_string":"result.textContent = 'BMI: pending';","new_string":"const height = Number(document.getElementById('height').value) / 100;\\n  const weight = Number(document.getElementById('weight').value);\\n  const bmi = weight / (height * height);\\n  result.textContent = `BMI: ${bmi.toFixed(1)}`;"}}
+                            """)))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Review the BMI calculator you just created and fix any obvious issue "
+                            + "that would stop it from working in a browser."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertFalse(out.text().contains("[Action obligation failed:"), out.text());
+            assertTrue(Files.readString(workspace.resolve("scripts.js"))
+                    .contains("result.textContent = `BMI: ${bmi.toFixed(1)}`;"));
         }
 
         @Test
@@ -2873,7 +2954,7 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
-        void directReviewAndFixTurnGetsMutatingCurrentTurnCapabilityFrame() {
+        void directReviewAndFixTurnGetsConditionalCurrentTurnCapabilityFrame() {
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
             messages.add(ChatMessage.user(
@@ -2888,7 +2969,11 @@ class AssistantTurnExecutorTest {
             assertTrue(frame.content().contains("[CurrentTurnCapability]"), frame.content());
             assertTrue(frame.content().contains("type: FILE_EDIT"), frame.content());
             assertTrue(frame.content().contains("mutationAllowed: true"), frame.content());
-            assertTrue(frame.content().contains("obligation: MUTATING_TOOL_REQUIRED"), frame.content());
+            assertTrue(frame.content().contains("obligation: CONDITIONAL_REVIEW_FIX"), frame.content());
+            assertFalse(frame.content().contains("obligation: MUTATING_TOOL_REQUIRED"), frame.content());
+            assertTrue(frame.content().contains("Inspect the relevant files first"), frame.content());
+            assertTrue(frame.content().contains("Only call talos.write_file or talos.edit_file"), frame.content());
+            assertTrue(frame.content().contains("No file change is required"), frame.content());
             assertTrue(frame.content().contains("talos.write_file"), frame.content());
             assertTrue(frame.content().contains("talos.edit_file"), frame.content());
         }

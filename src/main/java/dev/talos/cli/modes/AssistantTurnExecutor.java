@@ -2718,7 +2718,7 @@ public final class AssistantTurnExecutor {
             return new MutationRetryResult(answer, 0, null);
         }
         Optional<String> conditionalNoChange = ConditionalReviewFixPolicy
-                .noChangeAnswerIfCurrentWorkspacePasses(retryContract, loopResult, workspace);
+                .noChangeAnswerIfCurrentWorkspacePasses(retryContract, loopResult, workspace, answer);
         if (conditionalNoChange.isPresent()) {
             return new MutationRetryResult(conditionalNoChange.get(), 0, null);
         }
@@ -2737,19 +2737,12 @@ public final class AssistantTurnExecutor {
                 obligation.name(),
                 "UNSATISFIED",
                 "model response had no write/edit tool calls");
-        messages.add(ChatMessage.assistant(ResponseObligationVerifier.retryFailureSummary(answer)));
+        messages.add(ChatMessage.assistant(ResponseObligationVerifier.retryFailureSummary(obligation, answer)));
         messages.add(ChatMessage.system(CurrentTurnCapabilityFrame.render(safePlan)));
-        messages.add(ChatMessage.user(
-                "The current-turn obligation was not satisfied: this turn has mutationAllowed=true "
-                + "and visible write/edit tools, but the previous response did not call talos.write_file "
-                + "or talos.edit_file. "
-                + mutationRetryRequestContext(userRequest, priorMutationRequest)
-                + "Call the appropriate write/edit tool NOW to perform the workspace change. "
-                + "Do not say you lack filesystem or workspace access; the runtime exposes file tools "
-                + "and handles approval, permissions, checkpointing, and verification. "
-                + "If you truly cannot (e.g., you do not know which file, or the "
-                + "content is impossible to produce), state exactly which file and why "
-                + "in one sentence. Do not ask further questions — act."));
+        messages.add(ChatMessage.user(mutationRetryInstruction(
+                obligation,
+                userRequest,
+                priorMutationRequest)));
 
         try {
             LlmClient.StreamResult retry = chatFull(ctx, messages);
@@ -2922,6 +2915,32 @@ public final class AssistantTurnExecutor {
         return "The user's request was:\n\n«"
                 + pinForRetryPrompt(userRequest)
                 + "»\n\n";
+    }
+
+    private static String mutationRetryInstruction(
+            ActionObligation obligation,
+            String userRequest,
+            String priorMutationRequest
+    ) {
+        if (obligation == ActionObligation.CONDITIONAL_REVIEW_FIX) {
+            return "The conditional review-and-fix obligation was not satisfied. "
+                    + mutationRetryRequestContext(userRequest, priorMutationRequest)
+                    + "If you have not inspected the relevant files yet, call read-only tools first. "
+                    + "If the evidence shows an obvious blocker, or your previous answer identified a "
+                    + "concrete repair, call the appropriate talos.write_file or talos.edit_file tool NOW "
+                    + "to apply the repair. If inspected evidence shows no blocker, answer that no file "
+                    + "change is required. Do not make a harmless or no-op edit just to satisfy mutation.";
+        }
+        return "The current-turn obligation was not satisfied: this turn has mutationAllowed=true "
+                + "and visible write/edit tools, but the previous response did not call talos.write_file "
+                + "or talos.edit_file. "
+                + mutationRetryRequestContext(userRequest, priorMutationRequest)
+                + "Call the appropriate write/edit tool NOW to perform the workspace change. "
+                + "Do not say you lack filesystem or workspace access; the runtime exposes file tools "
+                + "and handles approval, permissions, checkpointing, and verification. "
+                + "If you truly cannot (e.g., you do not know which file, or the "
+                + "content is impossible to produce), state exactly which file and why "
+                + "in one sentence. Do not ask further questions - act.";
     }
 
     private static boolean retryShouldReissuePriorMutationRequest(TaskContract retryContract) {

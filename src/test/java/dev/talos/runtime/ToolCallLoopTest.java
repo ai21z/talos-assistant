@@ -1734,7 +1734,7 @@ class ToolCallLoopTest {
                     .filter(event -> "REPAIR_INSPECTION_ONLY".equals(event.data().get("failureKind")))
                     .findFirst()
                     .orElseThrow();
-            assertEquals("MUTATING_TOOL_REQUIRED", breached.data().get("obligation"));
+            assertEquals("CONDITIONAL_REVIEW_FIX", breached.data().get("obligation"));
             assertEquals("FAILED", breached.data().get("status"));
         } finally {
             deleteRecursive(ws);

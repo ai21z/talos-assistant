@@ -36,7 +36,11 @@ public final class ProviderRequestControlPolicy {
         boolean require = false;
         List<String> tags = new ArrayList<>();
 
-        if ((action == ActionObligation.MUTATING_TOOL_REQUIRED
+        if (action == ActionObligation.CONDITIONAL_REVIEW_FIX
+                && (inspectionToolsVisible || mutatingToolsVisible)) {
+            require = true;
+            tags.add("action-obligation:" + action.name());
+        } else if ((action == ActionObligation.MUTATING_TOOL_REQUIRED
                 || action == ActionObligation.REPAIR_FROM_VERIFIER_FINDINGS)
                 && mutatingToolsVisible) {
             require = true;

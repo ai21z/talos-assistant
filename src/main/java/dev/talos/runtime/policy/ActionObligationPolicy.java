@@ -15,11 +15,19 @@ public final class ActionObligationPolicy {
             case DIRECTORY_LISTING -> ActionObligation.LIST_DIR_ONLY;
             case WORKSPACE_EXPLAIN, DIAGNOSE_ONLY -> ActionObligation.INSPECT_REQUIRED;
             case VERIFY_ONLY -> ActionObligation.VERIFY_FROM_EVIDENCE;
-            case FILE_CREATE, FILE_EDIT -> contract.mutationAllowed() && phase == ExecutionPhase.APPLY
-                    ? ActionObligation.MUTATING_TOOL_REQUIRED
-                    : ActionObligation.INSPECT_REQUIRED;
+            case FILE_CREATE, FILE_EDIT -> fileMutationObligation(contract, phase);
             case READ_ONLY_QA -> ActionObligation.NONE;
             case UNKNOWN -> ActionObligation.UNKNOWN;
         };
+    }
+
+    private static ActionObligation fileMutationObligation(TaskContract contract, ExecutionPhase phase) {
+        if (!contract.mutationAllowed() || phase != ExecutionPhase.APPLY) {
+            return ActionObligation.INSPECT_REQUIRED;
+        }
+        if ("explicit-review-and-fix-request".equals(contract.classificationReason())) {
+            return ActionObligation.CONDITIONAL_REVIEW_FIX;
+        }
+        return ActionObligation.MUTATING_TOOL_REQUIRED;
     }
 }
