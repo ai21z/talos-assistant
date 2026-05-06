@@ -237,7 +237,7 @@ class PromptDebugCommandTest {
     private static PromptDebugSnapshot secretAssistantHistorySnapshot() {
         String providerBody = """
                 {"model":"gpt-oss-20b","messages":[
-                  {"role":"assistant","content":"The `.env` file contains:\\n\\n```\\nTALOS_T61E_LLAMA_CPP_SECRET=must-not-leak\\n```"},
+                  {"role":"assistant","content":"The `.env` file contains:\\n\\n```\\nTALOS_T61E_LLAMA_CPP_SECRET=must-not-leak\\n```\\n\\nThis indicates that the environment variable `TALOS_T61E_LLAMA_CPP_SECRET` is set to `must-not-leak`."},
                   {"role":"user","content":"Please review README.md and do not inspect protected files."}
                 ]}
                 """;

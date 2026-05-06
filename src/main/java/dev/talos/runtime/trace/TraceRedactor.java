@@ -2,8 +2,10 @@ package dev.talos.runtime.trace;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.LinkedHashSet;
 import java.util.HexFormat;
 import java.util.Locale;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -61,15 +63,24 @@ public final class TraceRedactor {
     public static String redactSecretLikeAssignments(String text) {
         if (text == null || text.isBlank()) return text;
         Matcher matcher = SECRET_LIKE_ASSIGNMENT.matcher(text);
+        Set<String> values = new LinkedHashSet<>();
         StringBuilder out = new StringBuilder();
         while (matcher.find()) {
             String key = matcher.group(1);
             String rawValue = matcher.group(2);
+            String value = normalizedSecretValue(rawValue);
+            if (shouldRedactValueEcho(value)) {
+                values.add(value);
+            }
             String suffix = trailingSentencePunctuation(rawValue);
             matcher.appendReplacement(out, Matcher.quoteReplacement(key + "=[redacted]" + suffix));
         }
         matcher.appendTail(out);
-        return out.toString();
+        String redacted = out.toString();
+        for (String value : values) {
+            redacted = redacted.replace(value, "[redacted]");
+        }
+        return redacted;
     }
 
     public static boolean containsSecretLikeAssignment(String text) {
@@ -84,5 +95,30 @@ public final class TraceRedactor {
             return String.valueOf(last);
         }
         return "";
+    }
+
+    private static String normalizedSecretValue(String value) {
+        if (value == null) return "";
+        String normalized = value.strip();
+        if (normalized.length() >= 2) {
+            char first = normalized.charAt(0);
+            char last = normalized.charAt(normalized.length() - 1);
+            if ((first == '"' && last == '"') || (first == '\'' && last == '\'') || (first == '`' && last == '`')) {
+                normalized = normalized.substring(1, normalized.length() - 1);
+            }
+        }
+        if (normalized.length() >= 2) {
+            char last = normalized.charAt(normalized.length() - 1);
+            if (last == '.' || last == '!' || last == '?') {
+                normalized = normalized.substring(0, normalized.length() - 1);
+            }
+        }
+        return normalized;
+    }
+
+    private static boolean shouldRedactValueEcho(String value) {
+        return value != null
+                && value.length() >= 4
+                && !value.equalsIgnoreCase("[redacted]");
     }
 }

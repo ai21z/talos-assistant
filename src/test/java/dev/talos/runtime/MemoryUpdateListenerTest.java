@@ -156,6 +156,8 @@ class MemoryUpdateListenerTest {
                 ```
                 TALOS_T61E_LLAMA_CPP_SECRET=must-not-leak
                 ```
+
+                This indicates that the environment variable `TALOS_T61E_LLAMA_CPP_SECRET` is set to `must-not-leak`.
                 """;
 
         listener.onTurnComplete(tr(new Result.Streamed(answer, ""), 1),
