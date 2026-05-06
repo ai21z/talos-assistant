@@ -1,6 +1,7 @@
 package dev.talos.runtime;
 
 import dev.talos.cli.repl.Result;
+import dev.talos.cli.repl.SessionMemory;
 import dev.talos.core.context.ConversationManager;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.trace.TraceRedactor;
@@ -30,6 +31,7 @@ public final class MemoryUpdateListener implements SessionListener {
 
     private final ConversationManager conversationManager;
     private final LlmClient llm;
+    private final SessionMemory memory;
     private volatile boolean assistMode;
 
     /**
@@ -37,13 +39,18 @@ public final class MemoryUpdateListener implements SessionListener {
      * @param llm                 the LLM client for compaction calls (may be null to disable compaction)
      */
     public MemoryUpdateListener(ConversationManager conversationManager, LlmClient llm) {
+        this(conversationManager, llm, null);
+    }
+
+    public MemoryUpdateListener(ConversationManager conversationManager, LlmClient llm, SessionMemory memory) {
         this.conversationManager = conversationManager;
         this.llm = llm;
+        this.memory = memory;
     }
 
     /** Constructor without LLM — compaction is disabled. */
     public MemoryUpdateListener(ConversationManager conversationManager) {
-        this(conversationManager, null);
+        this(conversationManager, null, null);
     }
 
     /**
@@ -59,6 +66,9 @@ public final class MemoryUpdateListener implements SessionListener {
     @Override
     public void onTurnComplete(TurnResult result, String userInput) {
         if (result == null || userInput == null || userInput.isBlank()) return;
+        if (memory != null) {
+            memory.recordToolEvidence(result.turnNumber(), result.audit().toolCalls());
+        }
 
         String answer = extractText(result.result());
         if (answer != null && !answer.isBlank()) {

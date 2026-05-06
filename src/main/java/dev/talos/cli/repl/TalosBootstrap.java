@@ -326,7 +326,7 @@ public final class TalosBootstrap {
                 .build();
 
         // ── Post-turn hooks ──────────────────────────────────────────────
-        var memoryListener = new MemoryUpdateListener(conversationManager, llm);
+        var memoryListener = new MemoryUpdateListener(conversationManager, llm, memory);
         // Auto mode routes to UnifiedAssistantMode by default — use the larger
         // assist-mode compaction budget (55%, 10-pair threshold) to prevent
         // premature context loss during multi-turn editing sessions.

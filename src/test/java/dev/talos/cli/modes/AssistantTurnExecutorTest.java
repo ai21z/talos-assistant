@@ -230,6 +230,75 @@ class AssistantTurnExecutorTest {
     }
 
     @Test
+    void metaEvidenceReadQuestionAnswersFromRuntimeEvidenceWithoutReadingFile(@TempDir Path workspace)
+            throws Exception {
+        Files.writeString(workspace.resolve("notes.md"), "PRIVATE-MARKER-SHOULD-NOT-BE-READ\n");
+        var registry = new dev.talos.tools.ToolRegistry();
+        registry.register(new dev.talos.tools.impl.ReadFileTool());
+        var processor = new dev.talos.runtime.TurnProcessor(
+                null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+        var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+        SessionMemory memory = new SessionMemory();
+        var ctx = Context.builder(new Config())
+                .memory(memory)
+                .llm(LlmClient.scripted(List.of(
+                        "I will answer confidently without evidence.",
+                        "I read notes.md.")))
+                .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                .toolRegistry(registry)
+                .toolCallLoop(loop)
+                .build();
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("system"));
+        messages.add(ChatMessage.user("Did you read notes.md?"));
+
+        TurnAuditCapture.begin();
+        try {
+            AssistantTurnExecutor.TurnOutput output = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+            var audit = TurnAuditCapture.end();
+
+            assertTrue(output.text().startsWith("No."), output.text());
+            assertTrue(output.text().contains("no runtime evidence"), output.text());
+            assertFalse(output.text().contains("PRIVATE-MARKER-SHOULD-NOT-BE-READ"), output.text());
+            assertTrue(audit.toolCalls().isEmpty(), audit.toolCalls().toString());
+        } finally {
+            if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
+        }
+    }
+
+    @Test
+    void metaEvidenceReadQuestionCanAnswerYesFromPriorRuntimeEvidence(@TempDir Path workspace)
+            throws Exception {
+        Files.writeString(workspace.resolve("notes.md"), "Prior evidence fixture.\n");
+        SessionMemory memory = new SessionMemory();
+        memory.recordToolEvidence(7, List.of(
+                new dev.talos.runtime.TurnRecord.ToolCallSummary("talos.read_file", "notes.md", true)));
+        var ctx = Context.builder(new Config())
+                .memory(memory)
+                .llm(LlmClient.scripted("This model response should not be used."))
+                .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                .build();
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("system"));
+        messages.add(ChatMessage.user(
+                "Did you read notes.md after edits earlier in this session? Answer yes or no."));
+
+        TurnAuditCapture.begin();
+        try {
+            AssistantTurnExecutor.TurnOutput output = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+            var audit = TurnAuditCapture.end();
+
+            assertTrue(output.text().startsWith("Yes."), output.text());
+            assertTrue(output.text().contains("runtime evidence"), output.text());
+            assertTrue(audit.toolCalls().isEmpty(), audit.toolCalls().toString());
+        } finally {
+            if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
+        }
+    }
+
+    @Test
     void deicticApplyUsesActiveProposalContextForToolSurfaceAndPromptAudit(@TempDir Path workspace)
             throws Exception {
         Files.writeString(workspace.resolve("README.md"), "# Old title\n");

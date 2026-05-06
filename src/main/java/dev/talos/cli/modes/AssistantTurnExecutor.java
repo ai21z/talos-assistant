@@ -2,6 +2,7 @@ package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.DebugLevel;
+import dev.talos.cli.repl.SessionMemory;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.MutationIntent;
 import dev.talos.runtime.ToolCallLoop;
@@ -1337,11 +1338,103 @@ public final class AssistantTurnExecutor {
                 && looksLikeAssistantCapabilityTurn(userRequest)) {
             return CapabilityAnswerPolicy.capabilityAnswer();
         }
+        String runtimeMetaEvidence = runtimeMetaEvidenceAnswerIfNeeded(ctx, userRequest, contract);
+        if (runtimeMetaEvidence != null) {
+            return runtimeMetaEvidence;
+        }
         String runtimeChangeSummary = runtimeChangeSummaryIfNeeded(ctx, userRequest);
         if (runtimeChangeSummary != null) {
             return runtimeChangeSummary;
         }
         return verifiedFollowUpSummaryIfNeeded(messages, userRequest);
+    }
+
+    private static String runtimeMetaEvidenceAnswerIfNeeded(
+            Context ctx,
+            String userRequest,
+            TaskContract contract
+    ) {
+        if (contract == null || !"session-meta-evidence-question".equals(contract.classificationReason())) {
+            return null;
+        }
+        if (contract.expectedTargets().isEmpty()) return null;
+        SessionEvidenceKind kind = sessionEvidenceKind(userRequest);
+        if (kind == SessionEvidenceKind.UNKNOWN) return null;
+
+        List<SessionMemory.ToolEvidence> evidence = ctx == null || ctx.memory() == null
+                ? List.of()
+                : ctx.memory().toolEvidence();
+        List<String> targets = contract.expectedTargets().stream()
+                .filter(target -> target != null && !target.isBlank())
+                .sorted()
+                .toList();
+        if (targets.isEmpty()) return null;
+
+        List<String> matched = targets.stream()
+                .filter(target -> hasMatchingRuntimeEvidence(evidence, target, kind))
+                .toList();
+        String targetText = String.join(", ", targets);
+        String action = sessionEvidenceActionText(kind);
+        if (matched.size() == targets.size()) {
+            return "Yes. Talos has runtime evidence that it " + action + " " + targetText
+                    + " earlier in this session.";
+        }
+        return "No. Talos has no runtime evidence that it " + action + " " + targetText
+                + " earlier in this session.";
+    }
+
+    private enum SessionEvidenceKind {
+        READ,
+        MUTATE,
+        UNKNOWN
+    }
+
+    private static SessionEvidenceKind sessionEvidenceKind(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return SessionEvidenceKind.UNKNOWN;
+        String lower = userRequest.toLowerCase(Locale.ROOT);
+        if (lower.contains("did you read")
+                || lower.contains("have you read")
+                || lower.contains("has talos read")
+                || lower.contains("did talos read")
+                || lower.contains("did you open")
+                || lower.contains("did you inspect")
+                || lower.contains("has talos opened")
+                || lower.contains("has talos inspected")) {
+            return SessionEvidenceKind.READ;
+        }
+        if (lower.contains("write")
+                || lower.contains("edit")
+                || lower.contains("change")
+                || lower.contains("modify")
+                || lower.contains("update")) {
+            return SessionEvidenceKind.MUTATE;
+        }
+        return SessionEvidenceKind.UNKNOWN;
+    }
+
+    private static boolean hasMatchingRuntimeEvidence(
+            List<SessionMemory.ToolEvidence> evidence,
+            String target,
+            SessionEvidenceKind kind
+    ) {
+        if (evidence == null || evidence.isEmpty() || target == null || target.isBlank()) return false;
+        String normalizedTarget = ToolCallSupport.normalizePath(target);
+        for (SessionMemory.ToolEvidence item : evidence) {
+            if (item == null || !item.success()) continue;
+            if (!normalizedTarget.equals(ToolCallSupport.normalizePath(item.pathHint()))) continue;
+            String toolName = canonicalToolName(item.toolName());
+            if (kind == SessionEvidenceKind.READ && "talos.read_file".equals(toolName)) return true;
+            if (kind == SessionEvidenceKind.MUTATE && ToolCallSupport.isMutatingTool(toolName)) return true;
+        }
+        return false;
+    }
+
+    private static String sessionEvidenceActionText(SessionEvidenceKind kind) {
+        return switch (kind) {
+            case READ -> "read";
+            case MUTATE -> "mutated";
+            case UNKNOWN -> "used";
+        };
     }
 
     private static String runtimeChangeSummaryIfNeeded(Context ctx, String userRequest) {

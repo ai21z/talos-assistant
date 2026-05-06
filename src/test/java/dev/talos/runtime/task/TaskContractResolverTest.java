@@ -904,6 +904,36 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void metaEvidenceReadQuestionBecomesVerifyOnlyInsteadOfReadTarget() {
+        for (String input : List.of(
+                "Based only on verified evidence from this session, did you read notes.md? "
+                        + "Answer yes or no and one sentence.",
+                "Did you read notes.md?")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertEquals(TaskType.VERIFY_ONLY, contract.type(), input);
+            assertFalse(contract.mutationRequested(), input);
+            assertFalse(contract.mutationAllowed(), input);
+            assertTrue(contract.verificationRequired(), input);
+            assertEquals(Set.of("notes.md"), contract.expectedTargets(), input);
+            assertEquals("session-meta-evidence-question", contract.classificationReason(), input);
+        }
+    }
+
+    @Test
+    void metaEvidenceReadQuestionDoesNotStealExplicitCurrentReadRequests() {
+        for (String input : List.of(
+                "If you have not read notes.md after edits, read it now and summarize it.",
+                "Did you read notes.md and summarize it?")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertEquals(TaskType.READ_ONLY_QA, contract.type(), input);
+            assertFalse(contract.mutationAllowed(), input);
+            assertEquals(Set.of("notes.md"), contract.expectedTargets(), input);
+        }
+    }
+
+    @Test
     void nullOrBlankInputIsUnknown() {
         List<String> inputs = List.of("", "   ");
         for (String input : inputs) {
