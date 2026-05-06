@@ -173,10 +173,21 @@ class OutcomeDominancePolicyTest {
     }
 
     @Test
-    void verificationRequiredReadOnlyCannotCompleteWhenVerifierDidNotRun() {
+    void verificationRequiredReadOnlyWithEvidenceIsReadOnlyAnsweredWhenPostApplyVerifierDidNotRun() {
         var decision = decide(verifyOnlyContract(),
                 false, false, false, false, false,
                 false, false, false, false, false,
+                ExecutionOutcome.VerificationStatus.NOT_RUN);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, decision.completionStatus());
+        assertEquals(TaskCompletionStatus.READ_ONLY_ANSWERED, decision.taskCompletionStatus());
+    }
+
+    @Test
+    void verificationRequiredReadOnlyWithMissingEvidenceStaysAdvisory() {
+        var decision = decide(verifyOnlyContract(),
+                false, false, false, false, false,
+                false, false, false, false, true,
                 ExecutionOutcome.VerificationStatus.NOT_RUN);
 
         assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, decision.completionStatus());

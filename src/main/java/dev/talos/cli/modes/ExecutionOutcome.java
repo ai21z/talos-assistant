@@ -300,9 +300,6 @@ record ExecutionOutcome(
         CompletionStatus completionStatus = preVerificationDecision.completionStatus();
         if (missingEvidence && completionStatus == CompletionStatus.ADVISORY_ONLY) {
             current = missingEvidencePrefix(current);
-            if (verificationRequiredButNotRun(contract, VerificationStatus.NOT_RUN)) {
-                current = verificationNotRunSuffix(current);
-            }
         }
 
         TaskVerificationResult taskVerification = workspace != null && shouldVerifyPostApply(
@@ -357,11 +354,6 @@ record ExecutionOutcome(
                 approvedProtectedReadPostcondition,
                 verificationStatus);
         completionStatus = finalDecision.completionStatus();
-        if (!missingEvidence
-                && verificationRequiredButNotRun(contract, verificationStatus)
-                && completionStatus == CompletionStatus.ADVISORY_ONLY) {
-            current = verificationNotRunPrefix(current);
-        }
         TaskOutcome taskOutcome = new TaskOutcome(
                 contract,
                 finalDecision.taskCompletionStatus(),
@@ -530,9 +522,6 @@ record ExecutionOutcome(
         CompletionStatus completionStatus = decision.completionStatus();
         if (missingEvidence && completionStatus == CompletionStatus.ADVISORY_ONLY) {
             shaped = missingEvidencePrefix(shaped);
-            if (verificationRequiredButNotRun(safePlan.taskContract(), VerificationStatus.NOT_RUN)) {
-                shaped = verificationNotRunSuffix(shaped);
-            }
         }
         advisoryOnly = completionStatus == CompletionStatus.ADVISORY_ONLY;
         TaskVerificationResult verification = TaskVerificationResult.notRun("Post-apply verification was not applicable.");
@@ -1300,42 +1289,6 @@ record ExecutionOutcome(
         return "talos.read_file was attempted for the protected target, but protected content "
                 + "was not returned successfully. No protected content was read from this turn."
                 + targetSentence(plan);
-    }
-
-    private static boolean verificationRequiredButNotRun(
-            TaskContract contract,
-            VerificationStatus verificationStatus
-    ) {
-        return contract != null
-                && contract.verificationRequired()
-                && !contract.mutationRequested()
-                && verificationStatus == VerificationStatus.NOT_RUN;
-    }
-
-    private static String verificationNotRunPrefix(String answer) {
-        String current = answer == null ? "" : answer;
-        String prefix = verificationNotRunNote();
-        if (current.startsWith(prefix)) {
-            return current;
-        }
-        return prefix + "\n\n" + current;
-    }
-
-    private static String verificationNotRunSuffix(String answer) {
-        String current = answer == null ? "" : answer;
-        String note = verificationNotRunNote();
-        if (current.contains(note)) {
-            return current;
-        }
-        if (current.isBlank()) {
-            return note;
-        }
-        return current + "\n\n" + note;
-    }
-
-    private static String verificationNotRunNote() {
-        return "[Task not verified: verification was required for this turn, "
-                + "but no task verifier ran.]";
     }
 
     private static String staticVerificationPassedAnnotation(TaskVerificationResult result) {
