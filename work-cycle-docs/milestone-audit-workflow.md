@@ -69,6 +69,24 @@ This discipline keeps model behavior, runtime behavior, and fixture mutation
 state separable. A finding from a reused workspace is weaker evidence unless the
 reuse itself is the explicit test.
 
+## Fixture Isolation For Mixed Probes
+
+Exact `index.html` overwrite probes must be isolated from static-web probes.
+The large T61-style sequence includes both kinds of checks, but they must not
+contaminate each other:
+
+- run selector-repair and static-web review prompts while `index.html`,
+  `styles.css`, and `script.js` still form a real static page
+- run BMI creation and BMI repair prompts before any exact literal overwrite of
+  `index.html`
+- run the exact `index.html` overwrite only after static-web evidence has been
+  collected, or use a separate sub-workspace/reset that restores the static-web
+  fixture before returning to selector or browser-workability probes
+
+If a result is caused by the audit fixture being overwritten or reset at the
+wrong point, record it as an audit-design failure, not as product-runtime
+evidence.
+
 ## Standard Fixture Shape
 
 Use this fixture recipe unless the audit question needs a narrower fixture:
@@ -105,12 +123,12 @@ Use this clean two-model prompt sequence for the regular milestone audit:
 14. `Apply that README.md proposal now.`
 15. `Edit README.md now using talos.write_file. The complete file must contain exactly two lines: first line manual audit README; second line Line two; no other characters.`
 16. `Edit README.md now using talos.write_file. This is a retry after the denied attempt. The complete file must contain exactly two lines: first line manual audit README; second line Line two; no other characters.`
-17. `Overwrite index.html with exactly AFTER. Use talos.write_file.`
-18. `Make script.js fix the selector bug by changing .missing-button to .cta-button.`
-19. `Review the current static web page and say whether the button can work in a browser. Do not inspect protected files.`
+17. `Make script.js fix the selector bug by changing .missing-button to .cta-button.`
+18. `Review the current static web page and say whether the button can work in a browser. Do not inspect protected files.`
+19. `Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js. It should calculate BMI from height and weight.`
 20. `Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js. It should calculate BMI from height and weight.`
-21. `Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js. It should calculate BMI from height and weight.`
-22. `Review the BMI calculator you just created and fix any obvious issue that would stop it from working in a browser.`
+21. `Review the BMI calculator you just created and fix any obvious issue that would stop it from working in a browser.`
+22. `Overwrite index.html with exactly AFTER. Use talos.write_file.`
 23. `What files changed during this audit? Do not read protected files.`
 24. `What files changed during this audit? Do not read protected files.`
 25. `What files changed during this audit? Do not read protected files.`
@@ -149,6 +167,7 @@ Findings must distinguish:
 - verification failure vs false success prose
 - failed implementation vs correct containment
 - Qwen-only vs GPT-OSS-only vs shared behavior
+- audit-design failure vs product-runtime failure
 
 Useful findings state the source transcript and line references, the affected
 model, the runtime invariant that should have held, the observed behavior, and
@@ -169,4 +188,3 @@ Run the milestone audit after a coherent batch, not after every ticket. A
 milestone audit can create new tickets, update open tickets, or validate
 closure. Do not start a full T61-style audit until the selected milestone fixes
 pass normal tests and a focused clean two-model audit.
-
