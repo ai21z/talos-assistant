@@ -2483,13 +2483,18 @@ public final class AssistantTurnExecutor {
         out.append("[Approval blocked: protected content was not read]\n\n")
                 .append("Protected content was not read because approval was denied for:\n");
         for (ToolCallLoop.ToolOutcome outcome : deniedProtectedReads) {
+            String path = canonicalDisplayPath(outcome.pathHint());
             out.append("- ")
-                    .append(outcome.pathHint().isBlank() ? outcome.toolName() : outcome.pathHint())
+                    .append(path.isBlank() ? outcome.toolName() : path)
                     .append(": approval denied\n");
         }
         out.append("\nNo protected file content was shown. ")
                 .append("Approve the protected read if you want Talos to inspect it.");
         return out.toString().stripTrailing();
+    }
+
+    private static String canonicalDisplayPath(String pathHint) {
+        return pathHint == null ? "" : pathHint.strip().replace('\\', '/');
     }
 
     private static boolean isDeniedProtectedReadOutcome(ToolCallLoop.ToolOutcome outcome) {

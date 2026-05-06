@@ -4258,6 +4258,27 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void deniedProtectedReadSummaryCanonicalizesDisplayPath() {
+            var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                    "raw secret prose", 1, 1,
+                    List.of("talos.read_file"), List.of(),
+                    1, 0, false, 0, List.of(),
+                    0, 0, 0, 0,
+                    List.of(new dev.talos.runtime.ToolCallLoop.ToolOutcome(
+                            "talos.read_file", " .env", false, false, true,
+                            "", "User did not approve the talos.read_file call.",
+                            null, dev.talos.tools.ToolError.DENIED
+                    )));
+
+            String answer = AssistantTurnExecutor.summarizeDeniedProtectedReadOutcomesIfNeeded(
+                    "raw secret prose", loopResult);
+
+            assertTrue(answer.contains("- .env: approval denied"), answer);
+            assertFalse(answer.contains("-  .env"), answer);
+            assertFalse(answer.contains("raw secret prose"), answer);
+        }
+
+        @Test
         void mutationRetryDoesNotFireAfterInvalidMutatingArgs() {
             var registry = new dev.talos.tools.ToolRegistry();
             var processor = new dev.talos.runtime.TurnProcessor(
