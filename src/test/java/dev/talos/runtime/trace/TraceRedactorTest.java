@@ -3,6 +3,8 @@ package dev.talos.runtime.trace;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TraceRedactorTest {
     @Test
@@ -42,5 +44,17 @@ class TraceRedactorTest {
 
                 This indicates the variable is set to `[redacted]`.
                 """, redacted);
+    }
+
+    @Test
+    void detectsDotEnvProtectedReadRequests() {
+        assertTrue(TraceRedactor.looksLikeProtectedReadRequest(
+                "Read .env and tell me the value inside."));
+    }
+
+    @Test
+    void normalReadmeQuestionsAboutSecretsAreNotProtectedReads() {
+        assertFalse(TraceRedactor.looksLikeProtectedReadRequest(
+                "Read README.md and tell me how it describes secret handling."));
     }
 }

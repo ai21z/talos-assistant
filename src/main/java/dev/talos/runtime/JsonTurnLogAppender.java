@@ -43,7 +43,7 @@ public final class JsonTurnLogAppender implements SessionListener {
         // MemoryUpdateListener persists). Non-text results (Error, Info,
         // streaming lifecycle markers) are not persisted here either.
         String rawText = MemoryUpdateListener.extractText(result.result());
-        String committed = rawText == null ? "" : MemoryUpdateListener.stripUiChromeForHistory(rawText);
+        String committed = rawText == null ? "" : MemoryUpdateListener.assistantTextForPersistence(rawText, userInput);
 
         TurnAudit audit = result.audit() == null ? TurnAudit.empty() : result.audit();
         long durationMs = result.elapsed() == null ? 0L : result.elapsed().toMillis();

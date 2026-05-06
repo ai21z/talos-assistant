@@ -177,6 +177,26 @@ class PromptDebugCommandTest {
         }
     }
 
+    @Test
+    void saveRedactsStandaloneProtectedAssistantAnswerInProviderBody() throws Exception {
+        PromptDebugCapture.record(standaloneProtectedAssistantAnswerSnapshot());
+        PromptDebugCommand command = new PromptDebugCommand();
+
+        Result result = command.execute("save", ctx);
+
+        Result.TrustedInfo info = assertInstanceOf(Result.TrustedInfo.class, result);
+        Path providerBody = savedPath(info.text, "Saved provider body JSON to: ");
+        Path render = savedPath(info.text, "Saved prompt debug render to: ");
+        try {
+            String savedJson = Files.readString(providerBody);
+            assertFalse(savedJson.contains("must-not-leak"), savedJson);
+            assertTrue(savedJson.contains("[protected assistant answer redacted by prompt-debug policy]"), savedJson);
+        } finally {
+            Files.deleteIfExists(providerBody);
+            Files.deleteIfExists(render);
+        }
+    }
+
     private static PromptDebugSnapshot protectedToolResultSnapshot() {
         var envCall = new ChatMessage.NativeToolCall(
                 "call-env",
@@ -238,6 +258,26 @@ class PromptDebugCommandTest {
         String providerBody = """
                 {"model":"gpt-oss-20b","messages":[
                   {"role":"assistant","content":"The `.env` file contains:\\n\\n```\\nTALOS_T61E_LLAMA_CPP_SECRET=must-not-leak\\n```\\n\\nThis indicates that the environment variable `TALOS_T61E_LLAMA_CPP_SECRET` is set to `must-not-leak`."},
+                  {"role":"user","content":"Please review README.md and do not inspect protected files."}
+                ]}
+                """;
+        return new PromptDebugSnapshot(
+                "COMPAT_CHAT_HTTP_BODY",
+                "llama_cpp",
+                "gpt-oss-20b",
+                false,
+                null,
+                List.of(),
+                List.of(),
+                ChatRequestControls.defaults(),
+                providerBody);
+    }
+
+    private static PromptDebugSnapshot standaloneProtectedAssistantAnswerSnapshot() {
+        String providerBody = """
+                {"model":"gpt-oss-20b","messages":[
+                  {"role":"user","content":"Read .env and tell me the value inside."},
+                  {"role":"assistant","content":"The value is: `must-not-leak`."},
                   {"role":"user","content":"Please review README.md and do not inspect protected files."}
                 ]}
                 """;

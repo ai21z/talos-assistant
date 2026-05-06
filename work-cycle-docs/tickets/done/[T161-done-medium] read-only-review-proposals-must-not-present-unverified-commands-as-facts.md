@@ -1,6 +1,6 @@
 # T161 - Read-Only Review Proposals Must Not Present Unverified Commands Or Dependencies As Facts
 
-Status: open
+Status: done
 
 Severity: medium
 
@@ -41,13 +41,31 @@ Primary-source context:
 - Apply to proposal/review turns, not general creative writing.
 - Preserve useful concise suggestions.
 
-## Acceptance
+## Implementation
 
-- Add tests where README contains no package/build evidence and the model response tries to include npm/yarn/Gradle/Maven commands as facts; Talos prompt framing or output policy must prevent or flag the ungrounded wording.
-- Add tests where unverified commands are allowed only as explicitly marked placeholders, not facts.
-- Add tests where user says "I do not want .env, I want README.md" and the response does not introduce `.env` advice unless README itself mentions it.
-- Existing read-only review and proposal tests still pass.
-- `.\gradlew.bat --no-daemon check installDist` passes.
+- Added `[GroundedReviewProposal]` current-turn framing for read-only README/review/proposal tasks.
+- Added runtime answer shaping that prepends a grounding warning when a read-only proposal contains unobserved commands, dependencies, protected-path advice, internal prompt text, or file-meaning claims.
+- Preserved observed commands/dependencies when the inspected evidence actually contains them.
+- Removed direct excluded `.env` advice for explicit `.env` negation cases.
+
+## Verification
+
+Tests:
+
+```powershell
+.\gradlew.bat --no-daemon test --tests "dev.talos.cli.modes.AssistantTurnExecutorTest*readOnlyReadmeProposal*"
+.\gradlew.bat --no-daemon check installDist
+```
+
+Focused two-model audit:
+
+- `local/manual-testing/t157-t161-focused-response-audit-20260506-102026/FINDINGS-T157-T161-T165-FOCUSED-RESPONSE-AUDIT.md`
+
+Audit result:
+
+- Qwen and GPT-OSS both inspected `README.md`.
+- Speculative file meanings/protected-path suggestions were flagged with the grounding warning.
+- No protected files were inspected during the README proposal turn.
 
 ## Non-Goals
 

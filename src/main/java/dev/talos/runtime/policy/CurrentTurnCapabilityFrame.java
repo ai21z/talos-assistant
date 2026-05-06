@@ -115,8 +115,30 @@ public final class CurrentTurnCapabilityFrame {
                     Follow the visible tool surface and task contract.
                     Do not claim unavailable workspace capabilities that the runtime has exposed.""");
         }
+        appendReadOnlyProposalGroundingGuidance(frame, contract, mutationAllowed);
         frame.append('\n').append(evidenceGuidance(evidence));
         return frame.toString();
+    }
+
+    private static void appendReadOnlyProposalGroundingGuidance(
+            StringBuilder frame,
+            TaskContract contract,
+            boolean mutationAllowed
+    ) {
+        if (mutationAllowed || contract == null || contract.originalUserRequest() == null) return;
+        String lower = contract.originalUserRequest().toLowerCase(java.util.Locale.ROOT);
+        boolean reviewProposal = (lower.contains("review") || lower.contains("propose")
+                || lower.contains("proposal") || lower.contains("improvement")
+                || lower.contains("suggest"))
+                && (lower.contains("readme") || lower.contains(".md"));
+        if (!reviewProposal) return;
+        frame.append("""
+
+                [GroundedReviewProposal]
+                For review/proposal output, separate observed evidence from suggestions.
+                Do not state commands, dependencies, package managers, frameworks, scripts, licenses, or file meanings as facts unless they were observed in the inspected workspace evidence.
+                If a command or dependency is only a possible suggestion, mark it as "if applicable" or a placeholder.
+                Respect current-turn exclusions such as protected files the user says not to inspect or discuss.""");
     }
 
     private static void appendExpectedTargets(

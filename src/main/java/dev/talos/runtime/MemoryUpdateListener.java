@@ -70,7 +70,7 @@ public final class MemoryUpdateListener implements SessionListener {
             // a confidence-trick failure mode (4 fabricated turns observed
             // in a real qwen2.5-coder transcript). Render-side chrome must
             // never be part of the model's training surface.
-            String forHistory = stripUiChromeForHistory(answer);
+            String forHistory = assistantTextForPersistence(answer, userInput);
             if (!isMemorizableAssistantReply(result.result(), forHistory)) return;
             if (forHistory.isBlank()) return;
             conversationManager.addTurn(userInput, forHistory);
@@ -132,6 +132,11 @@ public final class MemoryUpdateListener implements SessionListener {
         }
         String stripped = out.toString().replaceAll("\\n{3,}", "\n\n").strip();
         return TraceRedactor.redactSecretLikeAssignments(stripped);
+    }
+
+    public static String assistantTextForPersistence(String text, String userInput) {
+        String stripped = stripUiChromeForHistory(text);
+        return TraceRedactor.redactProtectedReadAnswerForPersistence(userInput, stripped);
     }
 
     /**
