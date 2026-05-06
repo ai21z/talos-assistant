@@ -288,6 +288,24 @@ public final class LocalTurnTraceCapture {
         bag.builder.event(TurnTraceEvent.simple("PROTOCOL_SANITIZED", now(), Map.of("reason", safe(reason))));
     }
 
+    public static void recordBackendMalformedResponse(
+            String context,
+            String bodyHash,
+            int bodyChars,
+            String bodyPreview
+    ) {
+        Bag bag = HOLDER.get();
+        if (bag == null) return;
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("context", safe(context));
+        data.put("bodyHash", safe(bodyHash));
+        data.put("bodyChars", Math.max(0, bodyChars));
+        if (bodyPreview != null && !bodyPreview.isBlank()) {
+            data.put("bodyPreview", cap(bodyPreview, 500));
+        }
+        bag.builder.event(TurnTraceEvent.simple("BACKEND_MALFORMED_RESPONSE_CAPTURED", now(), data));
+    }
+
     public static void recordActionObligation(String obligation, String status, String reason) {
         Bag bag = HOLDER.get();
         if (bag == null) return;

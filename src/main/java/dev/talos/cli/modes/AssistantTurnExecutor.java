@@ -348,6 +348,22 @@ public final class AssistantTurnExecutor {
             out.append("\n[").append(tr.guidance()).append("]\n");
             return;
         }
+        if (ex instanceof EngineException.MalformedResponse malformed) {
+            recordBackendFailureOutcome("BACKEND_MALFORMED_RESPONSE");
+            LocalTurnTraceCapture.recordBackendMalformedResponse(
+                    malformed.context(),
+                    malformed.bodyHash(),
+                    malformed.bodyChars(),
+                    malformed.bodyPreview());
+            LOG.warn("Malformed engine response: context={}, bodyHash={}, bodyChars={}",
+                    malformed.context(), malformed.bodyHash(), malformed.bodyChars());
+            out.append("\n[Engine error: Malformed engine response");
+            if (!malformed.context().isBlank()) {
+                out.append(" for ").append(malformed.context());
+            }
+            out.append(". ").append(malformed.guidance()).append("]\n");
+            return;
+        }
         recordBackendFailureOutcome(engineFailureClassification(ex));
         LOG.warn("Engine error: {}", ex.getMessage());
         out.append("\n[Engine error: ").append(ex.getMessage()).append("]\n");
