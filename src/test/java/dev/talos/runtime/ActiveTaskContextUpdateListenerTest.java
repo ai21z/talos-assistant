@@ -300,7 +300,10 @@ class ActiveTaskContextUpdateListenerTest {
 
         assertFalse(rendered.contains("Unresolved verification failures"), rendered);
         assertFalse(rendered.contains("exact content mismatch"), rendered);
-        assertTrue(rendered.contains("Verification status: verified complete"), rendered);
+        assertTrue(rendered.contains("README.md (turn 26)"), rendered);
+        assertTrue(rendered.contains("verifier=PASSED"), rendered);
+        assertTrue(rendered.contains("completion=COMPLETED_VERIFIED"), rendered);
+        assertFalse(rendered.contains("Verification status: verified complete"), rendered);
     }
 
     @Test

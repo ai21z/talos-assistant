@@ -5729,6 +5729,57 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void changedFilesAuditQuestionShowsPerFileVerificationStateForMixedHistory() {
+            SessionMemory memory = new SessionMemory();
+            memory.setChangeSummaryContext(new ChangeSummaryContext(
+                    ChangeSummaryContext.SCHEMA_VERSION,
+                    List.of(
+                            new ChangeSummaryContext.FileChange(
+                                    "index.html",
+                                    "talos.write_file",
+                                    30,
+                                    "trc-index",
+                                    "SUCCEEDED",
+                                    "PASSED",
+                                    "COMPLETED_VERIFIED"),
+                            new ChangeSummaryContext.FileChange(
+                                    "scripts.js",
+                                    "talos.write_file",
+                                    31,
+                                    "trc-scripts",
+                                    "SUCCEEDED",
+                                    "NOT_RUN",
+                                    "COMPLETED_UNVERIFIED")),
+                    List.of(),
+                    "PASSED",
+                    "COMPLETED_VERIFIED",
+                    List.of()));
+            var ctx = Context.builder(new Config())
+                    .memory(memory)
+                    .llm(LlmClient.scripted("Everything is verified."))
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("What files changed during this audit?"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, WS, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().startsWith("Recorded file changes"), out.text());
+            assertTrue(out.text().contains("index.html"), out.text());
+            assertTrue(out.text().contains("turn 30"), out.text());
+            assertTrue(out.text().contains("PASSED"), out.text());
+            assertTrue(out.text().contains("COMPLETED_VERIFIED"), out.text());
+            assertTrue(out.text().contains("scripts.js"), out.text());
+            assertTrue(out.text().contains("turn 31"), out.text());
+            assertTrue(out.text().contains("NOT_RUN"), out.text());
+            assertTrue(out.text().contains("COMPLETED_UNVERIFIED"), out.text());
+            assertTrue(out.text().contains("not verified complete"), out.text());
+            assertFalse(out.text().contains("Verification status: verified complete"), out.text());
+            assertFalse(out.text().contains("Everything is verified"), out.text());
+        }
+
+        @Test
         void repeatedStatusFollowUpDoesNotDuplicatePreviousVerifiedPreamble() {
             var ctx = scriptedContext("Yes, it is done now.");
             var messages = new ArrayList<ChatMessage>();
