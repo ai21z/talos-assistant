@@ -162,7 +162,8 @@ public record ChangeSummaryContext(
 
     public String renderForChangeSummaryQuestion() {
         if (!hasRecordedChanges()) {
-            return "No runtime-recorded file changes are available for this session/audit.";
+            return "No files were changed by Talos in the current session/audit according to Talos's runtime mutation history.\n\n"
+                    + "Talos has no runtime-recorded write/edit mutations for this session, so there are no runtime-owned changed files to list.";
         }
 
         StringBuilder out = new StringBuilder();

@@ -5225,7 +5225,7 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
-        void changedFilesAuditQuestionUsesPreviousVerifiedOutcomeWithoutProtectedReadGuess() {
+        void changedFilesAuditQuestionWithoutRuntimeLedgerDoesNotUsePreviousAssistantProse() {
             var ctx = scriptedContext("The audit changed .env and README.md.");
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
@@ -5250,13 +5250,57 @@ class AssistantTurnExecutorTest {
             AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
                     messages, WS, ctx, new AssistantTurnExecutor.Options());
 
-            assertTrue(out.text().startsWith("Partially."), out.text());
-            assertTrue(out.text().contains("index.html"), out.text());
-            assertTrue(out.text().contains("scripts.js"), out.text());
-            assertTrue(out.text().contains("styles.css"), out.text());
-            assertTrue(out.text().contains("HTML does not link JavaScript file"), out.text());
+            assertTrue(out.text().startsWith("No files were changed by Talos"), out.text());
+            assertTrue(out.text().contains("runtime mutation history"), out.text());
+            assertFalse(out.text().contains("index.html"), out.text());
+            assertFalse(out.text().contains("scripts.js"), out.text());
+            assertFalse(out.text().contains("styles.css"), out.text());
             assertFalse(out.text().contains(".env"), out.text());
             assertFalse(out.text().contains("The audit changed .env and README.md."), out.text());
+        }
+
+        @Test
+        void changedFilesAuditQuestionWithNoRuntimeChangesReturnsDeterministicNoChangeAnswer() {
+            SessionMemory memory = new SessionMemory();
+            var ctx = Context.builder(new Config())
+                    .memory(memory)
+                    .llm(LlmClient.scripted("The audit changed README.md."))
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("What files changed during this focused audit? Do not read protected files."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, WS, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().startsWith("No files were changed by Talos"), out.text());
+            assertTrue(out.text().contains("runtime mutation history"), out.text());
+            assertFalse(out.text().contains("README.md"), out.text());
+            assertFalse(out.text().contains(".env"), out.text());
+            assertFalse(out.text().contains("The audit changed README.md."), out.text());
+        }
+
+        @Test
+        void changedFilesModifyQuestionDoesNotInferFromWorkspaceMarkers(@TempDir Path workspace) throws Exception {
+            Files.writeString(workspace.resolve("README.md"),
+                    "audit marker: README.md was changed during this audit");
+            Files.writeString(workspace.resolve(".env"), "must-not-leak=secret");
+            SessionMemory memory = new SessionMemory();
+            var ctx = Context.builder(new Config())
+                    .memory(memory)
+                    .llm(LlmClient.scripted("README.md and .env changed."))
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Which files did you modify in this session?"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().startsWith("No files were changed by Talos"), out.text());
+            assertFalse(out.text().contains("README.md"), out.text());
+            assertFalse(out.text().contains(".env"), out.text());
+            assertFalse(out.text().contains("README.md and .env changed."), out.text());
         }
 
         @Test
@@ -5305,6 +5349,7 @@ class AssistantTurnExecutorTest {
             assertTrue(out.text().contains("not verified complete"), out.text());
             assertFalse(out.text().startsWith("No. The previous verified outcome"), out.text());
             assertFalse(out.text().contains(".env"), out.text());
+            assertFalse(out.text().contains("README.md"), out.text());
             assertFalse(out.text().contains("The audit changed .env and README.md."), out.text());
         }
 
