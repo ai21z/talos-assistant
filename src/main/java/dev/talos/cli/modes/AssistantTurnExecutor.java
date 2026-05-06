@@ -87,8 +87,19 @@ public final class AssistantTurnExecutor {
             "summarize what changed",
             "what changed",
             "what files changed",
+            "what files were changed",
+            "what files did you change",
+            "what files did you modify",
+            "what files were modified",
             "which files changed",
+            "which files were changed",
+            "which files did you change",
+            "which files did you modify",
+            "which files were modified",
             "changed during this audit",
+            "changed during this session",
+            "modified during this audit",
+            "modified during this session",
             "what did you change",
             "what was changed",
             "what did you do",
@@ -1270,9 +1281,14 @@ public final class AssistantTurnExecutor {
 
     private static String runtimeChangeSummaryIfNeeded(Context ctx, String userRequest) {
         if (!looksLikeChangeSummaryFollowUp(userRequest)) return null;
-        if (ctx == null || ctx.memory() == null) return null;
-        ChangeSummaryContext context = ctx.memory().changeSummaryContext();
-        if (context == null || !context.hasRecordedChanges()) return null;
+        ChangeSummaryContext context = ctx == null || ctx.memory() == null
+                ? null
+                : ctx.memory().changeSummaryContext();
+        if (context == null || !context.hasRecordedChanges()) {
+            return looksLikeDirectChangedFilesQuestion(userRequest)
+                    ? noRuntimeChangedFilesAnswer()
+                    : null;
+        }
         return context.renderForChangeSummaryQuestion();
     }
 
@@ -1315,6 +1331,28 @@ public final class AssistantTurnExecutor {
             if (lower.contains(marker)) return true;
         }
         return false;
+    }
+
+    private static boolean looksLikeDirectChangedFilesQuestion(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return false;
+        String lower = userRequest.toLowerCase(Locale.ROOT);
+        boolean fileScoped = lower.contains("file") || lower.contains("files");
+        boolean mutationScoped = lower.contains("changed")
+                || lower.contains("change")
+                || lower.contains("modified")
+                || lower.contains("modify")
+                || lower.contains("mutated")
+                || lower.contains("mutation");
+        boolean sessionScoped = lower.contains("audit")
+                || lower.contains("session")
+                || lower.contains("turn")
+                || lower.contains("workspace");
+        return fileScoped && (mutationScoped || sessionScoped);
+    }
+
+    private static String noRuntimeChangedFilesAnswer() {
+        return "No files were changed by Talos in the current session/audit according to Talos's runtime mutation history.\n\n"
+                + "Talos has no runtime-recorded write/edit mutations for this session, so there are no runtime-owned changed files to list.";
     }
 
     private static boolean looksLikeVerifiedMutationOutcome(String content) {
