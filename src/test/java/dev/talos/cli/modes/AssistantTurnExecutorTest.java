@@ -5075,6 +5075,46 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void changedFilesAuditQuestionPreservesUnresolvedExactFailureDespiteLaterPassedStatus() {
+            SessionMemory memory = new SessionMemory();
+            memory.setChangeSummaryContext(new ChangeSummaryContext(
+                    ChangeSummaryContext.SCHEMA_VERSION,
+                    List.of(
+                            new ChangeSummaryContext.FileChange("README.md", "talos.write_file", 21, "trc-readme"),
+                            new ChangeSummaryContext.FileChange("index.html", "talos.write_file", 22, "trc-index")),
+                    List.of(),
+                    "PASSED",
+                    "COMPLETED_VERIFIED",
+                    List.of(),
+                    List.of(new ChangeSummaryContext.VerificationFailure(
+                            List.of("README.md"),
+                            21,
+                            "FAILED",
+                            "TASK_INCOMPLETE",
+                            "trc-readme",
+                            List.of("README.md: exact content mismatch; expected 27 bytes/2 lines, observed 28 bytes/3 lines.")))));
+            var ctx = Context.builder(new Config())
+                    .memory(memory)
+                    .llm(LlmClient.scripted("Everything is verified now."))
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("What files changed during this audit?"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, WS, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().startsWith("Recorded file changes"), out.text());
+            assertTrue(out.text().contains("README.md"), out.text());
+            assertTrue(out.text().contains("index.html"), out.text());
+            assertTrue(out.text().contains("Unresolved verification failures"), out.text());
+            assertTrue(out.text().contains("exact content mismatch"), out.text());
+            assertTrue(out.text().contains("not verified complete"), out.text());
+            assertFalse(out.text().contains("Verification status: verified complete"), out.text());
+            assertFalse(out.text().contains("Everything is verified now"), out.text());
+        }
+
+        @Test
         void repeatedStatusFollowUpDoesNotDuplicatePreviousVerifiedPreamble() {
             var ctx = scriptedContext("Yes, it is done now.");
             var messages = new ArrayList<ChatMessage>();

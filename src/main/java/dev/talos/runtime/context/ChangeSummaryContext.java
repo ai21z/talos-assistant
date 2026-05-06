@@ -8,6 +8,7 @@ import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.PromptAuditRedactor;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -25,13 +26,27 @@ public record ChangeSummaryContext(
         List<String> unresolvedTargets,
         String verificationStatus,
         String completionStatus,
-        List<String> verifierFindings
+        List<String> verifierFindings,
+        List<VerificationFailure> unresolvedVerificationFailures
 ) {
-    public static final int SCHEMA_VERSION = 1;
+    public static final int SCHEMA_VERSION = 2;
     private static final int MAX_CHANGED_FILES = 20;
     private static final int MAX_UNRESOLVED_TARGETS = 10;
     private static final int MAX_FINDINGS = 5;
+    private static final int MAX_FAILURES = 10;
     private static final int MAX_FIELD_CHARS = 300;
+
+    public ChangeSummaryContext(
+            int schemaVersion,
+            List<FileChange> changedFiles,
+            List<String> unresolvedTargets,
+            String verificationStatus,
+            String completionStatus,
+            List<String> verifierFindings
+    ) {
+        this(schemaVersion, changedFiles, unresolvedTargets, verificationStatus, completionStatus,
+                verifierFindings, List.of());
+    }
 
     public ChangeSummaryContext {
         schemaVersion = SCHEMA_VERSION;
@@ -40,6 +55,7 @@ public record ChangeSummaryContext(
         verificationStatus = normalizeText(verificationStatus, MAX_FIELD_CHARS);
         completionStatus = normalizeText(completionStatus, MAX_FIELD_CHARS);
         verifierFindings = normalizeStrings(verifierFindings, MAX_FINDINGS);
+        unresolvedVerificationFailures = normalizeVerificationFailures(unresolvedVerificationFailures);
     }
 
     public record FileChange(String path, String toolName, int turnNumber, String traceId) {
@@ -50,6 +66,27 @@ public record ChangeSummaryContext(
         }
     }
 
+    public record VerificationFailure(
+            List<String> paths,
+            int turnNumber,
+            String verificationStatus,
+            String completionStatus,
+            String traceId,
+            List<String> findings
+    ) {
+        public VerificationFailure {
+            paths = normalizePaths(paths, MAX_CHANGED_FILES);
+            verificationStatus = normalizeText(verificationStatus, MAX_FIELD_CHARS);
+            completionStatus = normalizeText(completionStatus, MAX_FIELD_CHARS);
+            traceId = normalizeText(traceId, MAX_FIELD_CHARS);
+            findings = normalizeStrings(findings, MAX_FINDINGS);
+        }
+
+        VerificationFailure withPaths(List<String> paths) {
+            return new VerificationFailure(paths, turnNumber, verificationStatus, completionStatus, traceId, findings);
+        }
+    }
+
     public static ChangeSummaryContext none() {
         return new ChangeSummaryContext(
                 SCHEMA_VERSION,
@@ -57,6 +94,7 @@ public record ChangeSummaryContext(
                 List.of(),
                 "",
                 "",
+                List.of(),
                 List.of());
     }
 
@@ -100,13 +138,22 @@ public record ChangeSummaryContext(
         }
 
         List<String> unresolved = unresolvedTargets(audit.policyTrace(), audit.localTrace(), changedThisTurn);
+        List<VerificationFailure> unresolvedFailures = updateVerificationFailures(
+                current.unresolvedVerificationFailures(),
+                changedThisTurn,
+                result.turnNumber(),
+                traceId,
+                verificationStatus,
+                completionStatus,
+                findings);
         return new ChangeSummaryContext(
                 SCHEMA_VERSION,
                 List.copyOf(changes.values()),
                 unresolved,
                 verificationStatus,
                 completionStatus,
-                findings);
+                findings,
+                unresolvedFailures);
     }
 
     public boolean hasRecordedChanges() {
@@ -149,10 +196,26 @@ public record ChangeSummaryContext(
             }
         }
 
+        if (!unresolvedVerificationFailures.isEmpty()) {
+            out.append("\nUnresolved verification failures:\n");
+            for (VerificationFailure failure : unresolvedVerificationFailures) {
+                out.append("- ").append(String.join(", ", failure.paths()));
+                if (failure.turnNumber() > 0) out.append(" (turn ").append(failure.turnNumber()).append(')');
+                if (!failure.verificationStatus().isBlank()) {
+                    out.append(": ").append(failure.verificationStatus());
+                }
+                out.append('\n');
+                for (String finding : failure.findings()) {
+                    out.append("  - ").append(finding).append('\n');
+                }
+            }
+        }
+
         return out.toString().stripTrailing();
     }
 
     private boolean verifiedComplete() {
+        if (!unresolvedTargets.isEmpty() || !unresolvedVerificationFailures.isEmpty()) return false;
         return "PASSED".equalsIgnoreCase(verificationStatus)
                 || "COMPLETED_VERIFIED".equalsIgnoreCase(completionStatus);
     }
@@ -170,6 +233,83 @@ public record ChangeSummaryContext(
             }
         }
         return List.copyOf(out.values());
+    }
+
+    private static List<VerificationFailure> updateVerificationFailures(
+            List<VerificationFailure> previous,
+            LinkedHashSet<String> changedThisTurn,
+            int turnNumber,
+            String traceId,
+            String verificationStatus,
+            String completionStatus,
+            List<String> findings
+    ) {
+        if (changedThisTurn == null || changedThisTurn.isEmpty()) {
+            return normalizeVerificationFailures(previous);
+        }
+
+        boolean failed = verificationFailed(verificationStatus, completionStatus);
+        boolean passed = verificationPassed(verificationStatus, completionStatus);
+        if (!failed && !passed) {
+            return normalizeVerificationFailures(previous);
+        }
+
+        List<VerificationFailure> updated = new ArrayList<>();
+        for (VerificationFailure failure : normalizeVerificationFailures(previous)) {
+            List<String> remainingPaths = failure.paths().stream()
+                    .filter(path -> !changedThisTurn.contains(path))
+                    .toList();
+            if (!remainingPaths.isEmpty()) {
+                updated.add(failure.withPaths(remainingPaths));
+            }
+        }
+        if (failed) {
+            updated.add(new VerificationFailure(
+                    List.copyOf(changedThisTurn),
+                    turnNumber,
+                    verificationStatus,
+                    completionStatus,
+                    traceId,
+                    failureFindings(findings, verificationStatus, completionStatus)));
+        }
+        while (updated.size() > MAX_FAILURES) {
+            updated.removeFirst();
+        }
+        return List.copyOf(updated);
+    }
+
+    private static boolean verificationFailed(String verificationStatus, String completionStatus) {
+        return "FAILED".equalsIgnoreCase(verificationStatus)
+                || "TASK_INCOMPLETE".equalsIgnoreCase(completionStatus);
+    }
+
+    private static boolean verificationPassed(String verificationStatus, String completionStatus) {
+        return "PASSED".equalsIgnoreCase(verificationStatus)
+                || "COMPLETED_VERIFIED".equalsIgnoreCase(completionStatus);
+    }
+
+    private static List<String> failureFindings(
+            List<String> findings,
+            String verificationStatus,
+            String completionStatus
+    ) {
+        List<String> normalized = normalizeStrings(findings, MAX_FINDINGS);
+        if (!normalized.isEmpty()) return normalized;
+        String fallback = !normalizeText(verificationStatus, MAX_FIELD_CHARS).isBlank()
+                ? "Verification status: " + normalizeText(verificationStatus, MAX_FIELD_CHARS)
+                : "Completion status: " + normalizeText(completionStatus, MAX_FIELD_CHARS);
+        return normalizeStrings(List.of(fallback), MAX_FINDINGS);
+    }
+
+    private static List<VerificationFailure> normalizeVerificationFailures(List<VerificationFailure> failures) {
+        if (failures == null || failures.isEmpty()) return List.of();
+        List<VerificationFailure> out = new ArrayList<>();
+        for (VerificationFailure failure : failures) {
+            if (failure == null || failure.paths().isEmpty()) continue;
+            out.add(failure);
+            if (out.size() == MAX_FAILURES) break;
+        }
+        return List.copyOf(out);
     }
 
     private static List<String> unresolvedTargets(
@@ -227,6 +367,17 @@ public record ChangeSummaryContext(
         LinkedHashSet<String> out = new LinkedHashSet<>();
         for (String item : raw) {
             String normalized = normalizeText(item, MAX_FIELD_CHARS);
+            if (!normalized.isBlank()) out.add(normalized);
+            if (out.size() == maxItems) break;
+        }
+        return List.copyOf(out);
+    }
+
+    private static List<String> normalizePaths(List<String> raw, int maxItems) {
+        if (raw == null || raw.isEmpty()) return List.of();
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        for (String item : raw) {
+            String normalized = normalizePath(item);
             if (!normalized.isBlank()) out.add(normalized);
             if (out.size() == maxItems) break;
         }

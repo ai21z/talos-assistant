@@ -201,9 +201,157 @@ class ActiveTaskContextUpdateListenerTest {
     }
 
     @Test
+    void failedExactVerificationHistorySurvivesLaterUnrelatedVerifiedChange() {
+        SessionMemory memory = new SessionMemory();
+        ActiveTaskContextUpdateListener listener = new ActiveTaskContextUpdateListener(memory);
+
+        listener.onTurnComplete(mutatingTurn(
+                21,
+                "trace-readme-failed",
+                List.of("README.md"),
+                List.of(new TurnRecord.ToolCallSummary("talos.write_file", "README.md", true)),
+                "FAILED",
+                "TASK_INCOMPLETE",
+                List.of("README.md: exact content mismatch; expected 27 bytes/2 lines, observed 28 bytes/3 lines.")),
+                "Edit README.md with exactly two lines.");
+        listener.onTurnComplete(mutatingTurn(
+                22,
+                "trace-index-passed",
+                List.of("index.html"),
+                List.of(new TurnRecord.ToolCallSummary("talos.write_file", "index.html", true)),
+                "PASSED",
+                "COMPLETED_VERIFIED",
+                List.of()),
+                "Update index.html title.");
+
+        String rendered = memory.changeSummaryContext().renderForChangeSummaryQuestion();
+
+        assertTrue(rendered.contains("README.md"), rendered);
+        assertTrue(rendered.contains("Unresolved verification failures"), rendered);
+        assertTrue(rendered.contains("exact content mismatch"), rendered);
+        assertTrue(rendered.contains("not verified complete"), rendered);
+        assertFalse(rendered.contains("Verification status: verified complete"), rendered);
+    }
+
+    @Test
+    void failedStaticWebVerificationHistorySurvivesLaterUnrelatedVerifiedChange() {
+        SessionMemory memory = new SessionMemory();
+        ActiveTaskContextUpdateListener listener = new ActiveTaskContextUpdateListener(memory);
+
+        listener.onTurnComplete(mutatingTurn(
+                23,
+                "trace-static-failed",
+                List.of("index.html", "styles.css", "scripts.js"),
+                List.of(
+                        new TurnRecord.ToolCallSummary("talos.write_file", "index.html", true),
+                        new TurnRecord.ToolCallSummary("talos.write_file", "styles.css", true),
+                        new TurnRecord.ToolCallSummary("talos.write_file", "script.js", true)),
+                "FAILED",
+                "TASK_INCOMPLETE",
+                List.of(
+                        "scripts.js: expected target was not successfully mutated.",
+                        "script.js was mutated but does not satisfy expected target scripts.js.")),
+                "Create static BMI website.");
+        listener.onTurnComplete(mutatingTurn(
+                24,
+                "trace-readme-passed",
+                List.of("README.md"),
+                List.of(new TurnRecord.ToolCallSummary("talos.write_file", "README.md", true)),
+                "PASSED",
+                "COMPLETED_VERIFIED",
+                List.of()),
+                "Update README.md.");
+
+        String rendered = memory.changeSummaryContext().renderForChangeSummaryQuestion();
+
+        assertTrue(rendered.contains("index.html"), rendered);
+        assertTrue(rendered.contains("styles.css"), rendered);
+        assertTrue(rendered.contains("script.js"), rendered);
+        assertTrue(rendered.contains("scripts.js: expected target was not successfully mutated"), rendered);
+        assertTrue(rendered.contains("Unresolved verification failures"), rendered);
+        assertTrue(rendered.contains("not verified complete"), rendered);
+    }
+
+    @Test
+    void failedVerificationHistoryIsResolvedByLaterVerifiedChangeToSameTarget() {
+        SessionMemory memory = new SessionMemory();
+        ActiveTaskContextUpdateListener listener = new ActiveTaskContextUpdateListener(memory);
+
+        listener.onTurnComplete(mutatingTurn(
+                25,
+                "trace-readme-failed",
+                List.of("README.md"),
+                List.of(new TurnRecord.ToolCallSummary("talos.write_file", "README.md", true)),
+                "FAILED",
+                "TASK_INCOMPLETE",
+                List.of("README.md: exact content mismatch.")),
+                "Edit README.md with exactly two lines.");
+        listener.onTurnComplete(mutatingTurn(
+                26,
+                "trace-readme-passed",
+                List.of("README.md"),
+                List.of(new TurnRecord.ToolCallSummary("talos.write_file", "README.md", true)),
+                "PASSED",
+                "COMPLETED_VERIFIED",
+                List.of()),
+                "Repair README.md exact content.");
+
+        String rendered = memory.changeSummaryContext().renderForChangeSummaryQuestion();
+
+        assertFalse(rendered.contains("Unresolved verification failures"), rendered);
+        assertFalse(rendered.contains("exact content mismatch"), rendered);
+        assertTrue(rendered.contains("Verification status: verified complete"), rendered);
+    }
+
+    @Test
     void nullMemoryIsIgnored() {
         ActiveTaskContextUpdateListener listener = new ActiveTaskContextUpdateListener(null);
 
         assertDoesNotThrow(() -> listener.onTurnComplete(null, "anything"));
+    }
+
+    private static TurnResult mutatingTurn(
+            int turnNumber,
+            String traceId,
+            List<String> expectedTargets,
+            List<TurnRecord.ToolCallSummary> toolCalls,
+            String verificationStatus,
+            String completionStatus,
+            List<String> verifierFindings
+    ) {
+        return new TurnResult(
+                new Result.Ok("runtime summary"),
+                null,
+                turnNumber,
+                Duration.ofMillis(25),
+                new TurnAudit(
+                        toolCalls,
+                        0,
+                        0,
+                        0,
+                        new TurnPolicyTrace(
+                                "FILE_CREATE",
+                                true,
+                                true,
+                                expectedTargets,
+                                List.of(),
+                                "APPLY",
+                                "VERIFY",
+                                List.of(),
+                                List.of(),
+                                List.of()),
+                        LocalTurnTrace.builder(traceId, "session", turnNumber, "2026-05-02T00:00:00Z")
+                                .taskContract(new LocalTurnTrace.TaskContractSummary(
+                                        "FILE_CREATE",
+                                        true,
+                                        true,
+                                        true,
+                                        expectedTargets,
+                                        List.of()))
+                                .verification(verificationStatus, "Static verification " + verificationStatus,
+                                        verifierFindings)
+                                .outcome("MUTATION_APPLIED", verificationStatus, "NONE", "SUCCEEDED",
+                                        completionStatus)
+                                .build()));
     }
 }
