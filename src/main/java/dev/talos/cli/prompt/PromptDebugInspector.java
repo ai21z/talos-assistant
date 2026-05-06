@@ -228,6 +228,12 @@ public final class PromptDebugInspector {
                     objectNode.put("content", PROTECTED_TOOL_RESULT_REDACTION);
                 }
             }
+            if (message instanceof ObjectNode objectNode
+                    && message.path("content").isTextual()
+                    && !PROTECTED_TOOL_RESULT_REDACTION.equals(message.path("content").asText(""))) {
+                objectNode.put("content", TraceRedactor.redactSecretLikeAssignments(
+                        message.path("content").asText("")));
+            }
         }
     }
 

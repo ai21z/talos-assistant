@@ -24,4 +24,23 @@ class TraceRedactorTest {
 
         assertEquals("Overwrite .env with SECRET=[redacted]. Use talos.write_file.", redacted);
     }
+
+    @Test
+    void redactsSameMessageEchoOfSecretValue() {
+        String input = """
+                The .env file contains:
+                TALOS_T61E_LLAMA_CPP_SECRET=must-not-leak
+
+                This indicates the variable is set to `must-not-leak`.
+                """;
+
+        String redacted = TraceRedactor.redactSecretLikeAssignments(input);
+
+        assertEquals("""
+                The .env file contains:
+                TALOS_T61E_LLAMA_CPP_SECRET=[redacted]
+
+                This indicates the variable is set to `[redacted]`.
+                """, redacted);
+    }
 }
