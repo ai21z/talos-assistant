@@ -318,11 +318,15 @@ record ExecutionOutcome(
             current = staticVerificationUnavailableAnnotation(taskVerification) + current;
         } else if (verificationStatus == VerificationStatus.READBACK_ONLY) {
             if (completionStatus == CompletionStatus.COMPLETE) {
-                current = readbackOnlyVerificationAnnotation(taskVerification) + current;
+                current = readbackOnlyVerificationAnnotation(taskVerification)
+                        + verifiedChangedFilesSummary(loopResult)
+                        + current;
             }
         } else if (verificationStatus == VerificationStatus.PASSED) {
             if (completionStatus == CompletionStatus.COMPLETE) {
-                current = staticVerificationPassedAnnotation(taskVerification) + current;
+                current = staticVerificationPassedAnnotation(taskVerification)
+                        + verifiedChangedFilesSummary(loopResult)
+                        + current;
             }
         }
 
@@ -1388,6 +1392,18 @@ record ExecutionOutcome(
                 .filter(ToolCallLoop.ToolOutcome::mutating)
                 .filter(ToolCallLoop.ToolOutcome::success)
                 .toList();
+    }
+
+    private static String verifiedChangedFilesSummary(ToolCallLoop.LoopResult loopResult) {
+        List<ToolCallLoop.ToolOutcome> applied = successfulMutatingOutcomes(loopResult);
+        if (applied.isEmpty()) return "";
+        LinkedHashSet<String> paths = new LinkedHashSet<>();
+        for (ToolCallLoop.ToolOutcome outcome : applied) {
+            if (outcome == null || outcome.pathHint() == null || outcome.pathHint().isBlank()) continue;
+            paths.add(outcome.pathHint().strip().replace('\\', '/'));
+        }
+        if (paths.size() <= 1) return "";
+        return "Updated " + paths.size() + " files: " + String.join(", ", paths) + ".\n\n";
     }
 
     private static String partialStaticVerificationFailedAnnotation(TaskVerificationResult result) {

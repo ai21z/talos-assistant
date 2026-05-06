@@ -1418,6 +1418,155 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void verifiedStaticWebMultiFileSuccessListsEveryChangedTarget() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-multifile-success-summary-");
+        try {
+            Files.writeString(ws.resolve("index.html"), """
+                    <!DOCTYPE html>
+                    <html>
+                      <head>
+                        <title>BMI Calculator</title>
+                        <link rel="stylesheet" href="styles.css">
+                      </head>
+                      <body>
+                        <main class="app">
+                          <form id="bmi-form">
+                            <label for="height">Height</label>
+                            <input id="height" name="height" type="number">
+                            <label for="weight">Weight</label>
+                            <input id="weight" name="weight" type="number">
+                            <button id="calculate" type="submit">Calculate BMI</button>
+                            <output id="result"></output>
+                          </form>
+                        </main>
+                        <script src="scripts.js"></script>
+                      </body>
+                    </html>
+                    """);
+            Files.writeString(ws.resolve("styles.css"), """
+                    body { font-family: system-ui, sans-serif; }
+                    .app { max-width: 420px; margin: 2rem auto; }
+                    """);
+            Files.writeString(ws.resolve("scripts.js"), """
+                    const form = document.getElementById('bmi-form');
+                    const height = document.getElementById('height');
+                    const weight = document.getElementById('weight');
+                    const result = document.getElementById('result');
+                    form.addEventListener('submit', event => {
+                      event.preventDefault();
+                      const meters = Number(height.value) / 100;
+                      const bmi = Number(weight.value) / (meters * meters);
+                      result.textContent = `BMI ${bmi.toFixed(1)}`;
+                    });
+                    """);
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Create a complete static BMI calculator in this folder with index.html, styles.css, "
+                            + "and scripts.js. It should calculate BMI from height and weight."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Updated index.html and styles.css.", 1, 3,
+                    List.of("talos.write_file", "talos.write_file", "talos.write_file"), List.of(),
+                    0, 0, false, 3, List.of(),
+                    0, 0, 0, 0,
+                    List.of(
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.write_file", "index.html", true, true, false,
+                                    "wrote index.html", "", dev.talos.tools.VerificationStatus.PASS),
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.write_file", "styles.css", true, true, false,
+                                    "wrote styles.css", "", dev.talos.tools.VerificationStatus.PASS),
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.write_file", "scripts.js", true, true, false,
+                                    "wrote scripts.js", "", dev.talos.tools.VerificationStatus.PASS)));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    loopResult.finalAnswer(), messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.PASSED, outcome.verificationStatus());
+            assertTrue(outcome.finalAnswer().contains("Static verification: passed"),
+                    outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains(
+                            "Updated 3 files: index.html, styles.css, scripts.js."),
+                    outcome.finalAnswer());
+            assertEquals(TaskCompletionStatus.COMPLETED_VERIFIED, outcome.taskOutcome().completionStatus());
+            assertEquals(TaskVerificationStatus.PASSED, outcome.taskOutcome().verificationResult().status());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
+    void partialStaticWebFailureDoesNotEmitVerifiedMultiFileSuccessSummary() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-partial-summary-");
+        try {
+            Files.writeString(ws.resolve("index.html"), """
+                    <!DOCTYPE html>
+                    <html>
+                      <head><link rel="stylesheet" href="styles.css"></head>
+                      <body>
+                        <form id="bmi-form">
+                          <input id="height" name="height">
+                          <input id="weight" name="weight">
+                          <button type="submit">Calculate BMI</button>
+                          <output id="result"></output>
+                        </form>
+                        <script src="scripts.js"></script>
+                      </body>
+                    </html>
+                    """);
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Create a complete static BMI calculator in this folder with index.html, styles.css, "
+                            + "and scripts.js. It should calculate BMI from height and weight."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Everything is complete.", 1, 2,
+                    List.of("talos.write_file", "talos.write_file"), List.of(),
+                    1, 0, false, 1, List.of(),
+                    0, 0, 0, 0,
+                    List.of(
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.write_file", "index.html", true, true, false,
+                                    "wrote index.html", "", dev.talos.tools.VerificationStatus.PASS),
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.write_file", "styles.css", false, true, false,
+                                    "", "write failed before content was applied",
+                                    null, ToolError.TOOL_ERROR)));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    loopResult.finalAnswer(), messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.PARTIAL, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.FAILED, outcome.verificationStatus());
+            assertTrue(outcome.finalAnswer().startsWith("[Partial verification: static checks failed -"),
+                    outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("Succeeded:\n- index.html: wrote index.html"),
+                    outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("Failed:\n- styles.css: write failed before content was applied"),
+                    outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("Updated 2 files:"), outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("Updated 3 files:"), outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("Everything is complete."), outcome.finalAnswer());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void literalMatchAfterSuccessfulWriteIsVerifiedComplete() throws Exception {
         Path ws = Files.createTempDirectory("talos-execution-outcome-literal-match-");
         try {

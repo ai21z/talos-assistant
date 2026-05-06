@@ -1,6 +1,6 @@
 # T162 - Verified Multi-File Success Summaries Must List All Mutated Targets
 
-Status: open
+Status: done
 
 Severity: medium
 
