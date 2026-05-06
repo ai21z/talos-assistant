@@ -39,6 +39,7 @@ import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.trace.PromptAuditSnapshot;
 import dev.talos.runtime.verification.StaticTaskVerifier;
+import dev.talos.runtime.verification.StaticWebImportIntent;
 import dev.talos.runtime.verification.WebDiagnosticIntent;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
@@ -3384,6 +3385,20 @@ public final class AssistantTurnExecutor {
         if (!WebDiagnosticIntent.matchesReadOnlyRequest(userRequest)) return answer;
 
         String grounded = StaticTaskVerifier.renderWebDiagnostics(workspace);
+        return grounded == null || grounded.isBlank() ? answer : grounded;
+    }
+
+    static String overrideStaticWebImportAnswerIfNeeded(
+            String answer,
+            List<ChatMessage> messages,
+            ToolCallLoop.LoopResult loopResult,
+            Path workspace) {
+        if (loopResult == null || workspace == null) return answer;
+        if (loopResult.mutatingToolSuccesses() > 0) return answer;
+        String userRequest = latestUserRequest(messages);
+        if (!StaticWebImportIntent.matches(userRequest)) return answer;
+
+        String grounded = StaticTaskVerifier.renderScriptImportInspection(workspace, userRequest);
         return grounded == null || grounded.isBlank() ? answer : grounded;
     }
 

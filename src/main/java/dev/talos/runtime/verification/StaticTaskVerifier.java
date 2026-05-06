@@ -870,6 +870,37 @@ public final class StaticTaskVerifier {
         return out.toString().stripTrailing();
     }
 
+    public static String renderScriptImportInspection(Path workspace, String userRequest) {
+        if (workspace == null || !Files.isDirectory(workspace)) return null;
+        if (!StaticWebImportIntent.matches(userRequest)) return null;
+        Set<String> extractedTargets = TaskContractResolver.extractExpectedTargets(userRequest);
+        List<String> candidateScripts = StaticWebImportIntent.scriptCandidates(extractedTargets);
+        if (candidateScripts.isEmpty()) return null;
+
+        List<String> htmlTargets = StaticWebImportIntent.htmlTargets(extractedTargets);
+        if (htmlTargets.isEmpty()
+                && userRequest != null
+                && userRequest.toLowerCase(Locale.ROOT).contains("index.html")) {
+            htmlTargets = List.of("index.html");
+        }
+        if (htmlTargets.isEmpty()) return null;
+
+        Path root = workspace.toAbsolutePath().normalize();
+        String htmlTarget = firstReadableWorkspaceTarget(root, htmlTargets);
+        if (htmlTarget.isBlank()) return null;
+
+        String html;
+        try {
+            html = Files.readString(root.resolve(htmlTarget));
+        } catch (Exception e) {
+            return null;
+        }
+
+        List<String> linkedScripts = extractLinkedAssetOccurrences(html, HTML_SCRIPT_SRC, ".js");
+        List<String> importedCandidates = importedCandidateScripts(candidateScripts, linkedScripts);
+        return renderScriptImportAnswer(htmlTarget, candidateScripts, importedCandidates, linkedScripts);
+    }
+
     public static WebDiagnostics currentWebDiagnostics(Path workspace, TaskContract contract) {
         return currentWebDiagnostics(workspace, contract, Set.of());
     }
@@ -911,6 +942,83 @@ public final class StaticTaskVerifier {
             }
         }
         return new WebDiagnostics(facts.htmlFile(), facts.cssFile(), facts.jsFile(), problems);
+    }
+
+    private static String firstReadableWorkspaceTarget(Path root, List<String> targets) {
+        if (root == null || targets == null || targets.isEmpty()) return "";
+        for (String target : targets) {
+            String normalized = normalizePath(target);
+            if (normalized.isBlank()) continue;
+            try {
+                Path resolved = root.resolve(normalized).toAbsolutePath().normalize();
+                if (resolved.startsWith(root) && Files.isRegularFile(resolved)) {
+                    return normalized;
+                }
+            } catch (RuntimeException ignored) {
+                // Try the next candidate target.
+            }
+        }
+        return "";
+    }
+
+    private static List<String> importedCandidateScripts(
+            List<String> candidateScripts,
+            List<String> linkedScripts
+    ) {
+        if (candidateScripts == null || candidateScripts.isEmpty()
+                || linkedScripts == null || linkedScripts.isEmpty()) {
+            return List.of();
+        }
+        List<String> out = new ArrayList<>();
+        for (String candidate : candidateScripts) {
+            String candidateName = basename(candidate);
+            for (String linked : linkedScripts) {
+                if (candidateName.equalsIgnoreCase(basename(linked))) {
+                    out.add(candidate);
+                    break;
+                }
+            }
+        }
+        return List.copyOf(out);
+    }
+
+    private static String renderScriptImportAnswer(
+            String htmlTarget,
+            List<String> candidateScripts,
+            List<String> importedCandidates,
+            List<String> linkedScripts
+    ) {
+        StringBuilder out = new StringBuilder("[Static web import check]\n\n");
+        if (importedCandidates.isEmpty()) {
+            if (candidateScripts.size() == 2) {
+                out.append("Neither `").append(candidateScripts.get(0)).append("` nor `")
+                        .append(candidateScripts.get(1)).append("` is imported by `")
+                        .append(htmlTarget).append("`.");
+            } else {
+                out.append("None of the candidate script files ")
+                        .append(formatBacktickList(candidateScripts))
+                        .append(" are imported by `")
+                        .append(htmlTarget).append("`.");
+            }
+        } else if (importedCandidates.size() == 1) {
+            out.append("`").append(htmlTarget).append("` imports `")
+                    .append(importedCandidates.get(0)).append("`.");
+        } else {
+            out.append("`").append(htmlTarget).append("` imports ")
+                    .append(formatBacktickList(importedCandidates)).append(".");
+        }
+        out.append("\n\nCurrent script imports found in `").append(htmlTarget).append("`: ");
+        out.append(linkedScripts == null || linkedScripts.isEmpty()
+                ? "none."
+                : formatBacktickList(linkedScripts) + ".");
+        return out.toString();
+    }
+
+    private static String formatBacktickList(List<String> values) {
+        if (values == null || values.isEmpty()) return "none";
+        return values.stream()
+                .map(value -> "`" + value + "`")
+                .collect(java.util.stream.Collectors.joining(", "));
     }
 
     private static boolean hasPrimaryWebSurface(List<String> files) {
