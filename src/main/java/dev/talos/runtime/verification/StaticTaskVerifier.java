@@ -69,6 +69,11 @@ public final class StaticTaskVerifier {
             "getElementById\\s*\\(\\s*['\"]([A-Za-z_][A-Za-z0-9_-]*)['\"]\\s*\\)");
     private static final Pattern JS_GET_BY_CLASS = Pattern.compile(
             "getElementsByClassName\\s*\\(\\s*['\"]([A-Za-z_][A-Za-z0-9_-]*)['\"]\\s*\\)");
+    private static final Pattern JS_RESULT_CLICKED_TEXT_ASSIGNMENT = Pattern.compile(
+            "(?:querySelector\\s*\\(\\s*['\"]#result['\"]\\s*\\)"
+                    + "|getElementById\\s*\\(\\s*['\"]result['\"]\\s*\\))"
+                    + "\\s*\\.\\s*(?:textContent|innerText)\\s*=\\s*(['\"])\\s*Clicked\\s*\\1",
+            Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
     private static final String[] HTML_STRUCTURAL_TAGS = {
             "html", "head", "body", "div", "span", "section", "article",
             "nav", "header", "footer", "main", "aside", "form", "button",
@@ -656,6 +661,11 @@ public final class StaticTaskVerifier {
         problems.addAll(selectors.linkageProblems());
         problems.addAll(selectors.contentProblems());
         problems.addAll(selectors.selectorProblems());
+        List<String> buttonBehaviorProblems = selectors.buttonResultBehaviorProblems(contract.originalUserRequest());
+        problems.addAll(buttonBehaviorProblems);
+        if (buttonBehaviorProblems.isEmpty() && expectsRunButtonResultClicked(contract.originalUserRequest())) {
+            facts.add("Static button/result behavior passed for " + selectors.jsFile() + ".");
+        }
         if (StaticWebCapabilityProfile.looksCalculatorOrFormTask(contract)) {
             List<String> formProblems = selectors.calculatorFormProblems(contract.originalUserRequest());
             problems.addAll(formProblems);
@@ -1055,6 +1065,18 @@ public final class StaticTaskVerifier {
             return StaticTaskVerifier.calculatorFormProblems(request, html);
         }
 
+        List<String> buttonResultBehaviorProblems(String request) {
+            if (!expectsRunButtonResultClicked(request)) return List.of();
+            List<String> out = new ArrayList<>();
+            if (!jsIds.contains("run-button")) {
+                out.add(jsFile + ": JavaScript does not reference `#run-button` for the requested button behavior.");
+            }
+            if (!hasClickedResultAssignment(js)) {
+                out.add(jsFile + ": JavaScript does not assign `#result` text to `Clicked` for the requested button behavior.");
+            }
+            return out;
+        }
+
         String renderInspection() {
             StringBuilder out = new StringBuilder();
             out.append("I checked the selectors against the actual workspace files:\n\n");
@@ -1267,6 +1289,18 @@ public final class StaticTaskVerifier {
                 || lowerHtml.contains("id='result'")
                 || lowerHtml.contains("class=\"result\"")
                 || lowerHtml.contains("class='result'");
+    }
+
+    private static boolean expectsRunButtonResultClicked(String request) {
+        if (request == null || request.isBlank()) return false;
+        String lower = request.toLowerCase(Locale.ROOT);
+        return lower.contains("run-button")
+                && lower.contains("result")
+                && lower.contains("clicked");
+    }
+
+    private static boolean hasClickedResultAssignment(String js) {
+        return js != null && JS_RESULT_CLICKED_TEXT_ASSIGNMENT.matcher(js).find();
     }
 
     private static boolean looksLikeNearPlaceholder(String content, String kind) {

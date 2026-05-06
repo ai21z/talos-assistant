@@ -1,6 +1,6 @@
 # T156 - Static Web Verifier Must Reject Broken JS Handler Mutations
 
-Status: open
+Status: done
 Priority: high
 
 ## Evidence Summary
@@ -79,3 +79,34 @@ Suggested verification commands:
 .\gradlew.bat --no-daemon e2eTest
 .\gradlew.bat --no-daemon check
 ```
+
+## Closeout - 2026-05-06
+
+Implemented a request-scoped static behavior check for the button/result fixture class:
+
+- When the request says the button should set result text to `Clicked`, static web verification now requires JavaScript to reference `#run-button`.
+- It also requires a direct `#result` text assignment to `Clicked` through `querySelector('#result')` or `getElementById('result')` using `textContent`/`innerText`.
+- The original Qwen-shaped `.textC;` mutation now fails static verification with a concrete problem naming `script.js`, `#result`, and `Clicked`.
+
+Tests added:
+
+- `staticButtonFixtureFailsWhenResultHandlerHasTruncatedTextContentAssignment`
+- `staticButtonFixturePassesWhenQuerySelectorAssignsResultTextContent`
+- `staticButtonFixturePassesWhenGetElementByIdAssignsResultTextContent`
+
+Verification run:
+
+```powershell
+.\gradlew.bat --no-daemon test --tests dev.talos.runtime.verification.StaticTaskVerifierTest.staticButtonFixtureFailsWhenResultHandlerHasTruncatedTextContentAssignment
+.\gradlew.bat --no-daemon test --tests dev.talos.runtime.verification.StaticTaskVerifierTest.staticButtonFixtureFailsWhenResultHandlerHasTruncatedTextContentAssignment --tests dev.talos.runtime.verification.StaticTaskVerifierTest.staticButtonFixturePassesWhenQuerySelectorAssignsResultTextContent --tests dev.talos.runtime.verification.StaticTaskVerifierTest.staticButtonFixturePassesWhenGetElementByIdAssignsResultTextContent --tests dev.talos.runtime.verification.StaticTaskVerifierTest.staticWebRepairContextFilesDoNotAllNeedMutationWhenFinalSurfacePasses
+.\gradlew.bat --no-daemon test --tests dev.talos.runtime.verification.StaticTaskVerifierTest
+.\gradlew.bat --no-daemon test --tests dev.talos.runtime.ToolCallLoopTest
+.\gradlew.bat --no-daemon test
+.\gradlew.bat --no-daemon e2eTest
+.\gradlew.bat --no-daemon check
+.\gradlew.bat --no-daemon installDist
+```
+
+Focused audit:
+
+- `local/manual-testing/t156-static-web-verifier-audit-20260506-063043/FINDINGS-T156-STATIC-WEB-VERIFIER-AUDIT.md`
