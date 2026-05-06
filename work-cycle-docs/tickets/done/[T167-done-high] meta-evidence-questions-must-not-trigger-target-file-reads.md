@@ -1,11 +1,12 @@
 # T167 - Meta-Evidence Questions Must Not Trigger Target File Reads
 
-Status: open
+Status: done
 
 Severity: high
 
 Source audit:
 - `local/manual-testing/llama-cpp-t61g-big-audit-20260506-172941/FINDINGS-LLAMA-CPP-T61G-BIG-AUDIT.md`
+- `local/manual-testing/llama-cpp-t61h-full-audit-20260506-191922/FINDINGS-LLAMA-CPP-T61H-FULL-AUDIT.md`
 
 ## Problem
 
@@ -25,6 +26,14 @@ because Talos caused the action the user was asking about.
 
 Qwen hit a malformed backend response on the same forced-read shape.
 
+In the T61-H audit, the issue persisted with clearer two-model evidence:
+
+- Qwen read `notes.md` during the meta-evidence question, then answered `Yes`.
+  The answer became true only because Talos performed the read in that turn.
+- GPT-OSS also read `notes.md`, then falsely answered `No`.
+- The private note marker then appeared in later prompt-debug history because the
+  forced tool result entered session history.
+
 ## Evidence
 
 - `TEST-OUTPUT-LLAMA-CPP-GPT-OSS-20B.txt:14329-14353`
@@ -36,6 +45,20 @@ Qwen hit a malformed backend response on the same forced-read shape.
 - `TEST-OUTPUT-LLAMA-CPP-QWEN-14B.txt:14099-14122`
   - same prompt classified as `READ_TARGET_REQUIRED`
   - Qwen fails with malformed engine response before tool completion
+- T61-H Qwen:
+  - `TEST-OUTPUT-LLAMA-CPP-QWEN-14B.txt:14154-14171`
+    - prompt classified with `READ_TARGET_REQUIRED`
+  - `TEST-OUTPUT-LLAMA-CPP-QWEN-14B.txt:14193-14197`
+    - trace confirms `talos.read_file -> notes.md [ok]`
+- T61-H GPT-OSS:
+  - `TEST-OUTPUT-LLAMA-CPP-GPT-OSS-20B.txt:14387-14404`
+    - prompt classified with `READ_TARGET_REQUIRED`
+  - `TEST-OUTPUT-LLAMA-CPP-GPT-OSS-20B.txt:14426-14430`
+    - trace confirms `talos.read_file -> notes.md [ok]` while assistant says it
+      did not read the file
+- Prompt-debug/private marker persistence:
+  - `TEST-OUTPUT-LLAMA-CPP-QWEN-14B.txt:14878-14884`
+  - `TEST-OUTPUT-LLAMA-CPP-GPT-OSS-20B.txt:15107-15113`
 
 ## Scope
 
@@ -63,3 +86,21 @@ Out of scope:
 - Saved prompt-debug/provider-body artifacts do not acquire new private file
   contents from meta-evidence questions.
 - `.\gradlew.bat --no-daemon check installDist` passes.
+
+## Resolution
+
+- Added session meta-evidence classification for prior-action file questions so
+  the current-turn evidence obligation is `VERIFY_FROM_TRACE_OR_EVIDENCE`, not
+  `READ_TARGET_REQUIRED`.
+- Added runtime tool-evidence retention in `SessionMemory`, populated from
+  completed-turn `TurnAudit` snapshots by `MemoryUpdateListener`.
+- Added a deterministic executor answer path for meta-evidence read/mutation
+  questions. It answers from runtime evidence before any LLM/tool handoff.
+- Preserved normal current-content read requests such as "read it now".
+
+## Verification
+
+- `./gradlew.bat test --tests dev.talos.runtime.task.TaskContractResolverTest --tests dev.talos.runtime.policy.EvidenceObligationPolicyTest --tests dev.talos.cli.modes.AssistantTurnExecutorTest --tests dev.talos.runtime.MemoryUpdateListenerTest`
+- `./gradlew.bat test --tests dev.talos.runtime.task.* --tests dev.talos.runtime.policy.* --tests dev.talos.cli.modes.* --tests dev.talos.runtime.MemoryUpdateListenerTest --tests dev.talos.runtime.SessionLifecycleTest`
+- `./gradlew.bat check`
+- `./gradlew.bat installDist`

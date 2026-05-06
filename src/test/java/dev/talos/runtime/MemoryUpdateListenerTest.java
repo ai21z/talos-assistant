@@ -186,6 +186,28 @@ class MemoryUpdateListenerTest {
         assertEquals(0, cm.turnCount());
     }
 
+    @Test void memoryAwareListenerRecordsToolEvidenceForLaterMetaEvidenceAnswers() {
+        var evidenceMemory = new SessionMemory();
+        var evidenceConversation = new ConversationManager(evidenceMemory, new TokenBudget());
+        var evidenceListener = new MemoryUpdateListener(evidenceConversation, null, evidenceMemory);
+        var audit = new TurnAudit(
+                List.of(new TurnRecord.ToolCallSummary("talos.read_file", "notes.md", true)),
+                0,
+                0,
+                0);
+
+        evidenceListener.onTurnComplete(
+                new TurnResult(new Result.Ok("Read notes.md."), null, 4, Duration.ofMillis(50), audit),
+                "Read notes.md");
+
+        assertEquals(1, evidenceMemory.toolEvidence().size());
+        SessionMemory.ToolEvidence evidence = evidenceMemory.toolEvidence().getFirst();
+        assertEquals(4, evidence.turnNumber());
+        assertEquals("talos.read_file", evidence.toolName());
+        assertEquals("notes.md", evidence.pathHint());
+        assertTrue(evidence.success());
+    }
+
     private static TurnResult tr(Result r, int turn) {
         return new TurnResult(r, null, turn, Duration.ofMillis(50));
     }

@@ -3,6 +3,7 @@ package dev.talos.cli.repl;
 import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ArtifactGoal;
 import dev.talos.runtime.context.ChangeSummaryContext;
+import dev.talos.runtime.TurnRecord;
 import dev.talos.spi.types.ChatMessage;
 
 import java.util.ArrayList;
@@ -43,9 +44,17 @@ public final class SessionMemory {
 
     private String buffer;
     private final List<ChatMessage> turns = new ArrayList<>();
+    private final List<ToolEvidence> toolEvidence = new ArrayList<>();
     private ActiveTaskContext activeTaskContext;
     private ArtifactGoal artifactGoal;
     private ChangeSummaryContext changeSummaryContext;
+
+    public record ToolEvidence(int turnNumber, String toolName, String pathHint, boolean success) {
+        public ToolEvidence {
+            toolName = toolName == null ? "" : toolName;
+            pathHint = pathHint == null ? "" : pathHint;
+        }
+    }
 
     public SessionMemory() {
         this.buffer = null;
@@ -76,6 +85,10 @@ public final class SessionMemory {
         return changeSummaryContext;
     }
 
+    public synchronized List<ToolEvidence> toolEvidence() {
+        return List.copyOf(toolEvidence);
+    }
+
     public synchronized void setActiveTaskContext(ActiveTaskContext activeTaskContext) {
         this.activeTaskContext = activeTaskContext == null ? ActiveTaskContext.none() : activeTaskContext;
     }
@@ -97,6 +110,7 @@ public final class SessionMemory {
     public synchronized void clear() {
         buffer = null;
         turns.clear();
+        toolEvidence.clear();
         clearActiveTaskContext();
         changeSummaryContext = ChangeSummaryContext.none();
     }
@@ -161,6 +175,17 @@ public final class SessionMemory {
                 s = s.substring(s.length() - MAX_CHARS);
             }
             buffer = s;
+        }
+    }
+
+    public synchronized void recordToolEvidence(int turnNumber, List<TurnRecord.ToolCallSummary> calls) {
+        if (calls == null || calls.isEmpty()) return;
+        for (TurnRecord.ToolCallSummary call : calls) {
+            if (call == null) continue;
+            toolEvidence.add(new ToolEvidence(turnNumber, call.name(), call.pathHint(), call.success()));
+        }
+        while (toolEvidence.size() > MAX_TURNS * 4) {
+            toolEvidence.removeFirst();
         }
     }
 }

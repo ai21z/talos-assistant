@@ -239,14 +239,19 @@ public final class TaskContractResolver {
                     original,
                     "tool-alias-capability-question");
         }
+        boolean sessionMetaEvidenceQuestion = looksLikeSessionMetaEvidenceQuestion(lower);
         boolean priorChangeStatusQuestion = MutationIntent.looksPriorChangeStatusQuestion(original);
         String classificationReason = MutationIntent.classificationReason(original);
-        boolean mutationRequested = !priorChangeStatusQuestion
+        boolean mutationRequested = !sessionMetaEvidenceQuestion
+                && !priorChangeStatusQuestion
                 && MutationIntent.isExplicitMutationClassificationReason(classificationReason);
-        boolean commandVerificationRequest = !priorChangeStatusQuestion
+        boolean commandVerificationRequest = !sessionMetaEvidenceQuestion
+                && !priorChangeStatusQuestion
                 && !mutationRequested
                 && looksExplicitCommandVerificationRequest(lower);
-        TaskType type = priorChangeStatusQuestion
+        TaskType type = sessionMetaEvidenceQuestion
+                ? TaskType.VERIFY_ONLY
+                : priorChangeStatusQuestion
                 ? TaskType.VERIFY_ONLY
                 : commandVerificationRequest
                 ? TaskType.VERIFY_ONLY
@@ -272,7 +277,9 @@ public final class TaskContractResolver {
                 expectedTargets,
                 forbiddenTargets,
                 original,
-                commandVerificationRequest
+                sessionMetaEvidenceQuestion
+                        ? "session-meta-evidence-question"
+                        : commandVerificationRequest
                         ? "explicit-command-verification-request"
                         : classificationReason);
     }
@@ -414,6 +421,49 @@ public final class TaskContractResolver {
         if (containsAny(lower, COMMAND_TOOL_MARKERS)) return true;
         return containsAny(lower, GRADLE_COMMAND_MARKERS)
                 && looksGradleBuildOrTestVerification(lower);
+    }
+
+    private static boolean looksLikeSessionMetaEvidenceQuestion(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        if (!lower.contains("?")) return false;
+        if (lower.contains("read it now")
+                || lower.contains("read them now")
+                || lower.contains("open it now")
+                || lower.contains("inspect it now")) {
+            return false;
+        }
+        boolean asksAboutPriorAction = lower.contains("did you read")
+                || lower.contains("have you read")
+                || lower.contains("has talos read")
+                || lower.contains("did talos read")
+                || lower.contains("did you write")
+                || lower.contains("did you edit")
+                || lower.contains("did you change")
+                || lower.contains("did you modify")
+                || lower.contains("did you update")
+                || lower.contains("did talos write")
+                || lower.contains("did talos edit")
+                || lower.contains("did talos change")
+                || lower.contains("did talos modify")
+                || lower.contains("did talos update");
+        if (!asksAboutPriorAction) return false;
+        boolean evidenceScoped = lower.contains("verified evidence")
+                || lower.contains("runtime evidence")
+                || lower.contains("from this session")
+                || lower.contains("in this session")
+                || lower.contains("earlier")
+                || lower.contains("previously")
+                || lower.contains("already");
+        boolean contentRequest = lower.contains("summarize")
+                || lower.contains("summary")
+                || lower.contains("tell me")
+                || lower.contains("show me")
+                || lower.contains("content")
+                || lower.contains("contents")
+                || lower.contains("what is in")
+                || lower.contains("what does");
+        if (!evidenceScoped && contentRequest) return false;
+        return TARGET_FILE.matcher(lower).find() || EXTENSIONLESS_TEXT_TARGET.matcher(lower).find();
     }
 
     private static boolean looksGradleBuildOrTestVerification(String lower) {

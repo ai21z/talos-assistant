@@ -24,6 +24,17 @@ class EvidenceObligationPolicyTest {
     }
 
     @Test
+    void metaEvidenceReadQuestionUsesTraceEvidenceInsteadOfReadingTarget() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Based only on verified evidence from this session, did you read notes.md? "
+                        + "Answer yes or no and one sentence.");
+
+        assertEquals(
+                EvidenceObligation.VERIFY_FROM_TRACE_OR_EVIDENCE,
+                EvidenceObligationPolicy.derive(contract, ExecutionPhase.INSPECT, WORKSPACE));
+    }
+
+    @Test
     void protectedReadTargetRequiresApproval() {
         TaskContract contract = TaskContractResolver.fromUserRequest("Read .env and tell me the keys.");
 
