@@ -638,29 +638,7 @@ class StaticTaskVerifierTest {
 
     @Test
     void staticWebRepairContextFilesDoNotAllNeedMutationWhenFinalSurfacePasses() throws Exception {
-        Files.writeString(workspace.resolve("index.html"), """
-                <!doctype html>
-                <html>
-                <head>
-                  <meta charset="utf-8">
-                  <title>Talos Button Fixture</title>
-                  <link rel="stylesheet" href="styles.css">
-                </head>
-                <body>
-                  <main>
-                    <button id="run-button">Run</button>
-                    <p id="result">Waiting</p>
-                  </main>
-                  <script src="script.js"></script>
-                </body>
-                </html>
-                """);
-        Files.writeString(workspace.resolve("styles.css"), """
-                body { font-family: system-ui, sans-serif; }
-                main { max-width: 32rem; margin: 2rem auto; }
-                button { padding: 0.5rem 0.75rem; }
-                """);
-        Files.writeString(workspace.resolve("script.js"), """
+        writeButtonFixtureWebFiles("""
                 document.querySelector('#run-button').addEventListener('click', () => {
                   document.querySelector('#result').textContent = 'Clicked';
                 });
@@ -680,6 +658,74 @@ class StaticTaskVerifierTest {
                 result.problems().toString());
         assertTrue(result.facts().stream()
                 .anyMatch(f -> f.contains("HTML/CSS/JS selector coherence passed")), result.facts().toString());
+    }
+
+    @Test
+    void staticButtonFixtureFailsWhenResultHandlerHasTruncatedTextContentAssignment() throws Exception {
+        writeButtonFixtureWebFiles("""
+                document.querySelector('#run-button').addEventListener('click', () => {
+                  document.querySelector('#result').textC;
+                });
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Fix the static web button fixture. The existing index.html loads script.js; "
+                        + "the button with id run-button should set #result to Clicked. "
+                        + "Keep filenames index.html, styles.css, and script.js. Do not create scripts.js.",
+                loopResult(List.of(successfulEdit("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.facts().toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("script.js")
+                                && p.contains("#result")
+                                && p.contains("Clicked")),
+                result.problems().toString());
+    }
+
+    @Test
+    void staticButtonFixturePassesWhenQuerySelectorAssignsResultTextContent() throws Exception {
+        writeButtonFixtureWebFiles("""
+                document.querySelector('#run-button').addEventListener('click', () => {
+                  document.querySelector('#result').textContent = 'Clicked';
+                });
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Fix the static web button fixture. The existing index.html loads script.js; "
+                        + "the button with id run-button should set #result to Clicked. "
+                        + "Keep filenames index.html, styles.css, and script.js. Do not create scripts.js.",
+                loopResult(List.of(successfulEdit("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.problems().toString());
+        assertTrue(result.facts().stream()
+                        .anyMatch(f -> f.contains("button/result behavior passed")),
+                result.facts().toString());
+    }
+
+    @Test
+    void staticButtonFixturePassesWhenGetElementByIdAssignsResultTextContent() throws Exception {
+        writeButtonFixtureWebFiles("""
+                document.getElementById('run-button').addEventListener('click', () => {
+                  document.getElementById('result').textContent = 'Clicked';
+                });
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Fix the static web button fixture. The existing index.html loads script.js; "
+                        + "the button with id run-button should set #result to Clicked. "
+                        + "Keep filenames index.html, styles.css, and script.js. Do not create scripts.js.",
+                loopResult(List.of(successfulEdit("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.problems().toString());
+        assertTrue(result.facts().stream()
+                        .anyMatch(f -> f.contains("button/result behavior passed")),
+                result.facts().toString());
     }
 
     @Test
@@ -1071,6 +1117,32 @@ class StaticTaskVerifierTest {
                 document.getElementById('height');
                 document.getElementById('result');
                 """);
+    }
+
+    private void writeButtonFixtureWebFiles(String script) throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                <head>
+                  <meta charset="utf-8">
+                  <title>Talos Button Fixture</title>
+                  <link rel="stylesheet" href="styles.css">
+                </head>
+                <body>
+                  <main>
+                    <button id="run-button">Run</button>
+                    <p id="result">Waiting</p>
+                  </main>
+                  <script src="script.js"></script>
+                </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), """
+                body { font-family: system-ui, sans-serif; }
+                main { max-width: 32rem; margin: 2rem auto; }
+                button { padding: 0.5rem 0.75rem; }
+                """);
+        Files.writeString(workspace.resolve("script.js"), script);
     }
 
     private static ToolCallLoop.ToolOutcome successfulEdit(String path, VerificationStatus verificationStatus) {
