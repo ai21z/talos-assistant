@@ -1,6 +1,6 @@
 # T153 - Changed-Files Summary Must Preserve Failed Verification History
 
-Status: open
+Status: done
 Priority: high
 
 ## Evidence Summary
@@ -85,3 +85,41 @@ After implementation:
 
 - Rerun the exact literal write portion and final changed-files summary prompt with both models.
 - Confirm failed exact verification history remains visible unless a later turn genuinely repairs `README.md`.
+
+## Closeout - 2026-05-06
+
+Implemented unresolved verification failure history in `ChangeSummaryContext`.
+
+Runtime changed-files summaries now:
+
+- retain failed verification history across later unrelated successful mutations,
+- report `not verified complete` while any unresolved failed verification remains,
+- render an `Unresolved verification failures` section with the affected path, turn, status, and verifier findings,
+- clear a prior failure when the same path is later successfully verified,
+- continue to use runtime-owned changed-file data rather than model-authored prose.
+
+Tests added:
+
+- `ActiveTaskContextUpdateListenerTest.failedExactVerificationHistorySurvivesLaterUnrelatedVerifiedChange`
+- `ActiveTaskContextUpdateListenerTest.failedStaticWebVerificationHistorySurvivesLaterUnrelatedVerifiedChange`
+- `ActiveTaskContextUpdateListenerTest.failedVerificationHistoryIsResolvedByLaterVerifiedChangeToSameTarget`
+- `AssistantTurnExecutorTest.VerifiedFollowUpSummaries.changedFilesAuditQuestionPreservesUnresolvedExactFailureDespiteLaterPassedStatus`
+
+Verification run:
+
+```powershell
+.\gradlew.bat --no-daemon test --tests dev.talos.runtime.ActiveTaskContextUpdateListenerTest.failedExactVerificationHistorySurvivesLaterUnrelatedVerifiedChange
+.\gradlew.bat --no-daemon test --tests dev.talos.runtime.ActiveTaskContextUpdateListenerTest.failedExactVerificationHistorySurvivesLaterUnrelatedVerifiedChange --tests dev.talos.runtime.ActiveTaskContextUpdateListenerTest.failedStaticWebVerificationHistorySurvivesLaterUnrelatedVerifiedChange --tests dev.talos.runtime.ActiveTaskContextUpdateListenerTest.failedVerificationHistoryIsResolvedByLaterVerifiedChangeToSameTarget
+.\gradlew.bat --no-daemon test --tests dev.talos.runtime.ActiveTaskContextUpdateListenerTest
+.\gradlew.bat --no-daemon test --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$VerifiedFollowUpSummaries.changedFilesAuditQuestionPreservesUnresolvedExactFailureDespiteLaterPassedStatus'
+.\gradlew.bat --no-daemon test --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$VerifiedFollowUpSummaries'
+.\gradlew.bat --no-daemon test --tests dev.talos.runtime.ActiveTaskContextUpdateListenerTest --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$VerifiedFollowUpSummaries'
+.\gradlew.bat --no-daemon test
+.\gradlew.bat --no-daemon e2eTest
+.\gradlew.bat --no-daemon check
+.\gradlew.bat --no-daemon installDist
+```
+
+Focused audit:
+
+- `local/manual-testing/t153-change-summary-history-audit-20260506-064720/FINDINGS-T153-CHANGE-SUMMARY-HISTORY-AUDIT.md`
