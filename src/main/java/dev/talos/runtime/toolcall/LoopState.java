@@ -5,6 +5,7 @@ import dev.talos.runtime.failure.FailureAction;
 import dev.talos.runtime.Session;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatMessage.NativeToolCall;
+import dev.talos.tools.ToolCall;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -86,6 +87,28 @@ public final class LoopState {
         return pendingActionObligation != null;
     }
 
+    public boolean failPendingStaticRepairObligationAfterInvalidToolCalls(List<ToolCall> calls) {
+        if (pendingActionObligation == null
+                || pendingActionObligation.kind()
+                != PendingActionObligation.Kind.STATIC_REPAIR_TARGETS_REMAINING) {
+            return false;
+        }
+        if (calls == null || calls.isEmpty()) return false;
+        if (containsWriteFileForPendingTarget(calls, pendingActionObligation.targets())) {
+            return false;
+        }
+        String detail = staticRepairInvalidToolDetail(calls, pendingActionObligation.targets());
+        PendingActionObligation obligation = pendingActionObligation;
+        pendingActionObligation = null;
+        obligation.recordBreached(detail);
+        failureDecision = dev.talos.runtime.failure.FailureDecision.stop(
+                FailureAction.ASK_USER,
+                obligation.failureReason(detail));
+        currentText = obligation.failureAnswer(detail);
+        currentNativeCalls = List.of();
+        return true;
+    }
+
     public boolean failPendingActionObligationAfterNoExecutableToolCalls() {
         if (pendingActionObligation == null) return false;
         PendingActionObligation obligation = pendingActionObligation;
@@ -97,5 +120,53 @@ public final class LoopState {
         currentText = obligation.failureAnswer();
         currentNativeCalls = List.of();
         return true;
+    }
+
+    private static boolean containsWriteFileForPendingTarget(
+            List<ToolCall> calls,
+            List<String> targets
+    ) {
+        Set<String> normalizedTargets = normalizedTargets(targets);
+        if (normalizedTargets.isEmpty()) return false;
+        for (ToolCall call : calls) {
+            if (call == null || !"talos.write_file".equals(call.toolName())) continue;
+            String path = ToolCallSupport.normalizePath(call.param("path", ""));
+            if (!path.isBlank() && normalizedTargets.contains(path)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String staticRepairInvalidToolDetail(
+            List<ToolCall> calls,
+            List<String> targets
+    ) {
+        String attempted = calls == null || calls.isEmpty()
+                ? "(none)"
+                : calls.stream()
+                .filter(Objects::nonNull)
+                .map(call -> {
+                    String path = ToolCallSupport.normalizePath(call.param("path", ""));
+                    return path.isBlank() ? call.toolName() : call.toolName() + "(" + path + ")";
+                })
+                .toList()
+                .toString();
+        String targetList = targets == null || targets.isEmpty()
+                ? "(unknown)"
+                : String.join(", ", targets);
+        return "Static web repair requires talos.write_file for remaining target(s): "
+                + targetList + ". The model attempted " + attempted
+                + " instead, so no additional tool call was executed.";
+    }
+
+    private static Set<String> normalizedTargets(List<String> targets) {
+        if (targets == null || targets.isEmpty()) return Set.of();
+        Set<String> normalized = new HashSet<>();
+        for (String target : targets) {
+            String path = ToolCallSupport.normalizePath(target);
+            if (!path.isBlank()) normalized.add(path);
+        }
+        return normalized;
     }
 }

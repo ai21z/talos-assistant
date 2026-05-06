@@ -1437,9 +1437,6 @@ class ToolCallLoopTest {
             String badEdit = """
                     {"name":"talos.edit_file","arguments":{"path":"script.js","old_string":"document.querySelector('.missing-button').addEventListener('click', function () {","new_string":"document.querySelector('#run-button').addEventListener('click', function () {"}}
                     """;
-            String repeatedEdit = """
-                    {"name":"talos.edit_file","arguments":{"path":"script.js","old_string":"document.querySelector('.missing-button').addEventListener('click', function(){","new_string":"document.querySelector('#run-button').addEventListener('click', function(){"}}
-                    """;
             String correctedScript = """
                     document.getElementById('run-button').addEventListener('click', () => {
                       document.getElementById('result').textContent = 'Clicked';
@@ -1450,7 +1447,7 @@ class ToolCallLoopTest {
                     """.formatted(jsonEscape(correctedScript));
             var ctx = Context.builder(new Config())
                     .sandbox(new Sandbox(ws, Map.of()))
-                    .llm(LlmClient.scripted(List.of(badEdit, repeatedEdit, rewrite, "done")))
+                    .llm(LlmClient.scripted(List.of(badEdit, rewrite, "done")))
                     .build();
 
             TurnUserRequestCapture.set(request);
@@ -1472,13 +1469,195 @@ class ToolCallLoopTest {
             assertFalse(result.summary().contains("failed"),
                     "Recovered static web edit failures should not make the normal tool summary look failed.");
             assertEquals(correctedScript, Files.readString(ws.resolve("script.js")));
-            assertTrue(result.toolOutcomes().stream().anyMatch(ToolCallLoop.ToolOutcome::fullRewriteRepairRedirect),
-                    "After a static web old_string failure, repeated edit_file should be redirected to write_file.");
+            assertTrue(result.toolOutcomes().stream().anyMatch(ToolCallLoop.ToolOutcome::oldStringNotFoundEditFailure),
+                    "The initial old_string miss should be visible in tool outcomes.");
             assertTrue(trace.events().stream()
                             .anyMatch(event -> "REPAIR_DECISION_RECORDED".equals(event.type())
                                     && String.valueOf(event.data().get("summary"))
                                             .contains("static-web-edit-rewrite")),
                     "Trace should record the static web edit-to-write recovery decision.");
+            assertTrue(trace.events().stream()
+                            .noneMatch(event -> "PENDING_ACTION_OBLIGATION_BREACHED".equals(event.type())),
+                    "A direct write_file recovery must satisfy the pending repair obligation.");
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
+    void staticWebFullRewriteRequiredRejectsReadOnlyContinuationBeforeSuccessProse() throws Exception {
+        Path ws = Files.createTempDirectory("talos-static-web-rewrite-read-breach-");
+        try {
+            Files.writeString(ws.resolve("index.html"), """
+                    <!doctype html>
+                    <html>
+                    <head>
+                      <link rel="stylesheet" href="styles.css">
+                    </head>
+                    <body>
+                      <button id="run-button">Run</button>
+                      <p id="result">Waiting</p>
+                      <script src="script.js"></script>
+                    </body>
+                    </html>
+                    """);
+            Files.writeString(ws.resolve("styles.css"), "body { font-family: sans-serif; }\n");
+            Files.writeString(ws.resolve("script.js"), """
+                    document.querySelector('.missing-button').addEventListener('click', () => {
+                      document.querySelector('#result').textContent = 'Clicked';
+                    });
+                    """);
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileEditTool(new FileUndoStack()));
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 10);
+
+            String request = "Fix the static web button fixture. The existing index.html loads script.js; "
+                    + "the button with id run-button should set #result to Clicked. "
+                    + "Keep filenames index.html, styles.css, and script.js. Do not create scripts.js.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+
+            String badEdit = """
+                    {"name":"talos.edit_file","arguments":{"path":"script.js","old_string":"document.querySelector('.missing-button').addEventListener('click', function () {","new_string":"document.querySelector('#run-button').addEventListener('click', function () {"}}
+                    """;
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of(
+                            badEdit,
+                            readFileCall("script.js"),
+                            "Complete. Everything is ready to use.")))
+                    .build();
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            LocalTurnTraceCapture.begin("trc-t152-static-rewrite-read-breach", "session", 1,
+                    "2026-05-06T00:00:00Z", "ws", "test", "llama_cpp", "gpt-oss", request);
+            ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
+            try {
+                result = loop.run(readFileCall("script.js"), messages, ws, ctx);
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+                LocalTurnTraceCapture.clear();
+            }
+
+            assertTrue(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertTrue(result.failureDecision().reason().contains("STATIC_REPAIR_TARGETS_REMAINING"),
+                    result.failureDecision().reason());
+            assertTrue(result.failureDecision().reason().contains("script.js"),
+                    result.failureDecision().reason());
+            assertEquals(2, result.toolsInvoked(),
+                    "After old_string miss following read evidence, a read-only continuation should not execute.");
+            assertFalse(result.hitIterLimit(), "Static rewrite breach should stop before the generic loop cap.");
+            String lower = result.finalAnswer().toLowerCase(java.util.Locale.ROOT);
+            assertFalse(lower.contains("complete"), result.finalAnswer());
+            assertFalse(lower.contains("ready to use"), result.finalAnswer());
+            assertEquals("""
+                    document.querySelector('.missing-button').addEventListener('click', () => {
+                      document.querySelector('#result').textContent = 'Clicked';
+                    });
+                    """, Files.readString(ws.resolve("script.js")));
+
+            assertTrue(trace.events().stream()
+                            .anyMatch(event -> "PENDING_ACTION_OBLIGATION_RAISED".equals(event.type())
+                                    && "STATIC_REPAIR_TARGETS_REMAINING".equals(event.data().get("kind"))),
+                    "Trace should record the static repair obligation before the breach.");
+            assertTrue(trace.events().stream()
+                            .anyMatch(event -> "PENDING_ACTION_OBLIGATION_BREACHED".equals(event.type())
+                                    && "STATIC_REPAIR_TARGETS_REMAINING".equals(event.data().get("kind"))),
+                    "Trace should record a deterministic static repair breach.");
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
+    void staticWebFullRewriteRequiredRejectsRepeatedEditContinuationBeforeSuccessProse() throws Exception {
+        Path ws = Files.createTempDirectory("talos-static-web-rewrite-edit-breach-");
+        try {
+            Files.writeString(ws.resolve("index.html"), """
+                    <!doctype html>
+                    <html>
+                    <head>
+                      <link rel="stylesheet" href="styles.css">
+                    </head>
+                    <body>
+                      <button id="run-button">Run</button>
+                      <p id="result">Waiting</p>
+                      <script src="script.js"></script>
+                    </body>
+                    </html>
+                    """);
+            Files.writeString(ws.resolve("styles.css"), "body { font-family: sans-serif; }\n");
+            Files.writeString(ws.resolve("script.js"), """
+                    document.querySelector('.missing-button').addEventListener('click', () => {
+                      document.querySelector('#result').textContent = 'Clicked';
+                    });
+                    """);
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileEditTool(new FileUndoStack()));
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 10);
+
+            String request = "Fix the static web button fixture. The existing index.html loads script.js; "
+                    + "the button with id run-button should set #result to Clicked. "
+                    + "Keep filenames index.html, styles.css, and script.js. Do not create scripts.js.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+
+            String badEdit = """
+                    {"name":"talos.edit_file","arguments":{"path":"script.js","old_string":"document.querySelector('.missing-button').addEventListener('click', function () {","new_string":"document.querySelector('#run-button').addEventListener('click', function () {"}}
+                    """;
+            String repeatedEdit = """
+                    {"name":"talos.edit_file","arguments":{"path":"script.js","old_string":"document.querySelector('.missing-button').addEventListener('click', function(){","new_string":"document.querySelector('#run-button').addEventListener('click', function(){"}}
+                    """;
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of(
+                            badEdit,
+                            repeatedEdit,
+                            "Complete. Everything is ready to use.")))
+                    .build();
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            LocalTurnTraceCapture.begin("trc-t152-static-rewrite-edit-breach", "session", 1,
+                    "2026-05-06T00:00:00Z", "ws", "test", "llama_cpp", "gpt-oss", request);
+            ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
+            try {
+                result = loop.run(readFileCall("script.js"), messages, ws, ctx);
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+                LocalTurnTraceCapture.clear();
+            }
+
+            assertTrue(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertTrue(result.failureDecision().reason().contains("STATIC_REPAIR_TARGETS_REMAINING"),
+                    result.failureDecision().reason());
+            assertEquals(2, result.toolsInvoked(),
+                    "A repeated edit_file under a full-rewrite obligation should not execute.");
+            assertFalse(result.hitIterLimit(), "Static rewrite breach should stop before the generic loop cap.");
+            String lower = result.finalAnswer().toLowerCase(java.util.Locale.ROOT);
+            assertFalse(lower.contains("complete"), result.finalAnswer());
+            assertFalse(lower.contains("ready to use"), result.finalAnswer());
+            assertTrue(trace.events().stream()
+                            .anyMatch(event -> "PENDING_ACTION_OBLIGATION_BREACHED".equals(event.type())
+                                    && "STATIC_REPAIR_TARGETS_REMAINING".equals(event.data().get("kind"))),
+                    "Trace should record the repeated-edit static repair breach.");
         } finally {
             deleteRecursive(ws);
         }
