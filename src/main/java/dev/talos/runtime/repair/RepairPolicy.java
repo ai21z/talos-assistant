@@ -50,7 +50,6 @@ public final class RepairPolicy {
         if (problems.isEmpty()) {
             problems = List.of(firstStaticFailureLine(previous));
         }
-        Set<String> previousTargets = previousFailureTargets(previous, problems, messages);
         List<String> expectedTargets = contract.expectedTargets().stream()
                 .sorted()
                 .toList();
@@ -62,6 +61,11 @@ public final class RepairPolicy {
         List<WrongTargetPair> similarWrongTargets = similarWrongTargets(
                 missingExpectedTargets,
                 appliedMutationTargets);
+        Set<String> previousTargets = previousFailureTargets(
+                previous,
+                problems,
+                messages,
+                missingExpectedTargets);
         if (!expectedTargets.isEmpty()
                 && !previousTargets.isEmpty()
                 && !targetsOverlap(expectedTargets, previousTargets)) {
@@ -458,14 +462,23 @@ public final class RepairPolicy {
     private static Set<String> previousFailureTargets(
             String previous,
             List<String> problems,
-            List<ChatMessage> messages
+            List<ChatMessage> messages,
+            List<String> missingExpectedTargets
     ) {
         Set<String> targets = new LinkedHashSet<>();
-        targets.addAll(extractTargets(previous));
+        if (missingExpectedTargets != null && !missingExpectedTargets.isEmpty()) {
+            targets.addAll(missingExpectedTargets);
+            return Set.copyOf(targets);
+        }
         for (String problem : problems == null ? List.<String>of() : problems) {
             targets.addAll(extractTargets(problem));
         }
-        if (problems != null && problems.stream().anyMatch(StaticWebCapabilityProfile::isStructuralProblem)) {
+        if (targets.isEmpty()) {
+            targets.addAll(extractTargets(firstStaticFailureLine(previous)));
+        }
+        if (targets.isEmpty()
+                && problems != null
+                && problems.stream().anyMatch(StaticWebCapabilityProfile::isStructuralProblem)) {
             targets.addAll(StaticWebCapabilityProfile.inferStructuralTargets(messages, problems));
         }
         return Set.copyOf(targets);

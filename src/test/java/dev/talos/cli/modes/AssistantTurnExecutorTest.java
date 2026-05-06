@@ -760,6 +760,90 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void freshExactWriteSupersedesDisjointExistingStaticRepairContext(@TempDir Path workspace)
+                throws Exception {
+            var registry = new dev.talos.tools.ToolRegistry();
+            var undoStack = new dev.talos.tools.FileUndoStack();
+            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"index.html\","
+                                    + "\"content\":\"AFTER\"}}",
+                            "Updated index.html.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.system("""
+                    [Static verification repair context]
+                    The previous mutation task ended incomplete after static verification.
+
+                    Expected targets: scripts.js
+
+                    Previous static verification problems:
+                    - scripts.js: expected target was not successfully mutated.
+
+                    Repair plan:
+                    Full-file replacement targets: scripts.js
+                    - scripts.js: You must use talos.write_file with complete corrected file content for scripts.js.
+                    """));
+            messages.add(ChatMessage.user(
+                    "Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js."));
+            messages.add(ChatMessage.assistant("""
+                    [Task incomplete: Static verification failed - scripts.js: expected target was not successfully mutated.]
+
+                    The requested task is not verified complete.
+                    Unresolved static verification problems:
+                    - scripts.js: expected target was not successfully mutated.
+
+                    Applied mutating tool calls:
+                    - index.html: Updated index.html
+                    - styles.css: Updated styles.css
+                    - script.js: Updated script.js
+                    """));
+            messages.add(ChatMessage.user("Overwrite index.html with exactly AFTER. Use talos.write_file."));
+
+            AssistantTurnExecutor.TurnOutput out;
+            LocalTurnTrace trace;
+            LocalTurnTraceCapture.begin(
+                    "trc-t166-stale-repair-superseded",
+                    "sid",
+                    9,
+                    "2026-05-06T00:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "scripted",
+                    "test-model",
+                    "Overwrite index.html with exactly AFTER. Use talos.write_file.");
+            try {
+                out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+
+            assertEquals("AFTER", Files.readString(workspace.resolve("index.html")));
+            assertFalse(out.text().startsWith("[Action obligation failed:"), out.text());
+            assertFalse(out.text().contains("pending static repair progress"), out.text());
+            assertFalse(messages.stream()
+                            .map(message -> message.content() == null ? "" : message.content())
+                            .anyMatch(content -> content.startsWith("[Static verification repair context]")
+                                    && content.contains("Full-file replacement targets: scripts.js")),
+                    "fresh disjoint exact writes must remove stale static repair frames before the tool loop");
+            assertTrue(trace.events().stream()
+                            .anyMatch(event -> "REPAIR_DECISION_RECORDED".equals(event.type())
+                                    && "SUPERSEDED".equals(event.data().get("status"))
+                                    && String.valueOf(event.data().get("summary")).contains("scripts.js")),
+                    "trace should record the stale static repair supersession");
+        }
+
+        @Test
         void naturalRepairFollowUpWithoutCurrentMutationDoesNotSurfaceStaleSuccess(@TempDir Path workspace)
                 throws Exception {
             var registry = new dev.talos.tools.ToolRegistry();
