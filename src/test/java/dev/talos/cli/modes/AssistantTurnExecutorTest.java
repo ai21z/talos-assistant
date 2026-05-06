@@ -3094,6 +3094,10 @@ class AssistantTurnExecutorTest {
             assertTrue(out.text().contains("Talos"), out.text());
             assertTrue(lower.contains("local workspace"), out.text());
             assertTrue(lower.contains("approval"), out.text());
+            assertTrue(lower.contains("talos.run_command") || lower.contains("bounded command"),
+                    out.text());
+            assertFalse(lower.contains("cannot use browser, shell"), out.text());
+            assertFalse(lower.contains("raw shell"), out.text());
             assertFalse(lower.contains("as an ai language model"), out.text());
             assertFalse(lower.contains("poems"), out.text());
         }

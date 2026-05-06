@@ -1,6 +1,6 @@
 # T160 - Capability Answer Must Reflect Current Bounded Command Support
 
-Status: open
+Status: done
 
 Severity: medium
 

@@ -127,8 +127,10 @@ class UnifiedAssistantModeTest {
         assertEquals("SMALL_TALK", render.taskType());
         assertFalse(render.mutationAllowed());
         assertTrue(render.tools().isEmpty(), render.tools().toString());
-        assertTrue(body.contains("apply file changes only after approval"), body);
+        assertTrue(body.contains("apply approved file/workspace changes"), body);
+        assertTrue(body.contains("talos.run_command"), body);
         assertTrue(body.contains("read and search files"), body);
+        assertFalse(body.contains("cannot use browser, shell"), body);
         assertFalse(body.contains("This scripted answer should not be used"), body);
     }
 
