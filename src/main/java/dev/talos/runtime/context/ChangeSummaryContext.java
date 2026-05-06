@@ -29,7 +29,7 @@ public record ChangeSummaryContext(
         List<String> verifierFindings,
         List<VerificationFailure> unresolvedVerificationFailures
 ) {
-    public static final int SCHEMA_VERSION = 2;
+    public static final int SCHEMA_VERSION = 3;
     private static final int MAX_CHANGED_FILES = 20;
     private static final int MAX_UNRESOLVED_TARGETS = 10;
     private static final int MAX_FINDINGS = 5;
@@ -58,11 +58,26 @@ public record ChangeSummaryContext(
         unresolvedVerificationFailures = normalizeVerificationFailures(unresolvedVerificationFailures);
     }
 
-    public record FileChange(String path, String toolName, int turnNumber, String traceId) {
+    public record FileChange(
+            String path,
+            String toolName,
+            int turnNumber,
+            String traceId,
+            String toolOutcome,
+            String verificationStatus,
+            String completionStatus
+    ) {
+        public FileChange(String path, String toolName, int turnNumber, String traceId) {
+            this(path, toolName, turnNumber, traceId, "", "", "");
+        }
+
         public FileChange {
             path = normalizePath(path);
             toolName = normalizeText(toolName, MAX_FIELD_CHARS);
             traceId = normalizeText(traceId, MAX_FIELD_CHARS);
+            toolOutcome = normalizeText(toolOutcome, MAX_FIELD_CHARS);
+            verificationStatus = normalizeText(verificationStatus, MAX_FIELD_CHARS);
+            completionStatus = normalizeText(completionStatus, MAX_FIELD_CHARS);
         }
     }
 
@@ -129,7 +144,14 @@ public record ChangeSummaryContext(
             String path = normalizePath(call.pathHint());
             if (path.isBlank()) continue;
             changes.remove(path);
-            changes.put(path, new FileChange(path, call.name(), result.turnNumber(), traceId));
+            changes.put(path, new FileChange(
+                    path,
+                    call.name(),
+                    result.turnNumber(),
+                    traceId,
+                    "SUCCEEDED",
+                    verificationStatus,
+                    completionStatus));
             changedThisTurn.add(path);
         }
         while (changes.size() > MAX_CHANGED_FILES) {
@@ -172,11 +194,20 @@ public record ChangeSummaryContext(
             out.append("- ").append(change.path());
             if (change.turnNumber() > 0) out.append(" (turn ").append(change.turnNumber()).append(')');
             if (!change.toolName().isBlank()) out.append(" via ").append(change.toolName());
+            List<String> state = fileChangeState(change);
+            if (!state.isEmpty()) {
+                out.append(" [").append(String.join("; ", state)).append(']');
+            }
             out.append('\n');
         }
 
-        if (!completionStatus.isBlank() || !verificationStatus.isBlank()) {
-            out.append("\nVerification status: ");
+        if (hasUnverifiedFileChanges()) {
+            out.append("\nSome listed changes are not verified complete; see the per-file verifier state above.\n");
+        } else if (!unresolvedTargets.isEmpty() || !unresolvedVerificationFailures.isEmpty()) {
+            out.append("\nSome recorded work is not verified complete; unresolved targets or verifier failures remain.\n");
+        } else if (!hasPerFileVerificationState()
+                && (!completionStatus.isBlank() || !verificationStatus.isBlank())) {
+            out.append("\nLatest recorded mutation turn status: ");
             out.append(verifiedComplete() ? "verified complete" : "not verified complete");
             if (!verificationStatus.isBlank()) out.append(" (").append(verificationStatus).append(')');
             if (!completionStatus.isBlank()) out.append("; outcome=").append(completionStatus);
@@ -217,8 +248,47 @@ public record ChangeSummaryContext(
 
     private boolean verifiedComplete() {
         if (!unresolvedTargets.isEmpty() || !unresolvedVerificationFailures.isEmpty()) return false;
+        if (hasPerFileVerificationState()) {
+            return changedFiles.stream()
+                    .filter(ChangeSummaryContext::hasFileVerificationState)
+                    .allMatch(ChangeSummaryContext::fileChangeVerified);
+        }
         return "PASSED".equalsIgnoreCase(verificationStatus)
                 || "COMPLETED_VERIFIED".equalsIgnoreCase(completionStatus);
+    }
+
+    private boolean hasPerFileVerificationState() {
+        return changedFiles.stream().anyMatch(ChangeSummaryContext::hasFileVerificationState);
+    }
+
+    private boolean hasUnverifiedFileChanges() {
+        return changedFiles.stream().anyMatch(ChangeSummaryContext::fileChangeUnverified);
+    }
+
+    private static List<String> fileChangeState(FileChange change) {
+        if (change == null) return List.of();
+        List<String> state = new ArrayList<>();
+        if (!change.toolOutcome().isBlank()) state.add("tool outcome=" + change.toolOutcome());
+        if (!change.verificationStatus().isBlank()) state.add("verifier=" + change.verificationStatus());
+        if (!change.completionStatus().isBlank()) state.add("completion=" + change.completionStatus());
+        if (!change.traceId().isBlank()) state.add("trace=" + change.traceId());
+        return List.copyOf(state);
+    }
+
+    private static boolean hasFileVerificationState(FileChange change) {
+        return change != null
+                && (!change.verificationStatus().isBlank() || !change.completionStatus().isBlank());
+    }
+
+    private static boolean fileChangeVerified(FileChange change) {
+        if (change == null) return false;
+        return "PASSED".equalsIgnoreCase(change.verificationStatus())
+                || "COMPLETED_VERIFIED".equalsIgnoreCase(change.completionStatus());
+    }
+
+    private static boolean fileChangeUnverified(FileChange change) {
+        if (!hasFileVerificationState(change)) return false;
+        return !fileChangeVerified(change);
     }
 
     private static List<FileChange> normalizeChanges(List<FileChange> rawChanges) {
@@ -330,6 +400,7 @@ public record ChangeSummaryContext(
         if (localTrace == null || localTrace.verification() == null) return List.of();
         List<String> problems = localTrace.verification().problems();
         if (problems != null && !problems.isEmpty()) return normalizeStrings(problems, MAX_FINDINGS);
+        if ("PASSED".equalsIgnoreCase(localTrace.verification().status())) return List.of();
         String summary = localTrace.verification().summary();
         if (summary == null || summary.isBlank()) return List.of();
         return normalizeStrings(List.of(summary), MAX_FINDINGS);
