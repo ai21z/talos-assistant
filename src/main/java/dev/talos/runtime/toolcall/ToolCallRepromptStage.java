@@ -8,6 +8,7 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.repair.RepairInstruction;
 import dev.talos.runtime.repair.RepairPolicy;
+import dev.talos.runtime.policy.ActionObligation;
 import dev.talos.runtime.policy.ConditionalReviewFixPolicy;
 import dev.talos.runtime.policy.ResponseObligationVerifier;
 import dev.talos.runtime.task.TaskContract;
@@ -177,7 +178,7 @@ public final class ToolCallRepromptStage {
             state.currentText = ResponseObligationVerifier.deterministicRepairInspectionOnlyAnswer();
             state.currentNativeCalls = List.of();
             LocalTurnTraceCapture.recordActionObligation(
-                    "MUTATING_TOOL_REQUIRED",
+                    conditionalRepairObligationName(contract),
                     "FAILED",
                     reason,
                     "REPAIR_INSPECTION_ONLY");
@@ -438,6 +439,12 @@ public final class ToolCallRepromptStage {
         String reason = contract.classificationReason();
         return "explicit-review-and-fix-request".equals(reason)
                 || "repair-follow-up-inherits-previous-mutation-contract".equals(reason);
+    }
+
+    private static String conditionalRepairObligationName(TaskContract contract) {
+        return ConditionalReviewFixPolicy.isConditionalReviewAndFix(contract)
+                ? ActionObligation.CONDITIONAL_REVIEW_FIX.name()
+                : ActionObligation.MUTATING_TOOL_REQUIRED.name();
     }
 
     private static boolean hasStaticRepairContext(LoopState state) {

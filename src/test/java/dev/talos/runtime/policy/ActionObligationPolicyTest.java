@@ -19,6 +19,17 @@ class ActionObligationPolicyTest {
     }
 
     @Test
+    void conditionalReviewFixApplyTurnUsesConditionalObligation() {
+        var contract = TaskContractResolver.fromUserRequest(
+                "Review the BMI calculator you just created and fix any obvious issue "
+                        + "that would stop it from working in a browser.");
+
+        assertEquals(
+                ActionObligation.valueOf("CONDITIONAL_REVIEW_FIX"),
+                ActionObligationPolicy.derive(contract, ExecutionPhase.APPLY));
+    }
+
+    @Test
     void directoryListingRequiresListDirOnly() {
         var contract = TaskContractResolver.fromUserRequest("What files are in this folder?");
 

@@ -28,8 +28,8 @@ public final class ResponseObligationVerifier {
     private ResponseObligationVerifier() {}
 
     public static boolean unsatisfiedNoToolResponse(ActionObligation obligation, String answer) {
-        if (obligation != ActionObligation.MUTATING_TOOL_REQUIRED) return false;
-        return true;
+        return obligation == ActionObligation.MUTATING_TOOL_REQUIRED
+                || obligation == ActionObligation.CONDITIONAL_REVIEW_FIX;
     }
 
     public static boolean containsMutationCapabilityDeflection(String answer) {
@@ -42,6 +42,16 @@ public final class ResponseObligationVerifier {
     }
 
     public static String retryFailureSummary(String answer) {
+        return retryFailureSummary(ActionObligation.MUTATING_TOOL_REQUIRED, answer);
+    }
+
+    public static String retryFailureSummary(ActionObligation obligation, String answer) {
+        if (obligation == ActionObligation.CONDITIONAL_REVIEW_FIX) {
+            return "[Action obligation check: the previous model response did not satisfy "
+                    + "the conditional review-and-fix obligation. Inspection-only no-change "
+                    + "requires evidence-backed no blocker; a concrete repair claim requires "
+                    + "a write/edit tool call.]";
+        }
         if (containsMutationCapabilityDeflection(answer)) {
             return "[Action obligation check: the previous model response denied workspace file access, "
                     + "but the runtime exposed write/edit tools for this turn. That denial was not accepted.]";

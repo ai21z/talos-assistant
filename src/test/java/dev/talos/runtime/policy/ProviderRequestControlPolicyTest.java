@@ -33,6 +33,27 @@ class ProviderRequestControlPolicyTest {
     }
 
     @Test
+    void conditionalReviewFixRequiresToolChoiceWithoutMutatingTag() {
+        var contract = TaskContractResolver.fromUserRequest(
+                "Review the BMI calculator you just created and fix any obvious issue "
+                        + "that would stop it from working in a browser.");
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                contract,
+                ExecutionPhase.APPLY,
+                List.of("talos.read_file", "talos.write_file", "talos.edit_file"),
+                List.of("talos.read_file", "talos.write_file", "talos.edit_file"),
+                List.of());
+
+        var controls = ProviderRequestControlPolicy.forTurn(
+                plan,
+                List.of(tool("talos.read_file"), tool("talos.write_file"), tool("talos.edit_file")),
+                true);
+
+        assertEquals(ToolChoiceMode.REQUIRED, controls.toolChoice());
+        assertEquals(List.of("action-obligation:CONDITIONAL_REVIEW_FIX"), controls.debugTags());
+    }
+
+    @Test
     void evidenceObligationRequiresToolChoiceWhenSupportedAndReadToolsVisible() {
         var contract = TaskContractResolver.fromUserRequest("Inspect this project and explain what it does.");
         CurrentTurnPlan plan = CurrentTurnPlan.create(
