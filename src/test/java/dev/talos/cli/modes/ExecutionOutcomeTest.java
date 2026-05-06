@@ -2263,6 +2263,113 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void staticWebDiagnosisWithLinkedScriptButOnlyIndexReadIsEvidenceIncomplete() throws Exception {
+        Path ws = Files.createTempDirectory("talos-static-web-linked-script-missing-");
+        try {
+            Files.writeString(ws.resolve("index.html"), """
+                    <!doctype html>
+                    <html>
+                      <body>
+                        <button id="run-button">Run</button>
+                        <script src="script.js"></script>
+                      </body>
+                    </html>
+                    """);
+            Files.writeString(ws.resolve("script.js"), """
+                    document.querySelector('.missing-button').addEventListener('click', () => {
+                      document.body.dataset.clicked = 'true';
+                    });
+                    """);
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Will the current static web page button work in a browser? "
+                            + "Inspect the files and do not change anything."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "The button markup is present, but script.js still needs inspection before I can say whether it works.",
+                    1, 1,
+                    List.of("talos.read_file"), List.of(),
+                    0, 0, false, 0, List.of("index.html"),
+                    0, 0, 0, 0,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.read_file", "index.html", true, false, false,
+                            "read index", "")));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    loopResult.finalAnswer(), messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
+            assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
+            assertTrue(outcome.finalAnswer().startsWith(
+                    "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"));
+            assertFalse(outcome.finalAnswer().contains("button markup is present"), outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("script.js"), outcome.finalAnswer());
+            assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
+    void staticWebDiagnosisWithLinkedScriptReadCanComplete() throws Exception {
+        Path ws = Files.createTempDirectory("talos-static-web-linked-script-read-");
+        try {
+            Files.writeString(ws.resolve("index.html"), """
+                    <!doctype html>
+                    <html>
+                      <body>
+                        <button id="run-button">Run</button>
+                        <script src="script.js"></script>
+                      </body>
+                    </html>
+                    """);
+            Files.writeString(ws.resolve("script.js"), """
+                    document.querySelector('#run-button').addEventListener('click', () => {
+                      document.body.dataset.clicked = 'true';
+                    });
+                    """);
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Will the current static web page button work in a browser? "
+                            + "Inspect the files and do not change anything."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "index.html defines the button and script.js attaches the click listener to #run-button.",
+                    2, 2,
+                    List.of("talos.read_file", "talos.read_file"), List.of(),
+                    0, 0, false, 0, List.of("index.html", "script.js"),
+                    0, 0, 0, 0,
+                    List.of(
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.read_file", "index.html", true, false, false,
+                                    "read index", ""),
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.read_file", "script.js", true, false, false,
+                                    "read script", "")));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    loopResult.finalAnswer(), messages, loopResult, ws, 0);
+
+            assertFalse(outcome.finalAnswer().startsWith("[Evidence incomplete:"), outcome.finalAnswer());
+            assertFalse(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void staticWebDiagnosisWithStaticSourceReadsIsNotEvidenceIncomplete() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));

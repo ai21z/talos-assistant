@@ -248,7 +248,8 @@ record ExecutionOutcome(
         EvidenceObligation evidenceObligation = evidenceObligation(safePlan);
         EvidenceObligationVerifier.Result evidenceResult = verifyEvidence(
                 safePlan,
-                evidenceOutcomes(loopResult));
+                evidenceOutcomes(loopResult),
+                workspace);
         boolean missingEvidence = evidenceResult.status() == EvidenceObligationVerifier.Status.UNSATISFIED;
         boolean protectedReadApprovalMissing = protectedReadApprovalMissing(
                 evidenceObligation,
@@ -480,7 +481,7 @@ record ExecutionOutcome(
                 || localAccessCapabilityCorrected);
         boolean advisoryOnly = ungrounded && !blocked;
         EvidenceObligation evidenceObligation = evidenceObligation(safePlan);
-        EvidenceObligationVerifier.Result evidenceResult = verifyEvidence(safePlan, List.of());
+        EvidenceObligationVerifier.Result evidenceResult = verifyEvidence(safePlan, List.of(), null);
         boolean missingEvidence = evidenceResult.status() == EvidenceObligationVerifier.Status.UNSATISFIED;
         boolean protectedReadApprovalMissing = protectedReadApprovalMissing(
                 evidenceObligation,
@@ -799,7 +800,8 @@ record ExecutionOutcome(
 
     private static EvidenceObligationVerifier.Result verifyEvidence(
             CurrentTurnPlan plan,
-            List<ToolCallLoop.ToolOutcome> toolOutcomes
+            List<ToolCallLoop.ToolOutcome> toolOutcomes,
+            Path workspace
     ) {
         if (plan == null) {
             return EvidenceObligationVerifier.Result.satisfied("No current-turn plan was available.");
@@ -809,7 +811,8 @@ record ExecutionOutcome(
         return EvidenceObligationVerifier.verify(
                 obligation,
                 contract == null ? java.util.Set.of() : contract.expectedTargets(),
-                toolOutcomes);
+                toolOutcomes,
+                workspace);
     }
 
     private static boolean hasUnsupportedDocumentCapabilityLimit(ToolCallLoop.LoopResult loopResult) {
@@ -1126,12 +1129,13 @@ record ExecutionOutcome(
         if (runtimeSafeBody != null) {
             return missingEvidencePrefix(runtimeSafeBody);
         }
-        return missingEvidencePrefix(missingEvidenceContainmentMessage(plan, obligation));
+        return missingEvidencePrefix(missingEvidenceContainmentMessage(plan, obligation, evidenceResult));
     }
 
     private static String missingEvidenceContainmentMessage(
             CurrentTurnPlan plan,
-            EvidenceObligation obligation
+            EvidenceObligation obligation,
+            EvidenceObligationVerifier.Result evidenceResult
     ) {
         return switch (obligation) {
             case PROTECTED_READ_APPROVAL_REQUIRED ->
@@ -1152,7 +1156,8 @@ record ExecutionOutcome(
                             + "show file contents, or claim changed files from this turn.";
             case STATIC_WEB_DIAGNOSIS_REQUIRED ->
                     "I did not inspect the required static web files this turn, so I cannot "
-                            + "diagnose the page from grounded HTML, CSS, or JavaScript evidence.";
+                            + "diagnose the page from grounded HTML, CSS, or JavaScript evidence."
+                            + evidenceDetailSentence(evidenceResult);
             case VERIFY_FROM_TRACE_OR_EVIDENCE ->
                     "I did not gather trace or workspace evidence this turn, so I cannot "
                             + "verify the requested status from this turn.";
@@ -1161,6 +1166,14 @@ record ExecutionOutcome(
                             + "so I cannot answer from unsupported document contents.";
             case NONE -> "";
         };
+    }
+
+    private static String evidenceDetailSentence(EvidenceObligationVerifier.Result evidenceResult) {
+        if (evidenceResult == null || evidenceResult.message() == null || evidenceResult.message().isBlank()) {
+            return "";
+        }
+        String message = evidenceResult.message().strip();
+        return " " + message;
     }
 
     private static boolean isDominantRuntimeContainment(String answer) {
