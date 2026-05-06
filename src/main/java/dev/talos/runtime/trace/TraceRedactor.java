@@ -12,7 +12,7 @@ public final class TraceRedactor {
     private TraceRedactor() {}
 
     private static final Pattern SECRET_LIKE_ASSIGNMENT = Pattern.compile(
-            "(?i)\\b(secret|token|api[_-]?key|password|credential|credentials)\\b\\s*=\\s*(\"[^\"]*\"|'[^']*'|`[^`]*`|[^\\s,;]+)");
+            "(?i)\\b([A-Za-z0-9_.-]*(?:secret|token|api[_-]?key|password|passwd|pwd|credential|credentials|private[_-]?key)[A-Za-z0-9_.-]*)\\b\\s*[:=]\\s*(\"[^\"]*\"|'[^']*'|`[^`]*`|[^\\s,;]+)");
 
     static String hash(String value) {
         String safe = value == null ? "" : value;
@@ -70,6 +70,11 @@ public final class TraceRedactor {
         }
         matcher.appendTail(out);
         return out.toString();
+    }
+
+    public static boolean containsSecretLikeAssignment(String text) {
+        return text != null && !text.isBlank()
+                && SECRET_LIKE_ASSIGNMENT.matcher(text).find();
     }
 
     private static String trailingSentencePunctuation(String value) {

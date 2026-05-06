@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.talos.core.security.Redactor;
+import dev.talos.runtime.trace.TraceRedactor;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.spi.types.ChatMessage;
@@ -275,6 +276,13 @@ public final class PromptDebugInspector {
 
     private static String firstPathValue(JsonNode arguments) {
         if (arguments == null || arguments.isMissingNode()) return "";
+        if (arguments.isTextual()) {
+            try {
+                return firstPathValue(JSON_MAPPER.readTree(arguments.asText("")));
+            } catch (Exception ignored) {
+                return "";
+            }
+        }
         for (String key : List.of("path", "file_path", "filepath", "file", "filename")) {
             JsonNode value = arguments.path(key);
             if (!value.isMissingNode() && !value.asText("").isBlank()) return value.asText("");
@@ -299,10 +307,12 @@ public final class PromptDebugInspector {
 
     private static boolean hasProtectedContentSignal(String content) {
         if (content == null || content.isBlank()) return false;
-        return PROTECTED_CONTENT_SIGNAL.matcher(content).find();
+        return PROTECTED_CONTENT_SIGNAL.matcher(content).find()
+                || TraceRedactor.containsSecretLikeAssignment(content);
     }
 
     private static String redact(String value) {
-        return REDACTOR.redactBlock(Objects.toString(value, ""));
+        return TraceRedactor.redactSecretLikeAssignments(
+                REDACTOR.redactBlock(Objects.toString(value, "")));
     }
 }

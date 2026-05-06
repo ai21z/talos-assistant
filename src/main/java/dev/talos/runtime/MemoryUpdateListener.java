@@ -3,6 +3,7 @@ package dev.talos.runtime;
 import dev.talos.cli.repl.Result;
 import dev.talos.core.context.ConversationManager;
 import dev.talos.core.llm.LlmClient;
+import dev.talos.runtime.trace.TraceRedactor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -129,7 +130,8 @@ public final class MemoryUpdateListener implements SessionListener {
             if (t.startsWith("Suggestion: edit_file has failed")) continue;
             out.append(line).append('\n');
         }
-        return out.toString().replaceAll("\\n{3,}", "\n\n").strip();
+        String stripped = out.toString().replaceAll("\\n{3,}", "\n\n").strip();
+        return TraceRedactor.redactSecretLikeAssignments(stripped);
     }
 
     /**
