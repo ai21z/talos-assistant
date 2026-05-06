@@ -1086,24 +1086,28 @@ class JsonScenarioPackTest {
     }
 
     @Test
-    @DisplayName("[json-scenario:scenarios/67-literal-full-file-write-mismatch-fails-verification.json] 67: literal full-file mismatch fails verification")
-    void literalFullFileWriteMismatchFailsVerification() {
-        var loaded = JsonScenarioLoader.load("scenarios/67-literal-full-file-write-mismatch-fails-verification.json");
+    @DisplayName("[json-scenario:scenarios/67-literal-full-file-write-mismatch-is-corrected.json] 67: literal full-file mismatch is corrected")
+    void literalFullFileWriteMismatchIsCorrected() {
+        var loaded = JsonScenarioLoader.load("scenarios/67-literal-full-file-write-mismatch-is-corrected.json");
 
         try (var result = ScenarioRunner.runThroughExecutor(
                 loaded.definition(),
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
             result.assertApprovalCounts(1, 1, 0, 0)
-                    .assertAnswerContains("Exact content verification failed")
-                    .assertAnswerContains("requested task is not verified complete")
+                    .assertAnswerContains("Static verification: passed")
+                    .assertAnswerContains("Exact content verification passed")
                     .assertAnswerNotContains("File write/readback passed")
-                    .assertFileContains("index.html", "<html><body>AFTER</body></html>")
-                    .assertFileNotContains("index.html", "\nAFTER\n");
-            assertEquals("FAILED", result.localTrace().verification().status());
+                    .assertWorkspace(workspace -> assertEquals("AFTER", workspace.read("index.html")));
+            assertEquals("PASSED", result.localTrace().verification().status());
+            assertTrue(result.localTrace().events().stream()
+                    .anyMatch(event -> "EXACT_LITERAL_WRITE_CORRECTED".equals(event.type())
+                            && "index.html".equals(event.data().get("pathHint"))
+                            && event.data().containsKey("expectedHash")
+                            && event.data().containsKey("observedHash")));
             assertTrue(result.localTrace().events().stream()
                     .anyMatch(event -> "EXPECTATION_VERIFIED".equals(event.type())
-                            && "FAILED".equals(event.data().get("status"))
+                            && "PASSED".equals(event.data().get("status"))
                             && event.data().containsKey("expectedHash")
                             && event.data().containsKey("observedHash")));
         }

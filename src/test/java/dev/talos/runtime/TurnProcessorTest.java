@@ -23,6 +23,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -333,6 +334,62 @@ class TurnProcessorTest {
     }
 
     @Test
+    void exactLiteralWriteUsesRuntimePayloadBeforeApprovalAndWrite(@TempDir Path workspace)
+            throws Exception {
+        AtomicInteger approvals = new AtomicInteger();
+        var tp = processorWithFileToolsAndApprovalCounter(approvals);
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+        String request = "Edit README.md now using talos.write_file. "
+                + "The complete file must contain exactly two lines: "
+                + "first line T155 exact literal; second line Line two; no other characters.";
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.write_file", Map.of(
+                        "path", "README.md",
+                        "content", "T155 exact literal\nLine two\n")), ctx);
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals(1, approvals.get());
+        String written = Files.readString(workspace.resolve("README.md"));
+        assertEquals("T155 exact literal\nLine two", written);
+        assertEquals(27, written.getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
+        assertEquals(2, written.split("\\R", -1).length);
+    }
+
+    @Test
+    void deniedExactLiteralWriteShowsCorrectedPayloadAndDoesNotMutate(@TempDir Path workspace)
+            throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "original");
+        AtomicInteger approvals = new AtomicInteger();
+        List<String> approvalDetails = new ArrayList<>();
+        var tp = processorWithFileTools(approvalGate(approvals, approvalDetails, false));
+        var session = new Session(workspace, new Config());
+        var ctx = contextForWorkspace(workspace);
+        String request = "Edit README.md now using talos.write_file. "
+                + "The complete file must contain exactly two lines: "
+                + "first line T155 exact literal; second line Line two; no other characters.";
+        TurnUserRequestCapture.set(request);
+        TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+
+        ToolResult result = tp.executeTool(session,
+                new ToolCall("talos.write_file", Map.of(
+                        "path", "README.md",
+                        "content", "T155 exact literal\nLine two\n")), ctx);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.DENIED, result.error().code());
+        assertEquals(1, approvals.get());
+        assertEquals("original", Files.readString(workspace.resolve("README.md")));
+        assertFalse(approvalDetails.isEmpty());
+        assertTrue(approvalDetails.getFirst().contains("T155 exact literal"), approvalDetails.getFirst());
+        assertTrue(approvalDetails.getFirst().contains("(27 bytes, 2 lines)"), approvalDetails.getFirst());
+        assertFalse(approvalDetails.getFirst().contains("(28 bytes, 3 lines)"), approvalDetails.getFirst());
+    }
+
+    @Test
     void expectedTargetScopeRejectsOffTargetWritesBeforeApproval(@TempDir Path workspace) throws Exception {
         Files.writeString(workspace.resolve("README.md"), "original readme\n");
         Files.writeString(workspace.resolve("notes.md"), "private marker must stay private\n");
@@ -470,14 +527,32 @@ class TurnProcessorTest {
     }
 
     private static TurnProcessor processorWithFileToolsAndApprovalCounter(AtomicInteger approvals) {
+        return processorWithFileTools(approvalGate(approvals, new ArrayList<>(), true));
+    }
+
+    private static TurnProcessor processorWithFileTools(ApprovalGate gate) {
         ToolRegistry registry = new ToolRegistry();
         registry.register(new FileWriteTool());
         registry.register(new FileEditTool());
-        ApprovalGate gate = (description, detail) -> {
-            approvals.incrementAndGet();
-            return true;
-        };
         return new TurnProcessor(ModeController.defaultController(), gate, registry);
+    }
+
+    private static ApprovalGate approvalGate(
+            AtomicInteger approvals,
+            List<String> approvalDetails,
+            boolean approved
+    ) {
+        return new ApprovalGate() {
+            @Override public boolean approve(String description, String detail) {
+                return approveFull(description, detail).isApproved();
+            }
+
+            @Override public ApprovalResponse approveFull(String description, String detail) {
+                approvals.incrementAndGet();
+                approvalDetails.add(detail == null ? "" : detail);
+                return approved ? ApprovalResponse.APPROVED : ApprovalResponse.DENIED;
+            }
+        };
     }
 
     private static Context contextForWorkspace(Path workspace) {
