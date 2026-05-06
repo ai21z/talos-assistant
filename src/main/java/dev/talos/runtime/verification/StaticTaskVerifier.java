@@ -43,6 +43,29 @@ public final class StaticTaskVerifier {
 
     private StaticTaskVerifier() {}
 
+    public record WebDiagnostics(
+            String htmlFile,
+            String cssFile,
+            String jsFile,
+            List<String> problems
+    ) {
+        public WebDiagnostics {
+            htmlFile = htmlFile == null ? "" : htmlFile;
+            cssFile = cssFile == null ? "" : cssFile;
+            jsFile = jsFile == null ? "" : jsFile;
+            problems = problems == null ? List.of() : List.copyOf(problems);
+        }
+
+        public boolean available() {
+            return !htmlFile.isBlank() && !cssFile.isBlank() && !jsFile.isBlank();
+        }
+
+        public List<String> primaryFiles() {
+            if (!available()) return List.of();
+            return List.of(htmlFile, cssFile, jsFile);
+        }
+    }
+
     private static final Set<String> SMALL_WORKSPACE_WEB_EXTS = Set.of(
             ".html", ".htm", ".css", ".js", ".ts", ".jsx", ".tsx"
     );
@@ -826,11 +849,39 @@ public final class StaticTaskVerifier {
     }
 
     public static String renderWebDiagnostics(Path workspace) {
+        WebDiagnostics diagnostics = currentWebDiagnostics(workspace, null);
+        if (!diagnostics.available()) return null;
+
+        StringBuilder out = new StringBuilder();
+        out.append("I inspected the primary web files:\n\n");
+        out.append("- HTML: `").append(diagnostics.htmlFile()).append("`\n");
+        out.append("- CSS: `").append(diagnostics.cssFile()).append("`\n");
+        out.append("- JavaScript: `").append(diagnostics.jsFile()).append("`\n\n");
+
+        if (diagnostics.problems().isEmpty()) {
+            out.append("Static web diagnostics did not find obvious HTML/CSS/JavaScript linkage problems.");
+        } else {
+            out.append("Static web diagnostics found:\n");
+            for (String problem : diagnostics.problems()) {
+                out.append("- ").append(problem).append('\n');
+            }
+        }
+        out.append("\nNo files were changed.");
+        return out.toString().stripTrailing();
+    }
+
+    public static WebDiagnostics currentWebDiagnostics(Path workspace, TaskContract contract) {
         List<String> primary = obviousPrimaryFiles(workspace);
-        if (!hasPrimaryWebSurface(primary)) return null;
+        if (!hasPrimaryWebSurface(primary)) {
+            return new WebDiagnostics("", "", "", List.of(
+                    "web coherence could not be checked because HTML, CSS, and JavaScript primary files were not all present."));
+        }
         Path root = workspace.toAbsolutePath().normalize();
-        SelectorFacts facts = selectorFacts(root, primary);
-        if (facts == null) return null;
+        SelectorFacts facts = selectorFacts(root, primary, preferredWebTargetFiles(contract, Set.of()));
+        if (facts == null) {
+            return new WebDiagnostics("", "", "", List.of(
+                    "web coherence could not be checked because primary web files could not be read."));
+        }
 
         List<String> problems = new ArrayList<>();
         try {
@@ -840,24 +891,15 @@ public final class StaticTaskVerifier {
             problems.add(facts.htmlFile() + ": could not be read for HTML structure checks.");
         }
         problems.addAll(facts.linkageProblems());
+        problems.addAll(facts.contentProblems());
         problems.addAll(facts.selectorProblems());
-
-        StringBuilder out = new StringBuilder();
-        out.append("I inspected the primary web files:\n\n");
-        out.append("- HTML: `").append(facts.htmlFile()).append("`\n");
-        out.append("- CSS: `").append(facts.cssFile()).append("`\n");
-        out.append("- JavaScript: `").append(facts.jsFile()).append("`\n\n");
-
-        if (problems.isEmpty()) {
-            out.append("Static web diagnostics did not find obvious HTML/CSS/JavaScript linkage problems.");
-        } else {
-            out.append("Static web diagnostics found:\n");
-            for (String problem : problems) {
-                out.append("- ").append(problem).append('\n');
+        if (contract != null) {
+            problems.addAll(facts.buttonResultBehaviorProblems(contract.originalUserRequest()));
+            if (StaticWebCapabilityProfile.looksCalculatorOrFormTask(contract)) {
+                problems.addAll(facts.calculatorFormProblems(contract.originalUserRequest()));
             }
         }
-        out.append("\nNo files were changed.");
-        return out.toString().stripTrailing();
+        return new WebDiagnostics(facts.htmlFile(), facts.cssFile(), facts.jsFile(), problems);
     }
 
     private static boolean hasPrimaryWebSurface(List<String> files) {

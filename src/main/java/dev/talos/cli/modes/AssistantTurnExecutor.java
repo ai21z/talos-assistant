@@ -19,6 +19,7 @@ import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.ActionObligation;
 import dev.talos.runtime.policy.ActionObligationPolicy;
 import dev.talos.runtime.policy.CapabilityAnswerPolicy;
+import dev.talos.runtime.policy.ConditionalReviewFixPolicy;
 import dev.talos.runtime.policy.ConversationBoundaryPolicy;
 import dev.talos.runtime.policy.CurrentTurnCapabilityFrame;
 import dev.talos.runtime.policy.EvidenceObligation;
@@ -52,6 +53,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -2558,6 +2560,11 @@ public final class AssistantTurnExecutor {
         TaskContract retryContract = safePlan.taskContract();
         if (!retryContract.mutationAllowed()) {
             return new MutationRetryResult(answer, 0, null);
+        }
+        Optional<String> conditionalNoChange = ConditionalReviewFixPolicy
+                .noChangeAnswerIfCurrentWorkspacePasses(retryContract, loopResult, workspace);
+        if (conditionalNoChange.isPresent()) {
+            return new MutationRetryResult(conditionalNoChange.get(), 0, null);
         }
         ActionObligation obligation = safePlan.actionObligation();
         if (!ResponseObligationVerifier.unsatisfiedNoToolResponse(obligation, answer)) {

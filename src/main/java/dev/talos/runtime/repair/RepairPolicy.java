@@ -372,11 +372,22 @@ public final class RepairPolicy {
             ChatMessage message = messages.get(i);
             if (message == null || !"assistant".equals(message.role())) continue;
             String content = message.content();
+            if (looksLikeStaticVerificationPass(content)) {
+                return null;
+            }
             if (looksLikeStaticVerificationFailure(content)) {
                 return content;
             }
         }
         return null;
+    }
+
+    private static boolean looksLikeStaticVerificationPass(String value) {
+        if (value == null || value.isBlank()) return false;
+        String lower = value.toLowerCase(Locale.ROOT);
+        return lower.contains("[static verification: passed")
+                || lower.contains("static web coherence checks passed")
+                || lower.contains("verification status: verified complete");
     }
 
     private static boolean looksLikeStaticVerificationFailure(String value) {

@@ -8,6 +8,7 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.repair.RepairInstruction;
 import dev.talos.runtime.repair.RepairPolicy;
+import dev.talos.runtime.policy.ConditionalReviewFixPolicy;
 import dev.talos.runtime.policy.ResponseObligationVerifier;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -154,6 +155,21 @@ public final class ToolCallRepromptStage {
         }
 
         if (repairReadOnlyBudgetExceeded(state)) {
+            TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+            Optional<String> conditionalNoChange = ConditionalReviewFixPolicy
+                    .noChangeAnswerIfCurrentWorkspacePasses(
+                            contract,
+                            state.pathsReadThisTurn,
+                            state.toolNames,
+                            state.mutatingToolSuccesses,
+                            state.workspace);
+            if (conditionalNoChange.isPresent()) {
+                state.currentText = conditionalNoChange.get();
+                state.currentNativeCalls = List.of();
+                state.clearPendingActionObligation();
+                LOG.debug("Stopping conditional review/fix loop after inspection found no current static blocker.");
+                return false;
+            }
             String reason = "REPAIR_INSPECTION_ONLY: repair/fix turn inspected files with "
                     + state.toolNames.size()
                     + " read-only tool call(s) but did not call write/edit before the read-only repair budget was exhausted.";
