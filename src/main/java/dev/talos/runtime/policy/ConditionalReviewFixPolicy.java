@@ -80,7 +80,7 @@ public final class ConditionalReviewFixPolicy {
         }
 
         StaticTaskVerifier.WebDiagnostics diagnostics =
-                StaticTaskVerifier.currentWebDiagnostics(workspace, contract);
+                StaticTaskVerifier.currentWebDiagnostics(workspace, contract, pathsReadThisTurn);
         if (!diagnostics.available() || !diagnostics.problems().isEmpty()) {
             return Optional.empty();
         }
