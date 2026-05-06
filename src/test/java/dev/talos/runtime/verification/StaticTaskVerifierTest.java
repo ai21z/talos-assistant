@@ -70,6 +70,46 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void scriptImportInspectionReportsScriptsJsWhenCurrentIndexImportsScriptsJs() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <html><body><script src="scripts.js"></script></body></html>
+                """);
+
+        String out = StaticTaskVerifier.renderScriptImportInspection(
+                workspace,
+                "Which file does index.html import for the BMI script, script.js or scripts.js?");
+
+        assertTrue(out.contains("`index.html` imports `scripts.js`."), out);
+        assertFalse(out.contains("Neither `script.js` nor `scripts.js`"), out);
+    }
+
+    @Test
+    void scriptImportInspectionReportsScriptJsWhenCurrentIndexImportsScriptJs() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <html><body><script src="script.js"></script></body></html>
+                """);
+
+        String out = StaticTaskVerifier.renderScriptImportInspection(
+                workspace,
+                "Which file does index.html import for the BMI script, script.js or scripts.js?");
+
+        assertTrue(out.contains("`index.html` imports `script.js`."), out);
+        assertFalse(out.contains("`index.html` imports `scripts.js`."), out);
+    }
+
+    @Test
+    void scriptImportInspectionReportsNeitherWhenCurrentIndexHasNoScriptImport() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), "AFTER\n");
+
+        String out = StaticTaskVerifier.renderScriptImportInspection(
+                workspace,
+                "Which file does index.html import for the BMI script, script.js or scripts.js?");
+
+        assertTrue(out.contains("Neither `script.js` nor `scripts.js` is imported by `index.html`."), out);
+        assertTrue(out.contains("Current script imports found in `index.html`: none."), out);
+    }
+
+    @Test
     void exactTwoLineReadmeLiteralPassesTaskVerification() throws Exception {
         Files.writeString(workspace.resolve("README.md"), "T71 exact README\nLine two");
 

@@ -45,6 +45,15 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void staticWebImportChoiceQuestionTargetsIndexNotCandidateScripts() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Which file does index.html import for the BMI script, script.js or scripts.js?");
+
+        assertFalse(contract.mutationAllowed());
+        assertEquals(Set.of("index.html"), contract.expectedTargets());
+    }
+
+    @Test
     void buildWebsiteRequestBecomesFileCreateContract() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Can you build a small BMI calculator website here with separate CSS and JavaScript files? "

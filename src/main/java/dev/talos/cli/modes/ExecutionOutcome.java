@@ -191,6 +191,11 @@ record ExecutionOutcome(
         boolean unsupportedDocumentCapabilityOverride = !Objects.equals(current, shaped);
         current = shaped;
 
+        shaped = AssistantTurnExecutor.overrideStaticWebImportAnswerIfNeeded(
+                current, messages, loopResult, workspace);
+        boolean staticWebImportGroundedOverride = !Objects.equals(current, shaped);
+        current = shaped;
+
         shaped = AssistantTurnExecutor.overrideReadOnlyWebDiagnosticsIfNeeded(
                 current, messages, loopResult, workspace);
         boolean webDiagnosticGroundedOverride = !Objects.equals(current, shaped);
@@ -374,6 +379,7 @@ record ExecutionOutcome(
                         falseMutationClaim,
                         inspectUnderCompleted,
                         unsupportedDocumentCapabilityLimited,
+                        staticWebImportGroundedOverride,
                         webDiagnosticGroundedOverride,
                         selectorGroundedOverride,
                         verificationStatus,
@@ -382,7 +388,9 @@ record ExecutionOutcome(
                 loopResult == null ? List.of() : loopResult.toolOutcomes()
         );
 
-        GroundingStatus groundingStatus = selectorGroundedOverride || webDiagnosticGroundedOverride
+        GroundingStatus groundingStatus = selectorGroundedOverride
+                || staticWebImportGroundedOverride
+                || webDiagnosticGroundedOverride
                 ? GroundingStatus.GROUNDED
                 : GroundingStatus.UNKNOWN;
         if (readOnlyDeniedMutation) {
@@ -660,6 +668,7 @@ record ExecutionOutcome(
             boolean falseMutationClaim,
             boolean inspectUnderCompleted,
             boolean unsupportedDocumentCapabilityLimited,
+            boolean staticWebImportGroundedOverride,
             boolean webDiagnosticGroundedOverride,
             boolean selectorGroundedOverride,
             VerificationStatus verificationStatus,
@@ -724,7 +733,7 @@ record ExecutionOutcome(
                     TruthWarningType.SELECTOR_GROUNDED_OVERRIDE,
                     "Selector/linkage analysis was corrected from workspace evidence."));
         }
-        if (webDiagnosticGroundedOverride) {
+        if (staticWebImportGroundedOverride || webDiagnosticGroundedOverride) {
             warnings.add(TruthWarning.of(
                     TruthWarningType.WEB_DIAGNOSTIC_GROUNDED_OVERRIDE,
                     "Read-only web diagnostics were corrected from static workspace evidence."));

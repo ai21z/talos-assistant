@@ -5639,6 +5639,49 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        @DisplayName("script import question is grounded from current index.html")
+        void scriptImportQuestionUsesCurrentIndexHtmlAfterExactOverwrite() throws Exception {
+            Path ws = Files.createTempDirectory("talos-script-import-grounding-");
+            try {
+                Files.writeString(ws.resolve("index.html"), "AFTER\n");
+                Files.writeString(ws.resolve("script.js"), "console.log('old');\n");
+                Files.writeString(ws.resolve("scripts.js"), "console.log('new');\n");
+
+                var registry = new dev.talos.tools.ToolRegistry();
+                registry.register(new dev.talos.tools.impl.ReadFileTool());
+                var processor = new dev.talos.runtime.TurnProcessor(
+                        null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+                var loop = new dev.talos.runtime.ToolCallLoop(processor, 4);
+                var ctx = Context.builder(new Config())
+                        .llm(LlmClient.scripted(List.of(
+                                "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}",
+                                "index.html imports the BMI script from scripts.js.")))
+                        .sandbox(new dev.talos.core.security.Sandbox(ws, java.util.Map.of()))
+                        .toolRegistry(registry)
+                        .toolCallLoop(loop)
+                        .build();
+                var messages = new ArrayList<ChatMessage>();
+                messages.add(ChatMessage.system("sys"));
+                messages.add(ChatMessage.user(
+                        "Which file does index.html import for the BMI script, script.js or scripts.js?"));
+
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, ws, ctx, new AssistantTurnExecutor.Options());
+
+                assertTrue(out.text().contains("[Static web import check]"), out.text());
+                assertTrue(out.text().contains(
+                        "Neither `script.js` nor `scripts.js` is imported by `index.html`."), out.text());
+                assertFalse(out.text().contains("imports the BMI script from scripts.js"), out.text());
+            } finally {
+                try (var walk = Files.walk(ws)) {
+                    walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                        try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                    });
+                }
+            }
+        }
+
+        @Test
         @DisplayName("mutation requests do not use read-only web diagnostic override")
         void mutationRequestsAreNotOverridden() {
             var messages = new ArrayList<ChatMessage>();

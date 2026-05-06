@@ -4,6 +4,7 @@ import dev.talos.runtime.MutationIntent;
 import dev.talos.runtime.policy.CapabilityAnswerPolicy;
 import dev.talos.runtime.policy.ConversationBoundaryPolicy;
 import dev.talos.runtime.toolcall.ToolCallSupport;
+import dev.talos.runtime.verification.StaticWebImportIntent;
 import dev.talos.spi.types.ChatMessage;
 
 import java.util.LinkedHashSet;
@@ -261,6 +262,9 @@ public final class TaskContractResolver {
         boolean verificationRequired = mutationAllowed || type == TaskType.VERIFY_ONLY;
         Set<String> forbiddenTargets = extractForbiddenTargets(original);
         Set<String> expectedTargets = extractExpectedTargets(original);
+        if (!mutationRequested && StaticWebImportIntent.matches(original)) {
+            expectedTargets = StaticWebImportIntent.evidenceTargets(original, expectedTargets);
+        }
         if (mutationAllowed && !forbiddenTargets.isEmpty()) {
             expectedTargets = withoutForbiddenTargets(expectedTargets, forbiddenTargets);
         }
