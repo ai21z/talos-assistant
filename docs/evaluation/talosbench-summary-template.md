@@ -45,6 +45,12 @@ Map failures to the T49 taxonomy:
 - `REPAIR_CONTROL`
 - `MODEL_COMPETENCE`
 - `UNSUPPORTED_CAPABILITY`
+- `AUDIT_DESIGN`
+
+Use `AUDIT_DESIGN` when the fixture, prompt order, reset discipline, approval
+script, or transcript capture made the result ambiguous. Do not convert an
+audit-design failure into a product-runtime blocker unless a clean rerun
+reproduces the behavior.
 
 ## Candidate Recommendation
 

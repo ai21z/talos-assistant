@@ -1,6 +1,6 @@
 # T159 - T61 Audit Fixture Isolation For Exact Writes And Static Web
 
-Status: open
+Status: done
 
 Severity: medium
 
