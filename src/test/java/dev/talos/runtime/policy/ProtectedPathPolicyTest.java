@@ -4,6 +4,7 @@ import dev.talos.tools.ToolCall;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 
@@ -52,6 +53,18 @@ class ProtectedPathPolicyTest {
         assertFalse(decision.insideWorkspace());
         assertTrue(decision.workspaceEscape());
         assertFalse(decision.protectedPath(), "workspace escape is its own hard denial reason");
+    }
+
+    @Test
+    void classifiesTrimmedProtectedPathWhenRawWhitespacePathDoesNotExist() throws Exception {
+        Files.writeString(workspace.resolve(".env"), "SECRET=redacted\n");
+
+        ResourceDecision decision = ProtectedPathPolicy.classify(workspace, " .env");
+
+        assertTrue(decision.insideWorkspace());
+        assertEquals(".env", decision.relativePath());
+        assertTrue(decision.protectedPath());
+        assertEquals("SECRET", decision.protectedKind());
     }
 
     private void assertProtected(String path, String expectedKind) {

@@ -53,6 +53,43 @@ class ReadFileToolTest {
     }
 
     @Test
+    void trimsAccidentalPathWhitespaceWhenCanonicalFileExists() {
+        ToolCall call = new ToolCall("talos.read_file", Map.of("path", " hello.txt"));
+        ToolResult r = tool.execute(call, ctx);
+
+        assertTrue(r.success(), r.errorMessage());
+        assertTrue(r.output().contains("line 1"));
+    }
+
+    @Test
+    void doesNotTrimWhitespaceWhenNeitherRawNorTrimmedPathExists() {
+        ToolCall call = new ToolCall("talos.read_file", Map.of("path", " missing.txt"));
+        ToolResult r = tool.execute(call, ctx);
+
+        assertFalse(r.success());
+        assertEquals(ToolError.NOT_FOUND, r.error().code());
+        assertTrue(r.errorMessage().contains(" missing.txt"), r.errorMessage());
+    }
+
+    @Test
+    void keepsExactWhitespacePathWhenItExists() throws IOException {
+        Path exact = workspace.resolve(" hello.txt");
+        try {
+            Files.writeString(exact, "exact whitespace path\n");
+        } catch (IOException | RuntimeException e) {
+            org.junit.jupiter.api.Assumptions.assumeTrue(false,
+                    "platform did not allow leading-space filename: " + e.getMessage());
+        }
+
+        ToolCall call = new ToolCall("talos.read_file", Map.of("path", " hello.txt"));
+        ToolResult r = tool.execute(call, ctx);
+
+        assertTrue(r.success(), r.errorMessage());
+        assertTrue(r.output().contains("exact whitespace path"), r.output());
+        assertFalse(r.output().contains("line 1"), r.output());
+    }
+
+    @Test
     void readNestedFile() {
         ToolCall call = new ToolCall("talos.read_file", Map.of("path", "sub/nested.txt"));
         ToolResult r = tool.execute(call, ctx);

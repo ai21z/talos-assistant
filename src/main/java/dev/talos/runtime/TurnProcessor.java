@@ -324,6 +324,19 @@ public final class TurnProcessor {
                     exactCorrection.observedLines());
             call = exactCorrection.call();
         }
+        PathArgumentCanonicalizer.ToolCallNormalization pathNormalization =
+                PathArgumentCanonicalizer.canonicalizeToolCall(session.workspace(), call, pathParameterKeys());
+        if (pathNormalization.changed()) {
+            for (PathArgumentCanonicalizer.PathParameterChange change : pathNormalization.changes()) {
+                LocalTurnTraceCapture.recordPathArgumentNormalized(
+                        tracePhase,
+                        call,
+                        change.key(),
+                        change.rawPath(),
+                        change.normalizedPath());
+            }
+            call = pathNormalization.call();
+        }
         String path = resolvePathParam(call);
 
         if (taskContract.type() == TaskType.DIRECTORY_LISTING && !isListDirTool(call.toolName())) {
@@ -573,9 +586,11 @@ public final class TurnProcessor {
                 // the user to "ensure you have the necessary permissions" — the
                 // word "denied" anchored the wrong narrative. Reshape the error
                 // so the model interprets it as user intent, not auth failure.
+                String targetContext = approvalDeniedTargetContext(permissionDecision);
                 return ToolResult.fail(ToolError.denied(
                         "User did not approve the " + call.toolName()
-                                + " call. The user is in control of the workspace; "
+                                + " call." + targetContext
+                                + " The user is in control of the workspace; "
                                 + "ask what they want to do differently before retrying, "
                                 + "or take a different action that does not need approval."));
             }
@@ -921,6 +936,13 @@ public final class TurnProcessor {
                 .toLowerCase()
                 .replace('_', ' ')
                 + " operation: " + toolName;
+    }
+
+    private static String approvalDeniedTargetContext(PermissionDecision permissionDecision) {
+        if (permissionDecision == null) return "";
+        String relativePath = permissionDecision.relativePath();
+        if (relativePath == null || relativePath.isBlank()) return "";
+        return " Target path: `" + relativePath.strip() + "`.";
     }
 
     private static String toolFailureReason(ToolResult result) {

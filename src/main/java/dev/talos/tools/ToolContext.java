@@ -33,7 +33,12 @@ public record ToolContext(Path workspace, Sandbox sandbox, Config config) {
      * {@code sandbox().allowedPath()} on the result before I/O.
      */
     public Path resolve(String relativePath) {
-        return workspace.resolve(relativePath).normalize();
+        PathArgumentCanonicalizer.Resolution resolution =
+                PathArgumentCanonicalizer.canonicalizeExistingPathWhitespace(workspace, relativePath);
+        if (resolution.resolvedPath() == null) {
+            return workspace.resolve(relativePath).normalize();
+        }
+        return resolution.resolvedPath();
     }
 }
 

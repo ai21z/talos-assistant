@@ -2,6 +2,7 @@ package dev.talos.runtime.policy;
 
 import dev.talos.runtime.toolcall.ToolAliasPolicy;
 import dev.talos.runtime.workspace.WorkspaceBatchPlanParser;
+import dev.talos.tools.PathArgumentCanonicalizer;
 import dev.talos.tools.ToolCall;
 
 import java.nio.file.Path;
@@ -59,9 +60,12 @@ public final class ProtectedPathPolicy {
 
         Path ws;
         Path resolved;
+        PathArgumentCanonicalizer.Resolution canonical =
+                PathArgumentCanonicalizer.canonicalizeExistingPathWhitespace(workspace, rawPath);
+        String effectivePath = canonical.effectivePath();
         try {
             ws = workspace.toAbsolutePath().normalize();
-            Path candidate = Path.of(rawPath);
+            Path candidate = Path.of(effectivePath);
             resolved = (candidate.isAbsolute() ? candidate : ws.resolve(candidate)).normalize();
         } catch (Exception e) {
             return new ResourceDecision(rawPath, "", true, false, true, false, "");
