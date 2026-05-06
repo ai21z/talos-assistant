@@ -53,6 +53,45 @@ class AssistantTurnExecutorTest {
                 .build();
     }
 
+    private static void writePassingBmiFixture(Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                <head>
+                  <title>BMI Calculator</title>
+                  <link rel="stylesheet" href="styles.css">
+                </head>
+                <body>
+                  <main class="app">
+                    <h1>BMI Calculator</h1>
+                    <form id="bmi-form">
+                      <label>Height <input id="height" name="height" type="number"></label>
+                      <label>Weight <input id="weight" name="weight" type="number"></label>
+                      <button id="calculate" type="submit">Calculate</button>
+                    </form>
+                    <output id="result"></output>
+                  </main>
+                  <script src="scripts.js"></script>
+                </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), """
+                body { font-family: system-ui; }
+                .app { max-width: 36rem; margin: 2rem auto; }
+                """);
+        Files.writeString(workspace.resolve("scripts.js"), """
+                const form = document.getElementById('bmi-form');
+                const result = document.getElementById('result');
+                form.addEventListener('submit', event => {
+                  event.preventDefault();
+                  const height = Number(document.getElementById('height').value) / 100;
+                  const weight = Number(document.getElementById('weight').value);
+                  const bmi = weight / (height * height);
+                  result.textContent = `BMI: ${bmi.toFixed(1)}`;
+                });
+                """);
+    }
+
     private static SessionState sessionWithDebugLevel(DebugLevel level) {
         return new SessionState() {
             @Override public int getK() { return 8; }
@@ -1398,6 +1437,115 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void conditionalReviewFixAllowsInspectionOnlyWhenCurrentStaticWebPasses(@TempDir Path workspace)
+                throws Exception {
+            writePassingBmiFixture(workspace);
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            registry.register(new dev.talos.tools.impl.FileWriteTool());
+            registry.register(new dev.talos.tools.impl.FileEditTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 8);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}",
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"styles.css\"}}",
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"scripts.js\"}}",
+                            "I inspected the BMI calculator and it is ready to use.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Review the BMI calculator you just created and fix any obvious issue "
+                            + "that would stop it from working in a browser."));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-t158-conditional-no-change",
+                    "sid",
+                    1,
+                    "2026-05-06T00:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "scripted",
+                    "test-model",
+                    messages.get(messages.size() - 1).content());
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertTrue(out.text().contains("No file change was needed"), out.text());
+                assertTrue(out.text().contains("No files were changed"), out.text());
+                assertFalse(out.text().contains("repair/fix turn inspected files but did not change them"),
+                        out.text());
+                assertFalse(out.text().contains("[Action obligation failed:"), out.text());
+                assertEquals(0, trace.events().stream()
+                        .filter(event -> "ACTION_OBLIGATION_EVALUATED".equals(event.type()))
+                        .filter(event -> "REPAIR_INSPECTION_ONLY".equals(event.data().get("failureKind")))
+                        .count());
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        }
+
+        @Test
+        void conditionalReviewFixStillRequiresMutationWhenCurrentStaticWebHasBlocker(@TempDir Path workspace)
+                throws Exception {
+            writePassingBmiFixture(workspace);
+            Files.writeString(workspace.resolve("index.html"), """
+                    <!doctype html>
+                    <html>
+                    <head><link rel="stylesheet" href="styles.css"></head>
+                    <body>
+                      <form id="bmi-form">
+                        <input id="height" name="height">
+                        <input id="weight" name="weight">
+                        <button id="calculate" type="submit">Calculate</button>
+                        <output id="result"></output>
+                      </form>
+                      <script src="script.js"></script>
+                    </body>
+                    </html>
+                    """);
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            registry.register(new dev.talos.tools.impl.FileWriteTool());
+            registry.register(new dev.talos.tools.impl.FileEditTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 8);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}",
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"styles.css\"}}",
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"scripts.js\"}}",
+                            "I inspected the BMI calculator and it is ready to use.",
+                            "I still will not edit files.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Review the BMI calculator you just created and fix any obvious issue "
+                            + "that would stop it from working in a browser."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains("[Action obligation failed:"), out.text());
+            assertFalse(out.text().contains("No file change was needed"), out.text());
+            assertTrue(Files.readString(workspace.resolve("index.html")).contains("script.js"));
+        }
+
+        @Test
         void repairFixRetryWithStaticFullRewriteTargetEditFileGetsTypedWrongToolBreach(
                 @TempDir Path workspace) throws Exception {
             Files.writeString(workspace.resolve("index.html"), """
@@ -2732,6 +2880,40 @@ class AssistantTurnExecutorTest {
             } finally {
                 LocalTurnTraceCapture.clear();
             }
+        }
+
+        @Test
+        void staticRepairContextIsSkippedWhenLaterStaticPassSupersedesEarlierFailure() {
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Create a complete static BMI calculator in this folder with index.html, "
+                            + "styles.css, and scripts.js."));
+            messages.add(ChatMessage.assistant("""
+                    [Task incomplete: Static verification failed - HTML does not link JavaScript file: `scripts.js`]
+
+                    The requested task is not verified complete.
+                    Remaining static verification problems:
+                    - HTML does not link JavaScript file: `scripts.js`
+                    - Calculator/form task is missing a submit/calculate button.
+                    """));
+            messages.add(ChatMessage.user("Fix the remaining static verification problems now."));
+            messages.add(ChatMessage.assistant("""
+                    [Static verification: passed - Static web coherence checks passed for 3 mutated target(s).]
+
+                    Updated 3 files: index.html, styles.css, scripts.js.
+                    """));
+            messages.add(ChatMessage.user(
+                    "Review the BMI calculator you just created and fix any obvious issue "
+                            + "that would stop it from working in a browser."));
+            var contract = TaskContractResolver.fromMessages(messages);
+
+            AssistantTurnExecutor.injectStaticVerificationRepairInstruction(messages, contract);
+
+            assertTrue(messages.stream()
+                    .filter(message -> "system".equals(message.role()))
+                    .map(message -> message.content() == null ? "" : message.content())
+                    .noneMatch(content -> content.startsWith("[Static verification repair context]")));
         }
     }
 

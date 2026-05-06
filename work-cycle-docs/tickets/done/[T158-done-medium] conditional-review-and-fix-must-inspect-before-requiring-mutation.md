@@ -1,6 +1,6 @@
 # T158 - Conditional Review-And-Fix Must Inspect Before Requiring Mutation
 
-Status: open
+Status: done
 
 Severity: medium/high
 
