@@ -29,6 +29,8 @@ public final class PromptDebugInspector {
     private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
     public static final String PROTECTED_TOOL_RESULT_REDACTION =
             "[protected tool result redacted by prompt-debug policy]";
+    public static final String PROTECTED_ASSISTANT_ANSWER_REDACTION =
+            "[protected assistant answer redacted by prompt-debug policy]";
     private static final Pattern TOOL_RESULT_BLOCK = Pattern.compile(
             "(?s)\\[tool_result:\\s*([^\\]]+)\\](.*?)\\[/tool_result\\]");
     private static final Pattern PROTECTED_CONTENT_SIGNAL = Pattern.compile(
@@ -79,13 +81,15 @@ public final class PromptDebugInspector {
 
         out.append("## Structured Messages\n\n");
         Set<String> protectedToolCallIds = protectedToolCallIds(snapshot.messages());
+        boolean pendingProtectedReadAnswer = false;
         for (int i = 0; i < snapshot.messages().size(); i++) {
             ChatMessage message = snapshot.messages().get(i);
             out.append("### Message ").append(i + 1).append(" - ")
                     .append(Objects.toString(message.role(), "")).append("\n\n");
             out.append("```text\n")
-                    .append(redactMessageContent(message, protectedToolCallIds))
+                    .append(redactMessageContent(message, protectedToolCallIds, pendingProtectedReadAnswer))
                     .append("\n```\n\n");
+            pendingProtectedReadAnswer = nextPendingProtectedReadAnswer(pendingProtectedReadAnswer, message);
         }
 
         if (!snapshot.providerBodyJson().isBlank()) {
@@ -182,9 +186,19 @@ public final class PromptDebugInspector {
         return Set.copyOf(out);
     }
 
-    private static String redactMessageContent(ChatMessage message, Set<String> protectedToolCallIds) {
+    private static String redactMessageContent(
+            ChatMessage message,
+            Set<String> protectedToolCallIds,
+            boolean pendingProtectedReadAnswer) {
         if (message == null) return "";
         String content = Objects.toString(message.content(), "");
+        if (pendingProtectedReadAnswer
+                && "assistant".equals(message.role())
+                && !content.isBlank()
+                && !TraceRedactor.containsSecretLikeAssignment(content)
+                && !TraceRedactor.isProtectedReadDenial(content)) {
+            return PROTECTED_ASSISTANT_ANSWER_REDACTION;
+        }
         boolean protectedNativeToolResult = "tool".equals(message.role())
                 && message.toolCallId() != null
                 && protectedToolCallIds.contains(message.toolCallId());
@@ -209,9 +223,21 @@ public final class PromptDebugInspector {
         JsonNode messages = root == null ? null : root.path("messages");
         if (messages == null || !messages.isArray()) return;
         Set<String> protectedIds = new HashSet<>();
+        boolean pendingProtectedReadAnswer = false;
         for (JsonNode message : messages) {
             String role = message.path("role").asText("");
             if ("assistant".equals(role)) {
+                String content = message.path("content").asText("");
+                if (pendingProtectedReadAnswer
+                        && message instanceof ObjectNode objectNode
+                        && message.path("content").isTextual()
+                        && !content.isBlank()
+                        && !TraceRedactor.containsSecretLikeAssignment(content)
+                        && !TraceRedactor.isProtectedReadDenial(content)) {
+                    objectNode.put("content", PROTECTED_ASSISTANT_ANSWER_REDACTION);
+                    pendingProtectedReadAnswer = false;
+                    continue;
+                }
                 JsonNode toolCalls = message.path("tool_calls");
                 if (toolCalls.isArray()) {
                     for (JsonNode call : toolCalls) {
@@ -234,7 +260,39 @@ public final class PromptDebugInspector {
                 objectNode.put("content", TraceRedactor.redactSecretLikeAssignments(
                         message.path("content").asText("")));
             }
+            pendingProtectedReadAnswer = nextPendingProtectedReadAnswer(pendingProtectedReadAnswer, message);
         }
+    }
+
+    private static boolean nextPendingProtectedReadAnswer(
+            boolean currentPending,
+            ChatMessage message) {
+        if (message == null) return currentPending;
+        String role = Objects.toString(message.role(), "");
+        String content = Objects.toString(message.content(), "");
+        if ("user".equals(role)) {
+            return TraceRedactor.looksLikeProtectedReadRequest(content);
+        }
+        if ("assistant".equals(role)) {
+            if (content.isBlank() && message.hasNativeToolCalls()) return currentPending;
+            return false;
+        }
+        return currentPending;
+    }
+
+    private static boolean nextPendingProtectedReadAnswer(boolean currentPending, JsonNode message) {
+        if (message == null || message.isMissingNode()) return currentPending;
+        String role = message.path("role").asText("");
+        String content = message.path("content").asText("");
+        if ("user".equals(role)) {
+            return TraceRedactor.looksLikeProtectedReadRequest(content);
+        }
+        if ("assistant".equals(role)) {
+            JsonNode toolCalls = message.path("tool_calls");
+            if (content.isBlank() && toolCalls.isArray() && !toolCalls.isEmpty()) return currentPending;
+            return false;
+        }
+        return currentPending;
     }
 
     private static String redactProtectedToolResultBlocks(String value) {

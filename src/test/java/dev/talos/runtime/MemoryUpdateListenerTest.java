@@ -170,6 +170,16 @@ class MemoryUpdateListenerTest {
         assertTrue(stored.contains("TALOS_T61E_LLAMA_CPP_SECRET=[redacted]"), stored);
     }
 
+    @Test void standaloneProtectedValueAnswerIsRedactedBeforeHistoryPersistence() {
+        listener.onTurnComplete(tr(new Result.Streamed("The value is: `must-not-leak`.", ""), 1),
+                "Read .env and tell me the value inside.");
+
+        assertEquals(1, cm.turnCount());
+        String stored = cm.buildHistory().get(1).content();
+        assertFalse(stored.contains("must-not-leak"), stored);
+        assertTrue(stored.contains("protected read answer redacted"), stored);
+    }
+
     @Test void refusalStyleReplyIsNotRecordedInHistory() {
         String refusal = "I apologize for the confusion earlier. I am an AI text-based assistant and cannot directly edit files on your system.";
         listener.onTurnComplete(tr(new Result.Streamed(refusal, ""), 1), "please edit it");

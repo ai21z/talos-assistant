@@ -928,6 +928,187 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void readOnlyReadmeProposalFlagsUnverifiedCommandsAsNotObserved(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("README.md"),
+                    "# Focused Audit Fixture\n\nThis workspace checks response grounding.\n");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}",
+                            """
+                                    The README should add setup steps:
+                                    1. Install dependencies using `npm install`.
+                                    2. Run the audit with `node script.js`.
+                                    """)))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Please review README.md and propose concise improvements, but do not edit any files yet."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains("[Grounding warning:"), out.text());
+            assertTrue(out.text().contains("not present in inspected workspace evidence"), out.text());
+            assertTrue(out.text().contains("npm install"), out.text());
+            assertTrue(out.text().contains("node script.js"), out.text());
+        }
+
+        @Test
+        void readOnlyReadmeProposalAllowsObservedCommandsWithoutWarning(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("README.md"),
+                    "# Node Fixture\n\nSetup: run `npm install`.\nUsage: run `node script.js`.\n");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}",
+                            "Keep the existing setup commands `npm install` and `node script.js`, then add a purpose sentence.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Please review README.md and propose concise improvements, but do not edit any files yet."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertFalse(out.text().contains("[Grounding warning:"), out.text());
+            assertTrue(out.text().contains("npm install"), out.text());
+            assertTrue(out.text().contains("node script.js"), out.text());
+        }
+
+        @Test
+        void readOnlyReadmeProposalRemovesExcludedEnvAdviceWhenUnobserved(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("README.md"),
+                    "# Focused Audit Fixture\n\nThis workspace checks response grounding.\n");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}",
+                            """
+                                    Add usage instructions.
+                                    Add a section documenting `.env` variables.
+                                    Keep the fixture title.
+                                    """)))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "I do not want the .env, I want README.md. Please review README.md and propose concise improvements, but do not edit any files yet."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains("[Grounding warning:"), out.text());
+            assertFalse(out.text().contains("documenting `.env` variables"), out.text());
+            assertTrue(out.text().contains("Add usage instructions"), out.text());
+            assertTrue(out.text().contains("Keep the fixture title"), out.text());
+        }
+
+        @Test
+        void readOnlyReadmeProposalFlagsInternalPromptTextClaimedAsFileContent(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("README.md"),
+                    "# Focused Audit Fixture\n\nThis workspace checks response grounding.\n");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}",
+                            """
+                                    Current Content:
+                                    Behavior Rules
+                                    You are an action-capable local assistant with full read/write access via tools.
+                                    Suggested improvement: document talos.write_file usage.
+                                    """)))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Please review README.md and propose concise improvements, but do not edit any files yet."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains("[Grounding warning:"), out.text());
+            assertTrue(out.text().contains("not present in inspected workspace evidence"), out.text());
+            assertTrue(out.text().contains("Behavior Rules"), out.text());
+            assertTrue(out.text().contains("talos.write_file"), out.text());
+        }
+
+        @Test
+        void readOnlyReadmeProposalFlagsUnobservedWorkspaceFileMeanings(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("README.md"),
+                    "# Focused Audit Fixture\n\nThis workspace checks response grounding.\n");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}",
+                            """
+                                    Add a file overview:
+                                    - `.env`: configuration for environment variables.
+                                    - `report.docx`: report document.
+                                    - `script.js`: JavaScript logic.
+                                    """)))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Please review README.md and propose concise improvements, but do not edit any files yet."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains("[Grounding warning:"), out.text());
+            assertTrue(out.text().contains("not present in inspected workspace evidence"), out.text());
+            assertTrue(out.text().contains("configuration for environment variables"), out.text());
+        }
+
+        @Test
         void readTargetHandoffReplacesMalformedPostReadAnswerWithEvidence(@TempDir Path workspace)
                 throws Exception {
             Files.writeString(workspace.resolve("config.json"), "{\"name\":\"t57-fixture\"}\n");

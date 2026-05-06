@@ -13,8 +13,21 @@ import java.util.regex.Pattern;
 public final class TraceRedactor {
     private TraceRedactor() {}
 
+    public static final String PROTECTED_READ_ANSWER_REDACTION =
+            "[protected read answer redacted from history]";
+
     private static final Pattern SECRET_LIKE_ASSIGNMENT = Pattern.compile(
             "(?i)\\b([A-Za-z0-9_.-]*(?:secret|token|api[_-]?key|password|passwd|pwd|credential|credentials|private[_-]?key)[A-Za-z0-9_.-]*)\\b\\s*[:=]\\s*(\"[^\"]*\"|'[^']*'|`[^`]*`|[^\\s,;]+)");
+    private static final Pattern PROTECTED_PATH_REFERENCE = Pattern.compile(
+            "(?i)(^|[\\s\"'`({\\[])"
+                    + "(?:\\./)?(?:"
+                    + "\\.env(?:\\b|\\.[A-Za-z0-9_.-]*\\b)"
+                    + "|(?:secrets|tokens|credentials)[/\\\\][^\\s\"'`({\\[\\])}]+"
+                    + "|[^\\s\"'`({\\[\\])}]*"
+                    + "(?:secret|token|credential|password|private[_-]?key)"
+                    + "[^\\s\"'`({\\[\\])}]*\\.[A-Za-z0-9]{1,8}\\b"
+                    + "|id_rsa|id_ed25519"
+                    + ")");
 
     static String hash(String value) {
         String safe = value == null ? "" : value;
@@ -88,6 +101,45 @@ public final class TraceRedactor {
                 && SECRET_LIKE_ASSIGNMENT.matcher(text).find();
     }
 
+    public static String redactProtectedReadAnswerForPersistence(String userInput, String assistantText) {
+        String redacted = redactSecretLikeAssignments(assistantText);
+        if (redacted == null || redacted.isBlank()) return redacted;
+        if (containsSecretLikeAssignment(assistantText)) return redacted;
+        if (looksLikeProtectedReadRequest(userInput) && !isProtectedReadDenial(redacted)) {
+            return PROTECTED_READ_ANSWER_REDACTION;
+        }
+        return redacted;
+    }
+
+    public static boolean looksLikeProtectedReadRequest(String text) {
+        if (text == null || text.isBlank()) return false;
+        String lower = text.toLowerCase(Locale.ROOT);
+        if (looksLikeProtectedReadProhibition(lower)) return false;
+        if (!PROTECTED_PATH_REFERENCE.matcher(text).find()) return false;
+        return lower.contains("read")
+                || lower.contains("show")
+                || lower.contains("print")
+                || lower.contains("tell me")
+                || lower.contains("what")
+                || lower.contains("value")
+                || lower.contains("contents")
+                || lower.contains("inside")
+                || lower.contains("open ")
+                || lower.contains("cat ");
+    }
+
+    public static boolean isProtectedReadDenial(String text) {
+        if (text == null || text.isBlank()) return false;
+        String lower = text.toLowerCase(Locale.ROOT);
+        return lower.contains("protected content was not read")
+                || lower.contains("approval denied")
+                || lower.contains("permission was denied")
+                || lower.contains("was not read")
+                || lower.contains("did not read")
+                || lower.contains("cannot read")
+                || lower.contains("can't read");
+    }
+
     private static String trailingSentencePunctuation(String value) {
         if (value == null || value.length() < 2) return "";
         char last = value.charAt(value.length() - 1);
@@ -120,5 +172,15 @@ public final class TraceRedactor {
         return value != null
                 && value.length() >= 4
                 && !value.equalsIgnoreCase("[redacted]");
+    }
+
+    private static boolean looksLikeProtectedReadProhibition(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        return lower.contains("do not read .env")
+                || lower.contains("don't read .env")
+                || lower.contains("do not inspect .env")
+                || lower.contains("don't inspect .env")
+                || lower.contains("without reading .env")
+                || lower.contains("without inspecting .env");
     }
 }

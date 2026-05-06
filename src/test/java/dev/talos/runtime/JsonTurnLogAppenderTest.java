@@ -83,6 +83,28 @@ class JsonTurnLogAppenderTest {
     }
 
     @Test
+    void writesStandaloneProtectedAnswerAsRedactedTurnRecord(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "sess-protected-standalone";
+        JsonTurnLogAppender appender = new JsonTurnLogAppender(store, sid);
+
+        TurnResult tr = new TurnResult(
+                new Result.Streamed("The value is: `must-not-leak`.", ""),
+                null,
+                1,
+                Duration.ofMillis(100),
+                TurnAudit.empty());
+
+        appender.onTurnComplete(tr, "Read .env and tell me the value inside.");
+
+        List<TurnRecord> loaded = store.loadTurns(sid);
+        assertEquals(1, loaded.size());
+        String stored = loaded.get(0).assistantText();
+        assertFalse(stored.contains("must-not-leak"), stored);
+        assertTrue(stored.contains("protected read answer redacted"), stored);
+    }
+
+    @Test
     void writesLocalTraceArtifactAndTraceIdWithTurnRecord(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "sess-trace-listener";
