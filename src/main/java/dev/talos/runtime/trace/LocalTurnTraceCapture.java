@@ -127,6 +127,27 @@ public final class LocalTurnTraceCapture {
         bag.builder.event(TurnTraceEvent.simple("TOOL_ALIAS_DECISION", now(), data));
     }
 
+    public static void recordPathArgumentNormalized(
+            String phase,
+            ToolCall call,
+            String key,
+            String rawPath,
+            String normalizedPath
+    ) {
+        Bag bag = HOLDER.get();
+        if (bag == null) return;
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("key", safe(key));
+        data.put("rawPath", rawPath == null ? "" : rawPath.replace('\\', '/'));
+        data.put("normalizedPath", normalizedPath == null ? "" : normalizedPath.replace('\\', '/'));
+        bag.builder.event(new TurnTraceEvent(
+                "TOOL_PATH_ARGUMENT_NORMALIZED",
+                now(),
+                phase == null ? "" : phase,
+                call == null ? "" : call.toolName(),
+                data));
+    }
+
     public static void recordToolCallBlocked(String phase, ToolCall call, String reason) {
         Bag bag = HOLDER.get();
         if (bag != null) {

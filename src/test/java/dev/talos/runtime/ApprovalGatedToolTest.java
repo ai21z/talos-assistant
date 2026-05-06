@@ -4,6 +4,8 @@ import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
 import dev.talos.core.security.Sandbox;
+import dev.talos.runtime.trace.LocalTurnTrace;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.tools.*;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -163,6 +165,74 @@ class ApprovalGatedToolTest {
         assertNotNull(captured[1]);
         assertTrue(captured[1].contains("src/Main.java"),
                 "Approval detail should contain target path");
+    }
+
+    @Test
+    void protectedReadWithAccidentalLeadingWhitespaceAsksForCanonicalPathAndSucceeds(@TempDir Path workspace)
+            throws Exception {
+        Files.writeString(workspace.resolve(".env"), "SAFE_AUDIT_SECRET=allowed-after-approval\n");
+        var registry = new ToolRegistry();
+        registry.register(new dev.talos.tools.impl.ReadFileTool());
+        final String[] captured = {null, null};
+        ApprovalGate gate = (desc, detail) -> {
+            captured[0] = desc;
+            captured[1] = detail;
+            return true;
+        };
+        var processor = new TurnProcessor(ModeController.defaultController(), gate, registry);
+        var session = new Session(workspace, new Config());
+        var ctx = Context.builder(new Config())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .build();
+        var call = new ToolCall("talos.read_file", Map.of("path", " .env"));
+
+        LocalTurnTraceCapture.begin(
+                "trc-path-normalized",
+                "sid",
+                1,
+                "2026-05-06T00:00:00Z",
+                "workspace-hash",
+                "test",
+                "scripted",
+                "test-model",
+                "Read .env");
+        try {
+            ToolResult result = processor.executeTool(session, call, ctx);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            assertTrue(result.success(), result.errorMessage());
+            assertTrue(result.output().contains("SAFE_AUDIT_SECRET=allowed-after-approval"), result.output());
+            assertNotNull(captured[1]);
+            assertTrue(captured[1].contains(".env"), captured[1]);
+            assertTrue(trace.events().stream().anyMatch(event ->
+                    "TOOL_PATH_ARGUMENT_NORMALIZED".equals(event.type())
+                            && " .env".equals(event.data().get("rawPath"))
+                            && ".env".equals(event.data().get("normalizedPath"))),
+                    trace.events().toString());
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void protectedReadWithAccidentalLeadingWhitespaceDeniedWithoutLeakingContent(@TempDir Path workspace)
+            throws Exception {
+        Files.writeString(workspace.resolve(".env"), "SAFE_AUDIT_SECRET=must-not-leak\n");
+        var registry = new ToolRegistry();
+        registry.register(new dev.talos.tools.impl.ReadFileTool());
+        var processor = new TurnProcessor(ModeController.defaultController(), (desc, detail) -> false, registry);
+        var session = new Session(workspace, new Config());
+        var ctx = Context.builder(new Config())
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .build();
+        var call = new ToolCall("talos.read_file", Map.of("path", " .env"));
+
+        ToolResult result = processor.executeTool(session, call, ctx);
+
+        assertFalse(result.success());
+        assertEquals(ToolError.DENIED, result.error().code());
+        assertTrue(result.errorMessage().contains(".env"), result.errorMessage());
+        assertFalse(result.errorMessage().contains("must-not-leak"), result.errorMessage());
     }
 
     @Test
