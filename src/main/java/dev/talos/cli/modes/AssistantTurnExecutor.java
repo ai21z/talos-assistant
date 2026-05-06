@@ -1206,6 +1206,7 @@ public final class AssistantTurnExecutor {
             TaskContract taskContract
     ) {
         if (messages == null || messages.isEmpty()) return;
+        removeSupersededStaticVerificationRepairInstructions(messages, taskContract);
         if (messages.stream().anyMatch(AssistantTurnExecutor::isStaticVerificationRepairInstruction)) {
             return;
         }
@@ -1232,6 +1233,68 @@ public final class AssistantTurnExecutor {
                         LocalTurnTraceCapture.recordRepair("SKIPPED", repairDecision.reason());
                     }
                 });
+    }
+
+    private static void removeSupersededStaticVerificationRepairInstructions(
+            List<ChatMessage> messages,
+            TaskContract taskContract
+    ) {
+        if (messages == null || messages.isEmpty()
+                || taskContract == null
+                || !taskContract.mutationAllowed()
+                || taskContract.expectedTargets().isEmpty()) {
+            return;
+        }
+        Set<String> currentTargets = normalizedTargets(taskContract.expectedTargets());
+        if (currentTargets.isEmpty()) return;
+
+        List<String> removedTargets = new ArrayList<>();
+        messages.removeIf(message -> {
+            if (!isStaticVerificationRepairInstruction(message)) return false;
+            Set<String> repairTargets = RepairPolicy.fullRewriteTargetsFromRepairContext(List.of(message));
+            if (repairTargets.isEmpty() || targetsOverlap(currentTargets, repairTargets)) {
+                return false;
+            }
+            removedTargets.addAll(repairTargets.stream().sorted().toList());
+            return true;
+        });
+        if (!removedTargets.isEmpty()) {
+            LocalTurnTraceCapture.recordRepair(
+                    "SUPERSEDED",
+                    "stale static repair context skipped: targets did not overlap with current task targets; "
+                            + "current targets: " + String.join(", ", currentTargets.stream().sorted().toList())
+                            + "; stale repair targets: " + String.join(", ", removedTargets.stream().sorted().toList()));
+        }
+    }
+
+    private static Set<String> normalizedTargets(Set<String> targets) {
+        Set<String> out = new LinkedHashSet<>();
+        for (String target : targets == null ? Set.<String>of() : targets) {
+            String normalized = normalizeTargetForRepairScope(target);
+            if (!normalized.isBlank()) out.add(normalized);
+        }
+        return Set.copyOf(out);
+    }
+
+    private static boolean targetsOverlap(Set<String> leftTargets, Set<String> rightTargets) {
+        Set<String> left = normalizedTargets(leftTargets);
+        Set<String> right = normalizedTargets(rightTargets);
+        for (String target : left) {
+            if (right.contains(target)) return true;
+        }
+        return false;
+    }
+
+    private static String normalizeTargetForRepairScope(String raw) {
+        if (raw == null) return "";
+        String normalized = raw.strip()
+                .replace('\\', '/')
+                .replaceAll("^[`'\"(\\[]+", "")
+                .replaceAll("[`'\"),.;:!?\\]]+$", "");
+        while (normalized.startsWith("./")) {
+            normalized = normalized.substring(2);
+        }
+        return normalized.toLowerCase(Locale.ROOT);
     }
 
     private static boolean isTaskContractInstruction(ChatMessage message) {

@@ -1,6 +1,6 @@
 # T166 - Stale Static Repair Obligations Must Not Hijack Fresh Explicit Turns
 
-Status: open
+Status: done
 
 Severity: high
 
@@ -58,3 +58,21 @@ Out of scope:
 - The exact-write final output is success/failure-dominant based on the current
   turn, not an unrelated previous repair.
 - `.\gradlew.bat --no-daemon check installDist` passes.
+
+## Resolution
+
+- Scoped static repair overlap to unresolved verifier targets instead of every
+  filename mentioned in old failure prose.
+- Superseded existing `[Static verification repair context]` system frames when
+  their full-rewrite targets are disjoint from the current explicit mutation
+  targets.
+- Recorded a `SUPERSEDED` repair trace entry when stale repair context is
+  cleared.
+
+## Verification
+
+- `.\gradlew.bat --no-daemon test --tests "dev.talos.runtime.repair.RepairPolicyTest"`
+- `.\gradlew.bat --no-daemon test --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$NonStreaming.freshExactWriteSupersedesDisjointExistingStaticRepairContext'`
+- `.\gradlew.bat --no-daemon test --tests "dev.talos.runtime.repair.RepairPolicyTest" --tests "dev.talos.cli.modes.AssistantTurnExecutorTest"`
+- `.\gradlew.bat --no-daemon test --tests "dev.talos.runtime.ToolCallLoopTest"`
+- `.\gradlew.bat --no-daemon check installDist`

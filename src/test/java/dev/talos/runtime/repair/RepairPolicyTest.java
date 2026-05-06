@@ -160,6 +160,36 @@ class RepairPolicyTest {
     }
 
     @Test
+    void freshExactWriteDoesNotPlanStaticRepairFromPreviouslyAppliedTargets() {
+        var messages = staleScriptsRepairMessages(
+                "Overwrite index.html with exactly AFTER. Use talos.write_file.");
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        RepairDecision decision = RepairPolicy.planForStaticVerification(messages, contract);
+
+        assertEquals(RepairDecisionStatus.NOT_APPLICABLE, decision.status());
+        assertTrue(decision.plan().isEmpty());
+        assertTrue(decision.reason().contains("targets did not overlap"), decision.reason());
+    }
+
+    @Test
+    void sameMissingTargetStillPlansStaticRepairFromPreviousFailure() {
+        var messages = staleScriptsRepairMessages(
+                "Fix scripts.js with complete corrected BMI JavaScript. Use talos.write_file.");
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        RepairDecision decision = RepairPolicy.planForStaticVerification(messages, contract);
+
+        assertEquals(RepairDecisionStatus.PLAN_CREATED, decision.status());
+        RepairPlan plan = decision.plan().orElseThrow();
+        assertEquals(List.of("scripts.js"), plan.expectedTargets());
+        assertTrue(plan.instruction().contains("Full-file replacement targets: scripts.js"),
+                plan.instruction());
+        assertFalse(plan.instruction().contains("Full-file replacement targets: index.html"),
+                plan.instruction());
+    }
+
+    @Test
     void explicitStructuralWebTaskDoesNotCarryStaleSiblingRepairTarget() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));
@@ -336,6 +366,30 @@ class RepairPolicyTest {
                 - styles.css: expected target was not successfully mutated.
                 - HTML does not link JavaScript file: `scripts.js`
                 - Calculator/form task is missing a submit/calculate button.
+                """));
+        messages.add(ChatMessage.user(latestUser));
+        return messages;
+    }
+
+    private static List<ChatMessage> staleScriptsRepairMessages(String latestUser) {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user(
+                "Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js."));
+        messages.add(ChatMessage.assistant("""
+                [Task incomplete: Static verification failed - scripts.js: expected target was not successfully mutated.; Expected web-app build to successfully mutate a JavaScript file.; JavaScript references missing IDs: `#bmi-form`]
+
+                The requested task is not verified complete. Applied changes below are workspace changes only; unresolved static problems remain.
+
+                Unresolved static verification problems:
+                - scripts.js: expected target was not successfully mutated.
+                - Expected web-app build to successfully mutate a JavaScript file.
+                - JavaScript references missing IDs: `#bmi-form`
+
+                Applied mutating tool calls:
+                - index.html: Updated index.html (20 lines, 553 bytes)
+                - styles.css: Updated styles.css (49 lines, 696 bytes)
+                - script.js: Updated script.js (11 lines, 531 bytes)
                 """));
         messages.add(ChatMessage.user(latestUser));
         return messages;
