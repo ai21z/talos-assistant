@@ -306,6 +306,30 @@ public final class LocalTurnTraceCapture {
         bag.builder.event(TurnTraceEvent.simple("BACKEND_MALFORMED_RESPONSE_CAPTURED", now(), data));
     }
 
+    public static void recordExactLiteralWriteCorrected(
+            String path,
+            String sourcePattern,
+            String expectedHash,
+            int expectedBytes,
+            int expectedLines,
+            String observedHash,
+            int observedBytes,
+            int observedLines
+    ) {
+        Bag bag = HOLDER.get();
+        if (bag == null) return;
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("pathHint", TraceRedactor.pathHint(path));
+        data.put("sourcePattern", safe(sourcePattern));
+        data.put("expectedHash", safe(expectedHash));
+        data.put("expectedBytes", Math.max(0, expectedBytes));
+        data.put("expectedLines", Math.max(0, expectedLines));
+        data.put("observedHash", safe(observedHash));
+        data.put("observedBytes", Math.max(0, observedBytes));
+        data.put("observedLines", Math.max(0, observedLines));
+        bag.builder.event(TurnTraceEvent.simple("EXACT_LITERAL_WRITE_CORRECTED", now(), data));
+    }
+
     public static void recordActionObligation(String obligation, String status, String reason) {
         Bag bag = HOLDER.get();
         if (bag == null) return;

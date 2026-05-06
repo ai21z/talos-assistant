@@ -9,6 +9,7 @@ import dev.talos.runtime.phase.PhasePolicy;
 import dev.talos.runtime.command.CommandToolPlanner;
 import dev.talos.runtime.checkpoint.CheckpointCaptureResult;
 import dev.talos.runtime.checkpoint.CheckpointService;
+import dev.talos.runtime.expectation.ExactLiteralWriteCallCorrector;
 import dev.talos.runtime.policy.DeclarativePermissionPolicy;
 import dev.talos.runtime.policy.PermissionAction;
 import dev.talos.runtime.policy.PermissionDecision;
@@ -304,12 +305,26 @@ public final class TurnProcessor {
 
         boolean commandTool = CommandToolPlanner.isRunCommandTool(call.toolName());
         ToolRiskLevel risk = tool.descriptor().riskLevel();
-        String path = resolvePathParam(call);
         String userRequest = TurnUserRequestCapture.get();
         TaskContract taskContract = TurnTaskContractCapture.get();
         if (taskContract == null) {
             taskContract = TaskContractResolver.fromUserRequest(userRequest);
         }
+        ExactLiteralWriteCallCorrector.Correction exactCorrection =
+                ExactLiteralWriteCallCorrector.correct(call, taskContract);
+        if (exactCorrection.corrected()) {
+            LocalTurnTraceCapture.recordExactLiteralWriteCorrected(
+                    exactCorrection.targetPath(),
+                    exactCorrection.sourcePattern(),
+                    exactCorrection.expectedHash(),
+                    exactCorrection.expectedBytes(),
+                    exactCorrection.expectedLines(),
+                    exactCorrection.observedHash(),
+                    exactCorrection.observedBytes(),
+                    exactCorrection.observedLines());
+            call = exactCorrection.call();
+        }
+        String path = resolvePathParam(call);
 
         if (taskContract.type() == TaskType.DIRECTORY_LISTING && !isListDirTool(call.toolName())) {
             TurnAuditCapture.recordToolCall(
@@ -1063,13 +1078,12 @@ public final class TurnProcessor {
         }
 
         // For write_file: show content size and preview
-        String content = call.param("content");
-        if (content == null) content = call.param("text");
-        if (content == null) content = call.param("body");
+        String content = resolveParam(call, "content", "text", "body", "data", "file_content");
 
         if (content != null && !content.isEmpty()) {
+            long bytes = content.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
             long lines = content.chars().filter(c -> c == '\n').count() + 1;
-            sb.append(" (").append(content.length()).append(" bytes, ").append(lines).append(" lines)");
+            sb.append(" (").append(bytes).append(" bytes, ").append(lines).append(" lines)");
 
             // Show first 5 lines as preview
             String[] contentLines = content.split("\n", 7);

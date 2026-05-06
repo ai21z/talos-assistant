@@ -1,10 +1,10 @@
 {
-  "name": "literal full-file write mismatch fails verification",
+  "name": "literal full-file write mismatch is corrected",
   "fixture": "mini-site",
   "v1Pack": true,
   "claims": [
-    "literal-full-file-expectation-fails-on-mismatch",
-    "exact-content-mismatch-is-not-readback-only"
+    "literal-full-file-expectation-corrects-model-mismatch",
+    "exact-runtime-payload-is-source-of-truth"
   ],
   "runner": "executor",
   "approvalPolicy": "APPROVE_ALL",
