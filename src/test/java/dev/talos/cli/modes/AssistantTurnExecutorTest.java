@@ -2055,6 +2055,55 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void malformedBackendToolArgumentsAreFailureDominantAndTraceDiagnosed(@TempDir Path workspace)
+                throws Exception {
+            Path script = workspace.resolve("scripts.js");
+            Files.writeString(script, "console.log('old');\n");
+            String malformedPayload = "{\"path\":\"scripts.js\",\"content\":\"SHOULD_NOT_APPEAR\"";
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scriptedFailure(new EngineException.MalformedResponse(
+                            "compat chat stream tool arguments",
+                            malformedPayload)))
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Overwrite scripts.js with exactly console.log('new');"));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-malformed-compat",
+                    "session",
+                    1,
+                    "2026-05-06T00:00:00Z",
+                    "workspace",
+                    "ask",
+                    "llama_cpp",
+                    "qwen2.5-coder-14b.gguf",
+                    "Overwrite scripts.js with exactly console.log('new');");
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertTrue(out.text().contains("Malformed engine response for compat chat stream tool arguments"),
+                        out.text());
+                assertFalse(out.text().contains("SHOULD_NOT_APPEAR"), out.text());
+                assertFalse(out.text().toLowerCase(java.util.Locale.ROOT).contains("ready to use"), out.text());
+                assertEquals("console.log('old');\n", Files.readString(script),
+                        "malformed tool arguments must not mutate files");
+                assertEquals("BACKEND_MALFORMED_RESPONSE", trace.outcome().classification());
+                var malformedEvent = trace.events().stream()
+                        .filter(event -> "BACKEND_MALFORMED_RESPONSE_CAPTURED".equals(event.type()))
+                        .findFirst()
+                        .orElseThrow();
+                assertEquals("compat chat stream tool arguments", malformedEvent.data().get("context"));
+                assertEquals(malformedPayload.length(), malformedEvent.data().get("bodyChars"));
+                assertTrue(String.valueOf(malformedEvent.data().get("bodyHash")).startsWith("sha256:"));
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        }
+
+        @Test
         void readOnlyDeniedWriteFileProtocolIsSanitizedWithoutFakeApproval(@TempDir Path workspace)
                 throws Exception {
             Files.writeString(workspace.resolve("index.html"), "<h1>Current</h1>\n");

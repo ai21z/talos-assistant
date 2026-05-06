@@ -109,6 +109,19 @@ class EngineExceptionTest {
         assertTrue(ex.getMessage().contains("unexpected"));
     }
 
+    @Test
+    void malformedResponse_diagnostic_preview_is_capped_and_redacted() {
+        String body = "token=SECRET-VALUE " + "x".repeat(800);
+        var ex = new EngineException.MalformedResponse("compat chat stream tool arguments", body);
+
+        assertEquals("compat chat stream tool arguments", ex.context());
+        assertEquals(body.length(), ex.bodyChars());
+        assertTrue(ex.bodyHash().startsWith("sha256:"));
+        assertTrue(ex.bodyPreview().contains("token=[redacted]"));
+        assertFalse(ex.bodyPreview().contains("SECRET-VALUE"));
+        assertTrue(ex.bodyPreview().length() <= 501);
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     //  Sealed hierarchy
     // ═══════════════════════════════════════════════════════════════════════

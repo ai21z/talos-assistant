@@ -1,5 +1,11 @@
 package dev.talos.spi;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 /**
  * Sealed exception hierarchy for model-engine errors.
  *
@@ -18,6 +24,8 @@ public sealed class EngineException extends RuntimeException
 
     private final int httpStatus;
     private final String guidance;
+    private static final Pattern SECRET_LIKE_ASSIGNMENT = Pattern.compile(
+            "(?i)\\b(secret|token|api[_-]?key|password|credential|credentials)\\b\\s*=\\s*(\"[^\"]*\"|'[^']*'|`[^`]*`|[^\\s,;]+)");
 
     protected EngineException(String message, Throwable cause, int httpStatus, String guidance) {
         super(message, cause);
@@ -85,6 +93,11 @@ public sealed class EngineException extends RuntimeException
 
     /** Backend returned HTTP success with a response shape the engine cannot use. */
     public static final class MalformedResponse extends EngineException {
+        private final String context;
+        private final String bodyPreview;
+        private final String bodyHash;
+        private final int bodyChars;
+
         public MalformedResponse(String context, String body) {
             super("Malformed engine response"
                     + (context == null || context.isBlank() ? "" : " for " + context)
@@ -92,6 +105,10 @@ public sealed class EngineException extends RuntimeException
                     null,
                     0,
                     "The local model server returned an unsupported response shape.");
+            this.context = safe(context);
+            this.bodyPreview = diagnosticPreview(body);
+            this.bodyHash = diagnosticHash(body);
+            this.bodyChars = body == null ? 0 : body.length();
         }
 
         public MalformedResponse(String context, String body, Throwable cause) {
@@ -101,14 +118,58 @@ public sealed class EngineException extends RuntimeException
                     cause,
                     0,
                     "The local model server returned an unsupported response shape.");
+            this.context = safe(context);
+            this.bodyPreview = diagnosticPreview(body);
+            this.bodyHash = diagnosticHash(body);
+            this.bodyChars = body == null ? 0 : body.length();
         }
+
+        public String context() { return context; }
+
+        public String bodyPreview() { return bodyPreview; }
+
+        public String bodyHash() { return bodyHash; }
+
+        public int bodyChars() { return bodyChars; }
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────
 
+    private static String safe(String s) {
+        return s == null ? "" : s.strip();
+    }
+
     private static String truncate(String s, int max) {
         if (s == null) return "";
         return s.length() <= max ? s : s.substring(0, max) + "…";
+    }
+
+    private static String diagnosticPreview(String body) {
+        if (body == null || body.isBlank()) return "";
+        return truncate(redactSecretLikeAssignments(body.strip()), 500);
+    }
+
+    private static String diagnosticHash(String body) {
+        String safeBody = body == null ? "" : body;
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return "sha256:" + HexFormat.of().formatHex(
+                    digest.digest(safeBody.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception e) {
+            return "sha256:unavailable";
+        }
+    }
+
+    private static String redactSecretLikeAssignments(String text) {
+        if (text == null || text.isBlank()) return text;
+        Matcher matcher = SECRET_LIKE_ASSIGNMENT.matcher(text);
+        StringBuilder out = new StringBuilder();
+        while (matcher.find()) {
+            String key = matcher.group(1);
+            matcher.appendReplacement(out, Matcher.quoteReplacement(key + "=[redacted]"));
+        }
+        matcher.appendTail(out);
+        return out.toString();
     }
 }
 
