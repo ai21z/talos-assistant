@@ -14,9 +14,10 @@ public final class CapabilityAnswerPolicy {
 
     private static final String CAPABILITY_ANSWER =
             "Talos can inspect this local workspace, list, read and search files, retrieve indexed context, "
-            + "and apply file changes only after approval. It uses approval, checkpointing, and verification "
-            + "for workspace changes, and cannot use browser, shell, or unsupported binary-document tools "
-            + "unless those capabilities are added.";
+            + "apply approved file/workspace changes, and run approved bounded command profiles such as "
+            + "Gradle checks through talos.run_command. It uses approval, checkpointing, and verification "
+            + "for workspace changes. It cannot use browser automation or inspect unsupported "
+            + "binary-document contents unless those capabilities are added.";
 
     private static final Set<String> IDENTITY_MARKERS = Set.of(
             "who are you",
