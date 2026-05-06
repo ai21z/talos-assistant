@@ -2043,7 +2043,7 @@ class ExecutionOutcomeTest {
     }
 
     @Test
-    void verificationRequiredReadOnlyWithEvidenceButNoVerifierIsAdvisory() {
+    void verificationRequiredReadOnlyWithEvidenceButNoPostApplyVerifierIsReadOnlyAnswered() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Is this BMI page working now?"));
@@ -2076,17 +2076,18 @@ class ExecutionOutcomeTest {
         ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
                 "The BMI page appears to be working.", plan, messages, loopResult, null, 0);
 
-        assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
-        assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
+        assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+        assertEquals(TaskCompletionStatus.READ_ONLY_ANSWERED, outcome.taskOutcome().completionStatus());
         assertEquals(ExecutionOutcome.VerificationStatus.NOT_RUN, outcome.verificationStatus());
-        assertTrue(outcome.finalAnswer().startsWith("[Task not verified:"), outcome.finalAnswer());
-        assertTrue(outcome.finalAnswer().contains("not verified"), outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().startsWith("[Task not verified:"), outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains("task verifier ran"), outcome.finalAnswer());
+        assertTrue(outcome.finalAnswer().contains("The BMI page appears to be working."), outcome.finalAnswer());
         assertFalse(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
         assertFalse(outcome.finalAnswer().startsWith("[Evidence incomplete:"));
     }
 
     @Test
-    void verificationRequiredReadOnlyWithMissingEvidenceStillSaysNotVerified() {
+    void verificationRequiredReadOnlyWithMissingEvidenceStillReportsIncompleteEvidence() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));
         messages.add(ChatMessage.user("Is this BMI page working now?"));
@@ -2106,7 +2107,7 @@ class ExecutionOutcomeTest {
         assertEquals(TaskCompletionStatus.ADVISORY_ONLY, outcome.taskOutcome().completionStatus());
         assertTrue(outcome.finalAnswer().startsWith(
                 "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"));
-        assertTrue(outcome.finalAnswer().contains("not verified"), outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().contains("[Task not verified:"), outcome.finalAnswer());
         assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
     }
 

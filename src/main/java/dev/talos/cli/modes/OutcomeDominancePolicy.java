@@ -190,9 +190,8 @@ final class OutcomeDominancePolicy {
                     TaskCompletionStatus.COMPLETED_VERIFIED,
                     false);
         }
-        if (verificationRequiredButNotRun(facts)) {
-            return advisory();
-        }
+        // For non-mutating verify/status turns, evidence sufficiency is decided by the
+        // evidence gate. NOT_RUN only means no post-apply mutation verifier was relevant.
         if (facts.unsupportedCapabilityLimited()
                 || facts.missingEvidence()
                 || facts.falseMutationClaim()
@@ -233,10 +232,4 @@ final class OutcomeDominancePolicy {
                 false);
     }
 
-    private static boolean verificationRequiredButNotRun(Facts facts) {
-        return facts.contract() != null
-                && facts.contract().verificationRequired()
-                && !facts.contract().mutationRequested()
-                && facts.verificationStatus() == ExecutionOutcome.VerificationStatus.NOT_RUN;
-    }
 }
