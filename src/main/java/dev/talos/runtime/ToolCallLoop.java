@@ -350,6 +350,9 @@ public final class ToolCallLoop {
                 }
                 break;
             }
+            if (state.failPendingStaticRepairObligationAfterInvalidToolCalls(parsed.calls())) {
+                break;
+            }
 
             ToolCallExecutionStage.IterationOutcome outcome = executionStage.execute(state, parsed);
             if (!repromptStage.reprompt(state, outcome)) {

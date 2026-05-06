@@ -39,17 +39,32 @@ public record PendingActionObligation(Kind kind, List<String> targets) {
     }
 
     public String failureReason() {
+        return failureReason("The model returned no executable write/edit tool calls.");
+    }
+
+    public String failureReason(String detail) {
+        String suffix = detail == null || detail.isBlank()
+                ? "The model returned no executable write/edit tool calls."
+                : detail.strip();
         return "Pending action obligation " + kind.name()
                 + " was ignored after a " + kind.label
                 + " reprompt. Remaining target(s): " + targetList()
-                + ". The model returned no executable write/edit tool calls.";
+                + ". " + suffix;
     }
 
     public String failureAnswer() {
+        return failureAnswer(
+                "The model returned prose instead of the required write/edit tool call.");
+    }
+
+    public String failureAnswer(String detail) {
+        String suffix = detail == null || detail.isBlank()
+                ? "The model did not provide the required write/edit tool call."
+                : detail.strip();
         return "[Action obligation failed: pending " + kind.label + " was not satisfied.]\n\n"
                 + "Remaining target(s): " + targetList() + ".\n"
-                + "The model returned prose instead of the required write/edit tool call, "
-                + "so Talos stopped this turn deterministically.";
+                + suffix + "\n"
+                + "Talos stopped this turn deterministically.";
     }
 
     public void recordRaised() {
@@ -61,11 +76,17 @@ public record PendingActionObligation(Kind kind, List<String> targets) {
     }
 
     public void recordBreached() {
+        recordBreached("model response had no executable write/edit tool calls");
+    }
+
+    public void recordBreached(String detail) {
         LocalTurnTraceCapture.recordPendingActionObligation(
                 "BREACHED",
                 kind.name(),
                 targets,
-                "model response had no executable write/edit tool calls");
+                detail == null || detail.isBlank()
+                        ? "model response had no executable write/edit tool calls"
+                        : detail.strip());
     }
 
     private String targetList() {

@@ -1,6 +1,6 @@
 # T152 - Static Web Full-Rewrite Repair Must Enforce WriteFile After OldString Miss
 
-Status: open
+Status: done
 Priority: high
 
 ## Evidence Summary
@@ -102,3 +102,46 @@ Expected manual result:
 
 - GPT-OSS no longer leaves `script.js` with `.missing-button`.
 - The turn either verifies cleanly or fails with a deterministic repair-control breach before loop exhaustion.
+
+## Closeout Evidence
+
+Implementation summary:
+
+- Dynamic static-web full-rewrite targets now activate a pending static repair obligation as soon as an old-string miss is recorded after read evidence.
+- While that static repair obligation is pending, the next model response must include `talos.write_file` for one of the remaining repair targets.
+- Read-only, wrong-tool, or `talos.edit_file` continuations under that obligation fail deterministically before additional tools execute.
+- Direct `talos.write_file` recovery remains allowed and satisfies the obligation.
+
+Regression coverage:
+
+- Added `ToolCallLoopTest.staticWebFullRewriteRequiredRejectsReadOnlyContinuationBeforeSuccessProse`.
+- Added `ToolCallLoopTest.staticWebFullRewriteRequiredRejectsRepeatedEditContinuationBeforeSuccessProse`.
+- Updated the existing static-web old-string recovery test so the successful path is now direct `write_file` after the rewrite obligation is raised.
+
+Verification:
+
+```powershell
+.\gradlew.bat --no-daemon test --tests dev.talos.runtime.ToolCallLoopTest.staticWebFullRewriteRequiredRejectsReadOnlyContinuationBeforeSuccessProse
+.\gradlew.bat --no-daemon test --tests dev.talos.runtime.ToolCallLoopTest.staticWebFullRewriteRequiredRejectsRepeatedEditContinuationBeforeSuccessProse --tests dev.talos.runtime.ToolCallLoopTest.staticWebFullRewriteRequiredRejectsReadOnlyContinuationBeforeSuccessProse --tests dev.talos.runtime.ToolCallLoopTest.staticWebOldStringFailureAfterReadRecoversThroughFullWriteReplacement
+.\gradlew.bat --no-daemon test --tests dev.talos.runtime.ToolCallLoopTest.staticWebVerifierPassStopsWithoutExpectedContextTargetBreach --tests dev.talos.runtime.ToolCallLoopTest.staticWebOldStringFailureAfterReadRecoversThroughFullWriteReplacement --tests dev.talos.runtime.ToolCallLoopTest.staticWebFullRewriteRequiredRejectsReadOnlyContinuationBeforeSuccessProse --tests dev.talos.runtime.ToolCallLoopTest.staticRepairProgressNoToolProseBecomesDeterministicBreach --tests dev.talos.runtime.ToolCallLoopTest.expectedTargetProgressNoToolProseBecomesDeterministicBreach --tests dev.talos.runtime.ToolCallLoopTest.expectedTargetProgressToolCallKeepsHappyPathOpen
+.\gradlew.bat --no-daemon test --tests dev.talos.runtime.ToolCallLoopTest
+.\gradlew.bat --no-daemon test --tests dev.talos.runtime.ToolCallLoopTest --tests dev.talos.runtime.toolcall.ToolCallRepromptStageTest --tests dev.talos.runtime.outcome.MutationOutcomeTest --tests dev.talos.runtime.verification.StaticTaskVerifierTest
+.\gradlew.bat --no-daemon e2eTest --tests dev.talos.harness.JsonScenarioPackTest.structuralWebRepairRedirectsEditFileToWriteFile --tests dev.talos.harness.JsonScenarioPackTest.structuralWebRepairContinuesUntilPlannedWriteTargets --tests dev.talos.harness.JsonScenarioPackTest.repairAfterStaticVerificationFailureUsesVerifierContext --tests dev.talos.harness.JsonScenarioPackTest.repairFollowupAfterIncompleteOutcomeApplies
+.\gradlew.bat --no-daemon test
+.\gradlew.bat --no-daemon e2eTest
+.\gradlew.bat --no-daemon check
+.\gradlew.bat --no-daemon installDist
+```
+
+Manual audit:
+
+- `local/manual-testing/t152-static-web-full-rewrite-gate-audit-20260506-051126/FINDINGS-T152-STATIC-WEB-FULL-REWRITE-GATE-AUDIT.md`
+
+Manual audit result:
+
+- GPT-OSS confirmed the T152 control fix: after the old-string miss path, the model attempted `talos.read_file(script.js)` under a pending static repair obligation and Talos stopped deterministically with `STATIC_REPAIR_TARGETS_REMAINING` instead of looping to the iteration limit.
+- Qwen exposed a separate verifier bug: it wrote broken JavaScript with `.textC;`, and static verification incorrectly passed. Tracked separately as T156.
+
+Known follow-up:
+
+- T156 - Static Web Verifier Must Reject Broken JS Handler Mutations.

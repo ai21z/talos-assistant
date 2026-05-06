@@ -222,7 +222,10 @@ public final class ToolCallRepromptStage {
                             + "static verification passes."));
             expectedProgressIndex = state.messages.size() - 1;
         }
-        boolean obligationGateActive = outcome.mutationsThisIteration() > 0
+        boolean dynamicFullRewriteGateActive = !state.staticWebFullRewriteRequiredTargets.isEmpty()
+                && !remainingRepairTargets.isEmpty();
+        boolean obligationGateActive = dynamicFullRewriteGateActive
+                || outcome.mutationsThisIteration() > 0
                 || state.hasPendingActionObligation();
         if (obligationGateActive && !remainingRepairTargets.isEmpty()) {
             state.setPendingActionObligation(
