@@ -1370,6 +1370,11 @@ public final class AssistantTurnExecutor {
         if (runtimeMetaEvidence != null) {
             return runtimeMetaEvidence;
         }
+        String staticWebDiagnosticFollowUp =
+                previousRuntimeOwnedStaticWebDiagnosticFollowUpIfNeeded(messages, userRequest);
+        if (staticWebDiagnosticFollowUp != null) {
+            return staticWebDiagnosticFollowUp;
+        }
         String runtimeChangeSummary = runtimeChangeSummaryIfNeeded(ctx, userRequest);
         if (runtimeChangeSummary != null) {
             return runtimeChangeSummary;
@@ -1463,6 +1468,97 @@ public final class AssistantTurnExecutor {
             case MUTATE -> "mutated";
             case UNKNOWN -> "used";
         };
+    }
+
+    private static String previousRuntimeOwnedStaticWebDiagnosticFollowUpIfNeeded(
+            List<ChatMessage> messages,
+            String userRequest
+    ) {
+        if (!looksLikePreviousStaticWebDiagnosticFollowUp(userRequest)) return null;
+        String previousAssistantText = previousAssistantBeforeLatestUser(messages);
+        if (!looksLikeRuntimeOwnedStaticWebDiagnostics(previousAssistantText)) return null;
+        List<String> blockers = staticWebDiagnosticProblemLines(previousAssistantText);
+        if (blockers.isEmpty()) {
+            return "Based on the previous runtime-owned static web diagnostics, Talos did not find "
+                    + "obvious HTML/CSS/JavaScript linkage blockers in that diagnostic.";
+        }
+        return "Based on the previous runtime-owned static web diagnostics, the blockers are:\n"
+                + String.join("\n", blockers);
+    }
+
+    private static boolean looksLikePreviousStaticWebDiagnosticFollowUp(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return false;
+        String lower = userRequest.toLowerCase(Locale.ROOT);
+        boolean previousEvidence = lower.contains("previous answer")
+                || lower.contains("previous response")
+                || lower.contains("previous evidence")
+                || lower.contains("verified file evidence")
+                || lower.contains("verified evidence")
+                || lower.contains("based only on verified");
+        if (!previousEvidence) return false;
+        return lower.contains("blocker")
+                || lower.contains("prevent")
+                || lower.contains("issue")
+                || lower.contains("problem")
+                || lower.contains("finding")
+                || lower.contains("diagnos")
+                || lower.contains("why")
+                || lower.contains("what");
+    }
+
+    private static String previousAssistantBeforeLatestUser(List<ChatMessage> messages) {
+        if (messages == null || messages.isEmpty()) return null;
+        boolean skippedLatestUser = false;
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            ChatMessage message = messages.get(i);
+            if (message == null) continue;
+            if ("user".equals(message.role()) && !skippedLatestUser) {
+                skippedLatestUser = true;
+                continue;
+            }
+            if (!skippedLatestUser) continue;
+            if ("assistant".equals(message.role())) {
+                return message.content();
+            }
+            if ("user".equals(message.role())) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private static boolean looksLikeRuntimeOwnedStaticWebDiagnostics(String answer) {
+        if (answer == null || answer.isBlank()) return false;
+        String lower = answer.toLowerCase(Locale.ROOT);
+        return lower.contains("i inspected the primary web files:")
+                && (lower.contains("static web diagnostics found:")
+                || lower.contains("static web diagnostics did not find obvious"))
+                && lower.contains("no files were changed.");
+    }
+
+    private static List<String> staticWebDiagnosticProblemLines(String answer) {
+        if (answer == null || answer.isBlank()) return List.of();
+        List<String> problems = new ArrayList<>();
+        boolean inProblems = false;
+        for (String rawLine : answer.lines().toList()) {
+            String line = rawLine.strip();
+            String lower = line.toLowerCase(Locale.ROOT);
+            if (lower.equals("static web diagnostics found:")) {
+                inProblems = true;
+                continue;
+            }
+            if (!inProblems) continue;
+            if (line.isBlank() || lower.equals("no files were changed.")) {
+                break;
+            }
+            if (line.startsWith("- ")) {
+                problems.add(line);
+            } else if (!problems.isEmpty()) {
+                int last = problems.size() - 1;
+                problems.set(last, problems.get(last) + " " + line);
+            }
+        }
+        return List.copyOf(problems);
     }
 
     private static String runtimeChangeSummaryIfNeeded(Context ctx, String userRequest) {
