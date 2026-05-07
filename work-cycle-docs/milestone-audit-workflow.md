@@ -34,14 +34,19 @@ Run a clean two-model milestone audit:
 
 Do not run this audit after every small ticket. Use it when the result will
 change a milestone decision, create or close tickets, or de-risk the next larger
-audit.
+audit. For the large release-gate style run, use
+`work-cycle-docs/full-e2e-audit-workflow.md` and
+`work-cycle-docs/full-e2e-audit-operator-prompt.md`.
 
 ## Model Policy
 
-Default regular audit models:
+Default regular audit model identities:
 
-- Qwen: `ollama/qwen2.5-coder:14b`
-- GPT-OSS: `ollama/gpt-oss:20b`
+- Qwen: `qwen2.5-coder:14b`
+- GPT-OSS: `gpt-oss:20b`
+
+Current preferred backend for milestone and full-audit evidence is managed
+`llama.cpp`. Ollama remains a legacy comparison option, not the primary engine.
 
 Avoid Gemma for routine milestone audits because it is too slow for the regular
 Talos work-test cycle. Other models can be used when the audit question requires

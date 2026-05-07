@@ -145,6 +145,22 @@ For Talos, a serious candidate packet is:
 
 That packet is what makes a patch version comparable to the next one.
 
+For milestone evidence that depends on live local models, use the manual audit
+runbooks after the normal deterministic checks pass:
+
+- `work-cycle-docs/milestone-audit-workflow.md` for focused clean two-model
+  milestone audits
+- `work-cycle-docs/full-e2e-audit-workflow.md` for the large T61-style full E2E
+  audit
+- `work-cycle-docs/full-e2e-audit-operator-prompt.md` for the operator prompt
+  that must be copied into each full-audit artifact directory
+
+The full audit is the broad live-product E2E gate: it must cover all current
+native tools or explicitly exclude them, capture prompt/debug/trace/provider
+artifacts, and review model answers for truthfulness. It is not a substitute for
+`check`; it runs after the deterministic work-test cycle has made the candidate
+worth auditing.
+
 ## Current Practical Commands
 
 ### Inner Dev Loop
