@@ -1,7 +1,9 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.runtime.TurnProcessor;
+import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
+import dev.talos.runtime.policy.ProtectedPathAliasNormalizer;
 import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -9,6 +11,7 @@ import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.tools.PathArgumentCanonicalizer;
 import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolProgressSink;
@@ -105,6 +108,24 @@ public final class ToolCallExecutionStage {
         for (int i = 0; i < parsed.calls().size(); i++) {
             ToolCall call = parsed.calls().get(i);
             ToolCall effective = ToolCallSupport.repairMissingPath(call);
+            TaskContract currentTaskContract = TurnTaskContractCapture.get();
+            if (currentTaskContract != null) {
+                PathArgumentCanonicalizer.ToolCallNormalization protectedAliasNormalization =
+                        ProtectedPathAliasNormalizer.canonicalizeExpectedProtectedAliases(
+                                state.workspace, effective, currentTaskContract.expectedTargets());
+                if (protectedAliasNormalization.changed()) {
+                    for (PathArgumentCanonicalizer.PathParameterChange change
+                            : protectedAliasNormalization.changes()) {
+                        LocalTurnTraceCapture.recordPathArgumentNormalized(
+                                "tool_loop",
+                                effective,
+                                change.key(),
+                                change.rawPath(),
+                                change.normalizedPath());
+                    }
+                    effective = protectedAliasNormalization.call();
+                }
+            }
 
             String pathHint = ToolCallSupport.resolvePathHint(effective);
             WorkspaceOperationPlan workspaceOperationPlan = workspaceOperationPlan(effective);

@@ -14,6 +14,7 @@ import dev.talos.runtime.policy.DeclarativePermissionPolicy;
 import dev.talos.runtime.policy.PermissionAction;
 import dev.talos.runtime.policy.PermissionDecision;
 import dev.talos.runtime.policy.PermissionRequest;
+import dev.talos.runtime.policy.ProtectedPathAliasNormalizer;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
@@ -309,6 +310,20 @@ public final class TurnProcessor {
         TaskContract taskContract = TurnTaskContractCapture.get();
         if (taskContract == null) {
             taskContract = TaskContractResolver.fromUserRequest(userRequest);
+        }
+        PathArgumentCanonicalizer.ToolCallNormalization protectedAliasNormalization =
+                ProtectedPathAliasNormalizer.canonicalizeExpectedProtectedAliases(
+                        session.workspace(), call, pathParameterKeys(), taskContract.expectedTargets());
+        if (protectedAliasNormalization.changed()) {
+            for (PathArgumentCanonicalizer.PathParameterChange change : protectedAliasNormalization.changes()) {
+                LocalTurnTraceCapture.recordPathArgumentNormalized(
+                        tracePhase,
+                        call,
+                        change.key(),
+                        change.rawPath(),
+                        change.normalizedPath());
+            }
+            call = protectedAliasNormalization.call();
         }
         ExactLiteralWriteCallCorrector.Correction exactCorrection =
                 ExactLiteralWriteCallCorrector.correct(call, taskContract);

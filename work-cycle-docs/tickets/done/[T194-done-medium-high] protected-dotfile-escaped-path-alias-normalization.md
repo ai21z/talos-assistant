@@ -1,6 +1,6 @@
 # T194 - Protected Dotfile Escaped Path Alias Normalization
 
-Status: open
+Status: done
 Severity: medium/high
 
 ## Evidence
@@ -42,3 +42,16 @@ Out of scope:
 - `\Windows\system32\...`, `\..\secret`, and unrelated escaped paths remain blocked.
 - Tests cover both denied and approved protected-read flows.
 
+## Completion Notes
+
+- Added narrow `\.env` alias normalization only for matching current-turn protected expected targets.
+- Normalization happens before tool-loop path hints/outcomes are recorded and before direct `TurnProcessor` permission classification.
+- Protected read approval is still required before content is read.
+- Explicit non-alias cases remain blocked: Windows-root paths, parent traversal, forward-slash absolute paths, unrelated escaped dotfiles, and unprotected dotfiles.
+
+## Verification
+
+- `.\gradlew.bat test --tests dev.talos.runtime.policy.ProtectedPathAliasNormalizerTest --tests dev.talos.cli.modes.AssistantTurnExecutorTest --no-daemon`
+- `.\gradlew.bat test --tests "dev.talos.runtime.policy.*" --tests "dev.talos.runtime.toolcall.*" --tests dev.talos.cli.modes.AssistantTurnExecutorTest --no-daemon`
+- `.\gradlew.bat test --no-daemon`
+- `.\gradlew.bat build installDist --no-daemon`
