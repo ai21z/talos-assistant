@@ -1,6 +1,6 @@
 # T204 - Compact Mutation Retry Must Use Lean Runtime System Preamble
 
-Status: in-progress
+Status: done
 Severity: high
 
 ## Problem
@@ -64,3 +64,28 @@ Qwen:
 - Existing T201/T202/T203 targeted tests pass.
 - Full `test` and `build installDist` pass.
 - Re-run the same focused Qwen/GPT-OSS audit shape.
+
+## Audit Result
+
+Implemented in commit `a6e88ec`, but not accepted by focused audit.
+
+Focused audit:
+
+`local/manual-testing/llama-cpp-t204-focused-re-audit-20260507-203116/FINDINGS-LLAMA-CPP-T204-FOCUSED-RE-AUDIT.md`
+
+Result:
+- The full leading system prompt is no longer copied into the compact retry path.
+- Both Qwen and GPT-OSS still fail the review/fix missing-mutation retry before backend dispatch because the retry request is still over the 8192-token local budget:
+  - Qwen: estimated `5767`, budget `5635`.
+  - GPT-OSS: estimated `5719`, budget `5635`.
+
+Follow-up:
+- T205 owns the remaining acceptance blocker: the missing-mutation retry must use a minimal retry envelope that fits the managed 8k local context path with real tool schemas.
+
+Final closure:
+
+T204's narrow implementation stayed in place and was carried forward into T205. T205 then replaced the still-too-large retry envelope with a minimal retry frame and compact retry tool schemas. The combined T204/T205 path is accepted by:
+
+- deterministic compact retry tests,
+- full unit/build verification,
+- focused Qwen/GPT-OSS re-audit at `local/manual-testing/llama-cpp-t205-focused-re-audit-20260507-211437/FINDINGS-LLAMA-CPP-T205-FOCUSED-RE-AUDIT.md`.

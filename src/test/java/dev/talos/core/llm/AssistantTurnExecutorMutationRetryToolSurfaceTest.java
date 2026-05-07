@@ -9,6 +9,9 @@ import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.TokenChunk;
 import dev.talos.spi.types.ToolSpec;
+import dev.talos.tools.TalosTool;
+import dev.talos.tools.impl.FileEditTool;
+import dev.talos.tools.impl.FileWriteTool;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
@@ -74,7 +77,8 @@ class AssistantTurnExecutorMutationRetryToolSurfaceTest {
         assertFalse(retryPrompt.contains("OLD_HISTORY_MARKER"), retryPrompt);
         assertFalse(retryPrompt.contains("OLD_ASSISTANT_MARKER"), retryPrompt);
         assertFalse(retryPrompt.contains("OLD_RUNTIME_SYSTEM_MARKER"), retryPrompt);
-        assertTrue(retryPrompt.contains("[CurrentTurnCapability]"), retryPrompt);
+        assertTrue(retryPrompt.contains("[MutationRetryCapability]"), retryPrompt);
+        assertFalse(retryPrompt.contains("[CurrentTurnCapability]"), retryPrompt);
         assertTrue(retryPrompt.contains("Create index.html, styles.css, and scripts.js"), retryPrompt);
         assertTrue(retryPrompt.contains("previous model response did not issue required write/edit tool calls"),
                 retryPrompt);
@@ -101,9 +105,88 @@ class AssistantTurnExecutorMutationRetryToolSurfaceTest {
         assertTrue(resolver.requests.size() >= 2, "expected initial call and retry call");
         String retryPrompt = joinedMessageContent(resolver.requests.get(1));
         assertFalse(retryPrompt.contains("FULL_SYSTEM_MARKER"), retryPrompt);
-        assertTrue(retryPrompt.contains("local workspace assistant"), retryPrompt);
-        assertTrue(retryPrompt.contains("runtime handles tool invocation"), retryPrompt);
-        assertTrue(retryPrompt.contains("[CurrentTurnCapability]"), retryPrompt);
+        assertTrue(retryPrompt.contains("Talos bounded mutation retry"), retryPrompt);
+        assertTrue(retryPrompt.contains("Use only listed tools"), retryPrompt);
+        assertTrue(retryPrompt.contains("[MutationRetryCapability]"), retryPrompt);
+        assertFalse(retryPrompt.contains("[CurrentTurnCapability]"), retryPrompt);
+    }
+
+    @Test
+    void missingMutationRetryUsesMinimalFrameWithRealWriteEditSchemas() {
+        RecordingResolver resolver = new RecordingResolver(List.of(
+                "Done. The files are complete.",
+                "I still will not call tools."));
+        Context ctx = context(resolver, realWriteEditToolSurface());
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system(largeLeadingSystemPrompt()),
+                ChatMessage.user("Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js. It should calculate BMI from height and weight.")
+        ));
+
+        AssistantTurnExecutor.TurnOutput output = AssistantTurnExecutor.execute(
+                messages,
+                Path.of("."),
+                ctx,
+                new AssistantTurnExecutor.Options());
+
+        assertTrue(output.text().startsWith("[Action obligation failed:"), output.text());
+        assertTrue(resolver.requests.size() >= 2, "minimal retry should reach backend with real write/edit schemas");
+        ChatRequest retry = resolver.requests.get(1);
+        String retryPrompt = joinedMessageContent(retry);
+        assertTrue(retryPrompt.contains("[MutationRetryCapability]"), retryPrompt);
+        assertFalse(retryPrompt.contains("[CurrentTurnCapability]"), retryPrompt);
+        assertFalse(retryPrompt.contains("Do not provide manual snippets instead of acting"), retryPrompt);
+        assertTrue(retryPrompt.contains("requiredTargets: index.html, styles.css, scripts.js"), retryPrompt);
+        assertTrue(retryPrompt.contains("script.js and scripts.js are different target paths"), retryPrompt);
+        assertTrue(retryPrompt.contains("Create a complete static BMI calculator"), retryPrompt);
+        assertEquals(
+                List.of("talos.edit_file", "talos.write_file"),
+                sortedToolNames(retry));
+    }
+
+    @Test
+    void conditionalReviewFixRetryUsesCompactEnvelopeAndRetrySchemas() {
+        RecordingResolver resolver = new RecordingResolver(List.of(
+                "I inspected the files and did not change anything.",
+                "I still will not call tools."));
+        Context ctx = context(resolver, realWriteEditToolSurface());
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system(largeLeadingSystemPrompt()),
+                ChatMessage.user("Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js. It should calculate BMI from height and weight."),
+                ChatMessage.assistant("[Static verification: passed for 3 mutated target(s).]"),
+                ChatMessage.user("Review the BMI calculator you just created and fix any obvious issue that would stop it from working in a browser.")
+        ));
+
+        AssistantTurnExecutor.TurnOutput output = AssistantTurnExecutor.execute(
+                messages,
+                Path.of("."),
+                ctx,
+                new AssistantTurnExecutor.Options());
+
+        assertTrue(output.text().startsWith("[Action obligation failed:"), output.text());
+        assertTrue(resolver.requests.size() >= 2, "expected conditional review/fix retry call");
+        ChatRequest retry = resolver.requests.get(1);
+        String retryPrompt = joinedMessageContent(retry);
+        assertTrue(retryPrompt.contains("[MutationRetryCapability]"), retryPrompt);
+        assertTrue(retryPrompt.contains("obligation: CONDITIONAL_REVIEW_FIX"), retryPrompt);
+        assertTrue(retryPrompt.contains("Review the BMI calculator you just created"), retryPrompt);
+        assertFalse(retryPrompt.contains("If you have not inspected the relevant files yet"), retryPrompt);
+        assertFalse(retryPrompt.contains("The runtime handles tool invocation, approval"), retryPrompt);
+        assertTrue(retryPrompt.length() < 2_500, "retry prompt was too large: " + retryPrompt.length());
+
+        ToolSpec edit = retry.tools.stream()
+                .filter(tool -> "talos.edit_file".equals(tool.name()))
+                .findFirst()
+                .orElseThrow();
+        ToolSpec write = retry.tools.stream()
+                .filter(tool -> "talos.write_file".equals(tool.name()))
+                .findFirst()
+                .orElseThrow();
+        assertTrue(edit.parametersSchemaJson().contains("old_string"), edit.parametersSchemaJson());
+        assertTrue(edit.parametersSchemaJson().contains("new_string"), edit.parametersSchemaJson());
+        assertTrue(write.parametersSchemaJson().contains("content"), write.parametersSchemaJson());
+        assertFalse(edit.parametersSchemaJson().contains("line-number prefixes"), edit.parametersSchemaJson());
+        assertTrue(edit.parametersSchemaJson().length() < 420, "edit retry schema too large");
+        assertTrue(write.parametersSchemaJson().length() < 260, "write retry schema too large");
     }
 
     @Test
@@ -187,6 +270,40 @@ class AssistantTurnExecutorMutationRetryToolSurfaceTest {
     }
 
     @Test
+    void staticFullRewriteMissingMutationRetryCompactsVerboseRepairContext() {
+        RecordingResolver resolver = new RecordingResolver(List.of(
+                "Done. The repair is complete.",
+                "I still will not call tools."));
+        Context ctx = context(resolver, realWriteEditToolSurface());
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.system(largeStaticRepairContext()),
+                ChatMessage.user("Fix the remaining static verification problems.")
+        ));
+
+        AssistantTurnExecutor.TurnOutput output = AssistantTurnExecutor.execute(
+                messages,
+                Path.of("."),
+                ctx,
+                new AssistantTurnExecutor.Options());
+
+        assertTrue(output.text().startsWith("[Action obligation failed:"), output.text());
+        assertTrue(resolver.requests.size() >= 2, "expected initial call and retry call");
+        ChatRequest retry = resolver.requests.get(1);
+        String retryPrompt = joinedMessageContent(retry);
+        assertTrue(retryPrompt.contains("[Static verification repair context]"), retryPrompt);
+        assertTrue(retryPrompt.contains("Expected targets: index.html, scripts.js, styles.css"), retryPrompt);
+        assertTrue(retryPrompt.contains("Missing expected targets: scripts.js"), retryPrompt);
+        assertTrue(retryPrompt.contains("Previous static verification problems:"), retryPrompt);
+        assertTrue(retryPrompt.contains("scripts.js: expected target was not successfully mutated."), retryPrompt);
+        assertTrue(retryPrompt.contains("Full-file replacement targets: index.html, scripts.js, styles.css"), retryPrompt);
+        assertFalse(retryPrompt.contains("VERBOSE_REPAIR_PADDING"), retryPrompt);
+        assertFalse(retryPrompt.contains("Cross-file coherence checklist"), retryPrompt);
+        assertTrue(retryPrompt.length() < 3_500, "retry prompt was too large: " + retryPrompt.length());
+        assertEquals(List.of("talos.write_file"), sortedToolNames(retry));
+    }
+
+    @Test
     void compactMissingMutationRetryCanReachBackendWhenFullHistoryWouldExceedBudget() {
         BudgetGuardResolver resolver = new BudgetGuardResolver(
                 List.of("Done. The files are complete.", "I still will not call tools."),
@@ -211,7 +328,10 @@ class AssistantTurnExecutorMutationRetryToolSurfaceTest {
     }
 
     private static Context context(LlmEngineResolver resolver) {
-        List<ToolSpec> broadTools = broadToolSurface();
+        return context(resolver, broadToolSurface());
+    }
+
+    private static Context context(LlmEngineResolver resolver, List<ToolSpec> broadTools) {
         LlmClient llm = new LlmClient(engineConfig(), resolver);
         llm.setToolSpecs(broadTools);
         return Context.builder(engineConfig())
@@ -239,6 +359,16 @@ class AssistantTurnExecutorMutationRetryToolSurfaceTest {
         return new ToolSpec(name, name, "{}");
     }
 
+    private static List<ToolSpec> realWriteEditToolSurface() {
+        return List.<TalosTool>of(new FileEditTool(), new FileWriteTool()).stream()
+                .map(TalosTool::descriptor)
+                .map(descriptor -> new ToolSpec(
+                        descriptor.name(),
+                        descriptor.description(),
+                        descriptor.parametersSchema()))
+                .toList();
+    }
+
     private static String largeLeadingSystemPrompt() {
         return """
                 FULL_SYSTEM_MARKER
@@ -246,6 +376,35 @@ class AssistantTurnExecutorMutationRetryToolSurfaceTest {
                 This simulates workspace overview, behavior rules, tool policy prose, and long durable instructions.
                 """
                 + "full-system-padding ".repeat(500);
+    }
+
+    private static String largeStaticRepairContext() {
+        return """
+                [Static verification repair context]
+                The previous mutation task ended incomplete after static verification. Use the prior verifier findings as the repair checklist for this turn.
+
+                Expected targets: index.html, scripts.js, styles.css
+
+                Missing expected targets: scripts.js
+
+                Previous static verification problems:
+                - scripts.js: expected target was not successfully mutated.
+                - Expected web-app build to successfully mutate a JavaScript file.
+                - JavaScript references missing class selectors: `.cta-button`
+
+                Repair plan:
+                Full-file replacement targets: index.html, scripts.js, styles.css
+                - index.html: You must use talos.write_file with complete corrected file content for index.html.
+                - scripts.js: You must use talos.write_file with complete corrected file content for scripts.js.
+                - styles.css: You must use talos.write_file with complete corrected file content for styles.css.
+                - Verify static checks again before claiming completion.
+
+                Cross-file coherence checklist:
+                - HTML must link every CSS and JavaScript file being written.
+                - Every JavaScript ID or selector must exist in HTML before the JavaScript uses it.
+                - CSS selectors should correspond to classes or IDs in HTML where practical.
+                """
+                + "VERBOSE_REPAIR_PADDING ".repeat(300);
     }
 
     private static List<String> sortedToolNames(ChatRequest request) {

@@ -4305,7 +4305,7 @@ class AssistantTurnExecutorTest {
                     .filter(message -> "user".equals(message.role()))
                     .map(ChatMessage::content)
                     .filter(content -> content != null
-                            && content.contains("The current-turn obligation was not satisfied"))
+                            && content.contains("Retry required:"))
                     .findFirst()
                     .orElseThrow();
 
@@ -4405,7 +4405,7 @@ class AssistantTurnExecutorTest {
                     .filter(message -> "user".equals(message.role()))
                     .map(ChatMessage::content)
                     .filter(content -> content != null
-                            && content.contains("The current-turn obligation was not satisfied"))
+                            && content.contains("Retry required:"))
                     .findFirst()
                     .orElseThrow();
 
