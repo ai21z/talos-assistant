@@ -412,11 +412,15 @@ public final class CompatChatClient {
                         partial.arguments.append(arguments.asText(""));
                     } else if (arguments.isObject()) {
                         try {
-                            partial.arguments.append(mapper.writeValueAsString(arguments));
+                            partial.structuredArguments.putAll(mapper.convertValue(arguments, MAP_REF));
                         } catch (Exception e) {
                             throw new EngineException.MalformedResponse("compat chat stream tool arguments",
                                     arguments.toString(), e);
                         }
+                    } else {
+                        throw new EngineException.MalformedResponse(
+                                "compat chat stream tool arguments",
+                                arguments.toString());
                     }
                 }
             }
@@ -429,13 +433,24 @@ public final class CompatChatClient {
             for (PartialToolCall partial : partialToolCalls.values()) {
                 if (partial.name == null || partial.name.isBlank()) continue;
                 String id = partial.id == null || partial.id.isBlank() ? "call_" + generated : partial.id;
-                calls.add(new NativeToolCall(id, partial.name, parseArguments(partial.arguments.toString())));
+                calls.add(new NativeToolCall(id, partial.name, parseArguments(partial)));
                 generated++;
             }
             partialToolCalls.clear();
             if (!calls.isEmpty()) {
                 pending.add(TokenChunk.ofToolCalls(calls));
             }
+        }
+
+        private Map<String, Object> parseArguments(PartialToolCall partial) {
+            if (partial == null) return Map.of();
+            Map<String, Object> out = new LinkedHashMap<>();
+            String raw = partial.arguments.toString();
+            if (raw != null && !raw.isBlank()) {
+                out.putAll(parseArguments(raw));
+            }
+            out.putAll(partial.structuredArguments);
+            return out.isEmpty() ? Map.of() : out;
         }
 
         private Map<String, Object> parseArguments(String raw) {
@@ -456,5 +471,6 @@ public final class CompatChatClient {
         private String id = "";
         private String name = "";
         private final StringBuilder arguments = new StringBuilder();
+        private final Map<String, Object> structuredArguments = new LinkedHashMap<>();
     }
 }

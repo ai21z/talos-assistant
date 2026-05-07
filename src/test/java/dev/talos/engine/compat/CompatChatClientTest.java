@@ -175,6 +175,57 @@ class CompatChatClientTest {
     }
 
     @Test
+    void chatStreamMergesObjectToolArgumentDeltas() throws Exception {
+        HttpServer server = startServer(new AtomicReference<>(""), new AtomicReference<>(""), """
+                data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"talos.write_file","arguments":{"path":"scripts.js"}}}]}}]}
+
+                data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":{"content":"ok"}}}]},"finish_reason":"tool_calls"}]}
+
+                data: [DONE]
+
+                """, "text/event-stream");
+        try {
+            CompatChatClient client = client(server);
+
+            List<TokenChunk> chunks = client.chatStream(requestForStream()).toList();
+
+            assertTrue(chunks.get(0).hasToolCalls());
+            var call = chunks.get(0).toolCalls().get(0);
+            assertEquals("call_1", call.id());
+            assertEquals("talos.write_file", call.name());
+            assertEquals("scripts.js", call.arguments().get("path"));
+            assertEquals("ok", call.arguments().get("content"));
+            assertTrue(chunks.get(1).done());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void chatStreamUnsupportedToolArgumentShapeCarriesStructuredDiagnostic() throws Exception {
+        HttpServer server = startServer(new AtomicReference<>(""), new AtomicReference<>(""), """
+                data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"talos.write_file","arguments":["not","an","object"]}}]},"finish_reason":"tool_calls"}]}
+
+                data: [DONE]
+
+                """, "text/event-stream");
+        try {
+            CompatChatClient client = client(server);
+
+            EngineException.MalformedResponse error = assertThrows(
+                    EngineException.MalformedResponse.class,
+                    () -> client.chatStream(requestForStream()).toList());
+
+            assertEquals("compat chat stream tool arguments", error.context());
+            assertTrue(error.bodyPreview().contains("\"not\""), error.bodyPreview());
+            assertTrue(error.bodyHash().startsWith("sha256:"), error.bodyHash());
+            assertFalse(error.bodyPreview().contains("complete"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void chatStreamMalformedToolArgumentsCarriesStructuredDiagnostic() throws Exception {
         String malformedArguments = "{\"path\":\"scripts.js\",\"content\":\"ok\"";
         HttpServer server = startServer(new AtomicReference<>(""), new AtomicReference<>(""), """
