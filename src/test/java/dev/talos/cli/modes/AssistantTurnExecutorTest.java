@@ -4316,6 +4316,45 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void mutationRetryContextBudgetExceededReturnsTypedDeterministicFailure() {
+            var processor = new dev.talos.runtime.TurnProcessor(null);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scriptedFailure(new EngineException.ContextBudgetExceeded(
+                            5946, 5635, 8192, 0)))
+                    .toolCallLoop(new dev.talos.runtime.ToolCallLoop(processor, 3))
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Create index.html, styles.css, and scripts.js for a BMI calculator."));
+
+            var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                    "Done. The BMI calculator is complete.",
+                    1,
+                    0,
+                    List.of(),
+                    messages,
+                    0,
+                    0,
+                    false,
+                    0,
+                    List.of(),
+                    0,
+                    0,
+                    0,
+                    0);
+
+            var result = AssistantTurnExecutor.mutationRequestRetryIfNeeded(
+                    loopResult.finalAnswer(), messages, loopResult, WS, ctx);
+
+            assertTrue(result.actionObligationFailed());
+            assertEquals(0, result.mutationsInRetry());
+            assertTrue(result.answer().startsWith("[Action obligation failed:"), result.answer());
+            assertTrue(result.answer().toLowerCase().contains("context budget"), result.answer());
+            assertFalse(result.answer().contains("Engine error"), result.answer());
+            assertFalse(result.answer().toLowerCase().contains("complete"), result.answer());
+        }
+
+        @Test
         void mutationRetryForRepairFollowUpCanReissuePreviousMutationRequest() {
             var processor = new dev.talos.runtime.TurnProcessor(null);
             var ctx = Context.builder(new Config())

@@ -284,6 +284,8 @@ public final class ToolCallRepromptStage {
                 return false;
             }
             return true;
+        } catch (EngineException.ContextBudgetExceeded budget) {
+            return stopAfterContextBudgetExceeded(state, budget, "tool-call loop continuation");
         } catch (EngineException.ConnectionFailed cf) {
             LOG.warn("Ollama not reachable during tool-call loop iteration {}: {}", state.iterations, cf.getMessage());
             state.currentText = "[Ollama not reachable — tool loop aborted. " + cf.guidance() + "]";
@@ -322,6 +324,9 @@ public final class ToolCallRepromptStage {
                 state.currentNativeCalls = List.of();
                 return false;
             } catch (Exception retryEx) {
+                if (retryEx instanceof EngineException.ContextBudgetExceeded budget) {
+                    return stopAfterContextBudgetExceeded(state, budget, "transient retry continuation");
+                }
                 state.currentText = "[" + tr.guidance() + "]";
                 state.currentNativeCalls = List.of();
                 return false;
@@ -378,6 +383,29 @@ public final class ToolCallRepromptStage {
                 }
             }
         }
+    }
+
+    private static boolean stopAfterContextBudgetExceeded(
+            LoopState state,
+            EngineException.ContextBudgetExceeded budget,
+            String retryName
+    ) {
+        String detail = ResponseObligationVerifier.contextBudgetRetrySkippedDetail(budget);
+        LocalTurnTraceCapture.warning("CONTEXT_BUDGET_RETRY_SKIPPED", detail);
+        if (state != null && state.failPendingActionObligation(detail)) {
+            LOG.info("Skipping {} because it exceeded the local context budget.", retryName);
+            return false;
+        }
+        if (state != null) {
+            state.failureDecision = FailureDecision.stop(
+                    FailureAction.ASK_USER,
+                    "Context budget prevented " + retryName + ". " + detail);
+            state.currentText = ResponseObligationVerifier
+                    .deterministicContextBudgetRetrySkippedAnswer(retryName, budget);
+            state.currentNativeCalls = List.of();
+        }
+        LOG.info("Skipping {} because it exceeded the local context budget.", retryName);
+        return false;
     }
 
     public boolean hitIterationLimit(LoopState state) {

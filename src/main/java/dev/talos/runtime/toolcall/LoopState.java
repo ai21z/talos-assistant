@@ -110,14 +110,22 @@ public final class LoopState {
     }
 
     public boolean failPendingActionObligationAfterNoExecutableToolCalls() {
+        return failPendingActionObligation(
+                "model response had no executable write/edit tool calls");
+    }
+
+    public boolean failPendingActionObligation(String detail) {
         if (pendingActionObligation == null) return false;
         PendingActionObligation obligation = pendingActionObligation;
         pendingActionObligation = null;
-        obligation.recordBreached();
+        String safeDetail = detail == null || detail.isBlank()
+                ? "model response had no executable write/edit tool calls"
+                : detail.strip();
+        obligation.recordBreached(safeDetail);
         failureDecision = dev.talos.runtime.failure.FailureDecision.stop(
                 FailureAction.ASK_USER,
-                obligation.failureReason());
-        currentText = obligation.failureAnswer();
+                obligation.failureReason(safeDetail));
+        currentText = obligation.failureAnswer(safeDetail);
         currentNativeCalls = List.of();
         return true;
     }
