@@ -11,6 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
@@ -44,6 +45,9 @@ public final class PromptDebugCommand implements Command {
         if ("save".equals(q)) {
             return saveLatest();
         }
+        if ("save-all".equals(q) || "saveall".equals(q)) {
+            return saveAll();
+        }
         return new Result.Error("Usage: /prompt-debug [help|last|save]", 204);
     }
 
@@ -72,6 +76,43 @@ public final class PromptDebugCommand implements Command {
         return new Result.TrustedInfo(result.toString());
     }
 
+    private static Result saveAll() throws Exception {
+        List<PromptDebugSnapshot> snapshots = PromptDebugCapture.history();
+        if (snapshots.isEmpty()) {
+            return new Result.Info("No prompt debug capture has been recorded in this process yet.\n");
+        }
+        Path dir = Path.of("local", "prompts").toAbsolutePath().normalize();
+        Files.createDirectories(dir);
+
+        String ts = FILE_TS.format(LocalDateTime.now());
+        List<String> indexLines = new ArrayList<>();
+        StringBuilder result = new StringBuilder();
+        result.append("Saved ").append(snapshots.size()).append(" prompt debug capture(s).\n");
+        for (int i = 0; i < snapshots.size(); i++) {
+            PromptDebugSnapshot snapshot = snapshots.get(i);
+            String prefix = "prompt-debug-" + ts + "-" + String.format("%02d", i + 1);
+            Path md = dir.resolve(prefix + ".md");
+            Files.writeString(md, PromptDebugInspector.format(snapshot), StandardCharsets.UTF_8);
+            result.append("Saved prompt debug render to: ")
+                    .append(md.toAbsolutePath().normalize()).append('\n');
+            indexLines.add((i + 1) + ". " + md.toAbsolutePath().normalize());
+            if (!snapshot.providerBodyJson().isBlank()) {
+                Path json = dir.resolve(prefix + ".provider-body.json");
+                Files.writeString(json, PromptDebugInspector.redactedProviderBodyJson(snapshot), StandardCharsets.UTF_8);
+                result.append("Saved provider body JSON to: ")
+                        .append(json.toAbsolutePath().normalize()).append('\n');
+                indexLines.add("   provider: " + json.toAbsolutePath().normalize());
+            }
+        }
+        Path index = dir.resolve("prompt-debug-" + ts + "-index.md");
+        Files.writeString(index,
+                "# Talos Prompt Debug History\n\n" + String.join("\n", indexLines) + "\n",
+                StandardCharsets.UTF_8);
+        result.append("Saved prompt debug history index to: ")
+                .append(index.toAbsolutePath().normalize()).append('\n');
+        return new Result.TrustedInfo(result.toString());
+    }
+
     private static String help() {
         return """
                 /prompt-debug is an internal Talos maintainer command.
@@ -81,6 +122,9 @@ public final class PromptDebugCommand implements Command {
 
                 /prompt-debug save
                   Save the same render under local/prompts, plus provider-body JSON when available.
+
+                /prompt-debug save-all
+                  Save every non-background provider request captured since the latest turn started.
                 """;
     }
 }

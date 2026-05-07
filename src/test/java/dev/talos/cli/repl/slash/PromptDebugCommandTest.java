@@ -254,6 +254,91 @@ class PromptDebugCommandTest {
         }
     }
 
+    @Test
+    void saveAllWritesUserFacingCaptureHistoryInOrderAndSkipsBackground() throws Exception {
+        PromptDebugCapture.record(PromptDebugSnapshot.fromProviderBody(
+                new ChatRequest(
+                        "llama_cpp",
+                        "gpt-oss-20b",
+                        "",
+                        "",
+                        List.of(),
+                        Duration.ofSeconds(5),
+                        List.of(ChatMessage.user("Run the approved Gradle test command profile.")),
+                        List.of(new ToolSpec("talos.run_command", "Run command", "{}")),
+                        new ChatRequestControls(
+                                ToolChoiceMode.REQUIRED,
+                                "",
+                                ResponseFormatMode.TEXT,
+                                "",
+                                List.of("required-tool:talos.run_command"))),
+                true,
+                "{\"tool_choice\":\"required\",\"messages\":[{\"role\":\"user\",\"content\":\"Run the approved Gradle test command profile.\"}]}",
+                "COMPAT_CHAT_HTTP_BODY"));
+        PromptDebugCapture.record(PromptDebugSnapshot.fromProviderBody(
+                new ChatRequest(
+                        "llama_cpp",
+                        "gpt-oss-20b",
+                        "You are a conversation summarizer for a developer CLI tool.",
+                        "Recent conversation turns to incorporate:",
+                        List.of(),
+                        Duration.ofSeconds(5),
+                        List.of(),
+                        List.of(),
+                        new ChatRequestControls(
+                                ToolChoiceMode.AUTO,
+                                "",
+                                ResponseFormatMode.TEXT,
+                                "",
+                                List.of(PromptDebugCapture.BACKGROUND_MAINTENANCE_TAG))),
+                false,
+                "{\"system\":\"You are a conversation summarizer for a developer CLI tool.\"}",
+                "COMPAT_CHAT_HTTP_BODY"));
+        PromptDebugCapture.record(PromptDebugSnapshot.fromProviderBody(
+                new ChatRequest(
+                        "llama_cpp",
+                        "gpt-oss-20b",
+                        "",
+                        "",
+                        List.of(),
+                        Duration.ofSeconds(5),
+                        List.of(
+                                ChatMessage.toolResult("call-command",
+                                        "[tool_result: talos.run_command]\n[error] command failed\n[/tool_result]"),
+                                ChatMessage.system("[Current task - stay focused on this] Run the approved Gradle test command profile.")),
+                        List.of(new ToolSpec("talos.run_command", "Run command", "{}")),
+                        ChatRequestControls.defaults()),
+                true,
+                "{\"messages\":[{\"role\":\"tool\",\"content\":\"[tool_result: talos.run_command]\\n[error] command failed\\n[/tool_result]\"}]}",
+                "COMPAT_CHAT_HTTP_BODY"));
+        PromptDebugCommand command = new PromptDebugCommand();
+
+        Result result = command.execute("save-all", ctx);
+
+        Result.TrustedInfo info = assertInstanceOf(Result.TrustedInfo.class, result);
+        List<Path> renders = savedPaths(info.text, "Saved prompt debug render to: ");
+        List<Path> providerBodies = savedPaths(info.text, "Saved provider body JSON to: ");
+        Path index = savedPath(info.text, "Saved prompt debug history index to: ");
+        try {
+            assertTrue(info.text.contains("Saved 2 prompt debug capture(s)."), info.text);
+            assertTrue(renders.size() == 2, info.text);
+            assertTrue(providerBodies.size() == 2, info.text);
+            String firstRender = Files.readString(renders.get(0));
+            String secondRender = Files.readString(renders.get(1));
+            String firstJson = Files.readString(providerBodies.get(0));
+            String indexText = Files.readString(index);
+            assertTrue(firstRender.contains("Tool choice: REQUIRED"), firstRender);
+            assertTrue(firstRender.contains("required-tool:talos.run_command"), firstRender);
+            assertTrue(secondRender.contains("Tool choice: AUTO"), secondRender);
+            assertTrue(firstJson.contains("\"tool_choice\" : \"required\""), firstJson);
+            assertFalse(indexText.contains("conversation summarizer"), indexText);
+        } finally {
+            for (Path path : renders) Files.deleteIfExists(path);
+            for (Path path : providerBodies) Files.deleteIfExists(path);
+            Files.deleteIfExists(index);
+        }
+    }
+
     private static PromptDebugSnapshot protectedToolResultSnapshot() {
         var envCall = new ChatMessage.NativeToolCall(
                 "call-env",
@@ -357,5 +442,12 @@ class PromptDebugCommandTest {
             }
         }
         throw new AssertionError("Missing saved path line: " + prefix + "\n" + text);
+    }
+
+    private static List<Path> savedPaths(String text, String prefix) {
+        return text.lines()
+                .filter(line -> line.startsWith(prefix))
+                .map(line -> Path.of(line.substring(prefix.length()).strip()))
+                .toList();
     }
 }
