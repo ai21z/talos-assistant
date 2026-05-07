@@ -1,6 +1,7 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.core.capability.CapabilityKind;
+import dev.talos.runtime.expectation.TaskExpectationResolver;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
@@ -62,7 +63,7 @@ public final class ToolSurfacePlanner {
 
         if (mutationAllowed) {
             var workspaceOperation = WorkspaceOperationIntent.detect(contract);
-            if (workspaceOperation.isPresent()) {
+            if (workspaceOperation.isPresent() && !requiresFileWriteForExactExpectation(contract)) {
                 WorkspaceOperationIntent.Intent intent = workspaceOperation.get();
                 return select(
                         registry,
@@ -89,7 +90,7 @@ public final class ToolSurfacePlanner {
         }
         if (contract.mutationAllowed() && phase == ExecutionPhase.APPLY) {
             var workspaceOperation = WorkspaceOperationIntent.detect(contract);
-            if (workspaceOperation.isPresent()) {
+            if (workspaceOperation.isPresent() && !requiresFileWriteForExactExpectation(contract)) {
                 return workspaceOperation.get().toolNames();
             }
             return List.of(
@@ -121,6 +122,10 @@ public final class ToolSurfacePlanner {
                 .map(ToolSpec::name)
                 .sorted()
                 .toList();
+    }
+
+    private static boolean requiresFileWriteForExactExpectation(TaskContract contract) {
+        return contract != null && !TaskExpectationResolver.resolve(contract).isEmpty();
     }
 
     private static Plan select(ToolRegistry registry, java.util.function.Predicate<ToolDescriptor> predicate,

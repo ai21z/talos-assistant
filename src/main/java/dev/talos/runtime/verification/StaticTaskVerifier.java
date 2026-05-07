@@ -201,7 +201,7 @@ public final class StaticTaskVerifier {
 
         if (!problems.isEmpty()) {
             return TaskVerificationResult.failed(
-                    expectationRequired && problems.stream().anyMatch(p -> p.contains("exact content mismatch"))
+                    expectationRequired && problems.stream().anyMatch(StaticTaskVerifier::isExactContentProblem)
                             ? "Exact content verification failed."
                             : firstProblemSummary(problems),
                     facts,
@@ -239,6 +239,12 @@ public final class StaticTaskVerifier {
             }
         }
         return verifiedAny;
+    }
+
+    private static boolean isExactContentProblem(String problem) {
+        return problem != null
+                && (problem.contains("exact content mismatch")
+                || problem.contains("exact content verification"));
     }
 
     private static void verifyLiteralContentExpectation(

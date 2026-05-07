@@ -12,6 +12,7 @@ import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.TurnUserRequestCapture;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.FileUndoStack;
 import dev.talos.tools.impl.BatchWorkspaceApplyTool;
@@ -157,6 +158,56 @@ class WorkspaceOperationStaticVerifierTest {
         assertTrue(verification.problems().stream()
                         .anyMatch(problem -> problem.contains("workspace-notes/readme-renamed.md")
                                 && problem.contains("expected target was not successfully mutated")),
+                verification.problems().toString());
+    }
+
+    @Test
+    void mkdirAtExactFileTargetFailsInsteadOfReadbackOnly() throws Exception {
+        Files.createDirectories(workspace.resolve("workspace-notes/summary.txt"));
+
+        String request = "Create a directory named workspace-notes and create workspace-notes/summary.txt "
+                + "containing exactly created by audit.";
+        WorkspaceOperationPlan mkdirPlan = WorkspaceOperationPlan.batch(
+                WorkspaceOperationPlan.OperationKind.CREATE_DIRECTORY,
+                List.of(WorkspaceOperationPlan.PathEffect.absentBefore(
+                        "workspace-notes/summary.txt",
+                        true,
+                        WorkspaceOperationPlan.OperationKind.CREATE_DIRECTORY)),
+                dev.talos.tools.ToolRiskLevel.WRITE,
+                true,
+                WorkspaceOperationPlan.OverwritePolicy.NOT_APPLICABLE,
+                false,
+                "Create directory workspace-notes/summary.txt.",
+                "Mkdir: workspace-notes/summary.txt");
+        ToolCallLoop.LoopResult loopResult = new ToolCallLoop.LoopResult(
+                "Created the requested path.", 1, 1,
+                List.of("talos.mkdir"), List.of(),
+                1, 0, false, 1, List.of(),
+                0, 0, 0, 0,
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.mkdir",
+                        "workspace-notes/summary.txt",
+                        true,
+                        true,
+                        false,
+                        "Created directory workspace-notes/summary.txt",
+                        "",
+                        null,
+                        "",
+                        mkdirPlan)));
+
+        TaskVerificationResult verification = StaticTaskVerifier.verify(
+                workspace,
+                TaskContractResolver.fromUserRequest(request),
+                loopResult,
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, verification.status());
+        assertTrue(verification.summary().contains("Exact content verification failed"),
+                verification.summary());
+        assertTrue(verification.problems().stream()
+                        .anyMatch(problem -> problem.contains("workspace-notes/summary.txt")
+                                && problem.contains("not a readable file")),
                 verification.problems().toString());
     }
 

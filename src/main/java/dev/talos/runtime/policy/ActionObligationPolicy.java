@@ -1,6 +1,7 @@
 package dev.talos.runtime.policy;
 
 import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.expectation.TaskExpectationResolver;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.workspace.WorkspaceOperationIntent;
@@ -29,7 +30,8 @@ public final class ActionObligationPolicy {
         if ("explicit-review-and-fix-request".equals(contract.classificationReason())) {
             return ActionObligation.CONDITIONAL_REVIEW_FIX;
         }
-        if (WorkspaceOperationIntent.detect(contract).isPresent()) {
+        if (WorkspaceOperationIntent.detect(contract).isPresent()
+                && TaskExpectationResolver.resolve(contract).isEmpty()) {
             return ActionObligation.WORKSPACE_OPERATION_REQUIRED;
         }
         return ActionObligation.MUTATING_TOOL_REQUIRED;

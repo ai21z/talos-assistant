@@ -994,6 +994,76 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void exactFileTargetCreatedAsDirectoryIsFailureDominant() throws Exception {
+        Path ws = Files.createTempDirectory("talos-workspace-operation-directory-file-target-");
+        try {
+            Files.createDirectories(ws.resolve("workspace-notes/summary.txt"));
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Create a directory named workspace-notes and create workspace-notes/summary.txt "
+                            + "containing exactly created by audit."));
+
+            WorkspaceOperationPlan mkdirWorkspaceNotes = WorkspaceOperationPlan.batch(
+                    WorkspaceOperationPlan.OperationKind.CREATE_DIRECTORY,
+                    List.of(WorkspaceOperationPlan.PathEffect.absentBefore(
+                            "workspace-notes", true, WorkspaceOperationPlan.OperationKind.CREATE_DIRECTORY)),
+                    dev.talos.tools.ToolRiskLevel.WRITE,
+                    true,
+                    WorkspaceOperationPlan.OverwritePolicy.NOT_APPLICABLE,
+                    false,
+                    "Create directory workspace-notes.",
+                    "Mkdir: workspace-notes");
+            WorkspaceOperationPlan mkdirSummaryTxt = WorkspaceOperationPlan.batch(
+                    WorkspaceOperationPlan.OperationKind.CREATE_DIRECTORY,
+                    List.of(WorkspaceOperationPlan.PathEffect.absentBefore(
+                            "workspace-notes/summary.txt",
+                            true,
+                            WorkspaceOperationPlan.OperationKind.CREATE_DIRECTORY)),
+                    dev.talos.tools.ToolRiskLevel.WRITE,
+                    true,
+                    WorkspaceOperationPlan.OverwritePolicy.NOT_APPLICABLE,
+                    false,
+                    "Create directory workspace-notes/summary.txt.",
+                    "Mkdir: workspace-notes/summary.txt");
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Done. The file is complete and ready to use.", 1, 2,
+                    List.of("talos.mkdir", "talos.mkdir"), List.of(),
+                    2, 0, false, 2, List.of(),
+                    0, 0, 0, 0,
+                    List.of(
+                            workspaceOutcome("talos.mkdir", "workspace-notes", true,
+                                    "Created directory workspace-notes", "", "", mkdirWorkspaceNotes),
+                            workspaceOutcome("talos.mkdir", "workspace-notes/summary.txt", true,
+                                    "Created directory workspace-notes/summary.txt", "", "", mkdirSummaryTxt)
+                    ));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    loopResult.finalAnswer(), messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.FAILED, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.FAILED, outcome.verificationStatus());
+            assertTrue(outcome.finalAnswer().startsWith("[Task incomplete: Static verification failed -"),
+                    outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("Exact content verification failed"),
+                    outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("Workspace operation/readback passed"),
+                    outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("complete and ready to use"),
+                    outcome.finalAnswer());
+            assertEquals(TaskCompletionStatus.FAILED, outcome.taskOutcome().completionStatus());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void partialWorkspaceOperationDoesNotUseReadbackSuccessBanner() throws Exception {
         Path ws = Files.createTempDirectory("talos-workspace-operation-partial-wording-");
         try {

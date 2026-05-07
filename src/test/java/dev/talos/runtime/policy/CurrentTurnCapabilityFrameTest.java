@@ -116,6 +116,33 @@ class CurrentTurnCapabilityFrameTest {
     }
 
     @Test
+    void renderIncludesExactLiteralForMixedDirectoryAndFileCreate() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Create a directory named workspace-notes and create workspace-notes/summary.txt "
+                        + "containing exactly created by audit.");
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                contract,
+                ExecutionPhase.APPLY,
+                List.of("talos.mkdir", "talos.write_file"),
+                List.of("talos.mkdir", "talos.write_file"),
+                List.of());
+
+        String frame = CurrentTurnCapabilityFrame.render(plan);
+
+        assertTrue(frame.contains("[ExpectedTargets]"), frame);
+        assertTrue(frame.contains("requiredTargets: workspace-notes/summary.txt"), frame);
+        assertTrue(frame.contains("[ExactFileWrite]"), frame);
+        assertTrue(frame.contains("target: workspace-notes/summary.txt"), frame);
+        assertTrue(frame.contains("sourcePattern: literal-create-containing-exactly"), frame);
+        assertTrue(frame.contains("\ncreated by audit\n"), frame);
+        assertTrue(frame.contains("visibleTools: talos.mkdir, talos.write_file"), frame);
+        assertTrue(frame.contains("obligation: MUTATING_TOOL_REQUIRED"), frame);
+        assertTrue(frame.contains("Use file tools to apply the requested workspace change"), frame);
+        assertFalse(frame.contains("Use the visible workspace operation tool"), frame);
+        assertFalse(frame.contains("Do not substitute a generic talos.write_file"), frame);
+    }
+
+    @Test
     void renderIncludesExpectedTargetsForMultiFileMutationTurns() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js. "
