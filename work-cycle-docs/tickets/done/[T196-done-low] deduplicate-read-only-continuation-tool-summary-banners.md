@@ -1,6 +1,6 @@
 # T196 - Deduplicate Read-Only Continuation Tool Summary Banners
 
-Status: open
+Status: done
 Severity: low
 
 ## Evidence
@@ -36,4 +36,3 @@ Out of scope:
 - Focused test covers a read-only continuation with two reads and one visible combined summary.
 - Trace still records both tool calls.
 - Existing non-continuation output is unchanged.
-

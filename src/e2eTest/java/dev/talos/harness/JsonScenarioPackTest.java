@@ -618,8 +618,9 @@ class JsonScenarioPackTest {
                 loaded.definition().userPrompt(),
                 loaded.scriptedResponses())) {
             result.assertApprovalCounts(0, 0, 0, 0)
-                    .assertAnswerContains("[Used 1 tool(s): talos.list_dir")
-                    .assertAnswerContains("[Used 3 tool(s): talos.read_file")
+                    .assertAnswerContains("[Used 4 tool(s): talos.list_dir, talos.read_file")
+                    .assertAnswerNotContains("[Used 1 tool(s): talos.list_dir")
+                    .assertAnswerNotContains("[Used 3 tool(s): talos.read_file")
                     .assertAnswerContains("Night Drive landing page")
                     .assertAnswerContains("style.css supplies the visual design")
                     .assertAnswerNotContains("basic website");
