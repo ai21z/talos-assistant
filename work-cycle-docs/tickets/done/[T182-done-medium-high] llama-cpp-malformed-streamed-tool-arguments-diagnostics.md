@@ -1,6 +1,6 @@
 # [T182-medium-high] llama.cpp Malformed Streamed Tool Arguments Diagnostics
 
-Status: open
+Status: done
 Priority: medium/high
 
 ## Evidence Summary
@@ -73,6 +73,21 @@ Out of scope:
 - Final output remains failure-dominant.
 - If fallback is implemented, it is bounded to one attempt and covered by tests.
 - Tests cover malformed streamed tool-call argument shapes and ensure they do not produce false success.
+
+## Implementation
+
+- Updated the OpenAI-compatible streaming decoder used by managed llama.cpp.
+- String `function.arguments` deltas still use the existing buffered JSON parser.
+- Object-shaped `function.arguments` deltas are now merged by key across stream chunks instead of being concatenated into invalid JSON.
+- Unsupported non-object/non-string argument shapes now throw `EngineException.MalformedResponse` with redacted body preview, hash, char count, and `compat chat stream tool arguments` context.
+- Existing `AssistantTurnExecutor` handling keeps malformed backend responses failure-dominant and records `BACKEND_MALFORMED_RESPONSE_CAPTURED` trace data.
+
+## Verification
+
+```powershell
+./gradlew.bat test --tests dev.talos.engine.compat.CompatChatClientTest --no-daemon
+./gradlew.bat test --tests "*Llama*" --tests "*Compat*" --tests "*ToolCall*" --tests dev.talos.spi.EngineExceptionTest --no-daemon
+```
 
 ## Suggested Verification
 
