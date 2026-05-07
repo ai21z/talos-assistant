@@ -3,6 +3,7 @@ package dev.talos.runtime.policy;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
+import dev.talos.runtime.workspace.WorkspaceOperationIntent;
 
 /** Deterministically maps a current turn to the action shape Talos must enforce. */
 public final class ActionObligationPolicy {
@@ -27,6 +28,9 @@ public final class ActionObligationPolicy {
         }
         if ("explicit-review-and-fix-request".equals(contract.classificationReason())) {
             return ActionObligation.CONDITIONAL_REVIEW_FIX;
+        }
+        if (WorkspaceOperationIntent.detect(contract).isPresent()) {
+            return ActionObligation.WORKSPACE_OPERATION_REQUIRED;
         }
         return ActionObligation.MUTATING_TOOL_REQUIRED;
     }

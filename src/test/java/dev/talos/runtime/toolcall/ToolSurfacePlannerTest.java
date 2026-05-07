@@ -96,6 +96,26 @@ class ToolSurfacePlannerTest {
     }
 
     @Test
+    void explicitWorkspaceOperationRequestsExposeOnlyMatchingOperationTool() {
+        assertWorkspaceOperationSurface(
+                "Move workspace-notes/readme-renamed.md to archive/readme-renamed.md.",
+                List.of("talos.move_path"),
+                "workspace move operation surface");
+        assertWorkspaceOperationSurface(
+                "Copy docs/plan.md to docs/archive/plan.md.",
+                List.of("talos.copy_path"),
+                "workspace copy operation surface");
+        assertWorkspaceOperationSurface(
+                "Rename old.txt to new.txt.",
+                List.of("talos.rename_path"),
+                "workspace rename operation surface");
+        assertWorkspaceOperationSurface(
+                "Mkdir docs/reports.",
+                List.of("talos.mkdir"),
+                "workspace mkdir operation surface");
+    }
+
+    @Test
     void directoryListingSurfaceUsesDirectoryTargetMetadata() {
         ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
                 TaskContractResolver.fromUserRequest("What files are in this folder?"),
@@ -213,6 +233,13 @@ class ToolSurfacePlannerTest {
                         ExecutionPhase.APPLY));
 
         assertEquals(
+                List.of("talos.move_path"),
+                ToolSurfacePlanner.defaultVisibleToolNames(
+                        TaskContractResolver.fromUserRequest(
+                                "Move workspace-notes/readme-renamed.md to archive/readme-renamed.md."),
+                        ExecutionPhase.APPLY));
+
+        assertEquals(
                 List.of("talos.grep", "talos.list_dir", "talos.read_file", "talos.retrieve", "talos.run_command"),
                 ToolSurfacePlanner.defaultVisibleToolNames(
                         TaskContractResolver.fromUserRequest("verify that the Gradle build passes"),
@@ -224,6 +251,20 @@ class ToolSurfacePlannerTest {
                         TaskContractResolver.fromUserRequest(
                                 "Run the approved Gradle test command profile for this workspace and report the exact command result."),
                         ExecutionPhase.VERIFY));
+    }
+
+    private static void assertWorkspaceOperationSurface(
+            String request,
+            List<String> expectedTools,
+            String expectedReason
+    ) {
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                TaskContractResolver.fromUserRequest(request),
+                ExecutionPhase.APPLY,
+                registry());
+
+        assertEquals(expectedTools, plan.nativeToolNames(), request);
+        assertEquals(expectedReason, plan.reason(), request);
     }
 
     private static ToolRegistry registry() {

@@ -140,6 +140,27 @@ class CurrentTurnCapabilityFrameTest {
     }
 
     @Test
+    void renderUsesWorkspaceOperationGuidanceForMoveTurns() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Move workspace-notes/readme-renamed.md to archive/readme-renamed.md.");
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                contract,
+                ExecutionPhase.APPLY,
+                List.of("talos.move_path"),
+                List.of("talos.move_path"),
+                List.of());
+
+        String frame = CurrentTurnCapabilityFrame.render(plan);
+
+        assertTrue(frame.contains("obligation: WORKSPACE_OPERATION_REQUIRED"), frame);
+        assertTrue(frame.contains("Use the visible workspace operation tool"), frame);
+        assertTrue(frame.contains("talos.move_path"), frame);
+        assertTrue(frame.contains("Do not emulate move, copy, rename, or mkdir"), frame);
+        assertFalse(frame.contains("Available mutating tools: talos.write_file, talos.edit_file"), frame);
+        assertFalse(frame.contains("You must write or edit these exact target paths"), frame);
+    }
+
+    @Test
     void renderOmitsSuppressedContextDetailsFromModelGuidance() {
         TaskContract contract = new TaskContract(
                 TaskType.SMALL_TALK,
