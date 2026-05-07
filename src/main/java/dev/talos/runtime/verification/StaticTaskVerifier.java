@@ -934,6 +934,10 @@ public final class StaticTaskVerifier {
         if (candidateScripts.isEmpty()) return null;
 
         List<String> htmlTargets = StaticWebImportIntent.htmlTargets(extractedTargets);
+        if (htmlTargets.isEmpty()) {
+            htmlTargets = StaticWebImportIntent.htmlTargets(
+                    StaticWebImportIntent.evidenceTargets(userRequest, extractedTargets));
+        }
         if (htmlTargets.isEmpty()
                 && userRequest != null
                 && userRequest.toLowerCase(Locale.ROOT).contains("index.html")) {

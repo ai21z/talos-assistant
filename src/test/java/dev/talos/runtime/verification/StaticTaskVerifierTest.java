@@ -127,6 +127,29 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void scriptImportInspectionUsesInferredIndexHtmlInLargerAuditFixture() throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "# Audit fixture\n");
+        Files.writeString(workspace.resolve("notes.md"), "Private note marker.\n");
+        Files.writeString(workspace.resolve("config.json"), "{\"project\":\"audit\"}\n");
+        Files.writeString(workspace.resolve("report.docx"), "fake unsupported binary payload");
+        Files.writeString(workspace.resolve("index.html"), "AFTER\n");
+        Files.writeString(workspace.resolve("script.js"), "console.log('old');\n");
+        Files.writeString(workspace.resolve("scripts.js"), "console.log('new');\n");
+        Files.writeString(workspace.resolve("styles.css"), "body { margin: 0; }\n");
+
+        String out = StaticTaskVerifier.renderScriptImportInspection(
+                workspace,
+                "Which exact file currently imports the BMI script, script.js or scripts.js? "
+                        + "Verify from current files and answer only after inspection. "
+                        + "Do not read protected files.");
+
+        assertNotNull(out);
+        assertTrue(out.contains("[Static web import check]"), out);
+        assertTrue(out.contains("Neither `script.js` nor `scripts.js` is imported by `index.html`."), out);
+        assertTrue(out.contains("Current script imports found in `index.html`: none."), out);
+    }
+
+    @Test
     void exactTwoLineReadmeLiteralPassesTaskVerification() throws Exception {
         Files.writeString(workspace.resolve("README.md"), "T71 exact README\nLine two");
 
