@@ -334,6 +334,93 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void explicitCommandRequestWithoutRunCommandIsBlockedAndSanitizedAfterReadOnlyTools() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user(
+                "Run the approved Gradle test command profile for this workspace and report the exact command result. "
+                        + "Do not invent a pass if the command cannot run."));
+
+        var plan = dev.talos.runtime.turn.CurrentTurnPlan.create(
+                dev.talos.runtime.task.TaskContractResolver.fromMessages(messages),
+                dev.talos.runtime.phase.ExecutionPhase.VERIFY,
+                List.of("talos.grep", "talos.list_dir", "talos.read_file", "talos.run_command"),
+                List.of("talos.grep", "talos.list_dir", "talos.read_file", "talos.run_command"),
+                List.of());
+        var loopResult = new ToolCallLoop.LoopResult(
+                "There is no Gradle project here, so I cannot run the tests.",
+                2,
+                2,
+                List.of("talos.list_dir", "talos.grep"),
+                List.of(),
+                0,
+                0,
+                false,
+                0,
+                List.of("."),
+                2,
+                0,
+                0,
+                0,
+                List.of(
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.list_dir", ".", true, false, false,
+                                "README.md", "", null, ""),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.grep", "", true, false, false,
+                                "No matches found.", "", null, "")
+                ));
+
+        assertEquals(
+                "explicit-command-verification-request",
+                plan.taskContract().classificationReason());
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                loopResult.finalAnswer(), plan, messages, loopResult, null, 0);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.BLOCKED, outcome.completionStatus());
+        assertEquals(TaskCompletionStatus.BLOCKED_BY_POLICY, outcome.taskOutcome().completionStatus());
+        assertTrue(outcome.finalAnswer().startsWith(
+                "[Command not run: talos.run_command was required for this explicit command request.]"),
+                outcome.finalAnswer());
+        String lower = outcome.finalAnswer().toLowerCase(java.util.Locale.ROOT);
+        assertFalse(lower.contains("no gradle project"), outcome.finalAnswer());
+        assertFalse(lower.contains("cannot run"), outcome.finalAnswer());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.FAILED_ACTION_OBLIGATION));
+    }
+
+    @Test
+    void explicitCommandRequestWithoutAnyToolIsBlockedAndSanitized() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user(
+                "Run the approved Gradle test command profile for this workspace and report the exact command result. "
+                        + "Do not invent a pass if the command cannot run."));
+        var plan = dev.talos.runtime.turn.CurrentTurnPlan.create(
+                dev.talos.runtime.task.TaskContractResolver.fromMessages(messages),
+                dev.talos.runtime.phase.ExecutionPhase.VERIFY,
+                List.of("talos.grep", "talos.list_dir", "talos.read_file", "talos.run_command"),
+                List.of("talos.grep", "talos.list_dir", "talos.read_file", "talos.run_command"),
+                List.of());
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromNoTool(
+                "The Gradle tests passed.",
+                plan,
+                messages,
+                null,
+                true);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.BLOCKED, outcome.completionStatus());
+        assertEquals(TaskCompletionStatus.BLOCKED_BY_POLICY, outcome.taskOutcome().completionStatus());
+        assertTrue(outcome.finalAnswer().startsWith(
+                "[Command not run: talos.run_command was required for this explicit command request.]"),
+                outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().toLowerCase(java.util.Locale.ROOT).contains("passed"),
+                outcome.finalAnswer());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.FAILED_ACTION_OBLIGATION));
+    }
+
+    @Test
     void mutationRequestStoppedByFailurePolicyWithNoMutationIsNotComplete() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));

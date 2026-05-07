@@ -185,6 +185,11 @@ record ExecutionOutcome(
         boolean commandDenied = commandConclusion.denied();
         boolean commandSucceeded = commandConclusion.succeeded();
         boolean commandVerificationSucceeded = commandSucceeded && commandSatisfiesVerifyOnlyRequest(contract);
+        boolean commandRequiredButNotRun = explicitCommandVerificationRequired(contract)
+                && !commandSucceeded
+                && !commandFailed
+                && !commandDenied;
+        boolean failedAnyActionObligation = failedMutationObligation || commandRequiredButNotRun;
 
         String shaped = AssistantTurnExecutor.overrideUnsupportedDocumentClaimsIfNeeded(
                 current, loopResult);
@@ -248,6 +253,8 @@ record ExecutionOutcome(
             current = commandFailureReplacement(commandConclusion);
         } else if (commandVerificationSucceeded) {
             current = commandSuccessReplacement(commandConclusion);
+        } else if (commandRequiredButNotRun) {
+            current = commandRequiredButNotRunReplacement();
         }
 
         EvidenceObligation evidenceObligation = evidenceObligation(safePlan);
@@ -282,7 +289,7 @@ record ExecutionOutcome(
                 invalidMutation,
                 false,
                 readOnlyDeniedMutation,
-                failedMutationObligation,
+                failedAnyActionObligation,
                 commandFailed,
                 commandDenied,
                 commandVerificationSucceeded,
@@ -338,7 +345,7 @@ record ExecutionOutcome(
                 invalidMutation,
                 false,
                 readOnlyDeniedMutation,
-                failedMutationObligation,
+                failedAnyActionObligation,
                 commandFailed,
                 commandDenied,
                 commandVerificationSucceeded,
@@ -363,7 +370,7 @@ record ExecutionOutcome(
                         deniedMutation,
                         deniedProtectedRead,
                         readOnlyDeniedMutation,
-                        failedMutationObligation,
+                        failedAnyActionObligation,
                         commandFailed,
                         commandDenied,
                         invalidMutation,
@@ -475,7 +482,11 @@ record ExecutionOutcome(
 
         TaskContract contract = safePlan.taskContract();
         boolean mutationRequested = contract.mutationRequested();
-        boolean blocked = noToolMutationReplaced;
+        boolean commandRequiredButNotRun = explicitCommandVerificationRequired(contract);
+        if (commandRequiredButNotRun) {
+            shaped = commandRequiredButNotRunReplacement();
+        }
+        boolean blocked = noToolMutationReplaced || commandRequiredButNotRun;
         boolean ungrounded = shaped != null
                 && (shaped.startsWith(AssistantTurnExecutor.UNGROUNDED_ANNOTATION)
                 || localAccessCapabilityCorrected);
@@ -486,7 +497,7 @@ record ExecutionOutcome(
         boolean protectedReadApprovalMissing = protectedReadApprovalMissing(
                 evidenceObligation,
                 evidenceResult);
-        if (missingEvidence) {
+        if (missingEvidence && !commandRequiredButNotRun) {
             shaped = suppressDerivedContentForMissingEvidence(
                     shaped,
                     safePlan,
@@ -504,7 +515,7 @@ record ExecutionOutcome(
                 false,
                 malformedProtocolDebrisReplaced,
                 noToolMutationReplaced,
-                failedActionObligation,
+                failedActionObligation || commandRequiredButNotRun,
                 false,
                 false,
                 false,
@@ -527,7 +538,7 @@ record ExecutionOutcome(
         TaskVerificationResult verification = TaskVerificationResult.notRun("Post-apply verification was not applicable.");
         List<TruthWarning> warnings = noToolWarnings(
                 noToolMutationReplaced,
-                failedActionObligation,
+                failedActionObligation || commandRequiredButNotRun,
                 ungrounded,
                 malformedProtocolDebrisReplaced,
                 localAccessCapabilityCorrected,
@@ -675,7 +686,7 @@ record ExecutionOutcome(
         if (failedActionObligation) {
             warnings.add(TruthWarning.of(
                     TruthWarningType.FAILED_ACTION_OBLIGATION,
-                    "A required mutating action was not performed after retry."));
+                    "A required tool action was not performed after retry."));
         }
         if (commandFailed) {
             warnings.add(TruthWarning.of(
@@ -766,7 +777,7 @@ record ExecutionOutcome(
         if (failedActionObligation) {
             warnings.add(TruthWarning.of(
                     TruthWarningType.FAILED_ACTION_OBLIGATION,
-                    "The required write/edit tool calls were not issued, so no file was changed."));
+                    "The required tool calls were not issued, so the requested action did not run."));
         }
         if (ungrounded) {
             warnings.add(TruthWarning.of(
@@ -892,11 +903,21 @@ record ExecutionOutcome(
         return summary;
     }
 
+    private static String commandRequiredButNotRunReplacement() {
+        return "[Command not run: talos.run_command was required for this explicit command request.]\n\n"
+                + "No command result is available because the model did not call talos.run_command.";
+    }
+
     private static boolean commandSatisfiesVerifyOnlyRequest(TaskContract contract) {
         return contract != null
                 && contract.type() == TaskType.VERIFY_ONLY
                 && contract.verificationRequired()
                 && !contract.mutationRequested();
+    }
+
+    private static boolean explicitCommandVerificationRequired(TaskContract contract) {
+        return contract != null
+                && "explicit-command-verification-request".equals(contract.classificationReason());
     }
 
     private static boolean hasDeniedMutation(ToolCallLoop.LoopResult loopResult) {

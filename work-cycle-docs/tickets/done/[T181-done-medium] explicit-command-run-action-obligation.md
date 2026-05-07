@@ -1,6 +1,6 @@
 # [T181-medium] Explicit Command-Run Action Obligation
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -72,6 +72,21 @@ Out of scope:
   - approval path,
   - command failure path,
   - no regression for read-only "tell me what command I should run" prompts.
+
+## Implementation
+
+- Added explicit command-required-but-not-run handling in `ExecutionOutcome`.
+- If a turn is classified as `explicit-command-verification-request` and no `talos.run_command` outcome exists, Talos now replaces model prose with runtime-owned failure-dominant output.
+- The failure is recorded as `FAILED_ACTION_OBLIGATION` and classified as `BLOCKED_BY_POLICY`.
+- Existing command success, command failure, and command denial paths remain runtime-owned.
+
+## Verification
+
+```powershell
+./gradlew.bat test --tests dev.talos.cli.modes.ExecutionOutcomeTest --no-daemon
+./gradlew.bat test --tests dev.talos.runtime.task.TaskContractResolverTest --tests dev.talos.runtime.toolcall.ToolSurfacePlannerTest --tests dev.talos.runtime.toolcall.NativeToolSpecPolicyTest --tests dev.talos.cli.modes.ExecutionOutcomeTest --no-daemon
+./gradlew.bat test --tests dev.talos.cli.modes.AssistantTurnExecutorTest --no-daemon
+```
 
 ## Suggested Verification
 
