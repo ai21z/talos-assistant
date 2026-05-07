@@ -197,7 +197,7 @@ record ExecutionOutcome(
         current = shaped;
 
         shaped = AssistantTurnExecutor.overrideStaticWebImportAnswerIfNeeded(
-                current, messages, loopResult, workspace);
+                current, safePlan, messages, loopResult, workspace);
         boolean staticWebImportGroundedOverride = !Objects.equals(current, shaped);
         current = shaped;
 

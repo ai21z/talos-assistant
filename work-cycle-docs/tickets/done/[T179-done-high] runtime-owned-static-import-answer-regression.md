@@ -1,6 +1,6 @@
 # [T179-high] Runtime-Owned Static Import Answer Regression
 
-Status: open
+Status: done
 Priority: high
 
 ## Evidence Summary
@@ -109,3 +109,14 @@ Out of scope:
 ./gradlew.bat test --tests dev.talos.cli.modes.AssistantTurnExecutorTest --no-daemon
 ./gradlew.bat check --no-daemon
 ```
+
+## Resolution
+
+- Static import answer shaping now receives the stable `CurrentTurnPlan` and
+  resolves the static-import intent from `originalUserRequest` before falling
+  back to the mutable message list.
+- Added a regression test for the GPT-OSS-like path where internal retry
+  messages trail the original request and the model falsely claims
+  `scripts.js` is imported after reading `index.html` and `scripts.js`.
+- The runtime-owned static import answer now wins over model-authored prose for
+  this class of read-only question.
