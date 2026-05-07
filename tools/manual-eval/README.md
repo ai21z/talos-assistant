@@ -15,6 +15,12 @@ TalosBench is intentionally local-first:
 - do not treat this runner as a replacement for deterministic unit/e2e tests
 - do not hide failures; convert repeated failures into architectural tickets
 
+For the large Qwen/GPT-OSS full E2E audit, use the tracked runbook and operator
+prompt before creating the local audit directory:
+
+- `work-cycle-docs/full-e2e-audit-workflow.md`
+- `work-cycle-docs/full-e2e-audit-operator-prompt.md`
+
 ## Prerequisites
 
 Install the current Talos build first:
