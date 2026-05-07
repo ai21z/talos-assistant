@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AssistantTurnExecutorMutationRetryToolSurfaceTest {
@@ -45,6 +46,38 @@ class AssistantTurnExecutorMutationRetryToolSurfaceTest {
         assertEquals(
                 List.of("talos.edit_file", "talos.write_file"),
                 sortedToolNames(resolver.requests.get(1)));
+    }
+
+    @Test
+    void missingMutationRetryUsesCompactMessagesWithoutOldHistory() {
+        RecordingResolver resolver = new RecordingResolver(List.of(
+                "Done. The files are complete.",
+                "I still will not call tools."));
+        Context ctx = context(resolver);
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user("OLD_HISTORY_MARKER " + "u".repeat(2_000)),
+                ChatMessage.assistant("OLD_ASSISTANT_MARKER " + "a".repeat(2_000)),
+                ChatMessage.system("OLD_RUNTIME_SYSTEM_MARKER " + "s".repeat(2_000)),
+                ChatMessage.user("Create index.html, styles.css, and scripts.js for a BMI calculator.")
+        ));
+
+        AssistantTurnExecutor.TurnOutput output = AssistantTurnExecutor.execute(
+                messages,
+                Path.of("."),
+                ctx,
+                new AssistantTurnExecutor.Options());
+
+        assertTrue(output.text().startsWith("[Action obligation failed:"), output.text());
+        assertTrue(resolver.requests.size() >= 2, "expected initial call and retry call");
+        String retryPrompt = joinedMessageContent(resolver.requests.get(1));
+        assertFalse(retryPrompt.contains("OLD_HISTORY_MARKER"), retryPrompt);
+        assertFalse(retryPrompt.contains("OLD_ASSISTANT_MARKER"), retryPrompt);
+        assertFalse(retryPrompt.contains("OLD_RUNTIME_SYSTEM_MARKER"), retryPrompt);
+        assertTrue(retryPrompt.contains("[CurrentTurnCapability]"), retryPrompt);
+        assertTrue(retryPrompt.contains("Create index.html, styles.css, and scripts.js"), retryPrompt);
+        assertTrue(retryPrompt.contains("previous model response did not issue required write/edit tool calls"),
+                retryPrompt);
     }
 
     @Test
@@ -83,7 +116,75 @@ class AssistantTurnExecutorMutationRetryToolSurfaceTest {
         assertEquals(List.of("talos.write_file"), sortedToolNames(resolver.requests.get(1)));
     }
 
-    private static Context context(RecordingResolver resolver) {
+    @Test
+    void staticFullRewriteMissingMutationRetryPreservesRepairContextAfterCompaction() {
+        RecordingResolver resolver = new RecordingResolver(List.of(
+                "Done. The repair is complete.",
+                "I still will not call tools."));
+        Context ctx = context(resolver);
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user("OLD_HISTORY_MARKER " + "u".repeat(2_000)),
+                ChatMessage.assistant("OLD_ASSISTANT_MARKER " + "a".repeat(2_000)),
+                ChatMessage.system("""
+                        [Static verification repair context]
+                        Expected targets: index.html, scripts.js, styles.css
+
+                        Previous static verification problems:
+                        - HTML does not link JavaScript file: `scripts.js`
+
+                        Repair plan:
+                        - index.html: You must use talos.write_file with complete corrected file content for index.html.
+                        - scripts.js: You must use talos.write_file with complete corrected file content for scripts.js.
+                        - styles.css: You must use talos.write_file with complete corrected file content for styles.css.
+
+                        Full-file replacement targets: index.html, scripts.js, styles.css
+                        """),
+                ChatMessage.user("Fix the remaining static verification problems.")
+        ));
+
+        AssistantTurnExecutor.TurnOutput output = AssistantTurnExecutor.execute(
+                messages,
+                Path.of("."),
+                ctx,
+                new AssistantTurnExecutor.Options());
+
+        assertTrue(output.text().startsWith("[Action obligation failed:"), output.text());
+        assertTrue(resolver.requests.size() >= 2, "expected initial call and retry call");
+        String retryPrompt = joinedMessageContent(resolver.requests.get(1));
+        assertFalse(retryPrompt.contains("OLD_HISTORY_MARKER"), retryPrompt);
+        assertFalse(retryPrompt.contains("OLD_ASSISTANT_MARKER"), retryPrompt);
+        assertTrue(retryPrompt.contains("[Static verification repair context]"), retryPrompt);
+        assertTrue(retryPrompt.contains("HTML does not link JavaScript file"), retryPrompt);
+        assertTrue(retryPrompt.contains("Full-file replacement targets: index.html, scripts.js, styles.css"), retryPrompt);
+        assertEquals(List.of("talos.write_file"), sortedToolNames(resolver.requests.get(1)));
+    }
+
+    @Test
+    void compactMissingMutationRetryCanReachBackendWhenFullHistoryWouldExceedBudget() {
+        BudgetGuardResolver resolver = new BudgetGuardResolver(
+                List.of("Done. The files are complete.", "I still will not call tools."),
+                8_000);
+        Context ctx = context(resolver);
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user("OLD_HISTORY_MARKER " + "u".repeat(6_000)),
+                ChatMessage.assistant("OLD_ASSISTANT_MARKER " + "a".repeat(6_000)),
+                ChatMessage.system("OLD_RUNTIME_SYSTEM_MARKER " + "s".repeat(6_000)),
+                ChatMessage.user("Create index.html, styles.css, and scripts.js for a BMI calculator.")
+        ));
+
+        AssistantTurnExecutor.TurnOutput output = AssistantTurnExecutor.execute(
+                messages,
+                Path.of("."),
+                ctx,
+                new AssistantTurnExecutor.Options());
+
+        assertTrue(output.text().startsWith("[Action obligation failed:"), output.text());
+        assertEquals(2, resolver.requests.size(), "compact retry should reach the backend");
+    }
+
+    private static Context context(LlmEngineResolver resolver) {
         List<ToolSpec> broadTools = broadToolSurface();
         LlmClient llm = new LlmClient(engineConfig(), resolver);
         llm.setToolSpecs(broadTools);
@@ -121,6 +222,14 @@ class AssistantTurnExecutorMutationRetryToolSurfaceTest {
                 .toList();
     }
 
+    private static String joinedMessageContent(ChatRequest request) {
+        return request == null || request.messages == null
+                ? ""
+                : request.messages.stream()
+                .map(message -> message.content() == null ? "" : message.content())
+                .reduce("", (left, right) -> left + "\n" + right);
+    }
+
     private static Config engineConfig() {
         Config cfg = new Config();
         LinkedHashMap<String, Object> llm = new LinkedHashMap<>();
@@ -152,6 +261,41 @@ class AssistantTurnExecutorMutationRetryToolSurfaceTest {
 
         @Override
         public Stream<TokenChunk> chatStream(ChatRequest request) {
+            this.requests.add(request);
+            int index = Math.min(cursor++, responses.size() - 1);
+            return Stream.of(TokenChunk.of(responses.get(index)), TokenChunk.eos());
+        }
+
+        @Override
+        public void close() {
+            // no-op
+        }
+    }
+
+    private static final class BudgetGuardResolver implements LlmEngineResolver {
+        private final List<String> responses;
+        private final int maxRequestChars;
+        private final List<ChatRequest> requests = new ArrayList<>();
+        private int cursor;
+
+        private BudgetGuardResolver(List<String> responses, int maxRequestChars) {
+            this.responses = responses == null || responses.isEmpty()
+                    ? List.of("")
+                    : List.copyOf(responses);
+            this.maxRequestChars = maxRequestChars;
+        }
+
+        @Override
+        public void select(String backend, String model) {
+            // no-op
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(ChatRequest request) {
+            String joined = joinedMessageContent(request);
+            if (cursor > 0 && joined.length() > maxRequestChars) {
+                throw new AssertionError("request exceeded scripted backend budget: " + joined.length());
+            }
             this.requests.add(request);
             int index = Math.min(cursor++, responses.size() - 1);
             return Stream.of(TokenChunk.of(responses.get(index)), TokenChunk.eos());
