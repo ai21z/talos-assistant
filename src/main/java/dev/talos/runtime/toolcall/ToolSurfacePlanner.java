@@ -46,6 +46,9 @@ public final class ToolSurfacePlanner {
         if (mutationAllowed) {
             return select(registry, ToolSurfacePlanner::isApplyOperation, "mutation apply surface");
         }
+        if (explicitCommandVerificationSurface(contract, phase)) {
+            return select(registry, ToolSurfacePlanner::isCommandOperation, "explicit command profile surface");
+        }
         if (verificationCommandSurface(contract, phase)) {
             return select(registry, ToolSurfacePlanner::isVerificationOperation, "verification command surface");
         }
@@ -69,6 +72,9 @@ public final class ToolSurfacePlanner {
                     "talos.run_command",
                     "talos.retrieve",
                     "talos.write_file");
+        }
+        if (explicitCommandVerificationSurface(contract, phase)) {
+            return List.of("talos.run_command");
         }
         if (verificationCommandSurface(contract, phase)) {
             return List.of("talos.grep", "talos.list_dir", "talos.read_file", "talos.retrieve", "talos.run_command");
@@ -133,6 +139,22 @@ public final class ToolSurfacePlanner {
                 && !contract.mutationAllowed()
                 && contract.expectedTargets().isEmpty()
                 && phase == ExecutionPhase.VERIFY;
+    }
+
+    private static boolean explicitCommandVerificationSurface(TaskContract contract, ExecutionPhase phase) {
+        return verificationCommandSurface(contract, phase)
+                && "explicit-command-verification-request".equals(contract.classificationReason())
+                && explicitCommandProfileRequest(contract);
+    }
+
+    private static boolean explicitCommandProfileRequest(TaskContract contract) {
+        if (contract == null || contract.originalUserRequest() == null) return false;
+        String lower = contract.originalUserRequest().toLowerCase(java.util.Locale.ROOT);
+        return lower.contains("talos.run_command")
+                || lower.contains("command profile")
+                || lower.contains("approved gradle")
+                || lower.contains("approved bounded command")
+                || lower.contains("profile gradle_");
     }
 
     private static boolean isDirectoryListingTool(ToolDescriptor descriptor) {

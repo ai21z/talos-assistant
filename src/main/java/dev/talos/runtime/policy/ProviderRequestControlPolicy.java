@@ -16,6 +16,7 @@ public final class ProviderRequestControlPolicy {
     private static final Set<String> MUTATING_TOOLS = Set.of("talos.write_file", "talos.edit_file");
     private static final Set<String> INSPECTION_TOOLS = Set.of(
             "talos.grep", "talos.list_dir", "talos.read_file", "talos.retrieve");
+    private static final Set<String> COMMAND_TOOLS = Set.of("talos.run_command");
 
     private ProviderRequestControlPolicy() {}
 
@@ -32,11 +33,17 @@ public final class ProviderRequestControlPolicy {
         EvidenceObligation evidence = EvidenceObligationPolicy.parse(plan.evidenceObligation());
         boolean mutatingToolsVisible = hasAnyTool(visibleTools, MUTATING_TOOLS);
         boolean inspectionToolsVisible = hasAnyTool(visibleTools, INSPECTION_TOOLS);
+        boolean commandToolsVisible = hasAnyTool(visibleTools, COMMAND_TOOLS);
 
         boolean require = false;
         List<String> tags = new ArrayList<>();
 
-        if (action == ActionObligation.CONDITIONAL_REVIEW_FIX
+        if (explicitCommandRequest(plan) && commandToolsVisible) {
+            require = true;
+            tags.add("action-obligation:" + action.name());
+            tags.add("evidence-obligation:" + evidence.name());
+            tags.add("required-tool:talos.run_command");
+        } else if (action == ActionObligation.CONDITIONAL_REVIEW_FIX
                 && (inspectionToolsVisible || mutatingToolsVisible)) {
             require = true;
             tags.add("action-obligation:" + action.name());
@@ -72,6 +79,12 @@ public final class ProviderRequestControlPolicy {
 
     private static boolean requiresEvidenceTool(EvidenceObligation evidence) {
         return evidence != null && evidence != EvidenceObligation.NONE;
+    }
+
+    private static boolean explicitCommandRequest(CurrentTurnPlan plan) {
+        return plan != null
+                && plan.taskContract() != null
+                && "explicit-command-verification-request".equals(plan.taskContract().classificationReason());
     }
 
     private static boolean hasAnyTool(List<ToolSpec> tools, Set<String> names) {

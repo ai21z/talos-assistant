@@ -74,6 +74,30 @@ class ProviderRequestControlPolicyTest {
     }
 
     @Test
+    void explicitCommandProfileRequestRequiresRunCommandToolChoice() {
+        var contract = TaskContractResolver.fromUserRequest(
+                "Run the approved Gradle test command profile for this workspace and report the exact command result. "
+                        + "Do not invent a pass if the command cannot run.");
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                contract,
+                ExecutionPhase.VERIFY,
+                List.of("talos.run_command"),
+                List.of("talos.run_command"),
+                List.of());
+
+        var controls = ProviderRequestControlPolicy.forTurn(
+                plan,
+                List.of(tool("talos.run_command")),
+                true);
+
+        assertEquals("explicit-command-verification-request", contract.classificationReason());
+        assertEquals(ToolChoiceMode.REQUIRED, controls.toolChoice());
+        assertEquals(List.of("action-obligation:VERIFY_FROM_EVIDENCE",
+                "evidence-obligation:VERIFY_FROM_TRACE_OR_EVIDENCE",
+                "required-tool:talos.run_command"), controls.debugTags());
+    }
+
+    @Test
     void directAnswerDoesNotForceTools() {
         var contract = TaskContractResolver.fromUserRequest("Hello, what can you do?");
         CurrentTurnPlan plan = CurrentTurnPlan.create(

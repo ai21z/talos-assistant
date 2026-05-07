@@ -163,10 +163,25 @@ class ToolSurfacePlannerTest {
 
         List<String> names = plan.nativeToolNames();
         assertTrue(names.contains("talos.run_command"));
-        assertTrue(names.contains("talos.read_file"));
+        assertFalse(names.contains("talos.read_file"));
+        assertFalse(names.contains("talos.list_dir"));
+        assertFalse(names.contains("talos.grep"));
         assertFalse(names.contains("talos.write_file"));
         assertFalse(names.contains("talos.edit_file"));
-        assertEquals("verification command surface", plan.reason());
+        assertEquals("explicit command profile surface", plan.reason());
+    }
+
+    @Test
+    void explicitApprovedCommandProfileRequestExposesOnlyRunCommand() {
+        var contract = TaskContractResolver.fromUserRequest(
+                "Run the approved Gradle test command profile for this workspace and report the exact command result. "
+                        + "Do not invent a pass if the command cannot run.");
+
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(contract, ExecutionPhase.VERIFY, registry());
+
+        assertEquals("explicit-command-verification-request", contract.classificationReason());
+        assertEquals(List.of("talos.run_command"), plan.nativeToolNames());
+        assertEquals("explicit command profile surface", plan.reason());
     }
 
     @Test
@@ -201,6 +216,13 @@ class ToolSurfacePlannerTest {
                 List.of("talos.grep", "talos.list_dir", "talos.read_file", "talos.retrieve", "talos.run_command"),
                 ToolSurfacePlanner.defaultVisibleToolNames(
                         TaskContractResolver.fromUserRequest("verify that the Gradle build passes"),
+                        ExecutionPhase.VERIFY));
+
+        assertEquals(
+                List.of("talos.run_command"),
+                ToolSurfacePlanner.defaultVisibleToolNames(
+                        TaskContractResolver.fromUserRequest(
+                                "Run the approved Gradle test command profile for this workspace and report the exact command result."),
                         ExecutionPhase.VERIFY));
     }
 
