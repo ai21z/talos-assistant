@@ -116,6 +116,23 @@ class ToolSurfacePlannerTest {
     }
 
     @Test
+    void mixedDirectoryAndExactFileCreateKeepsFileWriteSurface() {
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                TaskContractResolver.fromUserRequest(
+                        "Create a directory named workspace-notes and create workspace-notes/summary.txt "
+                                + "containing exactly created by audit."),
+                ExecutionPhase.APPLY,
+                registry());
+
+        List<String> names = plan.nativeToolNames();
+        assertTrue(names.contains("talos.mkdir"), names.toString());
+        assertTrue(names.contains("talos.write_file"), names.toString());
+        assertFalse(
+                names.equals(List.of("talos.mkdir")),
+                "mixed directory+file creation must not be narrowed to mkdir-only");
+    }
+
+    @Test
     void directoryListingSurfaceUsesDirectoryTargetMetadata() {
         ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
                 TaskContractResolver.fromUserRequest("What files are in this folder?"),

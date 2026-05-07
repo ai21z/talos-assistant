@@ -84,6 +84,23 @@ class TaskExpectationResolverTest {
     }
 
     @Test
+    void extractsCreateTargetContainingExactlyLiteral() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Create a directory named workspace-notes and create workspace-notes/summary.txt "
+                        + "containing exactly created by audit.");
+
+        List<TaskExpectation> expectations = TaskExpectationResolver.resolve(contract);
+
+        assertEquals(1, expectations.size());
+        LiteralContentExpectation literal = (LiteralContentExpectation) expectations.getFirst();
+        assertEquals("workspace-notes/summary.txt", literal.targetPath());
+        assertEquals("created by audit", literal.expectedContent());
+        assertEquals(LiteralContentExpectation.MatchMode.EXACT, literal.matchMode());
+        assertEquals("literal-create-containing-exactly", literal.sourcePattern());
+        assertTrue(contract.mutationAllowed());
+    }
+
+    @Test
     void ignoresAmbiguousPageAboutLiteralText() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Make index.html into a simple webpage that says AFTER.");

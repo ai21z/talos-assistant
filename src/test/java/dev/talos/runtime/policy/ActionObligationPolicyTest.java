@@ -40,6 +40,17 @@ class ActionObligationPolicyTest {
     }
 
     @Test
+    void mixedDirectoryAndExactFileCreateRequiresMutatingTools() {
+        var contract = TaskContractResolver.fromUserRequest(
+                "Create a directory named workspace-notes and create workspace-notes/summary.txt "
+                        + "containing exactly created by audit.");
+
+        assertEquals(
+                ActionObligation.MUTATING_TOOL_REQUIRED,
+                ActionObligationPolicy.derive(contract, ExecutionPhase.APPLY));
+    }
+
+    @Test
     void directoryListingRequiresListDirOnly() {
         var contract = TaskContractResolver.fromUserRequest("What files are in this folder?");
 

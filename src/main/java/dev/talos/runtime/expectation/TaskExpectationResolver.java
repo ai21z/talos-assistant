@@ -38,6 +38,7 @@ public final class TaskExpectationResolver {
         String normalizedTarget = normalizePath(target);
         List<Candidate> candidates = new ArrayList<>();
         addTargetSpecificExactCandidates(request, normalizedTarget, candidates);
+        addTargetContainingExactlyCandidates(request, normalizedTarget, candidates);
         addCompleteFileTwoLineCandidate(request, candidates);
         addGenericCandidate(request, ENTIRE_FILE_SHOULD_BE, "literal-entire-file", candidates);
         addGenericCandidate(request, CONTENT_ARGUMENT_EXACT, "literal-content-argument", candidates);
@@ -77,6 +78,21 @@ public final class TaskExpectationResolver {
         Matcher matcher = overwriteWithExactly.matcher(request);
         while (matcher.find()) {
             candidates.add(new Candidate(matcher.group(1), "literal-overwrite-exactly"));
+        }
+    }
+
+    private static void addTargetContainingExactlyCandidates(
+            String request,
+            String target,
+            List<Candidate> candidates
+    ) {
+        String quoted = Pattern.quote(target);
+        Pattern createContainingExactly = Pattern.compile(
+                "(?is)\\b(?:create|write|add)\\s+`?" + quoted
+                        + "`?\\s+(?:with\\s+content\\s+)?containing\\s+exactly\\s+(.+)");
+        Matcher matcher = createContainingExactly.matcher(request);
+        while (matcher.find()) {
+            candidates.add(new Candidate(matcher.group(1), "literal-create-containing-exactly"));
         }
     }
 
