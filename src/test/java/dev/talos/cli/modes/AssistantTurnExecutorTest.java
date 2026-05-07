@@ -5813,6 +5813,89 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        @DisplayName("selector search no-match from html-only grep is grounded against current static files")
+        void selectorSearchNoMatchFromHtmlOnlyGrepIsGroundedAgainstCurrentStaticFiles(@TempDir Path ws)
+                throws Exception {
+            Files.writeString(ws.resolve("index.html"), """
+                    <!doctype html>
+                    <html><body><button id="run">Run</button><script src="script.js"></script></body></html>
+                    """);
+            Files.writeString(ws.resolve("styles.css"), "body { font-family: sans-serif; }\n");
+            Files.writeString(ws.resolve("script.js"),
+                    "const button = document.querySelector('.missing-button');\n");
+            Files.writeString(ws.resolve(".env"), "FAKE_SECRET_DO_NOT_READ=protected-marker\n");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.GrepTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.grep\",\"arguments\":{\"pattern\":\".missing-button\",\"include\":\"*.html\"}}",
+                            "No matches were found in the workspace.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(ws, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Search for the selector .missing-button using workspace search. "
+                            + "Return matching file and line only; do not read full files and do not read protected files."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, ws, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains("[Static selector search]"), out.text());
+            assertTrue(out.text().contains(
+                    "script.js:1 | const button = document.querySelector('.missing-button');"), out.text());
+            assertFalse(out.text().contains("No matches were found in the workspace"), out.text());
+            assertFalse(out.text().contains("FAKE_SECRET_DO_NOT_READ"), out.text());
+        }
+
+        @Test
+        @DisplayName("selector search no-match after invalid comma glob retry is grounded against js files")
+        void selectorSearchNoMatchAfterInvalidCommaGlobRetryIsGroundedAgainstJsFiles(@TempDir Path ws)
+                throws Exception {
+            Files.writeString(ws.resolve("index.html"), """
+                    <!doctype html>
+                    <html><body><button id="run">Run</button><script src="script.js"></script></body></html>
+                    """);
+            Files.writeString(ws.resolve("styles.css"), ".run { color: blue; }\n");
+            Files.writeString(ws.resolve("script.js"),
+                    "const button = document.querySelector('.missing-button');\n");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.GrepTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 6);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.grep\",\"arguments\":{\"pattern\":\".missing-button\",\"include\":\"*.css,*.html\"}}",
+                            "{\"name\":\"talos.grep\",\"arguments\":{\"pattern\":\".missing-button\",\"include\":\"*.{html,css}\"}}",
+                            "There are no matching selectors in .html or .css files.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(ws, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Search for the selector .missing-button using workspace search. "
+                            + "Return matching file and line only; do not read full files and do not read protected files."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, ws, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains("[Static selector search]"), out.text());
+            assertTrue(out.text().contains(
+                    "script.js:1 | const button = document.querySelector('.missing-button');"), out.text());
+            assertFalse(out.text().contains("There are no matching selectors"), out.text());
+        }
+
+        @Test
         @DisplayName("mutation requests do not use read-only web diagnostic override")
         void mutationRequestsAreNotOverridden() {
             var messages = new ArrayList<ChatMessage>();

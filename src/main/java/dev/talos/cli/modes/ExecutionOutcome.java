@@ -206,9 +206,15 @@ record ExecutionOutcome(
         boolean webDiagnosticGroundedOverride = !Objects.equals(current, shaped);
         current = shaped;
 
+        shaped = AssistantTurnExecutor.overrideStaticSelectorSearchAnswerIfNeeded(
+                current, safePlan, messages, loopResult, workspace);
+        boolean staticSelectorSearchGroundedOverride = !Objects.equals(current, shaped);
+        current = shaped;
+
         shaped = AssistantTurnExecutor.overrideSelectorMismatchAnalysisIfNeeded(
                 current, messages, loopResult, workspace);
-        boolean selectorGroundedOverride = !Objects.equals(current, shaped);
+        boolean selectorGroundedOverride = staticSelectorSearchGroundedOverride
+                || !Objects.equals(current, shaped);
         current = shaped;
 
         shaped = AssistantTurnExecutor.summarizeReadOnlyDeniedMutationOutcomesIfNeeded(

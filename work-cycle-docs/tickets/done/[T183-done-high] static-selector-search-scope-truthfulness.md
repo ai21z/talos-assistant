@@ -1,6 +1,6 @@
 # [T183-high] Static Selector Search Scope Truthfulness
 
-Status: open
+Status: done
 Priority: high
 
 ## Evidence Summary
@@ -97,6 +97,27 @@ Out of scope:
 
 ```powershell
 ./gradlew.bat test --tests "*Grep*" --tests "*StaticWeb*" --no-daemon
+./gradlew.bat test --tests dev.talos.cli.modes.AssistantTurnExecutorTest --no-daemon
+./gradlew.bat check --no-daemon
+```
+
+## Resolution
+
+- Added runtime-owned static selector search grounding for read-only selector
+  search turns that used `talos.grep`.
+- The grounding searches visible static web files (`.html`, `.htm`, `.css`,
+  `.js`, `.ts`, `.jsx`, `.tsx`) and skips hidden/protected-style dotfiles.
+- Qwen-like html-only no-match prose is replaced with the actual `script.js`
+  file/line match when present.
+- GPT-OSS-like invalid comma glob followed by html/css-only no-match prose is
+  also replaced with the actual `script.js` file/line match.
+- Existing comma-glob validation and grep behavior remain unchanged.
+
+Verification:
+
+```powershell
+./gradlew.bat test --tests "*selectorSearchNoMatch*" --no-daemon
+./gradlew.bat test --tests dev.talos.tools.impl.GrepToolTest --no-daemon
 ./gradlew.bat test --tests dev.talos.cli.modes.AssistantTurnExecutorTest --no-daemon
 ./gradlew.bat check --no-daemon
 ```
