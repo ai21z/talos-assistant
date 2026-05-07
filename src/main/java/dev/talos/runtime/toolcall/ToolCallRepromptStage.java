@@ -253,6 +253,10 @@ public final class ToolCallRepromptStage {
         } else {
             state.clearPendingActionObligation();
         }
+        List<ToolSpec> repromptToolSpecs = repromptToolSpecs(
+                state,
+                obligationGateActive && !remainingRepairTargets.isEmpty(),
+                obligationGateActive && !remainingExpectedTargets.isEmpty());
 
         int anchorIndex = -1;
         String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
@@ -266,7 +270,7 @@ public final class ToolCallRepromptStage {
             LlmClient.StreamResult repromptResult =
                     state.ctx.llm().chatFull(
                             state.messages,
-                            state.ctx.nativeToolSpecs(),
+                            repromptToolSpecs,
                             repromptControls(state));
             state.currentText = repromptResult.text();
             state.currentNativeCalls = repromptResult.hasToolCalls()
@@ -303,7 +307,7 @@ public final class ToolCallRepromptStage {
                 LlmClient.StreamResult retryResult =
                         state.ctx.llm().chatFull(
                                 state.messages,
-                                state.ctx.nativeToolSpecs(),
+                                repromptToolSpecs,
                                 repromptControls(state));
                 state.currentText = retryResult.text();
                 state.currentNativeCalls = retryResult.hasToolCalls()
@@ -406,6 +410,44 @@ public final class ToolCallRepromptStage {
         }
         LOG.info("Skipping {} because it exceeded the local context budget.", retryName);
         return false;
+    }
+
+    private static List<ToolSpec> repromptToolSpecs(
+            LoopState state,
+            boolean staticRepairProgress,
+            boolean expectedTargetProgress
+    ) {
+        List<ToolSpec> base = currentNativeToolSpecs(state);
+        if (base == null || base.isEmpty()) return base;
+        if (staticRepairProgress) {
+            List<ToolSpec> narrowed = filterTools(base, List.of("talos.write_file"));
+            return narrowed.isEmpty() ? base : narrowed;
+        }
+        if (expectedTargetProgress) {
+            List<ToolSpec> narrowed = filterTools(base, List.of("talos.write_file", "talos.edit_file"));
+            return narrowed.isEmpty() ? base : narrowed;
+        }
+        return base;
+    }
+
+    private static List<ToolSpec> currentNativeToolSpecs(LoopState state) {
+        if (state == null || state.ctx == null) return List.of();
+        if (state.ctx.nativeToolSpecs() != null) {
+            return state.ctx.nativeToolSpecs();
+        }
+        if (state.ctx.llm() != null) {
+            return state.ctx.llm().getToolSpecs();
+        }
+        return List.of();
+    }
+
+    private static List<ToolSpec> filterTools(List<ToolSpec> specs, List<String> allowedNames) {
+        if (specs == null || specs.isEmpty() || allowedNames == null || allowedNames.isEmpty()) {
+            return List.of();
+        }
+        return specs.stream()
+                .filter(spec -> spec != null && allowedNames.contains(spec.name()))
+                .toList();
     }
 
     public boolean hitIterationLimit(LoopState state) {
