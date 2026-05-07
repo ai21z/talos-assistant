@@ -10,10 +10,7 @@
   "approvalPolicy": "APPROVE_ALL",
   "userPrompt": "Inspect this BMI website and identify why it is not working. Do not edit files yet.",
   "scriptedResponses": [
-    "```json\n{\"name\":\"talos.list_dir\",\"parameters\":{\"path\":\".\"}}\n```",
-    "```json\n{\"name\":\"talos.grep\",\"parameters\":{\"pattern\":\"bmi\",\"include\":\"*.html\"}}\n```",
-    "```json\n{\"name\":\"talos.grep\",\"parameters\":{\"pattern\":\"form\",\"include\":\"*.html\"}}\n```",
-    "```json\n{\"name\":\"talos.grep\",\"parameters\":{\"pattern\":\"calculator\",\"include\":\"*.css\"}}\n```",
+    "```json\n{\"name\":\"talos.list_dir\",\"parameters\":{\"path\":\".\"}}\n```\n```json\n{\"name\":\"talos.read_file\",\"parameters\":{\"path\":\"index.html\"}}\n```\n```json\n{\"name\":\"talos.read_file\",\"parameters\":{\"path\":\"styles.css\"}}\n```\n```json\n{\"name\":\"talos.read_file\",\"parameters\":{\"path\":\"script.js\"}}\n```",
     "This response should not be reached."
   ]
 }

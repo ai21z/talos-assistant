@@ -99,6 +99,43 @@ class PromptDebugCommandTest {
     }
 
     @Test
+    void readOnlyPromptDebugDoesNotReportMissingMutationTargetCoverage() throws Exception {
+        PromptDebugCapture.record(PromptDebugSnapshot.fromProviderBody(
+                new ChatRequest(
+                        "llama_cpp",
+                        "qwen2.5-coder-14b",
+                        "",
+                        "",
+                        List.of(),
+                        Duration.ofSeconds(5),
+                        List.of(
+                                ChatMessage.system("main system"),
+                                ChatMessage.system("""
+                                        [CurrentTurnCapability]
+                                        [TaskContract]
+                                        type: DIAGNOSE_ONLY
+                                        mutationAllowed: false
+                                        verificationRequired: false
+                                        phase: INSPECT
+                                        """),
+                                ChatMessage.user("Review index.html, styles.css, and script.js and say whether the static page works. Do not edit files.")),
+                        List.of(new ToolSpec("talos.read_file", "Read", "{}"))),
+                false,
+                "{\"model\":\"qwen2.5-coder-14b\",\"messages\":[{\"role\":\"user\",\"content\":\"Review index.html, styles.css, and script.js\"}]}"));
+        PromptDebugCommand command = new PromptDebugCommand();
+
+        Result result = command.execute("last", ctx);
+
+        Result.TrustedInfo info = assertInstanceOf(Result.TrustedInfo.class, result);
+        assertTrue(info.text.contains("mutationAllowed=false"),
+                info.text);
+        assertTrue(info.text.contains("Evidence target hints:"), info.text);
+        assertTrue(info.text.contains("Evidence-target frame coverage: N/A (read-only task)"),
+                info.text);
+        assertFalse(info.text.contains("Expected-target coverage: MISSING"), info.text);
+    }
+
+    @Test
     void lastRedactsProtectedToolResultsAndKeepsPublicToolResults() throws Exception {
         PromptDebugCapture.record(protectedToolResultSnapshot());
         PromptDebugCommand command = new PromptDebugCommand();

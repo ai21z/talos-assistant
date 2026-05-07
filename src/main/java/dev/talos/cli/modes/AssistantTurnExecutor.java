@@ -3184,21 +3184,28 @@ public final class AssistantTurnExecutor {
         List<ChatMessage> retryMessages = new ArrayList<>(messages);
         retryMessages.add(ChatMessage.assistant(answer));
         retryMessages.add(ChatMessage.user(
-                "You started diagnosing the workspace before reading all of the obvious primary files. "
-                        + "Read these files now before answering: "
-                        + String.join(", ", missing)
-                        + ". After reading them, answer concretely from the file contents. "
-                        + "Do not speculate about files that do not exist."));
+                """
+                You started diagnosing the workspace before reading all of the obvious primary files.
+
+                Task type: %s
+                User request: "%s"
+
+                Read these files now before answering: %s. After reading them, answer concretely from the file contents. Do not speculate about files that do not exist.""".formatted(
+                        contract.type().name(),
+                        userRequest == null ? "" : userRequest.strip(),
+                        String.join(", ", missing))));
         try {
             LlmClient.StreamResult retry = chatFull(ctx, retryMessages);
             String retryText = retry.text() == null ? "" : retry.text();
             if (retry.hasToolCalls() || hasAnyTextToolCalls(retryText)) {
                 ToolCallLoop.LoopResult retryLoop = ctx.toolCallLoop().run(
                         retryText, retry.toolCalls(), retryMessages, workspace, ctx);
+                ToolCallLoop.LoopResult groundedRetryLoop =
+                        mergeReadOnlyInspectRetryEvidence(loopResult, retryLoop);
                 String mergedAnswer = retryLoop.finalAnswer();
                 return new InspectRetryResult(
                         mergedAnswer == null || mergedAnswer.isBlank() ? answer : mergedAnswer,
-                        retryLoop,
+                        groundedRetryLoop,
                         retryLoop.summary());
             }
             if (!retryText.isBlank() && !retryText.equals(answer)) {
@@ -3208,6 +3215,53 @@ public final class AssistantTurnExecutor {
             LOG.warn("Inspect-completeness retry failed: {}", e.getMessage());
         }
         return new InspectRetryResult(answer, null, null);
+    }
+
+    private static ToolCallLoop.LoopResult mergeReadOnlyInspectRetryEvidence(
+            ToolCallLoop.LoopResult original,
+            ToolCallLoop.LoopResult retry
+    ) {
+        if (retry == null) return null;
+        if (original == null) return retry;
+        if (original.mutatingToolSuccesses() > 0 || retry.mutatingToolSuccesses() > 0) return retry;
+
+        List<String> mergedReadPaths = mergeReadPaths(original.readPaths(), retry.readPaths());
+        if (mergedReadPaths.equals(retry.readPaths())) return retry;
+
+        return new ToolCallLoop.LoopResult(
+                retry.finalAnswer(),
+                retry.iterations(),
+                retry.toolsInvoked(),
+                retry.toolNames(),
+                retry.messages(),
+                retry.failedCalls(),
+                retry.retriedCalls(),
+                retry.hitIterLimit(),
+                retry.mutatingToolSuccesses(),
+                mergedReadPaths,
+                retry.cushionFiresRedundantRead(),
+                retry.cushionFiresAliasRescue(),
+                retry.cushionFiresB3EditShortCircuit(),
+                retry.cushionFiresE1Suggestion(),
+                retry.failureDecision(),
+                retry.toolOutcomes());
+    }
+
+    private static List<String> mergeReadPaths(List<String> original, List<String> retry) {
+        LinkedHashSet<String> merged = new LinkedHashSet<>();
+        addNormalizedReadPaths(merged, original);
+        addNormalizedReadPaths(merged, retry);
+        return List.copyOf(merged);
+    }
+
+    private static void addNormalizedReadPaths(Set<String> merged, List<String> paths) {
+        if (paths == null || paths.isEmpty()) return;
+        for (String path : paths) {
+            String normalized = ToolCallSupport.normalizePath(path);
+            if (!normalized.isBlank()) {
+                merged.add(normalized);
+            }
+        }
     }
 
     static String overrideSelectorMismatchAnalysisIfNeeded(
@@ -3419,11 +3473,32 @@ public final class AssistantTurnExecutor {
         if (loopResult == null || workspace == null) return answer;
         if (loopResult.mutatingToolSuccesses() > 0) return answer;
         if (declaresTaskType(messages, TaskType.WORKSPACE_EXPLAIN)) return answer;
-        String userRequest = latestUserRequest(messages);
+        String latestUserRequest = latestUserRequest(messages);
+        if ("WORKSPACE_EXPLAIN".equals(ToolCallSupport.embeddedRetryTaskType(latestUserRequest))) return answer;
+        String userRequest = ToolCallSupport.effectiveUserRequestForRetryWrappedPrompt(latestUserRequest);
+        TaskContract requestContract = TaskContractResolver.fromUserRequest(userRequest);
+        if (requestContract.type() == TaskType.WORKSPACE_EXPLAIN) return answer;
         if (!WebDiagnosticIntent.matchesReadOnlyRequest(userRequest)) return answer;
+        if (!readStaticWebDiagnosticSurface(loopResult)) return answer;
 
         String grounded = StaticTaskVerifier.renderWebDiagnostics(workspace);
         return grounded == null || grounded.isBlank() ? answer : grounded;
+    }
+
+    private static boolean readStaticWebDiagnosticSurface(ToolCallLoop.LoopResult loopResult) {
+        if (loopResult == null || loopResult.readPaths() == null || loopResult.readPaths().isEmpty()) return false;
+        boolean readHtml = false;
+        boolean readScript = false;
+        for (String path : loopResult.readPaths()) {
+            String lower = ToolCallSupport.normalizePath(path).toLowerCase(Locale.ROOT);
+            if (lower.endsWith(".html") || lower.endsWith(".htm")) {
+                readHtml = true;
+            }
+            if (lower.endsWith(".js") || lower.endsWith(".jsx") || lower.endsWith(".ts") || lower.endsWith(".tsx")) {
+                readScript = true;
+            }
+        }
+        return readHtml && readScript;
     }
 
     static String overrideStaticWebImportAnswerIfNeeded(

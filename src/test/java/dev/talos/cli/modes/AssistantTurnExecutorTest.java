@@ -5604,6 +5604,14 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        @DisplayName("natural static button review request is recognized")
+        void naturalStaticButtonReviewRequestIsRecognized() {
+            assertTrue(AssistantTurnExecutor.looksLikeReadOnlyWebDiagnosticRequest(
+                    "Review the current static web page and say whether the button can work in a browser. "
+                            + "Do not inspect protected files."));
+        }
+
+        @Test
         @DisplayName("web diagnostic request is overridden by deterministic static facts")
         void readOnlyWebDiagnosticAnswerIsGroundedFromWorkspace() throws Exception {
             Path ws = Files.createTempDirectory("talos-web-diagnostics-grounding-");
@@ -5694,6 +5702,213 @@ class AssistantTurnExecutorTest {
                 assertTrue(out.text().contains(
                         "Neither `script.js` nor `scripts.js` is imported by `index.html`."), out.text());
                 assertFalse(out.text().contains("imports the BMI script from scripts.js"), out.text());
+            } finally {
+                try (var walk = Files.walk(ws)) {
+                    walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                        try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                    });
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("static button review false success is replaced by deterministic diagnostics")
+        void staticButtonReviewFalseSuccessIsGroundedFromWorkspace() throws Exception {
+            Path ws = Files.createTempDirectory("talos-static-button-grounding-");
+            try {
+                Files.writeString(ws.resolve("index.html"), """
+                        <!DOCTYPE html>
+                        <html>
+                          <head><link rel="stylesheet" href="styles.css"></head>
+                          <body>
+                            <button class="cta-button" type="button">Run action</button>
+                            <p id="result">Waiting.</p>
+                            <script src="script.js"></script>
+                          </body>
+                        </html>
+                        """);
+                Files.writeString(ws.resolve("styles.css"), """
+                        .cta-button { color: red; }
+                        """);
+                Files.writeString(ws.resolve("script.js"), """
+                        const button = document.querySelector('.cta-button');
+                        const result = document.querySelector('#result');
+
+                        if (button && result) {
+                          button.addEventListener('click', () => {
+                            result.textC;
+                          });
+                        }
+                        """);
+
+                var messages = new ArrayList<ChatMessage>();
+                messages.add(ChatMessage.system("sys"));
+                messages.add(ChatMessage.user(
+                        "Review the current static web page and say whether the button can work in a browser. "
+                                + "Do not inspect protected files."));
+
+                var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                        "unused", 3, 3,
+                        List.of("talos.list_dir", "talos.read_file", "talos.read_file"),
+                        List.of(), 0, 0, false, 0,
+                        List.of("index.html", "script.js"),
+                        0, 0, 0, 0);
+
+                String bogus = """
+                        Yes - the page will work as expected in a browser.
+
+                        Opening `index.html` in a browser will show the button and, when clicked,
+                        will replace "Waiting." with "Audit action complete."
+                        """;
+                String out = AssistantTurnExecutor.overrideReadOnlyWebDiagnosticsIfNeeded(
+                        bogus, messages, loopResult, ws);
+
+                assertNotEquals(bogus, out);
+                assertTrue(out.contains("Static web diagnostics found:"), out);
+                assertTrue(out.contains("script.js"), out);
+                assertTrue(out.contains("does not assign visible result text"), out);
+                assertFalse(out.contains("will work as expected"), out);
+                assertFalse(out.contains("will replace \"Waiting.\""), out);
+            } finally {
+                try (var walk = Files.walk(ws)) {
+                    walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                        try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                    });
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("static button diagnostics survive primary-file completeness retry")
+        void staticButtonDiagnosticsSurviveInspectCompletenessRetry() throws Exception {
+            Path ws = Files.createTempDirectory("talos-static-button-retry-grounding-");
+            try {
+                Files.writeString(ws.resolve("index.html"), """
+                        <!DOCTYPE html>
+                        <html>
+                          <head><link rel="stylesheet" href="styles.css"></head>
+                          <body>
+                            <button class="cta-button" type="button">Run action</button>
+                            <p id="result">Waiting.</p>
+                            <script src="script.js"></script>
+                          </body>
+                        </html>
+                        """);
+                Files.writeString(ws.resolve("styles.css"), """
+                        .cta-button { color: red; }
+                        """);
+                Files.writeString(ws.resolve("script.js"), """
+                        const button = document.querySelector('.cta-button');
+                        const result = document.querySelector('#result');
+
+                        if (button && result) {
+                          button.addEventListener('click', () => {
+                            result.textC;
+                          });
+                        }
+                        """);
+
+                var registry = new dev.talos.tools.ToolRegistry();
+                registry.register(new dev.talos.tools.impl.ReadFileTool());
+                var processor = new dev.talos.runtime.TurnProcessor(
+                        null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+                var loop = new dev.talos.runtime.ToolCallLoop(processor, 6);
+                var llm = ScriptedNativeLlmClient.of(List.of(
+                        new LlmClient.StreamResult("", List.of(
+                                new ChatMessage.NativeToolCall(
+                                        "call_0",
+                                        "talos.read_file",
+                                        java.util.Map.of("path", "index.html")),
+                                new ChatMessage.NativeToolCall(
+                                        "call_1",
+                                        "talos.read_file",
+                                        java.util.Map.of("path", "script.js")))),
+                        new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                                "call_2",
+                                "talos.read_file",
+                                java.util.Map.of("path", "styles.css")))),
+                        new LlmClient.StreamResult("""
+                                I apologize for the oversight. The button issue can be fixed by changing:
+
+                                ```js
+                                result.textC;
+                                ```
+
+                                to:
+
+                                ```js
+                                result.textC;
+                                ```
+
+                                After making this change, the button should work correctly.
+                                """, List.of())));
+                var ctx = Context.builder(new Config())
+                        .llm(llm)
+                        .sandbox(new dev.talos.core.security.Sandbox(ws, java.util.Map.of()))
+                        .toolRegistry(registry)
+                        .toolCallLoop(loop)
+                        .build();
+                var messages = new ArrayList<ChatMessage>();
+                messages.add(ChatMessage.system("sys"));
+                messages.add(ChatMessage.user(
+                        "Review the current static web page and say whether the button can work in a browser. "
+                                + "Do not inspect protected files."));
+
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, ws, ctx, new AssistantTurnExecutor.Options());
+
+                assertTrue(out.text().contains("Static web diagnostics found:"), out.text());
+                assertTrue(out.text().contains("script.js"), out.text());
+                assertTrue(out.text().contains("does not assign visible result text"), out.text());
+                assertFalse(out.text().contains("After making this change, the button should work correctly"),
+                        out.text());
+                assertFalse(out.text().contains("I apologize for the oversight"), out.text());
+            } finally {
+                try (var walk = Files.walk(ws)) {
+                    walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                        try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                    });
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("static button review is not grounded from unread linked script evidence")
+        void staticButtonReviewDoesNotGroundWhenLinkedScriptWasNotRead() throws Exception {
+            Path ws = Files.createTempDirectory("talos-static-button-unread-script-");
+            try {
+                Files.writeString(ws.resolve("index.html"), """
+                        <!DOCTYPE html>
+                        <html>
+                          <head><link rel="stylesheet" href="styles.css"></head>
+                          <body>
+                            <button class="cta-button" type="button">Run action</button>
+                            <p id="result">Waiting.</p>
+                            <script src="script.js"></script>
+                          </body>
+                        </html>
+                        """);
+                Files.writeString(ws.resolve("styles.css"), ".cta-button { color: red; }\n");
+                Files.writeString(ws.resolve("script.js"), "result.textC;\n");
+
+                var messages = new ArrayList<ChatMessage>();
+                messages.add(ChatMessage.system("sys"));
+                messages.add(ChatMessage.user(
+                        "Review the current static web page and say whether the button can work in a browser. "
+                                + "Do not inspect protected files."));
+
+                var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                        "unused", 1, 1,
+                        List.of("talos.read_file"),
+                        List.of(), 0, 0, false, 0,
+                        List.of("index.html"),
+                        0, 0, 0, 0);
+
+                String answer = "I only read index.html.";
+                String out = AssistantTurnExecutor.overrideReadOnlyWebDiagnosticsIfNeeded(
+                        answer, messages, loopResult, ws);
+
+                assertEquals(answer, out);
             } finally {
                 try (var walk = Files.walk(ws)) {
                     walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {

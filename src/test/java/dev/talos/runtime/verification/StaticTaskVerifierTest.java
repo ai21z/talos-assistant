@@ -809,6 +809,70 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void readOnlyWebDiagnosticsReportTruncatedButtonResultAssignment() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!DOCTYPE html>
+                <html>
+                  <head><link rel="stylesheet" href="styles.css"></head>
+                  <body>
+                    <button class="cta-button" type="button">Run action</button>
+                    <p id="result">Waiting.</p>
+                    <script src="script.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), ".cta-button { color: red; }\n");
+        Files.writeString(workspace.resolve("script.js"), """
+                const button = document.querySelector('.cta-button');
+                const result = document.querySelector('#result');
+
+                if (button && result) {
+                  button.addEventListener('click', () => {
+                    result.textC;
+                  });
+                }
+                """);
+
+        String out = StaticTaskVerifier.renderWebDiagnostics(workspace);
+
+        assertNotNull(out);
+        assertTrue(out.contains("Static web diagnostics found:"), out);
+        assertTrue(out.contains("script.js"), out);
+        assertTrue(out.contains("does not assign visible result text"), out);
+    }
+
+    @Test
+    void readOnlyWebDiagnosticsAcceptVisibleButtonResultAssignment() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!DOCTYPE html>
+                <html>
+                  <head><link rel="stylesheet" href="styles.css"></head>
+                  <body>
+                    <button class="cta-button" type="button">Run action</button>
+                    <p id="result">Waiting.</p>
+                    <script src="script.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), ".cta-button { color: red; }\n");
+        Files.writeString(workspace.resolve("script.js"), """
+                const button = document.querySelector('.cta-button');
+                const result = document.querySelector('#result');
+
+                if (button && result) {
+                  button.addEventListener('click', () => {
+                    result.textContent = 'Audit action complete.';
+                  });
+                }
+                """);
+
+        String out = StaticTaskVerifier.renderWebDiagnostics(workspace);
+
+        assertNotNull(out);
+        assertFalse(out.contains("does not assign visible result text"), out);
+    }
+
+    @Test
     void targetAwareWebSurfaceRefusesTooManyCandidateWebFiles() throws Exception {
         Files.writeString(workspace.resolve("README.md"), "# Public fixture\n");
         Files.writeString(workspace.resolve("config.json"), "{\"name\":\"t57-fixture\"}\n");
