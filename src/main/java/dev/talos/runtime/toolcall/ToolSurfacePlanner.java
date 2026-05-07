@@ -12,12 +12,20 @@ import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.ToolRiskLevel;
 
 import java.util.List;
+import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Plans the native tool surface for one turn from the current task contract,
  * execution phase, and tool operation metadata.
  */
 public final class ToolSurfacePlanner {
+    private static final Pattern SLASH_PATH_CANDIDATE = Pattern.compile(
+            "(?i)(?<![A-Za-z0-9_.\\\\/-])([A-Za-z0-9_.-]+(?:[\\\\/][A-Za-z0-9_.-]+)+)"
+                    + "(?=$|\\s|[`'\"),;:!?\\]])");
+    private static final Pattern FILE_EXTENSION = Pattern.compile("(?i).*\\.[A-Za-z0-9]{1,8}$");
+
     private ToolSurfacePlanner() {}
 
     public static Plan plan(
@@ -33,6 +41,14 @@ public final class ToolSurfacePlanner {
         }
         if (contract != null && contract.type() == TaskType.DIRECTORY_LISTING) {
             return select(registry, ToolSurfacePlanner::isDirectoryListingTool, "directory listing");
+        }
+        if (contract != null
+                && !contract.mutationAllowed()
+                && verifyOnlyDirectoryAwarePathCheck(contract)) {
+            return select(
+                    registry,
+                    descriptor -> isFileReadTool(descriptor) || isDirectoryListingTool(descriptor),
+                    "verify-only path check with directory targets");
         }
         if (contract != null
                 && !contract.mutationAllowed()
@@ -67,6 +83,10 @@ public final class ToolSurfacePlanner {
     public static List<String> defaultVisibleToolNames(TaskContract contract, ExecutionPhase phase) {
         if (contract == null || contract.type() == TaskType.SMALL_TALK) return List.of();
         if (contract.type() == TaskType.DIRECTORY_LISTING) return List.of("talos.list_dir");
+        if (!contract.mutationAllowed()
+                && verifyOnlyDirectoryAwarePathCheck(contract)) {
+            return List.of("talos.list_dir", "talos.read_file");
+        }
         if (contract.mutationAllowed() && phase == ExecutionPhase.APPLY) {
             var workspaceOperation = WorkspaceOperationIntent.detect(contract);
             if (workspaceOperation.isPresent()) {
@@ -174,6 +194,52 @@ public final class ToolSurfacePlanner {
         ToolOperationMetadata metadata = metadata(descriptor);
         if (metadata == null || metadata.capabilityKind() != CapabilityKind.INSPECT) return false;
         return metadata.pathRoles().containsValue(ToolOperationMetadata.PathRole.TARGET_DIRECTORY);
+    }
+
+    private static boolean verifyOnlyDirectoryAwarePathCheck(TaskContract contract) {
+        if (contract == null || contract.type() != TaskType.VERIFY_ONLY) return false;
+        String request = contract.originalUserRequest();
+        if (request == null || request.isBlank()) return false;
+        String lower = request.toLowerCase(Locale.ROOT);
+        if (containsExtensionlessSlashPath(request)) return true;
+        boolean mentionsDirectory = lower.contains("directory")
+                || lower.contains("directories")
+                || lower.contains("folder")
+                || lower.contains("folders");
+        boolean asksPathStatus = lower.contains("exists")
+                || lower.contains("exist")
+                || lower.contains("present")
+                || lower.contains("path");
+        return mentionsDirectory && asksPathStatus;
+    }
+
+    private static boolean containsExtensionlessSlashPath(String request) {
+        if (request == null || request.isBlank()) return false;
+        Matcher matcher = SLASH_PATH_CANDIDATE.matcher(request);
+        while (matcher.find()) {
+            String candidate = matcher.group(1);
+            if (candidate == null || candidate.isBlank()) continue;
+            String normalized = trimTrailingPathPunctuation(candidate.replace('\\', '/'));
+            int slash = normalized.lastIndexOf('/');
+            String last = slash < 0 ? normalized : normalized.substring(slash + 1);
+            if (last.isBlank()) continue;
+            if (!FILE_EXTENSION.matcher(last).matches()) return true;
+        }
+        return false;
+    }
+
+    private static String trimTrailingPathPunctuation(String value) {
+        if (value == null || value.isBlank()) return "";
+        int end = value.length();
+        while (end > 0) {
+            char c = value.charAt(end - 1);
+            if (c == '.' || c == ',' || c == ';' || c == ':' || c == '!' || c == '?') {
+                end--;
+                continue;
+            }
+            break;
+        }
+        return value.substring(0, end);
     }
 
     private static boolean isFileReadTool(ToolDescriptor descriptor) {

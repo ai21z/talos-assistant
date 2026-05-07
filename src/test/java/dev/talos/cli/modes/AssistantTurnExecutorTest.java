@@ -1048,6 +1048,49 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void verifyOnlyDirectoryPathSummaryOverridesUngroundedDirectoryContentClaim(@TempDir Path workspace)
+                throws Exception {
+            Files.createDirectories(workspace.resolve("archive"));
+            Files.createDirectories(workspace.resolve("copies"));
+            Files.createDirectories(workspace.resolve("scratch/nested/reports"));
+            Files.writeString(workspace.resolve("archive/readme-renamed.md"), "# Archive Readme\n");
+            Files.writeString(workspace.resolve("copies/readme-final.md"), "# Final Copy\n");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ListDirTool());
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 8);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\"archive\"}}\n"
+                                    + "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\"copies\"}}\n"
+                                    + "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\"scratch/nested/reports\"}}\n"
+                                    + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"archive/readme-renamed.md\"}}\n"
+                                    + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"copies/readme-final.md\"}}",
+                            "Verified paths: scratch/nested/reports exists and contains files, not shown here.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Verify the final workspace paths for archive/readme-renamed.md, "
+                            + "copies/readme-final.md, and scratch/nested/reports. Do not edit files."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains("archive/readme-renamed.md: file exists"), out.text());
+            assertTrue(out.text().contains("copies/readme-final.md: file exists"), out.text());
+            assertTrue(out.text().contains("scratch/nested/reports: directory exists and is empty"), out.text());
+            assertFalse(out.text().contains("contains files"), out.text());
+            assertFalse(out.text().contains("not shown here"), out.text());
+        }
+
+        @Test
         void explicitReadRequestWithZeroToolsDoesNotCompleteAsOrdinaryAnswer(@TempDir Path workspace)
                 throws Exception {
             Files.writeString(workspace.resolve("README.md"), "# Project\nActual read content.\n");

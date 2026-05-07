@@ -126,10 +126,31 @@ public final class CurrentTurnCapabilityFrame {
             case NONE, UNKNOWN -> frame.append("""
                     Follow the visible tool surface and task contract.
                     Do not claim unavailable workspace capabilities that the runtime has exposed.""");
-        }
+                }
         appendReadOnlyProposalGroundingGuidance(frame, contract, mutationAllowed);
+        appendDirectoryAwareVerificationGuidance(frame, contract, visibleTools);
         frame.append('\n').append(evidenceGuidance(evidence));
         return frame.toString();
+    }
+
+    private static void appendDirectoryAwareVerificationGuidance(
+            StringBuilder frame,
+            TaskContract contract,
+            List<String> visibleTools
+    ) {
+        if (contract == null || contract.type() != TaskType.VERIFY_ONLY) return;
+        if (visibleTools == null
+                || !visibleTools.contains("talos.list_dir")
+                || !visibleTools.contains("talos.read_file")) {
+            return;
+        }
+        frame.append("""
+
+                [DirectoryAwareVerification]
+                Use talos.list_dir for directory paths.
+                Use talos.read_file for file paths.
+                A successful talos.list_dir result, including "(empty directory)", is directory existence evidence.
+                Do not call mutating workspace operation tools for verification-only path checks.""");
     }
 
     private static void appendReadOnlyProposalGroundingGuidance(
