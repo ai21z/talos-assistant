@@ -169,9 +169,13 @@ class AssistantTurnExecutorMutationRetryToolSurfaceTest {
         assertTrue(retryPrompt.contains("[MutationRetryCapability]"), retryPrompt);
         assertTrue(retryPrompt.contains("obligation: CONDITIONAL_REVIEW_FIX"), retryPrompt);
         assertTrue(retryPrompt.contains("Review the BMI calculator you just created"), retryPrompt);
+        assertFalse(retryPrompt.contains("previous model response did not satisfy"),
+                "backend retry payload should not include redundant failure-summary prose: " + retryPrompt);
         assertFalse(retryPrompt.contains("If you have not inspected the relevant files yet"), retryPrompt);
         assertFalse(retryPrompt.contains("The runtime handles tool invocation, approval"), retryPrompt);
         assertTrue(retryPrompt.length() < 2_500, "retry prompt was too large: " + retryPrompt.length());
+        assertTrue(requestPayloadChars(retry) < 3_000,
+                "retry payload including tool schemas was too large: " + requestPayloadChars(retry));
 
         ToolSpec edit = retry.tools.stream()
                 .filter(tool -> "talos.edit_file".equals(tool.name()))
@@ -422,6 +426,20 @@ class AssistantTurnExecutorMutationRetryToolSurfaceTest {
                 : request.messages.stream()
                 .map(message -> message.content() == null ? "" : message.content())
                 .reduce("", (left, right) -> left + "\n" + right);
+    }
+
+    private static int requestPayloadChars(ChatRequest request) {
+        if (request == null) return 0;
+        int total = joinedMessageContent(request).length();
+        if (request.tools != null) {
+            for (ToolSpec tool : request.tools) {
+                if (tool == null) continue;
+                total += tool.name() == null ? 0 : tool.name().length();
+                total += tool.description() == null ? 0 : tool.description().length();
+                total += tool.parametersSchemaJson() == null ? 0 : tool.parametersSchemaJson().length();
+            }
+        }
+        return total;
     }
 
     private static Config engineConfig() {

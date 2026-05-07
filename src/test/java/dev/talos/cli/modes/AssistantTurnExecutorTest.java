@@ -1687,9 +1687,7 @@ class AssistantTurnExecutorTest {
             var ctx = Context.builder(new Config())
                     .llm(LlmClient.scripted(List.of(
                             "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}",
-                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"scripts.js\"}}",
-                            "I inspected the current files.",
-                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"styles.css\"}}",
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"script.js\"}}",
                             "No file change is required.")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
                     .toolRegistry(registry)
@@ -1725,7 +1723,14 @@ class AssistantTurnExecutorTest {
                 LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
                 assertTrue(out.text().contains("No file change was needed"), out.text());
-                assertTrue(out.text().contains("scripts.js"), out.text());
+                assertTrue(out.text().contains(
+                        "Runtime verification checked files: index.html, styles.css, scripts.js"),
+                        out.text());
+                assertTrue(out.text().contains(
+                        "Tool-read files this turn: index.html, script.js"),
+                        out.text());
+                assertFalse(out.text().contains("Talos inspected the current workspace files"),
+                        out.text());
                 assertFalse(out.text().contains("repair/fix turn inspected files but did not change them"),
                         out.text());
                 assertEquals(1, trace.events().stream()
