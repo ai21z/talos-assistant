@@ -5873,6 +5873,192 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        @DisplayName("static button review continues once to read linked script in full audit fixture")
+        void staticButtonReviewReadsLinkedScriptWhenFullFixtureSkipsPrimaryRetry() throws Exception {
+            Path ws = Files.createTempDirectory("talos-static-button-linked-script-continuation-");
+            try {
+                Files.writeString(ws.resolve("README.md"), "# Audit fixture\n");
+                Files.writeString(ws.resolve("notes.md"), "Private note marker.\n");
+                Files.writeString(ws.resolve("config.json"), "{\"project\":\"audit\"}\n");
+                Files.writeString(ws.resolve("report.docx"), "fake unsupported binary payload");
+                Files.writeString(ws.resolve("index.html"), """
+                        <!DOCTYPE html>
+                        <html>
+                          <head><link rel="stylesheet" href="styles.css"></head>
+                          <body>
+                            <button class="cta-button" type="button">Run action</button>
+                            <p id="result">Waiting.</p>
+                            <script src="script.js"></script>
+                          </body>
+                        </html>
+                        """);
+                Files.writeString(ws.resolve("styles.css"), ".cta-button { color: red; }\n");
+                Files.writeString(ws.resolve("script.js"), """
+                        const button = document.querySelector('.cta-button');
+                        const result = document.querySelector('#result');
+
+                        if (button && result) {
+                          button.addEventListener('click', () => {
+                            result.textC;
+                          });
+                        }
+                        """);
+
+                var registry = new dev.talos.tools.ToolRegistry();
+                registry.register(new dev.talos.tools.impl.ReadFileTool());
+                var processor = new dev.talos.runtime.TurnProcessor(
+                        null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+                var loop = new dev.talos.runtime.ToolCallLoop(processor, 6);
+                var llm = ScriptedNativeLlmClient.of(List.of(
+                        new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                                "call_0",
+                                "talos.read_file",
+                                java.util.Map.of("path", "index.html")))),
+                        new LlmClient.StreamResult("Yes, the button will work in a browser.", List.of()),
+                        new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                                "call_1",
+                                "talos.read_file",
+                                java.util.Map.of("path", "script.js")))),
+                        new LlmClient.StreamResult("""
+                                After reading the script, the button works correctly and is ready to use.
+                                """, List.of())));
+                var ctx = Context.builder(new Config())
+                        .llm(llm)
+                        .sandbox(new dev.talos.core.security.Sandbox(ws, java.util.Map.of()))
+                        .toolRegistry(registry)
+                        .toolCallLoop(loop)
+                        .build();
+                var messages = new ArrayList<ChatMessage>();
+                messages.add(ChatMessage.system("sys"));
+                messages.add(ChatMessage.user(
+                        "Review the current static web page and say whether the button can work in a browser. "
+                                + "Do not inspect protected files."));
+
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, ws, ctx, new AssistantTurnExecutor.Options());
+
+                assertTrue(out.text().contains("Static web diagnostics found:"), out.text());
+                assertTrue(out.text().contains("script.js"), out.text());
+                assertTrue(out.text().contains("does not assign visible result text"), out.text());
+                assertFalse(out.text().contains("ready to use"), out.text());
+                assertFalse(out.text().contains("button works correctly"), out.text());
+            } finally {
+                try (var walk = Files.walk(ws)) {
+                    walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                        try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                    });
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("linked script inspect continuation ignores protected and external scripts")
+        void linkedScriptInspectContinuationIgnoresProtectedAndExternalScripts() throws Exception {
+            Path ws = Files.createTempDirectory("talos-static-button-linked-script-safe-targets-");
+            try {
+                Files.writeString(ws.resolve("index.html"), """
+                        <!DOCTYPE html>
+                        <html>
+                          <body>
+                            <script src="https://cdn.example.invalid/app.js"></script>
+                            <script src="//cdn.example.invalid/other.js"></script>
+                            <script src=".env.secret.js"></script>
+                            <script src="script.js"></script>
+                          </body>
+                        </html>
+                        """);
+                Files.writeString(ws.resolve(".env.secret.js"), "const secret = 'protected';\n");
+                Files.writeString(ws.resolve("script.js"), "console.log('public');\n");
+                var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                        "unused", 1, 1,
+                        List.of("talos.read_file"),
+                        List.of(), 0, 0, false, 0,
+                        List.of("index.html"),
+                        0, 0, 0, 0,
+                        List.of(new dev.talos.runtime.ToolCallLoop.ToolOutcome(
+                                "talos.read_file",
+                                "index.html",
+                                true,
+                                false,
+                                false,
+                                "read index.html",
+                                "")));
+
+                List<String> missing = AssistantTurnExecutor.missingInspectReads(ws, loopResult);
+
+                assertEquals(List.of("script.js"), missing);
+            } finally {
+                try (var walk = Files.walk(ws)) {
+                    walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                        try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                    });
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("linked script continuation failure keeps evidence-incomplete containment")
+        void linkedScriptContinuationNoToolRetryKeepsEvidenceIncompleteContainment() throws Exception {
+            Path ws = Files.createTempDirectory("talos-static-button-linked-script-no-tool-");
+            try {
+                Files.writeString(ws.resolve("README.md"), "# Audit fixture\n");
+                Files.writeString(ws.resolve("notes.md"), "Private note marker.\n");
+                Files.writeString(ws.resolve("config.json"), "{\"project\":\"audit\"}\n");
+                Files.writeString(ws.resolve("report.docx"), "fake unsupported binary payload");
+                Files.writeString(ws.resolve("index.html"), """
+                        <!DOCTYPE html>
+                        <html>
+                          <head><link rel="stylesheet" href="styles.css"></head>
+                          <body>
+                            <button class="cta-button" type="button">Run action</button>
+                            <p id="result">Waiting.</p>
+                            <script src="script.js"></script>
+                          </body>
+                        </html>
+                        """);
+                Files.writeString(ws.resolve("styles.css"), ".cta-button { color: red; }\n");
+                Files.writeString(ws.resolve("script.js"), "result.textC;\n");
+
+                var registry = new dev.talos.tools.ToolRegistry();
+                registry.register(new dev.talos.tools.impl.ReadFileTool());
+                var processor = new dev.talos.runtime.TurnProcessor(
+                        null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+                var loop = new dev.talos.runtime.ToolCallLoop(processor, 6);
+                var llm = ScriptedNativeLlmClient.of(List.of(
+                        new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                                "call_0",
+                                "talos.read_file",
+                                java.util.Map.of("path", "index.html")))),
+                        new LlmClient.StreamResult("Yes, the button will work in a browser.", List.of()),
+                        new LlmClient.StreamResult("No more reads are needed. The page works.", List.of())));
+                var ctx = Context.builder(new Config())
+                        .llm(llm)
+                        .sandbox(new dev.talos.core.security.Sandbox(ws, java.util.Map.of()))
+                        .toolRegistry(registry)
+                        .toolCallLoop(loop)
+                        .build();
+                var messages = new ArrayList<ChatMessage>();
+                messages.add(ChatMessage.system("sys"));
+                messages.add(ChatMessage.user(
+                        "Review the current static web page and say whether the button can work in a browser. "
+                                + "Do not inspect protected files."));
+
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, ws, ctx, new AssistantTurnExecutor.Options());
+
+                assertTrue(out.text().contains("[Evidence incomplete"), out.text());
+                assertTrue(out.text().contains("linked script source target(s): script.js"), out.text());
+                assertFalse(out.text().contains("Static web diagnostics found:"), out.text());
+            } finally {
+                try (var walk = Files.walk(ws)) {
+                    walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                        try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                    });
+                }
+            }
+        }
+
+        @Test
         @DisplayName("static button review is not grounded from unread linked script evidence")
         void staticButtonReviewDoesNotGroundWhenLinkedScriptWasNotRead() throws Exception {
             Path ws = Files.createTempDirectory("talos-static-button-unread-script-");

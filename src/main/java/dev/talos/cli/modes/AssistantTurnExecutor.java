@@ -24,8 +24,10 @@ import dev.talos.runtime.policy.ConditionalReviewFixPolicy;
 import dev.talos.runtime.policy.ConversationBoundaryPolicy;
 import dev.talos.runtime.policy.CurrentTurnCapabilityFrame;
 import dev.talos.runtime.policy.EvidenceObligation;
+import dev.talos.runtime.policy.EvidenceObligationVerifier;
 import dev.talos.runtime.policy.EvidenceGate;
 import dev.talos.runtime.policy.ProviderRequestControlPolicy;
+import dev.talos.runtime.policy.ProtectedPathPolicy;
 import dev.talos.runtime.policy.ResponseObligationVerifier;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -3142,6 +3144,19 @@ public final class AssistantTurnExecutor {
                 : StaticTaskVerifier.missingPrimaryReads(workspace, loopResult.readPaths());
     }
 
+    static List<String> missingInspectReads(Path workspace, ToolCallLoop.LoopResult loopResult) {
+        if (loopResult == null) return List.of();
+        LinkedHashSet<String> missing = new LinkedHashSet<>(missingPrimaryReads(workspace, loopResult));
+        for (String target : EvidenceObligationVerifier.missingLinkedScriptReadTargets(
+                workspace, loopResult.toolOutcomes())) {
+            if (target == null || target.isBlank()) continue;
+            if (ProtectedPathPolicy.classify(workspace, target).protectedPath()) continue;
+            String normalized = ToolCallSupport.normalizePath(target);
+            if (!normalized.isBlank()) missing.add(normalized);
+        }
+        return List.copyOf(missing);
+    }
+
     static InspectRetryResult inspectCompletenessRetryIfNeeded(
             String answer, List<ChatMessage> messages,
             ToolCallLoop.LoopResult loopResult,
@@ -3173,7 +3188,7 @@ public final class AssistantTurnExecutor {
         if (!looksLikeInspectFirstRequest(userRequest) && !requiresWorkspaceEvidence(contract)) {
             return new InspectRetryResult(answer, null, null);
         }
-        List<String> missing = missingPrimaryReads(workspace, loopResult);
+        List<String> missing = missingInspectReads(workspace, loopResult);
         if (missing.isEmpty()) return new InspectRetryResult(answer, null, null);
         if (loopResult.mutatingToolSuccesses() > 0) return new InspectRetryResult(answer, null, null);
         if (answer.isBlank()) return new InspectRetryResult(answer, null, null);
@@ -3481,7 +3496,7 @@ public final class AssistantTurnExecutor {
         if (!WebDiagnosticIntent.matchesReadOnlyRequest(userRequest)) return answer;
         if (!readStaticWebDiagnosticSurface(loopResult)) return answer;
 
-        String grounded = StaticTaskVerifier.renderWebDiagnostics(workspace);
+        String grounded = StaticTaskVerifier.renderWebDiagnostics(workspace, loopResult.readPaths());
         return grounded == null || grounded.isBlank() ? answer : grounded;
     }
 

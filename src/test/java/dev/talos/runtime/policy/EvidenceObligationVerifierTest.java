@@ -4,6 +4,8 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.tools.ToolError;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Set;
 
@@ -250,5 +252,57 @@ class EvidenceObligationVerifierTest {
                         "document.querySelector('.missing-button')", "")));
 
         assertEquals(EvidenceObligationVerifier.Status.SATISFIED, result.status());
+    }
+
+    @Test
+    void missingLinkedScriptReadTargetsNamesExistingUnreadLocalScripts() throws Exception {
+        Path workspace = Files.createTempDirectory("talos-linked-script-evidence-");
+        try {
+            Files.writeString(workspace.resolve("index.html"),
+                    "<script src=\"script.js?v=1#main\"></script>");
+            Files.writeString(workspace.resolve("script.js"), "console.log('public');\n");
+
+            List<String> missing = EvidenceObligationVerifier.missingLinkedScriptReadTargets(
+                    workspace,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.read_file", "index.html", true, false, false,
+                            "read index.html", "")));
+
+            assertEquals(List.of("script.js"), missing);
+        } finally {
+            try (var walk = Files.walk(workspace)) {
+                walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
+    void missingLinkedScriptReadTargetsEmptyAfterLinkedScriptRead() throws Exception {
+        Path workspace = Files.createTempDirectory("talos-linked-script-evidence-satisfied-");
+        try {
+            Files.writeString(workspace.resolve("index.html"),
+                    "<script src=\"script.js\"></script>");
+            Files.writeString(workspace.resolve("script.js"), "console.log('public');\n");
+
+            List<String> missing = EvidenceObligationVerifier.missingLinkedScriptReadTargets(
+                    workspace,
+                    List.of(
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.read_file", "index.html", true, false, false,
+                                    "read index.html", ""),
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.read_file", "./script.js", true, false, false,
+                                    "read script.js", "")));
+
+            assertEquals(List.of(), missing);
+        } finally {
+            try (var walk = Files.walk(workspace)) {
+                walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
     }
 }

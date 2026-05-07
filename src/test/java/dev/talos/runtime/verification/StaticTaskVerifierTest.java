@@ -1151,6 +1151,47 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void readOnlyWebDiagnosticsUseReadPathHintsInFullAuditFixture() throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "# Audit fixture\n");
+        Files.writeString(workspace.resolve("notes.md"), "Private note marker.\n");
+        Files.writeString(workspace.resolve("config.json"), "{\"project\":\"audit\"}\n");
+        Files.writeString(workspace.resolve("report.docx"), "fake unsupported binary payload");
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                <head>
+                  <meta charset="utf-8">
+                  <link rel="stylesheet" href="styles.css">
+                </head>
+                <body>
+                  <button class="cta-button" type="button">Run action</button>
+                  <p id="result">Waiting.</p>
+                  <script src="script.js"></script>
+                </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), ".cta-button { color: red; }\n");
+        Files.writeString(workspace.resolve("script.js"), """
+                const button = document.querySelector('.cta-button');
+                const result = document.querySelector('#result');
+                if (button && result) {
+                  button.addEventListener('click', () => {
+                    result.textC;
+                  });
+                }
+                """);
+
+        String rendered = StaticTaskVerifier.renderWebDiagnostics(
+                workspace,
+                List.of("index.html", "script.js"));
+
+        assertNotNull(rendered);
+        assertTrue(rendered.contains("Static web diagnostics found:"), rendered);
+        assertTrue(rendered.contains("script.js"), rendered);
+        assertTrue(rendered.contains("does not assign visible result text"), rendered);
+    }
+
+    @Test
     void expectedTargetFromContractMustBeMutated() throws Exception {
         Files.writeString(workspace.resolve("index.html"), "<html><body><main></main></body></html>");
         Files.writeString(workspace.resolve("style.css"), "body { color: white; }");
