@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LlmClientPromptDebugCaptureTest {
@@ -103,6 +104,69 @@ class LlmClientPromptDebugCaptureTest {
         assertEquals(ToolChoiceMode.REQUIRED, snapshot.controls().toolChoice());
         assertEquals(List.of("action-obligation:MUTATING_TOOL_REQUIRED"),
                 snapshot.controls().debugTags());
+    }
+
+    @Test
+    void backgroundPromptDebugCaptureDoesNotOverwriteLatestUserFacingCapture() {
+        PromptDebugSnapshot userFacing = PromptDebugSnapshot.fromProviderBody(
+                new ChatRequest(
+                        "llama_cpp",
+                        "qwen2.5-coder:14b",
+                        "",
+                        "",
+                        List.of(),
+                        null,
+                        List.of(ChatMessage.user("Which file imports scripts.js?")),
+                        List.of(writeSpec())),
+                true,
+                "{\"messages\":[{\"role\":\"user\",\"content\":\"Which file imports scripts.js?\"}]}",
+                "COMPAT_CHAT_HTTP_BODY");
+        PromptDebugSnapshot background = PromptDebugSnapshot.fromProviderBody(
+                new ChatRequest(
+                        "llama_cpp",
+                        "qwen2.5-coder:14b",
+                        "You are a conversation summarizer for a developer CLI tool.",
+                        "Recent conversation turns to incorporate:",
+                        List.of(),
+                        null,
+                        List.of(),
+                        List.of(),
+                        new ChatRequestControls(
+                                ToolChoiceMode.AUTO,
+                                "",
+                                ResponseFormatMode.TEXT,
+                                "",
+                                List.of("prompt-debug:background-maintenance"))),
+                true,
+                "{\"system\":\"You are a conversation summarizer for a developer CLI tool.\"}",
+                "COMPAT_CHAT_HTTP_BODY");
+
+        PromptDebugCapture.record(userFacing);
+        PromptDebugCapture.record(background);
+
+        PromptDebugSnapshot latest = PromptDebugCapture.latest().orElseThrow();
+        assertEquals("COMPAT_CHAT_HTTP_BODY", latest.stage());
+        assertTrue(latest.messages().stream()
+                .anyMatch(message -> message.content().contains("Which file imports scripts.js?")));
+        assertFalse(latest.controls().debugTags().contains("prompt-debug:background-maintenance"));
+        assertTrue(PromptDebugCapture.latestRecorded().orElseThrow()
+                .controls().debugTags().contains("prompt-debug:background-maintenance"));
+    }
+
+    @Test
+    void chatPlainSummarizerDoesNotOverwriteLatestUserFacingPromptDebugCapture() {
+        RecordingResolver resolver = new RecordingResolver();
+        LlmClient client = new LlmClient(engineConfig(), resolver);
+
+        client.chatFull(List.of(ChatMessage.user("List current files.")), 5_000L);
+        client.chatPlain(
+                "You are a conversation summarizer for a developer CLI tool.",
+                "Recent conversation turns to incorporate:");
+
+        PromptDebugSnapshot latest = PromptDebugCapture.latest().orElseThrow();
+        assertTrue(latest.messages().stream()
+                .anyMatch(message -> message.content().contains("List current files.")));
+        assertFalse(latest.controls().debugTags().contains("prompt-debug:background-maintenance"));
     }
 
     @Test

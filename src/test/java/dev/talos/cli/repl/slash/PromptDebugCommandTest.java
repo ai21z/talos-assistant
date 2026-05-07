@@ -197,6 +197,63 @@ class PromptDebugCommandTest {
         }
     }
 
+    @Test
+    void lastAndSaveUseUserFacingCaptureAfterBackgroundMaintenanceCapture() throws Exception {
+        PromptDebugCapture.record(PromptDebugSnapshot.fromProviderBody(
+                new ChatRequest(
+                        "llama_cpp",
+                        "qwen2.5-coder:14b",
+                        "",
+                        "",
+                        List.of(),
+                        Duration.ofSeconds(5),
+                        List.of(ChatMessage.user("Audited user prompt")),
+                        List.of()),
+                false,
+                "{\"messages\":[{\"role\":\"user\",\"content\":\"Audited user prompt\"}]}",
+                "COMPAT_CHAT_HTTP_BODY"));
+        PromptDebugCapture.record(PromptDebugSnapshot.fromProviderBody(
+                new ChatRequest(
+                        "llama_cpp",
+                        "qwen2.5-coder:14b",
+                        "You are a conversation summarizer for a developer CLI tool.",
+                        "Recent conversation turns to incorporate:",
+                        List.of(),
+                        Duration.ofSeconds(5),
+                        List.of(),
+                        List.of(),
+                        new ChatRequestControls(
+                                ToolChoiceMode.AUTO,
+                                "",
+                                ResponseFormatMode.TEXT,
+                                "",
+                                List.of(PromptDebugCapture.BACKGROUND_MAINTENANCE_TAG))),
+                false,
+                "{\"system\":\"You are a conversation summarizer for a developer CLI tool.\"}",
+                "COMPAT_CHAT_HTTP_BODY"));
+        PromptDebugCommand command = new PromptDebugCommand();
+
+        Result lastResult = command.execute("last", ctx);
+
+        Result.TrustedInfo lastInfo = assertInstanceOf(Result.TrustedInfo.class, lastResult);
+        assertTrue(lastInfo.text.contains("Audited user prompt"), lastInfo.text);
+        assertFalse(lastInfo.text.contains("conversation summarizer"), lastInfo.text);
+
+        Result saveResult = command.execute("save", ctx);
+
+        Result.TrustedInfo saveInfo = assertInstanceOf(Result.TrustedInfo.class, saveResult);
+        Path providerBody = savedPath(saveInfo.text, "Saved provider body JSON to: ");
+        Path render = savedPath(saveInfo.text, "Saved prompt debug render to: ");
+        try {
+            String savedJson = Files.readString(providerBody);
+            assertTrue(savedJson.contains("Audited user prompt"), savedJson);
+            assertFalse(savedJson.contains("conversation summarizer"), savedJson);
+        } finally {
+            Files.deleteIfExists(providerBody);
+            Files.deleteIfExists(render);
+        }
+    }
+
     private static PromptDebugSnapshot protectedToolResultSnapshot() {
         var envCall = new ChatMessage.NativeToolCall(
                 "call-env",

@@ -9,8 +9,10 @@ import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.PromptDebugCapture;
 import dev.talos.spi.types.PromptDebugSnapshot;
+import dev.talos.spi.types.ResponseFormatMode;
 import dev.talos.spi.types.TokenChunk;
 import dev.talos.spi.types.ToolSpec;
+import dev.talos.spi.types.ToolChoiceMode;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -484,10 +486,29 @@ public final class LlmClient implements AutoCloseable {
         List<Map<String,String>> sn = sanitizeSnippets(snippets);
 
         return LlmRetryExecutor.execute(MAX_RETRIES, () -> {
-            ChatRequest req = new ChatRequest(backend, model, sys, usr, sn, timeout, List.of(), toolSpecs);
+            ChatRequest req = new ChatRequest(
+                    backend, model, sys, usr, sn, timeout, List.of(), toolSpecs,
+                    promptDebugControlsForPlainCall(sys));
             PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(req, onChunk != null));
             return assembleFromStream(engineResolver.chatStream(req), onChunk, cancelled);
         });
+    }
+
+    private static ChatRequestControls promptDebugControlsForPlainCall(String systemPrompt) {
+        if (isConversationSummarizerPrompt(systemPrompt)) {
+            return new ChatRequestControls(
+                    ToolChoiceMode.AUTO,
+                    "",
+                    ResponseFormatMode.TEXT,
+                    "",
+                    List.of(PromptDebugCapture.BACKGROUND_MAINTENANCE_TAG));
+        }
+        return ChatRequestControls.defaults();
+    }
+
+    private static boolean isConversationSummarizerPrompt(String systemPrompt) {
+        return systemPrompt != null
+                && systemPrompt.contains("conversation summarizer for a developer CLI tool");
     }
 
     private static List<Map<String,String>> sanitizeSnippets(List<Map<String,String>> xs) {
