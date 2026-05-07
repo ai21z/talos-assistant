@@ -993,6 +993,74 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void verifiedChangedFilesSummaryUsesWorkspaceOperationDestinationsWhenPathHintsAreSources() throws Exception {
+        Path ws = Files.createTempDirectory("talos-workspace-operation-destination-summary-");
+        try {
+            Files.createDirectories(ws.resolve("archive"));
+            Files.writeString(ws.resolve("notes.md"), "notes\n");
+            Files.writeString(ws.resolve("archive/final-notes.md"), "notes\n");
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Copy notes.md to notes-copy.md, move notes-copy.md to archive/notes-copy.md, "
+                            + "then rename archive/notes-copy.md to final-notes.md."));
+
+            WorkspaceOperationPlan copyPlan = WorkspaceOperationPlan.copyPath(
+                    "notes.md",
+                    "notes-copy.md",
+                    WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS,
+                    false);
+            WorkspaceOperationPlan movePlan = WorkspaceOperationPlan.movePath(
+                    "notes-copy.md",
+                    "archive/notes-copy.md",
+                    WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS);
+            WorkspaceOperationPlan renamePlan = WorkspaceOperationPlan.batch(
+                    WorkspaceOperationPlan.OperationKind.RENAME_PATH,
+                    List.of(
+                            WorkspaceOperationPlan.PathEffect.source(
+                                    "archive/notes-copy.md", true, WorkspaceOperationPlan.OperationKind.RENAME_PATH),
+                            WorkspaceOperationPlan.PathEffect.destination(
+                                    "archive/final-notes.md", true, WorkspaceOperationPlan.OperationKind.RENAME_PATH)),
+                    dev.talos.tools.ToolRiskLevel.WRITE,
+                    true,
+                    WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS,
+                    false,
+                    "Rename archive/notes-copy.md to archive/final-notes.md.",
+                    "Rename: archive/notes-copy.md -> archive/final-notes.md");
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Done.", 1, 3,
+                    List.of("talos.copy_path", "talos.move_path", "talos.rename_path"),
+                    List.of(), 3, 0, false, 3, List.of(),
+                    0, 0, 0, 0,
+                    List.of(
+                            workspaceOutcome("talos.copy_path", "notes.md", true,
+                                    "Copied notes.md -> notes-copy.md", "", "", copyPlan),
+                            workspaceOutcome("talos.move_path", "notes-copy.md", true,
+                                    "Moved notes-copy.md -> archive/notes-copy.md", "", "", movePlan),
+                            workspaceOutcome("talos.rename_path", "archive/notes-copy.md", true,
+                                    "Renamed archive/notes-copy.md -> archive/final-notes.md", "", "", renamePlan)
+                    ));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "Done.", messages, loopResult, ws, 0);
+
+            assertTrue(outcome.finalAnswer().contains(
+                            "Updated 3 files: notes-copy.md, archive/notes-copy.md, archive/final-notes.md."),
+                    outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("Updated 3 files: notes.md"),
+                    outcome.finalAnswer());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void selectorGroundedOverrideIsClassifiedAsGrounded() throws Exception {
         Path ws = Files.createTempDirectory("talos-execution-outcome-selector-");
         try {

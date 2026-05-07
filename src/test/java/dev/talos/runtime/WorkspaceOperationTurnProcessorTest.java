@@ -12,13 +12,16 @@ import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.ToolResult;
+import dev.talos.tools.impl.CopyPathTool;
 import dev.talos.tools.impl.MovePathTool;
+import dev.talos.tools.impl.RenamePathTool;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -92,6 +95,61 @@ class WorkspaceOperationTurnProcessorTest {
         assertEquals(0, approvals.get(), "protected mutation must be denied before approval");
         assertTrue(Files.exists(workspace.resolve("public.txt")));
         assertFalse(Files.exists(workspace.resolve(".env")));
+    }
+
+    @Test
+    void auditRecordsWorkspaceOperationDestinationPaths(@TempDir Path temp) throws Exception {
+        Path workspace = temp.resolve("workspace");
+        Files.createDirectories(workspace);
+        Files.writeString(workspace.resolve("README.md"), "# Fixture\n");
+        Config config = config(false);
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new CopyPathTool());
+        registry.register(new MovePathTool());
+        registry.register(new RenamePathTool());
+        TurnProcessor processor = new TurnProcessor(
+                ModeController.defaultController(),
+                gateApproves(),
+                registry,
+                ApprovalPolicy.ALWAYS_ASK,
+                new CheckpointService(new FileBundleCheckpointStore(temp.resolve("checkpoints"))));
+        Context ctx = context(workspace, config);
+
+        TurnAuditCapture.begin();
+        try {
+            ToolResult copy = processor.executeTool(
+                    new Session(workspace, config),
+                    new ToolCall("talos.copy_path", Map.of(
+                            "from", "README.md",
+                            "to", "workspace-notes/readme-copy.md")),
+                    ctx);
+            ToolResult move = processor.executeTool(
+                    new Session(workspace, config),
+                    new ToolCall("talos.move_path", Map.of(
+                            "from", "workspace-notes/readme-copy.md",
+                            "to", "archive/readme-copy.md")),
+                    ctx);
+            ToolResult rename = processor.executeTool(
+                    new Session(workspace, config),
+                    new ToolCall("talos.rename_path", Map.of(
+                            "path", "archive/readme-copy.md",
+                            "new_name", "readme-renamed.md")),
+                    ctx);
+
+            TurnAudit audit = TurnAuditCapture.end();
+
+            assertTrue(copy.success(), copy.errorMessage());
+            assertTrue(move.success(), move.errorMessage());
+            assertTrue(rename.success(), rename.errorMessage());
+            assertEquals(
+                    List.of(
+                            "workspace-notes/readme-copy.md",
+                            "archive/readme-copy.md",
+                            "archive/readme-renamed.md"),
+                    audit.toolCalls().stream().map(TurnRecord.ToolCallSummary::pathHint).toList());
+        } finally {
+            if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
+        }
     }
 
     private static TurnProcessor processor(ApprovalGate gate, CheckpointService checkpointService) {

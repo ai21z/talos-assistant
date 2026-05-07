@@ -57,6 +57,11 @@ class WorkspaceOperationStaticVerifierTest {
                 {"name":"talos.rename_path","arguments":{"path":"archive/notes-copy.md","new_name":"final-notes.md"}}
                 """);
 
+        assertEquals(
+                List.of("notes-copy.md", "archive/notes-copy.md", "archive/final-notes.md"),
+                loopResult.toolOutcomes().stream().map(ToolCallLoop.ToolOutcome::pathHint).toList(),
+                "workspace operation outcomes should expose resulting changed paths, not source paths");
+
         assertTrue(Files.exists(workspace.resolve("notes.md")));
         assertFalse(Files.exists(workspace.resolve("notes-copy.md")));
         assertFalse(Files.exists(workspace.resolve("archive/notes-copy.md")));
@@ -76,6 +81,7 @@ class WorkspaceOperationStaticVerifierTest {
                 verification.facts().toString());
         assertTrue(verification.facts().stream().anyMatch(f -> f.contains("rename destination exists: archive/final-notes.md")),
                 verification.facts().toString());
+
     }
 
     @Test

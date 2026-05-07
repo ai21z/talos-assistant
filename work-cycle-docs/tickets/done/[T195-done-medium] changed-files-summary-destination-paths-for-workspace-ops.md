@@ -1,6 +1,6 @@
 # T195 - Changed-Files Summary Destination Paths For Workspace Operations
 
-Status: open
+Status: done
 Severity: medium
 
 ## Evidence
@@ -45,3 +45,16 @@ Out of scope:
 - No unresolved expected target is reported when the destination file exists and readback passed.
 - Existing write/edit summaries keep their current behavior.
 
+## Completion Notes
+
+- Added structured changed-path derivation to `WorkspaceOperationPlan`.
+- Tool-loop outcomes now expose resulting destination paths for copy, move, and rename operations.
+- Runtime audit records successful workspace operation destination paths so changed-files memory uses the final path.
+- Verified changed-files summaries prefer structured workspace-operation changed paths over source-oriented raw path hints.
+
+## Verification
+
+- `.\gradlew.bat test --tests dev.talos.runtime.verification.WorkspaceOperationStaticVerifierTest --tests dev.talos.runtime.WorkspaceOperationTurnProcessorTest --tests dev.talos.cli.modes.ExecutionOutcomeTest --no-daemon`
+- `.\gradlew.bat test --tests "dev.talos.runtime.workspace.*" --tests "dev.talos.runtime.verification.*WorkspaceOperation*" --tests dev.talos.runtime.WorkspaceOperationTurnProcessorTest --tests dev.talos.runtime.WorkspaceBatchTurnProcessorTest --tests dev.talos.cli.modes.ExecutionOutcomeTest --tests dev.talos.runtime.ActiveTaskContextUpdateListenerTest --tests "dev.talos.runtime.outcome.*" --no-daemon`
+- `.\gradlew.bat test --no-daemon`
+- `.\gradlew.bat build installDist --no-daemon`
