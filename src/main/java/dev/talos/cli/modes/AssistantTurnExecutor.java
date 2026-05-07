@@ -47,6 +47,7 @@ import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.PromptDebugCapture;
+import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.ToolError;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -1127,20 +1128,47 @@ public final class AssistantTurnExecutor {
             List<ChatMessage> messages,
             CurrentTurnPlan plan
     ) {
+        return chatFull(ctx, messages, plan, ctx.nativeToolSpecs());
+    }
+
+    private static LlmClient.StreamResult chatFull(
+            Context ctx,
+            List<ChatMessage> messages,
+            CurrentTurnPlan plan,
+            List<ToolSpec> requestToolSpecs
+    ) {
         return ctx.llm().chatFull(
                 messages,
-                ctx.nativeToolSpecs(),
-                chatControlsForTurn(ctx, plan));
+                requestToolSpecs,
+                chatControlsForTurn(ctx, plan, requestToolSpecsForControls(ctx, requestToolSpecs)));
     }
 
     private static ChatRequestControls chatControlsForTurn(Context ctx, CurrentTurnPlan plan) {
+        return chatControlsForTurn(
+                ctx,
+                plan,
+                ctx == null ? List.of() : ctx.nativeToolSpecs());
+    }
+
+    private static ChatRequestControls chatControlsForTurn(
+            Context ctx,
+            CurrentTurnPlan plan,
+            List<ToolSpec> requestToolSpecs
+    ) {
         boolean supportsRequired = ctx != null
                 && ctx.llm() != null
                 && ctx.llm().supportsRequiredToolChoice();
         return ProviderRequestControlPolicy.forTurn(
                 plan,
-                ctx == null ? List.of() : ctx.nativeToolSpecs(),
+                requestToolSpecs == null ? List.of() : requestToolSpecs,
                 supportsRequired);
+    }
+
+    private static List<ToolSpec> requestToolSpecsForControls(Context ctx, List<ToolSpec> requestToolSpecs) {
+        if (requestToolSpecs != null) return requestToolSpecs;
+        if (ctx != null && ctx.nativeToolSpecs() != null) return ctx.nativeToolSpecs();
+        if (ctx != null && ctx.llm() != null) return ctx.llm().getToolSpecs();
+        return List.of();
     }
 
     public static void injectTaskContractInstruction(List<ChatMessage> messages) {
@@ -2879,7 +2907,8 @@ public final class AssistantTurnExecutor {
                 priorMutationRequest)));
 
         try {
-            LlmClient.StreamResult retry = chatFull(ctx, messages);
+            List<ToolSpec> retryToolSpecs = mutationRetryToolSpecs(ctx, messages);
+            LlmClient.StreamResult retry = chatFull(ctx, messages, safePlan, retryToolSpecs);
             String retryText = retry.text() == null ? "" : retry.text();
 
             if (retry.hasToolCalls() || hasAnyTextToolCalls(retryText)) {
@@ -3003,6 +3032,26 @@ public final class AssistantTurnExecutor {
                 null,
                 null,
                 true);
+    }
+
+    private static List<ToolSpec> mutationRetryToolSpecs(Context ctx, List<ChatMessage> messages) {
+        List<ToolSpec> base = requestToolSpecsForControls(ctx, null);
+        if (base.isEmpty()) return base;
+        List<String> allowed = RepairPolicy.fullRewriteTargetsFromRepairContext(messages).isEmpty()
+                ? List.of("talos.write_file", "talos.edit_file")
+                : List.of("talos.write_file");
+        List<ToolSpec> narrowed = filterToolSpecs(base, allowed);
+        return narrowed.isEmpty() ? base : narrowed;
+    }
+
+    private static List<ToolSpec> filterToolSpecs(List<ToolSpec> specs, List<String> allowedNames) {
+        if (specs == null || specs.isEmpty() || allowedNames == null || allowedNames.isEmpty()) {
+            return List.of();
+        }
+        return specs.stream()
+                .filter(Objects::nonNull)
+                .filter(spec -> allowedNames.contains(spec.name()))
+                .toList();
     }
 
     private static boolean isRepairInspectionOnlyRetry(
