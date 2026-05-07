@@ -32,6 +32,11 @@ final class RegistryLlmEngineResolver implements LlmEngineResolver {
     }
 
     @Override
+    public Stream<TokenChunk> chatStreamNonStreaming(ChatRequest request) throws Exception {
+        return registry.engine().chatStreamNonStreaming(request);
+    }
+
+    @Override
     public void close() {
         registry.close();
     }

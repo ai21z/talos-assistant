@@ -855,60 +855,81 @@ public final class LlmClient implements AutoCloseable {
                     backend, model, "", "", List.of(), timeout, finalRequestMessages,
                     tools, finalRequestControls);
             PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(req, streamRequest));
-            // Try-with-resources ensures the token stream's onClose hook
-            // fires on every exit path (break, exception, normal return).
-            // For the Ollama transport that onClose closes the underlying
-            // BufferedReader → HTTP body → socket, so a cancelled or
-            // cap-truncated turn doesn't leave Ollama generating into a
-            // dead consumer.
-            //
-            // Async-close seam: as soon as the stream is open, register
-            // it in the shared activeStream ref so the watchdog thread
-            // (or the outer timeout/interrupt handler in the call budget)
-            // can close it from another thread. This is the only way to
-            // wake a worker blocked in a synchronous socket read —
-            // Thread.interrupt() alone cannot unblock the JDK HttpClient
-            // body-read on every platform. Cleared in the inner finally so
-            // a normal exit does not leave a stale reference that a
-            // subsequent watchdog tick could close.
-            try (java.util.stream.Stream<TokenChunk> stream = engineResolver.chatStream(req)) {
-                if (activeStream != null) activeStream.set(stream);
-                try {
-                    StringBuilder acc = new StringBuilder();
-                    List<ChatMessage.NativeToolCall> toolCalls = new ArrayList<>();
-                    int alreadyEmittedLen = 0;
-
-                    for (TokenChunk ch : (Iterable<TokenChunk>) stream::iterator) {
-                        if (cancelled != null && Boolean.TRUE.equals(cancelled.get())) break;
-                        if (ch == null || Boolean.TRUE.equals(ch.done())) break;
-
-                        if (ch.hasToolCalls()) {
-                            toolCalls.addAll(ch.toolCalls());
-                            continue;
-                        }
-
-                        String deltaRaw = Objects.toString(ch.text(), "");
-                        acc.append(deltaRaw);
-                        String noThink = Sanitize.stripThinkTags(acc.toString());
-                        String cleaned = Sanitize.sanitizeForOutputPreservingToolCalls(noThink);
-                        cleaned = Sanitize.hardTruncate(cleaned, safeCap());
-
-                        int already = Math.min(alreadyEmittedLen, cleaned.length());
-                        String emit = cleaned.substring(already);
-
-                        acc.setLength(0);
-                        acc.append(cleaned);
-                        alreadyEmittedLen = cleaned.length();
-
-                        if (onChunk != null && !emit.isEmpty()) onChunk.accept(emit);
-                        if (acc.length() >= safeCap()) break;
-                    }
-                    return new StreamResult(acc.toString(), toolCalls);
-                } finally {
-                    if (activeStream != null) activeStream.compareAndSet(stream, null);
+            try {
+                return consumeEngineStream(
+                        engineResolver.chatStream(req), activeStream, cancelled, onChunk);
+            } catch (EngineException.MalformedResponse malformed) {
+                if (!shouldRetryCompatToolArgumentsNonStreaming(malformed, req)) {
+                    throw malformed;
                 }
+                ChatRequest retryReq = new ChatRequest(
+                        req.backend, req.model, req.systemPrompt, req.userPrompt,
+                        req.snippets, req.timeout, req.messages, req.tools,
+                        withDebugTag(req.controls, "compat-tool-arguments-nonstream-retry"));
+                PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(retryReq, false));
+                return consumeEngineStream(
+                        engineResolver.chatStreamNonStreaming(retryReq), activeStream, cancelled, onChunk);
             }
         });
+    }
+
+    private StreamResult consumeEngineStream(java.util.stream.Stream<TokenChunk> stream,
+                                             AtomicReference<AutoCloseable> activeStream,
+                                             Supplier<Boolean> cancelled,
+                                             Consumer<String> onChunk) {
+        // Try-with-resources ensures the token stream's onClose hook fires on
+        // every exit path (break, exception, normal return). Registering the
+        // stream before iteration gives the watchdog a handle it can close if
+        // the worker blocks in a synchronous socket read.
+        try (stream) {
+            if (activeStream != null) activeStream.set(stream);
+            try {
+                StringBuilder acc = new StringBuilder();
+                List<ChatMessage.NativeToolCall> toolCalls = new ArrayList<>();
+                int alreadyEmittedLen = 0;
+
+                for (TokenChunk ch : (Iterable<TokenChunk>) stream::iterator) {
+                    if (cancelled != null && Boolean.TRUE.equals(cancelled.get())) break;
+                    if (ch == null || Boolean.TRUE.equals(ch.done())) break;
+
+                    if (ch.hasToolCalls()) {
+                        toolCalls.addAll(ch.toolCalls());
+                        continue;
+                    }
+
+                    String deltaRaw = Objects.toString(ch.text(), "");
+                    acc.append(deltaRaw);
+                    String noThink = Sanitize.stripThinkTags(acc.toString());
+                    String cleaned = Sanitize.sanitizeForOutputPreservingToolCalls(noThink);
+                    cleaned = Sanitize.hardTruncate(cleaned, safeCap());
+
+                    int already = Math.min(alreadyEmittedLen, cleaned.length());
+                    String emit = cleaned.substring(already);
+
+                    acc.setLength(0);
+                    acc.append(cleaned);
+                    alreadyEmittedLen = cleaned.length();
+
+                    if (onChunk != null && !emit.isEmpty()) onChunk.accept(emit);
+                    if (acc.length() >= safeCap()) break;
+                }
+                return new StreamResult(acc.toString(), toolCalls);
+            } finally {
+                if (activeStream != null) activeStream.compareAndSet(stream, null);
+            }
+        }
+    }
+
+    private static boolean shouldRetryCompatToolArgumentsNonStreaming(
+            EngineException.MalformedResponse malformed,
+            ChatRequest request) {
+        if (malformed == null || request == null) return false;
+        if (!"compat chat stream tool arguments".equals(malformed.context())) return false;
+        if (request.tools == null || request.tools.isEmpty()) return false;
+        ToolChoiceMode mode = request.controls == null
+                ? ToolChoiceMode.AUTO
+                : request.controls.toolChoice();
+        return mode == ToolChoiceMode.REQUIRED || mode == ToolChoiceMode.NAMED;
     }
 
     private List<ToolSpec> effectiveToolSpecs(List<ToolSpec> requestToolSpecs) {
