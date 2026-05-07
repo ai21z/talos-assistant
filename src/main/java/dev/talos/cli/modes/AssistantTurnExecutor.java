@@ -2878,6 +2878,22 @@ public final class AssistantTurnExecutor {
                         "retry response still had no write/edit tool calls");
                 return new MutationRetryResult(deterministic, 0, null, null, true);
             }
+        } catch (EngineException.ContextBudgetExceeded budget) {
+            String detail = ResponseObligationVerifier.contextBudgetRetrySkippedDetail(budget);
+            LOG.info("Skipping missing-mutation retry because it exceeded the local context budget.");
+            LocalTurnTraceCapture.warning("CONTEXT_BUDGET_RETRY_SKIPPED", detail);
+            LocalTurnTraceCapture.recordActionObligation(
+                    obligation.name(),
+                    "FAILED",
+                    detail,
+                    "CONTEXT_BUDGET_RETRY_SKIPPED");
+            return new MutationRetryResult(
+                    ResponseObligationVerifier.deterministicContextBudgetRetrySkippedAnswer(
+                            "missing-mutation retry", budget),
+                    0,
+                    null,
+                    null,
+                    true);
         } catch (Exception e) {
             LOG.warn("Missing-mutation retry failed: {}", e.getMessage());
         }

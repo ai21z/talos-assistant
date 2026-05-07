@@ -1,5 +1,7 @@
 package dev.talos.runtime.policy;
 
+import dev.talos.spi.EngineException;
+
 import java.util.Locale;
 import java.util.List;
 import java.util.Set;
@@ -65,6 +67,29 @@ public final class ResponseObligationVerifier {
                 + "the required write/edit tool calls on this turn, so no files were changed.";
     }
 
+    public static String deterministicContextBudgetRetrySkippedAnswer(
+            String retryName,
+            EngineException.ContextBudgetExceeded budget
+    ) {
+        return "[Action obligation failed: retry could not fit in the context budget.]\n\n"
+                + "Talos stopped the "
+                + safeRetryName(retryName)
+                + " before another model continuation because "
+                + contextBudgetRetrySkippedDetail(budget)
+                + "\nNo files were changed by this retry.";
+    }
+
+    public static String contextBudgetRetrySkippedDetail(EngineException.ContextBudgetExceeded budget) {
+        if (budget == null) {
+            return "the retry request exceeded the local context budget.";
+        }
+        return "the retry request exceeded the local context budget "
+                + "(estimated " + budget.estimatedTokens()
+                + " input tokens, budget " + budget.inputBudgetTokens()
+                + ", context window " + budget.contextWindowTokens()
+                + ").";
+    }
+
     public static String deterministicRepairInspectionOnlyAnswer() {
         return "[Action obligation failed: repair/fix turn inspected files but did not change them.]\n\n"
                 + "Talos required a write/edit tool call for this repair turn. The repair attempt used "
@@ -89,5 +114,10 @@ public final class ResponseObligationVerifier {
         return "[Action obligation failed: static repair used the wrong mutation tool.]\n\n"
                 + "Static verification repair required complete talos.write_file replacement for "
                 + targetText + ", but the retry used talos.edit_file. " + mutationText;
+    }
+
+    private static String safeRetryName(String retryName) {
+        if (retryName == null || retryName.isBlank()) return "retry";
+        return retryName.strip();
     }
 }

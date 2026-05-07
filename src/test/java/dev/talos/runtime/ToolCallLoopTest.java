@@ -8,6 +8,7 @@ import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.*;
 import dev.talos.tools.impl.FileEditTool;
@@ -1207,6 +1208,50 @@ class ToolCallLoopTest {
                 .orElseThrow();
         assertEquals("STATIC_REPAIR_TARGETS_REMAINING", breached.data().get("kind"));
         assertEquals(List.of("scripts.js", "styles.css"), breached.data().get("targets"));
+    }
+
+    @Test
+    void expectedTargetProgressContextBudgetExceededBecomesDeterministicBreach() {
+        var loop = createLoop(writeFileTool());
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user("Create index.html, styles.css, and scripts.js for a BMI calculator.")));
+        var ctx = Context.builder(new Config())
+                .llm(LlmClient.scriptedFailure(new EngineException.ContextBudgetExceeded(
+                        5946, 5635, 8192, 0)))
+                .build();
+        String llmResponse = """
+                <tool_call>{"name":"talos.write_file","parameters":{"path":"index.html","content":"<html></html>"}}</tool_call>
+                <tool_call>{"name":"talos.write_file","parameters":{"path":"styles.css","content":"body{}"}}</tool_call>
+                """;
+
+        LocalTurnTraceCapture.begin("trc-t197-budget", "session", 1,
+                "2026-05-07T00:00:00Z", "ws", "test", "llama_cpp", "gpt-oss", "create bmi");
+        ToolCallLoop.LoopResult result;
+        LocalTurnTrace trace;
+        try {
+            result = loop.run(llmResponse, messages, WS, ctx);
+            trace = LocalTurnTraceCapture.complete();
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+
+        assertTrue(result.failureDecision().shouldStop(), result.failureDecision().reason());
+        assertTrue(result.failureDecision().reason().contains("EXPECTED_TARGETS_REMAINING"),
+                result.failureDecision().reason());
+        assertTrue(result.finalAnswer().contains("scripts.js"), result.finalAnswer());
+        assertTrue(result.finalAnswer().toLowerCase().contains("context budget"), result.finalAnswer());
+        assertFalse(result.finalAnswer().contains("Engine error"), result.finalAnswer());
+        assertFalse(result.finalAnswer().toLowerCase().contains("ready to use"), result.finalAnswer());
+
+        var breached = trace.events().stream()
+                .filter(event -> "PENDING_ACTION_OBLIGATION_BREACHED".equals(event.type()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("EXPECTED_TARGETS_REMAINING", breached.data().get("kind"));
+        assertEquals(List.of("scripts.js"), breached.data().get("targets"));
+        assertTrue(String.valueOf(breached.data().get("reason")).contains("context budget"),
+                breached.data().toString());
     }
 
     @Test
