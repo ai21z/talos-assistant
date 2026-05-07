@@ -63,6 +63,9 @@ record ExecutionOutcome(
 
     private static final Pattern ENV_ASSIGNMENT = Pattern.compile(
             "(?<![A-Za-z0-9_])([A-Z][A-Z0-9_]{2,}\\s*=\\s*[^\\s`'\"<>]+)");
+    private static final String READ_ONLY_TOOL_LIMIT_REPLACEMENT =
+            "[Read-only evidence incomplete: the tool-call limit was reached before Talos produced "
+                    + "a complete grounded answer. The read-only inspection did not complete.]";
 
     enum CompletionStatus {
         COMPLETE,
@@ -290,6 +293,15 @@ record ExecutionOutcome(
                     loopResult,
                     workspace);
         }
+        boolean readOnlyToolLimitWithoutRuntimeAnswer = readOnlyToolLimitWithoutRuntimeAnswer(
+                contract,
+                loopResult,
+                staticWebImportGroundedOverride
+                        || webDiagnosticGroundedOverride
+                        || selectorGroundedOverride);
+        if (readOnlyToolLimitWithoutRuntimeAnswer) {
+            current = READ_ONLY_TOOL_LIMIT_REPLACEMENT;
+        }
         OutcomeDominancePolicy.Decision preVerificationDecision = outcomeDecision(
                 contract,
                 invalidMutation,
@@ -304,7 +316,7 @@ record ExecutionOutcome(
                 partialMutation,
                 falseMutationClaim,
                 inspectUnderCompleted,
-                false,
+                readOnlyToolLimitWithoutRuntimeAnswer,
                 unsupportedDocumentCapabilityLimited,
                 missingEvidence,
                 protectedReadApprovalMissing,
@@ -360,7 +372,7 @@ record ExecutionOutcome(
                 partialMutation,
                 falseMutationClaim,
                 inspectUnderCompleted,
-                false,
+                readOnlyToolLimitWithoutRuntimeAnswer,
                 unsupportedDocumentCapabilityLimited,
                 missingEvidence,
                 protectedReadApprovalMissing,
@@ -387,6 +399,7 @@ record ExecutionOutcome(
                         staticWebImportGroundedOverride,
                         webDiagnosticGroundedOverride,
                         selectorGroundedOverride,
+                        readOnlyToolLimitWithoutRuntimeAnswer,
                         verificationStatus,
                         missingEvidence,
                         approvedProtectedReadPostcondition),
@@ -608,6 +621,16 @@ record ExecutionOutcome(
         return loopResult.mutatingToolSuccesses() + Math.max(0, extraMutationSuccesses) > 0;
     }
 
+    private static boolean readOnlyToolLimitWithoutRuntimeAnswer(
+            TaskContract contract,
+            ToolCallLoop.LoopResult loopResult,
+            boolean runtimeGroundedOverride
+    ) {
+        if (loopResult == null || !loopResult.hitIterLimit()) return false;
+        if (runtimeGroundedOverride) return false;
+        return contract == null || !contract.mutationRequested();
+    }
+
     private static VerificationStatus mapVerificationStatus(TaskVerificationStatus status) {
         if (status == null) return VerificationStatus.NOT_RUN;
         return switch (status) {
@@ -677,6 +700,7 @@ record ExecutionOutcome(
             boolean staticWebImportGroundedOverride,
             boolean webDiagnosticGroundedOverride,
             boolean selectorGroundedOverride,
+            boolean readOnlyToolLimitWithoutRuntimeAnswer,
             VerificationStatus verificationStatus,
             boolean missingEvidence,
             boolean approvedProtectedReadPostcondition
@@ -743,6 +767,11 @@ record ExecutionOutcome(
             warnings.add(TruthWarning.of(
                     TruthWarningType.WEB_DIAGNOSTIC_GROUNDED_OVERRIDE,
                     "Read-only web diagnostics were corrected from static workspace evidence."));
+        }
+        if (readOnlyToolLimitWithoutRuntimeAnswer) {
+            warnings.add(TruthWarning.of(
+                    TruthWarningType.READ_ONLY_TOOL_LOOP_LIMIT,
+                    "The read-only tool-call limit was reached before a complete grounded answer was produced."));
         }
         if (verificationStatus == VerificationStatus.FAILED) {
             warnings.add(TruthWarning.of(

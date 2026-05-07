@@ -6,6 +6,7 @@ import dev.talos.cli.repl.SessionMemory;
 import dev.talos.cli.repl.SessionState;
 import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
+import dev.talos.core.llm.ScriptedNativeLlmClient;
 import dev.talos.runtime.TurnAuditCapture;
 import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ArtifactGoal;
@@ -5748,6 +5749,203 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        @DisplayName("candidate-only script import grounding works in full audit fixture shape")
+        void scriptImportGroundingUsesInferredIndexHtmlInFullAuditFixtureShape() throws Exception {
+            Path ws = Files.createTempDirectory("talos-script-import-audit-fixture-grounding-");
+            try {
+                Files.writeString(ws.resolve("README.md"), "# Audit fixture\n");
+                Files.writeString(ws.resolve("notes.md"), "Private note marker.\n");
+                Files.writeString(ws.resolve("config.json"), "{\"project\":\"audit\"}\n");
+                Files.writeString(ws.resolve("report.docx"), "fake unsupported binary payload");
+                Files.writeString(ws.resolve("index.html"), "AFTER\n");
+                Files.writeString(ws.resolve("script.js"), "console.log('old');\n");
+                Files.writeString(ws.resolve("scripts.js"), "console.log('new');\n");
+                Files.writeString(ws.resolve("styles.css"), "body { margin: 0; }\n");
+
+                var registry = new dev.talos.tools.ToolRegistry();
+                registry.register(new dev.talos.tools.impl.ReadFileTool());
+                var processor = new dev.talos.runtime.TurnProcessor(
+                        null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+                var loop = new dev.talos.runtime.ToolCallLoop(processor, 4);
+                var ctx = Context.builder(new Config())
+                        .llm(LlmClient.scripted(List.of(
+                                "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"script.js\"}}",
+                                "script.js imports the BMI script.")))
+                        .sandbox(new dev.talos.core.security.Sandbox(ws, java.util.Map.of()))
+                        .toolRegistry(registry)
+                        .toolCallLoop(loop)
+                        .build();
+                var messages = new ArrayList<ChatMessage>();
+                messages.add(ChatMessage.system("sys"));
+                messages.add(ChatMessage.user("Search for the selector .missing-button using workspace search."));
+                messages.add(ChatMessage.assistant(
+                        "[Static selector search]\nscript.js:1 | const button = document.querySelector('.missing-button');"));
+                messages.add(ChatMessage.user("Overwrite index.html with exactly AFTER. Use talos.write_file."));
+                messages.add(ChatMessage.assistant("""
+                        [Static verification: passed - Exact content verification passed.]
+
+                        [ok] Updated index.html (1 lines, 5 bytes)
+                        """));
+                messages.add(ChatMessage.user(
+                        "Which exact file currently imports the BMI script, script.js or scripts.js? "
+                                + "Verify from current files and answer only after inspection. "
+                                + "Do not read protected files."));
+
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, ws, ctx, new AssistantTurnExecutor.Options());
+
+                assertTrue(out.text().contains("[Static web import check]"), out.text());
+                assertTrue(out.text().contains(
+                        "Neither `script.js` nor `scripts.js` is imported by `index.html`."), out.text());
+                assertTrue(out.text().contains("Current script imports found in `index.html`: none."),
+                        out.text());
+                assertFalse(out.text().contains("script.js imports the BMI script."), out.text());
+            } finally {
+                try (var walk = Files.walk(ws)) {
+                    walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                        try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                    });
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("script import grounding wins after prior exact-write history")
+        void scriptImportGroundingWinsAfterPriorExactWriteHistory() throws Exception {
+            Path ws = Files.createTempDirectory("talos-script-import-history-grounding-");
+            try {
+                Files.writeString(ws.resolve("index.html"), "AFTER\n");
+                Files.writeString(ws.resolve("script.js"), "console.log('old');\n");
+                Files.writeString(ws.resolve("scripts.js"),
+                        "console.log('alternate script file present but not imported initially');\n");
+
+                var registry = new dev.talos.tools.ToolRegistry();
+                registry.register(new dev.talos.tools.impl.ReadFileTool());
+                var processor = new dev.talos.runtime.TurnProcessor(
+                        null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+                var loop = new dev.talos.runtime.ToolCallLoop(processor, 4);
+                var ctx = Context.builder(new Config())
+                        .llm(LlmClient.scripted(List.of(
+                                "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"scripts.js\"}}",
+                                """
+                                Based on the current contents of the files, `scripts.js` contains the reference to the BMI script.
+
+                                [Static verification: passed - Exact content verification passed.]
+
+                                [ok] Confirmed that `scripts.js` contains the reference to the BMI script.
+                                """)))
+                        .sandbox(new dev.talos.core.security.Sandbox(ws, java.util.Map.of()))
+                        .toolRegistry(registry)
+                        .toolCallLoop(loop)
+                        .build();
+                var messages = new ArrayList<ChatMessage>();
+                messages.add(ChatMessage.system("sys"));
+                messages.add(ChatMessage.user("Search for the selector .missing-button using workspace search."));
+                messages.add(ChatMessage.assistant(
+                        "[Static selector search]\nscript.js:1 | const button = document.querySelector('.missing-button');"));
+                messages.add(ChatMessage.user("Overwrite index.html with exactly AFTER. Use talos.write_file."));
+                messages.add(ChatMessage.assistant("""
+                        [Static verification: passed - Exact content verification passed.]
+
+                        [ok] Updated index.html (1 lines, 5 bytes)
+                        """));
+                messages.add(ChatMessage.user(
+                        "Which exact file currently imports the BMI script, script.js or scripts.js? "
+                                + "Verify from current files and answer only after inspection. "
+                                + "Do not read protected files."));
+
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, ws, ctx, new AssistantTurnExecutor.Options());
+
+                assertTrue(out.text().contains("[Static web import check]"), out.text());
+                assertTrue(out.text().contains(
+                        "Neither `script.js` nor `scripts.js` is imported by `index.html`."), out.text());
+                assertTrue(out.text().contains("Current script imports found in `index.html`: none."),
+                        out.text());
+                assertFalse(out.text().contains("Confirmed that `scripts.js` contains the reference"),
+                        out.text());
+                assertFalse(out.text().contains("[Static verification: passed - Exact content verification passed.]"),
+                        out.text());
+            } finally {
+                try (var walk = Files.walk(ws)) {
+                    walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                        try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                    });
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("script import grounding wins with native tool-call response")
+        void scriptImportGroundingWinsWithNativeToolCallResponse() throws Exception {
+            Path ws = Files.createTempDirectory("talos-script-import-native-grounding-");
+            try {
+                Files.writeString(ws.resolve("index.html"), "AFTER\n");
+                Files.writeString(ws.resolve("script.js"), "console.log('old');\n");
+                Files.writeString(ws.resolve("scripts.js"),
+                        "console.log('alternate script file present but not imported initially');\n");
+
+                var registry = new dev.talos.tools.ToolRegistry();
+                registry.register(new dev.talos.tools.impl.ReadFileTool());
+                var processor = new dev.talos.runtime.TurnProcessor(
+                        null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+                var loop = new dev.talos.runtime.ToolCallLoop(processor, 4);
+                var llm = ScriptedNativeLlmClient.of(List.of(
+                        new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                                "call_0",
+                                "talos.read_file",
+                                java.util.Map.of("path", "scripts.js")))),
+                        new LlmClient.StreamResult("""
+                                Based on the current contents of the files, `scripts.js` contains the reference to the BMI script.
+
+                                [Static verification: passed - Exact content verification passed.]
+
+                                [ok] Confirmed that `scripts.js` contains the reference to the BMI script.
+                                """, List.of())));
+                var ctx = Context.builder(new Config())
+                        .llm(llm)
+                        .sandbox(new dev.talos.core.security.Sandbox(ws, java.util.Map.of()))
+                        .toolRegistry(registry)
+                        .toolCallLoop(loop)
+                        .build();
+                var messages = new ArrayList<ChatMessage>();
+                messages.add(ChatMessage.system("sys"));
+                messages.add(ChatMessage.user("Search for the selector .missing-button using workspace search."));
+                messages.add(ChatMessage.assistant(
+                        "[Static selector search]\nscript.js:1 | const button = document.querySelector('.missing-button');"));
+                messages.add(ChatMessage.user("Overwrite index.html with exactly AFTER. Use talos.write_file."));
+                messages.add(ChatMessage.assistant("""
+                        [Static verification: passed - Exact content verification passed.]
+
+                        [ok] Updated index.html (1 lines, 5 bytes)
+                        """));
+                messages.add(ChatMessage.user(
+                        "Which exact file currently imports the BMI script, script.js or scripts.js? "
+                                + "Verify from current files and answer only after inspection. "
+                                + "Do not read protected files."));
+
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, ws, ctx, new AssistantTurnExecutor.Options());
+
+                assertTrue(out.text().contains("[Static web import check]"), out.text());
+                assertTrue(out.text().contains(
+                        "Neither `script.js` nor `scripts.js` is imported by `index.html`."), out.text());
+                assertTrue(out.text().contains("Current script imports found in `index.html`: none."),
+                        out.text());
+                assertFalse(out.text().contains("Confirmed that `scripts.js` contains the reference"),
+                        out.text());
+                assertFalse(out.text().contains("[Static verification: passed - Exact content verification passed.]"),
+                        out.text());
+            } finally {
+                try (var walk = Files.walk(ws)) {
+                    walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                        try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                    });
+                }
+            }
+        }
+
+        @Test
         @DisplayName("script import grounding uses stable turn request after internal retry messages")
         void scriptImportGroundingUsesStableTurnRequestAfterInternalRetryMessages() throws Exception {
             Path ws = Files.createTempDirectory("talos-script-import-plan-grounding-");
@@ -5809,6 +6007,119 @@ class AssistantTurnExecutorTest {
                         try { Files.deleteIfExists(path); } catch (Exception ignored) { }
                     });
                 }
+            }
+        }
+
+        @Test
+        @DisplayName("read-only tool-loop limit without runtime-owned answer is advisory")
+        void readOnlyToolLoopLimitWithoutRuntimeOwnedAnswerIsAdvisory() {
+            String request = "Read README.md and config.json, then compare them using current file evidence.";
+            var plan = CurrentTurnPlan.create(
+                    TaskContractResolver.fromUserRequest(request),
+                    ExecutionPhase.INSPECT,
+                    List.of("talos.read_file"),
+                    List.of(),
+                    List.of());
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(request));
+
+            String exhaustedAnswer = """
+                    [Tool-call limit reached. Some tool calls were not executed.]
+
+                    Everything is complete and ready.
+                    """;
+            var toolOutcomes = List.of(
+                    new dev.talos.runtime.ToolCallLoop.ToolOutcome(
+                            "talos.read_file", "README.md", true, false, "read README.md", ""),
+                    new dev.talos.runtime.ToolCallLoop.ToolOutcome(
+                            "talos.read_file", "config.json", true, false, "read config.json", ""));
+            var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                    exhaustedAnswer,
+                    10,
+                    6,
+                    List.of("talos.read_file", "talos.read_file", "talos.read_file",
+                            "talos.read_file", "talos.read_file", "talos.read_file"),
+                    messages,
+                    0,
+                    0,
+                    true,
+                    0,
+                    List.of("README.md", "config.json"),
+                    0,
+                    0,
+                    0,
+                    0,
+                    toolOutcomes);
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    exhaustedAnswer, plan, messages, loopResult, null, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
+            assertEquals(dev.talos.runtime.outcome.TaskCompletionStatus.ADVISORY_ONLY,
+                    outcome.taskOutcome().completionStatus());
+            assertTrue(outcome.finalAnswer().contains("tool-call limit"), outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("did not complete"), outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("Everything is complete and ready"), outcome.finalAnswer());
+            assertTrue(outcome.taskOutcome().warnings().stream()
+                            .anyMatch(warning -> warning.message().contains("tool-call limit")),
+                    outcome.taskOutcome().warnings().toString());
+        }
+
+        @Test
+        @DisplayName("read-only tool-loop limit records advisory trace outcome")
+        void readOnlyToolLoopLimitRecordsAdvisoryTraceOutcome(@TempDir Path ws) throws Exception {
+            Files.writeString(ws.resolve("README.md"), "Project README evidence.\n");
+            Files.writeString(ws.resolve("config.json"), "{\"mode\":\"test\"}\n");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 2);
+            var ctx = Context.builder(new Config())
+                    .llm(ScriptedNativeLlmClient.of(List.of(
+                            new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                                    "call_0",
+                                    "talos.read_file",
+                                    java.util.Map.of("path", "README.md")))),
+                            new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                                    "call_1",
+                                    "talos.read_file",
+                                    java.util.Map.of("path", "config.json")))))))
+                    .sandbox(new dev.talos.core.security.Sandbox(ws, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Read README.md and config.json, then compare them using current file evidence."));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-t185-read-only-limit",
+                    "sid",
+                    185,
+                    "2026-05-07T00:00:00Z",
+                    "workspace-hash",
+                    "test",
+                    "test-backend",
+                    "test-model",
+                    messages.getLast().content());
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, ws, ctx, new AssistantTurnExecutor.Options());
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertTrue(out.text().contains("Read-only evidence incomplete"), out.text());
+                assertTrue(out.text().contains("tool-call limit"), out.text());
+                assertEquals("ADVISORY_ONLY", trace.outcome().status());
+                assertEquals("ADVISORY_ONLY", trace.outcome().classification());
+                assertTrue(trace.warnings().stream()
+                                .anyMatch(warning -> "READ_ONLY_TOOL_LOOP_LIMIT".equals(warning.code())),
+                        trace.warnings().toString());
+            } finally {
+                LocalTurnTraceCapture.clear();
             }
         }
 
