@@ -110,6 +110,29 @@ public final class CompatChatClient {
                 });
     }
 
+    public Stream<TokenChunk> chatStreamNonStreaming(ChatRequest request) throws Exception {
+        ChatRequest req = safeRequest(request);
+        String json = mapper.writeValueAsString(buildBody(req, false));
+        PromptDebugCapture.record(PromptDebugSnapshot.fromProviderBody(
+                req, false, json, PROVIDER_BODY_STAGE));
+
+        HttpRequest httpReq = requestBuilder(req, false)
+                .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
+                .build();
+
+        HttpResponse<String> resp;
+        try {
+            resp = http.send(httpReq, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        } catch (ConnectException ce) {
+            throw new EngineException.ConnectionFailed(host, ce);
+        } catch (HttpTimeoutException te) {
+            throw new EngineException.Transient("Request timed out", te, 408);
+        }
+
+        checkStatus(resp.statusCode(), req.model, resp.body());
+        return parseNonStreamingChunks(resp.body()).stream();
+    }
+
     Map<String, Object> buildBody(ChatRequest req, boolean stream) {
         String model = req.model == null || req.model.isBlank() ? defaultModel : req.model;
         Map<String, Object> body = new LinkedHashMap<>();
@@ -270,6 +293,79 @@ public final class CompatChatClient {
             throw new EngineException.MalformedResponse("compat chat response", json, e);
         }
         throw new EngineException.MalformedResponse("compat chat response", json);
+    }
+
+    private List<TokenChunk> parseNonStreamingChunks(String json) {
+        try {
+            JsonNode message = firstChoice(json).path("message");
+            List<TokenChunk> chunks = new ArrayList<>();
+
+            String content = message.path("content").asText("");
+            if (!content.isEmpty()) {
+                chunks.add(TokenChunk.of(content));
+            }
+
+            JsonNode toolCalls = message.path("tool_calls");
+            List<NativeToolCall> calls = parseNativeToolCalls(toolCalls, "compat chat response tool arguments");
+            if (!calls.isEmpty()) {
+                chunks.add(TokenChunk.ofToolCalls(calls));
+            }
+
+            chunks.add(TokenChunk.eos());
+            return List.copyOf(chunks);
+        } catch (EngineException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new EngineException.MalformedResponse("compat chat response", json, e);
+        }
+    }
+
+    private List<NativeToolCall> parseNativeToolCalls(JsonNode toolCalls, String argumentContext) {
+        if (!toolCalls.isArray() || toolCalls.isEmpty()) {
+            return List.of();
+        }
+        List<NativeToolCall> calls = new ArrayList<>();
+        int generated = 0;
+        for (JsonNode toolCall : toolCalls) {
+            JsonNode fn = toolCall.path("function");
+            String name = fn.path("name").asText("");
+            if (name.isBlank()) continue;
+
+            String id = toolCall.path("id").asText("");
+            if (id.isBlank()) {
+                id = "call_" + generated;
+            }
+
+            calls.add(new NativeToolCall(id, name, parseArguments(fn.path("arguments"), argumentContext)));
+            generated++;
+        }
+        return calls;
+    }
+
+    private Map<String, Object> parseArguments(JsonNode arguments, String context) {
+        if (arguments == null || arguments.isMissingNode() || arguments.isNull()) {
+            return Map.of();
+        }
+        try {
+            if (arguments.isObject()) {
+                return mapper.convertValue(arguments, MAP_REF);
+            }
+            if (arguments.isTextual()) {
+                String raw = arguments.asText("");
+                if (raw.isBlank()) return Map.of();
+                JsonNode node = mapper.readTree(raw);
+                if (node.isObject()) {
+                    return mapper.convertValue(node, MAP_REF);
+                }
+                throw new EngineException.MalformedResponse(context, raw);
+            }
+            throw new EngineException.MalformedResponse(context, arguments.toString());
+        } catch (Exception e) {
+            if (e instanceof EngineException.MalformedResponse malformed) {
+                throw malformed;
+            }
+            throw new EngineException.MalformedResponse(context, arguments.toString(), e);
+        }
     }
 
     private JsonNode firstChoice(String json) {

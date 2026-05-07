@@ -16,6 +16,10 @@ interface LlmEngineResolver extends AutoCloseable {
 
     Stream<TokenChunk> chatStream(ChatRequest request) throws Exception;
 
+    default Stream<TokenChunk> chatStreamNonStreaming(ChatRequest request) throws Exception {
+        return chatStream(request);
+    }
+
     @Override
     void close();
 }

@@ -14,4 +14,8 @@ import java.util.stream.Stream;
 public interface ChatModelEngine {
     String chat(ChatRequest req) throws Exception;
     Stream<TokenChunk> chatStream(ChatRequest req) throws Exception;
+
+    default Stream<TokenChunk> chatStreamNonStreaming(ChatRequest req) throws Exception {
+        return Stream.of(TokenChunk.of(chat(req)), TokenChunk.eos());
+    }
 }

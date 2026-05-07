@@ -66,6 +66,12 @@ final class LlamaCppEngine implements ModelEngine {
     }
 
     @Override
+    public Stream<TokenChunk> chatStreamNonStreaming(ChatRequest req) throws Exception {
+        serverManager.ensureStarted();
+        return chatClient.chatStreamNonStreaming(req);
+    }
+
+    @Override
     public EmbeddingResult embed(List<String> texts) {
         throw new UnsupportedOperationException("llama_cpp embeddings are not wired yet");
     }

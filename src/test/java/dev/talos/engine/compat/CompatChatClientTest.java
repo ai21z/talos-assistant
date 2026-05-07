@@ -252,6 +252,31 @@ class CompatChatClientTest {
     }
 
     @Test
+    void chatStreamNonStreamingParsesToolCallsFromNonStreamResponse() throws Exception {
+        AtomicReference<String> bodyRef = new AtomicReference<>("");
+        HttpServer server = startServer(new AtomicReference<>(""), bodyRef, """
+                {"choices":[{"message":{"role":"assistant","content":"","tool_calls":[{"id":"call_1","type":"function","function":{"name":"talos.write_file","arguments":"{\\\"path\\\":\\\"scripts.js\\\",\\\"content\\\":\\\"ok\\\"}"}}]}}]}
+                """, "application/json");
+        try {
+            CompatChatClient client = client(server);
+
+            List<TokenChunk> chunks = client.chatStreamNonStreaming(requestForStream()).toList();
+
+            JsonNode body = MAPPER.readTree(bodyRef.get());
+            assertEquals(false, body.path("stream").asBoolean());
+            assertTrue(chunks.get(0).hasToolCalls());
+            var call = chunks.get(0).toolCalls().get(0);
+            assertEquals("call_1", call.id());
+            assertEquals("talos.write_file", call.name());
+            assertEquals("scripts.js", call.arguments().get("path"));
+            assertEquals("ok", call.arguments().get("content"));
+            assertTrue(chunks.get(1).done());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void malformedSuccessfulResponseThrowsTypedMalformedResponse() throws Exception {
         HttpServer server = startServer(new AtomicReference<>(""), new AtomicReference<>(""), """
                 {"unexpected":"shape"}

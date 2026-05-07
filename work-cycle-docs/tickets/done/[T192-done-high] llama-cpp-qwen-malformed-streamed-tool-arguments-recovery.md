@@ -1,6 +1,6 @@
 # T192 - llama.cpp Qwen Malformed Streamed Tool Arguments Recovery
 
-Status: open
+Status: done
 Severity: high
 
 ## Evidence
@@ -44,4 +44,3 @@ Out of scope:
 - If retry fails, final output remains failure-dominant and records a typed backend/protocol failure.
 - Trace/debug records the streamed failure and the bounded recovery attempt.
 - Existing GPT-OSS happy path is unchanged.
-

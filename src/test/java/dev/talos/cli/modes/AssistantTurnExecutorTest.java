@@ -2747,6 +2747,47 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void malformedStreamedToolArgumentsRecoverWithNonStreamingToolCallAndExecuteMutation(
+                @TempDir Path workspace) throws Exception {
+            Path script = workspace.resolve("scripts.js");
+            Files.writeString(script, "console.log('old');");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            var undoStack = new dev.talos.tools.FileUndoStack();
+            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var llm = ScriptedNativeLlmClient.compatMalformedStreamThenNonStreamingRecovery(
+                    new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                            "call_1",
+                            "talos.write_file",
+                            java.util.Map.of("path", "scripts.js", "content", "console.log('new');")))),
+                    List.of(new LlmClient.StreamResult("Updated scripts.js.", List.of())));
+            var ctx = Context.builder(new Config())
+                    .llm(llm)
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .nativeToolSpecs(List.of(new ToolSpec(
+                            "talos.write_file",
+                            "Write a file.",
+                            "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"content\":{\"type\":\"string\"}},\"required\":[\"path\",\"content\"]}")))
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Overwrite scripts.js with exactly console.log('new');"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertEquals("console.log('new');", Files.readString(script));
+            assertTrue(out.text().contains("Updated scripts.js"), out.text());
+            assertFalse(out.text().contains("Malformed engine response"), out.text());
+            assertFalse(out.text().toLowerCase(java.util.Locale.ROOT).contains("ready to use"), out.text());
+        }
+
+        @Test
         void readOnlyDeniedWriteFileProtocolIsSanitizedWithoutFakeApproval(@TempDir Path workspace)
                 throws Exception {
             Files.writeString(workspace.resolve("index.html"), "<h1>Current</h1>\n");
