@@ -5703,6 +5703,51 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        @DisplayName("candidate-only script import question is grounded from current index.html")
+        void candidateOnlyScriptImportQuestionUsesCurrentIndexHtmlAfterExactOverwrite() throws Exception {
+            Path ws = Files.createTempDirectory("talos-script-import-candidate-grounding-");
+            try {
+                Files.writeString(ws.resolve("index.html"), "AFTER\n");
+                Files.writeString(ws.resolve("script.js"), "console.log('old');\n");
+                Files.writeString(ws.resolve("scripts.js"), "console.log('new');\n");
+
+                var registry = new dev.talos.tools.ToolRegistry();
+                registry.register(new dev.talos.tools.impl.ReadFileTool());
+                var processor = new dev.talos.runtime.TurnProcessor(
+                        null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+                var loop = new dev.talos.runtime.ToolCallLoop(processor, 4);
+                var ctx = Context.builder(new Config())
+                        .llm(LlmClient.scripted(List.of(
+                                "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"index.html\"}}",
+                                "The BMI calculation is in scripts.js.")))
+                        .sandbox(new dev.talos.core.security.Sandbox(ws, java.util.Map.of()))
+                        .toolRegistry(registry)
+                        .toolCallLoop(loop)
+                        .build();
+                var messages = new ArrayList<ChatMessage>();
+                messages.add(ChatMessage.system("sys"));
+                messages.add(ChatMessage.user(
+                        "Which exact file currently imports the BMI script, script.js or scripts.js? "
+                                + "Verify from current files and answer only after inspection. "
+                                + "Do not read protected files."));
+
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, ws, ctx, new AssistantTurnExecutor.Options());
+
+                assertTrue(out.text().contains("[Static web import check]"), out.text());
+                assertTrue(out.text().contains(
+                        "Neither `script.js` nor `scripts.js` is imported by `index.html`."), out.text());
+                assertFalse(out.text().contains("The BMI calculation is in scripts.js"), out.text());
+            } finally {
+                try (var walk = Files.walk(ws)) {
+                    walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                        try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                    });
+                }
+            }
+        }
+
+        @Test
         @DisplayName("mutation requests do not use read-only web diagnostic override")
         void mutationRequestsAreNotOverridden() {
             var messages = new ArrayList<ChatMessage>();
@@ -6005,6 +6050,44 @@ class AssistantTurnExecutorTest {
             assertTrue(out.text().contains("not verified complete"), out.text());
             assertFalse(out.text().contains("Verification status: verified complete"), out.text());
             assertFalse(out.text().contains("Everything is verified"), out.text());
+        }
+
+        @Test
+        void changedFilesUncertaintyQuestionIncludesExplicitRuntimeUncertaintyClause() {
+            SessionMemory memory = new SessionMemory();
+            memory.setChangeSummaryContext(new ChangeSummaryContext(
+                    ChangeSummaryContext.SCHEMA_VERSION,
+                    List.of(new ChangeSummaryContext.FileChange(
+                            "index.html",
+                            "talos.write_file",
+                            30,
+                            "trc-index",
+                            "SUCCEEDED",
+                            "PASSED",
+                            "COMPLETED_VERIFIED")),
+                    List.of(),
+                    "PASSED",
+                    "COMPLETED_VERIFIED",
+                    List.of()));
+            var ctx = Context.builder(new Config())
+                    .memory(memory)
+                    .llm(LlmClient.scripted("No uncertainty."))
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("State any uncertainty you have about files changed during this audit. "
+                    + "Do not claim unverified facts and do not read protected files."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, WS, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().startsWith("Recorded file changes"), out.text());
+            assertTrue(out.text().contains("index.html"), out.text());
+            assertTrue(out.text().contains("Uncertainty:"), out.text());
+            assertTrue(out.text().contains("runtime mutation history"), out.text());
+            assertTrue(out.text().contains("external edits"), out.text());
+            assertTrue(out.text().contains("protected file contents"), out.text());
+            assertFalse(out.text().contains("No uncertainty."), out.text());
         }
 
         @Test

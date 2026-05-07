@@ -883,6 +883,9 @@ public final class StaticTaskVerifier {
                 && userRequest.toLowerCase(Locale.ROOT).contains("index.html")) {
             htmlTargets = List.of("index.html");
         }
+        if (htmlTargets.isEmpty()) {
+            htmlTargets = primaryHtmlTargets(workspace);
+        }
         if (htmlTargets.isEmpty()) return null;
 
         Path root = workspace.toAbsolutePath().normalize();
@@ -899,6 +902,24 @@ public final class StaticTaskVerifier {
         List<String> linkedScripts = extractLinkedAssetOccurrences(html, HTML_SCRIPT_SRC, ".js");
         List<String> importedCandidates = importedCandidateScripts(candidateScripts, linkedScripts);
         return renderScriptImportAnswer(htmlTarget, candidateScripts, importedCandidates, linkedScripts);
+    }
+
+    private static List<String> primaryHtmlTargets(Path workspace) {
+        List<String> primary = obviousPrimaryFiles(workspace);
+        if (primary.isEmpty()) return List.of();
+        List<String> html = primary.stream()
+                .filter(name -> {
+                    String lower = name.toLowerCase(Locale.ROOT);
+                    return lower.endsWith(".html") || lower.endsWith(".htm");
+                })
+                .toList();
+        if (html.isEmpty()) return List.of();
+        for (String candidate : html) {
+            if ("index.html".equalsIgnoreCase(candidate) || "index.htm".equalsIgnoreCase(candidate)) {
+                return List.of(candidate);
+            }
+        }
+        return List.of(html.get(0));
     }
 
     public static WebDiagnostics currentWebDiagnostics(Path workspace, TaskContract contract) {

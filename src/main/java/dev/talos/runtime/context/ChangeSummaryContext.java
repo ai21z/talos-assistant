@@ -183,9 +183,14 @@ public record ChangeSummaryContext(
     }
 
     public String renderForChangeSummaryQuestion() {
+        return renderForChangeSummaryQuestion(false);
+    }
+
+    public String renderForChangeSummaryQuestion(boolean includeUncertainty) {
         if (!hasRecordedChanges()) {
-            return "No files were changed by Talos in the current session/audit according to Talos's runtime mutation history.\n\n"
+            String answer = "No files were changed by Talos in the current session/audit according to Talos's runtime mutation history.\n\n"
                     + "Talos has no runtime-recorded write/edit mutations for this session, so there are no runtime-owned changed files to list.";
+            return includeUncertainty ? answer + "\n\n" + runtimeUncertaintyClause() : answer;
         }
 
         StringBuilder out = new StringBuilder();
@@ -242,8 +247,19 @@ public record ChangeSummaryContext(
                 }
             }
         }
+        if (includeUncertainty) {
+            out.append("\n").append(runtimeUncertaintyClause()).append('\n');
+        }
 
         return out.toString().stripTrailing();
+    }
+
+    public static String runtimeUncertaintyClause() {
+        return """
+                Uncertainty:
+                - This only covers changes recorded in Talos's runtime mutation history for this session/audit.
+                - Talos is not claiming knowledge of external edits outside the recorded Talos turns.
+                - Talos is not claiming knowledge of protected file contents.""".stripTrailing();
     }
 
     private boolean verifiedComplete() {
