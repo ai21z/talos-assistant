@@ -150,6 +150,47 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void webDiagnosticsReportsBrokenButtonEvidenceInsteadOfOptimisticSuccess() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html lang="en">
+                <head>
+                  <meta charset="utf-8">
+                  <link rel="stylesheet" href="styles.css">
+                </head>
+                <body>
+                  <main>
+                    <h1>Focused Button</h1>
+                    <p id="result" aria-live="polite">Waiting.</p>
+                  </main>
+                </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), "body { font-family: sans-serif; }\n");
+        Files.writeString(workspace.resolve("script.js"), """
+                const button = document.querySelector('.cta-button');
+                const result = document.querySelector('#result');
+
+                if (button && result) {
+                  button.addEventListener('click', () => {
+                    result.textC;
+                  });
+                }
+                """);
+
+        String out = StaticTaskVerifier.renderWebDiagnostics(
+                workspace,
+                List.of("index.html", "script.js"));
+
+        assertNotNull(out);
+        assertTrue(out.contains("Static web diagnostics found:"), out);
+        assertTrue(out.contains("HTML does not link JavaScript file: `script.js`"), out);
+        assertTrue(out.contains("JavaScript references missing class selectors: `.cta-button`"), out);
+        assertTrue(out.contains("button click handler references `#result`"), out);
+        assertFalse(out.contains("did not find obvious"), out);
+    }
+
+    @Test
     void exactTwoLineReadmeLiteralPassesTaskVerification() throws Exception {
         Files.writeString(workspace.resolve("README.md"), "T71 exact README\nLine two");
 

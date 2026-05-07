@@ -1329,8 +1329,6 @@ public final class StaticTaskVerifier {
         }
 
         List<String> genericButtonResultDiagnosticProblems() {
-            if (!containsTag(html.toLowerCase(Locale.ROOT), "button")) return List.of();
-            if (!hasResultOutput(html.toLowerCase(Locale.ROOT))) return List.of();
             if (!jsIds.contains("result")) return List.of();
             if (!JS_CLICK_EVENT_LISTENER.matcher(js).find()) return List.of();
             if (JS_VISIBLE_TEXT_ASSIGNMENT.matcher(js).find()) return List.of();
