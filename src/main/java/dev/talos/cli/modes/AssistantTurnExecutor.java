@@ -54,6 +54,7 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -115,12 +116,8 @@ public final class AssistantTurnExecutor {
     );
 
     private static final String COMPACT_MUTATION_RETRY_SYSTEM_PROMPT = """
-            You are Talos, a local workspace assistant.
-            This is a bounded retry for a current request that required workspace mutation.
-            Use only the provided Talos tools in this retry.
-            The runtime handles tool invocation, approval, permissions, checkpointing, and verification.
-            Do not claim files changed unless talos.write_file or talos.edit_file succeeds in this retry.
-            Follow the current-turn capability frame and the retry instruction exactly.
+            Talos bounded mutation retry.
+            Use only listed tools. Do not claim changes unless write/edit succeeds.
             """;
 
     private AssistantTurnExecutor() {} // utility class
@@ -2913,14 +2910,15 @@ public final class AssistantTurnExecutor {
                 obligation,
                 userRequest,
                 priorMutationRequest);
+        List<ToolSpec> retryToolSpecs = mutationRetryToolSpecs(ctx, messages);
+        String retryFrame = compactMutationRetryFrame(safePlan, retryToolSpecs);
         messages.add(ChatMessage.assistant(retrySummary));
-        messages.add(ChatMessage.system(CurrentTurnCapabilityFrame.render(safePlan)));
+        messages.add(ChatMessage.system(retryFrame));
         messages.add(ChatMessage.user(retryInstruction));
         List<ChatMessage> retryMessages = compactMutationRetryMessages(
-                messages, safePlan, retrySummary, retryInstruction);
+                messages, safePlan, retrySummary, retryInstruction, retryToolSpecs);
 
         try {
-            List<ToolSpec> retryToolSpecs = mutationRetryToolSpecs(ctx, retryMessages);
             LlmClient.StreamResult retry = chatFull(ctx, retryMessages, safePlan, retryToolSpecs);
             String retryText = retry.text() == null ? "" : retry.text();
 
@@ -3008,7 +3006,6 @@ public final class AssistantTurnExecutor {
             // text if it's non-blank (model explained why it can't), otherwise
             // fall back to the original answer.
             if (!retryText.isBlank() && !retryText.equals(answer)) {
-                String stripped = ToolCallParser.stripToolCalls(retryText);
                 String deterministic = ResponseObligationVerifier.deterministicNoActionAnswer();
                 LocalTurnTraceCapture.recordActionObligation(
                         obligation.name(),
@@ -3054,7 +3051,7 @@ public final class AssistantTurnExecutor {
                 ? List.of("talos.write_file", "talos.edit_file")
                 : List.of("talos.write_file");
         List<ToolSpec> narrowed = filterToolSpecs(base, allowed);
-        return narrowed.isEmpty() ? base : narrowed;
+        return narrowed.isEmpty() ? compactMutationRetryToolSpecs(base) : compactMutationRetryToolSpecs(narrowed);
     }
 
     private static List<ToolSpec> filterToolSpecs(List<ToolSpec> specs, List<String> allowedNames) {
@@ -3067,21 +3064,220 @@ public final class AssistantTurnExecutor {
                 .toList();
     }
 
+    private static List<ToolSpec> compactMutationRetryToolSpecs(List<ToolSpec> specs) {
+        if (specs == null || specs.isEmpty()) return List.of();
+        return specs.stream()
+                .filter(Objects::nonNull)
+                .map(AssistantTurnExecutor::compactMutationRetryToolSpec)
+                .toList();
+    }
+
+    private static ToolSpec compactMutationRetryToolSpec(ToolSpec spec) {
+        if (spec == null) return null;
+        return switch (spec.name()) {
+            case "talos.write_file" -> new ToolSpec(
+                    "talos.write_file",
+                    "Create or overwrite a workspace file.",
+                    "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"Relative path, generate first.\"},\"content\":{\"type\":\"string\",\"description\":\"Full file content.\"}},\"required\":[\"path\",\"content\"]}");
+            case "talos.edit_file" -> new ToolSpec(
+                    "talos.edit_file",
+                    "Replace exact unique text in a workspace file.",
+                    "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"Relative path.\"},\"old_string\":{\"type\":\"string\",\"description\":\"Exact unique text to replace; no line prefixes.\"},\"new_string\":{\"type\":\"string\",\"description\":\"Replacement text.\"}},\"required\":[\"path\",\"old_string\",\"new_string\"]}");
+            default -> spec;
+        };
+    }
+
     private static List<ChatMessage> compactMutationRetryMessages(
             List<ChatMessage> messages,
             CurrentTurnPlan plan,
             String retrySummary,
-            String retryInstruction
+            String retryInstruction,
+            List<ToolSpec> retryToolSpecs
     ) {
         List<ChatMessage> out = new ArrayList<>();
         out.add(ChatMessage.system(COMPACT_MUTATION_RETRY_SYSTEM_PROMPT));
         if (messages != null) {
-            lastStaticVerificationRepairInstruction(messages).ifPresent(out::add);
+            lastStaticVerificationRepairInstruction(messages)
+                    .map(AssistantTurnExecutor::compactStaticVerificationRepairInstructionForRetry)
+                    .ifPresent(out::add);
         }
-        out.add(ChatMessage.system(CurrentTurnCapabilityFrame.render(plan)));
+        out.add(ChatMessage.system(compactMutationRetryFrame(plan, retryToolSpecs)));
         out.add(ChatMessage.assistant(retrySummary));
         out.add(ChatMessage.user(retryInstruction));
         return out;
+    }
+
+    private static ChatMessage compactStaticVerificationRepairInstructionForRetry(ChatMessage message) {
+        if (message == null || message.content() == null) {
+            return message;
+        }
+        String content = message.content();
+        if (!content.startsWith("[Static verification repair context]")) {
+            return message;
+        }
+
+        String expectedTargets = firstRepairContextValue(content, "Expected targets:");
+        String missingTargets = firstRepairContextValue(content, "Missing expected targets:");
+        String fullWriteTargets = firstRepairContextValue(content, "Full-file replacement targets:");
+        List<String> problems = repairContextSectionBullets(
+                content,
+                "Previous static verification problems:",
+                6);
+        List<String> similarTargets = repairContextSectionBullets(
+                content,
+                "Similar changed targets that do not satisfy missing expected targets:",
+                4);
+
+        if (fullWriteTargets.isBlank()) {
+            Set<String> parsed = RepairPolicy.fullRewriteTargetsFromRepairContext(List.of(message));
+            if (!parsed.isEmpty()) {
+                fullWriteTargets = String.join(", ", parsed.stream().sorted().toList());
+            }
+        }
+
+        StringBuilder out = new StringBuilder();
+        out.append("[Static verification repair context]\n")
+                .append("Previous mutation task ended incomplete after static verification.\n");
+        if (!expectedTargets.isBlank()) {
+            out.append("\nExpected targets: ").append(expectedTargets).append('\n');
+        }
+        if (!missingTargets.isBlank()) {
+            out.append("\nMissing expected targets: ").append(missingTargets).append('\n');
+        }
+        if (!similarTargets.isEmpty()) {
+            out.append("\nSimilar changed targets that do not satisfy missing expected targets:\n");
+            similarTargets.forEach(line -> out.append(line).append('\n'));
+        }
+        if (!problems.isEmpty()) {
+            out.append("\nPrevious static verification problems:\n");
+            problems.forEach(line -> out.append(line).append('\n'));
+        }
+        out.append("\nRepair plan:\n");
+        if (!fullWriteTargets.isBlank()) {
+            out.append("Full-file replacement targets: ").append(fullWriteTargets).append('\n')
+                    .append("Use talos.write_file with complete corrected content for these targets.\n");
+        }
+        out.append("Preserve exact target spelling; script.js and scripts.js are different paths.\n")
+                .append("After tool-backed changes, answer only from tool results and static verification.");
+        return ChatMessage.system(out.toString());
+    }
+
+    private static String firstRepairContextValue(String content, String prefix) {
+        if (content == null || prefix == null || prefix.isBlank()) {
+            return "";
+        }
+        String prefixLower = prefix.toLowerCase(Locale.ROOT);
+        for (String rawLine : content.split("\\R")) {
+            String line = rawLine.strip();
+            if (line.toLowerCase(Locale.ROOT).startsWith(prefixLower)) {
+                return line.substring(prefix.length()).strip();
+            }
+        }
+        return "";
+    }
+
+    private static List<String> repairContextSectionBullets(
+            String content,
+            String sectionHeader,
+            int maxLines
+    ) {
+        if (content == null || sectionHeader == null || sectionHeader.isBlank() || maxLines <= 0) {
+            return List.of();
+        }
+        String sectionLower = sectionHeader.toLowerCase(Locale.ROOT);
+        List<String> out = new ArrayList<>();
+        boolean inSection = false;
+        for (String rawLine : content.split("\\R")) {
+            String line = rawLine.strip();
+            if (!inSection) {
+                if (line.toLowerCase(Locale.ROOT).equals(sectionLower)) {
+                    inSection = true;
+                }
+                continue;
+            }
+            if (line.isBlank()) {
+                if (!out.isEmpty()) break;
+                continue;
+            }
+            if (!line.startsWith("- ")) {
+                break;
+            }
+            out.add(line);
+            if (out.size() >= maxLines) {
+                break;
+            }
+        }
+        return out;
+    }
+
+    private static String compactMutationRetryFrame(CurrentTurnPlan plan, List<ToolSpec> retryToolSpecs) {
+        TaskContract contract = plan == null ? TaskContract.unknown("") : plan.taskContract();
+        ActionObligation obligation = plan == null ? ActionObligation.UNKNOWN : plan.actionObligation();
+        String request = plan == null ? "" : Objects.toString(plan.originalUserRequest(), "");
+        List<String> allowedTools = retryToolSpecs == null || retryToolSpecs.isEmpty()
+                ? List.of("talos.write_file", "talos.edit_file")
+                : retryToolSpecs.stream()
+                .filter(Objects::nonNull)
+                .map(ToolSpec::name)
+                .sorted()
+                .toList();
+
+        StringBuilder frame = new StringBuilder();
+        frame.append("[MutationRetryCapability]\n")
+                .append("type: ").append(contract.type().name()).append('\n')
+                .append("obligation: ").append(obligation == null ? ActionObligation.UNKNOWN.name() : obligation.name()).append('\n')
+                .append("tools: ").append(String.join(", ", allowedTools)).append('\n')
+                .append("Retry current request only; prose is not a file change.\n");
+        appendCompactRetryExpectedTargets(frame, contract);
+        appendCompactRetryExpectations(frame, plan);
+        if (!request.isBlank()) {
+            frame.append("[CurrentRequest]\n")
+                    .append(request.strip())
+                    .append('\n');
+        }
+        return frame.toString();
+    }
+
+    private static void appendCompactRetryExpectedTargets(StringBuilder frame, TaskContract contract) {
+        if (frame == null || contract == null || contract.expectedTargets().isEmpty()) {
+            return;
+        }
+        List<String> targets = orderedExpectedTargets(contract);
+        frame.append("[ExpectedTargets]\n")
+                .append("requiredTargets: ").append(String.join(", ", targets)).append('\n')
+                .append("Use exact target paths; similar filenames are not substitutes.\n")
+                .append("script.js and scripts.js are different target paths; preserve the exact requested spelling.\n");
+    }
+
+    private static List<String> orderedExpectedTargets(TaskContract contract) {
+        if (contract == null || contract.expectedTargets().isEmpty()) {
+            return List.of();
+        }
+        String request = contract.originalUserRequest() == null
+                ? ""
+                : contract.originalUserRequest().toLowerCase(Locale.ROOT);
+        return contract.expectedTargets().stream()
+                .sorted(Comparator
+                        .comparingInt((String target) -> targetIndex(request, target))
+                        .thenComparing(Comparator.naturalOrder()))
+                .toList();
+    }
+
+    private static int targetIndex(String requestLower, String target) {
+        if (requestLower == null || requestLower.isBlank() || target == null) {
+            return Integer.MAX_VALUE;
+        }
+        int index = requestLower.indexOf(target.toLowerCase(Locale.ROOT));
+        return index < 0 ? Integer.MAX_VALUE : index;
+    }
+
+    private static void appendCompactRetryExpectations(StringBuilder frame, CurrentTurnPlan plan) {
+        if (frame == null || plan == null || plan.taskExpectations().isEmpty()) {
+            return;
+        }
+        frame.append("[TaskExpectations]\n")
+                .append("Current-turn exact write expectations remain active. ")
+                .append("Use the latest user request literal payload exactly; do not reuse older literals.\n");
     }
 
     private static Optional<ChatMessage> lastStaticVerificationRepairInstruction(List<ChatMessage> messages) {
@@ -3163,24 +3359,14 @@ public final class AssistantTurnExecutor {
             String priorMutationRequest
     ) {
         if (obligation == ActionObligation.CONDITIONAL_REVIEW_FIX) {
-            return "The conditional review-and-fix obligation was not satisfied. "
+            return "Retry required for conditional review-and-fix. "
                     + mutationRetryRequestContext(userRequest, priorMutationRequest)
-                    + "If you have not inspected the relevant files yet, call read-only tools first. "
-                    + "If the evidence shows an obvious blocker, or your previous answer identified a "
-                    + "concrete repair, call the appropriate talos.write_file or talos.edit_file tool NOW "
-                    + "to apply the repair. If inspected evidence shows no blocker, answer that no file "
-                    + "change is required. Do not make a harmless or no-op edit just to satisfy mutation.";
+                    + "If an obvious browser blocker remains, call talos.write_file or talos.edit_file now. "
+                    + "If no blocker remains, answer: No file change is required. No no-op edits.";
         }
-        return "The current-turn obligation was not satisfied: this turn has mutationAllowed=true "
-                + "and visible write/edit tools, but the previous response did not call talos.write_file "
-                + "or talos.edit_file. "
+        return "Retry required: the previous model response did not issue required write/edit tool calls. "
                 + mutationRetryRequestContext(userRequest, priorMutationRequest)
-                + "Call the appropriate write/edit tool NOW to perform the workspace change. "
-                + "Do not say you lack filesystem or workspace access; the runtime exposes file tools "
-                + "and handles approval, permissions, checkpointing, and verification. "
-                + "If you truly cannot (e.g., you do not know which file, or the "
-                + "content is impossible to produce), state exactly which file and why "
-                + "in one sentence. Do not ask further questions - act.";
+                + "Call talos.write_file or talos.edit_file now. If impossible, name the file and reason in one sentence.";
     }
 
     private static boolean retryShouldReissuePriorMutationRequest(TaskContract retryContract) {
