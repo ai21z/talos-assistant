@@ -664,7 +664,7 @@ public final class TurnProcessor {
         }
         TurnAuditCapture.recordToolCall(
                 call.toolName(),
-                path == null ? "" : path,
+                result.success() ? auditPathHint(call, path) : path == null ? "" : path,
                 result.success(),
                 result.success() ? "" : toolFailureReason(result));
         return result;
@@ -696,6 +696,21 @@ public final class TurnProcessor {
             if (value != null && !value.isBlank()) return value;
         }
         return null;
+    }
+
+    private static String auditPathHint(ToolCall call, String fallbackPath) {
+        if (call != null && WorkspaceOperationPlanner.isWorkspaceOperationTool(call.toolName())) {
+            try {
+                Optional<WorkspaceOperationPlan> plan = WorkspaceOperationPlanner.checkpointPlan(call);
+                if (plan.isPresent()) {
+                    String changedPath = plan.get().primaryChangedPath();
+                    if (!changedPath.isBlank()) return changedPath;
+                }
+            } catch (IllegalArgumentException ignored) {
+                // Invalid operation payloads are handled before successful audit recording.
+            }
+        }
+        return fallbackPath == null ? "" : fallbackPath;
     }
 
     private CheckpointCaptureResult captureCheckpointBeforeMutation(Session session, ToolCall call) {

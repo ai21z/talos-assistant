@@ -127,8 +127,8 @@ public final class ToolCallExecutionStage {
                 }
             }
 
-            String pathHint = ToolCallSupport.resolvePathHint(effective);
             WorkspaceOperationPlan workspaceOperationPlan = workspaceOperationPlan(effective);
+            String pathHint = pathHint(effective, workspaceOperationPlan);
             emitProgress(effective.toolName(), "executing", pathHint);
             LOG.debug("  Executing tool: {} (params: {})", effective.toolName(), effective.parameters());
 
@@ -388,6 +388,14 @@ public final class ToolCallExecutionStage {
         } catch (IllegalArgumentException e) {
             return null;
         }
+    }
+
+    private static String pathHint(ToolCall call, WorkspaceOperationPlan workspaceOperationPlan) {
+        if (workspaceOperationPlan != null) {
+            String changedPath = workspaceOperationPlan.primaryChangedPath();
+            if (!changedPath.isBlank()) return changedPath;
+        }
+        return ToolCallSupport.resolvePathHint(call);
     }
 
     private static void recordSuccessfulRead(LoopState state, String pathHint) {

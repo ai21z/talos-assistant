@@ -133,6 +133,37 @@ public record WorkspaceOperationPlan(
         return List.copyOf(paths);
     }
 
+    public List<String> changedPaths() {
+        if (pathEffects.isEmpty()) return List.of();
+        Set<String> paths = new LinkedHashSet<>();
+        for (PathEffect effect : pathEffects) {
+            if (effect == null || effect.path().isBlank()) continue;
+            OperationKind kind = effect.operationKind() == null ? operationKind : effect.operationKind();
+            if (isChangedPathEffect(kind, effect.role())) {
+                paths.add(effect.path());
+            }
+        }
+        return List.copyOf(paths);
+    }
+
+    public String primaryChangedPath() {
+        List<String> paths = changedPaths();
+        return paths.isEmpty() ? "" : paths.get(0);
+    }
+
+    private static boolean isChangedPathEffect(OperationKind kind, PathRole role) {
+        if (kind == null || role == null) return false;
+        return switch (kind) {
+            case COPY_PATH, MOVE_PATH, RENAME_PATH -> role == PathRole.DESTINATION;
+            case CREATE_DIRECTORY -> role == PathRole.ABSENT_BEFORE || role == PathRole.TARGET;
+            case DELETE_PATH -> role == PathRole.DELETED;
+            case WRITE_FILE, BATCH_APPLY -> role == PathRole.DESTINATION
+                    || role == PathRole.TARGET
+                    || role == PathRole.ABSENT_BEFORE
+                    || role == PathRole.DELETED;
+        };
+    }
+
     private static String normalize(String value, String fallback) {
         if (value == null || value.isBlank()) return fallback;
         return value.strip();

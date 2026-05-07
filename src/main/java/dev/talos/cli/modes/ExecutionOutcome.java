@@ -1430,7 +1430,13 @@ record ExecutionOutcome(
         if (applied.isEmpty()) return "";
         LinkedHashSet<String> paths = new LinkedHashSet<>();
         for (ToolCallLoop.ToolOutcome outcome : applied) {
-            if (outcome == null || outcome.pathHint() == null || outcome.pathHint().isBlank()) continue;
+            if (outcome == null) continue;
+            if (outcome.workspaceOperationPlan() != null
+                    && !outcome.workspaceOperationPlan().changedPaths().isEmpty()) {
+                paths.addAll(outcome.workspaceOperationPlan().changedPaths());
+                continue;
+            }
+            if (outcome.pathHint() == null || outcome.pathHint().isBlank()) continue;
             paths.add(outcome.pathHint().strip().replace('\\', '/'));
         }
         if (paths.size() <= 1) return "";
