@@ -33,6 +33,29 @@ Concrete evidence:
 - Qwen false answer: `TEST-OUTPUT-LLAMA-CPP-QWEN-14B.txt:25295`
 - GPT-OSS correct answer: `TEST-OUTPUT-LLAMA-CPP-GPT-OSS-20B.txt:24496`
 
+Additional T61-L evidence:
+
+- Source: managed llama.cpp T61-L full E2E audit
+- Date: 2026-05-07
+- Commit under audit: `d312393`
+- Findings report:
+  - `local/manual-testing/llama-cpp-t61l-full-e2e-audit-20260507-081444/FINDINGS-LLAMA-CPP-T61L-FULL-E2E-AUDIT.md`
+- GPT-OSS prompt:
+  `TEST-OUTPUT-LLAMA-CPP-GPT-OSS-20B.txt:23611`
+- GPT-OSS read `index.html` and `scripts.js`:
+  `TEST-OUTPUT-LLAMA-CPP-GPT-OSS-20B.txt:23653`
+- GPT-OSS false answer:
+  `TEST-OUTPUT-LLAMA-CPP-GPT-OSS-20B.txt:23635-23656`
+- Qwen prompt:
+  `TEST-OUTPUT-LLAMA-CPP-QWEN-14B.txt:23960`
+- Qwen answer:
+  `TEST-OUTPUT-LLAMA-CPP-QWEN-14B.txt:23989-23990`
+  was grounded enough, but still model-authored rather than runtime-owned.
+
+The T61-L evidence shows this is not Qwen-only. The failure mode can appear in
+GPT-OSS when the model reads `index.html` and then reads `scripts.js`, allowing
+model-authored prose to override the deterministic HTML import fact.
+
 ## Problem
 
 T176 improved candidate-only static import target selection, but the audited
@@ -75,6 +98,9 @@ Out of scope:
 - If `index.html` contains only `AFTER`, final output says neither candidate is imported.
 - The final answer is runtime-owned and cannot be contradicted by model prose.
 - Tests include a Qwen-like model response that falsely claims `script.js` is imported after reading `index.html`; the final user-visible answer must remain correct.
+- Tests include a GPT-OSS-like response that reads `index.html`, then reads
+  `scripts.js`, and falsely says `scripts.js` is the imported BMI script; the
+  final user-visible answer must remain correct.
 
 ## Suggested Verification
 
