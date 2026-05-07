@@ -19,6 +19,7 @@ public sealed class EngineException extends RuntimeException
         permits EngineException.ModelNotFound,
                 EngineException.ConnectionFailed,
                 EngineException.Transient,
+                EngineException.ContextBudgetExceeded,
                 EngineException.ResponseError,
                 EngineException.MalformedResponse {
 
@@ -76,6 +77,39 @@ public sealed class EngineException extends RuntimeException
         public Transient(String message, int httpStatus) {
             this(message, null, httpStatus);
         }
+    }
+
+    /** Request cannot fit the selected model context after safe local trimming. */
+    public static final class ContextBudgetExceeded extends EngineException {
+        private final int estimatedTokens;
+        private final int inputBudgetTokens;
+        private final int contextWindowTokens;
+        private final int removedMessages;
+
+        public ContextBudgetExceeded(int estimatedTokens,
+                                     int inputBudgetTokens,
+                                     int contextWindowTokens,
+                                     int removedMessages) {
+            super("Request exceeds context budget: estimated " + Math.max(0, estimatedTokens)
+                            + " input tokens, budget " + Math.max(0, inputBudgetTokens)
+                            + " input tokens, context window " + Math.max(0, contextWindowTokens)
+                            + " tokens.",
+                    null,
+                    0,
+                    "Clear the session, shorten the request, or select a model/context window that can fit the current turn.");
+            this.estimatedTokens = Math.max(0, estimatedTokens);
+            this.inputBudgetTokens = Math.max(0, inputBudgetTokens);
+            this.contextWindowTokens = Math.max(0, contextWindowTokens);
+            this.removedMessages = Math.max(0, removedMessages);
+        }
+
+        public int estimatedTokens() { return estimatedTokens; }
+
+        public int inputBudgetTokens() { return inputBudgetTokens; }
+
+        public int contextWindowTokens() { return contextWindowTokens; }
+
+        public int removedMessages() { return removedMessages; }
     }
 
     /** Catch-all for non-2xx responses that don't fit the above categories. */

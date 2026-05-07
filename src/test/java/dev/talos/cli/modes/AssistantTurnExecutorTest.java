@@ -3607,6 +3607,41 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void local_context_budget_preflight_failure_is_failure_dominant() {
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scriptedFailure(new EngineException.ContextBudgetExceeded(
+                            8500, 5634, 8192, 42)))
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("system"));
+            messages.add(ChatMessage.user("Overwrite index.html with exactly AFTER. Use talos.write_file."));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-context-budget-preflight",
+                    "sid",
+                    1,
+                    "2026-05-07T00:00:00Z",
+                    "workspace-hash",
+                    "test",
+                    "llama_cpp",
+                    "qwen2.5-coder-14b",
+                    "Overwrite index.html with exactly AFTER. Use talos.write_file.");
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, WS, ctx, new AssistantTurnExecutor.Options());
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertTrue(out.text().contains("Context budget exceeded"), out.text());
+                assertFalse(out.text().contains("Engine error"), out.text());
+                assertNoSuccessProse(out.text());
+                assertEquals("FAILED", trace.outcome().status());
+                assertEquals("CONTEXT_BUDGET_EXCEEDED", trace.outcome().classification());
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        }
+
+        @Test
         void connection_failure_under_mutation_records_backend_failure_outcome() {
             var ctx = Context.builder(new Config())
                     .llm(LlmClient.scriptedFailure(new EngineException.ConnectionFailed(
@@ -3688,9 +3723,9 @@ class AssistantTurnExecutorTest {
             var subtypes = EngineException.class.getPermittedSubclasses();
             assertNotNull(subtypes, "EngineException should be sealed");
             // execute() catches: ConnectionFailed, ModelNotFound, Transient, EngineException (base).
-            // ResponseError and MalformedResponse are intentionally covered by the base catch.
-            assertEquals(5, subtypes.length,
-                    "EngineException should have exactly 5 subtypes (if this changes, update execute())");
+            // ContextBudgetExceeded, ResponseError, and MalformedResponse are intentionally covered by the base catch.
+            assertEquals(6, subtypes.length,
+                    "EngineException should have exactly 6 subtypes (if this changes, update execute())");
         }
     }
 

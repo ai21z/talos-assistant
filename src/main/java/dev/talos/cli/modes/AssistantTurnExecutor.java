@@ -342,6 +342,15 @@ public final class AssistantTurnExecutor {
     }
 
     private static void appendEngineException(StringBuilder out, EngineException ex) {
+        if (ex instanceof EngineException.ContextBudgetExceeded budget) {
+            recordBackendFailureOutcome("CONTEXT_BUDGET_EXCEEDED");
+            LOG.warn("Context budget exceeded: estimatedTokens={}, inputBudgetTokens={}, contextWindowTokens={}, removedMessages={}",
+                    budget.estimatedTokens(), budget.inputBudgetTokens(),
+                    budget.contextWindowTokens(), budget.removedMessages());
+            out.append("\n[Context budget exceeded: Talos could not safely fit this turn into the selected model context. ")
+                    .append(budget.guidance()).append("]\n");
+            return;
+        }
         if (ex instanceof EngineException.ConnectionFailed cf) {
             recordBackendFailureOutcome("BACKEND_CONNECTION_FAILED");
             LOG.warn("Model engine not reachable: {}", cf.getMessage());
@@ -406,6 +415,9 @@ public final class AssistantTurnExecutor {
     }
 
     private static String engineFailureClassification(EngineException ex) {
+        if (ex instanceof EngineException.ContextBudgetExceeded) {
+            return "CONTEXT_BUDGET_EXCEEDED";
+        }
         if (ex instanceof EngineException.ResponseError) {
             if (isContextBudgetFailure(ex)) {
                 return "CONTEXT_BUDGET_EXCEEDED";
