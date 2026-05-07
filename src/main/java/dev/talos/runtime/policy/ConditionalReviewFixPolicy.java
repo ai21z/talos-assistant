@@ -8,6 +8,7 @@ import dev.talos.runtime.verification.StaticTaskVerifier;
 
 import java.nio.file.Path;
 import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 
@@ -89,7 +90,7 @@ public final class ConditionalReviewFixPolicy {
                 ActionObligation.CONDITIONAL_REVIEW_FIX.name(),
                 "SATISFIED_BY_INSPECTION",
                 "conditional review/fix inspection found no current static web blocker");
-        return Optional.of(deterministicNoChangeAnswer(diagnostics));
+        return Optional.of(deterministicNoChangeAnswer(diagnostics, pathsReadThisTurn));
     }
 
     private static boolean claimsConcreteRepairNeeded(String answer) {
@@ -147,11 +148,35 @@ public final class ConditionalReviewFixPolicy {
         return toolNames.stream().anyMatch(ToolCallSupport::isReadOnlyTool);
     }
 
-    private static String deterministicNoChangeAnswer(StaticTaskVerifier.WebDiagnostics diagnostics) {
+    private static String deterministicNoChangeAnswer(
+            StaticTaskVerifier.WebDiagnostics diagnostics,
+            Collection<String> pathsReadThisTurn
+    ) {
+        List<String> readFiles = normalizedReadPaths(pathsReadThisTurn);
+        String readEvidence = readFiles.isEmpty()
+                ? ""
+                : "Tool-read files this turn: " + String.join(", ", readFiles) + ".\n";
         return "[Conditional review result: No file change was needed.]\n\n"
-                + "Talos inspected the current workspace files and did not find an obvious static "
-                + "HTML/CSS/JavaScript blocker for this review-and-fix request.\n"
-                + "Checked files: " + String.join(", ", diagnostics.primaryFiles()) + ".\n"
+                + "Runtime static verification found no obvious HTML/CSS/JavaScript blocker "
+                + "for this review-and-fix request.\n"
+                + "Runtime verification checked files: " + String.join(", ", diagnostics.primaryFiles()) + ".\n"
+                + readEvidence
                 + "No files were changed.";
+    }
+
+    private static List<String> normalizedReadPaths(Collection<String> pathsReadThisTurn) {
+        if (pathsReadThisTurn == null || pathsReadThisTurn.isEmpty()) return List.of();
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        for (String path : pathsReadThisTurn) {
+            if (path == null || path.isBlank()) continue;
+            String normalized = path.strip().replace('\\', '/');
+            while (normalized.startsWith("./")) {
+                normalized = normalized.substring(2);
+            }
+            if (!normalized.isBlank()) {
+                out.add(normalized);
+            }
+        }
+        return List.copyOf(out);
     }
 }
