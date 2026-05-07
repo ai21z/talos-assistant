@@ -72,6 +72,7 @@ public final class StaticTaskVerifier {
     private static final int MAX_SMALL_WORKSPACE_VISIBLE_FILES = 6;
     private static final int MAX_TARGET_AWARE_WORKSPACE_VISIBLE_FILES = 12;
     private static final int MAX_PRIMARY_WEB_FILES = 5;
+    private static final int MAX_STATIC_SELECTOR_SEARCH_MATCHES = 50;
 
     private static final Pattern HTML_CLASS_ATTR = Pattern.compile(
             "\\bclass\\s*=\\s*(['\"])(.*?)\\1", Pattern.CASE_INSENSITIVE);
@@ -92,6 +93,8 @@ public final class StaticTaskVerifier {
             "getElementById\\s*\\(\\s*['\"]([A-Za-z_][A-Za-z0-9_-]*)['\"]\\s*\\)");
     private static final Pattern JS_GET_BY_CLASS = Pattern.compile(
             "getElementsByClassName\\s*\\(\\s*['\"]([A-Za-z_][A-Za-z0-9_-]*)['\"]\\s*\\)");
+    private static final Pattern STATIC_SELECTOR_LITERAL = Pattern.compile(
+            "(?<![A-Za-z0-9_-])([.#][A-Za-z_][A-Za-z0-9_-]*)(?![A-Za-z0-9_-])");
     private static final Pattern JS_RESULT_CLICKED_TEXT_ASSIGNMENT = Pattern.compile(
             "(?:querySelector\\s*\\(\\s*['\"]#result['\"]\\s*\\)"
                     + "|getElementById\\s*\\(\\s*['\"]result['\"]\\s*\\))"
@@ -846,6 +849,59 @@ public final class StaticTaskVerifier {
         if (!hasPrimaryWebSurface(primary)) return null;
         SelectorFacts facts = selectorFacts(workspace.toAbsolutePath().normalize(), primary);
         return facts == null ? null : facts.renderInspection();
+    }
+
+    public static String renderStaticSelectorSearch(Path workspace, String userRequest) {
+        if (workspace == null || !Files.isDirectory(workspace)) return null;
+        String selector = requestedStaticSelectorLiteral(userRequest);
+        if (selector.isBlank()) return null;
+
+        Path root = workspace.toAbsolutePath().normalize();
+        List<Path> visibleFiles;
+        try {
+            visibleFiles = visibleRegularFiles(root);
+        } catch (Exception e) {
+            return null;
+        }
+        if (visibleFiles.isEmpty()
+                || visibleFiles.size() > MAX_TARGET_AWARE_WORKSPACE_VISIBLE_FILES) {
+            return null;
+        }
+
+        List<String> matches = new ArrayList<>();
+        search:
+        for (Path file : visibleFiles.stream()
+                .sorted((a, b) -> visibleFileName(a).compareToIgnoreCase(visibleFileName(b)))
+                .toList()) {
+            String name = visibleFileName(file).replace('\\', '/');
+            if (!isSmallWorkspaceWebFile(name)) continue;
+            int lineNumber = 0;
+            try (var lines = Files.lines(file)) {
+                var it = lines.iterator();
+                while (it.hasNext()) {
+                    String line = it.next();
+                    lineNumber++;
+                    if (!line.contains(selector)) continue;
+                    matches.add(name + ":" + lineNumber + " | " + truncateSelectorSearchLine(line.strip()));
+                    if (matches.size() >= MAX_STATIC_SELECTOR_SEARCH_MATCHES) break search;
+                }
+            } catch (Exception ignored) {
+                // Search is best-effort over visible static-web text files only.
+            }
+        }
+        if (matches.isEmpty()) return null;
+        return ("[Static selector search]\n" + String.join("\n", matches)).stripTrailing();
+    }
+
+    private static String requestedStaticSelectorLiteral(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return "";
+        Matcher matcher = STATIC_SELECTOR_LITERAL.matcher(userRequest);
+        return matcher.find() ? matcher.group(1) : "";
+    }
+
+    private static String truncateSelectorSearchLine(String line) {
+        if (line == null) return "";
+        return line.length() <= 240 ? line : line.substring(0, 237) + "...";
     }
 
     public static String renderWebDiagnostics(Path workspace) {

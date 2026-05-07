@@ -60,6 +60,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.UnaryOperator;
+import java.util.regex.Pattern;
 
 /**
  * Shared LLM turn execution logic for AskMode and RagMode.
@@ -3024,6 +3025,8 @@ public final class AssistantTurnExecutor {
             "selectors used in css",
             "selectors used in javascript"
     );
+    private static final Pattern STATIC_SELECTOR_SEARCH_LITERAL = Pattern.compile(
+            "(?<![A-Za-z0-9_-])([.#][A-Za-z_][A-Za-z0-9_-]*)(?![A-Za-z0-9_-])");
 
     // ── Inspect under-completion truth layer (N3 / P4) ───────────────────
 
@@ -3219,6 +3222,23 @@ public final class AssistantTurnExecutor {
         if (!looksLikeSelectorMismatchRequest(userRequest)) return answer;
 
         String grounded = StaticTaskVerifier.renderSelectorInspection(workspace);
+        return grounded == null || grounded.isBlank() ? answer : grounded;
+    }
+
+    static String overrideStaticSelectorSearchAnswerIfNeeded(
+            String answer,
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages,
+            ToolCallLoop.LoopResult loopResult,
+            Path workspace) {
+        if (answer == null) return null;
+        if (loopResult == null || workspace == null) return answer;
+        if (loopResult.mutatingToolSuccesses() > 0) return answer;
+        if (!loopUsedCanonicalTool(loopResult, "talos.grep")) return answer;
+        String userRequest = latestUserRequest(plan, messages);
+        if (!looksLikeStaticSelectorSearchRequest(userRequest)) return answer;
+
+        String grounded = StaticTaskVerifier.renderStaticSelectorSearch(workspace, userRequest);
         return grounded == null || grounded.isBlank() ? answer : grounded;
     }
 
@@ -3440,6 +3460,22 @@ public final class AssistantTurnExecutor {
             if (lower.contains(marker)) return true;
         }
         return lower.contains("mismatch") && lower.contains("selector");
+    }
+
+    static boolean looksLikeStaticSelectorSearchRequest(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return false;
+        if (looksLikeSelectorMismatchRequest(userRequest)) return false;
+        String lower = userRequest.toLowerCase(Locale.ROOT);
+        if (!lower.contains("search") || !lower.contains("selector")) return false;
+        return STATIC_SELECTOR_SEARCH_LITERAL.matcher(userRequest).find();
+    }
+
+    private static boolean loopUsedCanonicalTool(ToolCallLoop.LoopResult loopResult, String canonicalToolName) {
+        if (loopResult == null || loopResult.toolNames() == null) return false;
+        for (String toolName : loopResult.toolNames()) {
+            if (canonicalToolName.equals(canonicalToolName(toolName))) return true;
+        }
+        return false;
     }
 
     private static boolean declaresTaskType(List<ChatMessage> messages, TaskType taskType) {
