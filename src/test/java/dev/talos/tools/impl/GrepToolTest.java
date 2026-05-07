@@ -62,6 +62,21 @@ class GrepToolTest {
         assertFalse(r.output().contains("README.md"));
     }
 
+    @Test void commaSeparatedIncludeGlobIsRejectedInsteadOfSilentFalseNegative() throws IOException {
+        Files.writeString(workspace.resolve("script.js"),
+                "const button = document.querySelector('.missing-button');\n");
+
+        var r = tool.execute(new ToolCall("talos.grep", Map.of(
+                "pattern", "\\.missing-button",
+                "include", "*.html, *.css",
+                "regex", "true")), ctx);
+
+        assertFalse(r.success());
+        assertEquals(ToolError.INVALID_PARAMS, r.error().code());
+        assertTrue(r.error().message().contains("include"), r.error().message());
+        assertTrue(r.error().message().contains("comma-separated"), r.error().message());
+    }
+
     @Test void noMatchesFound() {
         var r = tool.execute(new ToolCall("talos.grep", Map.of("pattern", "xyznonexistentxyz")), ctx);
         assertTrue(r.success());
