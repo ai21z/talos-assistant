@@ -161,6 +161,28 @@ class CurrentTurnCapabilityFrameTest {
     }
 
     @Test
+    void verifyOnlyDirectoryAwareFrameDistinguishesDirectoryAndFileTools() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Verify the final workspace paths for archive/readme-renamed.md, "
+                        + "copies/readme-final.md, and scratch/nested/reports. Do not edit files.");
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                contract,
+                ExecutionPhase.VERIFY,
+                List.of("talos.list_dir", "talos.read_file"),
+                List.of("talos.list_dir", "talos.read_file"),
+                List.of());
+
+        String frame = CurrentTurnCapabilityFrame.render(plan);
+
+        assertTrue(frame.contains("visibleTools: talos.list_dir, talos.read_file"), frame);
+        assertTrue(frame.contains("Use talos.list_dir for directory paths"), frame);
+        assertTrue(frame.contains("Use talos.read_file for file paths"), frame);
+        assertTrue(frame.contains("Do not call mutating workspace operation tools"), frame);
+        assertFalse(frame.contains("visibleTools: talos.write_file"), frame);
+        assertFalse(frame.contains("visibleTools: talos.edit_file"), frame);
+    }
+
+    @Test
     void renderOmitsSuppressedContextDetailsFromModelGuidance() {
         TaskContract contract = new TaskContract(
                 TaskType.SMALL_TALK,

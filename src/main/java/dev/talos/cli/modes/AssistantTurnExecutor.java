@@ -1795,6 +1795,10 @@ public final class AssistantTurnExecutor {
         if (!directoryListingAnswer.isBlank()) {
             return sanitizeAndTruncate(directoryListingAnswer, opts);
         }
+        String verifyOnlyPathAnswer = verifyOnlyPathCheckAnswerIfApplicable(messages, plan, loopResult);
+        if (!verifyOnlyPathAnswer.isBlank()) {
+            return sanitizeAndTruncate(verifyOnlyPathAnswer, opts);
+        }
         String readTargetAnswer = readTargetAnswerIfApplicable(answer, messages, plan, loopResult);
         if (!readTargetAnswer.isBlank()) {
             return sanitizeAndTruncate(readTargetAnswer, opts);
@@ -2012,6 +2016,98 @@ public final class AssistantTurnExecutor {
                 .toList();
         if (entries.isEmpty()) return "";
         return "Directory entries:\n- " + String.join("\n- ", entries);
+    }
+
+    private static String verifyOnlyPathCheckAnswerIfApplicable(
+            List<ChatMessage> messages,
+            CurrentTurnPlan plan,
+            ToolCallLoop.LoopResult loopResult
+    ) {
+        TaskContract contract = safePlanFromMessages(plan, messages, null).taskContract();
+        if (contract.type() != TaskType.VERIFY_ONLY || loopResult == null) return "";
+        if (!looksLikeVerifyOnlyPathCheckRequest(contract.originalUserRequest())) return "";
+        if (loopResult.toolOutcomes() == null || loopResult.toolOutcomes().isEmpty()) return "";
+        if (loopResult.toolOutcomes().stream().anyMatch(ToolCallLoop.ToolOutcome::mutating)) return "";
+        boolean hasDirectoryEvidence = loopResult.toolOutcomes().stream()
+                .anyMatch(outcome -> outcome != null
+                        && outcome.success()
+                        && "talos.list_dir".equals(canonicalToolName(outcome.toolName())));
+        if (!hasDirectoryEvidence) return "";
+
+        String requestLower = contract.originalUserRequest().replace('\\', '/').toLowerCase(Locale.ROOT);
+        LinkedHashSet<String> lines = new LinkedHashSet<>();
+        for (ToolCallLoop.ToolOutcome outcome : loopResult.toolOutcomes()) {
+            String line = verifyOnlyPathStatusLine(outcome, requestLower);
+            if (!line.isBlank()) lines.add(line);
+        }
+        if (lines.isEmpty()) return "";
+        return "Verified paths:\n- " + String.join("\n- ", lines);
+    }
+
+    private static boolean looksLikeVerifyOnlyPathCheckRequest(String request) {
+        if (request == null || request.isBlank()) return false;
+        String lower = request.toLowerCase(Locale.ROOT);
+        return lower.contains("path")
+                || lower.contains("exists")
+                || lower.contains("exist")
+                || lower.contains("present")
+                || lower.contains("/")
+                || lower.contains("\\");
+    }
+
+    private static String verifyOnlyPathStatusLine(
+            ToolCallLoop.ToolOutcome outcome,
+            String requestLower
+    ) {
+        if (outcome == null || !outcome.success()) return "";
+        String tool = canonicalToolName(outcome.toolName());
+        String path = ToolCallSupport.normalizePath(outcome.pathHint());
+        if (path.isBlank() || !requestMentionsExactPath(requestLower, path)) return "";
+        if ("talos.read_file".equals(tool)) {
+            return path + ": file exists and was read.";
+        }
+        if ("talos.list_dir".equals(tool)) {
+            String summary = outcome.summary() == null ? "" : outcome.summary().strip();
+            if ("(empty directory)".equalsIgnoreCase(summary)) {
+                return path + ": directory exists and is empty.";
+            }
+            return path + ": directory exists.";
+        }
+        return "";
+    }
+
+    private static boolean requestMentionsExactPath(String requestLower, String path) {
+        if (requestLower == null || requestLower.isBlank() || path == null || path.isBlank()) return false;
+        String needle = path.replace('\\', '/').toLowerCase(Locale.ROOT);
+        int index = requestLower.indexOf(needle);
+        while (index >= 0) {
+            int before = index - 1;
+            int after = index + needle.length();
+            boolean beforeBoundary = before < 0 || !isPathTokenChar(requestLower.charAt(before));
+            boolean afterBoundary = after >= requestLower.length()
+                    || !isPathTokenChar(requestLower.charAt(after))
+                    || isSentenceEndingDot(requestLower, after);
+            if (beforeBoundary && afterBoundary) return true;
+            index = requestLower.indexOf(needle, index + 1);
+        }
+        return false;
+    }
+
+    private static boolean isSentenceEndingDot(String value, int index) {
+        if (value == null || index < 0 || index >= value.length() || value.charAt(index) != '.') {
+            return false;
+        }
+        int next = index + 1;
+        return next >= value.length() || Character.isWhitespace(value.charAt(next));
+    }
+
+    private static boolean isPathTokenChar(char c) {
+        return Character.isLetterOrDigit(c)
+                || c == '_'
+                || c == '-'
+                || c == '.'
+                || c == '/'
+                || c == '\\';
     }
 
     private static String readTargetAnswerIfApplicable(

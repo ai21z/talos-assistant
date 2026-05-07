@@ -142,6 +142,55 @@ class ToolSurfacePlannerTest {
     }
 
     @Test
+    void verifyOnlyMixedFileAndDirectoryPathChecksExposeReadFileAndListDirOnly() {
+        var contract = TaskContractResolver.fromUserRequest(
+                "Verify the final workspace paths for archive/readme-renamed.md, "
+                        + "copies/readme-final.md, and scratch/nested/reports. Do not edit files.");
+
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(contract, ExecutionPhase.VERIFY, registry());
+
+        List<String> names = plan.nativeToolNames();
+        assertEquals("verify-only path check with directory targets", plan.reason());
+        assertTrue(names.contains("talos.read_file"), names.toString());
+        assertTrue(names.contains("talos.list_dir"), names.toString());
+        assertFalse(names.contains("talos.write_file"), names.toString());
+        assertFalse(names.contains("talos.edit_file"), names.toString());
+        assertFalse(names.contains("talos.mkdir"), names.toString());
+        assertFalse(names.contains("talos.move_path"), names.toString());
+        assertFalse(names.contains("talos.copy_path"), names.toString());
+        assertFalse(names.contains("talos.rename_path"), names.toString());
+    }
+
+    @Test
+    void verifyOnlyFilePathChecksKeepExpectedTargetReadSurface() {
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                TaskContractResolver.fromUserRequest(
+                        "Verify README.md and docs/plan.md. Do not edit files."),
+                ExecutionPhase.VERIFY,
+                registry());
+
+        assertEquals(List.of("talos.read_file"), plan.nativeToolNames());
+        assertEquals("expected target read", plan.reason());
+    }
+
+    @Test
+    void verifyOnlyDirectoryPathWithoutFileTargetsUsesNarrowReadOnlyPathSurface() {
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                TaskContractResolver.fromUserRequest(
+                        "Verify whether scratch/nested/reports exists as a directory. Do not edit files."),
+                ExecutionPhase.VERIFY,
+                registry());
+
+        List<String> names = plan.nativeToolNames();
+        assertEquals("verify-only path check with directory targets", plan.reason());
+        assertEquals(List.of("talos.list_dir", "talos.read_file"), names);
+        assertFalse(names.contains("talos.run_command"), names.toString());
+        assertFalse(names.contains("talos.write_file"), names.toString());
+        assertFalse(names.contains("talos.edit_file"), names.toString());
+        assertFalse(names.contains("talos.mkdir"), names.toString());
+    }
+
+    @Test
     void verifyPhaseDowngradesMutationContractToReadOnlyMetadataSurface() {
         ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
                 TaskContractResolver.fromUserRequest("Edit index.html."),
@@ -243,6 +292,21 @@ class ToolSurfacePlannerTest {
                 List.of("talos.grep", "talos.list_dir", "talos.read_file", "talos.retrieve", "talos.run_command"),
                 ToolSurfacePlanner.defaultVisibleToolNames(
                         TaskContractResolver.fromUserRequest("verify that the Gradle build passes"),
+                        ExecutionPhase.VERIFY));
+
+        assertEquals(
+                List.of("talos.list_dir", "talos.read_file"),
+                ToolSurfacePlanner.defaultVisibleToolNames(
+                        TaskContractResolver.fromUserRequest(
+                                "Verify the final workspace paths for archive/readme-renamed.md, "
+                                        + "copies/readme-final.md, and scratch/nested/reports. Do not edit files."),
+                        ExecutionPhase.VERIFY));
+
+        assertEquals(
+                List.of("talos.list_dir", "talos.read_file"),
+                ToolSurfacePlanner.defaultVisibleToolNames(
+                        TaskContractResolver.fromUserRequest(
+                                "Verify whether scratch/nested/reports exists as a directory. Do not edit files."),
                         ExecutionPhase.VERIFY));
 
         assertEquals(
