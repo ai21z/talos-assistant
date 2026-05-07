@@ -30,6 +30,16 @@ class ActionObligationPolicyTest {
     }
 
     @Test
+    void explicitWorkspaceOperationApplyTurnRequiresWorkspaceOperationTool() {
+        var contract = TaskContractResolver.fromUserRequest(
+                "Move workspace-notes/readme-renamed.md to archive/readme-renamed.md.");
+
+        assertEquals(
+                ActionObligation.valueOf("WORKSPACE_OPERATION_REQUIRED"),
+                ActionObligationPolicy.derive(contract, ExecutionPhase.APPLY));
+    }
+
+    @Test
     void directoryListingRequiresListDirOnly() {
         var contract = TaskContractResolver.fromUserRequest("What files are in this folder?");
 

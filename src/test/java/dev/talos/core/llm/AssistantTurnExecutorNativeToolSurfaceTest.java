@@ -11,7 +11,11 @@ import dev.talos.tools.FileUndoStack;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
+import dev.talos.tools.impl.CopyPathTool;
+import dev.talos.tools.impl.MakeDirectoryTool;
+import dev.talos.tools.impl.MovePathTool;
 import dev.talos.tools.impl.ReadFileTool;
+import dev.talos.tools.impl.RenamePathTool;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
@@ -100,12 +104,30 @@ class AssistantTurnExecutorNativeToolSurfaceTest {
         assertTrue(names.contains("talos.edit_file"));
     }
 
+    @Test
+    void explicitMoveTurnSendsOnlyMovePathNativeToolSpec() {
+        RecordingResolver resolver = new RecordingResolver();
+        Context ctx = context(resolver);
+
+        AssistantTurnExecutor.execute(
+                messages("Move workspace-notes/readme-renamed.md to archive/readme-renamed.md."),
+                Path.of("."),
+                ctx,
+                new AssistantTurnExecutor.Options());
+
+        assertEquals(List.of("talos.move_path"), toolNames(resolver.lastRequest));
+    }
+
     private static Context context(RecordingResolver resolver) {
         ToolRegistry registry = new ToolRegistry();
         FileUndoStack undoStack = new FileUndoStack();
         registry.register(new ReadFileTool());
         registry.register(new FileWriteTool(undoStack));
         registry.register(new FileEditTool(undoStack));
+        registry.register(new MakeDirectoryTool());
+        registry.register(new MovePathTool());
+        registry.register(new CopyPathTool());
+        registry.register(new RenamePathTool());
 
         LlmClient llm = new LlmClient(engineConfig(), resolver);
         llm.setToolSpecs(registry.descriptors().stream()

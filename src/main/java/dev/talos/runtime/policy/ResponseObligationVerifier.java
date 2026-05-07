@@ -31,7 +31,8 @@ public final class ResponseObligationVerifier {
 
     public static boolean unsatisfiedNoToolResponse(ActionObligation obligation, String answer) {
         return obligation == ActionObligation.MUTATING_TOOL_REQUIRED
-                || obligation == ActionObligation.CONDITIONAL_REVIEW_FIX;
+                || obligation == ActionObligation.CONDITIONAL_REVIEW_FIX
+                || obligation == ActionObligation.WORKSPACE_OPERATION_REQUIRED;
     }
 
     public static boolean containsMutationCapabilityDeflection(String answer) {
@@ -54,6 +55,10 @@ public final class ResponseObligationVerifier {
                     + "requires evidence-backed no blocker; a concrete repair claim requires "
                     + "a write/edit tool call.]";
         }
+        if (obligation == ActionObligation.WORKSPACE_OPERATION_REQUIRED) {
+            return "[Action obligation check: the previous model response did not issue "
+                    + "the required workspace operation tool call.]";
+        }
         if (containsMutationCapabilityDeflection(answer)) {
             return "[Action obligation check: the previous model response denied workspace file access, "
                     + "but the runtime exposed write/edit tools for this turn. That denial was not accepted.]";
@@ -65,6 +70,15 @@ public final class ResponseObligationVerifier {
         return "[Action obligation failed: no file was changed in this turn.]\n\n"
                 + "Talos can apply approved file changes in this workspace, but the model did not issue "
                 + "the required write/edit tool calls on this turn, so no files were changed.";
+    }
+
+    public static String deterministicNoActionAnswer(ActionObligation obligation) {
+        if (obligation == ActionObligation.WORKSPACE_OPERATION_REQUIRED) {
+            return "[Action obligation failed: no workspace operation was performed in this turn.]\n\n"
+                    + "Talos exposed a dedicated workspace operation tool for this request, but the model did not "
+                    + "issue the required tool call, so the requested workspace operation was not applied.";
+        }
+        return deterministicNoActionAnswer();
     }
 
     public static String deterministicContextBudgetRetrySkippedAnswer(

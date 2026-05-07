@@ -52,6 +52,34 @@ class AssistantTurnExecutorMutationRetryToolSurfaceTest {
     }
 
     @Test
+    void workspaceOperationNoToolRetryUsesOnlyRequiredOperationToolAndFailsDeterministically() {
+        RecordingResolver resolver = new RecordingResolver(List.of(
+                "[ok] Created directory scratch/nested/reports.",
+                "[ok] Created directory scratch/nested/reports."));
+        Context ctx = context(resolver);
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user("Create directory scratch/nested/reports.")
+        ));
+
+        AssistantTurnExecutor.TurnOutput output = AssistantTurnExecutor.execute(
+                messages,
+                Path.of("."),
+                ctx,
+                new AssistantTurnExecutor.Options());
+
+        assertTrue(output.text().startsWith("[Action obligation failed:"), output.text());
+        assertFalse(output.text().contains("[ok] Created directory"), output.text());
+        assertTrue(resolver.requests.size() >= 2, "expected initial call and operation retry call");
+        assertEquals(List.of("talos.mkdir"), sortedToolNames(resolver.requests.get(1)));
+        String retryPrompt = joinedMessageContent(resolver.requests.get(1));
+        assertTrue(retryPrompt.contains("obligation: WORKSPACE_OPERATION_REQUIRED"), retryPrompt);
+        assertTrue(retryPrompt.contains("talos.mkdir"), retryPrompt);
+        assertFalse(retryPrompt.contains("talos.write_file"), retryPrompt);
+        assertFalse(retryPrompt.contains("talos.edit_file"), retryPrompt);
+    }
+
+    @Test
     void missingMutationRetryUsesCompactMessagesWithoutOldHistory() {
         RecordingResolver resolver = new RecordingResolver(List.of(
                 "Done. The files are complete.",

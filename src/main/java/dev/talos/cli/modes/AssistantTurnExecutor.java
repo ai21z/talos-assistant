@@ -43,6 +43,7 @@ import dev.talos.runtime.trace.PromptAuditSnapshot;
 import dev.talos.runtime.verification.StaticTaskVerifier;
 import dev.talos.runtime.verification.StaticWebImportIntent;
 import dev.talos.runtime.verification.WebDiagnosticIntent;
+import dev.talos.runtime.workspace.WorkspaceOperationIntent;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequestControls;
@@ -117,7 +118,7 @@ public final class AssistantTurnExecutor {
 
     private static final String COMPACT_MUTATION_RETRY_SYSTEM_PROMPT = """
             Talos bounded mutation retry.
-            Use only listed tools. Do not claim changes unless write/edit succeeds.
+            Use only listed tools. Do not claim changes unless the required mutation or workspace operation tool succeeds.
             """;
 
     private AssistantTurnExecutor() {} // utility class
@@ -2901,22 +2902,24 @@ public final class AssistantTurnExecutor {
         LOG.info("Missing-mutation retry fired: user asked for a change but 0 mutating "
                 + "tool calls succeeded. Re-prompting with an explicit write nudge.");
 
+        List<String> retryToolNames = mutationRetryToolNames(safePlan, messages);
         LocalTurnTraceCapture.recordActionObligation(
                 obligation.name(),
                 "UNSATISFIED",
-                "model response had no write/edit tool calls");
+                "model response had no " + requiredToolCallLabel(obligation, retryToolNames));
         String retrySummary = ResponseObligationVerifier.retryFailureSummary(obligation, answer);
+        List<ToolSpec> retryToolSpecs = mutationRetryToolSpecs(ctx, retryToolNames);
         String retryInstruction = mutationRetryInstruction(
                 obligation,
                 userRequest,
-                priorMutationRequest);
-        List<ToolSpec> retryToolSpecs = mutationRetryToolSpecs(ctx, messages);
-        String retryFrame = compactMutationRetryFrame(safePlan, retryToolSpecs);
+                priorMutationRequest,
+                retryToolNames);
+        String retryFrame = compactMutationRetryFrame(safePlan, retryToolSpecs, retryToolNames);
         messages.add(ChatMessage.assistant(retrySummary));
         messages.add(ChatMessage.system(retryFrame));
         messages.add(ChatMessage.user(retryInstruction));
         List<ChatMessage> retryMessages = compactMutationRetryMessages(
-                messages, safePlan, retryInstruction, retryToolSpecs);
+                messages, safePlan, retryInstruction, retryToolSpecs, retryToolNames);
 
         try {
             LlmClient.StreamResult retry = chatFull(ctx, retryMessages, safePlan, retryToolSpecs);
@@ -2957,7 +2960,7 @@ public final class AssistantTurnExecutor {
                     LocalTurnTraceCapture.recordActionObligation(
                             obligation.name(),
                             "SATISFIED_AFTER_RETRY",
-                            "retry response issued write/edit tool calls");
+                            "retry response issued " + requiredToolCallLabel(obligation, retryToolNames));
                 } else if (hasDeniedMutation(retryLoop)) {
                     LocalTurnTraceCapture.recordActionObligation(
                             obligation.name(),
@@ -2972,7 +2975,8 @@ public final class AssistantTurnExecutor {
                     boolean repairInspectionOnly = isRepairInspectionOnlyRetry(safePlan, retryLoop);
                     String failureReason = repairInspectionOnly
                             ? "repair/fix retry response used only read-only inspection tools"
-                            : "retry response issued tool calls but no write/edit tool calls";
+                            : "retry response issued tool calls but no "
+                            + requiredToolCallLabel(obligation, retryToolNames);
                     String failureKind = repairInspectionOnly ? "REPAIR_INSPECTION_ONLY" : "";
                     if (repairInspectionOnly) {
                         LocalTurnTraceCapture.recordActionObligation(
@@ -2989,7 +2993,7 @@ public final class AssistantTurnExecutor {
                     return new MutationRetryResult(
                             repairInspectionOnly
                                     ? ResponseObligationVerifier.deterministicRepairInspectionOnlyAnswer()
-                                    : ResponseObligationVerifier.deterministicNoActionAnswer(),
+                                    : ResponseObligationVerifier.deterministicNoActionAnswer(obligation),
                             0,
                             summary,
                             retryLoop,
@@ -3006,11 +3010,11 @@ public final class AssistantTurnExecutor {
             // text if it's non-blank (model explained why it can't), otherwise
             // fall back to the original answer.
             if (!retryText.isBlank() && !retryText.equals(answer)) {
-                String deterministic = ResponseObligationVerifier.deterministicNoActionAnswer();
+                String deterministic = ResponseObligationVerifier.deterministicNoActionAnswer(obligation);
                 LocalTurnTraceCapture.recordActionObligation(
                         obligation.name(),
                         "FAILED",
-                        "retry response still had no write/edit tool calls");
+                        "retry response still had no " + requiredToolCallLabel(obligation, retryToolNames));
                 return new MutationRetryResult(deterministic, 0, null, null, true);
             }
         } catch (EngineException.ContextBudgetExceeded budget) {
@@ -3035,23 +3039,41 @@ public final class AssistantTurnExecutor {
         LocalTurnTraceCapture.recordActionObligation(
                 obligation.name(),
                 "FAILED",
-                "retry failed before write/edit tool calls executed");
+                "retry failed before " + requiredToolCallLabel(obligation, retryToolNames) + " executed");
         return new MutationRetryResult(
-                ResponseObligationVerifier.deterministicNoActionAnswer(),
+                ResponseObligationVerifier.deterministicNoActionAnswer(obligation),
                 0,
                 null,
                 null,
                 true);
     }
 
-    private static List<ToolSpec> mutationRetryToolSpecs(Context ctx, List<ChatMessage> messages) {
-        List<ToolSpec> base = requestToolSpecsForControls(ctx, null);
-        if (base.isEmpty()) return base;
-        List<String> allowed = RepairPolicy.fullRewriteTargetsFromRepairContext(messages).isEmpty()
+    private static List<String> mutationRetryToolNames(CurrentTurnPlan plan, List<ChatMessage> messages) {
+        TaskContract contract = plan == null ? null : plan.taskContract();
+        Optional<WorkspaceOperationIntent.Intent> workspaceOperation = WorkspaceOperationIntent.detect(contract);
+        if (workspaceOperation.isPresent()) {
+            return workspaceOperation.get().toolNames();
+        }
+        return RepairPolicy.fullRewriteTargetsFromRepairContext(messages).isEmpty()
                 ? List.of("talos.write_file", "talos.edit_file")
                 : List.of("talos.write_file");
+    }
+
+    private static String requiredToolCallLabel(ActionObligation obligation, List<String> toolNames) {
+        if (obligation == ActionObligation.WORKSPACE_OPERATION_REQUIRED) {
+            String tools = toolNames == null || toolNames.isEmpty()
+                    ? "workspace operation"
+                    : String.join("/", toolNames);
+            return tools + " workspace operation tool calls";
+        }
+        return "write/edit tool calls";
+    }
+
+    private static List<ToolSpec> mutationRetryToolSpecs(Context ctx, List<String> allowed) {
+        List<ToolSpec> base = requestToolSpecsForControls(ctx, null);
+        if (base.isEmpty()) return base;
         List<ToolSpec> narrowed = filterToolSpecs(base, allowed);
-        return narrowed.isEmpty() ? compactMutationRetryToolSpecs(base) : compactMutationRetryToolSpecs(narrowed);
+        return narrowed.isEmpty() ? List.of() : compactMutationRetryToolSpecs(narrowed);
     }
 
     private static List<ToolSpec> filterToolSpecs(List<ToolSpec> specs, List<String> allowedNames) {
@@ -3091,7 +3113,8 @@ public final class AssistantTurnExecutor {
             List<ChatMessage> messages,
             CurrentTurnPlan plan,
             String retryInstruction,
-            List<ToolSpec> retryToolSpecs
+            List<ToolSpec> retryToolSpecs,
+            List<String> fallbackToolNames
     ) {
         List<ChatMessage> out = new ArrayList<>();
         out.add(ChatMessage.system(COMPACT_MUTATION_RETRY_SYSTEM_PROMPT));
@@ -3100,7 +3123,7 @@ public final class AssistantTurnExecutor {
                     .map(AssistantTurnExecutor::compactStaticVerificationRepairInstructionForRetry)
                     .ifPresent(out::add);
         }
-        out.add(ChatMessage.system(compactMutationRetryFrame(plan, retryToolSpecs)));
+        out.add(ChatMessage.system(compactMutationRetryFrame(plan, retryToolSpecs, fallbackToolNames)));
         out.add(ChatMessage.user(retryInstruction));
         return out;
     }
@@ -3208,12 +3231,18 @@ public final class AssistantTurnExecutor {
         return out;
     }
 
-    private static String compactMutationRetryFrame(CurrentTurnPlan plan, List<ToolSpec> retryToolSpecs) {
+    private static String compactMutationRetryFrame(
+            CurrentTurnPlan plan,
+            List<ToolSpec> retryToolSpecs,
+            List<String> fallbackToolNames
+    ) {
         TaskContract contract = plan == null ? TaskContract.unknown("") : plan.taskContract();
         ActionObligation obligation = plan == null ? ActionObligation.UNKNOWN : plan.actionObligation();
         String request = plan == null ? "" : Objects.toString(plan.originalUserRequest(), "");
         List<String> allowedTools = retryToolSpecs == null || retryToolSpecs.isEmpty()
+                ? (fallbackToolNames == null || fallbackToolNames.isEmpty()
                 ? List.of("talos.write_file", "talos.edit_file")
+                : fallbackToolNames)
                 : retryToolSpecs.stream()
                 .filter(Objects::nonNull)
                 .map(ToolSpec::name)
@@ -3383,13 +3412,23 @@ public final class AssistantTurnExecutor {
     private static String mutationRetryInstruction(
             ActionObligation obligation,
             String userRequest,
-            String priorMutationRequest
+            String priorMutationRequest,
+            List<String> retryToolNames
     ) {
         if (obligation == ActionObligation.CONDITIONAL_REVIEW_FIX) {
             return "Review/fix retry. "
                     + mutationRetryRequestContext(userRequest, priorMutationRequest)
                     + "If a browser blocker remains, call write_file/edit_file. "
                     + "If none, answer exactly: No file change is required.";
+        }
+        if (obligation == ActionObligation.WORKSPACE_OPERATION_REQUIRED) {
+            String tools = retryToolNames == null || retryToolNames.isEmpty()
+                    ? "the visible workspace operation tool"
+                    : String.join(", ", retryToolNames);
+            return "Retry required: the previous model response did not issue the required workspace operation tool call. "
+                    + mutationRetryRequestContext(userRequest, priorMutationRequest)
+                    + "Call " + tools + ". Do not emulate move, copy, rename, or mkdir by writing/editing file content. "
+                    + "If impossible, name the operation target and reason in one sentence.";
         }
         return "Retry required: the previous model response did not issue required write/edit tool calls. "
                 + mutationRetryRequestContext(userRequest, priorMutationRequest)

@@ -89,6 +89,12 @@ public final class CurrentTurnCapabilityFrame {
                     Runtime handles approval, permissions, checkpointing, and verification.
                     Do not say you lack filesystem or workspace access.
                     Do not provide manual snippets instead of acting unless a narrow clarification is genuinely required.""");
+            case WORKSPACE_OPERATION_REQUIRED -> frame.append("""
+                    Use the visible workspace operation tool for this turn.
+                    Do not emulate move, copy, rename, or mkdir by manually writing or editing file contents.
+                    Runtime handles approval, permissions, checkpointing, and verification.
+                    Do not say you lack filesystem or workspace access.
+                    Do not provide manual instructions instead of acting unless a narrow clarification is genuinely required.""");
             case CONDITIONAL_REVIEW_FIX -> frame.append("""
                     This is a conditional review-and-fix turn.
                     Inspect the relevant files first using read-only tools.
@@ -159,6 +165,12 @@ public final class CurrentTurnCapabilityFrame {
         List<String> targets = orderedExpectedTargets(contract);
         frame.append("[ExpectedTargets]\n")
                 .append("requiredTargets: ").append(String.join(", ", targets)).append('\n');
+        if (obligation == ActionObligation.WORKSPACE_OPERATION_REQUIRED) {
+            frame.append("Satisfy these exact source/destination target paths with the visible workspace operation tool.\n")
+                    .append("Do not substitute a generic talos.write_file or talos.edit_file call for a move, copy, rename, or mkdir request.\n")
+                    .append("Similar filenames are not substitutes for required target paths.\n");
+            return;
+        }
         if (obligation == ActionObligation.CONDITIONAL_REVIEW_FIX) {
             frame.append("Inspect these exact target paths when they are relevant to the review.\n")
                     .append("If evidence shows a repair is needed, write or edit these exact target paths.\n")

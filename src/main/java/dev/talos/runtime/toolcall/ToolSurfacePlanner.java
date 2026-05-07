@@ -4,6 +4,7 @@ import dev.talos.core.capability.CapabilityKind;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
+import dev.talos.runtime.workspace.WorkspaceOperationIntent;
 import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.ToolDescriptor;
 import dev.talos.tools.ToolOperationMetadata;
@@ -44,6 +45,14 @@ public final class ToolSurfacePlanner {
                 && phase == ExecutionPhase.APPLY;
 
         if (mutationAllowed) {
+            var workspaceOperation = WorkspaceOperationIntent.detect(contract);
+            if (workspaceOperation.isPresent()) {
+                WorkspaceOperationIntent.Intent intent = workspaceOperation.get();
+                return select(
+                        registry,
+                        descriptor -> intent.toolNames().contains(descriptor.name()),
+                        intent.surfaceReason());
+            }
             return select(registry, ToolSurfacePlanner::isApplyOperation, "mutation apply surface");
         }
         if (explicitCommandVerificationSurface(contract, phase)) {
@@ -59,6 +68,10 @@ public final class ToolSurfacePlanner {
         if (contract == null || contract.type() == TaskType.SMALL_TALK) return List.of();
         if (contract.type() == TaskType.DIRECTORY_LISTING) return List.of("talos.list_dir");
         if (contract.mutationAllowed() && phase == ExecutionPhase.APPLY) {
+            var workspaceOperation = WorkspaceOperationIntent.detect(contract);
+            if (workspaceOperation.isPresent()) {
+                return workspaceOperation.get().toolNames();
+            }
             return List.of(
                     "talos.apply_workspace_batch",
                     "talos.copy_path",

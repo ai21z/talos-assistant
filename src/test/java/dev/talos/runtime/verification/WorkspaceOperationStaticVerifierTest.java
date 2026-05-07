@@ -13,8 +13,10 @@ import dev.talos.runtime.TurnUserRequestCapture;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.tools.ToolRegistry;
+import dev.talos.tools.FileUndoStack;
 import dev.talos.tools.impl.BatchWorkspaceApplyTool;
 import dev.talos.tools.impl.CopyPathTool;
+import dev.talos.tools.impl.FileWriteTool;
 import dev.talos.tools.impl.MovePathTool;
 import dev.talos.tools.impl.RenamePathTool;
 import org.junit.jupiter.api.AfterEach;
@@ -127,6 +129,35 @@ class WorkspaceOperationStaticVerifierTest {
                 verification.facts().toString());
         assertTrue(verification.facts().stream().anyMatch(f -> f.contains("rename destination exists: docs/final-source.txt")),
                 verification.facts().toString());
+    }
+
+    @Test
+    void genericWriteDoesNotSatisfyMoveOperationWhenSourceRemains() throws Exception {
+        Files.createDirectories(workspace.resolve("workspace-notes"));
+        Files.writeString(workspace.resolve("workspace-notes/readme-renamed.md"), "source\n");
+
+        String request = "Move workspace-notes/readme-renamed.md to archive/readme-renamed.md.";
+        ToolCallLoop.LoopResult loopResult = runLoop(
+                request,
+                tools(new FileWriteTool(new FileUndoStack())),
+                """
+                {"name":"talos.write_file","arguments":{"path":"archive/readme-renamed.md","content":"source\\n"}}
+                """);
+
+        assertTrue(Files.exists(workspace.resolve("workspace-notes/readme-renamed.md")));
+        assertTrue(Files.exists(workspace.resolve("archive/readme-renamed.md")));
+
+        TaskVerificationResult verification = StaticTaskVerifier.verify(
+                workspace,
+                TaskContractResolver.fromUserRequest(request),
+                loopResult,
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, verification.status());
+        assertTrue(verification.problems().stream()
+                        .anyMatch(problem -> problem.contains("workspace-notes/readme-renamed.md")
+                                && problem.contains("expected target was not successfully mutated")),
+                verification.problems().toString());
     }
 
     private ToolCallLoop.LoopResult runLoop(String request, ToolRegistry registry, String initialResponse) {

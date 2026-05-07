@@ -1,7 +1,7 @@
 # T209 - Workspace Operation Intent Must Use Workspace Operation Tools
 
 Severity: medium-high
-Status: open
+Status: done
 
 ## Problem
 
@@ -51,3 +51,30 @@ Qwen comparison:
 - Do not change static web verification.
 - Do not implement filesystem deletes beyond the existing workspace operation tools.
 - Do not rely on prompt wording alone without narrowing the tool surface.
+
+## Implementation Notes
+
+Implemented a `WorkspaceOperationIntent` detector and wired it through:
+- action obligation selection,
+- current-turn capability framing,
+- tool surface planning,
+- compact mutation retry tool selection,
+- deterministic no-tool retry failure wording.
+
+Explicit move/copy/rename/mkdir requests now select `WORKSPACE_OPERATION_REQUIRED` and expose only the matching operation tool.
+
+## Verification
+
+Automated checks:
+- `.\gradlew.bat test --tests dev.talos.core.llm.AssistantTurnExecutorMutationRetryToolSurfaceTest --no-daemon`
+- `.\gradlew.bat test --tests dev.talos.runtime.policy.ActionObligationPolicyTest --tests dev.talos.runtime.policy.CurrentTurnCapabilityFrameTest --tests dev.talos.runtime.toolcall.ToolSurfacePlannerTest --tests dev.talos.core.llm.AssistantTurnExecutorNativeToolSurfaceTest --tests dev.talos.core.llm.AssistantTurnExecutorMutationRetryToolSurfaceTest --tests dev.talos.runtime.verification.WorkspaceOperationStaticVerifierTest --tests dev.talos.runtime.task.TaskContractResolverTest --no-daemon`
+- `.\gradlew.bat test --no-daemon`
+- `.\gradlew.bat build installDist --no-daemon`
+
+Focused two-model audit:
+`local/manual-testing/llama-cpp-t209-focused-re-audit-20260507-231118/FINDINGS-LLAMA-CPP-T209-FOCUSED-RE-AUDIT.md`
+
+Result:
+- Qwen and GPT-OSS both received only the matching operation tool for move/copy/rename/mkdir.
+- Qwen and GPT-OSS both used the matching tool successfully.
+- The previous no-tool mkdir completion did not reproduce.
