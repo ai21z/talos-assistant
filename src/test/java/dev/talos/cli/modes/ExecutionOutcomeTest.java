@@ -907,6 +907,203 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void workspaceOperationReadbackSummaryUsesOperationWording() throws Exception {
+        Path ws = Files.createTempDirectory("talos-workspace-operation-readback-wording-");
+        try {
+            Files.createDirectories(ws.resolve("archive"));
+            Files.createDirectories(ws.resolve("copies"));
+            Files.createDirectories(ws.resolve("scratch/nested/reports"));
+            Files.writeString(ws.resolve("archive/source.md"), "# Source\n");
+            Files.writeString(ws.resolve("copies/source-final.md"), "# Source\n");
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Move source.md to archive/source.md, copy archive/source.md to copies/source-copy.md, "
+                            + "rename copies/source-copy.md to source-final.md, and create directory "
+                            + "scratch/nested/reports."));
+
+            WorkspaceOperationPlan movePlan = WorkspaceOperationPlan.movePath(
+                    "source.md",
+                    "archive/source.md",
+                    WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS);
+            WorkspaceOperationPlan copyPlan = WorkspaceOperationPlan.copyPath(
+                    "archive/source.md",
+                    "copies/source-copy.md",
+                    WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS,
+                    false);
+            WorkspaceOperationPlan renamePlan = WorkspaceOperationPlan.batch(
+                    WorkspaceOperationPlan.OperationKind.RENAME_PATH,
+                    List.of(
+                            WorkspaceOperationPlan.PathEffect.source(
+                                    "copies/source-copy.md", true, WorkspaceOperationPlan.OperationKind.RENAME_PATH),
+                            WorkspaceOperationPlan.PathEffect.destination(
+                                    "copies/source-final.md", true, WorkspaceOperationPlan.OperationKind.RENAME_PATH)),
+                    dev.talos.tools.ToolRiskLevel.WRITE,
+                    true,
+                    WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS,
+                    false,
+                    "Rename copies/source-copy.md to copies/source-final.md.",
+                    "Rename: copies/source-copy.md -> copies/source-final.md");
+            WorkspaceOperationPlan mkdirPlan = WorkspaceOperationPlan.batch(
+                    WorkspaceOperationPlan.OperationKind.CREATE_DIRECTORY,
+                    List.of(WorkspaceOperationPlan.PathEffect.absentBefore(
+                            "scratch/nested/reports", true, WorkspaceOperationPlan.OperationKind.CREATE_DIRECTORY)),
+                    dev.talos.tools.ToolRiskLevel.WRITE,
+                    true,
+                    WorkspaceOperationPlan.OverwritePolicy.NOT_APPLICABLE,
+                    false,
+                    "Create directory scratch/nested/reports.",
+                    "Mkdir: scratch/nested/reports");
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Workspace operations applied.", 1, 4,
+                    List.of("talos.move_path", "talos.copy_path", "talos.rename_path", "talos.mkdir"),
+                    List.of(), 4, 0, false, 4, List.of(),
+                    0, 0, 0, 0,
+                    List.of(
+                            workspaceOutcome("talos.move_path", "archive/source.md", true,
+                                    "Moved source.md -> archive/source.md", "", "", movePlan),
+                            workspaceOutcome("talos.copy_path", "copies/source-copy.md", true,
+                                    "Copied archive/source.md -> copies/source-copy.md", "", "", copyPlan),
+                            workspaceOutcome("talos.rename_path", "copies/source-final.md", true,
+                                    "Renamed copies/source-copy.md -> copies/source-final.md", "", "", renamePlan),
+                            workspaceOutcome("talos.mkdir", "scratch/nested/reports", true,
+                                    "Created directory scratch/nested/reports", "", "", mkdirPlan)
+                    ));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "Workspace operations applied.", messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.READBACK_ONLY, outcome.verificationStatus());
+            assertTrue(outcome.finalAnswer().startsWith("[Workspace operation/readback passed."),
+                    outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("File write/readback passed"),
+                    outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("task completion was not verified"),
+                    outcome.finalAnswer());
+            assertEquals(TaskCompletionStatus.COMPLETED_UNVERIFIED, outcome.taskOutcome().completionStatus());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
+    void partialWorkspaceOperationDoesNotUseReadbackSuccessBanner() throws Exception {
+        Path ws = Files.createTempDirectory("talos-workspace-operation-partial-wording-");
+        try {
+            Files.createDirectories(ws.resolve("scratch/reports"));
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Create directory scratch/reports and move missing.md to archive/missing.md."));
+
+            WorkspaceOperationPlan mkdirPlan = WorkspaceOperationPlan.batch(
+                    WorkspaceOperationPlan.OperationKind.CREATE_DIRECTORY,
+                    List.of(WorkspaceOperationPlan.PathEffect.absentBefore(
+                            "scratch/reports", true, WorkspaceOperationPlan.OperationKind.CREATE_DIRECTORY)),
+                    dev.talos.tools.ToolRiskLevel.WRITE,
+                    true,
+                    WorkspaceOperationPlan.OverwritePolicy.NOT_APPLICABLE,
+                    false,
+                    "Create directory scratch/reports.",
+                    "Mkdir: scratch/reports");
+            WorkspaceOperationPlan movePlan = WorkspaceOperationPlan.movePath(
+                    "missing.md",
+                    "archive/missing.md",
+                    WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS);
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Created the folder and moved the file.", 1, 2,
+                    List.of("talos.mkdir", "talos.move_path"),
+                    List.of(), 1, 0, false, 1, List.of(),
+                    0, 0, 0, 0,
+                    List.of(
+                            workspaceOutcome("talos.mkdir", "scratch/reports", true,
+                                    "Created directory scratch/reports", "", "", mkdirPlan),
+                            workspaceOutcome("talos.move_path", "archive/missing.md", false,
+                                    "", "Source not found: missing.md",
+                                    ToolError.NOT_FOUND, movePlan)
+                    ));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "Created the folder and moved the file.", messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.PARTIAL, outcome.completionStatus());
+            assertTrue(outcome.finalAnswer().startsWith("[Partial verification: static checks failed"),
+                    outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains(AssistantTurnExecutor.PARTIAL_MUTATION_ANNOTATION),
+                    outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("Workspace operation/readback passed"),
+                    outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("File write/readback passed"),
+                    outcome.finalAnswer());
+            assertEquals(TaskCompletionStatus.PARTIAL, outcome.taskOutcome().completionStatus());
+            assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.PARTIAL_MUTATION));
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
+    void failedWorkspaceOperationDoesNotUseReadbackSuccessBanner() throws Exception {
+        Path ws = Files.createTempDirectory("talos-workspace-operation-failed-wording-");
+        try {
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Copy README.md to docs/README-copy.md."));
+
+            WorkspaceOperationPlan copyPlan = WorkspaceOperationPlan.copyPath(
+                    "README.md",
+                    "docs/README-copy.md",
+                    WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS,
+                    false);
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "I have created docs/README-copy.md.", 1, 1,
+                    List.of("talos.copy_path"),
+                    List.of(), 1, 0, false, 0, List.of(),
+                    0, 0, 0, 0,
+                    List.of(
+                            workspaceOutcome("talos.copy_path", "docs/README-copy.md", false,
+                                    "", "Invalid destination path: docs/README-copy.md",
+                                    ToolError.INVALID_PARAMS, copyPlan)
+                    ));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "I have created docs/README-copy.md.", messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.FAILED, outcome.completionStatus());
+            assertTrue(outcome.finalAnswer().startsWith(AssistantTurnExecutor.INVALID_MUTATION_ANNOTATION),
+                    outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("Workspace operation/readback passed"),
+                    outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("File write/readback passed"),
+                    outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("I have created docs/README-copy.md"),
+                    outcome.finalAnswer());
+            assertEquals(TaskCompletionStatus.FAILED, outcome.taskOutcome().completionStatus());
+            assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.INVALID_MUTATION_ARGUMENTS));
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void satisfiedWorkspaceOperationPostconditionsRecoverLaterDuplicateFailures() throws Exception {
         Path ws = Files.createTempDirectory("talos-workspace-operation-duplicate-recovery-");
         try {
