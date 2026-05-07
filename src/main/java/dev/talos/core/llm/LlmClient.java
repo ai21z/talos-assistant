@@ -3,7 +3,9 @@ package dev.talos.core.llm;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
 import dev.talos.core.EngineRuntimeConfig;
+import dev.talos.core.context.TokenBudget;
 import dev.talos.core.util.Sanitize;
+import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
@@ -838,12 +840,20 @@ public final class LlmClient implements AutoCloseable {
                         m.toolCalls(),
                         m.toolCallId()))
                 .toList();
+        List<ToolSpec> tools = effectiveToolSpecs(requestToolSpecs);
+        ChatRequestControls requestControls = controls == null ? ChatRequestControls.defaults() : controls;
+        List<ChatMessage> requestMessages = fitMessagesToContextBudget(sanitized, tools, requestControls);
+        if (requestMessages.size() < sanitized.size()) {
+            requestControls = withDebugTag(requestControls, "context-budget-trimmed");
+            requestMessages = fitMessagesToContextBudget(requestMessages, tools, requestControls);
+        }
+        final ChatRequestControls finalRequestControls = requestControls;
+        final List<ChatMessage> finalRequestMessages = requestMessages;
 
         return LlmRetryExecutor.execute(MAX_RETRIES, () -> {
             ChatRequest req = new ChatRequest(
-                    backend, model, "", "", List.of(), timeout, sanitized,
-                    effectiveToolSpecs(requestToolSpecs),
-                    controls == null ? ChatRequestControls.defaults() : controls);
+                    backend, model, "", "", List.of(), timeout, finalRequestMessages,
+                    tools, finalRequestControls);
             PromptDebugCapture.record(PromptDebugSnapshot.fromChatRequest(req, streamRequest));
             // Try-with-resources ensures the token stream's onClose hook
             // fires on every exit path (break, exception, normal return).
@@ -903,6 +913,192 @@ public final class LlmClient implements AutoCloseable {
 
     private List<ToolSpec> effectiveToolSpecs(List<ToolSpec> requestToolSpecs) {
         return requestToolSpecs == null ? toolSpecs : List.copyOf(requestToolSpecs);
+    }
+
+    private static ChatRequestControls withDebugTag(ChatRequestControls controls, String tag) {
+        ChatRequestControls safe = controls == null ? ChatRequestControls.defaults() : controls;
+        if (tag == null || tag.isBlank() || safe.debugTags().contains(tag)) {
+            return safe;
+        }
+        List<String> tags = new ArrayList<>(safe.debugTags());
+        tags.add(tag);
+        return new ChatRequestControls(
+                safe.toolChoice(),
+                safe.namedTool(),
+                safe.responseFormat(),
+                safe.jsonSchema(),
+                tags);
+    }
+
+    private List<ChatMessage> fitMessagesToContextBudget(List<ChatMessage> messages,
+                                                         List<ToolSpec> tools,
+                                                         ChatRequestControls controls) {
+        int contextWindowTokens = effectiveContextWindowTokens();
+        int inputBudgetTokens = inputBudgetTokens(contextWindowTokens);
+        int estimatedTokens = estimateChatRequestTokens(messages, tools, controls);
+        if (estimatedTokens <= inputBudgetTokens) {
+            return messages;
+        }
+
+        List<ChatMessage> trimmed = new ArrayList<>(messages);
+        int removedMessages = 0;
+        while (estimatedTokens > inputBudgetTokens) {
+            int removed = removeOldestRemovableHistoryGroup(trimmed);
+            if (removed == 0) break;
+            removedMessages += removed;
+            estimatedTokens = estimateChatRequestTokens(trimmed, tools, controls);
+        }
+
+        if (estimatedTokens > inputBudgetTokens) {
+            throw new EngineException.ContextBudgetExceeded(
+                    estimatedTokens, inputBudgetTokens, contextWindowTokens, removedMessages);
+        }
+        return List.copyOf(trimmed);
+    }
+
+    private int effectiveContextWindowTokens() {
+        int configured = TokenBudget.fromConfig(cfg).contextMaxTokens();
+        int engineWindow = 0;
+        try {
+            if (engineResolver != null && engineResolver.capabilities() != null) {
+                engineWindow = engineResolver.capabilities().contextWindow();
+            }
+        } catch (Exception ignored) {
+            engineWindow = 0;
+        }
+        if (engineWindow > 0) {
+            return Math.max(256, Math.min(configured, engineWindow));
+        }
+        return Math.max(256, configured);
+    }
+
+    private static int inputBudgetTokens(int contextWindowTokens) {
+        TokenBudget budget = new TokenBudget(contextWindowTokens);
+        int responseReserve = (int) (budget.contextMaxTokens() * budget.responseReserveFraction());
+        return Math.max(64, budget.contextMaxTokens() - responseReserve - budget.overheadTokens());
+    }
+
+    private static int estimateChatRequestTokens(List<ChatMessage> messages,
+                                                 List<ToolSpec> tools,
+                                                 ChatRequestControls controls) {
+        TokenBudget estimator = new TokenBudget();
+        int total = 64;
+        for (ChatMessage message : messages == null ? List.<ChatMessage>of() : messages) {
+            if (message == null) continue;
+            total += 8;
+            total += estimator.estimateTokens(Objects.toString(message.role(), ""));
+            total += estimator.estimateTokens(Objects.toString(message.content(), ""));
+            if (message.toolCallId() != null && !message.toolCallId().isBlank()) {
+                total += 4 + estimator.estimateTokens(message.toolCallId());
+            }
+            if (message.hasNativeToolCalls()) {
+                for (ChatMessage.NativeToolCall call : message.toolCalls()) {
+                    if (call == null) continue;
+                    total += 12;
+                    total += estimator.estimateTokens(Objects.toString(call.id(), ""));
+                    total += estimator.estimateTokens(Objects.toString(call.name(), ""));
+                    total += estimator.estimateTokens(Objects.toString(call.arguments(), ""));
+                }
+            }
+        }
+        for (ToolSpec tool : tools == null ? List.<ToolSpec>of() : tools) {
+            if (tool == null) continue;
+            total += 24;
+            total += estimator.estimateTokens(tool.name());
+            total += estimator.estimateTokens(tool.description());
+            total += estimator.estimateTokens(Objects.toString(tool.parametersSchemaJson(), ""));
+        }
+        if (controls != null) {
+            total += 8;
+            total += estimator.estimateTokens(controls.toolChoice().name());
+            total += estimator.estimateTokens(controls.namedTool());
+            total += estimator.estimateTokens(controls.responseFormat().name());
+            total += estimator.estimateTokens(controls.jsonSchema());
+            total += estimator.estimateTokens(String.join(",", controls.debugTags()));
+        }
+        return total;
+    }
+
+    private static int removeOldestRemovableHistoryGroup(List<ChatMessage> messages) {
+        int anchor = currentTurnAnchorIndex(messages);
+        for (int i = 0; i < anchor; i++) {
+            ChatMessage message = messages.get(i);
+            if (isSystemRole(message)) continue;
+
+            int start = i;
+            int end = i + 1;
+            if (isToolRole(message)) {
+                int assistantIndex = precedingAssistantToolCallIndex(messages, i);
+                if (assistantIndex >= 0 && assistantIndex < anchor) {
+                    start = assistantIndex;
+                    end = consecutiveToolResultsEnd(messages, assistantIndex + 1, anchor);
+                }
+            } else if (message != null && message.hasNativeToolCalls()) {
+                end = consecutiveToolResultsEnd(messages, i + 1, anchor);
+            }
+
+            for (int j = end - 1; j >= start; j--) {
+                messages.remove(j);
+            }
+            return end - start;
+        }
+        return 0;
+    }
+
+    private static int currentTurnAnchorIndex(List<ChatMessage> messages) {
+        int lastUser = -1;
+        for (int i = 0; i < messages.size(); i++) {
+            if (isUserRole(messages.get(i))) {
+                lastUser = i;
+            }
+        }
+        int searchFrom = lastUser >= 0 ? lastUser : messages.size() - 1;
+        for (int i = searchFrom; i >= 0; i--) {
+            if (isCurrentTurnFrame(messages.get(i))) {
+                return i;
+            }
+        }
+        return lastUser >= 0 ? lastUser : messages.size();
+    }
+
+    private static boolean isCurrentTurnFrame(ChatMessage message) {
+        if (!isSystemRole(message)) return false;
+        String content = Objects.toString(message.content(), "");
+        return content.contains("[CurrentTurnCapability]");
+    }
+
+    private static int precedingAssistantToolCallIndex(List<ChatMessage> messages, int toolIndex) {
+        int i = toolIndex - 1;
+        while (i >= 0 && isToolRole(messages.get(i))) {
+            i--;
+        }
+        if (i >= 0) {
+            ChatMessage previous = messages.get(i);
+            if (previous != null && "assistant".equals(previous.role()) && previous.hasNativeToolCalls()) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static int consecutiveToolResultsEnd(List<ChatMessage> messages, int start, int limitExclusive) {
+        int end = start;
+        while (end < limitExclusive && isToolRole(messages.get(end))) {
+            end++;
+        }
+        return end;
+    }
+
+    private static boolean isSystemRole(ChatMessage message) {
+        return message != null && "system".equals(message.role());
+    }
+
+    private static boolean isUserRole(ChatMessage message) {
+        return message != null && "user".equals(message.role());
+    }
+
+    private static boolean isToolRole(ChatMessage message) {
+        return message != null && "tool".equals(message.role());
     }
 
     // ── Retry / back-off constants ────────────────────────────────────────
