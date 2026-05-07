@@ -249,7 +249,6 @@ public final class AssistantTurnExecutor {
                             answer = loopResult.finalAnswer();
                             LOG.debug("Streaming tool-call loop complete: {} iterations, {} tools invoked",
                                     loopResult.iterations(), loopResult.toolsInvoked());
-                            appendSummary(out, loopResult);
                             ToolLoopAnswerResolution resolution = resolveToolLoopAnswer(
                                     answer, messages, currentTurnPlan, loopResult, workspace, ctx, opts);
                             appendExtraSummary(out, resolution.extraSummary());
@@ -293,7 +292,6 @@ public final class AssistantTurnExecutor {
                             answer = loopResult.finalAnswer();
                             LOG.debug("Buffered tool-call loop complete: {} iterations, {} tools invoked",
                                     loopResult.iterations(), loopResult.toolsInvoked());
-                            appendSummary(out, loopResult);
                             ToolLoopAnswerResolution resolution = resolveToolLoopAnswer(
                                     answer, messages, currentTurnPlan, loopResult, workspace, ctx, opts);
                             appendExtraSummary(out, resolution.extraSummary());
@@ -506,8 +504,22 @@ public final class AssistantTurnExecutor {
 
         return new ToolLoopAnswerResolution(
                 finalAnswer,
-                joinExtraSummaries(mrr.extraSummary(), irr.extraSummary())
+                visibleToolLoopSummary(loopResult, mrr, irr)
         );
+    }
+
+    private static String visibleToolLoopSummary(
+            ToolCallLoop.LoopResult loopResult,
+            MutationRetryResult mutationRetry,
+            InspectRetryResult inspectRetry
+    ) {
+        String baseSummary = loopResult == null ? null : loopResult.summary();
+        String mutationRetrySummary = mutationRetry == null ? null : mutationRetry.extraSummary();
+        if (inspectRetry != null && inspectRetry.loopResult() != null) {
+            return joinExtraSummaries(mutationRetrySummary, inspectRetry.extraSummary());
+        }
+        String withMutationRetry = joinExtraSummaries(baseSummary, mutationRetrySummary);
+        return joinExtraSummaries(withMutationRetry, inspectRetry == null ? null : inspectRetry.extraSummary());
     }
 
     private static ToolLoopAnswerResolution resolveNoToolAnswer(
@@ -2040,14 +2052,6 @@ public final class AssistantTurnExecutor {
         return sanitizeAndTruncate(outcome.finalAnswer(), opts);
     }
 
-    /** Append tool-use summary if present. */
-    private static void appendSummary(StringBuilder out, ToolCallLoop.LoopResult loopResult) {
-        String summary = loopResult.summary();
-        if (summary != null) {
-            out.append(summary).append("\n\n");
-        }
-    }
-
     // ── Post-tool answer acceptance gate ─────────────────────────────────
 
     /** Short phrases that indicate the model deflected instead of answering. */
@@ -3233,7 +3237,7 @@ public final class AssistantTurnExecutor {
                 return new InspectRetryResult(
                         mergedAnswer == null || mergedAnswer.isBlank() ? answer : mergedAnswer,
                         groundedRetryLoop,
-                        retryLoop.summary());
+                        groundedRetryLoop == null ? retryLoop.summary() : groundedRetryLoop.summary());
             }
             if (!retryText.isBlank() && !retryText.equals(answer)) {
                 return new InspectRetryResult(retryText, null, null);
@@ -3253,25 +3257,30 @@ public final class AssistantTurnExecutor {
         if (original.mutatingToolSuccesses() > 0 || retry.mutatingToolSuccesses() > 0) return retry;
 
         List<String> mergedReadPaths = mergeReadPaths(original.readPaths(), retry.readPaths());
-        if (mergedReadPaths.equals(retry.readPaths())) return retry;
+        List<String> mergedToolNames = new ArrayList<>();
+        if (original.toolNames() != null) mergedToolNames.addAll(original.toolNames());
+        if (retry.toolNames() != null) mergedToolNames.addAll(retry.toolNames());
+        List<ToolCallLoop.ToolOutcome> mergedOutcomes = new ArrayList<>();
+        if (original.toolOutcomes() != null) mergedOutcomes.addAll(original.toolOutcomes());
+        if (retry.toolOutcomes() != null) mergedOutcomes.addAll(retry.toolOutcomes());
 
         return new ToolCallLoop.LoopResult(
                 retry.finalAnswer(),
-                retry.iterations(),
-                retry.toolsInvoked(),
-                retry.toolNames(),
+                original.iterations() + retry.iterations(),
+                original.toolsInvoked() + retry.toolsInvoked(),
+                mergedToolNames,
                 retry.messages(),
-                retry.failedCalls(),
-                retry.retriedCalls(),
-                retry.hitIterLimit(),
+                original.failedCalls() + retry.failedCalls(),
+                original.retriedCalls() + retry.retriedCalls(),
+                original.hitIterLimit() || retry.hitIterLimit(),
                 retry.mutatingToolSuccesses(),
                 mergedReadPaths,
-                retry.cushionFiresRedundantRead(),
-                retry.cushionFiresAliasRescue(),
-                retry.cushionFiresB3EditShortCircuit(),
-                retry.cushionFiresE1Suggestion(),
+                original.cushionFiresRedundantRead() + retry.cushionFiresRedundantRead(),
+                original.cushionFiresAliasRescue() + retry.cushionFiresAliasRescue(),
+                original.cushionFiresB3EditShortCircuit() + retry.cushionFiresB3EditShortCircuit(),
+                original.cushionFiresE1Suggestion() + retry.cushionFiresE1Suggestion(),
                 retry.failureDecision(),
-                retry.toolOutcomes());
+                mergedOutcomes);
     }
 
     private static List<String> mergeReadPaths(List<String> original, List<String> retry) {

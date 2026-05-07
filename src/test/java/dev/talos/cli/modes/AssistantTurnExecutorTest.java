@@ -54,6 +54,17 @@ class AssistantTurnExecutorTest {
                 .build();
     }
 
+    private static int countOccurrences(String text, String needle) {
+        if (text == null || text.isEmpty() || needle == null || needle.isEmpty()) return 0;
+        int count = 0;
+        int index = 0;
+        while ((index = text.indexOf(needle, index)) >= 0) {
+            count++;
+            index += needle.length();
+        }
+        return count;
+    }
+
     private static void writePassingBmiFixture(Path workspace) throws Exception {
         Files.writeString(workspace.resolve("index.html"), """
                 <!doctype html>
@@ -3038,8 +3049,10 @@ class AssistantTurnExecutorTest {
             AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
                     messages, workspace, ctx, new AssistantTurnExecutor.Options());
 
-            assertTrue(out.text().contains("[Used 1 tool(s): talos.list_dir"), out.text());
-            assertTrue(out.text().contains("[Used 3 tool(s): talos.read_file"), out.text());
+            assertEquals(1, countOccurrences(out.text(), "[Used "), out.text());
+            assertTrue(out.text().contains(
+                    "[Used 4 tool(s): talos.list_dir, talos.read_file | 2 iteration(s)]"),
+                    out.text());
             assertTrue(out.text().contains("Night Drive landing page"), out.text());
             assertTrue(out.text().contains("style.css styles it"), out.text());
             assertFalse(out.text().contains("basic website"), out.text());
@@ -6122,12 +6135,37 @@ class AssistantTurnExecutorTest {
                         "Review the current static web page and say whether the button can work in a browser. "
                                 + "Do not inspect protected files."));
 
-                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
-                        messages, ws, ctx, new AssistantTurnExecutor.Options());
+                AssistantTurnExecutor.TurnOutput out;
+                LocalTurnTrace trace;
+                LocalTurnTraceCapture.begin(
+                        "trc-t196-read-only-continuation-summary",
+                        "sid",
+                        1,
+                        "2026-05-07T00:00:00Z",
+                        "workspace",
+                        "test",
+                        "scripted",
+                        "scripted",
+                        messages.get(messages.size() - 1).content());
+                try {
+                    out = AssistantTurnExecutor.execute(
+                            messages, ws, ctx, new AssistantTurnExecutor.Options());
+                    trace = LocalTurnTraceCapture.complete();
+                } finally {
+                    LocalTurnTraceCapture.clear();
+                }
 
                 assertTrue(out.text().contains("Static web diagnostics found:"), out.text());
                 assertTrue(out.text().contains("script.js"), out.text());
                 assertTrue(out.text().contains("does not assign visible result text"), out.text());
+                assertEquals(1, countOccurrences(out.text(), "[Used "), out.text());
+                assertTrue(out.text().contains("[Used 2 tool(s): talos.read_file | 2 iteration(s)]"),
+                        out.text());
+                long tracedReadCalls = trace.events().stream()
+                        .filter(event -> "TOOL_CALL_PARSED".equals(event.type()))
+                        .filter(event -> "talos.read_file".equals(event.toolName()))
+                        .count();
+                assertEquals(2, tracedReadCalls, trace.events().toString());
                 assertFalse(out.text().contains("ready to use"), out.text());
                 assertFalse(out.text().contains("button works correctly"), out.text());
             } finally {
