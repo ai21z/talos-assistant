@@ -3530,14 +3530,15 @@ public final class AssistantTurnExecutor {
         String userRequest = ToolCallSupport.effectiveUserRequestForRetryWrappedPrompt(latestUserRequest);
         TaskContract requestContract = TaskContractResolver.fromUserRequest(userRequest);
         if (requestContract.type() == TaskType.WORKSPACE_EXPLAIN) return answer;
+        if (StaticWebImportIntent.matches(userRequest)) return answer;
         if (!WebDiagnosticIntent.matchesReadOnlyRequest(userRequest)) return answer;
-        if (!readStaticWebDiagnosticSurface(loopResult)) return answer;
+        if (!readStaticWebDiagnosticSurface(loopResult, workspace)) return answer;
 
         String grounded = StaticTaskVerifier.renderWebDiagnostics(workspace, loopResult.readPaths());
         return grounded == null || grounded.isBlank() ? answer : grounded;
     }
 
-    private static boolean readStaticWebDiagnosticSurface(ToolCallLoop.LoopResult loopResult) {
+    private static boolean readStaticWebDiagnosticSurface(ToolCallLoop.LoopResult loopResult, Path workspace) {
         if (loopResult == null || loopResult.readPaths() == null || loopResult.readPaths().isEmpty()) return false;
         boolean readHtml = false;
         boolean readScript = false;
@@ -3550,7 +3551,29 @@ public final class AssistantTurnExecutor {
                 readScript = true;
             }
         }
-        return readHtml && readScript;
+        if (readHtml && readScript) return true;
+        if (!readHtml && !readScript) return false;
+        if (!EvidenceObligationVerifier.missingLinkedScriptReadTargets(
+                workspace, linkedScriptEvidenceOutcomes(loopResult)).isEmpty()) {
+            return false;
+        }
+        return true;
+    }
+
+    private static List<ToolCallLoop.ToolOutcome> linkedScriptEvidenceOutcomes(ToolCallLoop.LoopResult loopResult) {
+        if (loopResult == null) return List.of();
+        if (loopResult.toolOutcomes() != null && !loopResult.toolOutcomes().isEmpty()) {
+            return loopResult.toolOutcomes();
+        }
+        if (loopResult.readPaths() == null || loopResult.readPaths().isEmpty()) return List.of();
+        List<ToolCallLoop.ToolOutcome> outcomes = new ArrayList<>();
+        for (String path : loopResult.readPaths()) {
+            String normalized = ToolCallSupport.normalizePath(path);
+            if (normalized.isBlank()) continue;
+            outcomes.add(new ToolCallLoop.ToolOutcome(
+                    "talos.read_file", normalized, true, false, false, "", ""));
+        }
+        return List.copyOf(outcomes);
     }
 
     static String overrideStaticWebImportAnswerIfNeeded(
