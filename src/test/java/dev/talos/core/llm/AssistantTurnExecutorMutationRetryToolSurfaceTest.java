@@ -81,6 +81,32 @@ class AssistantTurnExecutorMutationRetryToolSurfaceTest {
     }
 
     @Test
+    void missingMutationRetryUsesLeanPreambleInsteadOfLargeLeadingSystemPrompt() {
+        RecordingResolver resolver = new RecordingResolver(List.of(
+                "Done. The files are complete.",
+                "I still will not call tools."));
+        Context ctx = context(resolver);
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system(largeLeadingSystemPrompt()),
+                ChatMessage.user("Create index.html, styles.css, and scripts.js for a BMI calculator.")
+        ));
+
+        AssistantTurnExecutor.TurnOutput output = AssistantTurnExecutor.execute(
+                messages,
+                Path.of("."),
+                ctx,
+                new AssistantTurnExecutor.Options());
+
+        assertTrue(output.text().startsWith("[Action obligation failed:"), output.text());
+        assertTrue(resolver.requests.size() >= 2, "expected initial call and retry call");
+        String retryPrompt = joinedMessageContent(resolver.requests.get(1));
+        assertFalse(retryPrompt.contains("FULL_SYSTEM_MARKER"), retryPrompt);
+        assertTrue(retryPrompt.contains("local workspace assistant"), retryPrompt);
+        assertTrue(retryPrompt.contains("runtime handles tool invocation"), retryPrompt);
+        assertTrue(retryPrompt.contains("[CurrentTurnCapability]"), retryPrompt);
+    }
+
+    @Test
     void staticFullRewriteMissingMutationRetryUsesOnlyWriteFileTool() {
         RecordingResolver resolver = new RecordingResolver(List.of(
                 "Done. The repair is complete.",
@@ -167,7 +193,7 @@ class AssistantTurnExecutorMutationRetryToolSurfaceTest {
                 8_000);
         Context ctx = context(resolver);
         var messages = new ArrayList<>(List.of(
-                ChatMessage.system("sys"),
+                ChatMessage.system(largeLeadingSystemPrompt()),
                 ChatMessage.user("OLD_HISTORY_MARKER " + "u".repeat(6_000)),
                 ChatMessage.assistant("OLD_ASSISTANT_MARKER " + "a".repeat(6_000)),
                 ChatMessage.system("OLD_RUNTIME_SYSTEM_MARKER " + "s".repeat(6_000)),
@@ -211,6 +237,15 @@ class AssistantTurnExecutorMutationRetryToolSurfaceTest {
 
     private static ToolSpec tool(String name) {
         return new ToolSpec(name, name, "{}");
+    }
+
+    private static String largeLeadingSystemPrompt() {
+        return """
+                FULL_SYSTEM_MARKER
+                You are Talos with a full ordinary turn prompt.
+                This simulates workspace overview, behavior rules, tool policy prose, and long durable instructions.
+                """
+                + "full-system-padding ".repeat(500);
     }
 
     private static List<String> sortedToolNames(ChatRequest request) {

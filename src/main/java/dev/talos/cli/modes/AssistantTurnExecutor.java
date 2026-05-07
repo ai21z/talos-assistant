@@ -114,6 +114,15 @@ public final class AssistantTurnExecutor {
             "summary of changes"
     );
 
+    private static final String COMPACT_MUTATION_RETRY_SYSTEM_PROMPT = """
+            You are Talos, a local workspace assistant.
+            This is a bounded retry for a current request that required workspace mutation.
+            Use only the provided Talos tools in this retry.
+            The runtime handles tool invocation, approval, permissions, checkpointing, and verification.
+            Do not claim files changed unless talos.write_file or talos.edit_file succeeds in this retry.
+            Follow the current-turn capability frame and the retry instruction exactly.
+            """;
+
     private AssistantTurnExecutor() {} // utility class
 
     /**
@@ -3065,14 +3074,8 @@ public final class AssistantTurnExecutor {
             String retryInstruction
     ) {
         List<ChatMessage> out = new ArrayList<>();
+        out.add(ChatMessage.system(COMPACT_MUTATION_RETRY_SYSTEM_PROMPT));
         if (messages != null) {
-            for (ChatMessage message : messages) {
-                if (!"system".equals(message.role())) break;
-                if (isTaskContractInstruction(message) || isStaticVerificationRepairInstruction(message)) {
-                    continue;
-                }
-                out.add(message);
-            }
             lastStaticVerificationRepairInstruction(messages).ifPresent(out::add);
         }
         out.add(ChatMessage.system(CurrentTurnCapabilityFrame.render(plan)));
