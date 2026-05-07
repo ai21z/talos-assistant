@@ -45,7 +45,7 @@ public final class PromptDebugInspector {
 
         TaskContract contract = TaskContractResolver.fromMessages(snapshot.messages());
         String frame = currentTurnFrame(snapshot.messages());
-        String expectedCoverage = expectedTargetCoverage(contract.expectedTargets(), frame);
+        String expectedCoverage = expectedTargetCoverage(contract, frame);
         String exactCoverage = exactLiteralCoverage(frame);
 
         StringBuilder out = new StringBuilder();
@@ -70,8 +70,8 @@ public final class PromptDebugInspector {
         out.append("- Task contract: ").append(contract.type())
                 .append(", mutationAllowed=").append(contract.mutationAllowed())
                 .append(", verificationRequired=").append(contract.verificationRequired()).append('\n');
-        out.append("- Expected targets: ").append(joinOrNone(contract)).append('\n');
-        out.append("- Expected-target coverage: ").append(expectedCoverage).append('\n');
+        out.append("- ").append(targetLabel(contract)).append(": ").append(joinOrNone(contract)).append('\n');
+        out.append("- ").append(targetCoverageLabel(contract)).append(": ").append(expectedCoverage).append('\n');
         out.append("- Exact-literal coverage: ").append(exactCoverage).append("\n\n");
 
         if ("OLLAMA_HTTP_BODY".equals(snapshot.stage())) {
@@ -125,8 +125,22 @@ public final class PromptDebugInspector {
         return "";
     }
 
-    private static String expectedTargetCoverage(Set<String> expectedTargets, String frame) {
+    private static String targetLabel(TaskContract contract) {
+        return contract != null && !contract.mutationAllowed()
+                ? "Evidence target hints"
+                : "Expected targets";
+    }
+
+    private static String targetCoverageLabel(TaskContract contract) {
+        return contract != null && !contract.mutationAllowed()
+                ? "Evidence-target frame coverage"
+                : "Expected-target coverage";
+    }
+
+    private static String expectedTargetCoverage(TaskContract contract, String frame) {
+        Set<String> expectedTargets = contract == null ? Set.of() : contract.expectedTargets();
         if (expectedTargets == null || expectedTargets.isEmpty()) return "N/A";
+        if (contract != null && !contract.mutationAllowed()) return "N/A (read-only task)";
         if (frame == null || frame.isBlank() || !frame.contains("[ExpectedTargets]")) {
             return "MISSING";
         }

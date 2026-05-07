@@ -111,6 +111,35 @@ public final class ToolCallSupport {
         return null;
     }
 
+    public static String embeddedRetryTaskType(String content) {
+        return embeddedLineValue(content, "Task type:");
+    }
+
+    public static String embeddedRetryUserRequest(String content) {
+        String value = embeddedLineValue(content, "User request:");
+        if (value == null || value.isBlank()) return null;
+        if (value.length() >= 2 && value.startsWith("\"") && value.endsWith("\"")) {
+            value = value.substring(1, value.length() - 1);
+        }
+        return value.isBlank() ? null : value;
+    }
+
+    public static String effectiveUserRequestForRetryWrappedPrompt(String content) {
+        String embedded = embeddedRetryUserRequest(content);
+        return embedded == null || embedded.isBlank() ? content : embedded;
+    }
+
+    private static String embeddedLineValue(String content, String marker) {
+        if (content == null || marker == null || marker.isBlank()) return null;
+        int idx = content.indexOf(marker);
+        if (idx < 0) return null;
+        int start = idx + marker.length();
+        int end = content.indexOf('\n', start);
+        String line = end >= 0 ? content.substring(start, end) : content.substring(start);
+        line = line.strip();
+        return line.isBlank() ? null : line;
+    }
+
     public static boolean isSyntheticToolResultContent(String content) {
         if (content == null) return false;
         String c = content.stripLeading();

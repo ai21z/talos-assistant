@@ -100,6 +100,10 @@ public final class StaticTaskVerifier {
                     + "|getElementById\\s*\\(\\s*['\"]result['\"]\\s*\\))"
                     + "\\s*\\.\\s*(?:textContent|innerText)\\s*=\\s*(['\"])\\s*Clicked\\s*\\1",
             Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+    private static final Pattern JS_CLICK_EVENT_LISTENER = Pattern.compile(
+            "addEventListener\\s*\\(\\s*['\"]click['\"]", Pattern.CASE_INSENSITIVE);
+    private static final Pattern JS_VISIBLE_TEXT_ASSIGNMENT = Pattern.compile(
+            "\\.\\s*(?:textContent|innerText)\\s*=", Pattern.CASE_INSENSITIVE);
     private static final String[] HTML_STRUCTURAL_TAGS = {
             "html", "head", "body", "div", "span", "section", "article",
             "nav", "header", "footer", "main", "aside", "form", "button",
@@ -1016,6 +1020,7 @@ public final class StaticTaskVerifier {
         problems.addAll(facts.linkageProblems());
         problems.addAll(facts.contentProblems());
         problems.addAll(facts.selectorProblems());
+        problems.addAll(facts.genericButtonResultDiagnosticProblems());
         if (contract != null) {
             problems.addAll(facts.buttonResultBehaviorProblems(contract.originalUserRequest()));
             if (StaticWebCapabilityProfile.looksCalculatorOrFormTask(contract)) {
@@ -1317,6 +1322,17 @@ public final class StaticTaskVerifier {
                 out.add(jsFile + ": JavaScript does not assign `#result` text to `Clicked` for the requested button behavior.");
             }
             return out;
+        }
+
+        List<String> genericButtonResultDiagnosticProblems() {
+            if (!containsTag(html.toLowerCase(Locale.ROOT), "button")) return List.of();
+            if (!hasResultOutput(html.toLowerCase(Locale.ROOT))) return List.of();
+            if (!jsIds.contains("result")) return List.of();
+            if (!JS_CLICK_EVENT_LISTENER.matcher(js).find()) return List.of();
+            if (JS_VISIBLE_TEXT_ASSIGNMENT.matcher(js).find()) return List.of();
+            return List.of(jsFile
+                    + ": button click handler references `#result` but does not assign visible result text "
+                    + "with `textContent` or `innerText`.");
         }
 
         String renderInspection() {

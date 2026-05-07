@@ -632,12 +632,31 @@ public final class ToolCallRepromptStage {
         if (state.mutatingToolSuccesses > 0 || outcome.mutationsThisIteration() > 0) return null;
 
         String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
-        if (userTask != null && userTask.contains("Task type: WORKSPACE_EXPLAIN")) return null;
+        String retryTaskType = ToolCallSupport.embeddedRetryTaskType(userTask);
+        if ("WORKSPACE_EXPLAIN".equals(retryTaskType)) return null;
         if (declaresTaskType(state.messages, "WORKSPACE_EXPLAIN")) return null;
-        if (!WebDiagnosticIntent.matchesReadOnlyRequest(userTask)) return null;
+        String intentUserTask = ToolCallSupport.effectiveUserRequestForRetryWrappedPrompt(userTask);
+        if (!WebDiagnosticIntent.matchesReadOnlyRequest(intentUserTask)) return null;
+        if (!readStaticWebDiagnosticSurface(state)) return null;
 
         String diagnostics = StaticTaskVerifier.renderWebDiagnostics(state.workspace);
         return diagnostics == null || diagnostics.isBlank() ? null : diagnostics;
+    }
+
+    private static boolean readStaticWebDiagnosticSurface(LoopState state) {
+        if (state == null || state.pathsReadThisTurn == null || state.pathsReadThisTurn.isEmpty()) return false;
+        boolean readHtml = false;
+        boolean readScript = false;
+        for (String path : state.pathsReadThisTurn) {
+            String lower = ToolCallSupport.normalizePath(path).toLowerCase(java.util.Locale.ROOT);
+            if (lower.endsWith(".html") || lower.endsWith(".htm")) {
+                readHtml = true;
+            }
+            if (lower.endsWith(".js") || lower.endsWith(".jsx") || lower.endsWith(".ts") || lower.endsWith(".tsx")) {
+                readScript = true;
+            }
+        }
+        return readHtml && readScript;
     }
 
     private static boolean declaresTaskType(List<ChatMessage> messages, String taskType) {
