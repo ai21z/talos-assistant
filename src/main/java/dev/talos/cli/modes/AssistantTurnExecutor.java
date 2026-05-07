@@ -1443,12 +1443,13 @@ public final class AssistantTurnExecutor {
         ChangeSummaryContext context = ctx == null || ctx.memory() == null
                 ? null
                 : ctx.memory().changeSummaryContext();
+        boolean includeUncertainty = looksLikeChangeSummaryUncertaintyQuestion(userRequest);
         if (context == null || !context.hasRecordedChanges()) {
             return looksLikeDirectChangedFilesQuestion(userRequest)
-                    ? noRuntimeChangedFilesAnswer()
+                    ? noRuntimeChangedFilesAnswer(includeUncertainty)
                     : null;
         }
-        return context.renderForChangeSummaryQuestion();
+        return context.renderForChangeSummaryQuestion(includeUncertainty);
     }
 
     static boolean looksLikeAssistantIdentityTurn(String userRequest) {
@@ -1492,6 +1493,16 @@ public final class AssistantTurnExecutor {
         return false;
     }
 
+    private static boolean looksLikeChangeSummaryUncertaintyQuestion(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return false;
+        String lower = userRequest.toLowerCase(Locale.ROOT);
+        return lower.contains("uncertainty")
+                || lower.contains("uncertain")
+                || lower.contains("not sure")
+                || lower.contains("unknown")
+                || lower.contains("confidence");
+    }
+
     private static boolean looksLikeDirectChangedFilesQuestion(String userRequest) {
         if (userRequest == null || userRequest.isBlank()) return false;
         String lower = userRequest.toLowerCase(Locale.ROOT);
@@ -1509,9 +1520,11 @@ public final class AssistantTurnExecutor {
         return fileScoped && (mutationScoped || sessionScoped);
     }
 
-    private static String noRuntimeChangedFilesAnswer() {
-        return "No files were changed by Talos in the current session/audit according to Talos's runtime mutation history.\n\n"
+    private static String noRuntimeChangedFilesAnswer(boolean includeUncertainty) {
+        String answer = "No files were changed by Talos in the current session/audit according to Talos's runtime mutation history.\n\n"
                 + "Talos has no runtime-recorded write/edit mutations for this session, so there are no runtime-owned changed files to list.";
+        if (!includeUncertainty) return answer;
+        return answer + "\n\n" + ChangeSummaryContext.runtimeUncertaintyClause();
     }
 
     private static boolean looksLikeVerifiedMutationOutcome(String content) {

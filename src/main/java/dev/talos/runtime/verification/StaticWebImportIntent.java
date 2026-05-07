@@ -6,9 +6,14 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /** Recognizes narrow read-only questions about which script an HTML file imports. */
 public final class StaticWebImportIntent {
+    private static final Pattern SCRIPT_FILE_TOKEN =
+            Pattern.compile("(?i)(?<![\\w./-])([\\w./-]+\\.(?:js|jsx|ts|tsx))(?![\\w.-])");
+
     private StaticWebImportIntent() {}
 
     public static boolean matches(String userRequest) {
@@ -33,13 +38,20 @@ public final class StaticWebImportIntent {
                 || lower.contains("include")
                 || lower.contains("reference")
                 || lower.contains("src");
-        return asksQuestion && staticWebSurface && scriptSurface && importRelation;
+        boolean candidateScriptChoice = scriptFileMentionCount(userRequest) >= 2;
+        return asksQuestion
+                && scriptSurface
+                && importRelation
+                && (staticWebSurface || candidateScriptChoice);
     }
 
     public static Set<String> evidenceTargets(String userRequest, Collection<String> extractedTargets) {
         if (!matches(userRequest)) return Set.of();
         LinkedHashSet<String> out = new LinkedHashSet<>(htmlTargets(extractedTargets));
         if (out.isEmpty() && userRequest.toLowerCase(Locale.ROOT).contains("index.html")) {
+            out.add("index.html");
+        }
+        if (out.isEmpty() && scriptFileMentionCount(userRequest) >= 2) {
             out.add("index.html");
         }
         return Set.copyOf(out);
@@ -78,5 +90,16 @@ public final class StaticWebImportIntent {
             normalized = normalized.substring(2);
         }
         return normalized;
+    }
+
+    private static int scriptFileMentionCount(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return 0;
+        Matcher matcher = SCRIPT_FILE_TOKEN.matcher(userRequest);
+        LinkedHashSet<String> scripts = new LinkedHashSet<>();
+        while (matcher.find()) {
+            String script = normalize(matcher.group(1)).toLowerCase(Locale.ROOT);
+            if (!script.isBlank()) scripts.add(script);
+        }
+        return scripts.size();
     }
 }

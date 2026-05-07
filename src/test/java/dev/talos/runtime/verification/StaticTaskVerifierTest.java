@@ -14,6 +14,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -105,6 +106,22 @@ class StaticTaskVerifierTest {
                 workspace,
                 "Which file does index.html import for the BMI script, script.js or scripts.js?");
 
+        assertTrue(out.contains("Neither `script.js` nor `scripts.js` is imported by `index.html`."), out);
+        assertTrue(out.contains("Current script imports found in `index.html`: none."), out);
+    }
+
+    @Test
+    void scriptImportInspectionGroundsCandidateOnlyQuestionInCurrentIndexHtml() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), "AFTER\n");
+        Files.writeString(workspace.resolve("script.js"), "console.log('old');\n");
+        Files.writeString(workspace.resolve("scripts.js"), "console.log('new');\n");
+
+        String out = StaticTaskVerifier.renderScriptImportInspection(
+                workspace,
+                "Which exact file currently imports the BMI script, script.js or scripts.js?");
+
+        assertNotNull(out);
+        assertTrue(out.contains("[Static web import check]"), out);
         assertTrue(out.contains("Neither `script.js` nor `scripts.js` is imported by `index.html`."), out);
         assertTrue(out.contains("Current script imports found in `index.html`: none."), out);
     }
