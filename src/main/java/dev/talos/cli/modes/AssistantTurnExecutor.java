@@ -2899,22 +2899,26 @@ public final class AssistantTurnExecutor {
                 obligation.name(),
                 "UNSATISFIED",
                 "model response had no write/edit tool calls");
-        messages.add(ChatMessage.assistant(ResponseObligationVerifier.retryFailureSummary(obligation, answer)));
-        messages.add(ChatMessage.system(CurrentTurnCapabilityFrame.render(safePlan)));
-        messages.add(ChatMessage.user(mutationRetryInstruction(
+        String retrySummary = ResponseObligationVerifier.retryFailureSummary(obligation, answer);
+        String retryInstruction = mutationRetryInstruction(
                 obligation,
                 userRequest,
-                priorMutationRequest)));
+                priorMutationRequest);
+        messages.add(ChatMessage.assistant(retrySummary));
+        messages.add(ChatMessage.system(CurrentTurnCapabilityFrame.render(safePlan)));
+        messages.add(ChatMessage.user(retryInstruction));
+        List<ChatMessage> retryMessages = compactMutationRetryMessages(
+                messages, safePlan, retrySummary, retryInstruction);
 
         try {
-            List<ToolSpec> retryToolSpecs = mutationRetryToolSpecs(ctx, messages);
-            LlmClient.StreamResult retry = chatFull(ctx, messages, safePlan, retryToolSpecs);
+            List<ToolSpec> retryToolSpecs = mutationRetryToolSpecs(ctx, retryMessages);
+            LlmClient.StreamResult retry = chatFull(ctx, retryMessages, safePlan, retryToolSpecs);
             String retryText = retry.text() == null ? "" : retry.text();
 
             if (retry.hasToolCalls() || hasAnyTextToolCalls(retryText)) {
                 // Re-enter the tool loop so the mutating call actually executes.
                 ToolCallLoop.LoopResult retryLoop = ctx.toolCallLoop().run(
-                        retryText, retry.toolCalls(), messages, workspace, ctx);
+                        retryText, retry.toolCalls(), retryMessages, workspace, ctx);
                 String mergedAnswer = retryLoop.finalAnswer();
                 String summary = retryLoop.summary();
                 boolean retryIssuedMutatingTool = retryLoop.toolOutcomes().stream()
@@ -3052,6 +3056,40 @@ public final class AssistantTurnExecutor {
                 .filter(Objects::nonNull)
                 .filter(spec -> allowedNames.contains(spec.name()))
                 .toList();
+    }
+
+    private static List<ChatMessage> compactMutationRetryMessages(
+            List<ChatMessage> messages,
+            CurrentTurnPlan plan,
+            String retrySummary,
+            String retryInstruction
+    ) {
+        List<ChatMessage> out = new ArrayList<>();
+        if (messages != null) {
+            for (ChatMessage message : messages) {
+                if (!"system".equals(message.role())) break;
+                if (isTaskContractInstruction(message) || isStaticVerificationRepairInstruction(message)) {
+                    continue;
+                }
+                out.add(message);
+            }
+            lastStaticVerificationRepairInstruction(messages).ifPresent(out::add);
+        }
+        out.add(ChatMessage.system(CurrentTurnCapabilityFrame.render(plan)));
+        out.add(ChatMessage.assistant(retrySummary));
+        out.add(ChatMessage.user(retryInstruction));
+        return out;
+    }
+
+    private static Optional<ChatMessage> lastStaticVerificationRepairInstruction(List<ChatMessage> messages) {
+        if (messages == null || messages.isEmpty()) return Optional.empty();
+        ChatMessage found = null;
+        for (ChatMessage message : messages) {
+            if (isStaticVerificationRepairInstruction(message)) {
+                found = message;
+            }
+        }
+        return Optional.ofNullable(found);
     }
 
     private static boolean isRepairInspectionOnlyRetry(
