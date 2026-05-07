@@ -3411,9 +3411,18 @@ public final class AssistantTurnExecutor {
             List<ChatMessage> messages,
             ToolCallLoop.LoopResult loopResult,
             Path workspace) {
+        return overrideStaticWebImportAnswerIfNeeded(answer, null, messages, loopResult, workspace);
+    }
+
+    static String overrideStaticWebImportAnswerIfNeeded(
+            String answer,
+            CurrentTurnPlan plan,
+            List<ChatMessage> messages,
+            ToolCallLoop.LoopResult loopResult,
+            Path workspace) {
         if (loopResult == null || workspace == null) return answer;
         if (loopResult.mutatingToolSuccesses() > 0) return answer;
-        String userRequest = latestUserRequest(messages);
+        String userRequest = latestUserRequest(plan, messages);
         if (!StaticWebImportIntent.matches(userRequest)) return answer;
 
         String grounded = StaticTaskVerifier.renderScriptImportInspection(workspace, userRequest);

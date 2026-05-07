@@ -5748,6 +5748,71 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        @DisplayName("script import grounding uses stable turn request after internal retry messages")
+        void scriptImportGroundingUsesStableTurnRequestAfterInternalRetryMessages() throws Exception {
+            Path ws = Files.createTempDirectory("talos-script-import-plan-grounding-");
+            try {
+                Files.writeString(ws.resolve("index.html"), "AFTER\n");
+                Files.writeString(ws.resolve("script.js"), "console.log('old');\n");
+                Files.writeString(ws.resolve("scripts.js"), "console.log('new');\n");
+
+                String originalRequest = "Which exact file currently imports the BMI script, "
+                        + "script.js or scripts.js? Verify from current files and answer only after inspection. "
+                        + "Do not read protected files.";
+                var plan = CurrentTurnPlan.create(
+                        TaskContractResolver.fromUserRequest(originalRequest),
+                        ExecutionPhase.INSPECT,
+                        List.of("talos.read_file"),
+                        List.of(),
+                        List.of());
+                var messages = new ArrayList<ChatMessage>();
+                messages.add(ChatMessage.system("sys"));
+                messages.add(ChatMessage.user(originalRequest));
+                messages.add(ChatMessage.assistant("The current file importing the BMI script is scripts.js."));
+                messages.add(ChatMessage.user(
+                        "Your previous answer was produced without reading any files. "
+                                + "Use the available file tools to read the relevant files, then answer."));
+
+                var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                        "The current file importing the BMI script is scripts.js.",
+                        2,
+                        2,
+                        List.of("talos.read_file", "talos.read_file"),
+                        List.of(),
+                        0,
+                        0,
+                        false,
+                        0,
+                        List.of("index.html", "scripts.js"),
+                        0,
+                        0,
+                        0,
+                        0);
+
+                ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                        "The current file importing the BMI script is scripts.js.",
+                        plan,
+                        messages,
+                        loopResult,
+                        ws,
+                        0);
+
+                assertTrue(outcome.finalAnswer().contains("[Static web import check]"), outcome.finalAnswer());
+                assertTrue(outcome.finalAnswer().contains(
+                        "Neither `script.js` nor `scripts.js` is imported by `index.html`."),
+                        outcome.finalAnswer());
+                assertFalse(outcome.finalAnswer().contains("importing the BMI script is scripts.js"),
+                        outcome.finalAnswer());
+            } finally {
+                try (var walk = Files.walk(ws)) {
+                    walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                        try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                    });
+                }
+            }
+        }
+
+        @Test
         @DisplayName("mutation requests do not use read-only web diagnostic override")
         void mutationRequestsAreNotOverridden() {
             var messages = new ArrayList<ChatMessage>();
