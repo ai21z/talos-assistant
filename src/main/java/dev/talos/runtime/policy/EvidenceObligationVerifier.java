@@ -8,6 +8,7 @@ import dev.talos.tools.ToolError;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -84,6 +85,22 @@ public final class EvidenceObligationVerifier {
                     verifyAnyReadOnlyEvidence(safeOutcomes);
             case UNSUPPORTED_CAPABILITY_CHECK_REQUIRED -> verifyUnsupportedCapability(targets, safeOutcomes);
         };
+    }
+
+    public static List<String> missingLinkedScriptReadTargets(
+            Path workspace,
+            List<ToolCallLoop.ToolOutcome> outcomes
+    ) {
+        Set<String> linkedScripts = linkedExistingScriptTargets(workspace, outcomes);
+        if (linkedScripts.isEmpty()) return List.of();
+        List<String> missing = new ArrayList<>();
+        for (String target : linkedScripts) {
+            Result result = verifySuccessfulReadTarget(target, outcomes);
+            if (result.status() != Status.SATISFIED) {
+                missing.add(target);
+            }
+        }
+        return List.copyOf(missing);
     }
 
     private static Result verifyListDirectoryOnly(List<ToolCallLoop.ToolOutcome> outcomes) {

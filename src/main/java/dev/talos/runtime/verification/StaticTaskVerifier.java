@@ -909,7 +909,11 @@ public final class StaticTaskVerifier {
     }
 
     public static String renderWebDiagnostics(Path workspace) {
-        WebDiagnostics diagnostics = currentWebDiagnostics(workspace, null);
+        return renderWebDiagnostics(workspace, List.of());
+    }
+
+    public static String renderWebDiagnostics(Path workspace, Collection<String> targetHints) {
+        WebDiagnostics diagnostics = currentWebDiagnostics(workspace, null, targetHints);
         if (!diagnostics.available()) return null;
 
         StringBuilder out = new StringBuilder();
