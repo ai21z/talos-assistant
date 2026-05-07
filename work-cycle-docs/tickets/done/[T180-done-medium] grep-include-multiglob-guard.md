@@ -1,6 +1,6 @@
-# [T180-medium] Grep Include Multi-Glob Guard
+# [T180-done-medium] Grep Include Multi-Glob Guard
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -81,4 +81,23 @@ Out of scope:
 ./gradlew.bat test --tests "*Grep*" --no-daemon
 ./gradlew.bat test --tests dev.talos.cli.modes.AssistantTurnExecutorTest --no-daemon
 ./gradlew.bat check --no-daemon
+```
+
+## Resolution
+
+`talos.grep` now treats comma-separated top-level `include` values as invalid
+parameters instead of passing them to the Java glob matcher and silently
+returning false negatives.
+
+The tool still accepts one normal glob such as `*.js`, and it preserves Java
+glob brace alternatives such as `*.{html,css,js}` because commas inside braces
+are not treated as top-level separators.
+
+## Verification
+
+Passed:
+
+```powershell
+./gradlew.bat test --tests dev.talos.tools.impl.GrepToolTest --no-daemon
+./gradlew.bat check installDist --no-daemon
 ```

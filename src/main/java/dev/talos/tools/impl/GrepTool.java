@@ -20,7 +20,7 @@ import java.util.regex.PatternSyntaxException;
  * <p>Parameters:
  * <ul>
  *   <li>{@code pattern} — text or regex pattern to search for (required)</li>
- *   <li>{@code include} — glob pattern for file names, e.g. "*.java" (optional)</li>
+ *   <li>{@code include} — single glob pattern for file names, e.g. "*.java" or "*.{js,css}" (optional)</li>
  *   <li>{@code max_results} — maximum total matching lines to return (optional, default: 50)</li>
  *   <li>{@code regex} — "true" to treat pattern as regex (optional, default: false)</li>
  * </ul>
@@ -46,7 +46,7 @@ public final class GrepTool implements TalosTool {
                 """
                 {"type":"object","properties":{
                   "pattern":{"type":"string","description":"Text or regex pattern to search for"},
-                  "include":{"type":"string","description":"Glob for filenames, e.g. *.java (optional)"},
+                  "include":{"type":"string","description":"Single glob for filenames, e.g. *.java or *.{js,css} (optional). Do not pass comma-separated globs."},
                   "max_results":{"type":"integer","description":"Max matching lines (default 50)"},
                   "regex":{"type":"string","description":"'true' to use regex (default plain text)"}
                 },"required":["pattern"]}""",
@@ -84,6 +84,11 @@ public final class GrepTool implements TalosTool {
         // Optional filename glob matcher
         PathMatcher globMatcher = null;
         if (includeGlob != null && !includeGlob.isBlank()) {
+            if (hasTopLevelComma(includeGlob)) {
+                return ToolResult.fail(ToolError.invalidParams(
+                        "Invalid include glob: comma-separated include values are not supported. "
+                                + "Pass one glob such as *.js, or one brace glob such as *.{html,css,js}."));
+            }
             try {
                 globMatcher = FileSystems.getDefault().getPathMatcher("glob:" + includeGlob);
             } catch (Exception e) {
@@ -164,6 +169,22 @@ public final class GrepTool implements TalosTool {
         }
         sb.append(unsupportedDocumentNote(skippedUnsupportedDocuments));
         return ToolResult.ok(sb.toString());
+    }
+
+    private static boolean hasTopLevelComma(String glob) {
+        if (glob == null || glob.isBlank()) return false;
+        int braceDepth = 0;
+        for (int i = 0; i < glob.length(); i++) {
+            char ch = glob.charAt(i);
+            if (ch == '{') {
+                braceDepth++;
+            } else if (ch == '}') {
+                braceDepth = Math.max(0, braceDepth - 1);
+            } else if (ch == ',' && braceDepth == 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String unsupportedDocumentNote(List<String> skippedUnsupportedDocuments) {
