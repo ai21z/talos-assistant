@@ -239,15 +239,16 @@ public final class ToolCallRepromptStage {
                             + "static verification passes."));
             expectedProgressIndex = state.messages.size() - 1;
         }
-        boolean dynamicFullRewriteGateActive = !state.staticWebFullRewriteRequiredTargets.isEmpty()
-                && !remainingRepairTargets.isEmpty();
-        boolean obligationGateActive = dynamicFullRewriteGateActive
-                || outcome.mutationsThisIteration() > 0
-                || state.hasPendingActionObligation();
-        if (obligationGateActive && !remainingRepairTargets.isEmpty()) {
+        boolean staticRepairObligationActive = !remainingRepairTargets.isEmpty()
+                && (!state.staticWebFullRewriteRequiredTargets.isEmpty()
+                || hasStaticRepairContext(state)
+                || state.hasPendingActionObligation());
+        boolean expectedTargetObligationActive = !remainingExpectedTargets.isEmpty()
+                && (outcome.mutationsThisIteration() > 0 || state.hasPendingActionObligation());
+        if (staticRepairObligationActive) {
             state.setPendingActionObligation(
                     PendingActionObligation.staticRepairTargets(remainingRepairTargets));
-        } else if (obligationGateActive && !remainingExpectedTargets.isEmpty()) {
+        } else if (expectedTargetObligationActive) {
             state.setPendingActionObligation(
                     PendingActionObligation.expectedTargets(remainingExpectedTargets));
         } else {
@@ -255,8 +256,8 @@ public final class ToolCallRepromptStage {
         }
         List<ToolSpec> repromptToolSpecs = repromptToolSpecs(
                 state,
-                obligationGateActive && !remainingRepairTargets.isEmpty(),
-                obligationGateActive && !remainingExpectedTargets.isEmpty());
+                staticRepairObligationActive,
+                expectedTargetObligationActive);
 
         int anchorIndex = -1;
         String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
@@ -265,11 +266,16 @@ public final class ToolCallRepromptStage {
             state.messages.add(ChatMessage.system("[Current task — stay focused on this] " + pinned));
             anchorIndex = state.messages.size() - 1;
         }
+        List<ChatMessage> requestMessages = repromptMessages(
+                state,
+                staticRepairObligationActive,
+                remainingRepairTargets,
+                userTask);
 
         try {
             LlmClient.StreamResult repromptResult =
                     state.ctx.llm().chatFull(
-                            state.messages,
+                            requestMessages,
                             repromptToolSpecs,
                             repromptControls(state));
             state.currentText = repromptResult.text();
@@ -306,7 +312,7 @@ public final class ToolCallRepromptStage {
                 Thread.sleep(400);
                 LlmClient.StreamResult retryResult =
                         state.ctx.llm().chatFull(
-                                state.messages,
+                                requestMessages,
                                 repromptToolSpecs,
                                 repromptControls(state));
                 state.currentText = retryResult.text();
@@ -428,6 +434,48 @@ public final class ToolCallRepromptStage {
             return narrowed.isEmpty() ? base : narrowed;
         }
         return base;
+    }
+
+    private static List<ChatMessage> repromptMessages(
+            LoopState state,
+            boolean staticRepairObligationActive,
+            List<String> remainingRepairTargets,
+            String userTask
+    ) {
+        if (!staticRepairObligationActive) {
+            return state == null ? List.of() : state.messages;
+        }
+        List<ChatMessage> out = new ArrayList<>();
+        out.add(ChatMessage.system("""
+                You are Talos, a local-first workspace assistant.
+                This is a bounded static-repair continuation. Use the available file-write tool to repair the exact remaining target paths.
+                Do not answer in prose instead of calling the required tool. Do not claim completion until tool-backed changes have executed.
+                """));
+        lastStaticVerificationRepairContext(state.messages).ifPresent(out::add);
+        out.add(ChatMessage.system(
+                "[Static repair progress] Continue the bounded repair. Remaining full-file "
+                        + "replacement targets: " + String.join(", ", remainingRepairTargets)
+                        + ". Use talos.write_file with complete corrected file content for each remaining target. "
+                        + "Do not claim completion until static verification passes."));
+        String currentTask = userTask == null || userTask.isBlank()
+                ? "Continue the bounded static repair."
+                : userTask.strip();
+        out.add(ChatMessage.user(currentTask));
+        return out;
+    }
+
+    private static Optional<ChatMessage> lastStaticVerificationRepairContext(List<ChatMessage> messages) {
+        if (messages == null || messages.isEmpty()) return Optional.empty();
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            ChatMessage message = messages.get(i);
+            if (message != null
+                    && "system".equals(message.role())
+                    && message.content() != null
+                    && message.content().startsWith("[Static verification repair context]")) {
+                return Optional.of(message);
+            }
+        }
+        return Optional.empty();
     }
 
     private static List<ToolSpec> currentNativeToolSpecs(LoopState state) {

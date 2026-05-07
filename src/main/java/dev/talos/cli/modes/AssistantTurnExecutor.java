@@ -3314,17 +3314,46 @@ public final class AssistantTurnExecutor {
     }
 
     private static boolean isStaticRepairWrongToolRetry(ToolCallLoop.LoopResult retryLoop) {
-        if (retryLoop == null || retryLoop.toolOutcomes() == null) return false;
-        return retryLoop.toolOutcomes().stream()
-                .anyMatch(ToolCallLoop.ToolOutcome::fullRewriteRepairRedirect);
+        if (retryLoop == null) return false;
+        if (retryLoop.toolOutcomes() != null
+                && retryLoop.toolOutcomes().stream()
+                .anyMatch(ToolCallLoop.ToolOutcome::fullRewriteRepairRedirect)) {
+            return true;
+        }
+        String reason = retryLoop.failureDecision() == null ? "" : retryLoop.failureDecision().reason();
+        return reason.contains("STATIC_REPAIR_TARGETS_REMAINING")
+                && reason.contains("Static web repair requires talos.write_file")
+                && reason.contains("talos.edit_file");
     }
 
     private static List<String> staticRepairWrongToolTargets(ToolCallLoop.LoopResult retryLoop) {
         if (retryLoop == null || retryLoop.toolOutcomes() == null) return List.of();
-        return retryLoop.toolOutcomes().stream()
+        List<String> outcomeTargets = retryLoop.toolOutcomes().stream()
                 .filter(ToolCallLoop.ToolOutcome::fullRewriteRepairRedirect)
                 .map(ToolCallLoop.ToolOutcome::pathHint)
                 .filter(path -> path != null && !path.isBlank())
+                .distinct()
+                .toList();
+        if (!outcomeTargets.isEmpty()) {
+            return outcomeTargets;
+        }
+        return staticRepairWrongToolTargetsFromFailureReason(
+                retryLoop.failureDecision() == null ? "" : retryLoop.failureDecision().reason());
+    }
+
+    private static List<String> staticRepairWrongToolTargetsFromFailureReason(String reason) {
+        if (reason == null || reason.isBlank()) return List.of();
+        String marker = "Remaining target(s): ";
+        int start = reason.indexOf(marker);
+        if (start < 0) return List.of();
+        start += marker.length();
+        int end = reason.indexOf(". Static web repair", start);
+        if (end < 0) return List.of();
+        String targetList = reason.substring(start, end).strip();
+        if (targetList.isBlank() || "(unknown)".equals(targetList)) return List.of();
+        return java.util.Arrays.stream(targetList.split(","))
+                .map(String::strip)
+                .filter(path -> !path.isBlank())
                 .distinct()
                 .toList();
     }

@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ToolCallRepromptStageToolSurfaceTest {
@@ -118,15 +119,144 @@ class ToolCallRepromptStageToolSurfaceTest {
         assertEquals(List.of("talos.write_file"), toolNames(resolver.lastRequest));
     }
 
+    @Test
+    void staticFullRewriteRepairAfterReadOnlyInspectionStillUsesOnlyWriteFileTool() {
+        RecordingResolver resolver = new RecordingResolver();
+        List<ToolSpec> broadTools = broadToolSurface();
+        LlmClient llm = new LlmClient(engineConfig(), resolver);
+        llm.setToolSpecs(broadTools);
+        Context ctx = Context.builder(engineConfig())
+                .llm(llm)
+                .nativeToolSpecs(broadTools)
+                .build();
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.system("""
+                        [Static verification repair context]
+                        Expected targets: index.html, scripts.js, styles.css
+
+                        Previous static verification problems:
+                        - CSS references missing class selectors: `.h1`
+
+                        Repair plan:
+                        Full-file replacement targets: index.html, scripts.js, styles.css
+                        - index.html: You must use talos.write_file with complete corrected file content for index.html.
+                        - scripts.js: You must use talos.write_file with complete corrected file content for scripts.js.
+                        - styles.css: You must use talos.write_file with complete corrected file content for styles.css.
+                        """),
+                ChatMessage.user("Review the BMI calculator you just created and fix any obvious issue.")
+        ));
+        LoopState state = new LoopState(
+                "",
+                List.of(),
+                messages,
+                Path.of("."),
+                ctx,
+                null,
+                10,
+                0);
+        state.toolOutcomes.add(readOnlyOutcome("talos.list_dir", ""));
+        state.toolNames.add("talos.list_dir");
+        var outcome = new ToolCallExecutionStage.IterationOutcome(
+                0,
+                List.of("[tool_result: talos.list_dir] index.html scripts.js styles.css"),
+                0,
+                false,
+                false,
+                false,
+                1);
+
+        boolean shouldReprompt = new ToolCallRepromptStage().reprompt(state, outcome);
+
+        assertTrue(shouldReprompt);
+        assertTrue(state.hasPendingActionObligation());
+        assertEquals(List.of("talos.write_file"), toolNames(resolver.lastRequest));
+    }
+
+    @Test
+    void staticFullRewriteRepairAfterReadOnlyInspectionUsesCompactRepairPayload() {
+        RecordingResolver resolver = new RecordingResolver();
+        List<ToolSpec> broadTools = broadToolSurface();
+        LlmClient llm = new LlmClient(engineConfig(), resolver);
+        llm.setToolSpecs(broadTools);
+        Context ctx = Context.builder(engineConfig())
+                .llm(llm)
+                .nativeToolSpecs(broadTools)
+                .build();
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys with OLD_BROAD_TOOL_MANUAL talos.rename_path talos.run_command"),
+                ChatMessage.user("OLD_UNRELATED_MARKER: write some unrelated file."),
+                ChatMessage.assistant("OLD_UNRELATED_MARKER: done."),
+                ChatMessage.system("""
+                        [Static verification repair context]
+                        Expected targets: index.html, scripts.js, styles.css
+
+                        Previous static verification problems:
+                        - CSS references missing class selectors: `.h1`
+
+                        Repair plan:
+                        Full-file replacement targets: index.html, scripts.js, styles.css
+                        - index.html: You must use talos.write_file with complete corrected file content for index.html.
+                        - scripts.js: You must use talos.write_file with complete corrected file content for scripts.js.
+                        - styles.css: You must use talos.write_file with complete corrected file content for styles.css.
+                        """),
+                ChatMessage.user("Review the BMI calculator you just created and fix any obvious issue.")
+        ));
+        LoopState state = new LoopState(
+                "",
+                List.of(),
+                messages,
+                Path.of("."),
+                ctx,
+                null,
+                10,
+                0);
+        state.toolOutcomes.add(readOnlyOutcome("talos.list_dir", ""));
+        state.toolNames.add("talos.list_dir");
+        var outcome = new ToolCallExecutionStage.IterationOutcome(
+                0,
+                List.of("[tool_result: talos.list_dir] index.html scripts.js styles.css"),
+                0,
+                false,
+                false,
+                false,
+                1);
+
+        boolean shouldReprompt = new ToolCallRepromptStage().reprompt(state, outcome);
+
+        assertTrue(shouldReprompt);
+        String payload = messageContents(resolver.lastRequest);
+        assertFalse(payload.contains("OLD_UNRELATED_MARKER"), payload);
+        assertFalse(payload.contains("OLD_BROAD_TOOL_MANUAL"), payload);
+        assertTrue(payload.contains("[Static verification repair context]"), payload);
+        assertTrue(payload.contains("[Static repair progress]"), payload);
+        assertTrue(payload.contains("Review the BMI calculator"), payload);
+    }
+
     private static ToolCallLoop.ToolOutcome mutatingOutcome(
             String toolName,
             String pathHint
+    ) {
+        return toolOutcome(toolName, pathHint, true);
+    }
+
+    private static ToolCallLoop.ToolOutcome readOnlyOutcome(
+            String toolName,
+            String pathHint
+    ) {
+        return toolOutcome(toolName, pathHint, false);
+    }
+
+    private static ToolCallLoop.ToolOutcome toolOutcome(
+            String toolName,
+            String pathHint,
+            boolean mutating
     ) {
         return new ToolCallLoop.ToolOutcome(
                 toolName,
                 pathHint,
                 true,
-                true,
+                mutating,
                 false,
                 "mutation applied",
                 "");
@@ -150,6 +280,14 @@ class ToolCallRepromptStageToolSurfaceTest {
         return request == null || request.tools == null
                 ? List.of()
                 : request.tools.stream().map(ToolSpec::name).toList();
+    }
+
+    private static String messageContents(ChatRequest request) {
+        if (request == null || request.messages == null) return "";
+        return request.messages.stream()
+                .map(ChatMessage::content)
+                .filter(content -> content != null)
+                .reduce("", (left, right) -> left + "\n" + right);
     }
 
     private static Config engineConfig() {
