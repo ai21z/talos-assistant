@@ -21,6 +21,7 @@ import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.runtime.verification.StaticTaskVerifier;
 import dev.talos.runtime.verification.TaskVerificationResult;
 import dev.talos.runtime.verification.TaskVerificationStatus;
+import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.spi.types.ChatMessage;
 
 import java.nio.file.Path;
@@ -346,7 +347,7 @@ record ExecutionOutcome(
             current = staticVerificationUnavailableAnnotation(taskVerification) + current;
         } else if (verificationStatus == VerificationStatus.READBACK_ONLY) {
             if (completionStatus == CompletionStatus.COMPLETE) {
-                current = readbackOnlyVerificationAnnotation(taskVerification)
+                current = readbackOnlyVerificationAnnotation(taskVerification, loopResult)
                         + verifiedChangedFilesSummary(loopResult)
                         + current;
             }
@@ -1351,10 +1352,39 @@ record ExecutionOutcome(
         return "[Static verification: passed - " + verificationSummary(result) + "]\n\n";
     }
 
-    private static String readbackOnlyVerificationAnnotation(TaskVerificationResult result) {
-        return "[File write/readback passed. No task-specific verifier was applicable, "
+    private static String readbackOnlyVerificationAnnotation(
+            TaskVerificationResult result,
+            ToolCallLoop.LoopResult loopResult
+    ) {
+        String readbackKind = hasSuccessfulWorkspaceOperation(loopResult)
+                ? "Workspace operation/readback"
+                : "File write/readback";
+        return "[" + readbackKind + " passed. No task-specific verifier was applicable, "
                 + "so task completion was not verified. "
                 + verificationSummary(result) + "]\n\n";
+    }
+
+    private static boolean hasSuccessfulWorkspaceOperation(ToolCallLoop.LoopResult loopResult) {
+        if (loopResult == null || loopResult.toolOutcomes() == null) return false;
+        return loopResult.toolOutcomes().stream()
+                .filter(Objects::nonNull)
+                .anyMatch(outcome -> outcome.success()
+                        && outcome.mutating()
+                        && isWorkspaceOperationOutcome(outcome));
+    }
+
+    private static boolean isWorkspaceOperationOutcome(ToolCallLoop.ToolOutcome outcome) {
+        if (outcome == null) return false;
+        WorkspaceOperationPlan plan = outcome.workspaceOperationPlan();
+        if (plan != null && plan.operationKind() != WorkspaceOperationPlan.OperationKind.WRITE_FILE) {
+            return true;
+        }
+        String tool = canonicalToolName(outcome.toolName());
+        return "talos.move_path".equals(tool)
+                || "talos.copy_path".equals(tool)
+                || "talos.rename_path".equals(tool)
+                || "talos.mkdir".equals(tool)
+                || "talos.apply_workspace_batch".equals(tool);
     }
 
     private static String staticVerificationFailedAnnotation(TaskVerificationResult result) {
