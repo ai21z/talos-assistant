@@ -7050,6 +7050,74 @@ class AssistantTurnExecutorTest {
     class VerifiedFollowUpSummaries {
 
         @Test
+        void staticWebDiagnosticFollowUpUsesPreviousRuntimeOwnedDiagnostics(@TempDir Path workspace)
+                throws Exception {
+            var ctx = scriptedContext("The button should work now.");
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Review the current static web page and say whether the button can work in a browser. "
+                            + "Do not inspect protected files."));
+            messages.add(ChatMessage.assistant("""
+                    [Truth check: no file was changed in this turn. The model attempted to call mutating tools, but this turn was classified as read-only, so those calls were blocked.]
+
+                    No file changes were applied. Ask explicitly to edit, update, or create files if you want Talos to modify the workspace.
+
+                    Read-only answer from inspected evidence:
+                    I inspected the primary web files:
+
+                    - HTML: `index.html`
+                    - CSS: `styles.css`
+                    - JavaScript: `script.js`
+
+                    Static web diagnostics found:
+                    - HTML does not link JavaScript file: `script.js`
+                    - JavaScript references missing class selectors: `.cta-button`
+                    - script.js: button click handler references `#result` but does not assign visible result text with `textContent` or `innerText`.
+
+                    No files were changed.
+                    """));
+            messages.add(ChatMessage.user(
+                    "Based only on verified file evidence from the previous answer, list the blockers "
+                            + "that prevent the button from working. Do not inspect protected files."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains("Based on the previous runtime-owned static web diagnostics"),
+                    out.text());
+            assertTrue(out.text().contains("HTML does not link JavaScript file: `script.js`"), out.text());
+            assertTrue(out.text().contains("JavaScript references missing class selectors: `.cta-button`"),
+                    out.text());
+            assertTrue(out.text().contains("does not assign visible result text"), out.text());
+            assertFalse(out.text().contains("[Evidence incomplete"), out.text());
+            assertFalse(out.text().contains("The button should work now"), out.text());
+        }
+
+        @Test
+        void staticWebDiagnosticFollowUpDoesNotTrustArbitraryPreviousProse(@TempDir Path workspace)
+                throws Exception {
+            var ctx = scriptedContext(
+                    "The previous answer says the button works.",
+                    "No more evidence is needed.");
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Can this button work?"));
+            messages.add(ChatMessage.assistant(
+                    "I looked at the page and the button should work. No blockers."));
+            messages.add(ChatMessage.user(
+                    "Based only on verified file evidence from the previous answer, list the blockers "
+                            + "that prevent the button from working. Do not inspect protected files."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertFalse(out.text().contains("Based on the previous runtime-owned static web diagnostics"),
+                    out.text());
+            assertFalse(out.text().contains("button should work. No blockers"), out.text());
+        }
+
+        @Test
         void changeSummaryFollowUpUsesPreviousPartialVerificationInsteadOfNewUnsupportedClaim() {
             var ctx = scriptedContext("I added the Listen Now button and wired script.js.");
             var messages = new ArrayList<ChatMessage>();
