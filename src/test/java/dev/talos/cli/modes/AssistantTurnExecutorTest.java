@@ -2136,6 +2136,118 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void escapedDotfileAliasUsesProtectedReadApprovalWhenCurrentTargetMatches(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve(".env"), "SECRET=manual-test\n");
+
+            var approvals = new java.util.concurrent.atomic.AtomicInteger();
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null,
+                    (description, detail) -> {
+                        approvals.incrementAndGet();
+                        assertTrue(description.contains("protected read"), description);
+                        assertTrue(detail.contains(".env"), detail);
+                        return true;
+                    },
+                    registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"\\\\.env\"}}",
+                            "The approved file says SECRET=manual-test.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Read .env and tell me what it says."));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-t194-escaped-dotfile-protected-read",
+                    "sid",
+                    1,
+                    "2026-05-07T00:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "scripted",
+                    "test-model",
+                    "Read .env and tell me what it says.");
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertEquals(1, approvals.get(), "escaped .env alias must still require explicit approval");
+                assertTrue(out.text().contains("SECRET=manual-test"), out.text());
+                assertFalse(out.text().contains("WORKSPACE_ESCAPE"), out.text());
+                assertTrue(trace.events().stream().anyMatch(event ->
+                        "TOOL_PATH_ARGUMENT_NORMALIZED".equals(event.type())
+                                && ".env".equals(event.data().get("normalizedPath"))),
+                        "trace should record escaped dotfile alias normalization");
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        }
+
+        @Test
+        void escapedDotfileAliasRemainsBlockedWhenCurrentTargetDoesNotMatch(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve(".env"), "SECRET=manual-test\n");
+            Files.writeString(workspace.resolve("README.md"), "Public readme\n");
+
+            var approvals = new java.util.concurrent.atomic.AtomicInteger();
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null,
+                    (description, detail) -> {
+                        approvals.incrementAndGet();
+                        return true;
+                    },
+                    registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"\\\\.env\"}}",
+                            "The file says SECRET=manual-test.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Read README.md and tell me what it says."));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-t194-escaped-dotfile-unmatched-target",
+                    "sid",
+                    1,
+                    "2026-05-07T00:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "scripted",
+                    "test-model",
+                    "Read README.md and tell me what it says.");
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertEquals(0, approvals.get(), "unmatched escaped .env must not be converted into an approval");
+                assertFalse(out.text().contains("SECRET=manual-test"), out.text());
+                assertTrue(trace.events().stream().anyMatch(event ->
+                        "PERMISSION_DECISION".equals(event.type())
+                                && "WORKSPACE_ESCAPE".equals(event.data().get("reasonCode"))),
+                        "unmatched escaped .env should remain a workspace-escape denial");
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        }
+
+        @Test
         void explicitProtectedReadNoToolAnswerUsesRuntimeHandoffAndApproval(@TempDir Path workspace)
                 throws Exception {
             Files.writeString(workspace.resolve(".env"), "SECRET=manual-test\n");
