@@ -1,6 +1,6 @@
 # T198 - Static-Web-Diagnostic Truthfulness From Read Evidence
 
-Status: open
+Status: done
 
 Severity: high
 
@@ -77,3 +77,27 @@ Relevant code:
 - `.\gradlew.bat test --no-daemon` passes.
 - `.\gradlew.bat build installDist --no-daemon` passes.
 - A focused two-model llama.cpp re-audit of the static web review prompt shows truthful diagnostics for the broken fixture.
+
+## Completion Notes
+
+Implemented in code:
+
+- `StaticTaskVerifier.genericButtonResultDiagnosticProblems()` now reports broken click-handler result text behavior even when the HTML is missing the button. A missing button is itself part of the diagnostic surface and must not suppress the JavaScript behavior problem.
+- Runtime read-only web diagnostic override now has regression coverage for the exact broken evidence shape from the audit: no button, no script import, JavaScript querying `.cta-button`, and `result.textC;`.
+
+Added tests:
+
+- `StaticTaskVerifierTest.webDiagnosticsReportsBrokenButtonEvidenceInsteadOfOptimisticSuccess`
+- `AssistantTurnExecutorTest.ReadOnlyWebDiagnosticsGroundingTests.staticButtonReviewReportsMissingButtonAndScriptLinkage`
+
+Verification run:
+
+- `.\gradlew.bat test --tests dev.talos.runtime.verification.StaticTaskVerifierTest.webDiagnosticsReportsBrokenButtonEvidenceInsteadOfOptimisticSuccess --no-daemon` - failed before implementation, passed after implementation.
+- `.\gradlew.bat test --tests dev.talos.runtime.verification.StaticTaskVerifierTest.webDiagnosticsReportsBrokenButtonEvidenceInsteadOfOptimisticSuccess --tests dev.talos.cli.modes.AssistantTurnExecutorTest$ReadOnlyWebDiagnosticsGroundingTests.staticButtonReviewReportsMissingButtonAndScriptLinkage --no-daemon` - passed
+- `.\gradlew.bat test --tests dev.talos.runtime.verification.StaticTaskVerifierTest --tests dev.talos.cli.modes.AssistantTurnExecutorTest --no-daemon` - passed
+- `.\gradlew.bat test --no-daemon` - passed
+- `.\gradlew.bat build installDist --no-daemon` - passed
+
+Remaining validation:
+
+- The next focused two-model llama.cpp re-audit should confirm the static button review no longer emits the optimistic "did not find obvious" diagnostic for the broken fixture.

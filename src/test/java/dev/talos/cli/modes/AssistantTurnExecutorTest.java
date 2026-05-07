@@ -6019,6 +6019,68 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        @DisplayName("static button review reports missing button and script linkage from read evidence")
+        void staticButtonReviewReportsMissingButtonAndScriptLinkage() throws Exception {
+            Path ws = Files.createTempDirectory("talos-static-button-missing-linkage-");
+            try {
+                Files.writeString(ws.resolve("index.html"), """
+                        <!DOCTYPE html>
+                        <html>
+                          <head><link rel="stylesheet" href="styles.css"></head>
+                          <body>
+                            <main>
+                              <h1>Focused Button</h1>
+                              <p id="result">Waiting.</p>
+                            </main>
+                          </body>
+                        </html>
+                        """);
+                Files.writeString(ws.resolve("styles.css"), "body { font-family: sans-serif; }\n");
+                Files.writeString(ws.resolve("script.js"), """
+                        const button = document.querySelector('.cta-button');
+                        const result = document.querySelector('#result');
+
+                        if (button && result) {
+                          button.addEventListener('click', () => {
+                            result.textC;
+                          });
+                        }
+                        """);
+
+                var messages = new ArrayList<ChatMessage>();
+                messages.add(ChatMessage.system("sys"));
+                messages.add(ChatMessage.user(
+                        "Review the current static web page and say whether the button can work in a browser. "
+                                + "Do not inspect protected files."));
+
+                var loopResult = new dev.talos.runtime.ToolCallLoop.LoopResult(
+                        "unused", 2, 2,
+                        List.of("talos.read_file", "talos.read_file"),
+                        List.of(), 0, 0, false, 0,
+                        List.of("index.html", "script.js"),
+                        0, 0, 0, 0);
+
+                String bogus = "The button can work in a browser. No issues found.";
+                String out = AssistantTurnExecutor.overrideReadOnlyWebDiagnosticsIfNeeded(
+                        bogus, messages, loopResult, ws);
+
+                assertNotEquals(bogus, out);
+                assertTrue(out.contains("Static web diagnostics found:"), out);
+                assertTrue(out.contains("HTML does not link JavaScript file: `script.js`"), out);
+                assertTrue(out.contains("JavaScript references missing class selectors: `.cta-button`"), out);
+                assertTrue(out.contains("does not assign visible result text"), out);
+                assertFalse(out.contains("did not find obvious"), out);
+                assertFalse(out.contains("No issues found"), out);
+            } finally {
+                try (var walk = Files.walk(ws)) {
+                    walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                        try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                    });
+                }
+            }
+        }
+
+        @Test
         @DisplayName("static button diagnostics survive primary-file completeness retry")
         void staticButtonDiagnosticsSurviveInspectCompletenessRetry() throws Exception {
             Path ws = Files.createTempDirectory("talos-static-button-retry-grounding-");
