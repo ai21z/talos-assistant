@@ -197,7 +197,7 @@ public final class AssistantTurnExecutor {
         CurrentTurnPlan currentTurnPlan = buildCurrentTurnPlan(taskContract, ctx, activeDecision);
         recordPolicyTrace(currentTurnPlan, ctx);
         injectTaskContractInstruction(messages, currentTurnPlan, activeDecisionUpdatesTurnSurface);
-        injectStaticVerificationRepairInstruction(messages, currentTurnPlan.taskContract());
+        injectStaticVerificationRepairInstruction(messages, currentTurnPlan.taskContract(), workspace);
         PromptAuditSnapshot promptAudit = recordPromptAudit(currentTurnPlan, messages);
         emitPromptAuditIfEnabled(promptAudit, ctx);
         Context turnContext = ctx;
@@ -1269,6 +1269,14 @@ public final class AssistantTurnExecutor {
             List<ChatMessage> messages,
             TaskContract taskContract
     ) {
+        injectStaticVerificationRepairInstruction(messages, taskContract, null);
+    }
+
+    static void injectStaticVerificationRepairInstruction(
+            List<ChatMessage> messages,
+            TaskContract taskContract,
+            Path workspace
+    ) {
         if (messages == null || messages.isEmpty()) return;
         removeSupersededStaticVerificationRepairInstructions(messages, taskContract);
         if (messages.stream().anyMatch(AssistantTurnExecutor::isStaticVerificationRepairInstruction)) {
@@ -1278,7 +1286,7 @@ public final class AssistantTurnExecutor {
         repairDecision
                 .plan()
                 .ifPresentOrElse(plan -> {
-                    String instruction = plan.instruction();
+                    String instruction = enrichStaticVerificationRepairInstruction(plan.instruction(), workspace);
                     if (instruction.isBlank()) return;
                     LocalTurnTraceCapture.recordRepair("PLANNED", plan.traceSummary());
                     int insertAt = 0;
@@ -1297,6 +1305,10 @@ public final class AssistantTurnExecutor {
                         LocalTurnTraceCapture.recordRepair("SKIPPED", repairDecision.reason());
                     }
                 });
+    }
+
+    private static String enrichStaticVerificationRepairInstruction(String instruction, Path workspace) {
+        return RepairPolicy.enrichSelectorFactsForRepairContext(instruction, workspace);
     }
 
     private static void removeSupersededStaticVerificationRepairInstructions(
@@ -3224,7 +3236,7 @@ public final class AssistantTurnExecutor {
         return out;
     }
 
-    private static ChatMessage compactStaticVerificationRepairInstructionForRetry(ChatMessage message) {
+    static ChatMessage compactStaticVerificationRepairInstructionForRetry(ChatMessage message) {
         if (message == null || message.content() == null) {
             return message;
         }
@@ -3244,6 +3256,14 @@ public final class AssistantTurnExecutor {
                 content,
                 "Similar changed targets that do not satisfy missing expected targets:",
                 4);
+        List<String> cssSelectorConstraint = repairContextSectionBullets(
+                content,
+                "CSS selector repair constraint:",
+                4);
+        String currentSelectorFacts = repairContextSectionLines(
+                content,
+                "[Current static selector facts]",
+                18);
 
         if (fullWriteTargets.isBlank()) {
             Set<String> parsed = RepairPolicy.fullRewriteTargetsFromRepairContext(List.of(message));
@@ -3273,6 +3293,15 @@ public final class AssistantTurnExecutor {
         if (!fullWriteTargets.isBlank()) {
             out.append("Full-file replacement targets: ").append(fullWriteTargets).append('\n')
                     .append("Use talos.write_file with complete corrected content for these targets.\n");
+        }
+        if (!cssSelectorConstraint.isEmpty()) {
+            out.append("\nCSS selector repair constraint:\n");
+            cssSelectorConstraint.forEach(line -> out.append(line).append('\n'));
+        }
+        if (!currentSelectorFacts.isBlank()) {
+            out.append("\n[Current static selector facts]\n")
+                    .append(currentSelectorFacts)
+                    .append('\n');
         }
         out.append("Preserve exact target spelling; script.js and scripts.js are different paths.\n")
                 .append("After tool-backed changes, answer only from tool results and static verification.");
@@ -3325,6 +3354,36 @@ public final class AssistantTurnExecutor {
             }
         }
         return out;
+    }
+
+    private static String repairContextSectionLines(
+            String content,
+            String sectionHeader,
+            int maxLines
+    ) {
+        if (content == null || sectionHeader == null || sectionHeader.isBlank() || maxLines <= 0) {
+            return "";
+        }
+        String sectionLower = sectionHeader.toLowerCase(Locale.ROOT);
+        List<String> out = new ArrayList<>();
+        boolean inSection = false;
+        for (String rawLine : content.split("\\R")) {
+            String line = rawLine.stripTrailing();
+            if (!inSection) {
+                if (line.strip().toLowerCase(Locale.ROOT).equals(sectionLower)) {
+                    inSection = true;
+                }
+                continue;
+            }
+            if (line.strip().startsWith("[") && !out.isEmpty()) {
+                break;
+            }
+            out.add(line.strip());
+            if (out.size() >= maxLines) {
+                break;
+            }
+        }
+        return String.join("\n", out).strip();
     }
 
     private static String compactMutationRetryFrame(

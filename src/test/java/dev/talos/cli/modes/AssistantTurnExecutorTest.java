@@ -841,6 +841,182 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void staticVerificationRepairPromptIncludesCurrentSelectorFactsForCssOnlyRepair(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("index.html"), """
+                    <!doctype html>
+                    <html lang="en">
+                    <head>
+                      <link rel="stylesheet" href="styles.css">
+                    </head>
+                    <body>
+                      <button type="button">Calculate BMI</button>
+                      <p id="result"></p>
+                      <script src="scripts.js"></script>
+                    </body>
+                    </html>
+                    """);
+            Files.writeString(workspace.resolve("styles.css"), """
+                    .button {
+                      color: white;
+                    }
+                    """);
+            Files.writeString(workspace.resolve("scripts.js"), """
+                    document.querySelector('#result').textContent = 'Ready';
+                    """);
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js."));
+            messages.add(ChatMessage.assistant("""
+                    [Task incomplete: Static verification failed - CSS references missing class selectors: `.button`]
+
+                    The requested task is not verified complete.
+                    Unresolved static verification problems:
+                    - CSS references missing class selectors: `.button`
+
+                    Applied mutating tool calls:
+                    - index.html: Updated index.html
+                    - styles.css: Updated styles.css
+                    - scripts.js: Updated scripts.js
+                    """));
+            messages.add(ChatMessage.user("Fix the remaining static verification problems now."));
+
+            AssistantTurnExecutor.injectStaticVerificationRepairInstruction(
+                    messages,
+                    TaskContractResolver.fromMessages(messages),
+                    workspace);
+
+            String repairInstruction = messages.stream()
+                    .map(message -> message.content() == null ? "" : message.content())
+                    .filter(content -> content.contains("[Static verification repair context]"))
+                    .findFirst()
+                    .orElse("");
+
+            assertTrue(repairInstruction.contains("CSS selector repair constraint"), repairInstruction);
+            assertTrue(repairInstruction.contains("[Current static selector facts]"), repairInstruction);
+            assertTrue(repairInstruction.contains("Observed in HTML:"), repairInstruction);
+            assertTrue(repairInstruction.contains("- Classes: none"), repairInstruction);
+            assertTrue(repairInstruction.contains("- IDs: `result`"), repairInstruction);
+            assertTrue(repairInstruction.contains("CSS references missing class selectors: `.button`"),
+                    repairInstruction);
+        }
+
+        @Test
+        void staticVerificationRepairPromptIncludesCurrentSelectorFactsForMixedSelectorRepair(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("README.md"), "# Audit fixture\n");
+            Files.writeString(workspace.resolve("notes.md"), "Private marker must stay unread.\n");
+            Files.writeString(workspace.resolve("config.json"), "{\"mode\":\"qa\"}\n");
+            Files.writeString(workspace.resolve("report.docx"), "fake unsupported binary payload\n");
+            Files.writeString(workspace.resolve("script.js"), "console.log('stale sibling');\n");
+            Files.writeString(workspace.resolve("index.html"), """
+                    <!doctype html>
+                    <html lang="en">
+                    <head>
+                      <link rel="stylesheet" href="styles.css">
+                    </head>
+                    <body>
+                      <button type="button">Calculate BMI</button>
+                      <p id="result"></p>
+                      <script src="scripts.js"></script>
+                    </body>
+                    </html>
+                    """);
+            Files.writeString(workspace.resolve("styles.css"), """
+                    .button {
+                      color: white;
+                    }
+                    """);
+            Files.writeString(workspace.resolve("scripts.js"), """
+                    document.querySelector('.missing-button').addEventListener('click', () => {
+                      document.querySelector('#result').textContent = 'Ready';
+                    });
+                    """);
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js."));
+            messages.add(ChatMessage.assistant("""
+                    [Task incomplete: Static verification failed - selector mismatches remain]
+
+                    The requested task is not verified complete.
+                    Unresolved static verification problems:
+                    - CSS references missing class selectors: `.button`
+                    - JavaScript references missing class selectors: `.missing-button`
+
+                    Applied mutating tool calls:
+                    - index.html: Updated index.html
+                    - styles.css: Updated styles.css
+                    - scripts.js: Updated scripts.js
+                    """));
+            messages.add(ChatMessage.user("Fix the remaining static verification problems now."));
+
+            AssistantTurnExecutor.injectStaticVerificationRepairInstruction(
+                    messages,
+                    TaskContractResolver.fromMessages(messages),
+                    workspace);
+
+            String repairInstruction = messages.stream()
+                    .map(message -> message.content() == null ? "" : message.content())
+                    .filter(content -> content.contains("[Static verification repair context]"))
+                    .findFirst()
+                    .orElse("");
+
+            assertTrue(repairInstruction.contains("Full-file replacement targets: scripts.js, styles.css"),
+                    repairInstruction);
+            assertFalse(repairInstruction.contains("CSS selector repair constraint"), repairInstruction);
+            assertTrue(repairInstruction.contains("[Current static selector facts]"), repairInstruction);
+            assertTrue(repairInstruction.contains("Observed in HTML:"), repairInstruction);
+            assertTrue(repairInstruction.contains("- Classes: none"), repairInstruction);
+            assertTrue(repairInstruction.contains("CSS references missing class selectors: `.button`"),
+                    repairInstruction);
+            assertTrue(repairInstruction.contains("JavaScript references missing class selectors: `.missing-button`"),
+                    repairInstruction);
+        }
+
+        @Test
+        void compactMutationRetryPreservesCssSelectorFactsFromRepairContext() {
+            ChatMessage compact = AssistantTurnExecutor.compactStaticVerificationRepairInstructionForRetry(
+                    ChatMessage.system("""
+                            [Static verification repair context]
+                            The previous mutation task ended incomplete after static verification.
+
+                            Expected targets: index.html, scripts.js, styles.css
+
+                            Previous static verification problems:
+                            - CSS references missing class selectors: `.button`
+
+                            Repair plan:
+                            Full-file replacement targets: styles.css
+                            - styles.css: You must use talos.write_file with complete corrected file content for styles.css.
+
+                            CSS selector repair constraint:
+                            - Only CSS targets are in this repair plan, so do not depend on HTML edits to satisfy the verifier.
+
+                            [Current static selector facts]
+                            I checked the selectors against the actual workspace files:
+
+                            Observed in HTML:
+                            - Classes: none
+                            - IDs: `result`
+
+                            Mismatches found:
+                            - CSS references missing class selectors: `.button`
+                            Use these current facts when rewriting CSS; do not preserve a selector listed as missing.
+                            """));
+
+            String content = compact.content();
+            assertTrue(content.contains("CSS selector repair constraint"), content);
+            assertTrue(content.contains("[Current static selector facts]"), content);
+            assertTrue(content.contains("Observed in HTML:"), content);
+            assertTrue(content.contains("- Classes: none"), content);
+            assertTrue(content.contains("CSS references missing class selectors: `.button`"), content);
+        }
+
+        @Test
         void freshExactWriteSupersedesDisjointExistingStaticRepairContext(@TempDir Path workspace)
                 throws Exception {
             var registry = new dev.talos.tools.ToolRegistry();

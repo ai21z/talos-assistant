@@ -124,6 +124,43 @@ class RepairPolicyTest {
     }
 
     @Test
+    void cssOnlySelectorRepairExplainsStylesheetOnlyStrategy() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user(
+                "Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js."));
+        messages.add(ChatMessage.assistant("""
+                [Task incomplete: Static verification failed - CSS references missing class selectors: `.button`]
+
+                Unresolved static verification problems:
+                - CSS references missing class selectors: `.button`
+
+                Applied mutating tool calls:
+                - index.html: Updated index.html
+                - styles.css: Updated styles.css
+                - scripts.js: Updated scripts.js
+                """));
+        messages.add(ChatMessage.user("Fix the remaining static verification problems now."));
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        RepairPlan plan = RepairPolicy.planForStaticVerification(messages, contract)
+                .plan()
+                .orElseThrow();
+
+        assertTrue(plan.instruction().contains("CSS selector repair constraint"), plan.instruction());
+        assertTrue(plan.instruction().contains("Only CSS targets are in this repair plan"),
+                plan.instruction());
+        assertTrue(plan.instruction().contains("do not depend on HTML edits"),
+                plan.instruction());
+        assertTrue(plan.instruction().contains("remove or rename orphan selectors"),
+                plan.instruction());
+        assertTrue(plan.instruction().contains("Do not leave a reported missing selector"),
+                plan.instruction());
+        assertFalse(plan.instruction().contains("add a matching class in HTML"),
+                plan.instruction());
+    }
+
+    @Test
     void staticVerificationRepairInstructionNamesMissingExpectedTargetAndSimilarWrongTarget() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));
