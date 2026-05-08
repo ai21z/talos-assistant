@@ -56,10 +56,26 @@ public final class TurnAuditCapture {
 
     /** Append a tool-call summary with a diagnostic reason for failed calls. */
     public static void recordToolCall(String name, String pathHint, boolean success, String reason) {
+        recordToolCall(name, pathHint, List.of(), success, reason);
+    }
+
+    /** Append a tool-call summary with all changed paths for multi-path tools. */
+    public static void recordToolCall(String name, List<String> pathHints, boolean success, String reason) {
+        String primary = pathHints == null || pathHints.isEmpty() ? "" : pathHints.getFirst();
+        recordToolCall(name, primary, pathHints, success, reason);
+    }
+
+    private static void recordToolCall(
+            String name,
+            String pathHint,
+            List<String> pathHints,
+            boolean success,
+            String reason
+    ) {
         Bag b = HOLDER.get();
         if (b != null) {
             String normalizedReason = reason == null ? "" : reason.strip();
-            b.toolCalls.add(new TurnRecord.ToolCallSummary(name, pathHint, success, normalizedReason));
+            b.toolCalls.add(new TurnRecord.ToolCallSummary(name, pathHint, pathHints, success, normalizedReason));
             ToolCall synthetic = syntheticCall(name, pathHint);
             if (success) {
                 LocalTurnTraceCapture.recordToolExecuted("", synthetic, true, "");

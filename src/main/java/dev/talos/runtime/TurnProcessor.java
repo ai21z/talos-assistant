@@ -662,11 +662,19 @@ public final class TurnProcessor {
                     "Tool execution failed unexpectedly: "
                             + e.getClass().getSimpleName() + ": " + e.getMessage()));
         }
-        TurnAuditCapture.recordToolCall(
-                call.toolName(),
-                result.success() ? auditPathHint(call, path) : path == null ? "" : path,
-                result.success(),
-                result.success() ? "" : toolFailureReason(result));
+        if (result.success()) {
+            TurnAuditCapture.recordToolCall(
+                    call.toolName(),
+                    auditPathHints(call, path),
+                    true,
+                    "");
+        } else {
+            TurnAuditCapture.recordToolCall(
+                    call.toolName(),
+                    path == null ? "" : path,
+                    false,
+                    toolFailureReason(result));
+        }
         return result;
     }
 
@@ -698,19 +706,19 @@ public final class TurnProcessor {
         return null;
     }
 
-    private static String auditPathHint(ToolCall call, String fallbackPath) {
+    private static List<String> auditPathHints(ToolCall call, String fallbackPath) {
         if (call != null && WorkspaceOperationPlanner.isWorkspaceOperationTool(call.toolName())) {
             try {
                 Optional<WorkspaceOperationPlan> plan = WorkspaceOperationPlanner.checkpointPlan(call);
                 if (plan.isPresent()) {
-                    String changedPath = plan.get().primaryChangedPath();
-                    if (!changedPath.isBlank()) return changedPath;
+                    List<String> changedPaths = plan.get().changedPaths();
+                    if (!changedPaths.isEmpty()) return changedPaths;
                 }
             } catch (IllegalArgumentException ignored) {
                 // Invalid operation payloads are handled before successful audit recording.
             }
         }
-        return fallbackPath == null ? "" : fallbackPath;
+        return fallbackPath == null || fallbackPath.isBlank() ? List.of() : List.of(fallbackPath);
     }
 
     private CheckpointCaptureResult captureCheckpointBeforeMutation(Session session, ToolCall call) {

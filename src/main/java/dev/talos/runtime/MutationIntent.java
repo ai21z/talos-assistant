@@ -125,6 +125,7 @@ public final class MutationIntent {
 
     private static final Pattern EXPLICIT_BATCH_WORKSPACE_APPLY_REQUEST = Pattern.compile(
             "\\b(?:use\\s+)?(?:talos\\.)?apply_workspace_batch\\b.{0,160}\\bapply\\b"
+                    + "|\\b(?:use\\s+)?(?:talos\\.)?apply_workspace_batch\\b.{0,160}\\b(?:create|copy|move|rename|mkdir)\\b"
                     + "|\\bapply\\s+operations_json\\b"
                     + "|\\bapply\\s+(?:these|the|exactly\\s+these)\\s+operations\\b");
 

@@ -122,7 +122,7 @@ public record ChangeSummaryContext(
         List<TurnRecord.ToolCallSummary> successfulMutations = calls.stream()
                 .filter(call -> call != null && call.success())
                 .filter(call -> ToolCallSupport.isMutatingTool(call.name()))
-                .filter(call -> !normalizePath(call.pathHint()).isBlank())
+                .filter(call -> !changedPathHints(call).isEmpty())
                 .toList();
 
         if (successfulMutations.isEmpty()) {
@@ -141,18 +141,18 @@ public record ChangeSummaryContext(
         LinkedHashSet<String> changedThisTurn = new LinkedHashSet<>();
         String traceId = traceId(audit.localTrace());
         for (TurnRecord.ToolCallSummary call : successfulMutations) {
-            String path = normalizePath(call.pathHint());
-            if (path.isBlank()) continue;
-            changes.remove(path);
-            changes.put(path, new FileChange(
-                    path,
-                    call.name(),
-                    result.turnNumber(),
-                    traceId,
-                    "SUCCEEDED",
-                    verificationStatus,
-                    completionStatus));
-            changedThisTurn.add(path);
+            for (String path : changedPathHints(call)) {
+                changes.remove(path);
+                changes.put(path, new FileChange(
+                        path,
+                        call.name(),
+                        result.turnNumber(),
+                        traceId,
+                        "SUCCEEDED",
+                        verificationStatus,
+                        completionStatus));
+                changedThisTurn.add(path);
+            }
         }
         while (changes.size() > MAX_CHANGED_FILES) {
             String first = changes.keySet().iterator().next();
@@ -448,6 +448,20 @@ public record ChangeSummaryContext(
             String normalized = normalizePath(value);
             if (!normalized.isBlank()) out.add(normalized);
         }
+    }
+
+    private static List<String> changedPathHints(TurnRecord.ToolCallSummary call) {
+        if (call == null) return List.of();
+        LinkedHashSet<String> paths = new LinkedHashSet<>();
+        if (call.pathHints() != null) {
+            for (String path : call.pathHints()) {
+                String normalized = normalizePath(path);
+                if (!normalized.isBlank()) paths.add(normalized);
+            }
+        }
+        String primary = normalizePath(call.pathHint());
+        if (!primary.isBlank()) paths.add(primary);
+        return List.copyOf(paths);
     }
 
     private static List<String> normalizeStrings(List<String> raw, int maxItems) {
