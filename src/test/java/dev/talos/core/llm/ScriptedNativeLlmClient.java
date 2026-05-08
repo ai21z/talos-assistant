@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Spliterators;
+import java.util.Collections;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
@@ -28,6 +29,23 @@ public final class ScriptedNativeLlmClient {
             llm.put("transport", "engine");
         }
         return new LlmClient(config, new Resolver(responses));
+    }
+
+    public record RecordedClient(LlmClient client, List<ChatRequest> requests) {}
+
+    public static RecordedClient recordingWithContextWindow(
+            List<LlmClient.StreamResult> responses,
+            int contextWindowTokens) {
+        Config config = new Config();
+        Object llmBlock = config.data.computeIfAbsent("llm", ignored -> new java.util.LinkedHashMap<String, Object>());
+        if (llmBlock instanceof Map<?, ?> map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> llm = (Map<String, Object>) map;
+            llm.put("transport", "engine");
+            llm.put("default_backend", "llama_cpp");
+        }
+        RecordingResolver resolver = new RecordingResolver(responses, contextWindowTokens);
+        return new RecordedClient(new LlmClient(config, resolver), resolver.requests());
     }
 
     public static LlmClient compatMalformedStreamThenNonStreamingRecovery(
@@ -76,6 +94,47 @@ public final class ScriptedNativeLlmClient {
             }
             chunks.add(TokenChunk.eos());
             return chunks.stream();
+        }
+
+        @Override
+        public void close() {
+        }
+    }
+
+    private static final class RecordingResolver implements LlmEngineResolver {
+        private final List<LlmClient.StreamResult> responses;
+        private final AtomicInteger cursor = new AtomicInteger();
+        private final int contextWindowTokens;
+        private final List<ChatRequest> requests = Collections.synchronizedList(new ArrayList<>());
+
+        private RecordingResolver(List<LlmClient.StreamResult> responses, int contextWindowTokens) {
+            this.responses = responses == null || responses.isEmpty()
+                    ? List.of(new LlmClient.StreamResult("", List.of()))
+                    : List.copyOf(responses);
+            this.contextWindowTokens = Math.max(256, contextWindowTokens);
+        }
+
+        private List<ChatRequest> requests() {
+            return requests;
+        }
+
+        @Override
+        public void select(String backend, String model) {
+        }
+
+        @Override
+        public Capabilities capabilities() {
+            return Capabilities.of(
+                    true, true, false, contextWindowTokens,
+                    true, true, true,
+                    false, false, false, true);
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(ChatRequest request) {
+            requests.add(request);
+            int index = Math.min(cursor.getAndIncrement(), responses.size() - 1);
+            return chunks(responses.get(index));
         }
 
         @Override

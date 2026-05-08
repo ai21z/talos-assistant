@@ -23,6 +23,7 @@ import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.PromptDebugCapture;
 import dev.talos.spi.types.PromptDebugSnapshot;
+import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -1098,6 +1099,126 @@ class AssistantTurnExecutorTest {
                                     && "SUPERSEDED".equals(event.data().get("status"))
                                     && String.valueOf(event.data().get("summary")).contains("scripts.js")),
                     "trace should record the stale static repair supersession");
+        }
+
+        @Test
+        void exactLiteralWriteContextBudgetFallbackUsesCompactCurrentTurnPrompt(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("index.html"), "BEFORE");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            var undoStack = new dev.talos.tools.FileUndoStack();
+            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            registry.register(new dev.talos.tools.impl.FileEditTool(undoStack));
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            ToolSpec writeFile = new ToolSpec(
+                    "talos.write_file",
+                    "Write a file.",
+                    "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"content\":{\"type\":\"string\"}},\"required\":[\"path\",\"content\"]}");
+            ToolSpec editFile = new ToolSpec(
+                    "talos.edit_file",
+                    "Edit a file.",
+                    "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"old_string\":{\"type\":\"string\"},\"new_string\":{\"type\":\"string\"}},\"required\":[\"path\",\"old_string\",\"new_string\"]}");
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                    List.of(
+                            new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                                    "call_exact",
+                                    "talos.write_file",
+                                    java.util.Map.of("path", "index.html", "content", "AFTER")))),
+                            new LlmClient.StreamResult("Updated index.html.", List.of())),
+                    2048);
+            var ctx = Context.builder(new Config())
+                    .llm(recorded.client())
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .nativeToolSpecs(List.of(writeFile, editFile))
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys " + "large-system-token ".repeat(600)));
+            messages.add(ChatMessage.user(
+                    "Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js."));
+            messages.add(ChatMessage.assistant("""
+                    [Task incomplete: Static verification failed - OLD_BMI_HISTORY_MARKER]
+
+                    The requested task is not verified complete.
+                    """));
+            messages.add(ChatMessage.user("Overwrite index.html with exactly AFTER. Use talos.write_file."));
+
+            AssistantTurnExecutor.TurnOutput out;
+            LocalTurnTrace trace;
+            LocalTurnTraceCapture.begin(
+                    "trc-t219-exact-context-fallback",
+                    "sid",
+                    10,
+                    "2026-05-08T00:00:00Z",
+                    "workspace-hash",
+                    "test",
+                    "llama_cpp",
+                    "gpt-oss-20b",
+                    "Overwrite index.html with exactly AFTER. Use talos.write_file.");
+            try {
+                out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+
+            assertEquals("AFTER", Files.readString(workspace.resolve("index.html")));
+            assertFalse(out.text().contains("Context budget exceeded"), out.text());
+            assertFalse(out.text().contains("OLD_BMI_HISTORY_MARKER"), out.text());
+            assertFalse(recorded.requests().isEmpty(), "compact fallback must reach the backend");
+
+            ChatRequest fallbackRequest = recorded.requests().getFirst();
+            String fallbackPrompt = fallbackRequest.messages.stream()
+                    .map(message -> message.content() == null ? "" : message.content())
+                    .reduce("", (left, right) -> left + "\n" + right);
+            assertFalse(fallbackPrompt.contains("OLD_BMI_HISTORY_MARKER"), fallbackPrompt);
+            assertFalse(fallbackPrompt.contains("Create a complete static BMI calculator"), fallbackPrompt);
+            assertTrue(fallbackPrompt.contains("[ExpectedTargets]"), fallbackPrompt);
+            assertTrue(fallbackPrompt.contains("requiredTargets: index.html"), fallbackPrompt);
+            assertTrue(fallbackPrompt.contains("[ExactFileWrite]"), fallbackPrompt);
+            assertTrue(fallbackPrompt.contains("AFTER"), fallbackPrompt);
+            assertEquals(List.of("talos.write_file"),
+                    fallbackRequest.tools.stream().map(ToolSpec::name).toList());
+            assertEquals(ToolChoiceMode.REQUIRED, fallbackRequest.controls.toolChoice());
+            assertTrue(fallbackRequest.controls.debugTags().contains(
+                    "context-budget-current-turn-fallback"));
+            assertTrue(trace.events().stream()
+                            .anyMatch(event -> "ACTION_OBLIGATION_EVALUATED".equals(event.type())
+                                    && "RETRIED_COMPACT_CONTEXT".equals(event.data().get("status"))),
+                    "trace should record the compact current-turn fallback");
+        }
+
+        @Test
+        void contextBudgetFallbackDoesNotRunForDeicticNonLiteralMutation(@TempDir Path workspace)
+                throws Exception {
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                    List.of(new LlmClient.StreamResult("This should not be reached.", List.of())),
+                    2048);
+            var ctx = Context.builder(new Config())
+                    .llm(recorded.client())
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .nativeToolSpecs(List.of(new ToolSpec(
+                            "talos.write_file",
+                            "Write a file.",
+                            "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"content\":{\"type\":\"string\"}},\"required\":[\"path\",\"content\"]}")))
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys " + "large-system-token ".repeat(600)));
+            messages.add(ChatMessage.user("Here is the proposal: change README somehow."));
+            messages.add(ChatMessage.assistant("Proposal: update README.md with a clearer heading."));
+            messages.add(ChatMessage.user("Apply that proposal now."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains("Context budget exceeded"), out.text());
+            assertTrue(recorded.requests().isEmpty(),
+                    "non-literal/deictic mutation requests must not use the exact-write compact fallback");
         }
 
         @Test
