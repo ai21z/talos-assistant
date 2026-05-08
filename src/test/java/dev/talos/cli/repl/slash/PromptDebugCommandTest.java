@@ -2,7 +2,9 @@ package dev.talos.cli.repl.slash;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
+import dev.talos.cli.modes.AssistantTurnExecutor;
 import dev.talos.core.Config;
+import dev.talos.core.llm.LlmClient;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.ChatRequestControls;
@@ -54,6 +56,60 @@ class PromptDebugCommandTest {
 
         Result.Info info = assertInstanceOf(Result.Info.class, result);
         assertTrue(info.text.contains("No prompt debug capture"), info.text);
+    }
+
+    @Test
+    void lastExplainsRuntimeOwnedTurnWhenNoProviderPromptWasSent() throws Exception {
+        PromptDebugCapture.record(PromptDebugSnapshot.fromProviderBody(
+                new ChatRequest(
+                        "llama_cpp",
+                        "qwen2.5-coder-14b",
+                        "",
+                        "",
+                        List.of(),
+                        Duration.ofSeconds(5),
+                        List.of(ChatMessage.user("Previous provider turn")),
+                        List.of()),
+                false,
+                "{\"messages\":[{\"role\":\"user\",\"content\":\"Previous provider turn\"}]}"));
+        var directCtx = Context.builder(new Config())
+                .llm(LlmClient.scripted("this should not be used"))
+                .build();
+        AssistantTurnExecutor.execute(
+                new java.util.ArrayList<>(List.of(
+                        ChatMessage.system("system"),
+                        ChatMessage.user("What can you do in this workspace? Answer briefly."))),
+                Path.of(".").toAbsolutePath().normalize(),
+                directCtx,
+                new AssistantTurnExecutor.Options());
+        PromptDebugCommand command = new PromptDebugCommand();
+
+        Result result = command.execute("last", ctx);
+
+        Result.Info info = assertInstanceOf(Result.Info.class, result);
+        assertTrue(info.text.contains("No provider prompt was sent for the last turn"), info.text);
+        assertFalse(info.text.contains("No prompt debug capture has been recorded"), info.text);
+    }
+
+    @Test
+    void saveAllExplainsRuntimeOwnedTurnWhenNoProviderPromptWasSent() throws Exception {
+        var directCtx = Context.builder(new Config())
+                .llm(LlmClient.scripted("this should not be used"))
+                .build();
+        AssistantTurnExecutor.execute(
+                new java.util.ArrayList<>(List.of(
+                        ChatMessage.system("system"),
+                        ChatMessage.user("What can you do in this workspace? Answer briefly."))),
+                Path.of(".").toAbsolutePath().normalize(),
+                directCtx,
+                new AssistantTurnExecutor.Options());
+        PromptDebugCommand command = new PromptDebugCommand();
+
+        Result result = command.execute("save-all", ctx);
+
+        Result.Info info = assertInstanceOf(Result.Info.class, result);
+        assertTrue(info.text.contains("No provider prompt was sent for the last turn"), info.text);
+        assertFalse(info.text.contains("No prompt debug capture has been recorded"), info.text);
     }
 
     @Test

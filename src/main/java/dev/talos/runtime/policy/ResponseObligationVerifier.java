@@ -110,6 +110,15 @@ public final class ResponseObligationVerifier {
                 + "only read-only inspection tools, so no files were changed.";
     }
 
+    public static String deterministicFailedMutationAttemptAnswer(List<String> failedTargets) {
+        String targetText = failedTargets == null || failedTargets.isEmpty()
+                ? "the requested file"
+                : String.join(", ", failedTargets);
+        return "[Action obligation failed: mutating tool call failed.]\n\n"
+                + "Talos required a successful write/edit tool call for this turn, but the model's "
+                + "mutation attempt failed for " + targetText + ". No successful file change was applied.";
+    }
+
     public static String deterministicStaticRepairWrongToolAnswer(List<String> targets) {
         return deterministicStaticRepairWrongToolAnswer(targets, false);
     }

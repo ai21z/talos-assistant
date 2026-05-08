@@ -40,7 +40,7 @@ public final class PromptDebugCommand implements Command {
         if ("last".equals(q) || "show".equals(q)) {
             return PromptDebugCapture.latest()
                     .<Result>map(snapshot -> new Result.TrustedInfo(PromptDebugInspector.format(snapshot)))
-                    .orElseGet(() -> new Result.Info("No prompt debug capture has been recorded in this process yet.\n"));
+                    .orElseGet(PromptDebugCommand::missingCaptureInfo);
         }
         if ("save".equals(q)) {
             return saveLatest();
@@ -54,7 +54,7 @@ public final class PromptDebugCommand implements Command {
     private static Result saveLatest() throws Exception {
         var latest = PromptDebugCapture.latest();
         if (latest.isEmpty()) {
-            return new Result.Info("No prompt debug capture has been recorded in this process yet.\n");
+            return missingCaptureInfo();
         }
         PromptDebugSnapshot snapshot = latest.get();
         Path dir = Path.of("local", "prompts").toAbsolutePath().normalize();
@@ -79,7 +79,7 @@ public final class PromptDebugCommand implements Command {
     private static Result saveAll() throws Exception {
         List<PromptDebugSnapshot> snapshots = PromptDebugCapture.history();
         if (snapshots.isEmpty()) {
-            return new Result.Info("No prompt debug capture has been recorded in this process yet.\n");
+            return missingCaptureInfo();
         }
         Path dir = Path.of("local", "prompts").toAbsolutePath().normalize();
         Files.createDirectories(dir);
@@ -111,6 +111,15 @@ public final class PromptDebugCommand implements Command {
         result.append("Saved prompt debug history index to: ")
                 .append(index.toAbsolutePath().normalize()).append('\n');
         return new Result.TrustedInfo(result.toString());
+    }
+
+    private static Result.Info missingCaptureInfo() {
+        if (PromptDebugCapture.lastTurnHadNoProviderRequest()) {
+            return new Result.Info(
+                    "No provider prompt was sent for the last turn. Talos answered from deterministic runtime policy, "
+                            + "so there is no provider request body to show or save for that turn.\n");
+        }
+        return new Result.Info("No prompt debug capture has been recorded in this process yet.\n");
     }
 
     private static String help() {

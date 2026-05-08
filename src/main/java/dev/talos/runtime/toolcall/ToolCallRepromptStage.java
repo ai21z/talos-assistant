@@ -1339,7 +1339,10 @@ public final class ToolCallRepromptStage {
         if (state == null || outcome == null || outcome.successesThisIteration() <= 0) return null;
         TaskContract contract = TaskContractResolver.fromMessages(state.messages);
         if (contract.type() != TaskType.DIRECTORY_LISTING) return null;
-        String body = latestSuccessfulToolResultBodyByCanonical(state.messages, "talos.list_dir");
+        String body = DirectoryListingEvidence.selectedBody(
+                state.messages,
+                state.toolOutcomes,
+                contract.originalUserRequest());
         if (body == null || body.isBlank()) return null;
         return renderDirectoryEntries(body);
     }
