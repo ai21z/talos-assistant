@@ -1,6 +1,6 @@
 # T213 - Static Web Repair Should Target Verifier-Specific Files
 
-Status: open
+Status: done
 Severity: medium
 
 ## Problem
@@ -32,6 +32,16 @@ Relevant transcript lines:
 - Pending repair obligation trace events remain present and machine-readable.
 - Qwen's passing static web path does not regress.
 - GPT-OSS static web repair gets a focused clean re-audit after implementation.
+
+## Completion Notes
+
+Implemented in `RepairPolicy` by deriving verifier-specific structural repair targets when every static verifier problem maps to an implicated file class. CSS selector-source failures now narrow to stylesheet targets, JavaScript selector-source failures narrow to script targets, and HTML structural failures narrow to HTML targets. Mixed failures retain the broad structural target set.
+
+Focused tests cover CSS-only narrowing and static repair obligation breach reporting for the narrowed target. A focused Qwen/GPT-OSS llama.cpp audit confirmed the CSS-only Qwen repair context named only `styles.css`, while the mixed GPT-OSS failure correctly retained `index.html`, `scripts.js`, and `styles.css`.
+
+Audit findings:
+
+`local/manual-testing/llama-cpp-t213-focused-re-audit-20260508-020613/FINDINGS-LLAMA-CPP-T213-FOCUSED-RE-AUDIT.md`
 
 ## Non-Goals
 

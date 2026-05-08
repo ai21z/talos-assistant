@@ -1211,6 +1211,58 @@ class ToolCallLoopTest {
     }
 
     @Test
+    void narrowedStaticRepairProgressBreachReportsOnlyVerifierSpecificTarget() {
+        var loop = createLoop(writeFileTool());
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.system("""
+                        [Static verification repair context]
+                        Expected targets: index.html, scripts.js, styles.css
+
+                        Previous static verification problems:
+                        - CSS references missing class selectors: `.button`
+
+                        Repair plan:
+                        Full-file replacement targets: styles.css
+                        - styles.css: You must use talos.write_file with complete corrected file content for styles.css.
+                        - Verify static checks again before claiming completion.
+                        """),
+                ChatMessage.user("Fix the remaining static verification problems.")));
+        var ctx = Context.builder(new Config())
+                .llm(LlmClient.scripted(List.of("Complete. Everything is ready to use.")))
+                .build();
+        String llmResponse = """
+                <tool_call>{"name":"talos.write_file","parameters":{"path":"index.html","content":"<html></html>"}}</tool_call>
+                """;
+
+        LocalTurnTraceCapture.begin("trc-t213-repair", "session", 1,
+                "2026-05-08T00:00:00Z", "ws", "test", "llama.cpp", "gpt-oss", "repair css selector");
+        ToolCallLoop.LoopResult result;
+        LocalTurnTrace trace;
+        try {
+            result = loop.run(llmResponse, messages, WS, ctx);
+            trace = LocalTurnTraceCapture.complete();
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+
+        assertTrue(result.failureDecision().shouldStop(), result.failureDecision().reason());
+        assertTrue(result.failureDecision().reason().contains("STATIC_REPAIR_TARGETS_REMAINING"),
+                result.failureDecision().reason());
+        assertTrue(result.finalAnswer().contains("styles.css"), result.finalAnswer());
+        assertFalse(result.finalAnswer().contains("scripts.js"), result.finalAnswer());
+        assertFalse(result.finalAnswer().toLowerCase().contains("ready to use"), result.finalAnswer());
+        assertFalse(result.finalAnswer().toLowerCase().contains("complete."), result.finalAnswer());
+
+        var breached = trace.events().stream()
+                .filter(event -> "PENDING_ACTION_OBLIGATION_BREACHED".equals(event.type()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("STATIC_REPAIR_TARGETS_REMAINING", breached.data().get("kind"));
+        assertEquals(List.of("styles.css"), breached.data().get("targets"));
+    }
+
+    @Test
     void expectedTargetProgressContextBudgetExceededBecomesDeterministicBreach() {
         var loop = createLoop(writeFileTool());
         var messages = new ArrayList<>(List.of(
