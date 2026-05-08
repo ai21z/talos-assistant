@@ -2521,6 +2521,152 @@ class ToolCallLoopTest {
     }
 
     @Test
+    void readBeforeEditOldStringMissUsesCompactRepairBeforeContextBudgetFailure() throws Exception {
+        Path ws = Files.createTempDirectory("talos-old-string-read-before-edit-compact-repair-");
+        try {
+            Files.writeString(ws.resolve("README.md"), "# Fixture\n\nOriginal text.\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileEditTool());
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 5);
+
+            String repaired = "# Fixture\n\nOriginal text.\n\nApplied proposal.\n";
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                    List.of(new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                            "call_repair_write",
+                            "talos.write_file",
+                            Map.of("path", "README.md", "content", repaired))))),
+                    2048);
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(recorded.client())
+                    .nativeToolSpecs(nativeSpecs(
+                            new ReadFileTool(),
+                            new FileEditTool(),
+                            new FileWriteTool()))
+                    .build();
+
+            String request = "Apply that README.md proposal now.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys " + "large-system-token ".repeat(700)),
+                    ChatMessage.user("Earlier unrelated request with stale proposal details."),
+                    ChatMessage.assistant("Old proposal context that must not dominate the compact repair."),
+                    ChatMessage.user(request)));
+            var initialCalls = List.of(
+                    new ChatMessage.NativeToolCall(
+                            "call_readback",
+                            "talos.read_file",
+                            Map.of("path", "README.md")),
+                    new ChatMessage.NativeToolCall(
+                            "call_bad_edit",
+                            "talos.edit_file",
+                            Map.of(
+                                    "path", "README.md",
+                                    "old_string", "This text does not exist.",
+                                    "new_string", "Applied proposal.")));
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            ToolCallLoop.LoopResult result;
+            try {
+                result = loop.run("", initialCalls, messages, ws, ctx);
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertEquals(repaired, Files.readString(ws.resolve("README.md")));
+            assertEquals(1, recorded.requests().size(), "generic oversized continuation should be replaced");
+
+            String compactPrompt = recorded.requests().getFirst().messages.stream()
+                    .map(ChatMessage::content)
+                    .reduce("", (left, right) -> left + "\n" + right);
+            assertTrue(compactPrompt.contains("[OldStringMissRepair]"), compactPrompt);
+            assertTrue(compactPrompt.contains("[OldStringMissRepair] Target: README.md"), compactPrompt);
+            assertTrue(compactPrompt.contains("1 | # Fixture"), compactPrompt);
+            assertFalse(compactPrompt.contains("[Expected target progress]"), compactPrompt);
+            assertFalse(compactPrompt.contains("large-system-token"), compactPrompt);
+            assertEquals(List.of("talos.edit_file", "talos.write_file"),
+                    recorded.requests().getFirst().tools.stream().map(ToolSpec::name).toList());
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
+    void oldStringMissCompactRepairDoesNotUseReadbackFromBeforeSuccessfulMutation() throws Exception {
+        Path ws = Files.createTempDirectory("talos-old-string-stale-readback-");
+        try {
+            String original = "# Fixture\n\nOriginal text.\n";
+            String mutated = "# Fixture\n\nContent changed before the failing edit.\n";
+            Files.writeString(ws.resolve("README.md"), original);
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileEditTool());
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 5);
+
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                    List.of(new LlmClient.StreamResult("I cannot repair without fresh content.", List.of())),
+                    8192);
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(recorded.client())
+                    .nativeToolSpecs(nativeSpecs(
+                            new ReadFileTool(),
+                            new FileEditTool(),
+                            new FileWriteTool()))
+                    .build();
+
+            String request = "Apply that README.md proposal now.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+            var initialCalls = List.of(
+                    new ChatMessage.NativeToolCall(
+                            "call_readback",
+                            "talos.read_file",
+                            Map.of("path", "README.md")),
+                    new ChatMessage.NativeToolCall(
+                            "call_successful_write",
+                            "talos.write_file",
+                            Map.of("path", "README.md", "content", mutated)),
+                    new ChatMessage.NativeToolCall(
+                            "call_bad_edit",
+                            "talos.edit_file",
+                            Map.of(
+                                    "path", "README.md",
+                                    "old_string", "This text does not exist.",
+                                    "new_string", "Applied proposal.")));
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            try {
+                loop.run("", initialCalls, messages, ws, ctx);
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            assertFalse(recorded.requests().isEmpty(), "loop should ask for a continuation");
+            String continuationPrompt = recorded.requests().getFirst().messages.stream()
+                    .map(ChatMessage::content)
+                    .reduce("", (left, right) -> left + "\n" + right);
+            assertFalse(continuationPrompt.contains("[OldStringMissRepair]"), continuationPrompt);
+            assertTrue(continuationPrompt.contains("[Stale edit repair required]"), continuationPrompt);
+            assertEquals(mutated, Files.readString(ws.resolve("README.md")));
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
     void oldStringMissCompactRepairPreservesExpectedTargetCasing() throws Exception {
         Path ws = Files.createTempDirectory("talos-old-string-compact-repair-case-");
         try {

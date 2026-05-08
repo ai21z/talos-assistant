@@ -293,7 +293,7 @@ public final class ToolCallExecutionStage {
                 state.failedCalls++;
                 failuresThisIter++;
                 recordFailure(state, effective.toolName(), pathHint);
-                if (ToolCallSupport.isMutatingTool(effective.toolName())) {
+                if (shouldClearSuccessfulReadCallsAfterFailure(state, effective, result, pathHint, isEditFile)) {
                     state.successfulReadCalls.clear();
                 }
                 if (isEditFile) {
@@ -415,6 +415,23 @@ public final class ToolCallExecutionStage {
         String path = normalizePath(pathHint);
         state.pathsMutatedSinceRead.add(path);
         state.staticWebFullRewriteRequiredTargets.remove(path);
+    }
+
+    private static boolean shouldClearSuccessfulReadCallsAfterFailure(
+            LoopState state,
+            ToolCall effective,
+            ToolResult result,
+            String pathHint,
+            boolean isEditFile
+    ) {
+        if (effective == null || !ToolCallSupport.isMutatingTool(effective.toolName())) return false;
+        if (isEditFile
+                && isOldStringNotFound(result)
+                && wasPathReadThisTurn(state, pathHint)
+                && !wasMutatedSinceRead(state, pathHint)) {
+            return false;
+        }
+        return true;
     }
 
     private static void recordEmptyEditArgumentFailure(LoopState state, String pathHint) {
