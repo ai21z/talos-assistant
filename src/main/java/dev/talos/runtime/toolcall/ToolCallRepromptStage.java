@@ -172,8 +172,9 @@ public final class ToolCallRepromptStage {
                 return false;
             }
             String reason = "REPAIR_INSPECTION_ONLY: repair/fix turn inspected files with "
-                    + state.toolNames.size()
-                    + " read-only tool call(s) but did not call write/edit before the read-only repair budget was exhausted.";
+                    + readOnlyInspectionAttemptCount(state)
+                    + " read-only/no-progress inspection attempt(s) but did not call write/edit before "
+                    + "the read-only repair budget was exhausted.";
             state.failureDecision = FailureDecision.stop(FailureAction.ASK_USER, reason);
             state.currentText = ResponseObligationVerifier.deterministicRepairInspectionOnlyAnswer();
             state.currentNativeCalls = List.of();
@@ -560,7 +561,12 @@ public final class ToolCallRepromptStage {
             if (!ToolCallSupport.isReadOnlyTool(toolName)) return false;
             readOnlyCalls++;
         }
-        return readOnlyCalls >= REPAIR_READ_ONLY_TOOL_BUDGET;
+        return readOnlyCalls + Math.max(0, state.cushionFiresRedundantRead) >= REPAIR_READ_ONLY_TOOL_BUDGET;
+    }
+
+    private static int readOnlyInspectionAttemptCount(LoopState state) {
+        if (state == null) return 0;
+        return Math.max(0, state.toolNames.size()) + Math.max(0, state.cushionFiresRedundantRead);
     }
 
     private static boolean isRepairOrFixMutationContract(TaskContract contract) {
