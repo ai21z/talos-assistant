@@ -117,7 +117,7 @@ public final class UnifiedAssistantMode implements Mode {
                 taskContract,
                 initialPhase,
                 NativeToolSpecPolicy.names(turnCtx.nativeToolSpecs()));
-        AssistantTurnExecutor.injectStaticVerificationRepairInstruction(messages, taskContract);
+        AssistantTurnExecutor.injectStaticVerificationRepairInstruction(messages, taskContract, workspace);
         LastPromptCapture.record(PromptInspector.fromMessages(
                 "auto",
                 "unified",
