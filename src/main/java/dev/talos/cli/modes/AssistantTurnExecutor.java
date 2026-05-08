@@ -34,6 +34,7 @@ import dev.talos.runtime.policy.ResponseObligationVerifier;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
+import dev.talos.runtime.toolcall.DirectoryListingEvidence;
 import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
 import dev.talos.runtime.toolcall.ToolAliasPolicy;
 import dev.talos.runtime.toolcall.ToolCallSupport;
@@ -191,7 +192,7 @@ public final class AssistantTurnExecutor {
      */
     public static TurnOutput execute(List<ChatMessage> messages, Path workspace,
                               Context ctx, Options opts) {
-        PromptDebugCapture.clear();
+        PromptDebugCapture.beginTurn();
         StringBuilder out = new StringBuilder();
         boolean streamed = false;
         TaskContract rawTaskContract = TaskContractResolver.fromMessages(messages);
@@ -2180,7 +2181,10 @@ public final class AssistantTurnExecutor {
         if (loopResult.toolNames().stream().anyMatch(AssistantTurnExecutor::isContentInspectionTool)) {
             return "";
         }
-        String body = latestToolResultBody(loopResult.messages(), "talos.list_dir");
+        String body = DirectoryListingEvidence.selectedBody(
+                loopResult.messages(),
+                loopResult.toolOutcomes(),
+                contract.originalUserRequest());
         if (body.isBlank() || body.contains("[error]")) return "";
         List<String> entries = body.lines()
                 .map(String::strip)
@@ -3238,10 +3242,34 @@ public final class AssistantTurnExecutor {
                             "BLOCKED_AFTER_RETRY",
                             "retry response issued mutating tool calls but policy blocked them");
                 } else if (retryIssuedMutatingTool) {
+                    if (hasInvalidMutatingFailure(retryLoop)) {
+                        LocalTurnTraceCapture.recordActionObligation(
+                                obligation.name(),
+                                "FAILED",
+                                "retry response issued invalid mutating tool arguments",
+                                "INVALID_MUTATION_AFTER_RETRY");
+                        return new MutationRetryResult(
+                                mergedAnswer == null || mergedAnswer.isBlank() ? answer : mergedAnswer,
+                                0,
+                                summary,
+                                retryLoop,
+                                false);
+                    }
+                    List<String> failedTargets = failedMutatingToolTargets(retryLoop);
                     LocalTurnTraceCapture.recordActionObligation(
                             obligation.name(),
-                            "ATTEMPTED_AFTER_RETRY",
-                            "retry response issued tool calls but no mutation completed");
+                            "FAILED",
+                            "retry response issued mutating tool calls but no mutation completed"
+                                    + (failedTargets.isEmpty()
+                                    ? ""
+                                    : " for " + String.join(", ", failedTargets)),
+                            "CONDITIONAL_REVIEW_FAILED_MUTATION");
+                    return new MutationRetryResult(
+                            ResponseObligationVerifier.deterministicFailedMutationAttemptAnswer(failedTargets),
+                            0,
+                            summary,
+                            retryLoop,
+                            true);
                 } else {
                     boolean repairInspectionOnly = isRepairInspectionOnlyRetry(safePlan, retryLoop);
                     String failureReason = repairInspectionOnly
@@ -3317,6 +3345,21 @@ public final class AssistantTurnExecutor {
                 null,
                 null,
                 true);
+    }
+
+    private static List<String> failedMutatingToolTargets(ToolCallLoop.LoopResult retryLoop) {
+        if (retryLoop == null || retryLoop.toolOutcomes() == null) return List.of();
+        return retryLoop.toolOutcomes().stream()
+                .filter(outcome -> outcome != null
+                        && outcome.mutating()
+                        && !outcome.success()
+                        && !outcome.denied())
+                .map(ToolCallLoop.ToolOutcome::pathHint)
+                .filter(path -> path != null && !path.isBlank())
+                .map(ToolCallSupport::normalizePath)
+                .filter(path -> !path.isBlank())
+                .distinct()
+                .toList();
     }
 
     private static List<String> mutationRetryToolNames(CurrentTurnPlan plan, List<ChatMessage> messages) {

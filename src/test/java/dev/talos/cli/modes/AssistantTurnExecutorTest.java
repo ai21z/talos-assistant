@@ -1354,6 +1354,90 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void directoryListingUsesRequestedRootEvenWhenModelListsEmptySubdirectories(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("README.md"), "Hidden project token: ALPHA-742\n");
+            Files.writeString(workspace.resolve("notes.md"), "Private notes.\n");
+            Files.writeString(workspace.resolve("config.json"), "{}\n");
+            Files.writeString(workspace.resolve("index.html"), "<button>Run</button>\n");
+            Files.writeString(workspace.resolve("script.js"), "console.log('bug');\n");
+            Files.writeString(workspace.resolve("styles.css"), "body{}\n");
+            Files.writeString(workspace.resolve("report.docx"), "fake-binary\n");
+            Files.createDirectories(workspace.resolve("natural-notes"));
+            Files.createDirectories(workspace.resolve("audit-output"));
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ListDirTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}\n"
+                                    + "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\"natural-notes\"}}\n"
+                                    + "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\"audit-output\"}}\n"
+                                    + "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".env\"}}\n"
+                                    + "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\"config.json\"}}\n"
+                                    + "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\"index.html\"}}\n"
+                                    + "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\"report.docx\"}}\n"
+                                    + "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\"script.js\"}}\n"
+                                    + "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\"styles.css\"}}",
+                            "Directory entries:\n- (empty directory)")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("List files only; do not show content from README.md or notes.md."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains("Directory entries:"), out.text());
+            assertTrue(out.text().contains("- README.md"), out.text());
+            assertTrue(out.text().contains("- notes.md"), out.text());
+            assertTrue(out.text().contains("- natural-notes/"), out.text());
+            assertFalse(out.text().contains("- (empty directory)"), out.text());
+            assertFalse(out.text().contains("Hidden project token"), out.text());
+            assertFalse(out.text().contains("Private notes"), out.text());
+        }
+
+        @Test
+        void directoryListingUsesExplicitNamedDirectoryWhenUserRequestedIt(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("README.md"), "Root readme.\n");
+            Files.createDirectories(workspace.resolve("natural-notes"));
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ListDirTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}\n"
+                                    + "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\"natural-notes\"}}",
+                            "Directory entries:\n- README.md")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "List files in natural-notes only; do not show file contents."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains("Directory entries:"), out.text());
+            assertTrue(out.text().contains("- (empty directory)"), out.text());
+            assertFalse(out.text().contains("- README.md"), out.text());
+            assertFalse(out.text().contains("Root readme"), out.text());
+        }
+
+        @Test
         void verifyOnlyDirectoryPathSummaryOverridesUngroundedDirectoryContentClaim(@TempDir Path workspace)
                 throws Exception {
             Files.createDirectories(workspace.resolve("archive"));
@@ -2002,6 +2086,70 @@ class AssistantTurnExecutorTest {
                         .filter(event -> "ACTION_OBLIGATION_EVALUATED".equals(event.type()))
                         .filter(event -> "REPAIR_INSPECTION_ONLY".equals(event.data().get("failureKind")))
                         .count());
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        }
+
+        @Test
+        void conditionalReviewFixFailsAfterRetryMutatingToolTargetsMissingFile(@TempDir Path workspace)
+                throws Exception {
+            writePassingBmiFixture(workspace);
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ListDirTool());
+            registry.register(new dev.talos.tools.impl.FileEditTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 8);
+            String missingEdit = """
+                    {"name":"talos.edit_file","arguments":{"path":"bmi_calculator.js","old_string":"old","new_string":"new"}}
+                    """;
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.list_dir\",\"arguments\":{\"path\":\".\"}}",
+                            missingEdit,
+                            "No file change is required.",
+                            missingEdit,
+                            "No file change is required.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Review the BMI calculator you just created and fix any obvious issue "
+                            + "that would stop it from working in a browser."));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-t231-conditional-failed-mutation",
+                    "sid",
+                    1,
+                    "2026-05-08T00:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "scripted",
+                    "test-model",
+                    messages.get(messages.size() - 1).content());
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertTrue(out.text().contains("[Action obligation failed:"), out.text());
+                assertTrue(out.text().contains("bmi_calculator.js"), out.text());
+                assertFalse(out.text().contains("No file change is required"), out.text());
+                assertFalse(out.text().toLowerCase(java.util.Locale.ROOT).contains("complete"),
+                        out.text());
+                assertEquals("BLOCKED", trace.outcome().status());
+                assertEquals("BLOCKED_BY_POLICY", trace.outcome().classification());
+                assertTrue(trace.events().stream()
+                                .anyMatch(event -> "ACTION_OBLIGATION_EVALUATED".equals(event.type())
+                                        && "FAILED".equals(event.data().get("status"))
+                                        && "CONDITIONAL_REVIEW_FAILED_MUTATION".equals(
+                                                event.data().get("failureKind"))),
+                        "Trace should record a typed conditional-review failed-mutation breach.");
             } finally {
                 LocalTurnTraceCapture.clear();
             }
