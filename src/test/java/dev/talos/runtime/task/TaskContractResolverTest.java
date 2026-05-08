@@ -145,6 +145,22 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void workspaceSwitchRequestsAreUnsupportedDirectAnswerContracts() {
+        for (String input : List.of(
+                "Change workspace to Desktop.",
+                "Change your workspace to Desktop.",
+                "Switch the workspace to C:\\Users\\arisz\\Desktop.",
+                "Can you use Desktop as the current workspace now?")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertEquals(TaskType.SMALL_TALK, contract.type(), input);
+            assertFalse(contract.mutationRequested(), input);
+            assertFalse(contract.mutationAllowed(), input);
+            assertEquals("workspace-switch-unsupported", contract.classificationReason(), input);
+        }
+    }
+
+    @Test
     void overwriteMultipleTargetsCapturesExpectedTargets() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Overwrite these three files to make a working BMI calculator: index.html, styles.css, scripts.js. "

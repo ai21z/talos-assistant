@@ -1035,6 +1035,9 @@ public final class AssistantTurnExecutor {
             return sanitizeAndTruncate(stripped, opts);
         }
         String userRequest = latestUserRequest(messages);
+        if (CapabilityAnswerPolicy.looksLikeWorkspaceSwitchRequest(userRequest)) {
+            return sanitizeAndTruncate(CapabilityAnswerPolicy.workspaceSwitchUnsupportedAnswer(), opts);
+        }
         if (looksLikeAssistantIdentityTurn(userRequest)) {
             return sanitizeAndTruncate(CapabilityAnswerPolicy.identityAnswer(), opts);
         }
@@ -1555,6 +1558,9 @@ public final class AssistantTurnExecutor {
             String conversationBoundaryAnswer = ConversationBoundaryPolicy.deterministicAnswer(userRequest);
             if (conversationBoundaryAnswer != null) {
                 return conversationBoundaryAnswer;
+            }
+            if (CapabilityAnswerPolicy.looksLikeWorkspaceSwitchRequest(userRequest)) {
+                return CapabilityAnswerPolicy.workspaceSwitchUnsupportedAnswer();
             }
             if (CapabilityAnswerPolicy.looksLikeToolAliasCapabilityTurn(userRequest)) {
                 return CapabilityAnswerPolicy.toolAliasCapabilityAnswer(userRequest);

@@ -19,6 +19,10 @@ public final class CapabilityAnswerPolicy {
             + "for workspace changes. It cannot use browser automation or inspect unsupported "
             + "binary-document contents unless those capabilities are added.";
 
+    private static final String WORKSPACE_SWITCH_UNSUPPORTED_ANSWER =
+            "Talos cannot change workspace inside the current session. Use /workspace to see the current "
+                    + "workspace, then start Talos from the folder you want to work in.";
+
     private static final Set<String> IDENTITY_MARKERS = Set.of(
             "who are you",
             "what are you",
@@ -65,8 +69,37 @@ public final class CapabilityAnswerPolicy {
         return asksCapability && ToolAliasPolicy.firstToolAliasToken(userRequest).isPresent();
     }
 
+    public static boolean looksLikeWorkspaceSwitchRequest(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return false;
+        String lower = userRequest.toLowerCase(Locale.ROOT);
+        if (!lower.contains("workspace")) return false;
+        return lower.contains("change workspace")
+                || lower.contains("switch workspace")
+                || lower.contains("set workspace")
+                || lower.contains("open workspace")
+                || lower.contains("change the workspace")
+                || lower.contains("change your workspace")
+                || lower.contains("change its workspace")
+                || lower.contains("change current workspace")
+                || lower.contains("switch the workspace")
+                || lower.contains("switch your workspace")
+                || lower.contains("switch its workspace")
+                || lower.contains("switch current workspace")
+                || lower.contains("set the workspace")
+                || lower.contains("set your workspace")
+                || lower.contains("set its workspace")
+                || lower.contains("set current workspace")
+                || lower.contains("open the workspace")
+                || lower.contains("use desktop as the current workspace")
+                || (lower.contains("use ") && lower.contains(" as the current workspace"))
+                || lower.contains("point talos at")
+                || lower.contains("point you at");
+    }
+
     public static boolean looksLikeIdentityOrCapabilityTurn(String userRequest) {
-        return looksLikeIdentityTurn(userRequest) || looksLikeCapabilityTurn(userRequest);
+        return looksLikeIdentityTurn(userRequest)
+                || looksLikeCapabilityTurn(userRequest)
+                || looksLikeWorkspaceSwitchRequest(userRequest);
     }
 
     public static String identityAnswer() {
@@ -75,6 +108,10 @@ public final class CapabilityAnswerPolicy {
 
     public static String capabilityAnswer() {
         return CAPABILITY_ANSWER;
+    }
+
+    public static String workspaceSwitchUnsupportedAnswer() {
+        return WORKSPACE_SWITCH_UNSUPPORTED_ANSWER;
     }
 
     public static String toolAliasCapabilityAnswer(String userRequest) {

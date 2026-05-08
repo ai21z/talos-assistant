@@ -4337,6 +4337,23 @@ class AssistantTurnExecutorTest {
             assertFalse(lower.contains("as an ai language model"), out.text());
             assertFalse(lower.contains("poems"), out.text());
         }
+
+        @Test
+        void workspaceSwitchRequestGetsDeterministicUnsupportedAnswer() {
+            var ctx = scriptedContext("I switched to Desktop and can work there now.");
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("You are Talos."));
+            messages.add(ChatMessage.user("Change workspace to Desktop."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, WS, ctx, new AssistantTurnExecutor.Options());
+
+            String lower = out.text().toLowerCase();
+            assertTrue(lower.contains("cannot change workspace"), out.text());
+            assertTrue(lower.contains("current session"), out.text());
+            assertTrue(lower.contains("/workspace"), out.text());
+            assertFalse(lower.contains("switched to desktop"), out.text());
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════

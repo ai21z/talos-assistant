@@ -238,6 +238,17 @@ public final class TaskContractResolver {
 
         String original = userRequest.strip();
         String lower = original.toLowerCase(Locale.ROOT);
+        if (CapabilityAnswerPolicy.looksLikeWorkspaceSwitchRequest(original)) {
+            return new TaskContract(
+                    TaskType.SMALL_TALK,
+                    false,
+                    false,
+                    false,
+                    Set.of(),
+                    Set.of(),
+                    original,
+                    "workspace-switch-unsupported");
+        }
         if (CapabilityAnswerPolicy.looksLikeToolAliasCapabilityTurn(original)) {
             return new TaskContract(
                     TaskType.SMALL_TALK,
