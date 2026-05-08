@@ -1182,6 +1182,9 @@ class AssistantTurnExecutorTest {
             assertTrue(fallbackPrompt.contains("requiredTargets: index.html"), fallbackPrompt);
             assertTrue(fallbackPrompt.contains("[ExactFileWrite]"), fallbackPrompt);
             assertTrue(fallbackPrompt.contains("AFTER"), fallbackPrompt);
+            assertTrue(fallbackPrompt.contains("Available mutating tools: talos.write_file."), fallbackPrompt);
+            assertFalse(fallbackPrompt.contains(
+                    "Available mutating tools: talos.write_file, talos.edit_file."), fallbackPrompt);
             assertEquals(List.of("talos.write_file"),
                     fallbackRequest.tools.stream().map(ToolSpec::name).toList());
             assertEquals(ToolChoiceMode.REQUIRED, fallbackRequest.controls.toolChoice());

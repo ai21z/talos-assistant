@@ -83,8 +83,11 @@ public final class CurrentTurnCapabilityFrame {
         appendTaskExpectations(frame, taskExpectations);
 
         switch (obligation) {
-            case MUTATING_TOOL_REQUIRED -> frame.append("""
-                    Available mutating tools: talos.write_file, talos.edit_file.
+            case MUTATING_TOOL_REQUIRED -> frame
+                    .append("Available mutating tools: ")
+                    .append(availableFileMutationTools(visibleTools))
+                    .append(".\n")
+                    .append("""
                     Use file tools to apply the requested workspace change in this turn.
                     Runtime handles approval, permissions, checkpointing, and verification.
                     Do not say you lack filesystem or workspace access.
@@ -131,6 +134,19 @@ public final class CurrentTurnCapabilityFrame {
         appendDirectoryAwareVerificationGuidance(frame, contract, visibleTools);
         frame.append('\n').append(evidenceGuidance(evidence));
         return frame.toString();
+    }
+
+    private static String availableFileMutationTools(List<String> visibleTools) {
+        if (visibleTools == null || visibleTools.isEmpty()) {
+            return "(none visible)";
+        }
+        List<String> available = visibleTools.stream()
+                .filter(tool -> "talos.write_file".equals(tool) || "talos.edit_file".equals(tool))
+                .toList();
+        if (available.isEmpty()) {
+            return "(none visible)";
+        }
+        return String.join(", ", available);
     }
 
     private static void appendDirectoryAwareVerificationGuidance(

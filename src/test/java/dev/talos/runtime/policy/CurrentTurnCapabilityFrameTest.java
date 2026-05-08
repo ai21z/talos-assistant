@@ -116,6 +116,24 @@ class CurrentTurnCapabilityFrameTest {
     }
 
     @Test
+    void mutatingGuidanceUsesOnlyVisibleMutatingTools() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Overwrite index.html with exactly AFTER. Use talos.write_file.");
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                contract,
+                ExecutionPhase.APPLY,
+                List.of("talos.write_file"),
+                List.of("talos.write_file"),
+                List.of());
+
+        String frame = CurrentTurnCapabilityFrame.render(plan);
+
+        assertTrue(frame.contains("visibleTools: talos.write_file"), frame);
+        assertTrue(frame.contains("Available mutating tools: talos.write_file."), frame);
+        assertFalse(frame.contains("Available mutating tools: talos.write_file, talos.edit_file."), frame);
+    }
+
+    @Test
     void renderIncludesExactLiteralForMixedDirectoryAndFileCreate() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Create a directory named workspace-notes and create workspace-notes/summary.txt "
@@ -164,6 +182,7 @@ class CurrentTurnCapabilityFrameTest {
         assertTrue(frame.contains("You must write or edit these exact target paths"), frame);
         assertTrue(frame.contains("Similar filenames are not substitutes"), frame);
         assertTrue(frame.contains("script.js and scripts.js are different target paths"), frame);
+        assertTrue(frame.contains("Available mutating tools: talos.write_file, talos.edit_file."), frame);
     }
 
     @Test
