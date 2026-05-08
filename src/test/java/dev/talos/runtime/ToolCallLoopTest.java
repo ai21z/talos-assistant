@@ -1263,6 +1263,101 @@ class ToolCallLoopTest {
     }
 
     @Test
+    void pendingStaticRepairRejectsEmptyWriteBeforeApply() throws Exception {
+        Path ws = Files.createTempDirectory("talos-static-repair-empty-write-");
+        try {
+            Files.writeString(ws.resolve("index.html"), "<html></html>\n");
+            Files.writeString(ws.resolve("styles.css"), "body { color: black; }\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new FileWriteTool());
+            final int[] approvals = {0};
+            var processor = new TurnProcessor(
+                    ModeController.defaultController(),
+                    (description, detail) -> {
+                        approvals[0]++;
+                        return true;
+                    },
+                    registry);
+            var loop = new ToolCallLoop(processor, 10);
+
+            String request = "Fix the remaining static verification problems.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.system("""
+                            [Static verification repair context]
+                            Expected targets: index.html, scripts.js, styles.css
+
+                            Previous static verification problems:
+                            - CSS references missing class selectors: `.button`
+
+                            Repair plan:
+                            Full-file replacement targets: styles.css
+                            - styles.css: You must use talos.write_file with complete corrected file content for styles.css.
+                            - Verify static checks again before claiming completion.
+                            """),
+                    ChatMessage.user(request)));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of("""
+                            {"name":"talos.write_file","arguments":{"path":"styles.css","content":""}}
+                            """)))
+                    .build();
+            String initial = """
+                    {"name":"talos.write_file","arguments":{"path":"index.html","content":"<html></html>\\n"}}
+                    """;
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromMessages(messages));
+            LocalTurnTraceCapture.begin("trc-t215-empty-repair-write", "session", 1,
+                    "2026-05-08T00:00:00Z", "ws", "test", "llama_cpp", "qwen", request);
+            ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
+            try {
+                result = loop.run(initial, messages, ws, ctx);
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+                LocalTurnTraceCapture.clear();
+            }
+
+            assertEquals("body { color: black; }\n", Files.readString(ws.resolve("styles.css")),
+                    "empty pending repair write must not overwrite the previous file content");
+            assertEquals(1, approvals[0],
+                    "only the initial valid write should reach approval; the empty repair write must be blocked first");
+            assertEquals(1, result.toolsInvoked(),
+                    "the empty repair write must not be counted as an executed tool");
+            assertEquals(1, result.mutatingToolSuccesses(),
+                    "the empty repair write must not count as a successful mutation");
+            assertTrue(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertTrue(result.failureDecision().reason().contains("STATIC_REPAIR_TARGETS_REMAINING"),
+                    result.failureDecision().reason());
+            assertTrue(result.failureDecision().reason().contains("styles.css"),
+                    result.failureDecision().reason());
+            assertTrue(result.failureDecision().reason().toLowerCase(java.util.Locale.ROOT).contains("empty"),
+                    result.failureDecision().reason());
+            String lower = result.finalAnswer().toLowerCase(java.util.Locale.ROOT);
+            assertFalse(lower.contains("complete"), result.finalAnswer());
+            assertFalse(lower.contains("ready to use"), result.finalAnswer());
+            assertFalse(lower.contains("open in browser"), result.finalAnswer());
+
+            var breached = trace.events().stream()
+                    .filter(event -> "PENDING_ACTION_OBLIGATION_BREACHED".equals(event.type()))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("STATIC_REPAIR_TARGETS_REMAINING", breached.data().get("kind"));
+            assertEquals(List.of("styles.css"), breached.data().get("targets"));
+            assertTrue(String.valueOf(breached.data().get("reason"))
+                            .toLowerCase(java.util.Locale.ROOT)
+                            .contains("empty"),
+                    breached.data().toString());
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
     void expectedTargetProgressContextBudgetExceededBecomesDeterministicBreach() {
         var loop = createLoop(writeFileTool());
         var messages = new ArrayList<>(List.of(

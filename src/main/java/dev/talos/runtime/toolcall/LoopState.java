@@ -2,6 +2,7 @@ package dev.talos.runtime.toolcall;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.runtime.failure.FailureAction;
+import dev.talos.runtime.TemplatePlaceholderGuard;
 import dev.talos.runtime.Session;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatMessage.NativeToolCall;
@@ -94,10 +95,14 @@ public final class LoopState {
             return false;
         }
         if (calls == null || calls.isEmpty()) return false;
-        if (containsWriteFileForPendingTarget(calls, pendingActionObligation.targets())) {
+        String invalidWriteDetail = invalidStaticRepairWriteDetail(calls, pendingActionObligation.targets());
+        if (invalidWriteDetail == null
+                && containsWriteFileForPendingTarget(calls, pendingActionObligation.targets())) {
             return false;
         }
-        String detail = staticRepairInvalidToolDetail(calls, pendingActionObligation.targets());
+        String detail = invalidWriteDetail == null
+                ? staticRepairInvalidToolDetail(calls, pendingActionObligation.targets())
+                : invalidWriteDetail;
         PendingActionObligation obligation = pendingActionObligation;
         pendingActionObligation = null;
         obligation.recordBreached(detail);
@@ -146,6 +151,51 @@ public final class LoopState {
         return false;
     }
 
+    private static String invalidStaticRepairWriteDetail(
+            List<ToolCall> calls,
+            List<String> targets
+    ) {
+        Set<String> normalizedTargets = normalizedTargets(targets);
+        if (normalizedTargets.isEmpty() || calls == null || calls.isEmpty()) {
+            return null;
+        }
+        for (ToolCall call : calls) {
+            if (call == null || !"talos.write_file".equals(call.toolName())) continue;
+            String path = ToolCallSupport.normalizePath(call.param("path", ""));
+            if (path.isBlank() || !normalizedTargets.contains(path)) continue;
+            String content = firstPresentParam(
+                    call,
+                    "content",
+                    "text",
+                    "body",
+                    "data",
+                    "file_content");
+            if (content == null) {
+                return rejectedStaticRepairWriteDetail(
+                        path,
+                        "missing required `content` argument");
+            }
+            if (content.isBlank()) {
+                return rejectedStaticRepairWriteDetail(
+                        path,
+                        "empty or blank content");
+            }
+            if (TemplatePlaceholderGuard.looksLikeTemplatePlaceholder(content)) {
+                return rejectedStaticRepairWriteDetail(
+                        path,
+                        "literal template-placeholder content");
+            }
+        }
+        return null;
+    }
+
+    private static String rejectedStaticRepairWriteDetail(String path, String reason) {
+        String safePath = path == null || path.isBlank() ? "(unknown)" : path;
+        String safeReason = reason == null || reason.isBlank() ? "invalid content" : reason;
+        return "Static web repair rejected talos.write_file(" + safePath + ") before apply because "
+                + safeReason + ". No approval was requested and no file was changed.";
+    }
+
     private static String staticRepairInvalidToolDetail(
             List<ToolCall> calls,
             List<String> targets
@@ -176,5 +226,14 @@ public final class LoopState {
             if (!path.isBlank()) normalized.add(path);
         }
         return normalized;
+    }
+
+    private static String firstPresentParam(ToolCall call, String... keys) {
+        if (call == null || keys == null) return null;
+        for (String key : keys) {
+            String value = call.param(key);
+            if (value != null) return value;
+        }
+        return null;
     }
 }
