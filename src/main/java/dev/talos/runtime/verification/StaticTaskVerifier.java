@@ -861,6 +861,20 @@ public final class StaticTaskVerifier {
         return facts == null ? null : facts.renderInspection();
     }
 
+    public static String renderTargetAwareSelectorInspection(Path workspace, Collection<String> targetHints) {
+        if (workspace == null || !Files.isDirectory(workspace)) return null;
+        List<String> primary = obviousPrimaryFiles(workspace);
+        if (!hasPrimaryWebSurface(primary)) {
+            primary = targetAwarePrimaryFiles(workspace, targetHints);
+        }
+        if (!hasPrimaryWebSurface(primary)) return null;
+        SelectorFacts facts = selectorFacts(
+                workspace.toAbsolutePath().normalize(),
+                primary,
+                preferredWebTargetFiles(null, targetHints));
+        return facts == null ? null : facts.renderInspection();
+    }
+
     public static String renderStaticSelectorSearch(Path workspace, String userRequest) {
         if (workspace == null || !Files.isDirectory(workspace)) return null;
         String selector = requestedStaticSelectorLiteral(userRequest);

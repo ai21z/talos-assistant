@@ -451,7 +451,9 @@ public final class ToolCallRepromptStage {
                 This is a bounded static-repair continuation. Use the available file-write tool to repair the exact remaining target paths.
                 Do not answer in prose instead of calling the required tool. Do not claim completion until tool-backed changes have executed.
                 """));
-        lastStaticVerificationRepairContext(state.messages).ifPresent(out::add);
+        lastStaticVerificationRepairContext(state.messages)
+                .map(message -> enrichStaticRepairContextForReprompt(message, state))
+                .ifPresent(out::add);
         out.add(ChatMessage.system(
                 "[Static repair progress] Continue the bounded repair. Remaining full-file "
                         + "replacement targets: " + String.join(", ", remainingRepairTargets)
@@ -476,6 +478,15 @@ public final class ToolCallRepromptStage {
             }
         }
         return Optional.empty();
+    }
+
+    private static ChatMessage enrichStaticRepairContextForReprompt(ChatMessage message, LoopState state) {
+        if (message == null || message.content() == null) return message;
+        String enriched = RepairPolicy.enrichSelectorFactsForRepairContext(
+                message.content(),
+                state == null ? null : state.workspace);
+        if (enriched.equals(message.content())) return message;
+        return ChatMessage.system(enriched);
     }
 
     private static List<ToolSpec> currentNativeToolSpecs(LoopState state) {

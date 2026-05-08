@@ -4,8 +4,10 @@ import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.toolcall.LoopState;
 import dev.talos.runtime.toolcall.ToolCallSupport;
+import dev.talos.runtime.verification.StaticTaskVerifier;
 import dev.talos.spi.types.ChatMessage;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
@@ -142,6 +144,26 @@ public final class RepairPolicy {
                         RepairPlanKind.INVALID_EDIT_ARGUMENT_REPAIR,
                         entry.getKey(),
                         emptyEditRepairInstruction(entry.getKey())));
+    }
+
+    public static String enrichSelectorFactsForRepairContext(String instruction, Path workspace) {
+        if (instruction == null || instruction.isBlank()) return "";
+        if (workspace == null
+                || instruction.contains("[Current static selector facts]")
+                || !hasSelectorRepairProblemInstruction(instruction)) {
+            return instruction;
+        }
+        String selectorFacts = StaticTaskVerifier.renderTargetAwareSelectorInspection(
+                workspace,
+                repairInstructionTargetHints(instruction));
+        if (selectorFacts == null || selectorFacts.isBlank()) {
+            return instruction;
+        }
+        return instruction
+                + "\n\n[Current static selector facts]\n"
+                + selectorFacts
+                + "\nUse these current facts when repairing static files; "
+                + "do not preserve a selector listed as missing.";
     }
 
     public static String staleEditRepairInstruction(String path) {
@@ -373,6 +395,18 @@ public final class RepairPolicy {
                         .append(step.instruction()).append("\n");
             }
         }
+        if (structuralWebRepair
+                && isCssOnlyRepairTargetSet(fullWriteTargets)
+                && hasCssSelectorSourceProblem(problems)) {
+            out.append("\nCSS selector repair constraint:\n")
+                    .append("- Only CSS targets are in this repair plan, so do not depend on HTML edits ")
+                    .append("to satisfy the verifier.\n")
+                    .append("- For missing CSS class/id selector findings, rewrite the stylesheet so ")
+                    .append("class/id selectors correspond to classes or IDs already present in HTML; ")
+                    .append("remove or rename orphan selectors that are not used by HTML.\n")
+                    .append("- Do not leave a reported missing selector unchanged unless the current HTML ")
+                    .append("already defines that class or ID.\n");
+        }
         if (!fullWriteTargets.isEmpty()) {
             out.append("\nFor these structural web repair targets, you must use talos.write_file ")
                     .append("with complete corrected file content. Do not use talos.edit_file ")
@@ -389,6 +423,70 @@ public final class RepairPolicy {
         out.append("Do not repeat an edit_file old_string that already failed. ")
                 .append("After tool-backed changes, answer only from tool results and static verification.");
         return out.toString();
+    }
+
+    private static boolean isCssOnlyRepairTargetSet(List<String> fullWriteTargets) {
+        if (fullWriteTargets == null || fullWriteTargets.isEmpty()) return false;
+        for (String target : fullWriteTargets) {
+            if (target == null || !target.toLowerCase(Locale.ROOT).endsWith(".css")) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean hasCssSelectorSourceProblem(List<String> problems) {
+        if (problems == null || problems.isEmpty()) return false;
+        for (String problem : problems) {
+            if (problem == null || problem.isBlank()) continue;
+            String lower = problem.toLowerCase(Locale.ROOT);
+            if (lower.contains("css references missing class selectors")
+                    || lower.contains("css references missing id selectors")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasSelectorRepairProblemInstruction(String instruction) {
+        if (instruction == null || instruction.isBlank()) return false;
+        String lower = instruction.toLowerCase(Locale.ROOT);
+        return lower.contains("css references missing class selectors")
+                || lower.contains("css references missing id selectors")
+                || lower.contains("css likely uses bare element selectors")
+                || lower.contains("javascript references missing class selectors")
+                || lower.contains("javascript references missing ids");
+    }
+
+    private static List<String> repairInstructionTargetHints(String instruction) {
+        if (instruction == null || instruction.isBlank()) return List.of();
+        LinkedHashSet<String> targets = new LinkedHashSet<>();
+        addRepairInstructionTargets(targets, firstRepairContextValue(instruction, "Expected targets:"));
+        addRepairInstructionTargets(targets, firstRepairContextValue(instruction, "Missing expected targets:"));
+        addRepairInstructionTargets(targets, firstRepairContextValue(instruction, "Full-file replacement targets:"));
+        return List.copyOf(targets);
+    }
+
+    private static void addRepairInstructionTargets(Set<String> out, String value) {
+        if (out == null || value == null || value.isBlank() || value.startsWith("(")) return;
+        for (String raw : value.split(",")) {
+            String target = normalizeTarget(raw);
+            if (!target.isBlank()) {
+                out.add(target);
+            }
+        }
+    }
+
+    private static String firstRepairContextValue(String content, String label) {
+        if (content == null || content.isBlank() || label == null || label.isBlank()) return "";
+        String lowerLabel = label.toLowerCase(Locale.ROOT);
+        for (String rawLine : content.split("\\R")) {
+            String line = rawLine.strip();
+            if (line.toLowerCase(Locale.ROOT).startsWith(lowerLabel)) {
+                return line.substring(label.length()).strip();
+            }
+        }
+        return "";
     }
 
     public static Set<String> fullRewriteTargetsFromRepairContext(List<ChatMessage> messages) {
