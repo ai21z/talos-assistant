@@ -21,7 +21,9 @@ public final class WorkspaceOperationIntent {
             "\\brename\\s+" + PATH_TOKEN + "\\s+(?:to|as)\\s+" + PATH_TOKEN,
             Pattern.CASE_INSENSITIVE);
     private static final Pattern MKDIR_REQUEST = Pattern.compile(
-            "\\b(?:mkdir|make\\s+(?:a\\s+)?(?:directory|dir|folder)|create\\s+(?:a\\s+)?(?:directory|dir|folder))\\s+"
+            "\\b(?:mkdir|make\\s+(?:(?:a|an)\\s+)?(?:new\\s+)?(?:directory|dir|folder)"
+                    + "|create\\s+(?:(?:a|an)\\s+)?(?:new\\s+)?(?:directory|dir|folder))\\s+"
+                    + "(?:(?:called|named|as)\\s+)?"
                     + PATH_TOKEN,
             Pattern.CASE_INSENSITIVE);
 

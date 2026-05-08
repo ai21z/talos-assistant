@@ -181,6 +181,15 @@ class WorkspaceCommandsTest {
             assertEquals("workspace", cmd.spec().name());
             assertTrue(cmd.spec().aliases().contains("where"));
         }
+
+        @Test
+        void spec_description_says_show_only() {
+            var cmd = new WorkspaceCommand(ws);
+
+            String description = cmd.spec().summary().toLowerCase();
+            assertTrue(description.contains("show"), description);
+            assertTrue(description.contains("does not change"), description);
+        }
     }
 }
 

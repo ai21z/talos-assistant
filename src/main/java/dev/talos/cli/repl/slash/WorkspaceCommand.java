@@ -25,7 +25,7 @@ public final class WorkspaceCommand implements Command {
         return new CommandSpec("workspace",
                 List.of("where"),
                 "/workspace",
-                "Show workspace paths.",
+                "Show workspace paths; does not change the current workspace.",
                 CommandGroup.SESSION);
     }
 

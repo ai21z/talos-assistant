@@ -96,8 +96,25 @@ Talos has a small tool set focused on local workspace work:
 | `retrieve` | pull relevant indexed context | not required |
 | `write_file` | create or replace file content | required |
 | `edit_file` | patch file content by targeted replacement | required |
+| `mkdir` | create a directory inside the workspace | required |
+| `copy_path` | copy a file or directory inside the workspace | required |
+| `move_path` | move a file or directory inside the workspace | required |
+| `rename_path` | rename a file or directory inside its parent | required |
+| `apply_workspace_batch` | apply a small approved batch of workspace operations | required |
+| `run_command` | run approved bounded command profiles | required |
 
 Write tools are intentionally gated. The user stays in control of the workspace.
+
+### Workspace boundary
+
+Talos works inside the workspace selected when the session starts. Natural
+requests such as creating files, creating folders, copying paths, or running
+approved checks are scoped to that workspace.
+
+Talos does not currently change workspace inside an active session. The
+`/workspace` command is informational: it shows the current workspace and index
+paths, but it does not switch to another folder. To work somewhere else, start
+Talos from the folder you want to use.
 
 ### Session behavior
 
@@ -194,7 +211,7 @@ Change only the page title in index.html.
 | `/models` | list available models |
 | `/set model <backend/model>` | switch active model |
 | `/reindex` | rebuild the current workspace index |
-| `/workspace` | show current workspace status |
+| `/workspace` | show current workspace status; does not switch workspace |
 | `/status` | show runtime and indexing details |
 | `/tools` | show the registered tool set |
 | `/session info` | inspect current session state |

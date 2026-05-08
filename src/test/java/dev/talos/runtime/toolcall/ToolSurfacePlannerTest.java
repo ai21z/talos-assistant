@@ -116,6 +116,19 @@ class ToolSurfacePlannerTest {
     }
 
     @Test
+    void naturalDirectoryCreationRequestsExposeOnlyMkdirTool() {
+        for (String request : List.of(
+                "Create a new dir called workspace-notes.",
+                "Create a new folder named audit-output.",
+                "Can you create a folder called docs?")) {
+            assertWorkspaceOperationSurface(
+                    request,
+                    List.of("talos.mkdir"),
+                    "workspace mkdir operation surface");
+        }
+    }
+
+    @Test
     void mixedDirectoryAndExactFileCreateKeepsFileWriteSurface() {
         ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
                 TaskContractResolver.fromUserRequest(
