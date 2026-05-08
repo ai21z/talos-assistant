@@ -185,17 +185,13 @@ public final class LoopState {
             List<String> targets
     ) {
         Set<String> normalizedTargets = normalizedTargets(targets);
-        Set<String> foldedTargets = normalizedTargets.stream()
-                .map(path -> path.toLowerCase(java.util.Locale.ROOT))
-                .collect(java.util.stream.Collectors.toSet());
         if (normalizedTargets.isEmpty()) return false;
         for (ToolCall call : calls) {
             if (call == null) continue;
             String toolName = call.toolName();
             if (!"talos.write_file".equals(toolName) && !"talos.edit_file".equals(toolName)) continue;
-            String path = ToolCallSupport.normalizePath(call.param("path", ""))
-                    .toLowerCase(java.util.Locale.ROOT);
-            if (!path.isBlank() && foldedTargets.contains(path)) {
+            String path = ToolCallSupport.normalizePath(call.param("path", ""));
+            if (!path.isBlank() && normalizedTargets.contains(path)) {
                 return true;
             }
         }
