@@ -315,6 +315,7 @@ class AssistantTurnExecutorTest {
     void deicticApplyUsesActiveProposalContextForToolSurfaceAndPromptAudit(@TempDir Path workspace)
             throws Exception {
         Files.writeString(workspace.resolve("README.md"), "# Old title\n");
+        String userRequest = "Apply that README.md proposal now.";
         ActiveTaskContext context = ActiveTaskContext.proposedChanges(
                 1, "trace-propose", List.of("README.md"),
                 "Replace the README title and add usage.");
@@ -324,6 +325,7 @@ class AssistantTurnExecutorTest {
 
         var registry = new dev.talos.tools.ToolRegistry();
         var undoStack = new dev.talos.tools.FileUndoStack();
+        registry.register(new dev.talos.tools.impl.ReadFileTool());
         registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
         var processor = new dev.talos.runtime.TurnProcessor(
                 null, new dev.talos.runtime.NoOpApprovalGate(), registry);
@@ -340,7 +342,7 @@ class AssistantTurnExecutorTest {
                 .build();
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("system"));
-        messages.add(ChatMessage.user("make those changes"));
+        messages.add(ChatMessage.user(userRequest));
 
         TurnAuditCapture.begin();
         LocalTurnTraceCapture.begin(
@@ -352,7 +354,7 @@ class AssistantTurnExecutorTest {
                 "auto",
                 "scripted",
                 "test-model",
-                "make those changes");
+                userRequest);
         try {
             AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
                     messages, workspace, ctx, new AssistantTurnExecutor.Options());
@@ -373,6 +375,10 @@ class AssistantTurnExecutorTest {
                     trace.promptAudit().artifactGoal());
             assertTrue(trace.promptAudit().artifactGoal().contains("operation=APPLY_EDIT"),
                     trace.promptAudit().artifactGoal());
+            assertTrue(trace.promptAudit().nativeTools().contains("talos.read_file"),
+                    trace.promptAudit().nativeTools().toString());
+            assertTrue(trace.promptAudit().nativeTools().contains("talos.write_file"),
+                    trace.promptAudit().nativeTools().toString());
         } finally {
             if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
             LocalTurnTraceCapture.clear();
