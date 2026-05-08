@@ -6,6 +6,7 @@ import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.failure.FailurePolicy;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
+import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.repair.RepairInstruction;
 import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.runtime.policy.ActionObligation;
@@ -636,6 +637,10 @@ public final class ToolCallRepromptStage {
                     .append("You must write or edit these exact target paths for this turn.\n")
                     .append("Similar filenames are not substitutes for required target paths.\n")
                     .append("script.js and scripts.js are different target paths; preserve the exact requested spelling.\n");
+            String staticWebGuidance = StaticWebCapabilityProfile.repairCoherenceGuidance(targets);
+            if (!staticWebGuidance.isBlank()) {
+                frame.append('\n').append(staticWebGuidance).append('\n');
+            }
         }
     }
 

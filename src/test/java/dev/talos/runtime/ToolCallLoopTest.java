@@ -1910,6 +1910,13 @@ class ToolCallLoopTest {
             assertTrue(compactPrompt.contains("scripts.js"), compactPrompt);
             assertTrue(compactPrompt.contains("script.js and scripts.js are different target paths"),
                     compactPrompt);
+            assertTrue(compactPrompt.contains("Cross-file coherence checklist"), compactPrompt);
+            assertTrue(compactPrompt.contains("HTML must link every CSS and JavaScript file being written"),
+                    compactPrompt);
+            assertTrue(compactPrompt.contains("Every JavaScript ID or selector must exist in HTML"),
+                    compactPrompt);
+            assertTrue(compactPrompt.contains("CSS selectors should correspond to classes or IDs in HTML"),
+                    compactPrompt);
             assertTrue(compactPrompt.contains(request), compactPrompt);
             assertFalse(compactPrompt.contains("Older unrelated turn"), compactPrompt);
             assertFalse(compactPrompt.contains("Older unrelated answer"), compactPrompt);
@@ -1917,6 +1924,74 @@ class ToolCallLoopTest {
             assertTrue(trace.warnings().stream()
                             .anyMatch(warning -> "COMPACT_MUTATION_CONTINUATION".equals(warning.code())),
                     "trace should record compact mutation continuation fallback");
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
+    void mutationContinuationKeepsStaticWebGuidanceOutOfNonWebCompactPrompt() throws Exception {
+        Path ws = Files.createTempDirectory("talos-compact-mutation-continuation-non-web-");
+        try {
+            Files.writeString(ws.resolve("README.md"), "# Old\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileEditTool());
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 6);
+
+            String request = "Rewrite README.md with a short project note.";
+            String readme = "# Project note\n\nCompact continuation updated this note.\n";
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                    List.of(new LlmClient.StreamResult("", List.of(
+                            new ChatMessage.NativeToolCall(
+                                    "compact_readme",
+                                    "talos.write_file",
+                                    Map.of("path", "README.md", "content", readme))))),
+                    2048);
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(recorded.client())
+                    .nativeToolSpecs(nativeSpecs(
+                            new ReadFileTool(),
+                            new FileEditTool(),
+                            new FileWriteTool()))
+                    .build();
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys " + "large-system-token ".repeat(700)),
+                    ChatMessage.user("Older unrelated static web task with index.html and scripts.js."),
+                    ChatMessage.assistant("Older unrelated answer."),
+                    ChatMessage.user(request)));
+            var initialCalls = List.of(new ChatMessage.NativeToolCall(
+                    "read_readme",
+                    "talos.read_file",
+                    Map.of("path", "README.md")));
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            ToolCallLoop.LoopResult result;
+            try {
+                result = loop.run("", initialCalls, messages, ws, ctx);
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertEquals(readme, Files.readString(ws.resolve("README.md")));
+            assertEquals(1, recorded.requests().size(),
+                    "full-history continuation should be replaced by one compact mutation continuation");
+            String compactPrompt = recorded.requests().getFirst().messages.stream()
+                    .map(ChatMessage::content)
+                    .reduce("", (left, right) -> left + "\n" + right);
+            assertTrue(compactPrompt.contains("[CompactMutationContinuation]"), compactPrompt);
+            assertTrue(compactPrompt.contains("README.md"), compactPrompt);
+            assertFalse(compactPrompt.contains("Cross-file coherence checklist"), compactPrompt);
+            assertFalse(compactPrompt.contains("Every JavaScript ID or selector must exist in HTML"),
+                    compactPrompt);
+            assertFalse(compactPrompt.contains("Older unrelated static web task"), compactPrompt);
         } finally {
             deleteRecursive(ws);
         }
