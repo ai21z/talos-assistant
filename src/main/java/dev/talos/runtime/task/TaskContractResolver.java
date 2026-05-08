@@ -36,6 +36,15 @@ public final class TaskContractResolver {
                     + "(?:README|LICENSE|NOTICE|CHANGELOG|CONTRIBUTING|AUTHORS|Makefile|Dockerfile))"
                     + "`?(?=$|\\s|[`'\"),;:!?\\]])");
 
+    private static final Pattern BATCH_DIRECTORY_CREATION_SPAN = Pattern.compile(
+            "(?i)\\b(?:create|make|mkdir)\\s+"
+                    + "(?:directories|directory|dirs|dir|folders|folder)\\s+"
+                    + "(.{1,180}?)(?=\\s+and\\s+(?:copy|move|rename|write|edit|create\\s+file)\\b|[.;]|$)");
+
+    private static final Pattern BATCH_DESTINATION_OPERATION = Pattern.compile(
+            "(?i)\\b(?:copy|move|rename)\\s+`?([^\\s,;`]+)`?\\s+"
+                    + "(?:to|into)\\s+`?([^\\s,;`]+)`?");
+
     private static final Pattern NEGATED_READ_TARGET_SPAN = Pattern.compile(
             "(?i)(?:\\b(?:do\\s+not|don't|dont)\\s+"
                     + "(?:show|display|include|read|inspect|open|summarize)\\s+"
@@ -262,6 +271,12 @@ public final class TaskContractResolver {
         boolean verificationRequired = mutationAllowed || type == TaskType.VERIFY_ONLY;
         Set<String> forbiddenTargets = extractForbiddenTargets(original);
         Set<String> expectedTargets = extractExpectedTargets(original);
+        if (mutationRequested && "explicit-batch-workspace-apply-request".equals(classificationReason)) {
+            Set<String> batchTargets = extractBatchWorkspaceExpectedTargets(original);
+            if (!batchTargets.isEmpty()) {
+                expectedTargets = batchTargets;
+            }
+        }
         if (!mutationRequested && StaticWebImportIntent.matches(original)) {
             expectedTargets = StaticWebImportIntent.evidenceTargets(original, expectedTargets);
         }
@@ -302,6 +317,47 @@ public final class TaskContractResolver {
             if (!target.isBlank()) out.add(target);
         }
         return Set.copyOf(out);
+    }
+
+    private static Set<String> extractBatchWorkspaceExpectedTargets(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return Set.of();
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        Matcher directoryMatcher = BATCH_DIRECTORY_CREATION_SPAN.matcher(userRequest);
+        while (directoryMatcher.find()) {
+            for (String target : splitDirectoryTargets(directoryMatcher.group(1))) {
+                if (!target.isBlank()) out.add(target);
+            }
+        }
+        Matcher destinationMatcher = BATCH_DESTINATION_OPERATION.matcher(userRequest);
+        while (destinationMatcher.find()) {
+            String destination = normalizeTarget(destinationMatcher.group(2));
+            if (!destination.isBlank()) out.add(destination);
+        }
+        return Set.copyOf(out);
+    }
+
+    private static List<String> splitDirectoryTargets(String rawSpan) {
+        if (rawSpan == null || rawSpan.isBlank()) return List.of();
+        String span = rawSpan
+                .replaceAll("(?i)\\b(?:and\\s+)?then\\b", " ")
+                .strip();
+        String[] pieces = span.split("(?i)\\s*(?:,|\\band\\b)\\s*");
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        for (String piece : pieces) {
+            String normalized = normalizeTarget(piece);
+            if (looksLikeDirectoryTarget(normalized)) {
+                out.add(normalized);
+            }
+        }
+        return List.copyOf(out);
+    }
+
+    private static boolean looksLikeDirectoryTarget(String value) {
+        if (value == null || value.isBlank()) return false;
+        String lower = value.toLowerCase(Locale.ROOT);
+        if (Set.of("a", "an", "the", "and", "to", "into").contains(lower)) return false;
+        if (lower.contains(" ")) return false;
+        return value.matches("[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*");
     }
 
     public static Set<String> extractForbiddenTargets(String userRequest) {

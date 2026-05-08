@@ -1,6 +1,7 @@
 package dev.talos.runtime;
 
 import java.time.Instant;
+import java.util.LinkedHashSet;
 import java.util.List;
 
 /**
@@ -117,20 +118,60 @@ public record TurnRecord(
     /**
      * A compact summary of one tool invocation during a turn.
      *
-     * @param name     the tool name (e.g. {@code talos.edit_file})
-     * @param pathHint the resolved target path, if the tool accepted one (may be blank)
-     * @param success  whether the tool reported success
-     * @param reason   compact failure/block reason, if the call did not succeed
+     * @param name      the tool name (e.g. {@code talos.edit_file})
+     * @param pathHint  the primary resolved target path, if the tool accepted one (may be blank)
+     * @param pathHints all resolved changed paths for multi-path tools; falls back to {@code pathHint}
+     * @param success   whether the tool reported success
+     * @param reason    compact failure/block reason, if the call did not succeed
      */
-    public record ToolCallSummary(String name, String pathHint, boolean success, String reason) {
+    public record ToolCallSummary(
+            String name,
+            String pathHint,
+            List<String> pathHints,
+            boolean success,
+            String reason
+    ) {
         public ToolCallSummary {
-            name     = (name == null) ? "" : name;
-            pathHint = (pathHint == null) ? "" : pathHint;
-            reason   = (reason == null) ? "" : reason;
+            name = (name == null) ? "" : name;
+            pathHints = normalizePathHints(pathHint, pathHints);
+            pathHint = primaryPathHint(pathHint, pathHints);
+            reason = (reason == null) ? "" : reason;
+        }
+
+        public ToolCallSummary(String name, String pathHint, boolean success, String reason) {
+            this(name, pathHint, List.of(), success, reason);
         }
 
         public ToolCallSummary(String name, String pathHint, boolean success) {
             this(name, pathHint, success, "");
+        }
+
+        private static String primaryPathHint(String pathHint, List<String> pathHints) {
+            String normalized = normalizePath(pathHint);
+            if (!normalized.isBlank()) return normalized;
+            return pathHints == null || pathHints.isEmpty() ? "" : pathHints.getFirst();
+        }
+
+        private static List<String> normalizePathHints(String pathHint, List<String> pathHints) {
+            LinkedHashSet<String> out = new LinkedHashSet<>();
+            String primary = normalizePath(pathHint);
+            if (!primary.isBlank()) out.add(primary);
+            if (pathHints != null) {
+                for (String path : pathHints) {
+                    String normalized = normalizePath(path);
+                    if (!normalized.isBlank()) out.add(normalized);
+                }
+            }
+            return List.copyOf(out);
+        }
+
+        private static String normalizePath(String value) {
+            if (value == null) return "";
+            String normalized = value.strip().replace('\\', '/');
+            while (normalized.startsWith("./")) {
+                normalized = normalized.substring(2);
+            }
+            return normalized;
         }
     }
 }

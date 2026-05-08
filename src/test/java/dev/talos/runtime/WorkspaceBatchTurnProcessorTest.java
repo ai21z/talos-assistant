@@ -19,6 +19,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -75,6 +76,38 @@ class WorkspaceBatchTurnProcessorTest {
         assertFalse(Files.exists(workspace.resolve("docs")));
         assertEquals("source-before", Files.readString(workspace.resolve("source.txt")));
         assertEquals("dest-before", Files.readString(workspace.resolve("dest.txt")));
+    }
+
+    @Test
+    void successfulBatchAuditRecordsAllChangedPaths(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("styles.css"), "body { color: black; }");
+        TurnProcessor processor = processor(gateApproves(new AtomicInteger()),
+                new CheckpointService(new FileBundleCheckpointStore(workspace.resolve(".checkpoints"))));
+        Config config = config(true);
+
+        TurnAuditCapture.begin();
+        try {
+            ToolResult result = processor.executeTool(
+                    new Session(workspace, config),
+                    new ToolCall("talos.apply_workspace_batch", Map.of("operations_json", """
+                            [
+                              {"op":"mkdir","path":"batch-one"},
+                              {"op":"mkdir","path":"batch-two"},
+                              {"op":"copy_path","from":"styles.css","to":"batch-one/styles-copy.css"}
+                            ]
+                            """)),
+                    context(workspace, config));
+
+            assertTrue(result.success(), result.errorMessage());
+            TurnAudit audit = TurnAuditCapture.end();
+            assertEquals(1, audit.toolCalls().size());
+            TurnRecord.ToolCallSummary call = audit.toolCalls().getFirst();
+            assertEquals("talos.apply_workspace_batch", call.name());
+            assertEquals("batch-one", call.pathHint());
+            assertEquals(List.of("batch-one", "batch-two", "batch-one/styles-copy.css"), call.pathHints());
+        } finally {
+            if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
+        }
     }
 
     @Test

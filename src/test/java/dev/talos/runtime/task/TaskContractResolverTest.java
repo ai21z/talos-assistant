@@ -214,6 +214,18 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void batchWorkspaceNaturalPromptTargetsCreatedDirsAndCopyDestinationNotSource() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Use talos.apply_workspace_batch to create directories batch-one and batch-two "
+                        + "and copy styles.css to batch-one/styles-copy.css.");
+
+        assertTrue(contract.mutationAllowed());
+        assertEquals("explicit-batch-workspace-apply-request", contract.classificationReason());
+        assertEquals(Set.of("batch-one", "batch-two", "batch-one/styles-copy.css"),
+                contract.expectedTargets());
+    }
+
+    @Test
     void explicitBatchWorkspaceApplyPromptExposesBatchToolInApplySurface() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Use talos.apply_workspace_batch only. Apply operations_json for exactly these operations: "

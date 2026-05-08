@@ -164,6 +164,38 @@ class ActiveTaskContextUpdateListenerTest {
     }
 
     @Test
+    void batchWorkspaceMutationRecordsEveryChangedPathInSummary() {
+        SessionMemory memory = new SessionMemory();
+        ActiveTaskContextUpdateListener listener = new ActiveTaskContextUpdateListener(memory);
+
+        TurnResult result = mutatingTurn(
+                23,
+                "trace-batch",
+                List.of("batch-one", "batch-two", "batch-one/styles-copy.css"),
+                List.of(new TurnRecord.ToolCallSummary(
+                        "talos.apply_workspace_batch",
+                        "batch-one",
+                        List.of("batch-one", "batch-two", "batch-one/styles-copy.css"),
+                        true,
+                        "")),
+                "READBACK_ONLY",
+                "COMPLETED_UNVERIFIED",
+                List.of());
+
+        listener.onTurnComplete(result,
+                "Use talos.apply_workspace_batch to create directories batch-one and batch-two "
+                        + "and copy styles.css to batch-one/styles-copy.css.");
+
+        ChangeSummaryContext context = memory.changeSummaryContext();
+        assertEquals(List.of("batch-one", "batch-two", "batch-one/styles-copy.css"),
+                context.changedFiles().stream().map(ChangeSummaryContext.FileChange::path).toList());
+        assertTrue(context.unresolvedTargets().isEmpty());
+        String rendered = context.renderForChangeSummaryQuestion();
+        assertTrue(rendered.contains("batch-two"), rendered);
+        assertTrue(rendered.contains("batch-one/styles-copy.css"), rendered);
+    }
+
+    @Test
     void noToolTurnDoesNotOverwriteExistingChangeSummaryContext() {
         SessionMemory memory = new SessionMemory();
         memory.setChangeSummaryContext(new ChangeSummaryContext(
