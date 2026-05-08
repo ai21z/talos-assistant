@@ -80,6 +80,7 @@ public final class CurrentTurnCapabilityFrame {
                 .append("evidenceObligation: ").append(evidence.name()).append('\n');
         appendExpectedTargets(frame, contract, mutationAllowed, obligation);
         appendActiveTaskContext(frame, activeTaskContext, artifactGoal);
+        appendProposalApplyGuidance(frame, activeTaskContext, artifactGoal, mutationAllowed);
         appendTaskExpectations(frame, taskExpectations);
 
         switch (obligation) {
@@ -263,6 +264,37 @@ public final class CurrentTurnCapabilityFrame {
                 .append("Explicit current user instructions win over active context.\n")
                 .append("Use active targets only for narrow deictic follow-ups.\n")
                 .append("Do not broaden to unrelated workspace files because context is present.\n");
+    }
+
+    private static void appendProposalApplyGuidance(
+            StringBuilder frame,
+            String activeTaskContext,
+            String artifactGoal,
+            boolean mutationAllowed
+    ) {
+        if (!mutationAllowed || !isActiveContextForModel(activeTaskContext)) {
+            return;
+        }
+        String combined = ((activeTaskContext == null ? "" : activeTaskContext) + " "
+                + (artifactGoal == null ? "" : artifactGoal)).toLowerCase(java.util.Locale.ROOT);
+        if (!combined.contains("proposed_changes") || !combined.contains("apply_edit")) {
+            return;
+        }
+        boolean markdownProposal = combined.contains("kind=readme")
+                || combined.contains("kind=markdown")
+                || combined.contains("readme")
+                || combined.contains(".md");
+        if (!markdownProposal) {
+            return;
+        }
+        frame.append("""
+
+                [ProposalApply]
+                Apply the active proposed change to the active target path(s), not an unrelated history guess.
+                Read the target file first in this turn before editing or writing.
+                For small Markdown/prose files, prefer talos.write_file with complete updated content after readback when an exact talos.edit_file old_string is uncertain.
+                Do not retry invalid talos.edit_file old_string guesses.
+                """);
     }
 
     private static boolean isDerived(String value) {

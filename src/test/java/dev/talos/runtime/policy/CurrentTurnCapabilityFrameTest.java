@@ -49,6 +49,39 @@ class CurrentTurnCapabilityFrameTest {
     }
 
     @Test
+    void renderIncludesProposalApplyReadbackWriteGuidanceForActiveMarkdownProposal() {
+        TaskContract contract = new TaskContract(
+                TaskType.FILE_EDIT,
+                true,
+                true,
+                true,
+                Set.of("README.md"),
+                Set.of(),
+                "Active task context: Add title and usage.\n\nFollow-up: Apply that README.md proposal now.");
+        String activeTaskContext = "activeTaskContext{state=ACTIVE, kind=PROPOSED_CHANGES, "
+                + "operation=APPLY_EDIT, targets=[README.md], proposal=Add title and usage.}";
+        String artifactGoal = "artifactGoal{kind=README, operation=APPLY_EDIT, "
+                + "targets=[README.md], source=ACTIVE_CONTEXT}";
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                contract,
+                ExecutionPhase.APPLY,
+                List.of("talos.read_file", "talos.write_file", "talos.edit_file"),
+                List.of("talos.read_file", "talos.write_file", "talos.edit_file"),
+                List.of(),
+                activeTaskContext,
+                artifactGoal,
+                CurrentTurnPlan.NONE_OR_NOT_DERIVED);
+
+        String frame = CurrentTurnCapabilityFrame.render(plan);
+
+        assertTrue(frame.contains("[ProposalApply]"), frame);
+        assertTrue(frame.contains("Apply the active proposed change to the active target"), frame);
+        assertTrue(frame.contains("Read the target file first in this turn"), frame);
+        assertTrue(frame.contains("prefer talos.write_file with complete updated content"), frame);
+        assertTrue(frame.contains("Do not retry invalid talos.edit_file old_string guesses"), frame);
+    }
+
+    @Test
     void legacyRenderOmitsActiveTaskContextWhenNoPlanDerivedContextIsAvailable() {
         TaskContract contract = new TaskContract(
                 TaskType.FILE_EDIT,

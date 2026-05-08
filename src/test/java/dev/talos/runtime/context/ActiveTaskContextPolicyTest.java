@@ -39,6 +39,33 @@ class ActiveTaskContextPolicyTest {
         assertTrue(decision.taskContract().originalUserRequest().contains("make those changes"));
     }
 
+    @Test void applyThatReadmeProposalConsumesProposalContext() {
+        ActiveTaskContext saved = readmeProposal();
+        String userRequest = "Apply that README.md proposal now.";
+        TaskContract rawContract = TaskContractResolver.fromUserRequest(userRequest);
+        ArtifactGoal savedGoal = ArtifactGoal.fromActiveContext(saved);
+
+        ActiveTaskContextPolicy.Decision decision = ActiveTaskContextPolicy.evaluate(
+                userRequest,
+                rawContract,
+                saved,
+                savedGoal,
+                3);
+
+        assertTrue(decision.consumed());
+        assertEquals(ActiveTaskContext.State.ACTIVE, decision.planContext().state());
+        assertEquals(TaskType.FILE_EDIT, decision.taskContract().type());
+        assertTrue(decision.taskContract().mutationAllowed());
+        assertTrue(decision.taskContract().verificationRequired());
+        assertEquals(Set.of("README.md"), decision.taskContract().expectedTargets());
+        assertEquals(savedGoal, decision.artifactGoal());
+        assertEquals(ArtifactGoal.Source.ACTIVE_CONTEXT, decision.artifactGoal().source());
+        assertEquals(ArtifactGoal.ArtifactKind.README, decision.artifactGoal().artifactKind());
+        assertEquals(saved, decision.memoryContext());
+        assertTrue(decision.taskContract().originalUserRequest().contains("Add title and usage."));
+        assertTrue(decision.taskContract().originalUserRequest().contains("Apply that README.md proposal now."));
+    }
+
     @Test void nullSavedContextReturnsBaselineDecisionWithoutMemory() {
         String userRequest = "Read README.md.";
         TaskContract rawContract = TaskContractResolver.fromUserRequest(userRequest);

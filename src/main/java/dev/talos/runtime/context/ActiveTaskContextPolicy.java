@@ -7,6 +7,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 public final class ActiveTaskContextPolicy {
 
@@ -19,6 +20,9 @@ public final class ActiveTaskContextPolicy {
             "make the changes",
             "do it now",
             "yes, apply it"
+    );
+    private static final Pattern DEICTIC_PROPOSAL_APPLY = Pattern.compile(
+            "^apply\\s+(?:(?:that|the)\\s+)?(?:[a-z0-9._/-]+\\s+)?proposal(?:\\s+now)?$"
     );
 
     private static final Set<ActiveTaskContext.Kind> CONSUMABLE_KINDS = Set.of(
@@ -138,7 +142,8 @@ public final class ActiveTaskContextPolicy {
 
     private static boolean isNarrowDeicticApply(String userRequest) {
         String lower = normalized(userRequest).replaceAll("[.!?]+$", "");
-        return DEICTIC_APPLY_PHRASES.contains(lower);
+        return DEICTIC_APPLY_PHRASES.contains(lower)
+                || DEICTIC_PROPOSAL_APPLY.matcher(lower).matches();
     }
 
     private static boolean isConsumable(ActiveTaskContext.Kind kind) {
