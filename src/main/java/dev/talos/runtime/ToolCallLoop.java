@@ -350,7 +350,7 @@ public final class ToolCallLoop {
                 }
                 break;
             }
-            if (state.failPendingStaticRepairObligationAfterInvalidToolCalls(parsed.calls())) {
+            if (state.failPendingActionObligationAfterInvalidToolCalls(parsed.calls())) {
                 break;
             }
             if (state.failStaticRepairAfterInvalidWriteContent(parsed.calls())) {

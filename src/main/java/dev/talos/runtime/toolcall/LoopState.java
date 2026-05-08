@@ -51,6 +51,7 @@ public final class LoopState {
     public final Map<String, Integer> failureCountsByPath = new HashMap<>();
     public final Map<String, Integer> emptyEditArgumentFailuresByPath = new HashMap<>();
     public final Set<String> emptyEditRepairPromptedPaths = new HashSet<>();
+    public final Set<String> oldStringMissRepairPromptedPaths = new HashSet<>();
     public final Set<String> pathsMutatedSinceRead = new HashSet<>();
     public final Map<String, Integer> staleEditFailuresByPath = new HashMap<>();
     public final Set<String> staleEditRepairPromptedPaths = new HashSet<>();
@@ -91,13 +92,31 @@ public final class LoopState {
         return pendingActionObligation != null;
     }
 
-    public boolean failPendingStaticRepairObligationAfterInvalidToolCalls(List<ToolCall> calls) {
-        if (pendingActionObligation == null
-                || pendingActionObligation.kind()
-                != PendingActionObligation.Kind.STATIC_REPAIR_TARGETS_REMAINING) {
+    public boolean failPendingActionObligationAfterInvalidToolCalls(List<ToolCall> calls) {
+        if (pendingActionObligation == null) {
             return false;
         }
         if (calls == null || calls.isEmpty()) return false;
+        if (pendingActionObligation.kind()
+                == PendingActionObligation.Kind.OLD_STRING_MISS_TARGET_REPAIR) {
+            if (containsMutatingCallForPendingTarget(calls, pendingActionObligation.targets())) {
+                return false;
+            }
+            String detail = oldStringMissRepairInvalidToolDetail(calls, pendingActionObligation.targets());
+            PendingActionObligation obligation = pendingActionObligation;
+            pendingActionObligation = null;
+            obligation.recordBreached(detail);
+            failureDecision = dev.talos.runtime.failure.FailureDecision.stop(
+                    FailureAction.ASK_USER,
+                    obligation.failureReason(detail));
+            currentText = obligation.failureAnswer(detail);
+            currentNativeCalls = List.of();
+            return true;
+        }
+        if (pendingActionObligation.kind()
+                != PendingActionObligation.Kind.STATIC_REPAIR_TARGETS_REMAINING) {
+            return false;
+        }
         String invalidWriteDetail = invalidStaticRepairWriteDetail(calls, pendingActionObligation.targets());
         if (invalidWriteDetail == null
                 && containsWriteFileForPendingTarget(calls, pendingActionObligation.targets())) {
@@ -159,6 +178,52 @@ public final class LoopState {
             return true;
         }
         return false;
+    }
+
+    private static boolean containsMutatingCallForPendingTarget(
+            List<ToolCall> calls,
+            List<String> targets
+    ) {
+        Set<String> normalizedTargets = normalizedTargets(targets);
+        Set<String> foldedTargets = normalizedTargets.stream()
+                .map(path -> path.toLowerCase(java.util.Locale.ROOT))
+                .collect(java.util.stream.Collectors.toSet());
+        if (normalizedTargets.isEmpty()) return false;
+        for (ToolCall call : calls) {
+            if (call == null) continue;
+            String toolName = call.toolName();
+            if (!"talos.write_file".equals(toolName) && !"talos.edit_file".equals(toolName)) continue;
+            String path = ToolCallSupport.normalizePath(call.param("path", ""))
+                    .toLowerCase(java.util.Locale.ROOT);
+            if (!path.isBlank() && foldedTargets.contains(path)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String oldStringMissRepairInvalidToolDetail(
+            List<ToolCall> calls,
+            List<String> targets
+    ) {
+        String targetList = targets == null || targets.isEmpty()
+                ? "(unknown)"
+                : String.join(", ", targets);
+        List<String> seen = new ArrayList<>();
+        if (calls != null) {
+            for (ToolCall call : calls) {
+                if (call == null) continue;
+                String path = ToolCallSupport.normalizePath(call.param("path", ""));
+                String name = call.toolName() == null || call.toolName().isBlank()
+                        ? "(unknown tool)"
+                        : call.toolName();
+                seen.add(path.isBlank() ? name : name + "(" + path + ")");
+            }
+        }
+        String seenCalls = seen.isEmpty() ? "(none)" : String.join(", ", seen);
+        return "old-string miss compact repair required talos.write_file or talos.edit_file "
+                + "for target(s): " + targetList + ", but the model returned: " + seenCalls
+                + ". No approval was requested and no file was changed.";
     }
 
     public boolean failPendingActionObligationAfterNoExecutableToolCalls() {

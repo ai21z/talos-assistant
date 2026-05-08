@@ -3,6 +3,7 @@ package dev.talos.runtime;
 import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
+import dev.talos.core.llm.ScriptedNativeLlmClient;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -10,6 +11,7 @@ import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.*;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
@@ -22,6 +24,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -2436,6 +2439,226 @@ class ToolCallLoopTest {
         }
     }
 
+    @Test
+    void oldStringMissWithReadbackUsesCompactTargetOnlyRepairBeforeContextBudgetFailure() throws Exception {
+        Path ws = Files.createTempDirectory("talos-old-string-compact-repair-");
+        try {
+            Files.writeString(ws.resolve("README.md"), "# Fixture\n\nOriginal text.\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileEditTool());
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 5);
+
+            List<ToolSpec> toolSpecs = nativeSpecs(
+                    new ReadFileTool(),
+                    new FileEditTool(),
+                    new FileWriteTool());
+            String repaired = "# Fixture\n\nOriginal text.\n\nApplied proposal.\n";
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                    List.of(new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                            "call_repair_write",
+                            "talos.write_file",
+                            Map.of("path", "README.md", "content", repaired))))),
+                    2048);
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(recorded.client())
+                    .nativeToolSpecs(toolSpecs)
+                    .build();
+
+            String request = "Apply that README.md proposal now.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys " + "large-system-token ".repeat(700)),
+                    ChatMessage.user("Earlier unrelated request with stale proposal details."),
+                    ChatMessage.assistant("Old proposal context that must not dominate the compact repair."),
+                    ChatMessage.user(request)));
+            var initialCalls = List.of(
+                    new ChatMessage.NativeToolCall(
+                            "call_bad_edit",
+                            "talos.edit_file",
+                            Map.of(
+                                    "path", "README.md",
+                                    "old_string", "This text does not exist.",
+                                    "new_string", "Applied proposal.")),
+                    new ChatMessage.NativeToolCall(
+                            "call_readback",
+                            "talos.read_file",
+                            Map.of("path", "README.md")));
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            ToolCallLoop.LoopResult result;
+            try {
+                result = loop.run("", initialCalls, messages, ws, ctx);
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertEquals(repaired, Files.readString(ws.resolve("README.md")));
+            assertTrue(result.mutatingToolSuccesses() > 0, "compact repair should execute a write_file mutation");
+            assertEquals(1, recorded.requests().size(), "generic oversized continuation should be replaced");
+
+            String compactPrompt = recorded.requests().getFirst().messages.stream()
+                    .map(ChatMessage::content)
+                    .reduce("", (left, right) -> left + "\n" + right);
+            assertTrue(compactPrompt.contains("[OldStringMissRepair]"), compactPrompt);
+            assertTrue(compactPrompt.contains("Apply that README.md proposal now."), compactPrompt);
+            assertTrue(compactPrompt.contains("README.md"), compactPrompt);
+            assertTrue(compactPrompt.contains("1 | # Fixture"), compactPrompt);
+            assertFalse(compactPrompt.contains("large-system-token"), compactPrompt);
+            assertFalse(compactPrompt.contains("Earlier unrelated request"), compactPrompt);
+            assertFalse(compactPrompt.contains("Old proposal context"), compactPrompt);
+            assertEquals(List.of("talos.edit_file", "talos.write_file"),
+                    recorded.requests().getFirst().tools.stream().map(ToolSpec::name).toList());
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
+    void oldStringMissCompactRepairNoToolProseBecomesDeterministicFailure() throws Exception {
+        Path ws = Files.createTempDirectory("talos-old-string-compact-repair-no-tool-");
+        try {
+            String original = "# Fixture\n\nOriginal text.\n";
+            Files.writeString(ws.resolve("README.md"), original);
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileEditTool());
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 5);
+
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                    List.of(new LlmClient.StreamResult(
+                            "Complete. README.md is ready to use.",
+                            List.of())),
+                    2048);
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(recorded.client())
+                    .nativeToolSpecs(nativeSpecs(
+                            new ReadFileTool(),
+                            new FileEditTool(),
+                            new FileWriteTool()))
+                    .build();
+
+            String request = "Apply that README.md proposal now.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys " + "large-system-token ".repeat(700)),
+                    ChatMessage.user(request)));
+            var initialCalls = List.of(
+                    new ChatMessage.NativeToolCall(
+                            "call_bad_edit",
+                            "talos.edit_file",
+                            Map.of(
+                                    "path", "README.md",
+                                    "old_string", "This text does not exist.",
+                                    "new_string", "Applied proposal.")),
+                    new ChatMessage.NativeToolCall(
+                            "call_readback",
+                            "talos.read_file",
+                            Map.of("path", "README.md")));
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            ToolCallLoop.LoopResult result;
+            try {
+                result = loop.run("", initialCalls, messages, ws, ctx);
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            assertTrue(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertTrue(result.failureDecision().reason().contains("OLD_STRING_MISS_TARGET_REPAIR"),
+                    result.failureDecision().reason());
+            assertEquals(original, Files.readString(ws.resolve("README.md")));
+            assertEquals(1, recorded.requests().size());
+
+            String finalLower = result.finalAnswer().toLowerCase(Locale.ROOT);
+            assertTrue(finalLower.contains("action obligation failed"), result.finalAnswer());
+            assertTrue(finalLower.contains("old-string miss repair"), result.finalAnswer());
+            assertFalse(finalLower.contains("complete"), result.finalAnswer());
+            assertFalse(finalLower.contains("ready to use"), result.finalAnswer());
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
+    void oldStringMissCompactRepairRejectsReadOnlyToolBeforeExecution() throws Exception {
+        Path ws = Files.createTempDirectory("talos-old-string-compact-repair-read-only-");
+        try {
+            String original = "# Fixture\n\nOriginal text.\n";
+            Files.writeString(ws.resolve("README.md"), original);
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileEditTool());
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 5);
+
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                    List.of(new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                            "call_bad_read_only_repair",
+                            "talos.read_file",
+                            Map.of("path", "README.md"))))),
+                    2048);
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(recorded.client())
+                    .nativeToolSpecs(nativeSpecs(
+                            new ReadFileTool(),
+                            new FileEditTool(),
+                            new FileWriteTool()))
+                    .build();
+
+            String request = "Apply that README.md proposal now.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys " + "large-system-token ".repeat(700)),
+                    ChatMessage.user(request)));
+            var initialCalls = List.of(
+                    new ChatMessage.NativeToolCall(
+                            "call_bad_edit",
+                            "talos.edit_file",
+                            Map.of(
+                                    "path", "README.md",
+                                    "old_string", "This text does not exist.",
+                                    "new_string", "Applied proposal.")),
+                    new ChatMessage.NativeToolCall(
+                            "call_readback",
+                            "talos.read_file",
+                            Map.of("path", "README.md")));
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            ToolCallLoop.LoopResult result;
+            try {
+                result = loop.run("", initialCalls, messages, ws, ctx);
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            assertTrue(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertTrue(result.failureDecision().reason().contains("OLD_STRING_MISS_TARGET_REPAIR"),
+                    result.failureDecision().reason());
+            assertTrue(result.failureDecision().reason().contains("talos.read_file(README.md)"),
+                    result.failureDecision().reason());
+            assertEquals(2, result.toolsInvoked(), "read-only compact repair call must be rejected before execution");
+            assertEquals(original, Files.readString(ws.resolve("README.md")));
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────
 
     private static ToolCallLoop createLoop(TalosTool... tools) {
@@ -2449,6 +2672,18 @@ class ToolCallLoopTest {
         return Context.builder(new Config())
                 .llm(LlmClient.scripted(List.of("")))
                 .build();
+    }
+
+    private static List<ToolSpec> nativeSpecs(TalosTool... tools) {
+        var specs = new ArrayList<ToolSpec>();
+        for (TalosTool tool : tools) {
+            ToolDescriptor descriptor = tool.descriptor();
+            specs.add(new ToolSpec(
+                    descriptor.name(),
+                    descriptor.description(),
+                    descriptor.parametersSchema() == null ? "{}" : descriptor.parametersSchema()));
+        }
+        return specs;
     }
 
     private static String readFileCall(String path) {

@@ -31,6 +31,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 
@@ -38,6 +39,9 @@ import java.util.Set;
 public final class ToolCallRepromptStage {
     private static final Logger LOG = LoggerFactory.getLogger(ToolCallRepromptStage.class);
     private static final int REPAIR_READ_ONLY_TOOL_BUDGET = 6;
+    private static final int COMPACT_READBACK_REPAIR_MAX_CHARS = 12_000;
+
+    private record OldStringMissRepair(String path, String reason, String readback) {}
 
     public boolean reprompt(LoopState state, ToolCallExecutionStage.IterationOutcome outcome) {
         if (outcome.approvalDeniedThisIteration()) {
@@ -201,6 +205,20 @@ public final class ToolCallRepromptStage {
             ToolCallSupport.compactOlderToolResultsInPlace(state.messages);
         }
 
+        String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
+        Optional<OldStringMissRepair> oldStringMissRepair = nextOldStringMissCompactRepair(state);
+        if (oldStringMissRepair.isPresent()) {
+            OldStringMissRepair repair = oldStringMissRepair.get();
+            state.setPendingActionObligation(
+                    PendingActionObligation.oldStringMissTargets(List.of(repair.path())));
+            state.oldStringMissRepairPromptedPaths.add(repair.path());
+            List<ToolSpec> repairToolSpecs = oldStringMissRepairToolSpecs(state);
+            List<ChatMessage> requestMessages = oldStringMissRepairMessages(repair, userTask);
+            return chatReprompt(state, requestMessages, repairToolSpecs,
+                    repromptControls(state, "old-string-miss-compact-repair"),
+                    "old-string miss compact repair");
+        }
+
         int staleRepairIndex = -1;
         Optional<RepairInstruction> staleRepair = nextStaleEditRepair(state);
         if (staleRepair.isPresent()) {
@@ -261,7 +279,6 @@ public final class ToolCallRepromptStage {
                 expectedTargetObligationActive);
 
         int anchorIndex = -1;
-        String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
         if (userTask != null && !userTask.isBlank()) {
             String pinned = userTask.length() <= 500 ? userTask : userTask.substring(0, 500) + "…";
             state.messages.add(ChatMessage.system("[Current task — stay focused on this] " + pinned));
@@ -274,24 +291,7 @@ public final class ToolCallRepromptStage {
                 userTask);
 
         try {
-            LlmClient.StreamResult repromptResult =
-                    state.ctx.llm().chatFull(
-                            requestMessages,
-                            repromptToolSpecs,
-                            repromptControls(state));
-            state.currentText = repromptResult.text();
-            state.currentNativeCalls = repromptResult.hasToolCalls()
-                    ? new ArrayList<>(repromptResult.toolCalls()) : List.of();
-            if (state.currentText == null) state.currentText = "";
-            if (state.currentText.isEmpty() && state.currentNativeCalls.isEmpty()) {
-                if (state.failPendingActionObligationAfterNoExecutableToolCalls()) {
-                    return false;
-                }
-                if (!state.pendingMutationSummaries.isEmpty()) {
-                    state.currentText = String.join("\n", state.pendingMutationSummaries);
-                } else {
-                    state.currentText = "(no answer from model after tool execution)";
-                }
+            if (!chatRepromptResult(state, requestMessages, repromptToolSpecs, repromptControls(state))) {
                 return false;
             }
             return true;
@@ -419,6 +419,173 @@ public final class ToolCallRepromptStage {
         return false;
     }
 
+    private static boolean chatReprompt(
+            LoopState state,
+            List<ChatMessage> requestMessages,
+            List<ToolSpec> repromptToolSpecs,
+            ChatRequestControls controls,
+            String retryName
+    ) {
+        try {
+            return chatRepromptResult(state, requestMessages, repromptToolSpecs, controls);
+        } catch (EngineException.ContextBudgetExceeded budget) {
+            return stopAfterContextBudgetExceeded(state, budget, retryName);
+        } catch (EngineException.ConnectionFailed cf) {
+            LOG.warn("Ollama not reachable during {}: {}", retryName, cf.getMessage());
+            state.currentText = "[Ollama not reachable — tool loop aborted. " + cf.guidance() + "]";
+            state.currentNativeCalls = List.of();
+            return false;
+        } catch (EngineException.ModelNotFound mnf) {
+            LOG.warn("Model not found during {}: {}", retryName, mnf.model());
+            state.currentText = "[Model '" + mnf.model() + "' not found — tool loop aborted. "
+                    + mnf.guidance() + "]";
+            state.currentNativeCalls = List.of();
+            return false;
+        } catch (EngineException ee) {
+            LOG.warn("Engine error during {}: {}", retryName, ee.getMessage());
+            state.currentText = "[Engine error during tool loop: " + ee.getMessage() + "]";
+            state.currentNativeCalls = List.of();
+            return false;
+        } catch (Exception e) {
+            LOG.warn("LLM call failed during {}: {}", retryName, e.getMessage());
+            state.currentText = "(error during follow-up LLM call: " + e.getMessage() + ")";
+            state.currentNativeCalls = List.of();
+            return false;
+        }
+    }
+
+    private static boolean chatRepromptResult(
+            LoopState state,
+            List<ChatMessage> requestMessages,
+            List<ToolSpec> repromptToolSpecs,
+            ChatRequestControls controls
+    ) {
+        LlmClient.StreamResult repromptResult =
+                state.ctx.llm().chatFull(
+                        requestMessages,
+                        repromptToolSpecs,
+                        controls);
+        state.currentText = repromptResult.text();
+        state.currentNativeCalls = repromptResult.hasToolCalls()
+                ? new ArrayList<>(repromptResult.toolCalls()) : List.of();
+        if (state.currentText == null) state.currentText = "";
+        if (state.currentText.isEmpty() && state.currentNativeCalls.isEmpty()) {
+            if (state.failPendingActionObligationAfterNoExecutableToolCalls()) {
+                return false;
+            }
+            if (!state.pendingMutationSummaries.isEmpty()) {
+                state.currentText = String.join("\n", state.pendingMutationSummaries);
+            } else {
+                state.currentText = "(no answer from model after tool execution)";
+            }
+            return false;
+        }
+        return true;
+    }
+
+    private static Optional<OldStringMissRepair> nextOldStringMissCompactRepair(LoopState state) {
+        if (state == null || state.toolOutcomes == null || state.toolOutcomes.isEmpty()) {
+            return Optional.empty();
+        }
+        List<String> remainingExpectedTargets = remainingExpectedMutationTargets(state);
+        if (remainingExpectedTargets.isEmpty()) return Optional.empty();
+        Set<String> remaining = remainingExpectedTargets.stream()
+                .map(ToolCallRepromptStage::normalizeExpectedTargetKey)
+                .collect(java.util.stream.Collectors.toSet());
+        for (int i = state.toolOutcomes.size() - 1; i >= 0; i--) {
+            ToolCallLoop.ToolOutcome outcome = state.toolOutcomes.get(i);
+            if (outcome == null || !outcome.oldStringNotFoundEditFailure()) continue;
+            String path = normalizeExpectedTargetKey(outcome.pathHint());
+            if (path.isBlank() || !remaining.contains(path)) continue;
+            if (state.oldStringMissRepairPromptedPaths.contains(path)) continue;
+            if (!successfulReadbackForPath(state, path)) continue;
+            String readback = latestSuccessfulReadbackForPath(state, path);
+            if (readback == null || readback.isBlank()) continue;
+            return Optional.of(new OldStringMissRepair(
+                    path,
+                    outcome.errorMessage(),
+                    truncateForCompactRepair(readback)));
+        }
+        return Optional.empty();
+    }
+
+    private static boolean successfulReadbackForPath(LoopState state, String normalizedPath) {
+        if (state == null || normalizedPath == null || normalizedPath.isBlank()) return false;
+        for (ToolCallLoop.ToolOutcome outcome : state.toolOutcomes) {
+            if (outcome == null || !outcome.success()) continue;
+            if (!"talos.read_file".equals(canonicalToolName(outcome.toolName()))) continue;
+            if (normalizedPath.equals(normalizeExpectedTargetKey(outcome.pathHint()))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String latestSuccessfulReadbackForPath(LoopState state, String normalizedPath) {
+        if (state == null || state.successfulReadCalls == null || state.successfulReadCalls.isEmpty()) {
+            return null;
+        }
+        String target = ToolCallSupport.canonicalizeReadPath(normalizedPath)
+                .toLowerCase(Locale.ROOT);
+        for (var entry : state.successfulReadCalls.entrySet()) {
+            String signature = entry.getKey() == null
+                    ? ""
+                    : entry.getKey().replace('\\', '/').toLowerCase(Locale.ROOT);
+            if (signature.startsWith("talos.read_file:")
+                    && signature.contains("path=" + target + ";")) {
+                return entry.getValue();
+            }
+        }
+        return null;
+    }
+
+    private static String truncateForCompactRepair(String readback) {
+        if (readback == null || readback.length() <= COMPACT_READBACK_REPAIR_MAX_CHARS) {
+            return readback;
+        }
+        return readback.substring(0, COMPACT_READBACK_REPAIR_MAX_CHARS)
+                + "\n... [readback truncated for compact old-string repair]";
+    }
+
+    private static List<ToolSpec> oldStringMissRepairToolSpecs(LoopState state) {
+        List<ToolSpec> base = currentNativeToolSpecs(state);
+        List<ToolSpec> narrowed = filterTools(base, List.of("talos.edit_file", "talos.write_file"));
+        return narrowed.isEmpty() ? base : narrowed;
+    }
+
+    private static List<ChatMessage> oldStringMissRepairMessages(
+            OldStringMissRepair repair,
+            String userTask
+    ) {
+        String currentTask = userTask == null || userTask.isBlank()
+                ? "Apply the requested file change."
+                : userTask.strip();
+        return List.of(
+                ChatMessage.system("""
+                        You are Talos, a local-first workspace assistant.
+                        This is a compact target-only repair after talos.edit_file failed because old_string was not found.
+                        Use the provided current file readback as the only file-content source.
+                        Use talos.write_file with complete target content for small Markdown/prose files unless a precise talos.edit_file replacement is obvious from the readback.
+                        Do not answer in prose instead of calling a write/edit tool.
+                        """),
+                ChatMessage.system(
+                        "[OldStringMissRepair] Target: " + repair.path() + "\n"
+                                + "Failed reason: " + safeRepairReason(repair.reason()) + "\n"
+                                + "Only mutate this target. Ignore stale prior history outside this compact repair frame."),
+                ChatMessage.user(
+                        "Current user request:\n"
+                                + currentTask
+                                + "\n\nCurrent readback for " + repair.path() + ":\n"
+                                + repair.readback()
+                                + "\n\nApply the current request to " + repair.path()
+                                + " using talos.write_file or talos.edit_file now."));
+    }
+
+    private static String safeRepairReason(String reason) {
+        if (reason == null || reason.isBlank()) return "old_string not found";
+        return reason.strip();
+    }
+
     private static List<ToolSpec> repromptToolSpecs(
             LoopState state,
             boolean staticRepairProgress,
@@ -516,6 +683,10 @@ public final class ToolCallRepromptStage {
     }
 
     private static ChatRequestControls repromptControls(LoopState state) {
+        return repromptControls(state, "pending-action-obligation");
+    }
+
+    private static ChatRequestControls repromptControls(LoopState state, String debugTag) {
         if (state == null
                 || state.ctx == null
                 || state.ctx.llm() == null
@@ -524,12 +695,16 @@ public final class ToolCallRepromptStage {
                 || !hasMutatingTool(state.ctx.nativeToolSpecs())) {
             return ChatRequestControls.defaults();
         }
+        List<String> tags = new ArrayList<>(List.of("pending-action-obligation"));
+        if (debugTag != null && !debugTag.isBlank() && !tags.contains(debugTag)) {
+            tags.add(debugTag);
+        }
         return new ChatRequestControls(
                 ToolChoiceMode.REQUIRED,
                 "",
                 ResponseFormatMode.TEXT,
                 "",
-                List.of("pending-action-obligation"));
+                tags);
     }
 
     private static boolean hasMutatingTool(List<ToolSpec> specs) {
