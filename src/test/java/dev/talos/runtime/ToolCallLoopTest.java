@@ -2521,6 +2521,139 @@ class ToolCallLoopTest {
     }
 
     @Test
+    void oldStringMissCompactRepairPreservesExpectedTargetCasing() throws Exception {
+        Path ws = Files.createTempDirectory("talos-old-string-compact-repair-case-");
+        try {
+            Files.writeString(ws.resolve("README.md"), "# Fixture\n\nOriginal text.\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileEditTool());
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 5);
+
+            String repaired = "# Fixture\n\nOriginal text.\n\nApplied proposal.\n";
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                    List.of(new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                            "call_repair_write",
+                            "talos.write_file",
+                            Map.of("path", "README.md", "content", repaired))))),
+                    2048);
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(recorded.client())
+                    .nativeToolSpecs(nativeSpecs(
+                            new ReadFileTool(),
+                            new FileEditTool(),
+                            new FileWriteTool()))
+                    .build();
+
+            String request = "Apply that README.md proposal now.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys " + "large-system-token ".repeat(700)),
+                    ChatMessage.user(request)));
+            var initialCalls = List.of(
+                    new ChatMessage.NativeToolCall(
+                            "call_bad_edit",
+                            "talos.edit_file",
+                            Map.of(
+                                    "path", "README.md",
+                                    "old_string", "This text does not exist.",
+                                    "new_string", "Applied proposal.")),
+                    new ChatMessage.NativeToolCall(
+                            "call_readback",
+                            "talos.read_file",
+                            Map.of("path", "README.md")));
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            try {
+                loop.run("", initialCalls, messages, ws, ctx);
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            String compactPrompt = recorded.requests().getFirst().messages.stream()
+                    .map(ChatMessage::content)
+                    .reduce("", (left, right) -> left + "\n" + right);
+            assertTrue(compactPrompt.contains("[OldStringMissRepair] Target: README.md"), compactPrompt);
+            assertFalse(compactPrompt.contains("[OldStringMissRepair] Target: readme.md"), compactPrompt);
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
+    void oldStringMissCompactRepairRejectsCaseMismatchedTargetBeforeExecution() throws Exception {
+        Path ws = Files.createTempDirectory("talos-old-string-compact-repair-case-mismatch-");
+        try {
+            String original = "# Fixture\n\nOriginal text.\n";
+            Files.writeString(ws.resolve("README.md"), original);
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileEditTool());
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 5);
+
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                    List.of(new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                            "call_wrong_case_repair",
+                            "talos.write_file",
+                            Map.of("path", "readme.md", "content", "# Wrong target\n"))))),
+                    2048);
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(recorded.client())
+                    .nativeToolSpecs(nativeSpecs(
+                            new ReadFileTool(),
+                            new FileEditTool(),
+                            new FileWriteTool()))
+                    .build();
+
+            String request = "Apply that README.md proposal now.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys " + "large-system-token ".repeat(700)),
+                    ChatMessage.user(request)));
+            var initialCalls = List.of(
+                    new ChatMessage.NativeToolCall(
+                            "call_bad_edit",
+                            "talos.edit_file",
+                            Map.of(
+                                    "path", "README.md",
+                                    "old_string", "This text does not exist.",
+                                    "new_string", "Applied proposal.")),
+                    new ChatMessage.NativeToolCall(
+                            "call_readback",
+                            "talos.read_file",
+                            Map.of("path", "README.md")));
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            ToolCallLoop.LoopResult result;
+            try {
+                result = loop.run("", initialCalls, messages, ws, ctx);
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            assertTrue(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertTrue(result.failureDecision().reason().contains("OLD_STRING_MISS_TARGET_REPAIR"),
+                    result.failureDecision().reason());
+            assertTrue(result.failureDecision().reason().contains("talos.write_file(readme.md)"),
+                    result.failureDecision().reason());
+            assertEquals(2, result.toolsInvoked(), "case-mismatched compact repair must be rejected before execution");
+            assertEquals(original, Files.readString(ws.resolve("README.md")));
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
     void oldStringMissCompactRepairNoToolProseBecomesDeterministicFailure() throws Exception {
         Path ws = Files.createTempDirectory("talos-old-string-compact-repair-no-tool-");
         try {

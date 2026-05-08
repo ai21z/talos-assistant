@@ -211,7 +211,7 @@ public final class ToolCallRepromptStage {
             OldStringMissRepair repair = oldStringMissRepair.get();
             state.setPendingActionObligation(
                     PendingActionObligation.oldStringMissTargets(List.of(repair.path())));
-            state.oldStringMissRepairPromptedPaths.add(repair.path());
+            state.oldStringMissRepairPromptedPaths.add(normalizeExpectedTargetKey(repair.path()));
             List<ToolSpec> repairToolSpecs = oldStringMissRepairToolSpecs(state);
             List<ChatMessage> requestMessages = oldStringMissRepairMessages(repair, userTask);
             return chatReprompt(state, requestMessages, repairToolSpecs,
@@ -495,9 +495,13 @@ public final class ToolCallRepromptStage {
         for (int i = state.toolOutcomes.size() - 1; i >= 0; i--) {
             ToolCallLoop.ToolOutcome outcome = state.toolOutcomes.get(i);
             if (outcome == null || !outcome.oldStringNotFoundEditFailure()) continue;
-            String path = normalizeExpectedTargetKey(outcome.pathHint());
-            if (path.isBlank() || !remaining.contains(path)) continue;
-            if (state.oldStringMissRepairPromptedPaths.contains(path)) continue;
+            String pathKey = normalizeExpectedTargetKey(outcome.pathHint());
+            if (pathKey.isBlank() || !remaining.contains(pathKey)) continue;
+            if (state.oldStringMissRepairPromptedPaths.contains(pathKey)) continue;
+            String path = displayExpectedTargetForKey(remainingExpectedTargets, pathKey);
+            if (path.isBlank()) {
+                path = ToolCallSupport.normalizePath(outcome.pathHint());
+            }
             if (!successfulReadbackForPath(state, path)) continue;
             String readback = latestSuccessfulReadbackForPath(state, path);
             if (readback == null || readback.isBlank()) continue;
@@ -511,10 +515,12 @@ public final class ToolCallRepromptStage {
 
     private static boolean successfulReadbackForPath(LoopState state, String normalizedPath) {
         if (state == null || normalizedPath == null || normalizedPath.isBlank()) return false;
+        String targetKey = normalizeExpectedTargetKey(normalizedPath);
+        if (targetKey.isBlank()) return false;
         for (ToolCallLoop.ToolOutcome outcome : state.toolOutcomes) {
             if (outcome == null || !outcome.success()) continue;
             if (!"talos.read_file".equals(canonicalToolName(outcome.toolName()))) continue;
-            if (normalizedPath.equals(normalizeExpectedTargetKey(outcome.pathHint()))) {
+            if (targetKey.equals(normalizeExpectedTargetKey(outcome.pathHint()))) {
                 return true;
             }
         }
@@ -537,6 +543,17 @@ public final class ToolCallRepromptStage {
             }
         }
         return null;
+    }
+
+    private static String displayExpectedTargetForKey(List<String> targets, String key) {
+        if (targets == null || targets.isEmpty() || key == null || key.isBlank()) return "";
+        for (String target : targets) {
+            String display = ToolCallSupport.normalizePath(target);
+            if (!display.isBlank() && key.equals(normalizeExpectedTargetKey(display))) {
+                return display;
+            }
+        }
+        return "";
     }
 
     private static String truncateForCompactRepair(String readback) {
@@ -1037,10 +1054,17 @@ public final class ToolCallRepromptStage {
             if (outcome == null || !outcome.success() || !outcome.mutating()) continue;
             addSatisfiedExpectedTargetKeys(satisfiedTargets, outcome);
         }
-        return expectedTargets.stream()
-                .map(ToolCallRepromptStage::normalizeExpectedTargetKey)
-                .filter(path -> !path.isBlank())
-                .filter(path -> !satisfiedTargets.contains(path))
+        java.util.LinkedHashMap<String, String> expectedDisplayByKey = new java.util.LinkedHashMap<>();
+        for (String target : expectedTargets) {
+            String display = ToolCallSupport.normalizePath(target);
+            String key = normalizeExpectedTargetKey(display);
+            if (!key.isBlank()) {
+                expectedDisplayByKey.putIfAbsent(key, display);
+            }
+        }
+        return expectedDisplayByKey.entrySet().stream()
+                .filter(entry -> !satisfiedTargets.contains(entry.getKey()))
+                .map(java.util.Map.Entry::getValue)
                 .sorted()
                 .toList();
     }
