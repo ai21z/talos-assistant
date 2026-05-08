@@ -2598,6 +2598,179 @@ class ToolCallLoopTest {
     }
 
     @Test
+    void readOnlyReviewUsesCompactEvidenceContinuationBeforeContextBudgetFailure() throws Exception {
+        Path ws = Files.createTempDirectory("talos-readonly-review-compact-evidence-");
+        try {
+            Files.writeString(ws.resolve("README.md"),
+                    "# Fixture\n\nThis workspace checks compact read-only review synthesis.\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 5);
+
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                    List.of(new LlmClient.StreamResult(
+                            "One concrete wording improvement: change \"checks\" to \"validates\" for a clearer purpose sentence.",
+                            List.of())),
+                    2048);
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(recorded.client())
+                    .nativeToolSpecs(nativeSpecs(new ReadFileTool()))
+                    .build();
+
+            String request = "Please review README.md again and propose one concrete wording improvement, "
+                    + "but do not edit any files yet.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys " + "large-system-token ".repeat(700)),
+                    ChatMessage.user("Earlier unrelated README discussion that should not be in compact evidence."),
+                    ChatMessage.assistant("Old proposal context that should not dominate the current readback."),
+                    ChatMessage.user(request)));
+            var initialCalls = List.of(new ChatMessage.NativeToolCall(
+                    "call_read_readme",
+                    "talos.read_file",
+                    Map.of("path", "README.md")));
+
+            LocalTurnTraceCapture.begin("trc-t225-readonly-compact", "session", 1,
+                    "2026-05-08T00:00:00Z", "ws", "test", "llama_cpp", "qwen", request);
+            ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
+            try {
+                result = loop.run("", initialCalls, messages, ws, ctx);
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+
+            assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertFalse(result.finalAnswer().toLowerCase(Locale.ROOT).contains("context budget"),
+                    result.finalAnswer());
+            assertFalse(result.finalAnswer().toLowerCase(Locale.ROOT).contains("ready to use"),
+                    result.finalAnswer());
+            assertTrue(result.finalAnswer().contains("validates"), result.finalAnswer());
+            assertEquals(1, recorded.requests().size(), "full-history continuation should be replaced");
+
+            String compactPrompt = recorded.requests().getFirst().messages.stream()
+                    .map(ChatMessage::content)
+                    .reduce("", (left, right) -> left + "\n" + right);
+            assertTrue(compactPrompt.contains("[ReadOnlyEvidenceAnswer]"), compactPrompt);
+            assertTrue(compactPrompt.contains(request), compactPrompt);
+            assertTrue(compactPrompt.contains("1 | # Fixture"), compactPrompt);
+            assertFalse(compactPrompt.contains("large-system-token"), compactPrompt);
+            assertFalse(compactPrompt.contains("Earlier unrelated README discussion"), compactPrompt);
+            assertFalse(compactPrompt.contains("Old proposal context"), compactPrompt);
+            assertTrue(trace.warnings().stream()
+                            .anyMatch(warning -> "READ_ONLY_EVIDENCE_COMPACT_CONTINUATION".equals(warning.code())
+                                    && warning.message().contains("README.md")),
+                    trace.warnings().toString());
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
+    void readOnlyReviewCompactEvidenceUsesRequestedTargetReadback() throws Exception {
+        Path ws = Files.createTempDirectory("talos-readonly-review-target-evidence-");
+        try {
+            Files.writeString(ws.resolve("README.md"),
+                    "# Fixture\n\nREADME evidence belongs in the compact answer.\n");
+            Files.writeString(ws.resolve("config.json"),
+                    "{\n  \"mode\": \"wrong-evidence\"\n}\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 5);
+
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                    List.of(new LlmClient.StreamResult(
+                            "One concrete wording improvement: say the README evidence belongs in the answer.",
+                            List.of())),
+                    2048);
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(recorded.client())
+                    .nativeToolSpecs(nativeSpecs(new ReadFileTool()))
+                    .build();
+
+            String request = "Please review README.md again and propose one concrete wording improvement, "
+                    + "but do not edit any files yet.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys " + "large-system-token ".repeat(700)),
+                    ChatMessage.user(request)));
+            var initialCalls = List.of(
+                    new ChatMessage.NativeToolCall(
+                            "call_read_readme",
+                            "talos.read_file",
+                            Map.of("path", "README.md")),
+                    new ChatMessage.NativeToolCall(
+                            "call_read_config",
+                            "talos.read_file",
+                            Map.of("path", "config.json")));
+
+            ToolCallLoop.LoopResult result = loop.run("", initialCalls, messages, ws, ctx);
+
+            assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            String compactPrompt = recorded.requests().getFirst().messages.stream()
+                    .map(ChatMessage::content)
+                    .reduce("", (left, right) -> left + "\n" + right);
+            assertTrue(compactPrompt.contains("README evidence belongs in the compact answer"), compactPrompt);
+            assertFalse(compactPrompt.contains("wrong-evidence"), compactPrompt);
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
+    void readOnlyReviewCompactEvidenceToolCallKeepsContextBudgetFailureDominant() throws Exception {
+        Path ws = Files.createTempDirectory("talos-readonly-review-compact-tool-call-");
+        try {
+            Files.writeString(ws.resolve("README.md"),
+                    "# Fixture\n\nThis workspace checks rejected compact tool calls.\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 5);
+
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                    List.of(new LlmClient.StreamResult(
+                            "",
+                            List.of(new ChatMessage.NativeToolCall(
+                                    "call_bad_compact_tool",
+                                    "talos.read_file",
+                                    Map.of("path", "README.md"))))),
+                    2048);
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(recorded.client())
+                    .nativeToolSpecs(nativeSpecs(new ReadFileTool()))
+                    .build();
+
+            String request = "Please review README.md again and propose one concrete wording improvement, "
+                    + "but do not edit any files yet.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys " + "large-system-token ".repeat(700)),
+                    ChatMessage.user(request)));
+            var initialCalls = List.of(new ChatMessage.NativeToolCall(
+                    "call_read_readme",
+                    "talos.read_file",
+                    Map.of("path", "README.md")));
+
+            ToolCallLoop.LoopResult result = loop.run("", initialCalls, messages, ws, ctx);
+
+            assertTrue(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertTrue(result.finalAnswer().toLowerCase(Locale.ROOT).contains("context budget"),
+                    result.finalAnswer());
+            assertFalse(result.finalAnswer().toLowerCase(Locale.ROOT).contains("ready to use"),
+                    result.finalAnswer());
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
     void oldStringMissCompactRepairDoesNotUseReadbackFromBeforeSuccessfulMutation() throws Exception {
         Path ws = Files.createTempDirectory("talos-old-string-stale-readback-");
         try {

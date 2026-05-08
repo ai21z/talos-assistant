@@ -297,18 +297,40 @@ class CompatChatClientTest {
     }
 
     @Test
-    void chatHttp500ContextSizeThrowsResponseErrorInsteadOfAssistantText() throws Exception {
+    void chatStreamHttp400ContextSizeThrowsContextBudgetExceededWithBodyDetails() throws Exception {
+        HttpServer server = startServer(new AtomicReference<>(""), new AtomicReference<>(""), """
+                {"error":{"message":"request (3390 tokens) exceeds the available context size (3072 tokens), try increasing it"}}
+                """, "application/json", 400);
+        try {
+            CompatChatClient client = client(server);
+
+            EngineException.ContextBudgetExceeded error =
+                    assertThrows(EngineException.ContextBudgetExceeded.class,
+                            () -> client.chatStream(requestForStream()).toList());
+
+            assertEquals(3390, error.estimatedTokens());
+            assertEquals(3072, error.inputBudgetTokens());
+            assertEquals(3072, error.contextWindowTokens());
+            assertEquals(400, error.httpStatus());
+            assertFalse(error.getMessage().contains("complete"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void chatHttp500ContextSizeThrowsContextBudgetExceededInsteadOfAssistantText() throws Exception {
         HttpServer server = startServer(new AtomicReference<>(""), new AtomicReference<>(""), """
                 {"error":{"message":"Context size has been exceeded."}}
                 """, "application/json", 500);
         try {
             CompatChatClient client = client(server);
 
-            EngineException.ResponseError error =
-                    assertThrows(EngineException.ResponseError.class, () -> client.chat(requestForStream()));
+            EngineException.ContextBudgetExceeded error =
+                    assertThrows(EngineException.ContextBudgetExceeded.class, () -> client.chat(requestForStream()));
 
             assertEquals(500, error.httpStatus());
-            assertTrue(error.getMessage().contains("Context size has been exceeded"));
+            assertTrue(error.getMessage().contains("Request exceeds context budget"));
             assertFalse(error.getMessage().contains("complete"));
         } finally {
             server.stop(0);

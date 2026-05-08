@@ -90,12 +90,17 @@ public sealed class EngineException extends RuntimeException
                                      int inputBudgetTokens,
                                      int contextWindowTokens,
                                      int removedMessages) {
-            super("Request exceeds context budget: estimated " + Math.max(0, estimatedTokens)
-                            + " input tokens, budget " + Math.max(0, inputBudgetTokens)
-                            + " input tokens, context window " + Math.max(0, contextWindowTokens)
-                            + " tokens.",
+            this(estimatedTokens, inputBudgetTokens, contextWindowTokens, removedMessages, 0);
+        }
+
+        public ContextBudgetExceeded(int estimatedTokens,
+                                     int inputBudgetTokens,
+                                     int contextWindowTokens,
+                                     int removedMessages,
+                                     int httpStatus) {
+            super(contextBudgetMessage(estimatedTokens, inputBudgetTokens, contextWindowTokens),
                     null,
-                    0,
+                    Math.max(0, httpStatus),
                     "Clear the session, shorten the request, or select a model/context window that can fit the current turn.");
             this.estimatedTokens = Math.max(0, estimatedTokens);
             this.inputBudgetTokens = Math.max(0, inputBudgetTokens);
@@ -110,6 +115,13 @@ public sealed class EngineException extends RuntimeException
         public int contextWindowTokens() { return contextWindowTokens; }
 
         public int removedMessages() { return removedMessages; }
+
+        private static String contextBudgetMessage(int estimatedTokens, int inputBudgetTokens, int contextWindowTokens) {
+            return "Request exceeds context budget: estimated " + Math.max(0, estimatedTokens)
+                    + " input tokens, budget " + Math.max(0, inputBudgetTokens)
+                    + " input tokens, context window " + Math.max(0, contextWindowTokens)
+                    + " tokens.";
+        }
     }
 
     /** Catch-all for non-2xx responses that don't fit the above categories. */
