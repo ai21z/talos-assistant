@@ -2369,6 +2369,73 @@ class ToolCallLoopTest {
         }
     }
 
+    @Test
+    void repairReadOnlyBudgetCountsSuppressedRedundantReadsBeforeAnotherContinuation() throws Exception {
+        Path ws = Files.createTempDirectory("talos-repair-redundant-read-budget-");
+        try {
+            Files.writeString(ws.resolve("index.html"), "<script src=\"missing.js\"></script>\n");
+            Files.writeString(ws.resolve("styles.css"), "body{}\n");
+            Files.writeString(ws.resolve("scripts.js"), "console.log('old');\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 10);
+
+            String request = "Review the BMI calculator and fix any obvious issue that would stop it from working in a browser.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of(
+                            readFileCall("styles.css"),
+                            readFileCall("scripts.js"),
+                            readFileCall("index.html", 200),
+                            readFileCall("styles.css", 200),
+                            readFileCall("index.html", 200),
+                            "Complete. Everything is ready to use.")))
+                    .build();
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            LocalTurnTraceCapture.begin("trc-t221-redundant-read-budget", "session", 1,
+                    "2026-05-08T00:00:00Z", "ws", "test", "llama_cpp", "gpt-oss", request);
+            ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
+            try {
+                result = loop.run(readFileCall("index.html"), messages, ws, ctx);
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+                LocalTurnTraceCapture.clear();
+            }
+
+            assertTrue(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertTrue(result.failureDecision().reason().contains("REPAIR_INSPECTION_ONLY"),
+                    result.failureDecision().reason());
+            assertTrue(result.cushionFiresRedundantRead() > 0,
+                    "The suppressed duplicate read should be visible in the loop result.");
+            assertEquals(0, result.mutatingToolSuccesses());
+
+            String finalLower = result.finalAnswer().toLowerCase(java.util.Locale.ROOT);
+            assertTrue(finalLower.contains("repair/fix turn inspected files but did not change them"),
+                    result.finalAnswer());
+            assertFalse(finalLower.contains("context budget"), result.finalAnswer());
+            assertFalse(finalLower.contains("complete"), result.finalAnswer());
+            assertFalse(finalLower.contains("ready to use"), result.finalAnswer());
+
+            assertTrue(trace.events().stream()
+                            .anyMatch(event -> "ACTION_OBLIGATION_EVALUATED".equals(event.type())
+                                    && "REPAIR_INSPECTION_ONLY".equals(event.data().get("failureKind"))),
+                    "Trace should record deterministic repair inspection-only failure.");
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────
 
     private static ToolCallLoop createLoop(TalosTool... tools) {
