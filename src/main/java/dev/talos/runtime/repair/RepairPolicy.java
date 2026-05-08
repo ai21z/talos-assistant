@@ -181,7 +181,10 @@ public final class RepairPolicy {
         List<RepairPlanStep> steps = new ArrayList<>();
         Set<String> targets = new LinkedHashSet<>();
         boolean structuralWebRepair = problems.stream().anyMatch(StaticWebCapabilityProfile::isStructuralProblem);
-        if (structuralWebRepair && expectedTargets != null && !expectedTargets.isEmpty()) {
+        Set<String> verifierSpecificTargets = verifierSpecificStructuralRepairTargets(problems, expectedTargets);
+        if (structuralWebRepair && !verifierSpecificTargets.isEmpty()) {
+            targets.addAll(verifierSpecificTargets);
+        } else if (structuralWebRepair && expectedTargets != null && !expectedTargets.isEmpty()) {
             targets.addAll(expectedTargets);
         } else {
             for (String problem : problems) {
@@ -210,6 +213,73 @@ public final class RepairPolicy {
                 "Run static post-apply verification before claiming the task is complete.",
                 false));
         return List.copyOf(steps);
+    }
+
+    private static Set<String> verifierSpecificStructuralRepairTargets(
+            List<String> problems,
+            List<String> expectedTargets
+    ) {
+        if (problems == null || problems.isEmpty()) return Set.of();
+        Set<String> targets = new LinkedHashSet<>();
+        for (String problem : problems) {
+            Set<String> problemTargets = verifierSpecificTargetsForProblem(problem, expectedTargets);
+            if (problemTargets.isEmpty()) {
+                return Set.of();
+            }
+            targets.addAll(problemTargets);
+        }
+        return targets;
+    }
+
+    private static Set<String> verifierSpecificTargetsForProblem(
+            String problem,
+            List<String> expectedTargets
+    ) {
+        if (problem == null || problem.isBlank()) return Set.of();
+        String lower = problem.toLowerCase(Locale.ROOT);
+        if (lower.contains("css references missing class selectors")
+                || lower.contains("css references missing id selectors")
+                || lower.contains("css likely uses bare element selectors")) {
+            return expectedTargetsWithExtension(expectedTargets, ".css");
+        }
+        if (lower.contains("javascript references missing class selectors")
+                || lower.contains("javascript references missing ids")) {
+            return expectedTargetsWithExtension(expectedTargets, ".js", ".jsx", ".ts", ".tsx");
+        }
+        if (lower.contains("html defines duplicate ids")
+                || lower.contains("html file is empty")
+                || lower.contains("unclosed `<")
+                || lower.contains("malformed closing tag")) {
+            return expectedTargetsWithExtension(expectedTargets, ".html", ".htm");
+        }
+        return Set.of();
+    }
+
+    private static Set<String> expectedTargetsWithExtension(List<String> expectedTargets, String... extensions) {
+        Set<String> targets = new LinkedHashSet<>();
+        if (expectedTargets != null) {
+            for (String target : expectedTargets) {
+                String normalized = normalizeTarget(target);
+                String lower = normalized.toLowerCase(Locale.ROOT);
+                for (String extension : extensions == null ? new String[0] : extensions) {
+                    if (!extension.isBlank() && lower.endsWith(extension)) {
+                        targets.add(normalized);
+                        break;
+                    }
+                }
+            }
+        }
+        if (!targets.isEmpty()) return targets;
+        for (String extension : extensions == null ? new String[0] : extensions) {
+            if (".css".equals(extension)) {
+                targets.add("styles.css");
+            } else if (".js".equals(extension)) {
+                targets.add("scripts.js");
+            } else if (".html".equals(extension)) {
+                targets.add("index.html");
+            }
+        }
+        return targets;
     }
 
     private static void removeWrongSimilarEvidenceTargets(
