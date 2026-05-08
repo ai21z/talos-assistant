@@ -15,7 +15,9 @@ import dev.talos.tools.impl.ListDirTool;
 import dev.talos.tools.impl.ReadFileTool;
 import dev.talos.tools.impl.RetrieveTool;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -370,6 +372,67 @@ class UnifiedAssistantModeTest {
                         && content.contains("index.html, scripts.js, styles.css")
                         && content.contains("must use talos.write_file")
                         && content.contains("Do not use talos.edit_file for these structural web repair targets")));
+    }
+
+    @Test
+    void staticSelectorRepairFollowUpCarriesCurrentWorkspaceSelectorFacts(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                <head>
+                  <link rel="stylesheet" href="styles.css">
+                </head>
+                <body>
+                  <button id="calcBtn">Calculate</button>
+                  <script src="scripts.js"></script>
+                </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), """
+                .button {
+                  color: red;
+                }
+                """);
+        Files.writeString(workspace.resolve("scripts.js"), """
+                document.querySelector('.missing-button')?.addEventListener('click', () => {});
+                """);
+        LastPromptCapture.clear();
+        var mode = new UnifiedAssistantMode();
+        var memory = new SessionMemory();
+        memory.update(
+                "Create a complete static BMI calculator in this folder with index.html, styles.css, and scripts.js.",
+                """
+                [Task incomplete: Static verification failed - CSS references missing class selectors: `.button`; JavaScript references missing class selectors: `.missing-button`]
+
+                The requested task is not verified complete.
+                Unresolved static verification problems:
+                - CSS references missing class selectors: `.button`
+                - JavaScript references missing class selectors: `.missing-button`
+
+                Applied mutating tool calls:
+                - index.html: Updated index.html
+                - styles.css: Updated styles.css
+                - scripts.js: Updated scripts.js
+                """);
+
+        var result = mode.handle(
+                "Fix the remaining static verification problems now.",
+                workspace,
+                context("I will repair the remaining selector findings.", memory));
+
+        assertTrue(result.isPresent());
+        var render = LastPromptCapture.latest().orElseThrow();
+
+        assertTrue(render.messages().stream()
+                .map(message -> message.content() == null ? "" : message.content())
+                .anyMatch(content -> content.contains("[Static verification repair context]")
+                        && content.contains("Full-file replacement targets: scripts.js, styles.css")
+                        && content.contains("[Current static selector facts]")
+                        && content.contains("Observed in HTML")
+                        && content.contains("Classes: none")
+                        && content.contains("CSS references missing class selectors: `.button`")
+                        && content.contains("JavaScript references missing class selectors: `.missing-button`")),
+                render.messages().toString());
     }
 
     @Test
