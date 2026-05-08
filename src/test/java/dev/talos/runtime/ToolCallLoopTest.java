@@ -11,6 +11,7 @@ import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.*;
 import dev.talos.tools.impl.FileEditTool;
@@ -1789,6 +1790,202 @@ class ToolCallLoopTest {
         assertEquals(List.of("scripts.js"), breached.data().get("targets"));
         assertTrue(String.valueOf(breached.data().get("reason")).contains("context budget"),
                 breached.data().toString());
+    }
+
+    @Test
+    void mutationContinuationContextBudgetUsesCompactWriteRetryAfterReadOnlyProgress() throws Exception {
+        Path ws = Files.createTempDirectory("talos-compact-mutation-continuation-");
+        try {
+            Files.writeString(ws.resolve("index.html"), "<html><body><button>Old</button></body></html>\n");
+            Files.writeString(ws.resolve("styles.css"), "body { font-family: sans-serif; }\n");
+            Files.writeString(ws.resolve("script.js"), "console.log('similar wrong target');\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileEditTool());
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 6);
+
+            String request = "Create a complete static BMI calculator in this folder with index.html, styles.css, "
+                    + "and scripts.js. It should calculate BMI from height and weight.";
+            String index = """
+                    <!doctype html>
+                    <html>
+                    <head><link rel="stylesheet" href="styles.css"></head>
+                    <body>
+                    <input id="height"><input id="weight"><button id="calculate">Calculate</button>
+                    <p id="result"></p><script src="scripts.js"></script>
+                    </body>
+                    </html>
+                    """;
+            String styles = "body { font-family: sans-serif; }\n";
+            String scripts = """
+                    document.getElementById('calculate').addEventListener('click', () => {
+                      const h = Number(document.getElementById('height').value) / 100;
+                      const w = Number(document.getElementById('weight').value);
+                      document.getElementById('result').textContent = String((w / (h * h)).toFixed(1));
+                    });
+                    """;
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                    List.of(new LlmClient.StreamResult("", List.of(
+                            new ChatMessage.NativeToolCall(
+                                    "compact_index",
+                                    "talos.write_file",
+                                    Map.of("path", "index.html", "content", index)),
+                            new ChatMessage.NativeToolCall(
+                                    "compact_styles",
+                                    "talos.write_file",
+                                    Map.of("path", "styles.css", "content", styles)),
+                            new ChatMessage.NativeToolCall(
+                                    "compact_scripts",
+                                    "talos.write_file",
+                                    Map.of("path", "scripts.js", "content", scripts))))),
+                    2048);
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(recorded.client())
+                    .nativeToolSpecs(nativeSpecs(
+                            new ReadFileTool(),
+                            new FileEditTool(),
+                            new FileWriteTool()))
+                    .build();
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys " + "large-system-token ".repeat(700)),
+                    ChatMessage.user("Older unrelated turn that must not enter compact mutation continuation."),
+                    ChatMessage.assistant("Older unrelated answer that must not enter compact mutation continuation."),
+                    ChatMessage.user(request)));
+            var initialCalls = List.of(
+                    new ChatMessage.NativeToolCall(
+                            "read_index",
+                            "talos.read_file",
+                            Map.of("path", "index.html")),
+                    new ChatMessage.NativeToolCall(
+                            "read_styles",
+                            "talos.read_file",
+                            Map.of("path", "styles.css")),
+                    new ChatMessage.NativeToolCall(
+                            "read_similar_script",
+                            "talos.read_file",
+                            Map.of("path", "script.js")),
+                    new ChatMessage.NativeToolCall(
+                            "read_index_again",
+                            "talos.read_file",
+                            Map.of("path", "index.html")));
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            LocalTurnTraceCapture.begin("trc-t228-compact-mutation", "session", 1,
+                    "2026-05-08T00:00:00Z", "ws", "test", "llama_cpp", "gpt-oss", request);
+            ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
+            try {
+                result = loop.run("", initialCalls, messages, ws, ctx);
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+                LocalTurnTraceCapture.clear();
+            }
+
+            assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertFalse(result.finalAnswer().toLowerCase(Locale.ROOT).contains("context budget"),
+                    result.finalAnswer());
+            assertEquals(index, Files.readString(ws.resolve("index.html")));
+            assertEquals(styles, Files.readString(ws.resolve("styles.css")));
+            assertEquals(scripts, Files.readString(ws.resolve("scripts.js")));
+            assertEquals(1, recorded.requests().size(),
+                    "full-history continuation should be replaced by one compact mutation continuation");
+
+            var compactRequest = recorded.requests().getFirst();
+            assertEquals(List.of("talos.edit_file", "talos.write_file"),
+                    compactRequest.tools.stream().map(ToolSpec::name).sorted().toList());
+            assertEquals(ToolChoiceMode.REQUIRED, compactRequest.controls.toolChoice());
+            assertTrue(compactRequest.controls.debugTags().contains("compact-mutation-continuation"),
+                    compactRequest.controls.debugTags().toString());
+            String compactPrompt = compactRequest.messages.stream()
+                    .map(ChatMessage::content)
+                    .reduce("", (left, right) -> left + "\n" + right);
+            assertTrue(compactPrompt.contains("[CompactMutationContinuation]"), compactPrompt);
+            assertTrue(compactPrompt.contains("scripts.js"), compactPrompt);
+            assertTrue(compactPrompt.contains("script.js and scripts.js are different target paths"),
+                    compactPrompt);
+            assertTrue(compactPrompt.contains(request), compactPrompt);
+            assertFalse(compactPrompt.contains("Older unrelated turn"), compactPrompt);
+            assertFalse(compactPrompt.contains("Older unrelated answer"), compactPrompt);
+
+            assertTrue(trace.warnings().stream()
+                            .anyMatch(warning -> "COMPACT_MUTATION_CONTINUATION".equals(warning.code())),
+                    "trace should record compact mutation continuation fallback");
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
+    void mutationContinuationCompactRetryNoToolRemainsFailureDominant() throws Exception {
+        Path ws = Files.createTempDirectory("talos-compact-mutation-continuation-no-tool-");
+        try {
+            Files.writeString(ws.resolve("index.html"), "<html></html>\n");
+            Files.writeString(ws.resolve("styles.css"), "body{}\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileEditTool());
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 6);
+
+            String request = "Create a complete static BMI calculator in this folder with index.html, styles.css, "
+                    + "and scripts.js. It should calculate BMI from height and weight.";
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                    List.of(new LlmClient.StreamResult(
+                            "Done, everything is complete and ready to use.",
+                            List.of())),
+                    2048);
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(recorded.client())
+                    .nativeToolSpecs(nativeSpecs(
+                            new ReadFileTool(),
+                            new FileEditTool(),
+                            new FileWriteTool()))
+                    .build();
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys " + "large-system-token ".repeat(1_600)),
+                    ChatMessage.user(request)));
+            var initialCalls = List.of(
+                    new ChatMessage.NativeToolCall(
+                            "read_index",
+                            "talos.read_file",
+                            Map.of("path", "index.html")),
+                    new ChatMessage.NativeToolCall(
+                            "read_styles",
+                            "talos.read_file",
+                            Map.of("path", "styles.css")));
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            ToolCallLoop.LoopResult result;
+            try {
+                result = loop.run("", initialCalls, messages, ws, ctx);
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            assertTrue(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertTrue(result.failureDecision().reason().contains("COMPACT_MUTATION_CONTINUATION_NO_TOOL"),
+                    result.failureDecision().reason());
+            String finalLower = result.finalAnswer().toLowerCase(Locale.ROOT);
+            assertTrue(finalLower.contains("action obligation failed"), result.finalAnswer());
+            assertFalse(finalLower.contains("complete"), result.finalAnswer());
+            assertFalse(finalLower.contains("ready to use"), result.finalAnswer());
+            assertEquals(1, recorded.requests().size());
+            assertFalse(Files.exists(ws.resolve("scripts.js")));
+        } finally {
+            deleteRecursive(ws);
+        }
     }
 
     @Test
