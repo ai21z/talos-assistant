@@ -1358,6 +1358,393 @@ class ToolCallLoopTest {
     }
 
     @Test
+    void firstStaticRepairRejectsEmptyWriteBeforeApply() throws Exception {
+        Path ws = Files.createTempDirectory("talos-static-repair-first-empty-write-");
+        try {
+            Files.writeString(ws.resolve("index.html"), "<html></html>\n");
+            Files.writeString(ws.resolve("styles.css"), "body { color: black; }\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new FileWriteTool());
+            final int[] approvals = {0};
+            var processor = new TurnProcessor(
+                    ModeController.defaultController(),
+                    (description, detail) -> {
+                        approvals[0]++;
+                        return true;
+                    },
+                    registry);
+            var loop = new ToolCallLoop(processor, 10);
+
+            String request = "Fix the remaining static verification problems.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.system("""
+                            [Static verification repair context]
+                            Expected targets: index.html, scripts.js, styles.css
+
+                            Previous static verification problems:
+                            - CSS references missing class selectors: `.button`
+
+                            Repair plan:
+                            Full-file replacement targets: styles.css
+                            - styles.css: You must use talos.write_file with complete corrected file content for styles.css.
+                            - Verify static checks again before claiming completion.
+                            """),
+                    ChatMessage.user(request)));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of("Complete. Everything is ready to use. Open it in your browser.")))
+                    .build();
+            String initial = """
+                    {"name":"talos.write_file","arguments":{"path":"styles.css","content":""}}
+                    """;
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromMessages(messages));
+            LocalTurnTraceCapture.begin("trc-t218-first-empty-repair-write", "session", 1,
+                    "2026-05-08T00:00:00Z", "ws", "test", "llama_cpp", "qwen", request);
+            ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
+            try {
+                result = loop.run(initial, messages, ws, ctx);
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+                LocalTurnTraceCapture.clear();
+            }
+
+            assertEquals("body { color: black; }\n", Files.readString(ws.resolve("styles.css")),
+                    "empty first repair write must not overwrite the previous file content");
+            assertEquals(0, approvals[0],
+                    "empty first repair write must be rejected before approval");
+            assertEquals(0, result.toolsInvoked(),
+                    "empty first repair write must not be counted as an executed tool");
+            assertEquals(0, result.mutatingToolSuccesses(),
+                    "empty first repair write must not count as a successful mutation");
+            assertTrue(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertTrue(result.failureDecision().reason().contains("STATIC_REPAIR_INVALID_WRITE_CONTENT"),
+                    result.failureDecision().reason());
+            assertTrue(result.failureDecision().reason().contains("styles.css"),
+                    result.failureDecision().reason());
+            assertTrue(result.failureDecision().reason().toLowerCase(java.util.Locale.ROOT).contains("empty"),
+                    result.failureDecision().reason());
+            String lower = result.finalAnswer().toLowerCase(java.util.Locale.ROOT);
+            assertFalse(lower.contains("complete"), result.finalAnswer());
+            assertFalse(lower.contains("ready to use"), result.finalAnswer());
+            assertFalse(lower.contains("open in browser"), result.finalAnswer());
+
+            var failed = trace.events().stream()
+                    .filter(event -> "ACTION_OBLIGATION_EVALUATED".equals(event.type()))
+                    .filter(event -> "STATIC_REPAIR_INVALID_WRITE_CONTENT".equals(event.data().get("failureKind")))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("STATIC_REPAIR_WRITE_CONTENT", failed.data().get("obligation"));
+            assertEquals("FAILED", failed.data().get("status"));
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
+    void staticSelectorRepairRejectsPreservedMissingCssSelectorBeforeApply() throws Exception {
+        Path ws = Files.createTempDirectory("talos-static-selector-repair-preserved-css-");
+        try {
+            Files.writeString(ws.resolve("index.html"), """
+                    <!doctype html>
+                    <html>
+                    <head>
+                      <link rel="stylesheet" href="styles.css">
+                    </head>
+                    <body>
+                      <p id="result">Waiting</p>
+                    </body>
+                    </html>
+                    """);
+            Files.writeString(ws.resolve("styles.css"), "body { color: black; }\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new FileWriteTool());
+            final int[] approvals = {0};
+            var processor = new TurnProcessor(
+                    ModeController.defaultController(),
+                    (description, detail) -> {
+                        approvals[0]++;
+                        return true;
+                    },
+                    registry);
+            var loop = new ToolCallLoop(processor, 10);
+
+            String request = "Fix the remaining static verification problems.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.system("""
+                            [Static verification repair context]
+                            Expected targets: index.html, scripts.js, styles.css
+
+                            Previous static verification problems:
+                            - CSS references missing class selectors: `.button`
+
+                            Repair plan:
+                            Full-file replacement targets: styles.css
+                            - styles.css: You must use talos.write_file with complete corrected file content for styles.css.
+                            - Verify static checks again before claiming completion.
+
+                            [Current static selector facts]
+                            I checked the selectors against the actual workspace files:
+
+                            - HTML: `index.html`
+                            - CSS: `styles.css`
+                            - JavaScript: `scripts.js`
+
+                            Observed in HTML:
+                            - Classes: none
+                            - IDs: `#result`
+
+                            Mismatches found:
+                            - CSS references missing class selectors: `.button`
+                            """),
+                    ChatMessage.user(request)));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of("Complete. Everything is ready to use.")))
+                    .build();
+            String initial = """
+                    {"name":"talos.write_file","arguments":{"path":"styles.css","content":".button { color: red; }\\nbody { margin: 0; }\\n"}}
+                    """;
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromMessages(messages));
+            LocalTurnTraceCapture.begin("trc-t217-static-selector-preserved-css", "session", 1,
+                    "2026-05-08T00:00:00Z", "ws", "test", "llama_cpp", "qwen", request);
+            ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
+            try {
+                result = loop.run(initial, messages, ws, ctx);
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+                LocalTurnTraceCapture.clear();
+            }
+
+            assertEquals("body { color: black; }\n", Files.readString(ws.resolve("styles.css")),
+                    "selector repair writes that preserve verifier-known missing selectors must not apply");
+            assertEquals(0, approvals[0],
+                    "the preserved-selector repair write must be blocked before approval");
+            assertEquals(0, result.toolsInvoked(),
+                    "the preserved-selector repair write must not be counted as executed");
+            assertEquals(0, result.mutatingToolSuccesses(),
+                    "the preserved-selector repair write must not count as a successful mutation");
+            assertTrue(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertTrue(result.failureDecision().reason().contains("STATIC_SELECTOR_REPAIR_PRESERVED_MISSING_SELECTOR"),
+                    result.failureDecision().reason());
+            assertTrue(result.failureDecision().reason().contains("styles.css"),
+                    result.failureDecision().reason());
+            assertTrue(result.failureDecision().reason().contains(".button"),
+                    result.failureDecision().reason());
+
+            String lower = result.finalAnswer().toLowerCase(java.util.Locale.ROOT);
+            assertFalse(lower.contains("complete"), result.finalAnswer());
+            assertFalse(lower.contains("ready to use"), result.finalAnswer());
+            assertFalse(lower.contains("open in browser"), result.finalAnswer());
+
+            var breached = trace.events().stream()
+                    .filter(event -> "ACTION_OBLIGATION_EVALUATED".equals(event.type()))
+                    .filter(event -> "STATIC_SELECTOR_REPAIR_PRESERVED_MISSING_SELECTOR"
+                            .equals(event.data().get("failureKind")))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("STATIC_SELECTOR_REPAIR", breached.data().get("obligation"));
+            assertEquals("FAILED", breached.data().get("status"));
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
+    void staticSelectorRepairRejectsPreservedMissingJavaScriptSelectorBeforeApply() throws Exception {
+        Path ws = Files.createTempDirectory("talos-static-selector-repair-preserved-js-");
+        try {
+            Files.writeString(ws.resolve("index.html"), """
+                    <!doctype html>
+                    <html>
+                    <body>
+                      <button id="run-button">Run</button>
+                      <p id="result">Waiting</p>
+                      <script src="scripts.js"></script>
+                    </body>
+                    </html>
+                    """);
+            Files.writeString(ws.resolve("scripts.js"), "console.log('old');\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new FileWriteTool());
+            final int[] approvals = {0};
+            var processor = new TurnProcessor(
+                    ModeController.defaultController(),
+                    (description, detail) -> {
+                        approvals[0]++;
+                        return true;
+                    },
+                    registry);
+            var loop = new ToolCallLoop(processor, 10);
+
+            String request = "Fix the remaining static verification problems.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.system("""
+                            [Static verification repair context]
+                            Expected targets: index.html, scripts.js, styles.css
+
+                            Previous static verification problems:
+                            - JavaScript references missing class selectors: `.missing-button`
+
+                            Repair plan:
+                            Full-file replacement targets: scripts.js
+                            - scripts.js: You must use talos.write_file with complete corrected file content for scripts.js.
+                            - Verify static checks again before claiming completion.
+
+                            [Current static selector facts]
+                            I checked the selectors against the actual workspace files:
+
+                            - HTML: `index.html`
+                            - CSS: `styles.css`
+                            - JavaScript: `scripts.js`
+
+                            Observed in HTML:
+                            - Classes: none
+                            - IDs: `#run-button`, `#result`
+
+                            Mismatches found:
+                            - JavaScript references missing class selectors: `.missing-button`
+                            """),
+                    ChatMessage.user(request)));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of("Complete. Everything is ready to use.")))
+                    .build();
+            String initial = """
+                    {"name":"talos.write_file","arguments":{"path":"scripts.js","content":"document.querySelector('.missing-button').addEventListener('click', () => {\\n  document.querySelector('#result').textContent = 'Clicked';\\n});\\n"}}
+                    """;
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromMessages(messages));
+            ToolCallLoop.LoopResult result;
+            try {
+                result = loop.run(initial, messages, ws, ctx);
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            assertEquals("console.log('old');\n", Files.readString(ws.resolve("scripts.js")),
+                    "JavaScript repair writes that preserve known missing selectors must not apply");
+            assertEquals(0, approvals[0],
+                    "the preserved JavaScript selector repair write must be blocked before approval");
+            assertEquals(0, result.toolsInvoked());
+            assertTrue(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertTrue(result.failureDecision().reason().contains("STATIC_SELECTOR_REPAIR_PRESERVED_MISSING_SELECTOR"),
+                    result.failureDecision().reason());
+            assertTrue(result.failureDecision().reason().contains("scripts.js"),
+                    result.failureDecision().reason());
+            assertTrue(result.failureDecision().reason().contains(".missing-button"),
+                    result.failureDecision().reason());
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
+    void staticSelectorRepairAllowsReplacementThatRemovesKnownMissingSelector() throws Exception {
+        Path ws = Files.createTempDirectory("talos-static-selector-repair-valid-css-");
+        try {
+            Files.writeString(ws.resolve("index.html"), """
+                    <!doctype html>
+                    <html>
+                    <head>
+                      <link rel="stylesheet" href="styles.css">
+                    </head>
+                    <body>
+                      <p id="result">Waiting</p>
+                    </body>
+                    </html>
+                    """);
+            Files.writeString(ws.resolve("styles.css"), ".button { color: red; }\nbody { color: black; }\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new FileWriteTool());
+            final int[] approvals = {0};
+            var processor = new TurnProcessor(
+                    ModeController.defaultController(),
+                    (description, detail) -> {
+                        approvals[0]++;
+                        return true;
+                    },
+                    registry);
+            var loop = new ToolCallLoop(processor, 10);
+
+            String request = "Fix the remaining static verification problems.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.system("""
+                            [Static verification repair context]
+                            Expected targets: index.html, scripts.js, styles.css
+
+                            Previous static verification problems:
+                            - CSS references missing class selectors: `.button`
+
+                            Repair plan:
+                            Full-file replacement targets: styles.css
+                            - styles.css: You must use talos.write_file with complete corrected file content for styles.css.
+                            - Verify static checks again before claiming completion.
+
+                            [Current static selector facts]
+                            I checked the selectors against the actual workspace files:
+
+                            - HTML: `index.html`
+                            - CSS: `styles.css`
+                            - JavaScript: `scripts.js`
+
+                            Observed in HTML:
+                            - Classes: none
+                            - IDs: `#result`
+
+                            Mismatches found:
+                            - CSS references missing class selectors: `.button`
+                            """),
+                    ChatMessage.user(request)));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of("Complete. Everything is ready to use.")))
+                    .build();
+            String initial = """
+                    {"name":"talos.write_file","arguments":{"path":"styles.css","content":"body { color: black; }\\n"}}
+                    """;
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromMessages(messages));
+            ToolCallLoop.LoopResult result;
+            try {
+                result = loop.run(initial, messages, ws, ctx);
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            assertEquals("body { color: black; }\n", Files.readString(ws.resolve("styles.css")));
+            assertEquals(1, approvals[0],
+                    "valid selector repair write should still reach approval and apply");
+            assertEquals(1, result.toolsInvoked());
+            assertEquals(1, result.mutatingToolSuccesses());
+            assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
     void expectedTargetProgressContextBudgetExceededBecomesDeterministicBreach() {
         var loop = createLoop(writeFileTool());
         var messages = new ArrayList<>(List.of(
