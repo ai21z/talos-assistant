@@ -235,9 +235,9 @@ public final class ToolCallExecutionStage {
                 recordSuccessfulRead(state, pathHint);
             }
             if (result.success() && ToolCallSupport.isReadOnlyTool(effective.toolName())) {
-                state.successfulReadCalls.put(
-                        ToolCallSupport.buildReadCallSignature(effective),
-                        ToolCallSupport.truncateForLog(result.output()));
+                String readSignature = ToolCallSupport.buildReadCallSignature(effective);
+                state.successfulReadCalls.put(readSignature, ToolCallSupport.truncateForLog(result.output()));
+                state.successfulReadCallBodies.put(readSignature, result.output() == null ? "" : result.output());
             }
             if (ToolCallSupport.isMutatingTool(effective.toolName()) && result.success()) {
                 state.mutationSinceStart = true;
@@ -249,7 +249,7 @@ public final class ToolCallExecutionStage {
                     mutationSummariesThisIter.add("✓ " + summary);
                     state.pendingMutationSummaries.add("✓ " + summary);
                 }
-                state.successfulReadCalls.clear();
+                clearSuccessfulReadCalls(state);
             }
 
             boolean denied = !result.success()
@@ -294,7 +294,7 @@ public final class ToolCallExecutionStage {
                 failuresThisIter++;
                 recordFailure(state, effective.toolName(), pathHint);
                 if (shouldClearSuccessfulReadCallsAfterFailure(state, effective, result, pathHint, isEditFile)) {
-                    state.successfulReadCalls.clear();
+                    clearSuccessfulReadCalls(state);
                 }
                 if (isEditFile) {
                     String callSig = ToolCallSupport.buildCallSignature(effective);
@@ -432,6 +432,12 @@ public final class ToolCallExecutionStage {
             return false;
         }
         return true;
+    }
+
+    private static void clearSuccessfulReadCalls(LoopState state) {
+        if (state == null) return;
+        state.successfulReadCalls.clear();
+        state.successfulReadCallBodies.clear();
     }
 
     private static void recordEmptyEditArgumentFailure(LoopState state, String pathHint) {

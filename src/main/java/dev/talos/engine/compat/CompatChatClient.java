@@ -35,6 +35,8 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Spliterators;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
@@ -44,6 +46,9 @@ public final class CompatChatClient {
 
     private static final Logger LOG = LoggerFactory.getLogger(CompatChatClient.class);
     private static final TypeReference<Map<String, Object>> MAP_REF = new TypeReference<>() {};
+    private static final Pattern CONTEXT_SIZE_PATTERN = Pattern.compile(
+            "request\\s*\\((\\d+)\\s+tokens\\)\\s+exceeds\\s+the\\s+available\\s+context\\s+size\\s*\\((\\d+)\\s+tokens\\)",
+            Pattern.CASE_INSENSITIVE);
 
     private final String host;
     private final String defaultModel;
@@ -99,7 +104,9 @@ public final class CompatChatClient {
             throw new EngineException.Transient("Request timed out", te, 408);
         }
 
-        checkStatus(resp.statusCode(), req.model, null);
+        if (resp.statusCode() / 100 != 2) {
+            checkStatus(resp.statusCode(), req.model, readErrorBody(resp.body()));
+        }
 
         BufferedReader reader = new BufferedReader(
                 new InputStreamReader(resp.body(), StandardCharsets.UTF_8));
@@ -392,7 +399,46 @@ public final class CompatChatClient {
         if (status / 100 == 2) return;
         if (status == 404) throw new EngineException.ModelNotFound(model);
         if (status == 429 || status == 503) throw new EngineException.Transient("Backend returned " + status, status);
+        if (looksLikeContextBudgetError(status, body)) throw contextBudgetExceeded(status, body);
         throw new EngineException.ResponseError(status, body);
+    }
+
+    private static String readErrorBody(java.io.InputStream body) {
+        if (body == null) return null;
+        try (body) {
+            return new String(body.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static boolean looksLikeContextBudgetError(int status, String body) {
+        if (status / 100 == 2 || body == null || body.isBlank()) return false;
+        String lower = body.toLowerCase();
+        return lower.contains("context")
+                && (lower.contains("exceed")
+                || lower.contains("too large")
+                || lower.contains("maximum context"));
+    }
+
+    private static EngineException.ContextBudgetExceeded contextBudgetExceeded(int status, String body) {
+        int estimated = 0;
+        int context = 0;
+        Matcher matcher = CONTEXT_SIZE_PATTERN.matcher(Objects.toString(body, ""));
+        if (matcher.find()) {
+            estimated = safeInt(matcher.group(1));
+            context = safeInt(matcher.group(2));
+        }
+        int budget = context;
+        return new EngineException.ContextBudgetExceeded(estimated, budget, context, 0, status);
+    }
+
+    private static int safeInt(String raw) {
+        try {
+            return Math.max(0, Integer.parseInt(Objects.toString(raw, "").trim()));
+        } catch (Exception ignored) {
+            return 0;
+        }
     }
 
     private static String trimTrailingSlash(String value) {

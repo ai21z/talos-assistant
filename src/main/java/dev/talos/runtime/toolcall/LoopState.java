@@ -59,6 +59,7 @@ public final class LoopState {
     public final Set<String> staticWebFullRewriteRequiredTargets = new HashSet<>();
     public final Set<String> pathsReadThisTurn = new HashSet<>();
     public final Map<String, String> successfulReadCalls = new HashMap<>();
+    public final Map<String, String> successfulReadCallBodies = new HashMap<>();
     public boolean mutationSinceStart;
     public final List<String> pendingMutationSummaries = new ArrayList<>();
     private PendingActionObligation pendingActionObligation;
