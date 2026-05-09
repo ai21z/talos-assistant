@@ -1,4 +1,4 @@
-# LOQ-J — Copilot / AI Assistant Project Instructions
+# Talos - Copilot / AI Assistant Project Instructions
 
 These instructions are read automatically by GitHub Copilot Chat and should
 be treated as persistent project rules for any AI assistant working in this
@@ -49,24 +49,39 @@ They must be intentional, not accidental side effects of a feature branch.
 
 ## Project Identity
 
-LOQ-J is a **local-first Java knowledge and context engine** for the Loqs suite.
+Talos is a **local-first CLI workspace assistant** and execution harness for
+bounded local workspace work.
 
-It is responsible for:
-- ingestion, parsing, chunking
-- indexing (Lucene-backed)
-- retrieval (hybrid: BM25 + vector + metadata)
-- reranking
-- provenance and retrieval traces
-- context packing / evidence assembly
+Repository identity:
 
-It is **not** responsible for:
-- agent orchestration, planning, or routing (→ Loqs Core)
-- durable assistant/task/user memory (→ Loqs Memory)
-- screenshots, PDFs-as-images, UI understanding (→ Loqs Vision)
-- browser, email, files, calendar automation (→ Loqs Actions)
-- multi-agent coordination (→ Loqs MAS)
+- Product name: Talos
+- Repository name: `talos-cli`
+- GitHub repository: `ai21z/talos-cli`
+- Public description: "Local-first CLI workspace assistant with retrieval,
+  approval-gated file operations, traces, context handling, and
+  verification-oriented outcomes."
 
-Do not introduce agent-platform concerns into LOQ-J core.
+Talos currently focuses on:
+
+- workspace inspection through local tools
+- local context retrieval and context packing
+- approval-gated file operations
+- bounded command execution through approved profiles
+- local traces, prompt/debug evidence, and outcome records
+- context handling across turns
+- verification-oriented completion reporting
+
+Talos is **not**:
+
+- a foundation model
+- a cloud-agent clone
+- a swarm or multi-agent platform
+- a background autonomous daemon
+- a general browser/email/calendar automation product
+- just a RAG CLI
+
+Do not weaken explicit user control, approval gates, workspace boundaries,
+traceability, or verification-oriented outcomes.
 
 ---
 
@@ -93,7 +108,7 @@ Do not introduce agent-platform concerns into LOQ-J core.
 - `dev.talos.core.embed` — embeddings client
 - `dev.talos.core.cache` — SQLite caching
 - `dev.talos.core.llm` — LLM client abstraction
-- `dev.talos.tools` — future tool/MCP seam
+- `dev.talos.tools` — tool registry and local workspace tool implementations
 - `dev.talos.api` — programmatic API seam (`TalosKnowledgeEngine`)
 - `dev.talos.cli` — CLI commands and REPL
 
@@ -109,8 +124,8 @@ Stages are stateless (`StageOutput` record). Traces are captured per-stage.
 ## What NOT to do
 
 - Do not rewrite the core around LangChain4j or Spring AI
-- Do not merge long-term memory into LOQ-J core
-- Do not add MCP server logic until the retrieval seam is stable
+- Do not merge broad long-term memory into Talos core without a scoped design
+- Do not add MCP server logic until the local tool and retrieval seams are stable
 - Do not perform broad package reshuffles without a concrete reason
 - Do not delete legacy code before proving parity with new code
 - Do not push CI/quality tooling changes into dev or main without review

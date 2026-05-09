@@ -93,7 +93,7 @@ Use this shape for each tracker ticket:
 
 ## 4. Tickets
 
-### CCR-001 — Fix stale `dev.loqj.*` package references in project instructions
+### CCR-001 - Fix stale pre-Talos package references in project instructions
 
 **Status**
 
@@ -104,13 +104,13 @@ Use this shape for each tracker ticket:
 
 **Why this exists**
 
-`.github/copilot-instructions.md` still describes package paths under
-`dev.loqj.*`, while the codebase is `dev.talos.*`. This creates avoidable
-confusion for humans and AI assistants.
+`.github/copilot-instructions.md` still describes package paths from the
+pre-Talos codebase, while the active codebase is `dev.talos.*`. This creates
+avoidable confusion for humans and AI assistants.
 
 **Scope**
 
-- Replace stale `dev.loqj.*` package references with `dev.talos.*`
+- Replace stale package references with `dev.talos.*`
 - Keep intent and project rules unchanged
 - Restrict changes to documentation only
 
@@ -1321,7 +1321,7 @@ compaction attempt which also failed, yet history was pruned anyway.
 
 If you need tracker-ready titles only:
 
-- `CCR-001 Fix stale dev.loqj package references in project instructions`
+- `CCR-001 Fix stale pre-Talos package references in project instructions`
 - `CCR-002 Decouple failing tests from real engine resolution with the correct seam per test layer`
 - `CCR-003 Add exploded-classes version source for BuildInfo`
 - `CCR-004 Remove deprecated FirstRunWizard class`

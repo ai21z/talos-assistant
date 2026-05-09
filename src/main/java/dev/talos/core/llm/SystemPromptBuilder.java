@@ -329,9 +329,9 @@ public final class SystemPromptBuilder {
     /** Minimal fallback prompt when no resource files exist. */
     private String defaultPrompt() {
         return switch (mode) {
-            case ASK     -> "You are Talos, a local-first knowledge assistant. Answer clearly and concisely.\n";
-            case RAG     -> "You are Talos, a local-first knowledge engine. Answer using the provided context snippets.\n";
-            case UNIFIED -> "You are Talos, a local-first knowledge assistant with full tool access. Use tools proactively for file operations and project questions.\n";
+            case ASK     -> "You are Talos, a local-first workspace assistant. Answer clearly and concisely.\n";
+            case RAG     -> "You are Talos, a local-first workspace assistant. Answer using the provided context snippets.\n";
+            case UNIFIED -> "You are Talos, a local-first workspace assistant with full tool access. Use tools proactively for file operations and project questions.\n";
         };
     }
 

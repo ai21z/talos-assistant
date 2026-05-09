@@ -30,7 +30,7 @@ Hello! I am Qwen, an AI language model developed by Alibaba Cloud.
 The prompt render for the same turn says:
 
 ```text
-You are Talos, a local-first knowledge assistant running on the user's machine.
+You are Talos, a local-first workspace assistant running on the user's machine.
 ```
 
 The runtime classified the turn correctly:

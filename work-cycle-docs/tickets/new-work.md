@@ -19,7 +19,7 @@ The next path matters a lot.
 
 ## My corrected diagnosis
 
-The README is now strong. It correctly says Talos is a **local-first knowledge engine and workspace assistant**, not just a RAG CLI. It explains that Talos can inspect files, retrieve local context, and apply changes through an approval-gated tool loop. It also gives a simple turn model: inspect workspace, retrieve context when needed, call local tools, then answer/cite/persist.
+The README is now strong. It correctly says Talos is a **local-first CLI workspace assistant** with retrieval, approval-gated file operations, traces, context handling, and verification-oriented outcomes. It explains that Talos can inspect files, retrieve local context, and apply changes through an approval-gated tool loop. It also gives a simple turn model: inspect workspace, retrieve context when needed, call local tools, then report/trace/persist.
 
 So the **product identity is now basically right**.
 
@@ -627,7 +627,7 @@ That is the thing.
 
 Not “better than Claude Code.”
 Not “Java agent framework.”
-Not “local RAG CLI.”
+Not "retrieval-only CLI."
 Not “multi-agent system.”
 
 The category is:

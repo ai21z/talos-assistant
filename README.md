@@ -1,10 +1,45 @@
 # Talos
 
-Talos is a local-first knowledge engine and workspace assistant.
+Talos is a local-first CLI workspace assistant with retrieval,
+approval-gated file operations, traces, context handling, and
+verification-oriented outcomes.
 
-It can answer questions about a project, inspect files, retrieve relevant context from an index, and apply file changes through an approval-gated tool loop. It started life as a RAG CLI, but that description is too small now. Retrieval is still part of Talos. It is no longer the whole product.
+It runs as an execution harness for local workspace work. Talos can inspect
+files, list directories, search a workspace, retrieve local indexed context,
+use local tools, ask for approval before writes or bounded commands, preserve
+local turn traces and session context, and report what was verified.
+
+Talos started as LOQ-J, a local RAG CLI, and evolved into a broader local-first
+workspace assistant. Retrieval remains part of Talos, but it is no longer the
+whole product.
 
 The public release version is defined in `gradle.properties` as `talosVersion`, so the build and CLI stay aligned.
+
+## Current Status
+
+Talos is under active beta hardening. It currently focuses on bounded local
+workspace tasks with explicit user control, not unattended background
+automation.
+
+## What Talos Is Not
+
+Talos is not:
+
+- a foundation model
+- a cloud-agent clone
+- a swarm
+- a background autonomous daemon
+- just a RAG CLI
+
+## Practical Limits
+
+Talos is useful today, but the trust layers are still being hardened.
+
+- local model quality matters
+- setup and hardware matter
+- not all file types are supported equally
+- not every task can be semantically verified
+- the project is still evolving
 
 ## Talos In One Minute
 
@@ -14,11 +49,13 @@ Talos is built for a simple local workflow:
 - let it inspect, retrieve, and reason over that workspace
 - allow safe read-only operations automatically
 - require approval before write operations
+- preserve local traces and session context
+- report verification-oriented outcomes when checks are available
 - keep the whole loop local on your machine
 
 If you want the shortest accurate description, it is this:
 
-> Talos is a local CLI assistant for understanding and changing a workspace, with retrieval, tools, approval gates, and session history.
+> Talos is a local-first CLI workspace assistant for understanding and changing a workspace, with retrieval, tools, approval gates, traces, context handling, and verification-oriented outcomes.
 
 ## How A Turn Works
 
@@ -44,7 +81,7 @@ One Talos turn is not just "prompt in, paragraph out".
               |
               v
     .--------------------.
-    | answer, cite,      |
+    | report, trace,     |
     | and persist turn   |
     '--------------------'
 ```
@@ -57,18 +94,21 @@ In practice, a turn can include:
 - retrieval from the local index
 - write or edit operations with approval
 - session-memory updates
+- trace persistence
+- verification-oriented completion checks
 - persistence to session artifacts
 
 That is why calling Talos only a "RAG CLI" is misleading.
 
 ## What Talos Does Today
 
-At a high level, Talos currently has four main jobs:
+At a high level, Talos currently has five main jobs:
 
 1. Understand a workspace
 2. Retrieve relevant local context
 3. Use tools to inspect or change files
 4. Keep a session coherent across turns
+5. Preserve traceable outcomes for review
 
 ### Workspace understanding
 
@@ -326,12 +366,16 @@ Talos is improving, but it still has clear limits:
 - Windows is the best-supported operational path right now
 - the current engine path is centered on local Ollama usage
 - web mode is not a full browsing product in this build
-- model quality still matters a lot for editing and diagnosis quality
-- retrieval, tools, and session behavior are stronger than they were, but not complete
+- local model quality still matters a lot for editing and diagnosis quality
+- setup and hardware affect latency, context size, and model choices
+- not all file types are supported equally
+- not every task can be semantically verified
+- trust layers are still being hardened
+- retrieval, tools, and session behavior are stronger than they were, but still evolving
 
 If you need a one-line status:
 
-> Talos is already useful for local workspace understanding and guarded file operations, but it is still evolving into the assistant shape the architecture is aiming for.
+> Talos is useful for local workspace understanding and guarded file operations, but it is still under active beta hardening.
 
 ## Repo Layout
 
@@ -352,6 +396,49 @@ High-level layout:
 
 The `local/` folder is for personal workspace material on this machine, including manual-testing notes. It is intentionally ignored by Git. Generated `reports/` are also ignored; keep only usage instructions in `reports-disabled/`.
 
+## Repository Identity Migration
+
+Current public identity:
+
+- Product name: Talos
+- Repository name: `talos-cli`
+- GitHub repository: `ai21z/talos-cli`
+- GitHub URL: `https://github.com/ai21z/talos-cli`
+- SSH URL: `git@github.com:ai21z/talos-cli.git`
+- Public description: "Local-first CLI workspace assistant with retrieval, approval-gated file operations, traces, context handling, and verification-oriented outcomes."
+
+Repository rename checklist:
+
+- Rename GitHub repository to `ai21z/talos-cli` through the GitHub UI.
+- Update local git remote:
+  ```powershell
+  git remote set-url origin https://github.com/ai21z/talos-cli.git
+  ```
+- Verify local remote:
+  ```powershell
+  git remote -v
+  ```
+- Update README links.
+- Update install docs.
+- Update scripts with hardcoded repo URLs.
+- Update docs and examples.
+- Update screenshots or captions if they mention old names.
+- Verify old GitHub links redirect.
+- Do not create a new repository using the old `loqj-cli` name, because it can interfere with GitHub redirects.
+
+Suggested GitHub topics:
+
+- `local-ai`
+- `cli`
+- `java`
+- `ollama`
+- `workspace-assistant`
+- `ai-agent`
+- `local-first`
+- `retrieval`
+- `developer-tools`
+- `verification`
+
 ## Bottom Line
 
 Talos should now be understood like this:
@@ -360,13 +447,14 @@ Talos should now be understood like this:
 - not just a chat shell
 - not just a file editor
 
-It is a local workspace assistant that combines:
+It is a local-first workspace assistant and execution harness that combines:
 
 - retrieval
-- tools
-- approval gates
-- session memory
-- persistence
+- local tools
+- approval-gated file operations
+- local traces
+- context handling
+- verification-oriented outcomes
 - developer-oriented CLI workflows
 
 That is the current state of Talos.

@@ -28,7 +28,7 @@ class JsonScenarioPackTest {
                 loaded.scriptedResponses())) {
             result.assertAnswerContains("README.md")
                     .assertAnswerContains("src/Main.java")
-                    .assertAnswerContains("local-first knowledge engine")
+                    .assertAnswerContains("local-first workspace assistant")
                     .assertLocalTraceRecorded()
                     .assertFileContains("README.md", "Talos")
                     .assertFileContains("src/Main.java", "class Main")
@@ -487,7 +487,7 @@ class JsonScenarioPackTest {
                     .assertAnswerContains("separate follow-up")
                     .assertAnswerNotContains("This response should not be reached")
                     .assertFileContains("README.md", "# Talos Local")
-                    .assertFileContains("README.md", "Talos is a local-first knowledge engine.")
+                    .assertFileContains("README.md", "Talos is a local-first workspace assistant.")
                     .assertFileNotContains("README.md", "disciplined local-first");
         }
     }
