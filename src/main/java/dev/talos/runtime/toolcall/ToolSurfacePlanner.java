@@ -103,7 +103,6 @@ public final class ToolSurfacePlanner {
                     "talos.move_path",
                     "talos.read_file",
                     "talos.rename_path",
-                    "talos.run_command",
                     "talos.retrieve",
                     "talos.write_file");
         }
@@ -150,7 +149,6 @@ public final class ToolSurfacePlanner {
         ToolOperationMetadata metadata = metadata(descriptor);
         if (metadata == null) return false;
         if (isReadOnlyOperation(descriptor)) return true;
-        if (isCommandOperation(descriptor)) return true;
         return metadata.mutatesWorkspace()
                 && !metadata.destructive()
                 && metadata.riskLevel() == ToolRiskLevel.WRITE;
