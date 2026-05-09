@@ -30,8 +30,14 @@ class SystemPromptBuilderTest {
 
         assertFalse(prompt.contains("Ollama"),
                 "Default model-facing identity prompt should not name an engine-specific backend");
-        assertTrue(prompt.contains("configured local model engine"),
-                "Default identity prompt should preserve local-only semantics without naming Ollama");
+        assertTrue(prompt.contains("configured runtime and tools"),
+                "Default identity prompt should preserve configured-runtime semantics without naming Ollama");
+        assertTrue(prompt.contains("tool-mediated"),
+                "Default identity prompt should describe workspace access as tool-mediated");
+        assertFalse(prompt.contains("never exfiltrate"),
+                "Default identity prompt should not make absolute data-exfiltration guarantees");
+        assertFalse(prompt.contains("full access"),
+                "Default identity prompt should not claim unrestricted workspace access");
     }
 
     @Test
