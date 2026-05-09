@@ -461,13 +461,15 @@ Trace data must not include raw secrets, full environment, or uncapped output.
 
 ## Tool Surface
 
-`talos.run_command` should not appear for ordinary read-only questions.
+`talos.run_command` should not appear for ordinary read-only questions or
+ordinary file mutation turns.
 
 V1 surface rules:
 
-- show only in `APPLY` or verification-oriented dev tasks;
+- show only for explicit command-profile requests or verification-oriented dev
+  tasks;
 - hide for small talk, privacy-negated prompts, directory listing, and normal
-  file read tasks;
+  file read/write tasks;
 - expose only when `CommandProfileRegistry` has at least one profile enabled;
 - include current visible profiles in the current-turn capability frame;
 - keep command profile requirements runtime-enforced, not prompt-only.

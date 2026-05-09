@@ -159,7 +159,7 @@ class NativeToolSpecPolicyTest {
         assertTrue(names.contains("talos.move_path"));
         assertTrue(names.contains("talos.copy_path"));
         assertTrue(names.contains("talos.rename_path"));
-        assertTrue(names.contains("talos.run_command"));
+        assertFalse(names.contains("talos.run_command"), names.toString());
     }
 
     @Test
