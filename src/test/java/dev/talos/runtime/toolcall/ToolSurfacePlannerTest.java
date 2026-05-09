@@ -90,7 +90,7 @@ class ToolSurfacePlannerTest {
         assertTrue(names.contains("talos.move_path"));
         assertTrue(names.contains("talos.copy_path"));
         assertTrue(names.contains("talos.rename_path"));
-        assertTrue(names.contains("talos.run_command"));
+        assertFalse(names.contains("talos.run_command"), names.toString());
         assertFalse(names.contains("talos.metadata_delete"));
         assertEquals("mutation apply surface", plan.reason());
     }
@@ -305,8 +305,8 @@ class ToolSurfacePlannerTest {
 
         assertEquals(
                 List.of("talos.apply_workspace_batch", "talos.copy_path", "talos.edit_file", "talos.grep", "talos.list_dir",
-                        "talos.mkdir", "talos.move_path", "talos.read_file", "talos.rename_path", "talos.run_command",
-                        "talos.retrieve", "talos.write_file"),
+                        "talos.mkdir", "talos.move_path", "talos.read_file", "talos.rename_path", "talos.retrieve",
+                        "talos.write_file"),
                 ToolSurfacePlanner.defaultVisibleToolNames(
                         TaskContractResolver.fromUserRequest("create a README.md file"),
                         ExecutionPhase.APPLY));
