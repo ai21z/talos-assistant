@@ -6,8 +6,8 @@ Status: active architecture guardrail
 
 ## Purpose
 
-Talos is growing from a local-first knowledge engine into a controlled local
-workspace assistant. More tools are useful only if they preserve the runtime
+Talos is a local-first workspace assistant and execution harness for bounded
+local workspace work. More tools are useful only if they preserve the runtime
 discipline that already exists: approval, protected paths, checkpoints,
 evidence obligations, verification, failure-dominant output, prompt debug, and
 local traces.

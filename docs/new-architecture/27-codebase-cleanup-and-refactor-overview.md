@@ -22,7 +22,7 @@ reversible PRs without affecting current behavior.
 ### 1.1 What Talos actually is today (operational framing)
 
 For the rest of this document, "Talos" means the concrete code on
-`v0.9.0-beta-dev`, not the aspirational RAG-CLI headline:
+`v0.9.0-beta-dev`, not the older retrieval-only headline:
 
 - **Live runtime center is unified tool-driven assistance.**
   `cli/modes/AutoMode.java` is an explicit placeholder (its javadoc line 10–11
@@ -99,8 +99,8 @@ fixture plus a manifest-less `BuildInfo` fallback would eliminate all 18.
 | `tools`     | 21    | 2071 | Tool registry + concrete tools                   | OK        |
 
 **Architecture drift flagged:** `.github/assistant-instructions.md` still names
-packages as `dev.loqj.*` (lines 86–98). The actual tree is `dev.talos.*`.
-Doc is stale — fix during the first cleanup PR (doc-only, zero risk).
+pre-Talos package paths (lines 86-98). The actual tree is `dev.talos.*`.
+Doc is stale - fix during the first cleanup PR (doc-only, zero risk).
 
 ### 3.2 `cli` sub-structure — the **`cmds` vs `commands` naming collision**
 
@@ -416,7 +416,7 @@ engine-resolution seam described in §4.2 / §9.2 is in place.
 - `runtime/*` imports `core/*` and `tools/*`. Good.
 - `cli/*` depends on everything below it. Expected.
 - The **architecture drift** to be fixed is documentation-only: the
-  assistant-instructions file still talks about `dev.loqj.*` package names.
+  assistant-instructions file still talks about pre-Talos package names.
 
 ---
 
@@ -494,7 +494,7 @@ Finish #6 before starting any §9.1+ work.
 ### 9.1 Doc drift fix — zero production risk
 
 - Files: `.github/assistant-instructions.md`
-- Change: replace stale `dev.loqj.*` package references with `dev.talos.*`.
+- Change: replace stale package references with `dev.talos.*`.
 - Parity: doc-only.
 - Rollback: revert.
 
@@ -629,7 +629,7 @@ Two independent moves, either of which unblocks the 16 placeholder tests:
 Per `.github/assistant-instructions.md` and this review:
 
 - No rewrite around LangChain4j, Spring AI, or any agent framework.
-- No merging of long-term memory into LOQ-J core.
+- No merging of broad long-term memory into Talos core without a scoped design.
 - No MCP server implementation until the retrieval seam is stable.
 - No broad package reshuffles beyond the targeted ones in §9.7–9.8.
 - **No CI / quality-tooling (JaCoCo, Sonar, Qodana, CodeQL, Snyk, workflow
@@ -699,4 +699,3 @@ Per `.github/assistant-instructions.md` and this review:
      backlog §9.5 to reflect that any removal must also retire the
      `/mode` help entry and the README line atomically.
 - **2026-04-19 (rev 1)** — initial draft.
-

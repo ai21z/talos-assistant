@@ -36,9 +36,10 @@ verification, output dominance, and trace.
 
 The current README gives the correct product direction:
 
-> Talos is a local-first knowledge engine and workspace assistant.
+> Talos is a local-first CLI workspace assistant with retrieval, approval-gated file operations, traces, context handling, and verification-oriented outcomes.
 
-In practical terms, Talos should become a controlled local workspace operator:
+In practical terms, Talos should continue hardening as a controlled local
+workspace assistant:
 
 - understand a workspace;
 - inspect and retrieve local context;

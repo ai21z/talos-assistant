@@ -56,7 +56,7 @@ class ConversationCompactionTest {
             LlmClient llm = new LlmClient(placeholderConfig());
             List<ChatMessage> turns = List.of(
                     ChatMessage.user("What is Talos?"),
-                    ChatMessage.assistant("Talos is a local-first knowledge engine.")
+                    ChatMessage.assistant("Talos is a local-first workspace assistant.")
             );
             String result = ConversationCompactor.compact(null, turns, llm);
             // PLACEHOLDER mode returns something — exact text depends on implementation

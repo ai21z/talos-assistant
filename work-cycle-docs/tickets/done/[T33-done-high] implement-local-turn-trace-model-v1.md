@@ -193,7 +193,7 @@ Command:
 ```powershell
 @('/session clear','/debug trace','What files are in this folder?','/last trace','/q') |
   & 'C:\Users\arisz\AppData\Local\Programs\talos\bin\talos.bat' 2>&1 |
-  Tee-Object -FilePath 'C:\Users\arisz\Projects\LOQ\loqj-cli\local\manual-testing\T33-output.txt'
+  Tee-Object -FilePath '.\local\manual-testing\T33-output.txt'
 ```
 
 Workspace:

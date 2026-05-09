@@ -50,7 +50,7 @@ class BudgetCoordinationTest {
         assertTrue(historyTokens > 0);
 
         // Step 3: Pack snippets with history deduction
-        String system = "You are Talos, a local-first knowledge assistant. " +
+        String system = "You are Talos, a local-first workspace assistant. " +
                 "Answer clearly and concisely using the provided context.";
         String query = "Now explain how it works with Spring Boot auto-configuration?";
 

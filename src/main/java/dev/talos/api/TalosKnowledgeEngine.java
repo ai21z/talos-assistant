@@ -8,7 +8,7 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Programmatic entry point for Talos as a knowledge engine.
+ * Programmatic entry point for Talos retrieval and workspace-context services.
  * Provides a clean consumer-facing API for retrieval and question answering
  * without requiring CLI or REPL infrastructure.
  * <p>
@@ -83,7 +83,7 @@ public final class TalosKnowledgeEngine {
     // --- Request / Response value types ---
 
     /**
-     * Immutable query request to the knowledge engine.
+     * Immutable query request to the retrieval API.
      */
     public static final class QueryRequest {
         private final Path workspace;
@@ -106,7 +106,7 @@ public final class TalosKnowledgeEngine {
     }
 
     /**
-     * Immutable response from the knowledge engine.
+     * Immutable response from the retrieval API.
      * Carries typed snippets with structured metadata for richer provenance.
      * <p>
      * <strong>API compatibility note (v0.9.0):</strong>
