@@ -29,6 +29,7 @@ Talos is not:
 - a cloud-agent clone
 - a swarm
 - a background autonomous daemon
+- an open-ended shell automation system
 - just a RAG CLI
 
 ## Practical Limits
@@ -144,6 +145,8 @@ Talos has a small tool set focused on local workspace work:
 | `run_command` | run approved bounded command profiles | required |
 
 Write tools are intentionally gated. The user stays in control of the workspace.
+Talos does not provide open-ended shell automation. It supports
+approval-gated bounded command profiles where explicitly configured.
 
 ### Workspace boundary
 
@@ -395,49 +398,6 @@ High-level layout:
 ```
 
 The `local/` folder is for personal workspace material on this machine, including manual-testing notes. It is intentionally ignored by Git. Generated `reports/` are also ignored; keep only usage instructions in `reports-disabled/`.
-
-## Repository Identity Migration
-
-Current public identity:
-
-- Product name: Talos
-- Repository name: `talos-cli`
-- GitHub repository: `ai21z/talos-cli`
-- GitHub URL: `https://github.com/ai21z/talos-cli`
-- SSH URL: `git@github.com:ai21z/talos-cli.git`
-- Public description: "Local-first CLI workspace assistant with retrieval, approval-gated file operations, traces, context handling, and verification-oriented outcomes."
-
-Repository rename checklist:
-
-- Rename GitHub repository to `ai21z/talos-cli` through the GitHub UI.
-- Update local git remote:
-  ```powershell
-  git remote set-url origin https://github.com/ai21z/talos-cli.git
-  ```
-- Verify local remote:
-  ```powershell
-  git remote -v
-  ```
-- Update README links.
-- Update install docs.
-- Update scripts with hardcoded repo URLs.
-- Update docs and examples.
-- Update screenshots or captions if they mention old names.
-- Verify old GitHub links redirect.
-- Do not create a new repository using the old `loqj-cli` name, because it can interfere with GitHub redirects.
-
-Suggested GitHub topics:
-
-- `local-ai`
-- `cli`
-- `java`
-- `ollama`
-- `workspace-assistant`
-- `ai-agent`
-- `local-first`
-- `retrieval`
-- `developer-tools`
-- `verification`
 
 ## Bottom Line
 
