@@ -1,89 +1,52 @@
 # Talos
 
-Talos is a local-first CLI workspace assistant with retrieval,
-approval-gated file operations, traces, context handling, and
-verification-oriented outcomes.
+Talos is a local-first CLI workspace assistant for understanding and changing a
+developer workspace through governed local tools, approval gates, traces,
+context handling, and verification-oriented outcomes.
 
-It runs as an execution harness for local workspace work. Talos can inspect
-files, list directories, search a workspace, retrieve local indexed context,
-use local tools, ask for approval before writes or bounded commands, preserve
-local turn traces and session context, and report what was verified.
+Talos began as LOQ-J, a local RAG CLI. It has evolved into a broader local
+workspace assistant and execution harness. Retrieval remains part of the
+system, but it now sits beside file tools, workspace operations, bounded command
+profiles, session state, prompt-debug evidence, and local trace records.
 
-Talos started as LOQ-J, a local RAG CLI, and evolved into a broader local-first
-workspace assistant. Retrieval remains part of Talos, but it is no longer the
-whole product.
-
-The public release version is defined in `gradle.properties` as `talosVersion`, so the build and CLI stay aligned.
+The public release version is defined in `gradle.properties` as
+`talosVersion`, so the build and CLI stay aligned.
 
 ## Current Status
 
-Talos is under active beta hardening. It currently focuses on bounded local
-workspace tasks with explicit user control, not unattended background
-automation.
+Talos is under active beta hardening. The current beta path focuses on bounded
+local workspace tasks, explicit user control, local model execution, and
+auditable outcomes.
 
-## What Talos Is Not
-
-Talos is not:
-
-- a foundation model
-- a cloud-agent clone
-- a swarm
-- a background autonomous daemon
-- an open-ended shell automation system
-- just a RAG CLI
-
-## Practical Limits
-
-Talos is useful today, but the trust layers are still being hardened.
-
-- local model quality matters
-- setup and hardware matter
-- not all file types are supported equally
-- not every task can be semantically verified
-- the project is still evolving
-
-## Talos In One Minute
-
-Talos is built for a simple local workflow:
-
-- point it at a workspace
-- let it inspect, retrieve, and reason over that workspace
-- allow safe read-only operations automatically
-- require approval before write operations
-- preserve local traces and session context
-- report verification-oriented outcomes when checks are available
-- keep the whole loop local on your machine
-
-If you want the shortest accurate description, it is this:
-
-> Talos is a local-first CLI workspace assistant for understanding and changing a workspace, with retrieval, tools, approval gates, traces, context handling, and verification-oriented outcomes.
+The preferred model backend for the current product path is managed
+`llama.cpp`. Ollama remains available as a legacy backend option.
 
 ## How A Turn Works
 
-One Talos turn is not just "prompt in, paragraph out".
+A Talos turn is handled as an execution cycle:
 
 ```text
     .--------------------.
+    | classify request   |
+    '---------+----------'
+              |
+              v
+    .--------------------.
     | inspect workspace  |
+    | or retrieve context|
     '---------+----------'
               |
               v
     .--------------------.
-    | retrieve context   |
-    | when needed        |
+    | call allowed tools |
+    | when action is     |
+    | required           |
     '---------+----------'
               |
               v
     .--------------------.
-    | call local tools   |
-    | when the task      |
-    | needs real action  |
-    '---------+----------'
-              |
-              v
-    .--------------------.
-    | report, trace,     |
-    | and persist turn   |
+    | verify, trace,     |
+    | and report outcome |
     '--------------------'
 ```
 
@@ -93,41 +56,45 @@ In practice, a turn can include:
 - directory listing
 - grep-style search
 - retrieval from the local index
-- write or edit operations with approval
+- approved file creation and edits
+- approved workspace operations such as mkdir, copy, move, and rename
+- approved bounded command profiles
 - session-memory updates
-- trace persistence
+- prompt-debug and trace persistence
 - verification-oriented completion checks
-- persistence to session artifacts
 
-That is why calling Talos only a "RAG CLI" is misleading.
+Runtime policy decides which tools are visible for the current turn. Mutation
+tools are exposed only for apply-oriented turns, and command execution is exposed
+only for approved command or verification turns.
 
 ## What Talos Does Today
 
-At a high level, Talos currently has five main jobs:
+Talos currently supports five main workflows:
 
-1. Understand a workspace
-2. Retrieve relevant local context
-3. Use tools to inspect or change files
-4. Keep a session coherent across turns
-5. Preserve traceable outcomes for review
+1. Understand a local workspace.
+2. Retrieve relevant local context.
+3. Inspect, create, and modify workspace files through approved tools.
+4. Keep a local session coherent across turns.
+5. Preserve traceable outcomes for review.
 
-### Workspace understanding
+### Workspace Understanding
 
-Talos can answer questions about the current project, inspect specific files, list directories, search for patterns, and summarize what it finds.
+Talos can answer questions about the current project, inspect specific files,
+list directories, search for patterns, and summarize evidence from the
+workspace.
 
 ### Retrieval
 
-Talos still has a real indexing and retrieval path.
+Talos has a local indexing and retrieval path:
 
-- `rag-index` builds the local index
-- `rag-ask` asks through the retrieval pipeline directly
-- the unified assistant can also use retrieval as a tool when it needs workspace context
+- `rag-index` builds the local index.
+- `rag-ask` asks through the retrieval pipeline directly.
+- The unified assistant can use retrieval as a tool when workspace context is
+  needed.
 
-So retrieval remains important, but it now sits inside a larger assistant architecture.
+### Tool Use
 
-### Tool use
-
-Talos has a small tool set focused on local workspace work:
+Talos has a focused tool set for local workspace work:
 
 | Tool | Purpose | Approval |
 |---|---|---|
@@ -144,59 +111,65 @@ Talos has a small tool set focused on local workspace work:
 | `apply_workspace_batch` | apply a small approved batch of workspace operations | required |
 | `run_command` | run approved bounded command profiles | required |
 
-Write tools are intentionally gated. The user stays in control of the workspace.
-Talos does not provide open-ended shell automation. It supports
-approval-gated bounded command profiles where explicitly configured.
+Write tools are approval-gated. The workspace remains under user control, and
+Talos records the outcome of each governed operation.
 
-### Workspace boundary
+### Workspace Boundary
 
 Talos works inside the workspace selected when the session starts. Natural
 requests such as creating files, creating folders, copying paths, or running
 approved checks are scoped to that workspace.
 
-Talos does not currently change workspace inside an active session. The
-`/workspace` command is informational: it shows the current workspace and index
-paths, but it does not switch to another folder. To work somewhere else, start
-Talos from the folder you want to use.
+The `/workspace` command shows the current workspace and index paths. To work in
+a different folder, Talos should be started from that folder.
 
-### Session behavior
+### Session Behavior
 
-Talos now has real session behavior, not just stateless one-shot answers.
+Talos maintains local session state:
 
 - conversation history is kept in memory
 - sessions are persisted locally
 - turn logs are written for durability
 - prior session state can be restored for the same workspace
+- prompt-debug and trace artifacts can be reviewed when debugging behavior
 
-## The Main User Modes
+## Main User Modes
 
-Talos exposes multiple modes, but the most useful mental model is simple:
+Talos exposes multiple modes:
 
-- `auto`: default and recommended for most work
+- `auto`: default mode for most workspace work
 - `rag`: explicit retrieval-focused mode
-- `dev`: deterministic file/navigation commands
+- `dev`: deterministic file and navigation commands
 - `ask` and `chat`: direct assistant-style interaction
-- `web`: reserved, not a full web mode in this build
+- `web`: reserved mode in this build
 
-Auto mode is assistant-first. It uses tools and retrieval when needed instead of forcing the user to think in separate subsystems.
+Auto mode is assistant-first. It uses tools and retrieval when needed, while
+runtime policy keeps each turn bounded.
 
 ## Quick Start
 
 ### 1. Install prerequisites
 
-What you need right now:
+Current practical setup:
 
+- Windows
 - Java 21+
-- Ollama running locally
-- a local chat model in Ollama
-- an embeddings model in Ollama if you want vector retrieval
+- `llama-server.exe` from llama.cpp, or another configured local backend
+- a local GGUF chat model for the managed llama.cpp path
+- an embeddings model when vector retrieval is needed
 
-Recommended Ollama pulls:
+The default configuration uses the engine transport with `llama_cpp` as the
+default backend. Configure the llama.cpp paths in `~/.talos/config.yaml`:
 
-```powershell
-ollama pull qwen3:8b
-ollama pull bge-m3
+```yaml
+engines:
+  llama_cpp:
+    mode: "managed"
+    server_path: "C:/path/to/llama-server.exe"
+    model_path: "C:/path/to/model.gguf"
 ```
+
+Ollama can still be selected explicitly as a legacy backend when needed.
 
 ### 2. Build Talos
 
@@ -222,12 +195,14 @@ talos
 talos rag-index
 ```
 
-### 6. Ask something useful
+### 6. Ask workspace questions or request approved changes
 
 ```text
 What does this project do?
 Read README.md and explain the architecture.
+Create notes/summary.md with a short project summary.
 Change only the page title in index.html.
+Run the approved Gradle test command profile.
 ```
 
 ## Common Commands
@@ -245,7 +220,7 @@ Change only the page title in index.html.
 | `talos version` | print version information |
 | `talos setup` | first-run setup flow |
 
-### Useful REPL commands
+### Useful REPL Commands
 
 | Command | Purpose |
 |---|---|
@@ -254,7 +229,7 @@ Change only the page title in index.html.
 | `/models` | list available models |
 | `/set model <backend/model>` | switch active model |
 | `/reindex` | rebuild the current workspace index |
-| `/workspace` | show current workspace status; does not switch workspace |
+| `/workspace` | show current workspace status |
 | `/status` | show runtime and indexing details |
 | `/tools` | show the registered tool set |
 | `/session info` | inspect current session state |
@@ -263,12 +238,12 @@ Change only the page title in index.html.
 
 ## The Talos Work Cycle
 
-Talos now has a clearer work cycle for development and review.
+Talos has a structured development and review cycle:
 
-There are two loops:
-
-- a fast inner development loop
-- a slower versioned candidate loop
+- fast local implementation loop
+- normal Gradle verification
+- focused milestone audits when runtime or model behavior changes
+- larger full E2E audits before important release decisions
 
 ```text
     change code
@@ -279,66 +254,66 @@ There are two loops:
     '----------+-----------'
                |
                v
-    build -> test -> e2e -> coverage -> qodana -> review
-               ^                                        |
-               |                                        |
-               '-------- change code if needed ---------'
+    build -> test -> e2e -> audit -> review
+               ^                         |
+               |                         |
+               '---- change code if needed
 ```
 
-The short version:
-
-- iterate quickly while implementing
-- bump patch version only when you want a real review candidate
-- build evidence for that candidate as one unit
-
-The full work-cycle writeup lives here:
+The work-cycle documentation lives here:
 
 - [work-cycle-docs/work-test-cycle.md](work-cycle-docs/work-test-cycle.md)
 - [work-cycle-docs/work-test-cycle-setup.md](work-cycle-docs/work-test-cycle-setup.md)
 - [work-cycle-docs/work-test-cycle-step-by-step.md](work-cycle-docs/work-test-cycle-step-by-step.md)
+- [work-cycle-docs/milestone-audit-workflow.md](work-cycle-docs/milestone-audit-workflow.md)
+- [work-cycle-docs/full-e2e-audit-workflow.md](work-cycle-docs/full-e2e-audit-workflow.md)
 
 Post-0.9.6 architecture direction is documented in
 [docs/architecture/01-execution-discipline-and-local-trust.md](docs/architecture/01-execution-discipline-and-local-trust.md).
 
-## What You Need To Run Talos Well
+## Running Talos Well
 
 ### Hardware
 
-Talos can run on modest hardware, but better local models need more RAM.
+Talos can run on modest hardware. Larger local models need more RAM and more
+time.
 
 Practical guidance:
 
-- small local models: comfortable on typical developer machines
-- larger local models: more RAM and patience required
-- SSD strongly recommended for smoother indexing and local model work
+- small local models are comfortable on typical developer machines
+- larger local models benefit from more RAM and faster CPUs/GPUs
+- SSD storage is strongly recommended for smoother indexing and model work
 
 ### Software
 
-Current practical setup is:
+Current practical setup:
 
-- Windows is the most supported day-to-day path in this repo
+- Windows as the best-supported day-to-day path in this repo
 - Java 21+
-- Ollama on the same machine
+- managed llama.cpp for the primary local model path
+- Ollama as an optional legacy backend
 
-### Network expectations
+### Network Expectations
 
-Talos is local-first.
+Talos is local-first:
 
-- your workspace data is intended to stay local
-- Talos talks to Ollama over localhost
-- you still need to download models ahead of time
+- workspace data is intended to stay local
+- local model backends are expected to run on the same machine or localhost
+- models must be downloaded or configured ahead of use
 
 ## Quality Reports
 
-Talos can generate reviewer-friendly Markdown quality reports from the machine-readable summaries in `build/reports/talos/`.
+Talos can generate reviewer-friendly Markdown quality reports from the
+machine-readable summaries in `build/reports/talos/`.
 
-Use this when you want local snapshots for coverage, E2E, Qodana, and build artifact provenance:
+Use this command for local snapshots of coverage, E2E, Qodana, and build
+artifact provenance:
 
 ```powershell
 ./gradlew.bat writeQualityMarkdownReports
 ```
 
-For a full fresh local quality run that refreshes native Qodana first, use:
+For a full fresh local quality run that refreshes native Qodana first:
 
 ```powershell
 ./gradlew.bat talosQualityLocal
@@ -356,29 +331,25 @@ Example:
 coverage-23042026-090.md
 ```
 
-The generated `reports/` folder is intentionally ignored by Git. The tracked `reports-disabled/README.md` explains how to use it: either create `reports/`, or rename/copy `reports-disabled/` to `reports/`. Gradle will also create `reports/` automatically when the report task runs.
+The generated `reports/` folder is intentionally ignored by Git. The tracked
+`reports-disabled/README.md` explains how to use it. Gradle also creates
+`reports/` automatically when the report task runs.
 
-Before writing new reports, the generator removes older generated report snapshots with the standard report filename pattern. Manual files with other names are preserved.
+Before writing new reports, the generator removes older generated report
+snapshots with the standard report filename pattern. Manual files with other
+names are preserved.
 
-## Current Limitations
+## Beta Scope
 
-This is the honest part.
+Talos is useful today for local workspace understanding, guarded file operations,
+and evidence-oriented developer workflows. The beta line is still being hardened
+around model reliability, command profiles, semantic verification, binary file
+support, and broader capability growth.
 
-Talos is improving, but it still has clear limits:
-
-- Windows is the best-supported operational path right now
-- the current engine path is centered on local Ollama usage
-- web mode is not a full browsing product in this build
-- local model quality still matters a lot for editing and diagnosis quality
-- setup and hardware affect latency, context size, and model choices
-- not all file types are supported equally
-- not every task can be semantically verified
-- trust layers are still being hardened
-- retrieval, tools, and session behavior are stronger than they were, but still evolving
-
-If you need a one-line status:
-
-> Talos is useful for local workspace understanding and guarded file operations, but it is still under active beta hardening.
+The strongest current path is Windows plus managed llama.cpp with explicit local
+model configuration. File and workspace operations are gated and traceable.
+Command execution is bounded to approved profiles. Unsupported or unverified
+results are reported as such.
 
 ## Repo Layout
 
@@ -397,24 +368,13 @@ High-level layout:
 `-- README.md            project overview
 ```
 
-The `local/` folder is for personal workspace material on this machine, including manual-testing notes. It is intentionally ignored by Git. Generated `reports/` are also ignored; keep only usage instructions in `reports-disabled/`.
+The `local/` folder is for personal workspace material on this machine,
+including manual-testing notes. It is intentionally ignored by Git. Generated
+`reports/` are also ignored; usage instructions are kept in `reports-disabled/`.
 
-## Bottom Line
+## Summary
 
-Talos should now be understood like this:
-
-- not just a RAG CLI
-- not just a chat shell
-- not just a file editor
-
-It is a local-first workspace assistant and execution harness that combines:
-
-- retrieval
-- local tools
-- approval-gated file operations
-- local traces
-- context handling
-- verification-oriented outcomes
-- developer-oriented CLI workflows
-
-That is the current state of Talos.
+Talos is a local-first workspace assistant and execution harness. It combines
+retrieval, local tools, approval-gated file operations, bounded command
+profiles, local traces, context handling, and verification-oriented outcomes for
+developer workspaces.
