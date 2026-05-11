@@ -196,6 +196,14 @@ public final class AssistantTurnExecutor {
         PromptDebugCapture.beginTurn();
         StringBuilder out = new StringBuilder();
         boolean streamed = false;
+        WorkspaceBoundaryPreflight workspaceBoundaryPreflight =
+                workspaceBoundaryPreflight(messages, workspace, ctx);
+        if (workspaceBoundaryPreflight.directAnswer() != null) {
+            return directTurnOutput(workspaceBoundaryPreflight.directAnswer(), ctx, opts);
+        }
+        if (workspaceBoundaryPreflight.effectiveUserRequest() != null) {
+            messages = replaceLatestUserRequest(messages, workspaceBoundaryPreflight.effectiveUserRequest());
+        }
         TaskContract rawTaskContract = TaskContractResolver.fromMessages(messages);
         ActiveTaskContextPolicy.Decision activeDecision = activeTaskContextDecision(
                 latestUserRequest(messages), rawTaskContract, ctx);
@@ -212,7 +220,8 @@ public final class AssistantTurnExecutor {
         PromptAuditSnapshot promptAudit = recordPromptAudit(currentTurnPlan, messages);
         emitPromptAuditIfEnabled(promptAudit, ctx);
         Context turnContext = ctx;
-        String directAnswer = deterministicDirectAnswerIfNeeded(messages, currentTurnPlan.taskContract(), ctx);
+        String directAnswer = deterministicDirectAnswerIfNeeded(
+                messages, currentTurnPlan.taskContract(), workspace, ctx);
         if (directAnswer != null) {
             return directTurnOutput(directAnswer, ctx, opts);
         }
@@ -293,8 +302,9 @@ public final class AssistantTurnExecutor {
                 // ── Non-streaming fallback (tests, non-interactive) ─────────
                 // Use chatFull() so native tool calls are captured too
                 // (chat() returns only String, losing native tool calls).
+                final List<ChatMessage> llmMessages = messages;
                 CompletableFuture<LlmClient.StreamResult> fut = CompletableFuture.supplyAsync(
-                        () -> chatFull(turnContext, messages, currentTurnPlan));
+                        () -> chatFull(turnContext, llmMessages, currentTurnPlan));
                 LlmClient.StreamResult streamResult;
                 try {
                     streamResult = fut.get(opts.llmTimeoutMs, TimeUnit.MILLISECONDS);
@@ -1550,9 +1560,148 @@ public final class AssistantTurnExecutor {
                 && message.content().startsWith("[Static verification repair context]");
     }
 
+    private record WorkspaceBoundaryPreflight(String directAnswer, String effectiveUserRequest) {
+        static WorkspaceBoundaryPreflight none() {
+            return new WorkspaceBoundaryPreflight(null, null);
+        }
+
+        static WorkspaceBoundaryPreflight direct(String answer) {
+            return new WorkspaceBoundaryPreflight(answer, null);
+        }
+
+        static WorkspaceBoundaryPreflight useRequest(String request) {
+            return new WorkspaceBoundaryPreflight(null, request);
+        }
+    }
+
+    private static WorkspaceBoundaryPreflight workspaceBoundaryPreflight(
+            List<ChatMessage> messages,
+            Path workspace,
+            Context ctx
+    ) {
+        if (ctx == null || ctx.memory() == null) return WorkspaceBoundaryPreflight.none();
+        String userRequest = latestUserRequest(messages);
+        if (userRequest == null || userRequest.isBlank()) return WorkspaceBoundaryPreflight.none();
+
+        SessionMemory.PendingWorkspaceMutationConfirmation pending =
+                ctx.memory().pendingWorkspaceMutationConfirmation();
+        if (pending != null) {
+            if (isWorkspaceMutationConfirmation(userRequest)) {
+                ctx.memory().clearPendingWorkspaceMutationConfirmation();
+                ctx.memory().clearFailedWorkspaceSwitch();
+                return WorkspaceBoundaryPreflight.useRequest(pending.userRequest());
+            }
+            if (isWorkspaceMutationRejection(userRequest)) {
+                ctx.memory().clearPendingWorkspaceMutationConfirmation();
+                ctx.memory().clearFailedWorkspaceSwitch();
+                return WorkspaceBoundaryPreflight.direct(
+                        "No workspace change was made. The current workspace is still "
+                                + workspaceDisplay(workspace, pending.currentWorkspace()) + ".");
+            }
+            ctx.memory().clearPendingWorkspaceMutationConfirmation();
+            ctx.memory().clearFailedWorkspaceSwitch();
+            return WorkspaceBoundaryPreflight.none();
+        }
+
+        SessionMemory.FailedWorkspaceSwitch failedSwitch = ctx.memory().failedWorkspaceSwitch();
+        if (failedSwitch == null) return WorkspaceBoundaryPreflight.none();
+        if (CapabilityAnswerPolicy.looksLikeWorkspaceSwitchRequest(userRequest)) {
+            return WorkspaceBoundaryPreflight.none();
+        }
+
+        TaskContract contract = TaskContractResolver.fromUserRequest(userRequest);
+        if (isRelativeWorkspaceMutation(contract, userRequest)) {
+            String currentWorkspace = workspaceDisplay(workspace, failedSwitch.currentWorkspace());
+            ctx.memory().recordPendingWorkspaceMutationConfirmation(userRequest, currentWorkspace);
+            return WorkspaceBoundaryPreflight.direct(
+                    "The current workspace is still " + currentWorkspace
+                            + ". Talos did not switch workspace after the previous request. "
+                            + "Confirm if you want this change applied in the current workspace: "
+                            + userRequest);
+        }
+
+        ctx.memory().clearFailedWorkspaceSwitch();
+        return WorkspaceBoundaryPreflight.none();
+    }
+
+    private static List<ChatMessage> replaceLatestUserRequest(List<ChatMessage> messages, String effectiveUserRequest) {
+        if (messages == null || messages.isEmpty()) return messages;
+        ArrayList<ChatMessage> copy = new ArrayList<>(messages);
+        for (int i = copy.size() - 1; i >= 0; i--) {
+            ChatMessage message = copy.get(i);
+            if (message != null && "user".equals(message.role())) {
+                copy.set(i, ChatMessage.user(effectiveUserRequest));
+                return copy;
+            }
+        }
+        return messages;
+    }
+
+    private static boolean isRelativeWorkspaceMutation(TaskContract contract, String userRequest) {
+        return contract != null
+                && contract.mutationAllowed()
+                && !containsAbsolutePath(userRequest);
+    }
+
+    private static boolean containsAbsolutePath(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return false;
+        String value = userRequest.strip();
+        return Pattern.compile("(?i)(?:^|\\s|[`'\"(])(?:[a-z]:[\\\\/]|\\\\\\\\|/)").matcher(value).find();
+    }
+
+    private static boolean isWorkspaceMutationConfirmation(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return false;
+        String lower = userRequest.toLowerCase(Locale.ROOT).strip();
+        if (isWorkspaceMutationRejection(lower)) return false;
+        return lower.equals("yes")
+                || lower.equals("y")
+                || lower.equals("ok")
+                || lower.equals("okay")
+                || lower.contains("yes,")
+                || lower.contains("yes ")
+                || lower.contains("go ahead")
+                || lower.contains("do it")
+                || lower.contains("apply it")
+                || lower.contains("create it")
+                || lower.contains("make it")
+                || lower.contains("current workspace")
+                || lower.contains("this workspace")
+                || lower.equals("here");
+    }
+
+    private static boolean isWorkspaceMutationRejection(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return false;
+        String lower = userRequest.toLowerCase(Locale.ROOT).strip();
+        return lower.equals("no")
+                || lower.equals("n")
+                || lower.startsWith("no,")
+                || lower.startsWith("no ")
+                || lower.contains("do not")
+                || lower.contains("don't")
+                || lower.contains("dont")
+                || lower.contains("cancel");
+    }
+
+    private static String workspaceDisplay(Path workspace, String fallback) {
+        if (workspace != null) {
+            try {
+                return workspace.toAbsolutePath().normalize().toString();
+            } catch (RuntimeException ignored) {
+                // fall through to fallback
+            }
+        }
+        return fallback == null || fallback.isBlank() ? "the original workspace" : fallback;
+    }
+
+    private static void recordFailedWorkspaceSwitch(String userRequest, Path workspace, Context ctx) {
+        if (ctx == null || ctx.memory() == null) return;
+        ctx.memory().recordFailedWorkspaceSwitch(userRequest, workspaceDisplay(workspace, ""));
+    }
+
     private static String deterministicDirectAnswerIfNeeded(
             List<ChatMessage> messages,
             TaskContract contract,
+            Path workspace,
             Context ctx
     ) {
         String userRequest = latestUserRequest(messages);
@@ -1562,6 +1711,7 @@ public final class AssistantTurnExecutor {
                 return conversationBoundaryAnswer;
             }
             if (CapabilityAnswerPolicy.looksLikeWorkspaceSwitchRequest(userRequest)) {
+                recordFailedWorkspaceSwitch(userRequest, workspace, ctx);
                 return CapabilityAnswerPolicy.workspaceSwitchUnsupportedAnswer();
             }
             if (CapabilityAnswerPolicy.looksLikeToolAliasCapabilityTurn(userRequest)) {
