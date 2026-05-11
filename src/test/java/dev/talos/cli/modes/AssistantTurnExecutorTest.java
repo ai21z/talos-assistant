@@ -3248,6 +3248,94 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void unsupportedDocxCreationRequestReturnsCapabilityAnswerWithoutProviderOrFakeFile(
+                @TempDir Path workspace) throws Exception {
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scriptedFailure(new RuntimeException("provider should not be called")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "okay I want your help with a doc file. can you create a docx file about "
+                            + "how a cool looking synthwave webpage for a band should be created?"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains("cannot create valid Microsoft Word .docx files"), out.text());
+            assertTrue(out.text().contains("No file was changed"), out.text());
+            assertFalse(out.text().contains("provider should not be called"), out.text());
+            try (var entries = Files.list(workspace)) {
+                assertTrue(entries.findAny().isEmpty(),
+                        "unsupported DOCX creation must not create a fake file");
+            }
+        }
+
+        @Test
+        void unsupportedPdfFormatRequestReturnsCapabilityAnswerWithoutProviderOrFakeFile(
+                @TempDir Path workspace) throws Exception {
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scriptedFailure(new RuntimeException("provider should not be called")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "oh I was wrong... I want you to delete the docx file and make the same thing "
+                            + "but in pdf format please."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains("cannot create valid PDF files"), out.text());
+            assertTrue(out.text().contains("No file was changed"), out.text());
+            assertFalse(out.text().contains("provider should not be called"), out.text());
+            assertFalse(Files.exists(workspace.resolve("synthwave_band_webpage.pdf")));
+        }
+
+        @Test
+        void unsupportedBinaryDocumentWriteIsRejectedBeforeApproval(@TempDir Path workspace)
+                throws Exception {
+            var approvals = new java.util.concurrent.atomic.AtomicInteger();
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.FileWriteTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null,
+                    (description, detail) -> {
+                        approvals.incrementAndGet();
+                        return true;
+                    },
+                    registry);
+            var ctx = Context.builder(new Config())
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .build();
+            var session = new dev.talos.runtime.Session(workspace, new Config());
+            var request = "Create sample.pdf containing hello.";
+
+            dev.talos.runtime.TurnUserRequestCapture.set(request);
+            dev.talos.runtime.TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            try {
+                dev.talos.tools.ToolResult result = processor.executeTool(
+                        session,
+                        new dev.talos.tools.ToolCall("talos.write_file", java.util.Map.of(
+                                "path", "sample.pdf",
+                                "content", "hello")),
+                        ctx);
+
+                assertFalse(result.success());
+                assertEquals(dev.talos.tools.ToolError.UNSUPPORTED_FORMAT, result.error().code());
+                assertTrue(result.errorMessage().contains("cannot create valid PDF files"),
+                        result.errorMessage());
+                assertEquals(0, approvals.get(), "unsupported write must not ask for approval");
+                assertFalse(Files.exists(workspace.resolve("sample.pdf")));
+            } finally {
+                dev.talos.runtime.TurnUserRequestCapture.clear();
+                dev.talos.runtime.TurnTaskContractCapture.clear();
+            }
+        }
+
+        @Test
         void smallTalkTextFallbackToolCallIsNotExecuted(@TempDir Path workspace)
                 throws Exception {
             Files.writeString(workspace.resolve("notes.md"), "Hidden project token: ALPHA-742\n");

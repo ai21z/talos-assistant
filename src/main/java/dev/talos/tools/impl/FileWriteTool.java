@@ -1,6 +1,7 @@
 package dev.talos.tools.impl;
 
 import dev.talos.core.capability.CapabilityKind;
+import dev.talos.core.ingest.UnsupportedDocumentFormats;
 import dev.talos.tools.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -105,6 +106,10 @@ public final class FileWriteTool implements TalosTool {
         if (Files.isDirectory(resolved)) {
             return ToolResult.fail(ToolError.invalidParams(
                     "Path is a directory, not a file: " + pathParam));
+        }
+        if (UnsupportedDocumentFormats.isUnsupported(resolved)) {
+            return ToolResult.fail(ToolError.unsupportedFormat(
+                    UnsupportedDocumentFormats.writeCapabilityMessage(resolved)));
         }
 
         try {

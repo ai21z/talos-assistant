@@ -31,6 +31,7 @@ import dev.talos.runtime.policy.EvidenceGate;
 import dev.talos.runtime.policy.ProviderRequestControlPolicy;
 import dev.talos.runtime.policy.ProtectedPathPolicy;
 import dev.talos.runtime.policy.ResponseObligationVerifier;
+import dev.talos.runtime.policy.UnsupportedDocumentMutationPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
@@ -1576,6 +1577,11 @@ public final class AssistantTurnExecutor {
                 && contract.type() == TaskType.SMALL_TALK
                 && looksLikeAssistantCapabilityTurn(userRequest)) {
             return CapabilityAnswerPolicy.capabilityAnswer();
+        }
+        Optional<String> unsupportedDocumentMutation =
+                UnsupportedDocumentMutationPolicy.answerIfUnsupportedMutation(contract);
+        if (unsupportedDocumentMutation.isPresent()) {
+            return unsupportedDocumentMutation.get();
         }
         String runtimeMetaEvidence = runtimeMetaEvidenceAnswerIfNeeded(ctx, userRequest, contract);
         if (runtimeMetaEvidence != null) {
