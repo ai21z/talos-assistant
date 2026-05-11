@@ -1,5 +1,9 @@
 # T240 - Workspace-Switch Confirmation Must Replay Saved Mutation Contract
 
+Status: done
+
+Closed: 2026-05-11
+
 Severity: high
 
 ## Problem
@@ -44,3 +48,16 @@ Transcript:
 - Both no-confirmation and rejection paths remain non-mutating.
 - Targeted tests and full Gradle tests pass.
 
+## Resolution
+
+- The confirmation path already replayed the saved mutation request before task-contract resolution.
+- The audit failure came from a stale `[CurrentTurnCapability]` frame retained in conversation history.
+- `AssistantTurnExecutor.execute` now always replaces existing per-turn task/capability frames before injecting the current frame.
+- The focused regression test now includes a stale read-only frame in history and asserts that the backend request contains exactly one current mutating frame for the replayed saved request.
+
+## Verification
+
+- `.\gradlew test --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$NonStreaming.confirmationAfterWorkspaceFenceAppliesSavedRelativeMutation' --no-daemon`
+- `.\gradlew test --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$NonStreaming.failedWorkspaceSwitchFencesNextRelativeFolderMutation' --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$NonStreaming.confirmationAfterWorkspaceFenceAppliesSavedRelativeMutation' --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$CurrentTurnCapabilityFramePolicyTests' --no-daemon`
+- `.\gradlew test --no-daemon`
+- `.\gradlew build --no-daemon`
