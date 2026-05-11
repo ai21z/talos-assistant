@@ -351,6 +351,15 @@ class InfraCommandsTest {
             assertTrue(r.toString().contains("Usage"));
         }
 
+        @Test void plural_models_subcommand_returns_usage_without_prefix_model_lookup() throws Exception {
+            var cmd = new SetModelCommand();
+            Result r = cmd.execute("models ollama/qwen2.5-coder:14b", ctx);
+
+            assertInstanceOf(Result.Error.class, r);
+            assertTrue(r.toString().contains("Usage"), r.toString());
+            assertFalse(r.toString().contains("sollama"), r.toString());
+        }
+
         @Test void empty_model_name_returns_error() throws Exception {
             var cmd = new SetModelCommand();
             Result r = cmd.execute("model", ctx);
