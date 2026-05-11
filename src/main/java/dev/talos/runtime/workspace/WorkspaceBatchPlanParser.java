@@ -51,6 +51,8 @@ public final class WorkspaceBatchPlanParser {
                     effects.add(WorkspaceOperationPlan.PathEffect.source(operation.sourcePath(), true, kind));
                     effects.add(WorkspaceOperationPlan.PathEffect.destination(operation.destinationPath(), true, kind));
                 }
+                case DELETE_PATH -> effects.add(WorkspaceOperationPlan.PathEffect.deleted(
+                        operation.targetPath(), true, WorkspaceOperationPlan.OperationKind.DELETE_PATH));
                 case COPY_PATH -> {
                     effects.add(WorkspaceOperationPlan.PathEffect.source(
                             operation.sourcePath(), false, WorkspaceOperationPlan.OperationKind.COPY_PATH));
@@ -64,10 +66,14 @@ public final class WorkspaceBatchPlanParser {
                 .map(WorkspaceBatchOperation::previewLine)
                 .reduce((left, right) -> left + "; " + right)
                 .orElse("batch workspace apply");
+        ToolRiskLevel risk = operations.stream().anyMatch(operation ->
+                operation.kind() == WorkspaceBatchOperation.Kind.DELETE_PATH)
+                ? ToolRiskLevel.DESTRUCTIVE
+                : ToolRiskLevel.WRITE;
         WorkspaceOperationPlan checkpointPlan = WorkspaceOperationPlan.batch(
                 WorkspaceOperationPlan.OperationKind.BATCH_APPLY,
                 effects,
-                ToolRiskLevel.WRITE,
+                risk,
                 true,
                 WorkspaceOperationPlan.OverwritePolicy.OVERWRITE,
                 true,
@@ -116,6 +122,14 @@ public final class WorkspaceBatchPlanParser {
                     bool(node, "overwrite"),
                     bool(node, "recursive"));
             case RENAME_PATH -> renameOperation(node, kind);
+            case DELETE_PATH -> new WorkspaceBatchOperation(
+                    kind,
+                    "",
+                    "",
+                    requiredPath(node, "path", "target", "file", "filename"),
+                    "",
+                    false,
+                    bool(node, "recursive"));
         };
     }
 
@@ -138,6 +152,7 @@ public final class WorkspaceBatchPlanParser {
             case "move", "mv", "move_path" -> WorkspaceBatchOperation.Kind.MOVE_PATH;
             case "copy", "cp", "copy_path" -> WorkspaceBatchOperation.Kind.COPY_PATH;
             case "rename", "rename_path" -> WorkspaceBatchOperation.Kind.RENAME_PATH;
+            case "delete", "rm", "remove", "delete_path", "remove_path" -> WorkspaceBatchOperation.Kind.DELETE_PATH;
             default -> throw new IllegalArgumentException("Unsupported batch operation: " + rawKind);
         };
     }

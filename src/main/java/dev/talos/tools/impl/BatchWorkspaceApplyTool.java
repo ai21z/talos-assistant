@@ -18,14 +18,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-/** Applies a coherent non-destructive workspace batch after one approval. */
+/** Applies a coherent workspace batch after one approval. */
 public final class BatchWorkspaceApplyTool implements TalosTool {
     private static final String NAME = "talos.apply_workspace_batch";
 
     @Override public String name() { return NAME; }
 
     @Override public String description() {
-        return "Apply a batch of non-destructive workspace operations from an operations_json string.";
+        return "Apply a batch of workspace operations from an operations_json string.";
     }
 
     @Override
@@ -33,7 +33,7 @@ public final class BatchWorkspaceApplyTool implements TalosTool {
         return new ToolDescriptor(NAME, description(),
                 """
                 {"type":"object","properties":{
-                  "operations_json":{"type":"string","description":"JSON array of operations. Supported op values: mkdir, move_path, copy_path, rename_path. Use overwrite/recursive booleans when needed."}
+                  "operations_json":{"type":"string","description":"JSON array of operations. Supported op values: mkdir, move_path, copy_path, rename_path, delete_path. Use overwrite/recursive booleans when needed."}
                 },"required":["operations_json"]}""",
                 ToolRiskLevel.WRITE,
                 ToolOperationMetadata.workspaceMutation(
@@ -123,6 +123,11 @@ public final class BatchWorkspaceApplyTool implements TalosTool {
                             "path", operation.sourcePath(),
                             "new_name", operation.newName(),
                             "overwrite", String.valueOf(operation.overwrite()))),
+                    ctx);
+            case DELETE_PATH -> new DeletePathTool().execute(
+                    new ToolCall("talos.delete_path", Map.of(
+                            "path", operation.targetPath(),
+                            "recursive", String.valueOf(operation.recursive()))),
                     ctx);
         };
     }

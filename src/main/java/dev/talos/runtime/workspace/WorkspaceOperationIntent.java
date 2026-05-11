@@ -26,12 +26,21 @@ public final class WorkspaceOperationIntent {
                     + "(?:(?:called|named|as)\\s+)?"
                     + PATH_TOKEN,
             Pattern.CASE_INSENSITIVE);
+    private static final Pattern DELETE_REQUEST = Pattern.compile(
+            "\\b(?:delete|remove|rm)\\s+" + PATH_TOKEN,
+            Pattern.CASE_INSENSITIVE);
 
     private WorkspaceOperationIntent() {}
 
     public static Optional<Intent> detect(TaskContract contract) {
         if (contract == null || !contract.mutationAllowed()) return Optional.empty();
-        return detect(contract.originalUserRequest());
+        Optional<Intent> intent = detect(contract.originalUserRequest());
+        if (intent.isPresent()
+                && intent.get().kind() == Kind.DELETE_PATH
+                && contract.expectedTargets().isEmpty()) {
+            return Optional.empty();
+        }
+        return intent;
     }
 
     public static Optional<Intent> detect(String userRequest) {
@@ -45,6 +54,7 @@ public final class WorkspaceOperationIntent {
         if (COPY_REQUEST.matcher(request).find()) return Optional.of(new Intent(Kind.COPY_PATH));
         if (RENAME_REQUEST.matcher(request).find()) return Optional.of(new Intent(Kind.RENAME_PATH));
         if (MKDIR_REQUEST.matcher(request).find()) return Optional.of(new Intent(Kind.MKDIR));
+        if (DELETE_REQUEST.matcher(request).find()) return Optional.of(new Intent(Kind.DELETE_PATH));
         return Optional.empty();
     }
 
@@ -52,7 +62,8 @@ public final class WorkspaceOperationIntent {
         MKDIR("talos.mkdir", "workspace mkdir operation surface"),
         MOVE_PATH("talos.move_path", "workspace move operation surface"),
         COPY_PATH("talos.copy_path", "workspace copy operation surface"),
-        RENAME_PATH("talos.rename_path", "workspace rename operation surface");
+        RENAME_PATH("talos.rename_path", "workspace rename operation surface"),
+        DELETE_PATH("talos.delete_path", "workspace delete operation surface");
 
         private final String toolName;
         private final String surfaceReason;

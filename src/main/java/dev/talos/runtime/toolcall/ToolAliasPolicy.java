@@ -22,6 +22,7 @@ public final class ToolAliasPolicy {
             "talos.move_path",
             "talos.copy_path",
             "talos.rename_path",
+            "talos.delete_path",
             "talos.list_dir",
             "talos.run_command",
             "talos.grep",
@@ -42,7 +43,8 @@ public final class ToolAliasPolicy {
             "talos.mkdir",
             "talos.move_path",
             "talos.copy_path",
-            "talos.rename_path"
+            "talos.rename_path",
+            "talos.delete_path"
     );
 
     private static final Map<String, AliasTarget> ALIASES = aliases();
@@ -194,6 +196,8 @@ public final class ToolAliasPolicy {
                 "copy_path", "copy", "cp");
         addAliases(out, BackendToolProfile.TALOS, "talos.rename_path",
                 "rename_path", "rename");
+        addAliases(out, BackendToolProfile.TALOS, "talos.delete_path",
+                "delete_path", "delete", "remove_path", "remove", "rm");
         addAliases(out, BackendToolProfile.TALOS, "talos.run_command",
                 "run_command", "command_run", "runcommand");
         addAliases(out, BackendToolProfile.TALOS, "talos.list_dir",
@@ -218,6 +222,7 @@ public final class ToolAliasPolicy {
         addAliases(out, profile, "talos.move_path", namespace + ":move_path", namespace + ".move_path");
         addAliases(out, profile, "talos.copy_path", namespace + ":copy_path", namespace + ".copy_path");
         addAliases(out, profile, "talos.rename_path", namespace + ":rename_path", namespace + ".rename_path");
+        addAliases(out, profile, "talos.delete_path", namespace + ":delete_path", namespace + ".delete_path");
         addAliases(out, profile, "talos.run_command", namespace + ":run_command", namespace + ".run_command");
         addAliases(out, profile, "talos.list_dir", namespace + ":list_dir", namespace + ".list_dir");
         addAliases(out, profile, "talos.grep", namespace + ":grep", namespace + ".grep");

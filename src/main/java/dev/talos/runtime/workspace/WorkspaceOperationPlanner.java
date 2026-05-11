@@ -19,7 +19,8 @@ public final class WorkspaceOperationPlanner {
                 || "mkdir".equals(canonical)
                 || "move_path".equals(canonical)
                 || "copy_path".equals(canonical)
-                || "rename_path".equals(canonical);
+                || "rename_path".equals(canonical)
+                || "delete_path".equals(canonical);
     }
 
     public static Optional<WorkspaceOperationPlan> checkpointPlan(ToolCall call) {
@@ -30,6 +31,7 @@ public final class WorkspaceOperationPlanner {
             case "move_path" -> movePlan(call);
             case "copy_path" -> copyPlan(call);
             case "rename_path" -> renamePlan(call);
+            case "delete_path" -> deletePlan(call);
             default -> Optional.empty();
         };
     }
@@ -45,6 +47,10 @@ public final class WorkspaceOperationPlanner {
             case "move_path" -> validateTwoPathOperation(call, "talos.move_path");
             case "copy_path" -> validateTwoPathOperation(call, "talos.copy_path");
             case "rename_path" -> validateRename(call);
+            case "delete_path" -> requirePath(call, "path", "target", "file", "filename").isPresent()
+                    ? Optional.empty()
+                    : Optional.of("Invalid talos.delete_path call: missing required parameter `path`. "
+                            + "No approval was requested and no file was changed.");
             default -> Optional.empty();
         };
     }
@@ -119,6 +125,11 @@ public final class WorkspaceOperationPlanner {
                 false,
                 "Rename " + normalizePath(source.get()) + " to " + normalizePath(destination) + ".",
                 "Rename: " + normalizePath(source.get()) + " -> " + normalizePath(destination)));
+    }
+
+    private static Optional<WorkspaceOperationPlan> deletePlan(ToolCall call) {
+        return requirePath(call, "path", "target", "file", "filename")
+                .map(path -> WorkspaceOperationPlan.deletePath(path, boolParam(call, "recursive")));
     }
 
     private static Optional<String> validateTwoPathOperation(ToolCall call, String toolName) {

@@ -143,6 +143,72 @@ class WorkspaceOperationToolsTest {
                 invalid.errorMessage());
     }
 
+    @Test
+    void deletePathDeletesFileAndExposesDestructiveMetadata(@TempDir Path workspace) throws Exception {
+        Files.createDirectories(workspace.resolve("docs"));
+        Files.writeString(workspace.resolve("docs/old-plan.md"), "delete me");
+        var tool = new DeletePathTool();
+
+        ToolResult result = tool.execute(
+                new ToolCall("talos.delete_path", Map.of("path", "docs/old-plan.md")),
+                context(workspace));
+
+        assertTrue(result.success(), result.errorMessage());
+        assertFalse(Files.exists(workspace.resolve("docs/old-plan.md")));
+        assertTrue(result.output().contains("Deleted docs/old-plan.md"), result.output());
+
+        ToolOperationMetadata metadata = tool.descriptor().operationMetadata();
+        assertEquals(CapabilityKind.DELETE, metadata.capabilityKind());
+        assertEquals(ToolRiskLevel.DESTRUCTIVE, metadata.riskLevel());
+        assertTrue(metadata.mutatesWorkspace());
+        assertTrue(metadata.requiresApproval());
+        assertTrue(metadata.requiresCheckpoint());
+        assertTrue(metadata.destructive());
+        assertEquals(Map.of("path", ToolOperationMetadata.PathRole.TARGET_PATH), metadata.pathRoles());
+    }
+
+    @Test
+    void deletePathRejectsMissingPathDirectoryWithoutRecursiveAndWorkspaceEscape(@TempDir Path workspace)
+            throws Exception {
+        Files.createDirectories(workspace.resolve("docs/nested"));
+        Files.writeString(workspace.resolve("docs/nested/file.txt"), "nested");
+        var tool = new DeletePathTool();
+
+        ToolResult missing = tool.execute(
+                new ToolCall("talos.delete_path", Map.of("path", "missing.txt")),
+                context(workspace));
+        assertFalse(missing.success());
+        assertTrue(missing.errorMessage().contains("Path not found"), missing.errorMessage());
+
+        ToolResult directoryWithoutRecursive = tool.execute(
+                new ToolCall("talos.delete_path", Map.of("path", "docs")),
+                context(workspace));
+        assertFalse(directoryWithoutRecursive.success());
+        assertTrue(directoryWithoutRecursive.errorMessage().contains("recursive=true"),
+                directoryWithoutRecursive.errorMessage());
+        assertTrue(Files.exists(workspace.resolve("docs/nested/file.txt")));
+
+        ToolResult escape = tool.execute(
+                new ToolCall("talos.delete_path", Map.of("path", "../outside.txt")),
+                context(workspace));
+        assertFalse(escape.success());
+        assertTrue(escape.errorMessage().contains("Path not allowed"), escape.errorMessage());
+    }
+
+    @Test
+    void deletePathDeletesDirectoryOnlyWhenRecursiveIsExplicit(@TempDir Path workspace) throws Exception {
+        Files.createDirectories(workspace.resolve("docs/nested"));
+        Files.writeString(workspace.resolve("docs/nested/file.txt"), "nested");
+        var tool = new DeletePathTool();
+
+        ToolResult result = tool.execute(
+                new ToolCall("talos.delete_path", Map.of("path", "docs", "recursive", "true")),
+                context(workspace));
+
+        assertTrue(result.success(), result.errorMessage());
+        assertFalse(Files.exists(workspace.resolve("docs")));
+    }
+
     private static ToolContext context(Path workspace) {
         return new ToolContext(
                 workspace,

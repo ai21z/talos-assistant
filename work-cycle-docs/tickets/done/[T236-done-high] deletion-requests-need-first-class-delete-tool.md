@@ -1,6 +1,6 @@
 # T236 - Deletion Requests Need First-Class Delete Tool
 
-Status: open
+Status: done
 Priority: high
 
 ## Evidence Summary
@@ -64,6 +64,17 @@ workspace.
 - The model is not encouraged to emulate deletion by writing empty content.
 - `apply_workspace_batch` either supports `delete_path` explicitly or rejects it
   with a deterministic product-level answer before model drift causes damage.
+
+## Completion Notes
+
+- Added `talos.delete_path` as a destructive workspace operation.
+- Explicit delete requests now receive a delete-only tool surface.
+- `apply_workspace_batch` now supports `delete_path` and marks delete batches
+  destructive for approval/checkpoint planning.
+- Directory deletion requires explicit `recursive=true`; workspace-root and
+  sandbox escapes are blocked.
+- Added direct tool, batch, planner, alias, verifier, and executor tests.
+- Verification: `.\gradlew test`.
 
 ## Non-Goals
 

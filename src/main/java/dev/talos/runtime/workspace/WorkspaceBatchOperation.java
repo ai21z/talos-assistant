@@ -25,6 +25,7 @@ public record WorkspaceBatchOperation(
             case MKDIR -> List.of(targetPath);
             case MOVE_PATH, COPY_PATH -> List.of(sourcePath, destinationPath);
             case RENAME_PATH -> List.of(sourcePath, destinationPath);
+            case DELETE_PATH -> List.of(targetPath);
         };
     }
 
@@ -34,6 +35,7 @@ public record WorkspaceBatchOperation(
             case MOVE_PATH -> "move " + sourcePath + " -> " + destinationPath;
             case COPY_PATH -> "copy " + sourcePath + " -> " + destinationPath;
             case RENAME_PATH -> "rename " + sourcePath + " -> " + destinationPath;
+            case DELETE_PATH -> "delete " + targetPath;
         };
     }
 
@@ -41,6 +43,7 @@ public record WorkspaceBatchOperation(
         return switch (kind) {
             case MKDIR -> targetPath;
             case MOVE_PATH, COPY_PATH, RENAME_PATH -> sourcePath + " -> " + destinationPath;
+            case DELETE_PATH -> targetPath;
         };
     }
 
@@ -52,6 +55,7 @@ public record WorkspaceBatchOperation(
         MKDIR,
         MOVE_PATH,
         COPY_PATH,
-        RENAME_PATH
+        RENAME_PATH,
+        DELETE_PATH
     }
 }
