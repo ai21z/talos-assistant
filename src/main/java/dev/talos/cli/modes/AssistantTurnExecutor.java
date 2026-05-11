@@ -201,6 +201,7 @@ public final class AssistantTurnExecutor {
         if (workspaceBoundaryPreflight.directAnswer() != null) {
             return directTurnOutput(workspaceBoundaryPreflight.directAnswer(), ctx, opts);
         }
+        boolean workspaceBoundaryReplayedRequest = workspaceBoundaryPreflight.effectiveUserRequest() != null;
         if (workspaceBoundaryPreflight.effectiveUserRequest() != null) {
             messages = replaceLatestUserRequest(messages, workspaceBoundaryPreflight.effectiveUserRequest());
         }
@@ -212,7 +213,10 @@ public final class AssistantTurnExecutor {
                 activeDecisionUpdatesTurnSurface(rawTaskContract, activeDecision);
         applyActiveTaskMemoryDecision(activeDecision, ctx);
         initializeExecutionPhaseForTurn(taskContract, ctx);
-        ctx = withNativeToolSurface(ctx, taskContract, activeDecisionUpdatesTurnSurface);
+        ctx = withNativeToolSurface(
+                ctx,
+                taskContract,
+                activeDecisionUpdatesTurnSurface || workspaceBoundaryReplayedRequest);
         CurrentTurnPlan currentTurnPlan = buildCurrentTurnPlan(taskContract, ctx, activeDecision);
         recordPolicyTrace(currentTurnPlan, ctx);
         injectTaskContractInstruction(messages, currentTurnPlan, true);
@@ -2459,11 +2463,20 @@ public final class AssistantTurnExecutor {
                 .anyMatch(outcome -> "talos.read_file".equals(canonicalToolName(outcome.toolName()))
                         && outcome.success()
                         && normalizedTarget.equals(ToolCallSupport.normalizePath(outcome.pathHint())));
-        String userRequest = latestUserRequest(safePlanFromMessages(plan, messages, null), messages);
-        if (!targetRead || !needsReadTargetFallback(answer, userRequest)) return "";
+        if (!targetRead) return "";
         String body = latestToolResultBodyByCanonical(loopResult.messages(), "talos.read_file");
         if (body.isBlank()) return "";
+        String userRequest = latestUserRequest(safePlanFromMessages(plan, messages, null), messages);
+        boolean fallbackNeeded = needsReadTargetFallback(answer, userRequest);
         String directAnswer = deterministicDirectReadTargetAnswer(userRequest, target, body);
+        if (!directAnswer.isBlank()) {
+            Boolean modelConclusion = yesNoConclusion(answer);
+            Boolean literalConclusion = directAnswer.startsWith("Yes.");
+            if (fallbackNeeded || (modelConclusion != null && !modelConclusion.equals(literalConclusion))) {
+                return directAnswer;
+            }
+        }
+        if (!fallbackNeeded) return "";
         return directAnswer.isBlank() ? "Read " + target + ":\n" + body : directAnswer;
     }
 
@@ -2505,7 +2518,9 @@ public final class AssistantTurnExecutor {
                 || lower.startsWith("was ")
                 || lower.startsWith("were ")
                 || lower.startsWith("can ")
-                || lower.startsWith("could ");
+                || lower.startsWith("could ")
+                || lower.contains(" tell me if ")
+                || lower.startsWith("tell me if ");
         boolean evidenceVerb = lower.contains(" mention")
                 || lower.contains(" mentions")
                 || lower.contains(" contain")
@@ -2532,6 +2547,24 @@ public final class AssistantTurnExecutor {
                 || lower.contains(" isn't ")
                 || lower.contains(" are not ")
                 || lower.contains(" aren't ");
+    }
+
+    private static Boolean yesNoConclusion(String answer) {
+        if (answer == null || answer.isBlank()) return null;
+        String lower = answer.strip().toLowerCase(Locale.ROOT);
+        if (lower.startsWith("yes")) return true;
+        if (lower.startsWith("no")) return false;
+        if (lower.contains(" does not ")
+                || lower.contains(" doesn't ")
+                || lower.contains(" do not ")
+                || lower.contains(" don't ")
+                || lower.contains(" is not ")
+                || lower.contains(" isn't ")
+                || lower.contains(" are not ")
+                || lower.contains(" aren't ")) {
+            return false;
+        }
+        return null;
     }
 
     private static String deterministicDirectReadTargetAnswer(
