@@ -922,6 +922,67 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void readOnlyDirectEvidenceQuestionReplacesApologyNonAnswer(@TempDir Path workspace) throws Exception {
+            Files.createDirectories(workspace.resolve("docs"));
+            Files.writeString(workspace.resolve("docs/summary.md"),
+                    "Public release summary only.\nNo private markers are included here.\n");
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"docs/summary.md\"}}",
+                            "I apologize for the confusion. Let's proceed with the task as originally requested.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Does docs/summary.md mention the private notes marker?"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains("No. docs/summary.md does not mention"), out.text());
+            assertTrue(out.text().contains("docs/summary.md"), out.text());
+            assertFalse(out.text().toLowerCase(java.util.Locale.ROOT).contains("let's proceed"), out.text());
+            assertFalse(out.text().toLowerCase(java.util.Locale.ROOT).contains("apologize"), out.text());
+        }
+
+        @Test
+        void readOnlyDirectEvidenceQuestionKeepsConcreteModelAnswer(@TempDir Path workspace) throws Exception {
+            Files.createDirectories(workspace.resolve("docs"));
+            Files.writeString(workspace.resolve("docs/summary.md"),
+                    "Public release summary only.\nNo private markers are included here.\n");
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"docs/summary.md\"}}",
+                            "No, docs/summary.md does not mention the private notes marker.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Does docs/summary.md mention the private notes marker?"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains("No, docs/summary.md does not mention the private notes marker."),
+                    out.text());
+            assertFalse(out.text().contains("Read docs/summary.md:"), out.text());
+        }
+
+        @Test
         void summarizeSourceIntoFileReadsSourceThenWritesTarget(@TempDir Path workspace) throws Exception {
             Files.writeString(workspace.resolve("long-notes.txt"), """
                     - Alice shipped the prototype.

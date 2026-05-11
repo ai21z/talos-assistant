@@ -1,5 +1,9 @@
 # T242 - Read-Only Evidence Answers Must Not Complete With Non-Answers
 
+Status: done
+
+Closed: 2026-05-11
+
 Severity: medium-high
 
 ## Problem
@@ -41,3 +45,16 @@ Transcript:
 - Existing ordinary read-only workspace explanations still work.
 - Targeted tests and full Gradle tests pass.
 
+## Resolution
+
+- Read-target answer shaping now detects obvious apology/task-restatement non-answers.
+- Direct yes/no evidence questions now require a yes/no-style conclusion after the target file is read.
+- If the model read the required target but failed to answer, Talos derives a narrow deterministic answer from the inspected readback for simple direct evidence questions such as "Does file.md mention X?"
+- Concrete model answers are preserved.
+
+## Verification
+
+- `.\gradlew test --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$NonStreaming.readOnlyDirectEvidenceQuestionReplacesApologyNonAnswer' --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$NonStreaming.readOnlyDirectEvidenceQuestionKeepsConcreteModelAnswer' --no-daemon`
+- `.\gradlew test --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$NonStreaming.readOnlyDirectEvidenceQuestionReplacesApologyNonAnswer' --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$NonStreaming.readOnlyDirectEvidenceQuestionKeepsConcreteModelAnswer' --tests dev.talos.runtime.policy.EvidenceObligationVerifierTest --tests dev.talos.runtime.policy.EvidenceObligationPolicyTest --tests dev.talos.runtime.policy.EvidenceGateTest --no-daemon`
+- `.\gradlew test --no-daemon`
+- `.\gradlew build --no-daemon`

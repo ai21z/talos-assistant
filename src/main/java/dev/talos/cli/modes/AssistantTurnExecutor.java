@@ -2459,12 +2459,15 @@ public final class AssistantTurnExecutor {
                 .anyMatch(outcome -> "talos.read_file".equals(canonicalToolName(outcome.toolName()))
                         && outcome.success()
                         && normalizedTarget.equals(ToolCallSupport.normalizePath(outcome.pathHint())));
-        if (!targetRead || !needsReadTargetFallback(answer)) return "";
+        String userRequest = latestUserRequest(safePlanFromMessages(plan, messages, null), messages);
+        if (!targetRead || !needsReadTargetFallback(answer, userRequest)) return "";
         String body = latestToolResultBodyByCanonical(loopResult.messages(), "talos.read_file");
-        return body.isBlank() ? "" : "Read " + target + ":\n" + body;
+        if (body.isBlank()) return "";
+        String directAnswer = deterministicDirectReadTargetAnswer(userRequest, target, body);
+        return directAnswer.isBlank() ? "Read " + target + ":\n" + body : directAnswer;
     }
 
-    private static boolean needsReadTargetFallback(String answer) {
+    private static boolean needsReadTargetFallback(String answer, String userRequest) {
         if (answer == null || answer.isBlank()) return true;
         String lower = answer.toLowerCase(Locale.ROOT);
         return answer.contains("<function-name>")
@@ -2472,8 +2475,97 @@ public final class AssistantTurnExecutor {
                 || answer.contains("[Tool-call limit reached.")
                 || answer.contains("You already gathered this information")
                 || lower.contains("i cannot answer")
+                || obviousReadOnlyNonAnswer(lower)
+                || (isDirectYesNoEvidenceQuestion(userRequest) && !answerContainsYesNoConclusion(lower))
                 || ToolCallParser.looksLikeMalformedProtocolArrayDebris(answer)
                 || ToolCallParser.looksLikeMalformedToolProtocol(answer);
+    }
+
+    private static boolean obviousReadOnlyNonAnswer(String lowerAnswer) {
+        if (lowerAnswer == null || lowerAnswer.isBlank()) return true;
+        boolean apology = lowerAnswer.contains("i apologize")
+                || lowerAnswer.contains("sorry for the confusion")
+                || lowerAnswer.contains("apologies");
+        boolean taskRestatement = lowerAnswer.contains("let's proceed")
+                || lowerAnswer.contains("as originally requested")
+                || lowerAnswer.contains("proceed with the task")
+                || lowerAnswer.contains("how can i assist")
+                || lowerAnswer.contains("what would you like me to do");
+        return apology && taskRestatement;
+    }
+
+    private static boolean isDirectYesNoEvidenceQuestion(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return false;
+        String lower = userRequest.toLowerCase(Locale.ROOT).strip();
+        boolean yesNoLead = lower.startsWith("does ")
+                || lower.startsWith("do ")
+                || lower.startsWith("did ")
+                || lower.startsWith("is ")
+                || lower.startsWith("are ")
+                || lower.startsWith("was ")
+                || lower.startsWith("were ")
+                || lower.startsWith("can ")
+                || lower.startsWith("could ");
+        boolean evidenceVerb = lower.contains(" mention")
+                || lower.contains(" mentions")
+                || lower.contains(" contain")
+                || lower.contains(" contains")
+                || lower.contains(" include")
+                || lower.contains(" includes")
+                || lower.contains(" reference")
+                || lower.contains(" references");
+        return yesNoLead && evidenceVerb;
+    }
+
+    private static boolean answerContainsYesNoConclusion(String lowerAnswer) {
+        if (lowerAnswer == null || lowerAnswer.isBlank()) return false;
+        String lower = lowerAnswer.strip().toLowerCase(Locale.ROOT);
+        return lower.startsWith("yes")
+                || lower.startsWith("no")
+                || lower.contains("\nyes")
+                || lower.contains("\nno")
+                || lower.contains(" does not ")
+                || lower.contains(" doesn't ")
+                || lower.contains(" do not ")
+                || lower.contains(" don't ")
+                || lower.contains(" is not ")
+                || lower.contains(" isn't ")
+                || lower.contains(" are not ")
+                || lower.contains(" aren't ");
+    }
+
+    private static String deterministicDirectReadTargetAnswer(
+            String userRequest,
+            String target,
+            String body
+    ) {
+        if (!isDirectYesNoEvidenceQuestion(userRequest) || body == null || body.isBlank()) return "";
+        String term = directEvidenceSearchTerm(userRequest);
+        if (term.isBlank()) return "";
+        boolean present = normalizedEvidenceText(body).contains(normalizedEvidenceText(term));
+        String quotedTerm = "\"" + term + "\"";
+        return (present ? "Yes. " : "No. ")
+                + target
+                + (present ? " mentions " : " does not mention ")
+                + quotedTerm
+                + " in the inspected content.";
+    }
+
+    private static String directEvidenceSearchTerm(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return "";
+        var matcher = Pattern.compile(
+                "(?i)\\b(?:mention|mentions|contain|contains|include|includes|reference|references)\\s+"
+                        + "(?:the\\s+|a\\s+|an\\s+)?(.+?)(?:[?.!]|$)")
+                .matcher(userRequest.strip());
+        if (!matcher.find()) return "";
+        String term = matcher.group(1) == null ? "" : matcher.group(1).strip();
+        term = term.replaceAll("(?i)\\s+(?:in|inside|from)\\s+`?[A-Za-z0-9_.\\\\/-]+`?$", "").strip();
+        return term;
+    }
+
+    private static String normalizedEvidenceText(String value) {
+        if (value == null || value.isBlank()) return "";
+        return value.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", "");
     }
 
     private static boolean isContentInspectionTool(String toolName) {
