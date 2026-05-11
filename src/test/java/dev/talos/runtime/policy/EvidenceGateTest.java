@@ -120,4 +120,23 @@ class EvidenceGateTest {
                 EvidenceObligation.UNSUPPORTED_CAPABILITY_CHECK_REQUIRED,
                 workspace));
     }
+
+    @Test
+    void sourceEvidenceTargetsDriveHandoffInsteadOfMutationTargets(@TempDir Path workspace) {
+        TaskContract contract = new TaskContract(
+                TaskType.FILE_CREATE,
+                true,
+                true,
+                true,
+                Set.of("docs/summary.md"),
+                Set.of("long-notes.txt"),
+                Set.of(),
+                "Summarize long-notes.txt into docs/summary.md.",
+                "explicit-source-to-target-artifact-request");
+
+        assertEquals(List.of("long-notes.txt"), EvidenceGate.handoffTargets(
+                contract,
+                EvidenceObligation.READ_TARGET_REQUIRED,
+                workspace));
+    }
 }

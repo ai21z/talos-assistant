@@ -711,6 +711,91 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void summarizeSourceIntoFileReadsSourceThenWritesTarget(@TempDir Path workspace) throws Exception {
+            Files.writeString(workspace.resolve("long-notes.txt"), """
+                    - Alice shipped the prototype.
+                    - Beta users asked for clearer onboarding.
+                    - Next step is to publish a short release note.
+                    """);
+            Files.writeString(workspace.resolve(".env"), "SECRET_MARKER=do-not-read");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            var undoStack = new dev.talos.tools.FileUndoStack();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"long-notes.txt\"}}\n"
+                                    + "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"docs/summary.md\","
+                                    + "\"content\":\"- Prototype shipped.\\n- Onboarding needs clearer guidance.\\n"
+                                    + "- Publish a short release note next.\"}}",
+                            "Created docs/summary.md from long-notes.txt.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Summarize long-notes.txt into docs/summary.md. "
+                            + "Keep it under 8 bullets and do not read protected files."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(Files.exists(workspace.resolve("docs/summary.md")), out.text());
+            String summary = Files.readString(workspace.resolve("docs/summary.md"));
+            assertTrue(summary.contains("Prototype shipped."), summary);
+            assertFalse(summary.contains("SECRET_MARKER"), summary);
+            assertTrue(out.text().contains("[Used 2 tool(s): talos.read_file, talos.write_file"), out.text());
+            assertFalse(out.text().contains("[Evidence incomplete"), out.text());
+            List<String> frames = messages.stream()
+                    .filter(AssistantTurnExecutorTest::isCurrentTurnCapabilityFrame)
+                    .map(ChatMessage::content)
+                    .toList();
+            assertEquals(1, frames.size(), frames.toString());
+            assertTrue(frames.getFirst().contains("requiredTargets: docs/summary.md"), frames.getFirst());
+            assertTrue(frames.getFirst().contains("sourceTargets: long-notes.txt"), frames.getFirst());
+            assertFalse(frames.getFirst().contains(".env"), frames.getFirst());
+        }
+
+        @Test
+        void summarizeSourceIntoFileWithoutSourceReadIsEvidenceIncomplete(@TempDir Path workspace) throws Exception {
+            Files.writeString(workspace.resolve("long-notes.txt"), "Grounded source text.");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            var undoStack = new dev.talos.tools.FileUndoStack();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"docs/summary.md\","
+                                    + "\"content\":\"- Ungrounded summary.\"}}",
+                            "Created docs/summary.md.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Summarize long-notes.txt into docs/summary.md."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(Files.exists(workspace.resolve("docs/summary.md")));
+            assertTrue(out.text().contains("[Evidence incomplete"), out.text());
+            assertTrue(out.text().contains("long-notes.txt"), out.text());
+            assertFalse(out.text().contains("[File write/readback passed"), out.text());
+        }
+
+        @Test
         void explicitMutationNoToolCapabilityDenialRetriesAndExecutesWrite(@TempDir Path workspace)
                 throws Exception {
             var registry = new dev.talos.tools.ToolRegistry();

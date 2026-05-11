@@ -331,6 +331,14 @@ class ToolSurfacePlannerTest {
                         ExecutionPhase.APPLY));
 
         assertEquals(
+                List.of("talos.apply_workspace_batch", "talos.copy_path", "talos.edit_file", "talos.grep", "talos.list_dir",
+                        "talos.mkdir", "talos.move_path", "talos.read_file", "talos.rename_path", "talos.retrieve",
+                        "talos.write_file"),
+                ToolSurfacePlanner.defaultVisibleToolNames(
+                        TaskContractResolver.fromUserRequest("Summarize long-notes.txt into docs/summary.md."),
+                        ExecutionPhase.APPLY));
+
+        assertEquals(
                 List.of("talos.grep", "talos.list_dir", "talos.read_file", "talos.retrieve", "talos.run_command"),
                 ToolSurfacePlanner.defaultVisibleToolNames(
                         TaskContractResolver.fromUserRequest("verify that the Gradle build passes"),

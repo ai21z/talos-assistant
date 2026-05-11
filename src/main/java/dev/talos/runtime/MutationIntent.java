@@ -2,8 +2,11 @@ package dev.talos.runtime;
 
 import dev.talos.runtime.toolcall.ToolCallSupport;
 
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -115,9 +118,40 @@ public final class MutationIntent {
                     + "(?:readme|license|notice|changelog|contributing|authors|makefile|dockerfile))"
                     + "|(?:(?:[a-z0-9_.\\\\/-]+/)?\\.env(?:\\.[a-z0-9_.-]+)?))`?)";
 
+    private static final String CAPTURED_FILE_TARGET =
+            "`?((?:(?:[a-z0-9_.\\\\/-]+\\."
+                    + "(?:html|htm|css|js|jsx|ts|tsx|java|md|txt|json|yaml|yml|xml|"
+                    + "properties|gradle|kts|toml|ini|env|csv|pdf|doc|docx|xls|xlsx|ppt|pptx))"
+                    + "|(?:(?:[a-z0-9_.\\\\/-]+/)?"
+                    + "(?:readme|license|notice|changelog|contributing|authors|makefile|dockerfile))"
+                    + "|(?:(?:[a-z0-9_.\\\\/-]+/)?\\.env(?:\\.[a-z0-9_.-]+)?)))`?";
+
     private static final Pattern MUTATION_VERB_WITH_FILE_TARGET = Pattern.compile(
             "\\b" + CORE_MUTATION_VERBS + "\\s+(?:only\\s+)?" + EXPLICIT_FILE_TARGET
                     + "(?=$|\\s|[`'\"),;:!?\\]])");
+
+    private static final Pattern SUMMARIZE_SOURCE_TO_TARGET = Pattern.compile(
+            "\\b(?:summarize|summarise|condense|"
+                    + "write\\s+(?:a\\s+)?summary\\s+of|"
+                    + "create\\s+(?:a\\s+)?summary\\s+of|"
+                    + "make\\s+(?:a\\s+)?summary\\s+of)\\s+"
+                    + "(?:the\\s+)?(?:file\\s+)?"
+                    + CAPTURED_FILE_TARGET
+                    + "\\s+(?:into|to|as|in)\\s+"
+                    + "(?:the\\s+)?(?:file\\s+)?"
+                    + CAPTURED_FILE_TARGET
+                    + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))",
+            Pattern.CASE_INSENSITIVE);
+
+    private static final Pattern READ_THEN_WRITE_SUMMARY_TO_TARGET = Pattern.compile(
+            "\\b(?:read|inspect|open)\\s+(?:the\\s+)?(?:file\\s+)?"
+                    + CAPTURED_FILE_TARGET
+                    + ".{0,180}?\\b(?:write|create|save|put|summarize|summarise)\\b"
+                    + ".{0,120}?\\b(?:summary|summarized|summarised)?\\s*"
+                    + "(?:into|to|as|in)\\s+(?:the\\s+)?(?:file\\s+)?"
+                    + CAPTURED_FILE_TARGET
+                    + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))",
+            Pattern.CASE_INSENSITIVE);
 
     private static final Pattern REVIEW_THEN_MUTATION_REQUEST = Pattern.compile(
             "\\b(?:review|inspect|check|diagnose|look\\s+at)\\b.{0,160}"
@@ -144,6 +178,13 @@ public final class MutationIntent {
 
     private MutationIntent() {}
 
+    public record SourceToTargetArtifact(Set<String> sourceTargets, Set<String> outputTargets) {
+        public SourceToTargetArtifact {
+            sourceTargets = sourceTargets == null ? Set.of() : Set.copyOf(sourceTargets);
+            outputTargets = outputTargets == null ? Set.of() : Set.copyOf(outputTargets);
+        }
+    }
+
     public static boolean looksExplicitMutationRequest(String userRequest) {
         return isExplicitMutationClassificationReason(classificationReason(userRequest));
     }
@@ -158,6 +199,7 @@ public final class MutationIntent {
         if (looksInstructionalMutationQuestion(lower)) return "instructional-mutation-question";
         if (looksReviewThenMutationRequest(lower)) return "explicit-review-and-fix-request";
         if (looksExplicitBatchWorkspaceApplyRequest(lower)) return "explicit-batch-workspace-apply-request";
+        if (sourceToTargetArtifact(userRequest).isPresent()) return "explicit-source-to-target-artifact-request";
         for (Pattern pattern : REQUEST_PATTERNS) {
             if (pattern.matcher(lower).find()) return "explicit-request-pattern";
         }
@@ -172,6 +214,14 @@ public final class MutationIntent {
     public static boolean isExplicitMutationClassificationReason(String reason) {
         if (reason == null || reason.isBlank()) return false;
         return reason.startsWith("explicit-") || "natural-artifact-request".equals(reason);
+    }
+
+    public static Optional<SourceToTargetArtifact> sourceToTargetArtifact(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return Optional.empty();
+        String request = userRequest.trim();
+        Optional<SourceToTargetArtifact> direct = sourceToTargetArtifact(SUMMARIZE_SOURCE_TO_TARGET.matcher(request));
+        if (direct.isPresent()) return direct;
+        return sourceToTargetArtifact(READ_THEN_WRITE_SUMMARY_TO_TARGET.matcher(request));
     }
 
     public static boolean looksPriorChangeStatusQuestion(String userRequest) {
@@ -207,6 +257,30 @@ public final class MutationIntent {
 
     private static boolean looksExplicitFileTargetMutation(String lower) {
         return lower != null && MUTATION_VERB_WITH_FILE_TARGET.matcher(lower).find();
+    }
+
+    private static Optional<SourceToTargetArtifact> sourceToTargetArtifact(Matcher matcher) {
+        if (matcher == null || !matcher.find()) return Optional.empty();
+        String source = normalizeArtifactPath(matcher.group(1));
+        String output = normalizeArtifactPath(matcher.group(2));
+        if (source.isBlank() || output.isBlank() || source.equals(output)) return Optional.empty();
+        LinkedHashSet<String> sources = new LinkedHashSet<>();
+        LinkedHashSet<String> outputs = new LinkedHashSet<>();
+        sources.add(source);
+        outputs.add(output);
+        return Optional.of(new SourceToTargetArtifact(sources, outputs));
+    }
+
+    private static String normalizeArtifactPath(String value) {
+        if (value == null || value.isBlank()) return "";
+        String normalized = ToolCallSupport.normalizePath(value).strip();
+        while (normalized.startsWith("./")) {
+            normalized = normalized.substring(2);
+        }
+        while (normalized.length() > 1 && ".,;:!?)]}".indexOf(normalized.charAt(normalized.length() - 1)) >= 0) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        return normalized;
     }
 
     private static boolean looksReviewThenMutationRequest(String lower) {

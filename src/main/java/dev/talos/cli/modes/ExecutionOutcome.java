@@ -855,7 +855,7 @@ record ExecutionOutcome(
         TaskContract contract = plan.taskContract();
         return EvidenceObligationVerifier.verify(
                 obligation,
-                contract == null ? java.util.Set.of() : contract.expectedTargets(),
+                evidenceTargets(contract),
                 toolOutcomes,
                 workspace);
     }
@@ -1273,8 +1273,17 @@ record ExecutionOutcome(
 
     private static String targetSentence(CurrentTurnPlan plan) {
         TaskContract contract = plan == null ? null : plan.taskContract();
-        if (contract == null || contract.expectedTargets().isEmpty()) return "";
-        return " Required target(s): " + String.join(", ", contract.expectedTargets()) + ".";
+        Set<String> targets = evidenceTargets(contract);
+        if (targets.isEmpty()) return "";
+        return " Required target(s): " + String.join(", ", targets) + ".";
+    }
+
+    private static Set<String> evidenceTargets(TaskContract contract) {
+        if (contract == null) return Set.of();
+        if (!contract.sourceEvidenceTargets().isEmpty()) {
+            return contract.sourceEvidenceTargets();
+        }
+        return contract.expectedTargets();
     }
 
     private static List<ToolCallLoop.ToolOutcome> evidenceOutcomes(ToolCallLoop.LoopResult loopResult) {

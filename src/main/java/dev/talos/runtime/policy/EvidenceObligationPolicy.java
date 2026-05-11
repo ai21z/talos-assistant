@@ -27,11 +27,17 @@ public final class EvidenceObligationPolicy {
         if (hasUnsupportedDocumentTarget(contract)) {
             return EvidenceObligation.UNSUPPORTED_CAPABILITY_CHECK_REQUIRED;
         }
+        if (hasSourceEvidenceTargets(contract) && hasProtectedExpectedTarget(contract, workspace)) {
+            return EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED;
+        }
         if (!contract.mutationAllowed() && hasProtectedExpectedTarget(contract, workspace)) {
             return EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED;
         }
         if (hasStaticWebDiagnosisObligation(contract, type)) {
             return EvidenceObligation.STATIC_WEB_DIAGNOSIS_REQUIRED;
+        }
+        if (contract.mutationAllowed() && hasSourceEvidenceTargets(contract)) {
+            return EvidenceObligation.READ_TARGET_REQUIRED;
         }
         if (!contract.mutationAllowed() && !contract.expectedTargets().isEmpty()) {
             return EvidenceObligation.READ_TARGET_REQUIRED;
@@ -52,7 +58,7 @@ public final class EvidenceObligationPolicy {
     }
 
     private static boolean hasUnsupportedDocumentTarget(TaskContract contract) {
-        for (String target : contract.expectedTargets()) {
+        for (String target : evidenceTargets(contract)) {
             if (UnsupportedDocumentFormats.isUnsupported(Path.of(target))) {
                 return true;
             }
@@ -61,12 +67,22 @@ public final class EvidenceObligationPolicy {
     }
 
     private static boolean hasProtectedExpectedTarget(TaskContract contract, Path workspace) {
-        for (String target : contract.expectedTargets()) {
+        for (String target : evidenceTargets(contract)) {
             if (ProtectedPathPolicy.classify(workspace, target).protectedPath()) {
                 return true;
             }
         }
         return false;
+    }
+
+    private static boolean hasSourceEvidenceTargets(TaskContract contract) {
+        return contract != null && !contract.sourceEvidenceTargets().isEmpty();
+    }
+
+    private static Iterable<String> evidenceTargets(TaskContract contract) {
+        if (contract == null) return java.util.Set.of();
+        if (!contract.sourceEvidenceTargets().isEmpty()) return contract.sourceEvidenceTargets();
+        return contract.expectedTargets();
     }
 
     private static boolean hasStaticWebDiagnosisObligation(TaskContract contract, TaskType type) {
