@@ -5,6 +5,8 @@ import dev.talos.runtime.task.TaskContract;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.regex.Pattern;
 
 /** Detects simple explicit workspace organization operations from the current user request. */
@@ -21,8 +23,8 @@ public final class WorkspaceOperationIntent {
             "\\brename\\s+" + PATH_TOKEN + "\\s+(?:to|as)\\s+" + PATH_TOKEN,
             Pattern.CASE_INSENSITIVE);
     private static final Pattern MKDIR_REQUEST = Pattern.compile(
-            "\\b(?:mkdir|make\\s+(?:(?:a|an)\\s+)?(?:new\\s+)?(?:directory|dir|folder)"
-                    + "|create\\s+(?:(?:a|an)\\s+)?(?:new\\s+)?(?:directory|dir|folder))\\s+"
+            "\\b(?:mkdir|make\\s+(?:(?:a|an)\\s+)?(?:new\\s+)?(?:directories|directory|dirs|dir|folders|folder)"
+                    + "|create\\s+(?:(?:a|an)\\s+)?(?:new\\s+)?(?:directories|directory|dirs|dir|folders|folder))\\s+"
                     + "(?:(?:called|named|as)\\s+)?"
                     + PATH_TOKEN,
             Pattern.CASE_INSENSITIVE);
@@ -50,6 +52,16 @@ public final class WorkspaceOperationIntent {
         if (lower.contains("apply_workspace_batch") || lower.contains("operations_json")) {
             return Optional.empty();
         }
+        List<Kind> kinds = new ArrayList<>();
+        if (MKDIR_REQUEST.matcher(request).find()) kinds.add(Kind.MKDIR);
+        if (COPY_REQUEST.matcher(request).find()) kinds.add(Kind.COPY_PATH);
+        if (RENAME_REQUEST.matcher(request).find()) kinds.add(Kind.RENAME_PATH);
+        if (MOVE_REQUEST.matcher(request).find()) kinds.add(Kind.MOVE_PATH);
+        if (DELETE_REQUEST.matcher(request).find()) kinds.add(Kind.DELETE_PATH);
+        LinkedHashSet<Kind> distinctKinds = new LinkedHashSet<>(kinds);
+        if (distinctKinds.size() > 1) {
+            return Optional.of(Intent.compound(List.copyOf(distinctKinds)));
+        }
         if (MOVE_REQUEST.matcher(request).find()) return Optional.of(new Intent(Kind.MOVE_PATH));
         if (COPY_REQUEST.matcher(request).find()) return Optional.of(new Intent(Kind.COPY_PATH));
         if (RENAME_REQUEST.matcher(request).find()) return Optional.of(new Intent(Kind.RENAME_PATH));
@@ -63,7 +75,8 @@ public final class WorkspaceOperationIntent {
         MOVE_PATH("talos.move_path", "workspace move operation surface"),
         COPY_PATH("talos.copy_path", "workspace copy operation surface"),
         RENAME_PATH("talos.rename_path", "workspace rename operation surface"),
-        DELETE_PATH("talos.delete_path", "workspace delete operation surface");
+        DELETE_PATH("talos.delete_path", "workspace delete operation surface"),
+        COMPOUND("talos.apply_workspace_batch", "compound workspace operation surface");
 
         private final String toolName;
         private final String surfaceReason;
@@ -86,19 +99,35 @@ public final class WorkspaceOperationIntent {
         }
     }
 
-    public record Intent(Kind kind) {
+    public record Intent(Kind kind, List<String> toolNames, String surfaceReason) {
         public Intent {
             if (kind == null) {
                 throw new IllegalArgumentException("kind must not be null");
             }
+            toolNames = List.copyOf(toolNames == null ? kind.toolNames() : toolNames);
+            surfaceReason = surfaceReason == null ? kind.surfaceReason() : surfaceReason;
+        }
+
+        public Intent(Kind kind) {
+            this(kind, kind == null ? List.of() : kind.toolNames(), kind == null ? "" : kind.surfaceReason());
+        }
+
+        static Intent compound(List<Kind> kinds) {
+            LinkedHashSet<String> names = new LinkedHashSet<>();
+            names.add("talos.apply_workspace_batch");
+            for (Kind kind : kinds == null ? List.<Kind>of() : kinds) {
+                if (kind == null || kind == Kind.COMPOUND) continue;
+                names.add(kind.toolName());
+            }
+            return new Intent(Kind.COMPOUND, List.copyOf(names), Kind.COMPOUND.surfaceReason());
         }
 
         public List<String> toolNames() {
-            return kind.toolNames();
+            return toolNames;
         }
 
         public String surfaceReason() {
-            return kind.surfaceReason();
+            return surfaceReason;
         }
     }
 }

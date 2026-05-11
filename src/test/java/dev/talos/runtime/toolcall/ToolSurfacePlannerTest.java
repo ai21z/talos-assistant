@@ -122,6 +122,26 @@ class ToolSurfacePlannerTest {
     }
 
     @Test
+    void compoundWorkspaceOperationRequestsExposeBatchAndRequiredOperationTools() {
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                TaskContractResolver.fromUserRequest(
+                        "Create folders assets and drafts, copy docs/summary.md to drafts/summary-copy.md, "
+                                + "rename it to summary-renamed.md, then move it to assets/summary-renamed.md."),
+                ExecutionPhase.APPLY,
+                registry());
+
+        assertEquals(
+                List.of(
+                        "talos.apply_workspace_batch",
+                        "talos.copy_path",
+                        "talos.mkdir",
+                        "talos.move_path",
+                        "talos.rename_path"),
+                plan.nativeToolNames());
+        assertEquals("compound workspace operation surface", plan.reason());
+    }
+
+    @Test
     void naturalDirectoryCreationRequestsExposeOnlyMkdirTool() {
         for (String request : List.of(
                 "Create a new dir called workspace-notes.",

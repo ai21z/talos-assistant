@@ -1,5 +1,9 @@
 # T241 - Compound Workspace Operation Tool Surface Must Be Complete And Enforced
 
+Status: done
+
+Closed: 2026-05-11
+
 Severity: high
 
 ## Problem
@@ -39,3 +43,17 @@ Transcript:
 - The changed-files summary remains runtime-owned and accurate.
 - Targeted tests and full Gradle tests pass.
 
+## Resolution
+
+- `WorkspaceOperationIntent` now detects compound workspace-operation turns instead of collapsing them to the first single operation.
+- Compound workspace operation turns expose `talos.apply_workspace_batch` plus the required individual workspace tools (`talos.mkdir`, `talos.copy_path`, `talos.rename_path`, `talos.move_path`, and `talos.delete_path` only when a delete operation is requested).
+- `TurnProcessor` now enforces the current `Context.nativeToolSpecs()` allowlist before executing a registered tool. A registered but hidden tool is rejected with a deterministic `DENIED` result and trace block instead of being executed.
+- The phase-policy test harness now wires the same registry into `Context` that it gives to `TurnProcessor`, matching production planning assumptions.
+
+## Verification
+
+- `.\gradlew test --tests dev.talos.runtime.toolcall.ToolSurfacePlannerTest.compoundWorkspaceOperationRequestsExposeBatchAndRequiredOperationTools --tests dev.talos.core.llm.AssistantTurnExecutorNativeToolSurfaceTest.compoundWorkspaceTurnSendsCompleteWorkspaceOperationSurface --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$NonStreaming.hiddenWorkspaceOperationToolIsRejectedBeforeExecution' --no-daemon`
+- `.\gradlew test --tests dev.talos.runtime.toolcall.ToolSurfacePlannerTest --tests dev.talos.core.llm.AssistantTurnExecutorNativeToolSurfaceTest --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$NonStreaming.hiddenWorkspaceOperationToolIsRejectedBeforeExecution' --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$NonStreaming.compoundWorkspaceOperationCanApplyBatchThroughVisibleSurface' --no-daemon`
+- `.\gradlew test --tests dev.talos.cli.modes.AssistantTurnExecutorPhasePolicyTest.explicitMutationTurnStartsInApplyAndMovesToVerifyAfterSuccessfulMutation --no-daemon`
+- `.\gradlew test --no-daemon`
+- `.\gradlew build --no-daemon`

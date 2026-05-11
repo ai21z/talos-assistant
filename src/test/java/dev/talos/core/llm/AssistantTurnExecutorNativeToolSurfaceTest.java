@@ -11,6 +11,8 @@ import dev.talos.tools.FileUndoStack;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
+import dev.talos.tools.impl.BatchWorkspaceApplyTool;
+import dev.talos.tools.impl.DeletePathTool;
 import dev.talos.tools.impl.CopyPathTool;
 import dev.talos.tools.impl.MakeDirectoryTool;
 import dev.talos.tools.impl.MovePathTool;
@@ -118,16 +120,40 @@ class AssistantTurnExecutorNativeToolSurfaceTest {
         assertEquals(List.of("talos.move_path"), toolNames(resolver.lastRequest));
     }
 
+    @Test
+    void compoundWorkspaceTurnSendsCompleteWorkspaceOperationSurface() {
+        RecordingResolver resolver = new RecordingResolver();
+        Context ctx = context(resolver);
+
+        AssistantTurnExecutor.execute(
+                messages("Create folders assets and drafts, copy docs/summary.md to drafts/summary-copy.md, "
+                        + "rename it to summary-renamed.md, then move it to assets/summary-renamed.md."),
+                Path.of("."),
+                ctx,
+                new AssistantTurnExecutor.Options());
+
+        assertEquals(
+                List.of(
+                        "talos.apply_workspace_batch",
+                        "talos.copy_path",
+                        "talos.mkdir",
+                        "talos.move_path",
+                        "talos.rename_path"),
+                toolNames(resolver.lastRequest));
+    }
+
     private static Context context(RecordingResolver resolver) {
         ToolRegistry registry = new ToolRegistry();
         FileUndoStack undoStack = new FileUndoStack();
         registry.register(new ReadFileTool());
         registry.register(new FileWriteTool(undoStack));
         registry.register(new FileEditTool(undoStack));
+        registry.register(new BatchWorkspaceApplyTool());
         registry.register(new MakeDirectoryTool());
         registry.register(new MovePathTool());
         registry.register(new CopyPathTool());
         registry.register(new RenamePathTool());
+        registry.register(new DeletePathTool());
 
         LlmClient llm = new LlmClient(engineConfig(), resolver);
         llm.setToolSpecs(registry.descriptors().stream()
