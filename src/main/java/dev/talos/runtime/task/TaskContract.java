@@ -15,6 +15,7 @@ public record TaskContract(
         boolean mutationAllowed,
         boolean verificationRequired,
         Set<String> expectedTargets,
+        Set<String> sourceEvidenceTargets,
         Set<String> forbiddenTargets,
         String originalUserRequest,
         String classificationReason
@@ -34,14 +35,38 @@ public record TaskContract(
                 mutationAllowed,
                 verificationRequired,
                 expectedTargets,
+                Set.of(),
                 forbiddenTargets,
                 originalUserRequest,
                 "");
     }
 
+    public TaskContract(
+            TaskType type,
+            boolean mutationRequested,
+            boolean mutationAllowed,
+            boolean verificationRequired,
+            Set<String> expectedTargets,
+            Set<String> forbiddenTargets,
+            String originalUserRequest,
+            String classificationReason
+    ) {
+        this(
+                type,
+                mutationRequested,
+                mutationAllowed,
+                verificationRequired,
+                expectedTargets,
+                Set.of(),
+                forbiddenTargets,
+                originalUserRequest,
+                classificationReason);
+    }
+
     public TaskContract {
         type = type == null ? TaskType.UNKNOWN : type;
         expectedTargets = expectedTargets == null ? Set.of() : Set.copyOf(expectedTargets);
+        sourceEvidenceTargets = sourceEvidenceTargets == null ? Set.of() : Set.copyOf(sourceEvidenceTargets);
         forbiddenTargets = forbiddenTargets == null ? Set.of() : Set.copyOf(forbiddenTargets);
         originalUserRequest = originalUserRequest == null ? "" : originalUserRequest;
         classificationReason = classificationReason == null ? "" : classificationReason;
@@ -53,6 +78,7 @@ public record TaskContract(
                 false,
                 false,
                 false,
+                Set.of(),
                 Set.of(),
                 Set.of(),
                 userRequest,

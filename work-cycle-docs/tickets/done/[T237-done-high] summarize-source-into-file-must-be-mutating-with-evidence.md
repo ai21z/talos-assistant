@@ -1,6 +1,6 @@
 # T237 - Summarize Source Into File Must Be Mutating With Evidence
 
-Status: open
+Status: done
 Priority: high
 
 ## Evidence Summary
@@ -75,3 +75,20 @@ evidence gathering.
 - E2E: `docs/summary.md` exists after approval and does not include protected
   marker content from unrelated protected files.
 - Denied protected source read blocks without writing.
+
+## Resolution
+
+- Added source evidence targets to the task contract so source reads are no
+  longer mixed with mutation targets.
+- Classified explicit source-to-target summary requests as `FILE_CREATE`.
+- Rendered `[SourceEvidenceTargets]` in the current-turn capability frame.
+- Evidence verification now checks source evidence targets for these mixed
+  read/write turns.
+- Added executor coverage for successful source-read plus target-write, and
+  containment when the model writes without first reading the source.
+
+## Verification
+
+- `.\gradlew test --tests dev.talos.runtime.task.TaskContractResolverTest --tests dev.talos.runtime.policy.EvidenceObligationPolicyTest --tests dev.talos.runtime.policy.EvidenceGateTest --tests dev.talos.runtime.policy.CurrentTurnCapabilityFrameTest --tests dev.talos.runtime.toolcall.ToolSurfacePlannerTest --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$NonStreaming.summarizeSourceIntoFileReadsSourceThenWritesTarget' --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$NonStreaming.summarizeSourceIntoFileWithoutSourceReadIsEvidenceIncomplete'`
+- `.\gradlew test`
+- `.\gradlew build`

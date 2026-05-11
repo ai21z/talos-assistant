@@ -79,6 +79,7 @@ public final class CurrentTurnCapabilityFrame {
                 .append("obligation: ").append(obligation.name()).append('\n')
                 .append("evidenceObligation: ").append(evidence.name()).append('\n');
         appendExpectedTargets(frame, contract, mutationAllowed, obligation);
+        appendSourceEvidenceTargets(frame, contract, mutationAllowed);
         appendActiveTaskContext(frame, activeTaskContext, artifactGoal);
         appendProposalApplyGuidance(frame, activeTaskContext, artifactGoal, mutationAllowed);
         appendTaskExpectations(frame, taskExpectations);
@@ -225,6 +226,34 @@ public final class CurrentTurnCapabilityFrame {
 
     private static List<String> orderedExpectedTargets(TaskContract contract) {
         Set<String> expected = contract.expectedTargets();
+        String request = contract.originalUserRequest() == null
+                ? ""
+                : contract.originalUserRequest().toLowerCase(java.util.Locale.ROOT);
+        return expected.stream()
+                .sorted(Comparator
+                        .comparingInt((String target) -> targetIndex(request, target))
+                        .thenComparing(Comparator.naturalOrder()))
+                .toList();
+    }
+
+    private static void appendSourceEvidenceTargets(
+            StringBuilder frame,
+            TaskContract contract,
+            boolean mutationAllowed
+    ) {
+        if (!mutationAllowed || contract == null || contract.sourceEvidenceTargets().isEmpty()) {
+            return;
+        }
+        List<String> targets = orderedSourceEvidenceTargets(contract);
+        frame.append("[SourceEvidenceTargets]\n")
+                .append("sourceTargets: ").append(String.join(", ", targets)).append('\n')
+                .append("Read these exact source target paths before writing or editing the requested output target(s).\n")
+                .append("Use the source content only for the requested derived artifact.\n")
+                .append("Do not read protected or unrelated files unless the user explicitly named them as source targets.\n");
+    }
+
+    private static List<String> orderedSourceEvidenceTargets(TaskContract contract) {
+        Set<String> expected = contract.sourceEvidenceTargets();
         String request = contract.originalUserRequest() == null
                 ? ""
                 : contract.originalUserRequest().toLowerCase(java.util.Locale.ROOT);

@@ -283,8 +283,16 @@ public final class TaskContractResolver {
         boolean mutationAllowed = mutationRequested
                 && (type == TaskType.FILE_EDIT || type == TaskType.FILE_CREATE);
         boolean verificationRequired = mutationAllowed || type == TaskType.VERIFY_ONLY;
+        MutationIntent.SourceToTargetArtifact sourceToTargetArtifact =
+                MutationIntent.sourceToTargetArtifact(original).orElse(null);
         Set<String> forbiddenTargets = extractForbiddenTargets(original);
         Set<String> expectedTargets = extractExpectedTargets(original);
+        Set<String> sourceEvidenceTargets = sourceToTargetArtifact == null
+                ? Set.of()
+                : sourceToTargetArtifact.sourceTargets();
+        if (sourceToTargetArtifact != null && !sourceToTargetArtifact.outputTargets().isEmpty()) {
+            expectedTargets = sourceToTargetArtifact.outputTargets();
+        }
         if (mutationRequested && "explicit-batch-workspace-apply-request".equals(classificationReason)) {
             Set<String> batchTargets = extractBatchWorkspaceExpectedTargets(original);
             if (!batchTargets.isEmpty()) {
@@ -300,6 +308,7 @@ public final class TaskContractResolver {
         Set<String> readForbiddenTargets = extractReadForbiddenTargets(original);
         if (!readForbiddenTargets.isEmpty()) {
             expectedTargets = withoutForbiddenTargets(expectedTargets, readForbiddenTargets);
+            sourceEvidenceTargets = withoutForbiddenTargets(sourceEvidenceTargets, readForbiddenTargets);
         }
 
         return new TaskContract(
@@ -308,6 +317,7 @@ public final class TaskContractResolver {
                 mutationAllowed,
                 verificationRequired,
                 expectedTargets,
+                sourceEvidenceTargets,
                 forbiddenTargets,
                 original,
                 sessionMetaEvidenceQuestion
@@ -449,6 +459,9 @@ public final class TaskContractResolver {
         if (mutationRequested) {
             if ("explicit-review-and-fix-request".equals(classificationReason)) {
                 return TaskType.FILE_EDIT;
+            }
+            if ("explicit-source-to-target-artifact-request".equals(classificationReason)) {
+                return TaskType.FILE_CREATE;
             }
             return containsAny(lower, CREATE_MARKERS) ? TaskType.FILE_CREATE : TaskType.FILE_EDIT;
         }

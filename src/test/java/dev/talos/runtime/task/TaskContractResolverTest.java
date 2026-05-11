@@ -702,6 +702,29 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void summarizeSourceIntoFileSeparatesSourceEvidenceFromMutationTarget() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Summarize long-notes.txt into docs/summary.md. "
+                        + "Keep it under 8 bullets and do not read protected files.");
+
+        assertEquals(TaskType.FILE_CREATE, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("docs/summary.md"), contract.expectedTargets());
+        assertEquals(Set.of("long-notes.txt"), contract.sourceEvidenceTargets());
+    }
+
+    @Test
+    void summarizeSourceIntoFilePreservesRequestedPathSpelling() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Summarize README.md into Docs/Summary.md.");
+
+        assertEquals(Set.of("Docs/Summary.md"), contract.expectedTargets());
+        assertEquals(Set.of("README.md"), contract.sourceEvidenceTargets());
+    }
+
+    @Test
     void negatedReadTargetsAreRemovedWithoutDroppingPositiveTargets() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Read README.md and notes.md, but do not inspect secrets.env.");

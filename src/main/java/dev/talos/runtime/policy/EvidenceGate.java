@@ -43,11 +43,12 @@ public final class EvidenceGate {
             EvidenceObligation obligation,
             Path workspace
     ) {
-        if (contract == null || workspace == null || contract.expectedTargets().isEmpty()) {
+        List<String> evidenceTargets = evidenceTargets(contract);
+        if (contract == null || workspace == null || evidenceTargets.isEmpty()) {
             return List.of();
         }
         LinkedHashSet<String> targets = new LinkedHashSet<>();
-        for (String target : contract.expectedTargets()) {
+        for (String target : evidenceTargets) {
             if (target == null || target.isBlank()) continue;
             boolean protectedTarget = ProtectedPathPolicy.classify(workspace, target).protectedPath();
             if (obligation == EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED) {
@@ -63,9 +64,10 @@ public final class EvidenceGate {
     }
 
     public static boolean hasOnlyUnsupportedExpectedTargets(TaskContract contract) {
-        if (contract == null || contract.expectedTargets().isEmpty()) return false;
+        List<String> evidenceTargets = evidenceTargets(contract);
+        if (contract == null || evidenceTargets.isEmpty()) return false;
         boolean sawTarget = false;
-        for (String target : contract.expectedTargets()) {
+        for (String target : evidenceTargets) {
             if (target == null || target.isBlank()) continue;
             sawTarget = true;
             if (!isUnsupportedExpectedTarget(target)) return false;
@@ -74,11 +76,12 @@ public final class EvidenceGate {
     }
 
     public static List<String> protectedExpectedTargets(TaskContract contract, Path workspace) {
-        if (contract == null || workspace == null || contract.expectedTargets().isEmpty()) {
+        List<String> evidenceTargets = evidenceTargets(contract);
+        if (contract == null || workspace == null || evidenceTargets.isEmpty()) {
             return List.of();
         }
         LinkedHashSet<String> targets = new LinkedHashSet<>();
-        for (String target : contract.expectedTargets()) {
+        for (String target : evidenceTargets) {
             if (target == null || target.isBlank()) continue;
             if (ProtectedPathPolicy.classify(workspace, target).protectedPath()) {
                 targets.add(target);
@@ -98,6 +101,14 @@ public final class EvidenceGate {
             }
         }
         return false;
+    }
+
+    static List<String> evidenceTargets(TaskContract contract) {
+        if (contract == null) return List.of();
+        if (!contract.sourceEvidenceTargets().isEmpty()) {
+            return List.copyOf(contract.sourceEvidenceTargets());
+        }
+        return List.copyOf(contract.expectedTargets());
     }
 
     static boolean isUnsupportedExpectedTarget(String target) {

@@ -82,6 +82,26 @@ class EvidenceObligationPolicyTest {
     }
 
     @Test
+    void sourceToTargetMutationRequiresReadingSourceEvidence() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Summarize long-notes.txt into docs/summary.md.");
+
+        assertEquals(
+                EvidenceObligation.READ_TARGET_REQUIRED,
+                EvidenceObligationPolicy.derive(contract, ExecutionPhase.APPLY, WORKSPACE));
+    }
+
+    @Test
+    void protectedSourceToTargetMutationRequiresProtectedReadApproval() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Summarize .env into docs/secret-summary.md.");
+
+        assertEquals(
+                EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED,
+                EvidenceObligationPolicy.derive(contract, ExecutionPhase.APPLY, WORKSPACE));
+    }
+
+    @Test
     void noWorkspaceSmallTalkHasNoEvidenceObligation() {
         TaskContract contract = new TaskContract(
                 TaskType.SMALL_TALK,
