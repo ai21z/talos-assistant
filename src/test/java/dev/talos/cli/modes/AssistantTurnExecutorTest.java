@@ -768,13 +768,21 @@ class AssistantTurnExecutorTest {
                                     java.util.Map.of("path", "should-not-be-on-desktop")))),
                             new LlmClient.StreamResult("Created should-not-be-on-desktop.", List.of())),
                     4096);
+            ToolSpec staleRead = new ToolSpec(
+                    "talos.read_file",
+                    "Read a file.",
+                    "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}");
+            ToolSpec staleList = new ToolSpec(
+                    "talos.list_dir",
+                    "List a directory.",
+                    "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}");
             var ctx = Context.builder(new Config())
                     .llm(recorded.client())
                     .memory(memory)
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
                     .toolRegistry(registry)
                     .toolCallLoop(loop)
-                    .nativeToolSpecs(List.of(mkdir))
+                    .nativeToolSpecs(List.of(staleRead, staleList))
                     .build();
 
             var switchMessages = new ArrayList<ChatMessage>();
@@ -819,6 +827,7 @@ class AssistantTurnExecutorTest {
             assertTrue(prompt.contains("type: FILE_CREATE"), prompt);
             assertTrue(prompt.contains("mutationAllowed: true"), prompt);
             assertTrue(prompt.contains("visibleTools: talos.mkdir"), prompt);
+            assertFalse(prompt.contains("visibleTools: talos.list_dir, talos.read_file"), prompt);
             assertTrue(prompt.contains("Create folder should-not-be-on-desktop."), prompt);
             assertFalse(prompt.contains("type: WORKSPACE_EXPLAIN"), prompt);
         }
@@ -941,7 +950,8 @@ class AssistantTurnExecutorTest {
                     .build();
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
-            messages.add(ChatMessage.user("Does docs/summary.md mention the private notes marker?"));
+            messages.add(ChatMessage.user(
+                    "Read docs/summary.md and tell me if it mentions the private notes marker. Do not read notes.md or .env."));
 
             AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
                     messages, workspace, ctx, new AssistantTurnExecutor.Options());
@@ -978,6 +988,67 @@ class AssistantTurnExecutorTest {
                     messages, workspace, ctx, new AssistantTurnExecutor.Options());
 
             assertTrue(out.text().contains("No, docs/summary.md does not mention the private notes marker."),
+                    out.text());
+            assertFalse(out.text().contains("Read docs/summary.md:"), out.text());
+        }
+
+        @Test
+        void readOnlyDirectEvidenceQuestionReplacesContradictoryYesAnswer(@TempDir Path workspace) throws Exception {
+            Files.createDirectories(workspace.resolve("docs"));
+            Files.writeString(workspace.resolve("docs/summary.md"),
+                    "Avoid private notes or secrets.\nPublic summary only.\n");
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"docs/summary.md\"}}",
+                            "Yes - line 1 references the private-notes marker.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Does docs/summary.md mention the private notes marker?"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains(
+                    "No. docs/summary.md does not mention \"private notes marker\" in the inspected content."),
+                    out.text());
+            assertFalse(out.text().startsWith("Yes"), out.text());
+        }
+
+        @Test
+        void readOnlyDirectEvidenceQuestionKeepsAgreeingYesAnswer(@TempDir Path workspace) throws Exception {
+            Files.createDirectories(workspace.resolve("docs"));
+            Files.writeString(workspace.resolve("docs/summary.md"),
+                    "The private notes marker is not included in released copy.\n");
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"docs/summary.md\"}}",
+                            "Yes, docs/summary.md mentions the private notes marker.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Does docs/summary.md mention the private notes marker?"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains("Yes, docs/summary.md mentions the private notes marker."),
                     out.text());
             assertFalse(out.text().contains("Read docs/summary.md:"), out.text());
         }
