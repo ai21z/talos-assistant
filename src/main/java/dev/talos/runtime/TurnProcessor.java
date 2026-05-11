@@ -4,6 +4,7 @@ import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
 import dev.talos.core.retrieval.RetrievalTrace;
+import dev.talos.core.ingest.UnsupportedDocumentFormats;
 import dev.talos.runtime.command.CommandPlan;
 import dev.talos.runtime.phase.PhasePolicy;
 import dev.talos.runtime.command.CommandToolPlanner;
@@ -787,6 +788,11 @@ public final class TurnProcessor {
                                 + "No approval was requested and no file was changed."));
             }
 
+            ToolResult unsupportedDocumentValidation = validateUnsupportedDocumentWriteBeforeApproval(path);
+            if (unsupportedDocumentValidation != null) {
+                return unsupportedDocumentValidation;
+            }
+
             return null;
         }
 
@@ -823,6 +829,18 @@ public final class TurnProcessor {
         }
 
         return null;
+    }
+
+    private static ToolResult validateUnsupportedDocumentWriteBeforeApproval(String path) {
+        if (path == null || path.isBlank()) return null;
+        try {
+            Path candidate = Path.of(path);
+            if (!UnsupportedDocumentFormats.isUnsupported(candidate)) return null;
+            return ToolResult.fail(ToolError.unsupportedFormat(
+                    UnsupportedDocumentFormats.writeCapabilityMessage(candidate)));
+        } catch (RuntimeException ignored) {
+            return null;
+        }
     }
 
     private static ToolResult validateExpectedTargetBeforeApproval(ToolCall call, TaskContract taskContract) {

@@ -161,6 +161,20 @@ class FileWriteToolTest {
     }
 
     @Test
+    void unsupportedBinaryDocumentWriteIsRejectedWithoutCreatingFakeFile() {
+        ToolCall call = new ToolCall("talos.write_file", Map.of(
+                "path", "sample.pdf",
+                "content", "This is plain text, not a PDF."));
+        ToolResult r = tool.execute(call, ctx);
+
+        assertFalse(r.success());
+        assertEquals(ToolError.UNSUPPORTED_FORMAT, r.error().code());
+        assertTrue(r.errorMessage().contains("Unsupported binary document format: sample.pdf"));
+        assertTrue(r.errorMessage().contains("cannot create valid PDF files"));
+        assertFalse(Files.exists(workspace.resolve("sample.pdf")));
+    }
+
+    @Test
     void nullContextFails() {
         ToolCall call = new ToolCall("talos.write_file", Map.of("path", "x", "content", "y"));
         ToolResult r = tool.execute(call, null);

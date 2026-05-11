@@ -26,7 +26,13 @@ public final class UnsupportedDocumentFormats {
         String name = path.getFileName().toString();
         int dot = name.lastIndexOf('.');
         if (dot < 0 || dot == name.length() - 1) return Optional.empty();
-        String ext = name.substring(dot + 1).toLowerCase(Locale.ROOT);
+        return describeExtension(name.substring(dot + 1));
+    }
+
+    public static Optional<Format> describeExtension(String extension) {
+        if (extension == null || extension.isBlank()) return Optional.empty();
+        String ext = extension.strip().toLowerCase(Locale.ROOT);
+        if (ext.startsWith(".")) ext = ext.substring(1);
         return Optional.ofNullable(FORMATS.get(ext));
     }
 
@@ -43,6 +49,18 @@ public final class UnsupportedDocumentFormats {
                 + "Talos cannot extract " + format.contentName()
                 + " contents with the current local text-tool surface. "
                 + "Convert it to text, Markdown, CSV, or another supported text format before relying on its contents.";
+    }
+
+    public static String writeCapabilityMessage(Path path) {
+        String fileName = path == null || path.getFileName() == null
+                ? "requested file"
+                : path.getFileName().toString();
+        Format format = describe(path).orElse(new Format("", "binary document", "binary document"));
+        return "Unsupported binary document format: " + fileName + " (" + format.label() + "). "
+                + "Talos cannot create valid " + format.label()
+                + " files with the current local text-file tool surface. "
+                + "Use Markdown, plain text, HTML, CSV, or another supported text source format, "
+                + "then convert it with a dedicated document tool.";
     }
 
     public record Format(String extension, String label, String contentName) {}
