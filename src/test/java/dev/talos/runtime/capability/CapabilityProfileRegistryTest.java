@@ -52,4 +52,17 @@ class CapabilityProfileRegistryTest {
             assertEquals(RepairProfile.NONE, profile.repairProfile(), prompt);
         }
     }
+
+    @Test
+    void markdownDocumentAboutWebpageDoesNotSelectStaticWebProfile() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Create docs/synthwave-webpage-plan.md with a concise plan for a cool looking "
+                        + "synthwave webpage for a band. Use a supported text format.");
+
+        CapabilityProfile profile = CapabilityProfileRegistry.select(contract);
+
+        assertFalse(profile.staticWeb());
+        assertEquals(VerifierProfile.NONE, profile.verifierProfile());
+        assertEquals(RepairProfile.NONE, profile.repairProfile());
+    }
 }

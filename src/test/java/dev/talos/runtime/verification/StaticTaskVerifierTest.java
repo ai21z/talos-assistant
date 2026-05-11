@@ -1131,6 +1131,34 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void markdownDocumentAboutWebpageDoesNotRunStaticWebVerifier() throws Exception {
+        Files.createDirectories(workspace.resolve("docs"));
+        Files.writeString(workspace.resolve("index.html"), "<!doctype html><html><body></body></html>");
+        Files.writeString(workspace.resolve("styles.css"), "body { font-family: sans-serif; }");
+        Files.writeString(workspace.resolve("script.js"), "console.log('fixture');");
+        Files.writeString(workspace.resolve("docs/synthwave-webpage-plan.md"), """
+                # Synthwave Webpage Plan
+
+                - Use neon accent colors.
+                - Keep band tour dates easy to scan.
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Create docs/synthwave-webpage-plan.md with a concise plan for a cool looking "
+                        + "synthwave webpage for a band. Use a supported text format.",
+                loopResult(List.of(successfulWrite("docs/synthwave-webpage-plan.md", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.READBACK_ONLY, result.status());
+        assertTrue(result.summary().contains("Target/readback checks passed"), result.summary());
+        assertTrue(result.summary().contains("no task-specific static verifier was applicable"), result.summary());
+        assertTrue(result.problems().stream()
+                .noneMatch(problem -> problem.contains("web coherence could not be checked")),
+                result.problems().toString());
+    }
+
+    @Test
     void expectedTargetMatchingCanUseWindowsCaseInsensitiveSemantics() {
         assertTrue(StaticTaskVerifier.expectedTargetMatches("Index.html", "index.html", true));
         assertTrue(StaticTaskVerifier.expectedTargetMatches(".\\Index.html", "./index.html", true));

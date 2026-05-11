@@ -1689,6 +1689,55 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void markdownDocumentAboutWebpageCompletesAsReadbackOnlyNotStaticWebFailure() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-markdown-webpage-doc-");
+        try {
+            Files.createDirectories(ws.resolve("docs"));
+            Files.writeString(ws.resolve("index.html"), "<!doctype html><html><body></body></html>");
+            Files.writeString(ws.resolve("styles.css"), "body { font-family: sans-serif; }");
+            Files.writeString(ws.resolve("script.js"), "console.log('fixture');");
+            Files.writeString(ws.resolve("docs/synthwave-webpage-plan.md"), """
+                    # Synthwave Webpage Plan
+
+                    - Use neon accent colors.
+                    - Keep band tour dates easy to scan.
+                    """);
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Create docs/synthwave-webpage-plan.md with a concise plan for a cool looking "
+                            + "synthwave webpage for a band. Use a supported text format."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Created docs/synthwave-webpage-plan.md.", 1, 1,
+                    List.of("talos.write_file"), List.of(),
+                    0, 0, false, 1, List.of(),
+                    0, 0, 0, 0,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.write_file", "docs/synthwave-webpage-plan.md", true, true, false,
+                            "wrote docs/synthwave-webpage-plan.md", "", dev.talos.tools.VerificationStatus.PASS
+                    )));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "Created docs/synthwave-webpage-plan.md.", messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.READBACK_ONLY, outcome.verificationStatus());
+            assertEquals(TaskCompletionStatus.COMPLETED_UNVERIFIED, outcome.taskOutcome().completionStatus());
+            assertFalse(outcome.finalAnswer().contains("Task incomplete"), outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("Static verification failed"), outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("File write/readback passed"), outcome.finalAnswer());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void literalMismatchAfterSuccessfulWriteIsIncompleteNotReadbackOnly() throws Exception {
         Path ws = Files.createTempDirectory("talos-execution-outcome-literal-mismatch-");
         try {
