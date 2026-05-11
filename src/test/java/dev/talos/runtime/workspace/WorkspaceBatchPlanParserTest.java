@@ -59,12 +59,26 @@ class WorkspaceBatchPlanParserTest {
     }
 
     @Test
+    void parsesDeletePathAsDestructiveOperation() {
+        WorkspaceBatchPlan plan = WorkspaceBatchPlanParser.parse(
+                new ToolCall("talos.apply_workspace_batch", Map.of("operations_json", """
+                        [{"op":"delete_path","path":"README.md"}]
+                        """))).orElseThrow();
+
+        assertEquals(WorkspaceBatchOperation.Kind.DELETE_PATH, plan.operations().getFirst().kind());
+        assertEquals(dev.talos.tools.ToolRiskLevel.DESTRUCTIVE, plan.checkpointPlan().riskLevel());
+        assertTrue(plan.checkpointPlan().pathEffects().stream()
+                .anyMatch(effect -> effect.role() == WorkspaceOperationPlan.PathRole.DELETED
+                        && effect.path().equals("README.md")));
+    }
+
+    @Test
     void rejectsUnknownOperations() {
         IllegalArgumentException error = assertThrows(
                 IllegalArgumentException.class,
                 () -> WorkspaceBatchPlanParser.parse(
                         new ToolCall("talos.apply_workspace_batch", Map.of("operations_json", """
-                                [{"op":"delete_path","path":"README.md"}]
+                                [{"op":"shred_path","path":"README.md"}]
                                 """))));
 
         assertTrue(error.getMessage().contains("Unsupported batch operation"), error.getMessage());

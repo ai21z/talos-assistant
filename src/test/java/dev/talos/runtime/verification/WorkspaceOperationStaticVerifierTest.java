@@ -17,6 +17,7 @@ import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.FileUndoStack;
 import dev.talos.tools.impl.BatchWorkspaceApplyTool;
 import dev.talos.tools.impl.CopyPathTool;
+import dev.talos.tools.impl.DeletePathTool;
 import dev.talos.tools.impl.FileWriteTool;
 import dev.talos.tools.impl.MovePathTool;
 import dev.talos.tools.impl.RenamePathTool;
@@ -129,6 +130,33 @@ class WorkspaceOperationStaticVerifierTest {
         assertTrue(verification.facts().stream().anyMatch(f -> f.contains("move source absent: source.txt")),
                 verification.facts().toString());
         assertTrue(verification.facts().stream().anyMatch(f -> f.contains("rename destination exists: docs/final-source.txt")),
+                verification.facts().toString());
+    }
+
+    @Test
+    void deletePathVerifiesTargetIsAbsentFromToolLoopOutcome() throws Exception {
+        Files.createDirectories(workspace.resolve("docs"));
+        Files.writeString(workspace.resolve("docs/old-plan.md"), "delete me\n");
+
+        String request = "Delete docs/old-plan.md please.";
+        ToolCallLoop.LoopResult loopResult = runLoop(
+                request,
+                tools(new DeletePathTool()),
+                """
+                {"name":"talos.delete_path","arguments":{"path":"docs/old-plan.md"}}
+                """);
+
+        assertFalse(Files.exists(workspace.resolve("docs/old-plan.md")));
+
+        TaskVerificationResult verification = StaticTaskVerifier.verify(
+                workspace,
+                TaskContractResolver.fromUserRequest(request),
+                loopResult,
+                0);
+
+        assertEquals(TaskVerificationStatus.READBACK_ONLY, verification.status(), verification.problems().toString());
+        assertTrue(verification.problems().isEmpty(), verification.problems().toString());
+        assertTrue(verification.facts().stream().anyMatch(f -> f.contains("deleted target absent: docs/old-plan.md")),
                 verification.facts().toString());
     }
 

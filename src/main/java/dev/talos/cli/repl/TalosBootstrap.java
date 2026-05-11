@@ -32,6 +32,7 @@ import dev.talos.tools.FileUndoStack;
 import dev.talos.tools.ToolProgressSink;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.impl.BatchWorkspaceApplyTool;
+import dev.talos.tools.impl.DeletePathTool;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
 import dev.talos.tools.impl.GrepTool;
@@ -153,6 +154,7 @@ public final class TalosBootstrap {
         toolRegistry.register(new MovePathTool());
         toolRegistry.register(new CopyPathTool());
         toolRegistry.register(new RenamePathTool());
+        toolRegistry.register(new DeletePathTool());
         toolRegistry.register(new RunCommandTool());
         toolRegistry.register(new GrepTool());
         toolRegistry.register(new ListDirTool());

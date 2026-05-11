@@ -306,7 +306,7 @@ public final class TurnProcessor {
         }
 
         boolean commandTool = CommandToolPlanner.isRunCommandTool(call.toolName());
-        ToolRiskLevel risk = tool.descriptor().riskLevel();
+        ToolRiskLevel risk = effectiveRisk(tool.descriptor().riskLevel(), call);
         String userRequest = TurnUserRequestCapture.get();
         TaskContract taskContract = TurnTaskContractCapture.get();
         if (taskContract == null) {
@@ -694,6 +694,22 @@ public final class TurnProcessor {
         return toolRegistry;
     }
 
+    private static ToolRiskLevel effectiveRisk(ToolRiskLevel descriptorRisk, ToolCall call) {
+        ToolRiskLevel risk = descriptorRisk == null ? ToolRiskLevel.READ_ONLY : descriptorRisk;
+        if (call == null || !WorkspaceOperationPlanner.isWorkspaceOperationTool(call.toolName())) {
+            return risk;
+        }
+        try {
+            Optional<WorkspaceOperationPlan> plan = WorkspaceOperationPlanner.checkpointPlan(call);
+            if (plan.isPresent() && plan.get().riskLevel() == ToolRiskLevel.DESTRUCTIVE) {
+                return ToolRiskLevel.DESTRUCTIVE;
+            }
+        } catch (IllegalArgumentException ignored) {
+            // Invalid operation payloads are handled by normal pre-approval validation.
+        }
+        return risk;
+    }
+
     /**
      * Resolve the target path from a tool call, trying common parameter name variants.
      * Used for the approval gate display — even when the model uses non-canonical
@@ -851,7 +867,7 @@ public final class TurnProcessor {
                 || !ToolCallSupport.isMutatingTool(call.toolName())) {
             return null;
         }
-        String path = resolveParam(call, "path", "file_path", "filepath", "file", "filename");
+        String path = resolveParam(call, "path", "file_path", "filepath", "file", "filename", "target");
         if (path == null || path.isBlank()) {
             return null;
         }

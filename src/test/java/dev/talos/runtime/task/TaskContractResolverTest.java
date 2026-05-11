@@ -45,6 +45,18 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void deleteRequestBecomesMutationAllowedContractWithExpectedTarget() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Delete docs/synthwave-webpage-plan.md please.");
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("docs/synthwave-webpage-plan.md"), contract.expectedTargets());
+    }
+
+    @Test
     void staticWebImportChoiceQuestionTargetsIndexNotCandidateScripts() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Which file does index.html import for the BMI script, script.js or scripts.js?");

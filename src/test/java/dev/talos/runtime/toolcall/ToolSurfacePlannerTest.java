@@ -13,6 +13,7 @@ import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.ToolResult;
 import dev.talos.tools.ToolRiskLevel;
 import dev.talos.tools.impl.BatchWorkspaceApplyTool;
+import dev.talos.tools.impl.DeletePathTool;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
 import dev.talos.tools.impl.GrepTool;
@@ -90,6 +91,7 @@ class ToolSurfacePlannerTest {
         assertTrue(names.contains("talos.move_path"));
         assertTrue(names.contains("talos.copy_path"));
         assertTrue(names.contains("talos.rename_path"));
+        assertFalse(names.contains("talos.delete_path"));
         assertFalse(names.contains("talos.run_command"), names.toString());
         assertFalse(names.contains("talos.metadata_delete"));
         assertEquals("mutation apply surface", plan.reason());
@@ -113,6 +115,10 @@ class ToolSurfacePlannerTest {
                 "Mkdir docs/reports.",
                 List.of("talos.mkdir"),
                 "workspace mkdir operation surface");
+        assertWorkspaceOperationSurface(
+                "Delete docs/old-plan.md please.",
+                List.of("talos.delete_path"),
+                "workspace delete operation surface");
     }
 
     @Test
@@ -319,6 +325,12 @@ class ToolSurfacePlannerTest {
                         ExecutionPhase.APPLY));
 
         assertEquals(
+                List.of("talos.delete_path"),
+                ToolSurfacePlanner.defaultVisibleToolNames(
+                        TaskContractResolver.fromUserRequest("Delete docs/old-plan.md please."),
+                        ExecutionPhase.APPLY));
+
+        assertEquals(
                 List.of("talos.grep", "talos.list_dir", "talos.read_file", "talos.retrieve", "talos.run_command"),
                 ToolSurfacePlanner.defaultVisibleToolNames(
                         TaskContractResolver.fromUserRequest("verify that the Gradle build passes"),
@@ -375,6 +387,7 @@ class ToolSurfacePlannerTest {
         registry.register(new MovePathTool());
         registry.register(new CopyPathTool());
         registry.register(new RenamePathTool());
+        registry.register(new DeletePathTool());
         registry.register(new RunCommandTool(plan -> new dev.talos.runtime.command.CommandResult(
                 plan, 0, 1, false, false, "", "", false, false, false, "")));
         return registry;

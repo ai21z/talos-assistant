@@ -31,7 +31,8 @@ public final class ToolCallSupport {
             "mkdir", "make_dir", "make_directory", "create_dir", "create_directory",
             "move_path", "move", "mv",
             "copy_path", "copy", "cp",
-            "rename_path", "rename"
+            "rename_path", "rename",
+            "delete_path", "delete", "remove_path", "remove", "rm"
     );
     private static final Set<String> PATH_REQUIRED_TOOLS = Set.of(
             "write_file", "file_write", "writefile",
@@ -40,12 +41,13 @@ public final class ToolCallSupport {
             "mkdir", "make_dir", "make_directory", "create_dir", "create_directory",
             "move_path", "move", "mv",
             "copy_path", "copy", "cp",
-            "rename_path", "rename"
+            "rename_path", "rename",
+            "delete_path", "delete", "remove_path", "remove", "rm"
     );
     private static final List<String> PATH_PARAM_KEYS = List.of(
             "path", "file_path", "filepath", "file", "filename",
             "from", "to", "source", "source_path", "destination", "destination_path",
-            "dir", "directory"
+            "target", "dir", "directory"
     );
 
     private ToolCallSupport() {}

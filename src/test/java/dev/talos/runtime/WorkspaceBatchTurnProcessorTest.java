@@ -22,6 +22,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -111,6 +112,41 @@ class WorkspaceBatchTurnProcessorTest {
     }
 
     @Test
+    void deleteBatchUsesDestructiveApprovalRiskAndBundleCheckpoint(@TempDir Path temp) throws Exception {
+        Path workspace = temp.resolve("workspace");
+        Files.createDirectories(workspace);
+        Files.writeString(workspace.resolve("old-plan.md"), "delete me");
+
+        AtomicReference<String> approvalDescription = new AtomicReference<>("");
+        CheckpointService checkpoints = new CheckpointService(
+                new FileBundleCheckpointStore(temp.resolve("checkpoints")));
+        TurnProcessor processor = processor(gateApproves(new AtomicInteger(), approvalDescription), checkpoints);
+        Config config = config(true);
+
+        LocalTurnTraceCapture.begin("trc-workspace-batch-delete", "sid", 1,
+                "2026-05-11T00:00:00Z", "sid", "auto", "test", "model", "delete");
+        TurnUserRequestCapture.set("Delete old-plan.md.");
+
+        ToolResult result = processor.executeTool(
+                new Session(workspace, config),
+                new ToolCall("talos.apply_workspace_batch", Map.of("operations_json", """
+                        [{"op":"delete_path","path":"old-plan.md"}]
+                        """)),
+                context(workspace, config));
+
+        assertTrue(result.success(), result.errorMessage());
+        assertEquals("destructive operation: talos.apply_workspace_batch", approvalDescription.get());
+        assertFalse(Files.exists(workspace.resolve("old-plan.md")));
+
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+        assertEquals("CREATED", trace.checkpoint().status());
+
+        CheckpointRestoreResult restore = checkpoints.restore(workspace, trace.checkpoint().checkpointId());
+        assertTrue(restore.success(), restore.message());
+        assertEquals("delete me", Files.readString(workspace.resolve("old-plan.md")));
+    }
+
+    @Test
     void protectedNestedBatchDestinationIsDeniedBeforeApproval(@TempDir Path workspace) throws Exception {
         Files.writeString(workspace.resolve("public.txt"), "public");
         AtomicInteger approvals = new AtomicInteger();
@@ -169,12 +205,17 @@ class WorkspaceBatchTurnProcessorTest {
     }
 
     private static ApprovalGate gateApproves(AtomicInteger calls) {
+        return gateApproves(calls, new AtomicReference<>(""));
+    }
+
+    private static ApprovalGate gateApproves(AtomicInteger calls, AtomicReference<String> descriptionRef) {
         return new ApprovalGate() {
             @Override public boolean approve(String description, String detail) {
                 return approveFull(description, detail).isApproved();
             }
             @Override public ApprovalResponse approveFull(String description, String detail) {
                 calls.incrementAndGet();
+                descriptionRef.set(description);
                 return ApprovalResponse.APPROVED;
             }
         };

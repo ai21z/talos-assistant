@@ -680,6 +680,37 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void naturalDeleteRequestUsesFirstClassDeleteTool(@TempDir Path workspace) throws Exception {
+            Files.createDirectories(workspace.resolve("docs"));
+            Files.writeString(workspace.resolve("docs/synthwave-webpage-plan.md"), "delete me");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.DeletePathTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.delete_path\",\"arguments\":{\"path\":\"docs/synthwave-webpage-plan.md\"}}",
+                            "Deleted docs/synthwave-webpage-plan.md.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Delete docs/synthwave-webpage-plan.md please."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertFalse(Files.exists(workspace.resolve("docs/synthwave-webpage-plan.md")));
+            assertTrue(out.text().contains("[Used 1 tool(s): talos.delete_path"), out.text());
+            assertFalse(out.text().contains("talos.write_file"), out.text());
+            assertFalse(out.text().contains("Task incomplete"), out.text());
+        }
+
+        @Test
         void explicitMutationNoToolCapabilityDenialRetriesAndExecutesWrite(@TempDir Path workspace)
                 throws Exception {
             var registry = new dev.talos.tools.ToolRegistry();
