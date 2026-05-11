@@ -1,6 +1,6 @@
 # T238 - Failed Workspace Switch Must Fence Next Relative Mutation
 
-Status: open
+Status: done
 Priority: medium
 
 ## Evidence Summary
@@ -70,3 +70,20 @@ another workspace.
 - Follow-up confirmation then creates inside the current workspace.
 - Normal folder creation without prior failed workspace switch still works.
 - `/workspace` output remains truthful.
+
+## Resolution
+
+- Added short-lived session memory for failed workspace-switch requests.
+- Added a one-turn pending confirmation state for the next relative mutation.
+- The first relative mutation after a failed switch now produces a deterministic
+  clarification instead of running tools.
+- A clear confirmation replays the saved mutation request into the unchanged
+  current workspace with the normal tool loop, approval, checkpointing, and
+  verification path.
+- Non-confirming or unrelated turns clear the short-lived fence.
+
+## Verification
+
+- `.\gradlew test --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$NonStreaming.failedWorkspaceSwitchFencesNextRelativeFolderMutation' --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$NonStreaming.confirmationAfterWorkspaceFenceAppliesSavedRelativeMutation' --tests dev.talos.runtime.toolcall.ToolSurfacePlannerTest`
+- `.\gradlew test`
+- `.\gradlew build`

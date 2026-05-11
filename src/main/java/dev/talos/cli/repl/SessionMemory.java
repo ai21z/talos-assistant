@@ -48,6 +48,8 @@ public final class SessionMemory {
     private ActiveTaskContext activeTaskContext;
     private ArtifactGoal artifactGoal;
     private ChangeSummaryContext changeSummaryContext;
+    private FailedWorkspaceSwitch failedWorkspaceSwitch;
+    private PendingWorkspaceMutationConfirmation pendingWorkspaceMutationConfirmation;
 
     public record ToolEvidence(int turnNumber, String toolName, String pathHint, boolean success) {
         public ToolEvidence {
@@ -56,11 +58,27 @@ public final class SessionMemory {
         }
     }
 
+    public record FailedWorkspaceSwitch(String requestedWorkspace, String currentWorkspace) {
+        public FailedWorkspaceSwitch {
+            requestedWorkspace = requestedWorkspace == null ? "" : requestedWorkspace;
+            currentWorkspace = currentWorkspace == null ? "" : currentWorkspace;
+        }
+    }
+
+    public record PendingWorkspaceMutationConfirmation(String userRequest, String currentWorkspace) {
+        public PendingWorkspaceMutationConfirmation {
+            userRequest = userRequest == null ? "" : userRequest;
+            currentWorkspace = currentWorkspace == null ? "" : currentWorkspace;
+        }
+    }
+
     public SessionMemory() {
         this.buffer = null;
         this.activeTaskContext = ActiveTaskContext.none();
         this.artifactGoal = ArtifactGoal.none();
         this.changeSummaryContext = ChangeSummaryContext.none();
+        this.failedWorkspaceSwitch = null;
+        this.pendingWorkspaceMutationConfirmation = null;
     }
 
     /** Returns the current memory content, or null if empty. */
@@ -89,6 +107,14 @@ public final class SessionMemory {
         return List.copyOf(toolEvidence);
     }
 
+    public synchronized FailedWorkspaceSwitch failedWorkspaceSwitch() {
+        return failedWorkspaceSwitch;
+    }
+
+    public synchronized PendingWorkspaceMutationConfirmation pendingWorkspaceMutationConfirmation() {
+        return pendingWorkspaceMutationConfirmation;
+    }
+
     public synchronized void setActiveTaskContext(ActiveTaskContext activeTaskContext) {
         this.activeTaskContext = activeTaskContext == null ? ActiveTaskContext.none() : activeTaskContext;
     }
@@ -99,6 +125,23 @@ public final class SessionMemory {
 
     public synchronized void setChangeSummaryContext(ChangeSummaryContext changeSummaryContext) {
         this.changeSummaryContext = changeSummaryContext == null ? ChangeSummaryContext.none() : changeSummaryContext;
+    }
+
+    public synchronized void recordFailedWorkspaceSwitch(String requestedWorkspace, String currentWorkspace) {
+        failedWorkspaceSwitch = new FailedWorkspaceSwitch(requestedWorkspace, currentWorkspace);
+        pendingWorkspaceMutationConfirmation = null;
+    }
+
+    public synchronized void clearFailedWorkspaceSwitch() {
+        failedWorkspaceSwitch = null;
+    }
+
+    public synchronized void recordPendingWorkspaceMutationConfirmation(String userRequest, String currentWorkspace) {
+        pendingWorkspaceMutationConfirmation = new PendingWorkspaceMutationConfirmation(userRequest, currentWorkspace);
+    }
+
+    public synchronized void clearPendingWorkspaceMutationConfirmation() {
+        pendingWorkspaceMutationConfirmation = null;
     }
 
     public synchronized void clearActiveTaskContext() {
@@ -113,6 +156,8 @@ public final class SessionMemory {
         toolEvidence.clear();
         clearActiveTaskContext();
         changeSummaryContext = ChangeSummaryContext.none();
+        clearFailedWorkspaceSwitch();
+        clearPendingWorkspaceMutationConfirmation();
     }
 
     /** Returns true if memory has content. */

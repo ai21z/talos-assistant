@@ -711,6 +711,83 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void failedWorkspaceSwitchFencesNextRelativeFolderMutation(@TempDir Path workspace) {
+            var memory = new SessionMemory();
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.MakeDirectoryTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.mkdir\",\"arguments\":{\"path\":\"should-not-be-on-desktop\"}}",
+                            "Created should-not-be-on-desktop.")))
+                    .memory(memory)
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+
+            var switchMessages = new ArrayList<ChatMessage>();
+            switchMessages.add(ChatMessage.system("sys"));
+            switchMessages.add(ChatMessage.user("Change workspace to Desktop."));
+            AssistantTurnExecutor.TurnOutput switchOut = AssistantTurnExecutor.execute(
+                    switchMessages, workspace, ctx, new AssistantTurnExecutor.Options());
+            assertTrue(switchOut.text().contains("cannot change workspace"), switchOut.text());
+
+            var createMessages = new ArrayList<ChatMessage>();
+            createMessages.add(ChatMessage.system("sys"));
+            createMessages.add(ChatMessage.user("Create folder should-not-be-on-desktop."));
+            AssistantTurnExecutor.TurnOutput createOut = AssistantTurnExecutor.execute(
+                    createMessages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertFalse(Files.exists(workspace.resolve("should-not-be-on-desktop")));
+            assertTrue(createOut.text().contains("current workspace is still"), createOut.text());
+            assertTrue(createOut.text().contains(workspace.toAbsolutePath().normalize().toString()), createOut.text());
+            assertTrue(createOut.text().contains("should-not-be-on-desktop"), createOut.text());
+            assertFalse(createOut.text().contains("[Used"), createOut.text());
+        }
+
+        @Test
+        void confirmationAfterWorkspaceFenceAppliesSavedRelativeMutation(@TempDir Path workspace) {
+            var memory = new SessionMemory();
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.MakeDirectoryTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.mkdir\",\"arguments\":{\"path\":\"should-not-be-on-desktop\"}}",
+                            "Created should-not-be-on-desktop.")))
+                    .memory(memory)
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+
+            var switchMessages = new ArrayList<ChatMessage>();
+            switchMessages.add(ChatMessage.system("sys"));
+            switchMessages.add(ChatMessage.user("Change workspace to Desktop."));
+            AssistantTurnExecutor.execute(switchMessages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            var createMessages = new ArrayList<ChatMessage>();
+            createMessages.add(ChatMessage.system("sys"));
+            createMessages.add(ChatMessage.user("Create folder should-not-be-on-desktop."));
+            AssistantTurnExecutor.execute(createMessages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            var confirmMessages = new ArrayList<ChatMessage>();
+            confirmMessages.add(ChatMessage.system("sys"));
+            confirmMessages.add(ChatMessage.user("Yes, create it in the current workspace."));
+            AssistantTurnExecutor.TurnOutput confirmOut = AssistantTurnExecutor.execute(
+                    confirmMessages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(Files.isDirectory(workspace.resolve("should-not-be-on-desktop")));
+            assertTrue(confirmOut.text().contains("[Used 1 tool(s): talos.mkdir"), confirmOut.text());
+            assertFalse(confirmOut.text().contains("current workspace is still"), confirmOut.text());
+        }
+
+        @Test
         void summarizeSourceIntoFileReadsSourceThenWritesTarget(@TempDir Path workspace) throws Exception {
             Files.writeString(workspace.resolve("long-notes.txt"), """
                     - Alice shipped the prototype.
