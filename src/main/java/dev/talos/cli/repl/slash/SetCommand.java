@@ -17,10 +17,11 @@ public final class SetCommand implements Command {
     @SuppressWarnings("resource") // ctx.llm() is borrowed from the active REPL context.
     public Result execute(String args, Context ctx) throws Exception {
         String a = args == null ? "" : args.trim();
-        if (a.isEmpty() || !a.toLowerCase(Locale.ROOT).startsWith("model")) {
+        String[] parts = a.split("\\s+", 2);
+        if (a.isEmpty() || parts.length == 0 || !"model".equals(parts[0].toLowerCase(Locale.ROOT))) {
             return new Result.Error("Usage: /set model <name>\nExample: /set model qwen2.5-coder:14b\n", 200);
         }
-        String rest = a.substring("model".length()).trim();
+        String rest = parts.length > 1 ? parts[1].trim() : "";
         if (rest.isEmpty()) return new Result.Error("Usage: /set model <name>\n", 200);
 
         String name = sanitizeModelName(rest);

@@ -1736,6 +1736,11 @@ public final class AssistantTurnExecutor {
         if (unsupportedDocumentMutation.isPresent()) {
             return unsupportedDocumentMutation.get();
         }
+        Optional<String> unsupportedDocumentCapability =
+                UnsupportedDocumentMutationPolicy.answerIfUnsupportedCapabilityQuestion(userRequest);
+        if (unsupportedDocumentCapability.isPresent()) {
+            return unsupportedDocumentCapability.get();
+        }
         String runtimeMetaEvidence = runtimeMetaEvidenceAnswerIfNeeded(ctx, userRequest, contract);
         if (runtimeMetaEvidence != null) {
             return runtimeMetaEvidence;

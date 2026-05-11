@@ -323,6 +323,9 @@ class ToolRegistryTest {
         assertEquals("talos.rename_path", registry.get("rename").name());
         assertEquals("talos.delete_path", registry.get("delete_path").name());
         assertEquals("talos.delete_path", registry.get("delete").name());
+        assertEquals("talos.delete_path", registry.get("delete_file").name());
+        assertEquals("talos.delete_path", registry.get("talos.delete_file").name());
+        assertEquals("talos.delete_path", registry.get("remove_file").name());
         assertEquals("talos.apply_workspace_batch", registry.get("batch_apply").name());
     }
 }

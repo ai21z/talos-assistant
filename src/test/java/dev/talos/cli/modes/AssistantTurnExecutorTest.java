@@ -711,6 +711,35 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void naturalDeleteRequestAcceptsDeleteFileAlias(@TempDir Path workspace) throws Exception {
+            Files.writeString(workspace.resolve("obsolete-guide.md"), "delete me");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.DeletePathTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.delete_file\",\"arguments\":{\"path\":\"obsolete-guide.md\"}}",
+                            "Deleted obsolete-guide.md.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Delete obsolete-guide.md please."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertFalse(Files.exists(workspace.resolve("obsolete-guide.md")));
+            assertTrue(out.text().contains("[Used 1 tool(s):"), out.text());
+            assertFalse(out.text().contains("Unknown tool"), out.text());
+        }
+
+        @Test
         void failedWorkspaceSwitchFencesNextRelativeFolderMutation(@TempDir Path workspace) {
             var memory = new SessionMemory();
             var registry = new dev.talos.tools.ToolRegistry();
@@ -3832,6 +3861,66 @@ class AssistantTurnExecutorTest {
             assertTrue(out.text().contains("No file was changed"), out.text());
             assertFalse(out.text().contains("provider should not be called"), out.text());
             assertFalse(Files.exists(workspace.resolve("synthwave_band_webpage.pdf")));
+        }
+
+        @Test
+        void unsupportedPdfCreationLivePhraseReturnsCapabilityAnswerWithoutProviderOrFallbackFile(
+                @TempDir Path workspace) throws Exception {
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scriptedFailure(new RuntimeException("provider should not be called")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "0I want to create a pdf with instructions for me on how to create a bmi calculator web page!"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains("cannot create valid PDF files"), out.text());
+            assertTrue(out.text().contains("No file was changed"), out.text());
+            assertFalse(out.text().contains("provider should not be called"), out.text());
+            try (var entries = Files.list(workspace)) {
+                assertTrue(entries.findAny().isEmpty(), "unsupported PDF request must not create fallback files");
+            }
+        }
+
+        @Test
+        void unsupportedPdfCreationFollowUpReturnsCapabilityAnswerWithoutProviderOrFallbackFile(
+                @TempDir Path workspace) throws Exception {
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scriptedFailure(new RuntimeException("provider should not be called")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("you should create the pdf guide!"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains("cannot create valid PDF files"), out.text());
+            assertTrue(out.text().contains("No file was changed"), out.text());
+            assertFalse(out.text().contains("provider should not be called"), out.text());
+            assertFalse(Files.exists(workspace.resolve("pdf_guide.md")));
+        }
+
+        @Test
+        void unsupportedPdfCapabilityQuestionUsesTalosProductAnswer() {
+            var ctx = scriptedContext(
+                    "As an AI text-based model, I don't have the capability to directly create PDF files.");
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("so you cannot create pdf ?"));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, WS, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().contains("Talos cannot create valid PDF files"), out.text());
+            assertTrue(out.text().contains("Markdown"), out.text());
+            assertFalse(out.text().toLowerCase().contains("as an ai"), out.text());
+            assertFalse(out.text().toLowerCase().contains("text-based model"), out.text());
         }
 
         @Test
