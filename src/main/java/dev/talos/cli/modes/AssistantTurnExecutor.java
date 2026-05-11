@@ -215,7 +215,7 @@ public final class AssistantTurnExecutor {
         ctx = withNativeToolSurface(ctx, taskContract, activeDecisionUpdatesTurnSurface);
         CurrentTurnPlan currentTurnPlan = buildCurrentTurnPlan(taskContract, ctx, activeDecision);
         recordPolicyTrace(currentTurnPlan, ctx);
-        injectTaskContractInstruction(messages, currentTurnPlan, activeDecisionUpdatesTurnSurface);
+        injectTaskContractInstruction(messages, currentTurnPlan, true);
         injectStaticVerificationRepairInstruction(messages, currentTurnPlan.taskContract(), workspace);
         PromptAuditSnapshot promptAudit = recordPromptAudit(currentTurnPlan, messages);
         emitPromptAuditIfEnabled(promptAudit, ctx);

@@ -756,14 +756,25 @@ class AssistantTurnExecutorTest {
             var processor = new dev.talos.runtime.TurnProcessor(
                     null, new dev.talos.runtime.NoOpApprovalGate(), registry);
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            ToolSpec mkdir = new ToolSpec(
+                    "talos.mkdir",
+                    "Create a directory.",
+                    "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}");
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                    List.of(
+                            new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                                    "call_mkdir",
+                                    "talos.mkdir",
+                                    java.util.Map.of("path", "should-not-be-on-desktop")))),
+                            new LlmClient.StreamResult("Created should-not-be-on-desktop.", List.of())),
+                    4096);
             var ctx = Context.builder(new Config())
-                    .llm(LlmClient.scripted(List.of(
-                            "{\"name\":\"talos.mkdir\",\"arguments\":{\"path\":\"should-not-be-on-desktop\"}}",
-                            "Created should-not-be-on-desktop.")))
+                    .llm(recorded.client())
                     .memory(memory)
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
                     .toolRegistry(registry)
                     .toolCallLoop(loop)
+                    .nativeToolSpecs(List.of(mkdir))
                     .build();
 
             var switchMessages = new ArrayList<ChatMessage>();
@@ -778,6 +789,18 @@ class AssistantTurnExecutorTest {
 
             var confirmMessages = new ArrayList<ChatMessage>();
             confirmMessages.add(ChatMessage.system("sys"));
+            confirmMessages.add(ChatMessage.system("""
+                    [CurrentTurnCapability]
+                    type: WORKSPACE_EXPLAIN
+                    mutationAllowed: false
+                    visibleTools: talos.list_dir
+                    """));
+            confirmMessages.add(ChatMessage.user("Change workspace to Desktop."));
+            confirmMessages.add(ChatMessage.assistant("Talos cannot change workspace from inside the REPL."));
+            confirmMessages.add(ChatMessage.user("Create folder should-not-be-on-desktop."));
+            confirmMessages.add(ChatMessage.assistant(
+                    "The current workspace is still " + workspace.toAbsolutePath().normalize()
+                            + ". Confirm if you want this change applied in the current workspace."));
             confirmMessages.add(ChatMessage.user("Yes, create it in the current workspace."));
             AssistantTurnExecutor.TurnOutput confirmOut = AssistantTurnExecutor.execute(
                     confirmMessages, workspace, ctx, new AssistantTurnExecutor.Options());
@@ -785,6 +808,19 @@ class AssistantTurnExecutorTest {
             assertTrue(Files.isDirectory(workspace.resolve("should-not-be-on-desktop")));
             assertTrue(confirmOut.text().contains("[Used 1 tool(s): talos.mkdir"), confirmOut.text());
             assertFalse(confirmOut.text().contains("current workspace is still"), confirmOut.text());
+            assertFalse(recorded.requests().isEmpty(), "confirmation must reach the backend as a mutation turn");
+            ChatRequest request = recorded.requests().getFirst();
+            String prompt = request.messages.stream()
+                    .map(message -> message.content() == null ? "" : message.content())
+                    .reduce("", (left, right) -> left + "\n" + right);
+            assertEquals(1, request.messages.stream()
+                    .filter(AssistantTurnExecutorTest::isCurrentTurnCapabilityFrame)
+                    .count(), "exactly one current-turn frame should be sent");
+            assertTrue(prompt.contains("type: FILE_CREATE"), prompt);
+            assertTrue(prompt.contains("mutationAllowed: true"), prompt);
+            assertTrue(prompt.contains("visibleTools: talos.mkdir"), prompt);
+            assertTrue(prompt.contains("Create folder should-not-be-on-desktop."), prompt);
+            assertFalse(prompt.contains("type: WORKSPACE_EXPLAIN"), prompt);
         }
 
         @Test
