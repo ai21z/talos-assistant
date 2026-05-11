@@ -840,6 +840,87 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void summarizeSourceIntoFileSplitReadThenRetryPreservesSourceEvidence(@TempDir Path workspace) throws Exception {
+            Files.writeString(workspace.resolve("long-notes.txt"), """
+                    - Alice shipped the prototype.
+                    - Beta users asked for clearer onboarding.
+                    - Next step is to publish a short release note.
+                    """);
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            var undoStack = new dev.talos.tools.FileUndoStack();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"long-notes.txt\"}}",
+                            "I read long-notes.txt.",
+                            "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"docs/summary.md\","
+                                    + "\"content\":\"- Alice shipped the prototype.\\n"
+                                    + "- Beta users need clearer onboarding.\\n"
+                                    + "- Publish a short release note next.\"}}",
+                            "Created docs/summary.md from long-notes.txt.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Summarize long-notes.txt into docs/summary.md. Keep it under 8 bullets."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(Files.exists(workspace.resolve("docs/summary.md")), out.text());
+            assertFalse(out.text().contains("[Evidence incomplete"), out.text());
+            assertTrue(out.text().contains("Source-derived artifact verification passed"), out.text());
+        }
+
+        @Test
+        void summarizeSourceIntoFileInstructionEchoFailsVerification(@TempDir Path workspace) throws Exception {
+            Files.writeString(workspace.resolve("long-notes.txt"), """
+                    - The band is called Neon Harbor.
+                    - The website needs a hero, latest single, tour dates, mailing list, and press kit.
+                    - The tone should be direct, stylish, and practical.
+                    """);
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            var undoStack = new dev.talos.tools.FileUndoStack();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"long-notes.txt\"}}",
+                            "I read long-notes.txt.",
+                            "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"docs/summary.md\","
+                                    + "\"content\":\"Summarize the contents of long-notes.txt into 8 concise bullet points.\"}}",
+                            "Created docs/summary.md from long-notes.txt.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Summarize long-notes.txt into docs/summary.md. Keep it under 8 bullets."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(Files.exists(workspace.resolve("docs/summary.md")), out.text());
+            assertTrue(out.text().contains("Source-derived artifact verification failed"), out.text());
+            assertTrue(out.text().contains("target content appears to repeat the request"), out.text());
+            assertFalse(out.text().contains("[File write/readback passed"), out.text());
+        }
+
+        @Test
         void summarizeSourceIntoFileWithoutSourceReadIsEvidenceIncomplete(@TempDir Path workspace) throws Exception {
             Files.writeString(workspace.resolve("long-notes.txt"), "Grounded source text.");
 
