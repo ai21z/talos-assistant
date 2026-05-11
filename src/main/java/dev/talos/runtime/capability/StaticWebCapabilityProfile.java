@@ -26,6 +26,7 @@ public final class StaticWebCapabilityProfile {
 
     public static boolean shouldVerifyCoherence(TaskContract contract, Path workspace, Set<String> mutatedPaths) {
         if (contract == null) return false;
+        if (hasOnlyExplicitNonWebMutationTargets(contract)) return false;
         String request = contract.originalUserRequest();
         if (shouldCheckSelectorCoherence(request) || looksBroadWebTask(contract)) return true;
         return looksGenericMutationFollowUp(request) && mutatesSmallWebSurface(workspace, mutatedPaths);
@@ -52,7 +53,7 @@ public final class StaticWebCapabilityProfile {
                 || lower.contains("actually work")
                 || lower.contains("does not work")
                 || lower.contains("doesn't work")
-                || lower.contains("form");
+                || mentionsForm(lower);
     }
 
     public static boolean looksCalculatorOrFormTask(TaskContract contract) {
@@ -62,7 +63,7 @@ public final class StaticWebCapabilityProfile {
         String lower = request.toLowerCase(Locale.ROOT);
         return lower.contains("calculator")
                 || lower.contains("bmi")
-                || lower.contains("form")
+                || mentionsForm(lower)
                 || lower.contains("input")
                 || lower.contains("interactive")
                 || lower.contains("functioning")
@@ -283,9 +284,36 @@ public final class StaticWebCapabilityProfile {
                 || lower.contains("actually work")
                 || lower.contains("does not work")
                 || lower.contains("doesn't work")
-                || lower.contains("form");
+                || mentionsForm(lower);
         return mutatingTask && mentionsWebSurface
                 && ((mentionsStyle && mentionsScript) || asksFunctional);
+    }
+
+    private static boolean hasOnlyExplicitNonWebMutationTargets(TaskContract contract) {
+        return contract != null
+                && contract.mutationRequested()
+                && !contract.expectedTargets().isEmpty()
+                && contract.expectedTargets().stream().noneMatch(StaticWebCapabilityProfile::isSmallWebFile);
+    }
+
+    private static boolean mentionsForm(String lower) {
+        return containsWholeWord(lower, "form") || containsWholeWord(lower, "forms");
+    }
+
+    private static boolean containsWholeWord(String lower, String token) {
+        if (lower == null || lower.isBlank() || token == null || token.isBlank()) return false;
+        int start = 0;
+        while (start < lower.length()) {
+            int index = lower.indexOf(token, start);
+            if (index < 0) return false;
+            int before = index - 1;
+            int after = index + token.length();
+            boolean leftBoundary = before < 0 || !Character.isLetterOrDigit(lower.charAt(before));
+            boolean rightBoundary = after >= lower.length() || !Character.isLetterOrDigit(lower.charAt(after));
+            if (leftBoundary && rightBoundary) return true;
+            start = index + token.length();
+        }
+        return false;
     }
 
     private static boolean looksGenericMutationFollowUp(String request) {
