@@ -537,10 +537,9 @@ public final class AssistantTurnExecutor {
         answer = irr.answer();
 
         ToolCallLoop.LoopResult outcomeLoopResult = mrr.retryLoopResult() != null
-                ? mrr.retryLoopResult()
+                ? mergeMutationRetryEvidence(loopResult, mrr.retryLoopResult())
                 : irr.loopResult() != null ? irr.loopResult() : loopResult;
-        int outcomeExtraMutationSuccesses =
-                mrr.retryLoopResult() == null ? mrr.mutationsInRetry() : 0;
+        int outcomeExtraMutationSuccesses = 0;
 
         moveToVerifyAfterSuccessfulMutation(ctx, outcomeLoopResult, outcomeExtraMutationSuccesses);
 
@@ -4245,6 +4244,41 @@ public final class AssistantTurnExecutor {
                 original.retriedCalls() + retry.retriedCalls(),
                 original.hitIterLimit() || retry.hitIterLimit(),
                 retry.mutatingToolSuccesses(),
+                mergedReadPaths,
+                original.cushionFiresRedundantRead() + retry.cushionFiresRedundantRead(),
+                original.cushionFiresAliasRescue() + retry.cushionFiresAliasRescue(),
+                original.cushionFiresB3EditShortCircuit() + retry.cushionFiresB3EditShortCircuit(),
+                original.cushionFiresE1Suggestion() + retry.cushionFiresE1Suggestion(),
+                retry.failureDecision(),
+                mergedOutcomes);
+    }
+
+    private static ToolCallLoop.LoopResult mergeMutationRetryEvidence(
+            ToolCallLoop.LoopResult original,
+            ToolCallLoop.LoopResult retry
+    ) {
+        if (retry == null) return original;
+        if (original == null) return retry;
+        List<String> mergedReadPaths = mergeReadPaths(original.readPaths(), retry.readPaths());
+        java.util.LinkedHashSet<String> mergedToolNames = new java.util.LinkedHashSet<>();
+        if (original.toolNames() != null) mergedToolNames.addAll(original.toolNames());
+        if (retry.toolNames() != null) mergedToolNames.addAll(retry.toolNames());
+        List<ToolCallLoop.ToolOutcome> mergedOutcomes = new ArrayList<>();
+        if (original.toolOutcomes() != null) mergedOutcomes.addAll(original.toolOutcomes());
+        if (retry.toolOutcomes() != null) mergedOutcomes.addAll(retry.toolOutcomes());
+        List<ChatMessage> mergedMessages = new ArrayList<>();
+        if (original.messages() != null) mergedMessages.addAll(original.messages());
+        if (retry.messages() != null) mergedMessages.addAll(retry.messages());
+        return new ToolCallLoop.LoopResult(
+                retry.finalAnswer(),
+                original.iterations() + retry.iterations(),
+                original.toolsInvoked() + retry.toolsInvoked(),
+                List.copyOf(mergedToolNames),
+                List.copyOf(mergedMessages),
+                original.failedCalls() + retry.failedCalls(),
+                original.retriedCalls() + retry.retriedCalls(),
+                original.hitIterLimit() || retry.hitIterLimit(),
+                original.mutatingToolSuccesses() + retry.mutatingToolSuccesses(),
                 mergedReadPaths,
                 original.cushionFiresRedundantRead() + retry.cushionFiresRedundantRead(),
                 original.cushionFiresAliasRescue() + retry.cushionFiresAliasRescue(),

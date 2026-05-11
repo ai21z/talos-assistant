@@ -95,6 +95,7 @@ public final class StaticTaskVerifier {
             "getElementsByClassName\\s*\\(\\s*['\"]([A-Za-z_][A-Za-z0-9_-]*)['\"]\\s*\\)");
     private static final Pattern STATIC_SELECTOR_LITERAL = Pattern.compile(
             "(?<![A-Za-z0-9_-])([.#][A-Za-z_][A-Za-z0-9_-]*)(?![A-Za-z0-9_-])");
+    private static final Pattern WORD_TOKEN = Pattern.compile("[A-Za-z][A-Za-z0-9_-]{3,}");
     private static final Pattern JS_RESULT_CLICKED_TEXT_ASSIGNMENT = Pattern.compile(
             "(?:querySelector\\s*\\(\\s*['\"]#result['\"]\\s*\\)"
                     + "|getElementById\\s*\\(\\s*['\"]result['\"]\\s*\\))"
@@ -109,6 +110,14 @@ public final class StaticTaskVerifier {
             "nav", "header", "footer", "main", "aside", "form", "button",
             "select", "textarea", "script", "style", "svg"
     };
+    private static final Set<String> SOURCE_DERIVED_STOP_WORDS = Set.of(
+            "about", "after", "also", "avoid", "before", "bullet", "bullets",
+            "called", "clear", "concise", "content", "contents", "create",
+            "document", "file", "from", "into", "keep", "line", "long",
+            "mention", "notes", "point", "points", "private", "read",
+            "secret", "secrets", "short", "source", "summarize", "summary",
+            "target", "text", "that", "their", "them", "this", "under",
+            "with", "write");
 
     public static TaskVerificationResult verify(
             Path workspace,
@@ -187,6 +196,7 @@ public final class StaticTaskVerifier {
         verifyExpectedTargets(contract, root, profile, mutatedPaths, expectedTargetExemptions,
                 workspaceOperationVerification.expectedTargetAliases(), facts, problems);
         boolean expectationRequired = verifyTaskExpectations(contract, root, facts, problems);
+        boolean sourceDerivedRequired = verifySourceDerivedArtifact(contract, root, facts, problems);
 
         if (webCoherenceRequired) {
             String profileFact = StaticWebCapabilityProfile.profileFact(profile);
@@ -201,7 +211,9 @@ public final class StaticTaskVerifier {
 
         if (!problems.isEmpty()) {
             return TaskVerificationResult.failed(
-                    expectationRequired && problems.stream().anyMatch(StaticTaskVerifier::isExactContentProblem)
+                    sourceDerivedRequired && !webCoherenceRequired
+                            ? "Source-derived artifact verification failed."
+                    : expectationRequired && problems.stream().anyMatch(StaticTaskVerifier::isExactContentProblem)
                             ? "Exact content verification failed."
                             : firstProblemSummary(problems),
                     facts,
@@ -210,6 +222,11 @@ public final class StaticTaskVerifier {
         if (expectationRequired && !webCoherenceRequired) {
             return TaskVerificationResult.passed(
                     "Exact content verification passed.",
+                    facts);
+        }
+        if (sourceDerivedRequired && !webCoherenceRequired) {
+            return TaskVerificationResult.passed(
+                    "Source-derived artifact verification passed.",
                     facts);
         }
         if (webCoherenceRequired) {
@@ -239,6 +256,162 @@ public final class StaticTaskVerifier {
             }
         }
         return verifiedAny;
+    }
+
+    private static boolean verifySourceDerivedArtifact(
+            TaskContract contract,
+            Path root,
+            List<String> facts,
+            List<String> problems
+    ) {
+        if (contract == null || root == null) return false;
+        if (contract.sourceEvidenceTargets().isEmpty() || contract.expectedTargets().isEmpty()) return false;
+        String request = contract.originalUserRequest() == null ? "" : contract.originalUserRequest();
+        if (!request.toLowerCase(Locale.ROOT).contains("summarize")) return false;
+
+        String targetPath = firstPath(contract.expectedTargets());
+        if (targetPath.isBlank()) return false;
+        Path target = resolveWorkspaceFile(root, targetPath);
+        if (target == null || !Files.isRegularFile(target)) {
+            problems.add(targetPath + ": source-derived target is not a readable file after apply.");
+            return true;
+        }
+
+        String targetContent;
+        try {
+            targetContent = Files.readString(target);
+        } catch (Exception e) {
+            problems.add(targetPath + ": source-derived target could not be read after apply (" + e.getMessage() + ")");
+            return true;
+        }
+        if (targetContent.isBlank()) {
+            problems.add(targetPath + ": source-derived target is empty after apply.");
+            return true;
+        }
+
+        String sourceText = readSourceEvidence(root, contract.sourceEvidenceTargets(), problems);
+        if (sourceText.isBlank()) {
+            return true;
+        }
+
+        Set<String> requestTerms = distinctiveTerms(request);
+        Set<String> sourceTerms = distinctiveTerms(sourceText);
+        sourceTerms.removeAll(requestTerms);
+        Set<String> targetTerms = distinctiveTerms(targetContent);
+        long overlap = sourceTerms.stream().filter(targetTerms::contains).count();
+        int problemsBeforeDerivedChecks = problems.size();
+
+        if (looksLikeInstructionEcho(targetContent, request, contract.sourceEvidenceTargets())) {
+            problems.add(targetPath + ": target content appears to repeat the request instead of summarizing source evidence.");
+        }
+        if (!sourceTerms.isEmpty() && overlap == 0) {
+            problems.add(targetPath + ": source-derived summary does not contain distinctive source facts.");
+        }
+        if (bulletLimitRequested(request) && bulletLineCount(targetContent) > 8) {
+            problems.add(targetPath + ": source-derived summary exceeds the requested bullet limit.");
+        }
+        if (problems.size() == problemsBeforeDerivedChecks) {
+            facts.add(targetPath + ": source-derived artifact includes evidence from "
+                    + String.join(", ", contract.sourceEvidenceTargets()) + ".");
+        }
+        return true;
+    }
+
+    private static String firstPath(Collection<String> paths) {
+        if (paths == null || paths.isEmpty()) return "";
+        for (String path : paths) {
+            if (path != null && !path.isBlank()) return normalizePath(path);
+        }
+        return "";
+    }
+
+    private static Path resolveWorkspaceFile(Path root, String path) {
+        try {
+            Path resolved = root.resolve(normalizePath(path)).normalize();
+            return resolved.startsWith(root) ? resolved : null;
+        } catch (InvalidPathException e) {
+            return null;
+        }
+    }
+
+    private static String readSourceEvidence(Path root, Collection<String> sourceTargets, List<String> problems) {
+        StringBuilder out = new StringBuilder();
+        for (String sourceTarget : sourceTargets) {
+            if (sourceTarget == null || sourceTarget.isBlank()) continue;
+            String normalized = normalizePath(sourceTarget);
+            Path source = resolveWorkspaceFile(root, normalized);
+            if (source == null || !Files.isRegularFile(source)) {
+                problems.add(normalized + ": source evidence file is not readable for derived artifact verification.");
+                continue;
+            }
+            try {
+                out.append('\n').append(Files.readString(source));
+            } catch (Exception e) {
+                problems.add(normalized + ": source evidence file could not be read for derived artifact verification ("
+                        + e.getMessage() + ")");
+            }
+        }
+        return out.toString();
+    }
+
+    private static boolean looksLikeInstructionEcho(
+            String targetContent,
+            String request,
+            Collection<String> sourceTargets
+    ) {
+        String target = normalizedLowerText(targetContent);
+        String req = normalizedLowerText(request);
+        if (target.isBlank()) return false;
+        if (!target.contains("summarize")) return false;
+        for (String sourceTarget : sourceTargets == null ? List.<String>of() : sourceTargets) {
+            String source = normalizedLowerText(sourceTarget);
+            if (!source.isBlank() && target.contains(source)) return true;
+            String base = basename(sourceTarget).toLowerCase(Locale.ROOT);
+            if (!base.isBlank() && target.contains(base)) return true;
+        }
+        return !req.isBlank() && req.contains(target);
+    }
+
+    private static String normalizedLowerText(String value) {
+        if (value == null) return "";
+        return value.toLowerCase(Locale.ROOT)
+                .replace('\\', '/')
+                .replaceAll("[^a-z0-9_./-]+", " ")
+                .replaceAll("\\s+", " ")
+                .strip();
+    }
+
+    private static Set<String> distinctiveTerms(String value) {
+        if (value == null || value.isBlank()) return Set.of();
+        LinkedHashSet<String> terms = new LinkedHashSet<>();
+        Matcher matcher = WORD_TOKEN.matcher(value.toLowerCase(Locale.ROOT));
+        while (matcher.find()) {
+            String token = matcher.group();
+            if (SOURCE_DERIVED_STOP_WORDS.contains(token)) continue;
+            if (token.matches("\\d+")) continue;
+            terms.add(token);
+        }
+        return terms;
+    }
+
+    private static boolean bulletLimitRequested(String request) {
+        if (request == null || request.isBlank()) return false;
+        String lower = request.toLowerCase(Locale.ROOT);
+        return lower.contains("under 8 bullet") || lower.contains("under eight bullet");
+    }
+
+    private static int bulletLineCount(String content) {
+        if (content == null || content.isBlank()) return 0;
+        int count = 0;
+        for (String line : content.split("\\R")) {
+            String trimmed = line.stripLeading();
+            if (trimmed.startsWith("- ")
+                    || trimmed.startsWith("* ")
+                    || trimmed.matches("\\d+[.)]\\s+.*")) {
+                count++;
+            }
+        }
+        return count;
     }
 
     private static boolean isExactContentProblem(String problem) {
