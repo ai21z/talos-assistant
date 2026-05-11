@@ -824,6 +824,104 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void hiddenWorkspaceOperationToolIsRejectedBeforeExecution(@TempDir Path workspace) throws Exception {
+            Files.writeString(workspace.resolve("source.txt"), "source");
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.MakeDirectoryTool());
+            registry.register(new dev.talos.tools.impl.MovePathTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            ToolSpec move = new ToolSpec(
+                    "talos.move_path",
+                    "Move a workspace path.",
+                    "{\"type\":\"object\",\"properties\":{\"from\":{\"type\":\"string\"},\"to\":{\"type\":\"string\"}},\"required\":[\"from\",\"to\"]}");
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.mkdir\",\"arguments\":{\"path\":\"archive\"}}",
+                            "I stopped after the policy block.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .nativeToolSpecs(List.of(move))
+                    .build();
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Move source.txt to archive/source.txt."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertFalse(Files.exists(workspace.resolve("archive")),
+                    "hidden talos.mkdir must be rejected before it creates a directory");
+            assertTrue(out.text().contains("talos.mkdir"), out.text());
+            assertTrue(out.text().contains("not allowed") || out.text().contains("policy"), out.text());
+        }
+
+        @Test
+        void compoundWorkspaceOperationCanApplyBatchThroughVisibleSurface(@TempDir Path workspace) throws Exception {
+            Files.createDirectories(workspace.resolve("docs"));
+            Files.writeString(workspace.resolve("docs/summary.md"), "summary body");
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.BatchWorkspaceApplyTool());
+            registry.register(new dev.talos.tools.impl.MakeDirectoryTool());
+            registry.register(new dev.talos.tools.impl.CopyPathTool());
+            registry.register(new dev.talos.tools.impl.RenamePathTool());
+            registry.register(new dev.talos.tools.impl.MovePathTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                    List.of(
+                            new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                                    "call_batch",
+                                    "talos.apply_workspace_batch",
+                                    java.util.Map.of("operations_json", """
+                                            [
+                                              {"op":"mkdir","path":"assets"},
+                                              {"op":"mkdir","path":"drafts"},
+                                              {"op":"copy_path","from":"docs/summary.md","to":"drafts/summary-copy.md"},
+                                              {"op":"rename_path","path":"drafts/summary-copy.md","new_name":"summary-renamed.md"},
+                                              {"op":"move_path","from":"drafts/summary-renamed.md","to":"assets/summary-renamed.md"}
+                                            ]
+                                            """)))),
+                            new LlmClient.StreamResult("Applied the workspace organization batch.", List.of())),
+                    4096);
+            var ctx = Context.builder(new Config())
+                    .llm(recorded.client())
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Create folders assets and drafts, copy docs/summary.md "
+                    + "to drafts/summary-copy.md, rename it to summary-renamed.md, then move it "
+                    + "to assets/summary-renamed.md."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertEquals("summary body", Files.readString(workspace.resolve("assets/summary-renamed.md")));
+            assertFalse(Files.exists(workspace.resolve("drafts/summary-renamed.md")));
+            assertTrue(out.text().contains("[Used 1 tool(s): talos.apply_workspace_batch"), out.text());
+            assertFalse(recorded.requests().isEmpty(), "compound workspace turn must reach the backend");
+            List<String> toolNames = recorded.requests().getFirst().tools.stream()
+                    .map(ToolSpec::name)
+                    .sorted()
+                    .toList();
+            assertEquals(
+                    List.of(
+                            "talos.apply_workspace_batch",
+                            "talos.copy_path",
+                            "talos.mkdir",
+                            "talos.move_path",
+                            "talos.rename_path"),
+                    toolNames);
+        }
+
+        @Test
         void summarizeSourceIntoFileReadsSourceThenWritesTarget(@TempDir Path workspace) throws Exception {
             Files.writeString(workspace.resolve("long-notes.txt"), """
                     - Alice shipped the prototype.

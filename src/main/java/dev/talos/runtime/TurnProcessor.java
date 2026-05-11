@@ -26,6 +26,7 @@ import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.workspace.WorkspaceBatchPlanParser;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
+import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -303,6 +304,14 @@ public final class TurnProcessor {
         if (tool == null) {
             TurnAuditCapture.recordToolCall(call.toolName(), "", false, "unknown tool");
             return ToolResult.fail(ToolError.notFound("Unknown tool: " + call.toolName()));
+        }
+        ToolResult surfaceRejection = rejectIfOutsideCurrentToolSurface(
+                ctx, call, tool.name(), tracePhase);
+        if (surfaceRejection != null) {
+            TurnAuditCapture.recordToolCall(
+                    call.toolName(), "", false,
+                    "current-turn tool surface denied " + tool.name());
+            return surfaceRejection;
         }
 
         boolean commandTool = CommandToolPlanner.isRunCommandTool(call.toolName());
@@ -1071,6 +1080,35 @@ public final class TurnProcessor {
                 || "ls".equals(normalized)
                 || "listdir".equals(normalized)
                 || "listdirectory".equals(normalized);
+    }
+
+    private static ToolResult rejectIfOutsideCurrentToolSurface(
+            Context ctx,
+            ToolCall call,
+            String canonicalToolName,
+            String tracePhase
+    ) {
+        if (ctx == null || ctx.nativeToolSpecs() == null) return null;
+        List<String> allowed = ctx.nativeToolSpecs().stream()
+                .filter(Objects::nonNull)
+                .map(ToolSpec::name)
+                .filter(name -> name != null && !name.isBlank())
+                .distinct()
+                .sorted()
+                .toList();
+        if (allowed.contains(canonicalToolName)) return null;
+
+        String requested = canonicalToolName == null || canonicalToolName.isBlank()
+                ? call.toolName()
+                : canonicalToolName;
+        String allowedText = allowed.isEmpty() ? "(none)" : String.join(", ", allowed);
+        LocalTurnTraceCapture.recordToolCallBlocked(
+                tracePhase,
+                call,
+                "current-turn tool surface denied " + requested + "; allowed: " + allowedText);
+        return ToolResult.fail(ToolError.denied(
+                "Current-turn tool surface did not allow " + requested
+                        + ". Allowed tools: " + allowedText + "."));
     }
 
     private static boolean isMkdirTool(String toolName) {

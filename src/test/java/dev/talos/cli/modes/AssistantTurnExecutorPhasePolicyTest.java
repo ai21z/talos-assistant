@@ -51,6 +51,7 @@ class AssistantTurnExecutorPhasePolicyTest {
                 .llm(LlmClient.scripted(List.of(
                         "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"index.html\",\"content\":\"ok\"}}",
                         "Done.")))
+                .toolRegistry(registry)
                 .toolCallLoop(loop)
                 .executionPhaseState(phaseState)
                 .build();
