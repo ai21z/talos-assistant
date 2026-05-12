@@ -581,6 +581,18 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void unsupportedNaturalCommandRequestBecomesUnsupportedVerifyContract() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "run the safe command check for this folder. if it can't run, say exactly that.");
+
+        assertEquals(TaskType.VERIFY_ONLY, contract.type());
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals("unsupported-command-verification-request", contract.classificationReason());
+    }
+
+    @Test
     void commandCapabilityQuestionsDoNotBecomeExecutionRequests() {
         List<String> inputs = List.of(
                 "What is talos.run_command?",

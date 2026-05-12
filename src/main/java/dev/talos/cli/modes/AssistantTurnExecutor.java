@@ -1752,6 +1752,10 @@ public final class AssistantTurnExecutor {
         if (unsupportedDocumentCapability.isPresent()) {
             return unsupportedDocumentCapability.get();
         }
+        String unsupportedCommand = unsupportedCommandAnswerIfNeeded(contract);
+        if (unsupportedCommand != null) {
+            return unsupportedCommand;
+        }
         String runtimeMetaEvidence = runtimeMetaEvidenceAnswerIfNeeded(ctx, userRequest, contract);
         if (runtimeMetaEvidence != null) {
             return runtimeMetaEvidence;
@@ -1770,6 +1774,16 @@ public final class AssistantTurnExecutor {
             return documentCreationStatus;
         }
         return verifiedFollowUpSummaryIfNeeded(messages, userRequest);
+    }
+
+    private static String unsupportedCommandAnswerIfNeeded(TaskContract contract) {
+        if (contract == null
+                || !"unsupported-command-verification-request".equals(contract.classificationReason())) {
+            return null;
+        }
+        return "I can't run that command check because no approved command profile was specified. "
+                + "Talos can only run bounded approved command profiles, such as Gradle test/check/build profiles, "
+                + "when the request names a supported profile.";
     }
 
     private static String runtimeMetaEvidenceAnswerIfNeeded(

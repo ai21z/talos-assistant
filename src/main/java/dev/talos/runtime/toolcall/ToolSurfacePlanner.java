@@ -40,6 +40,9 @@ public final class ToolSurfacePlanner {
         if (contract != null && contract.type() == TaskType.SMALL_TALK) {
             return new Plan(List.of(), "small-talk");
         }
+        if (unsupportedCommandRequest(contract)) {
+            return new Plan(List.of(), "unsupported command request");
+        }
         if (contract != null && contract.type() == TaskType.DIRECTORY_LISTING) {
             return select(registry, ToolSurfacePlanner::isDirectoryListingTool, "directory listing");
         }
@@ -83,6 +86,7 @@ public final class ToolSurfacePlanner {
 
     public static List<String> defaultVisibleToolNames(TaskContract contract, ExecutionPhase phase) {
         if (contract == null || contract.type() == TaskType.SMALL_TALK) return List.of();
+        if (unsupportedCommandRequest(contract)) return List.of();
         if (contract.type() == TaskType.DIRECTORY_LISTING) return List.of("talos.list_dir");
         if (!contract.mutationAllowed()
                 && verifyOnlyDirectoryAwarePathCheck(contract)) {
@@ -181,6 +185,11 @@ public final class ToolSurfacePlanner {
         return verificationCommandSurface(contract, phase)
                 && "explicit-command-verification-request".equals(contract.classificationReason())
                 && explicitCommandProfileRequest(contract);
+    }
+
+    private static boolean unsupportedCommandRequest(TaskContract contract) {
+        return contract != null
+                && "unsupported-command-verification-request".equals(contract.classificationReason());
     }
 
     private static boolean explicitCommandProfileRequest(TaskContract contract) {
