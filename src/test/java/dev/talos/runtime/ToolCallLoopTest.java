@@ -1161,6 +1161,52 @@ class ToolCallLoopTest {
     }
 
     @Test
+    void negatedSimilarFileDoesNotBecomePendingExpectedTargetObligation() throws Exception {
+        Path ws = Files.createTempDirectory("talos-negated-target-loop-");
+        try {
+            var loop = createLoop(new FileWriteTool());
+            String request = "Create a BMI calculator web page using exactly index.html, styles.css, scripts.js. "
+                    + "Do not use script.js.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of("Complete. Everything is ready to use.")))
+                    .build();
+            String llmResponse = """
+                    <tool_call>{"name":"talos.write_file","parameters":{"path":"index.html","content":"<html><head><link rel=\\"stylesheet\\" href=\\"styles.css\\"></head><body><script src=\\"scripts.js\\"></script></body></html>"}}</tool_call>
+                    <tool_call>{"name":"talos.write_file","parameters":{"path":"styles.css","content":"body{}"}}</tool_call>
+                    <tool_call>{"name":"talos.write_file","parameters":{"path":"scripts.js","content":"console.log('ok');"}}</tool_call>
+                    """;
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            LocalTurnTraceCapture.begin("trc-t248-negated-target", "session", 1,
+                    "2026-05-12T00:00:00Z", "ws", "test", "ollama", "gpt-oss", request);
+            ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
+            try {
+                result = loop.run(llmResponse, messages, ws, ctx);
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+                LocalTurnTraceCapture.clear();
+            }
+
+            assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertTrue(Files.exists(ws.resolve("scripts.js")));
+            assertFalse(Files.exists(ws.resolve("script.js")));
+            assertTrue(trace.events().stream()
+                            .noneMatch(event -> "PENDING_ACTION_OBLIGATION_BREACHED".equals(event.type())),
+                    "Negated script.js must not become a pending expected-target breach.");
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
     void staticRepairProgressNoToolProseBecomesDeterministicBreach() {
         var loop = createLoop(writeFileTool());
         var messages = new ArrayList<>(List.of(

@@ -1024,6 +1024,54 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void negatedLegacyScriptTargetIsNotRequiredByStaticVerification() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!DOCTYPE html>
+                <html>
+                  <head><link rel="stylesheet" href="styles.css"></head>
+                  <body>
+                    <main class="calculator">
+                      <form id="bmi-form">
+                        <input id="weight" type="number">
+                        <input id="height" type="number">
+                        <button type="submit">Calculate</button>
+                      </form>
+                      <p id="result"></p>
+                    </main>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), ".calculator { max-width: 28rem; }");
+        Files.writeString(workspace.resolve("script.js"), "document.querySelector('.missing-button');");
+        Files.writeString(workspace.resolve("scripts.js"), """
+                document.getElementById('bmi-form').addEventListener('submit', event => event.preventDefault());
+                document.getElementById('weight');
+                document.getElementById('height');
+                document.getElementById('result');
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Create a BMI calculator web page using exactly index.html, styles.css, scripts.js. Do not use script.js.",
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("styles.css", VerificationStatus.PASS),
+                        successfulWrite("scripts.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("HTML does not link JavaScript file: `scripts.js`")),
+                result.problems().toString());
+        assertFalse(result.problems().stream()
+                        .anyMatch(p -> p.contains("script.js: expected target was not successfully mutated")),
+                result.problems().toString());
+        assertFalse(result.problems().stream()
+                        .anyMatch(p -> p.contains("script.js") && p.contains("does not satisfy")),
+                result.problems().toString());
+    }
+
+    @Test
     void linkedCssFileIsPreferredOverLegacyCssNeighbor() throws Exception {
         Files.writeString(workspace.resolve("index.html"), """
                 <!DOCTYPE html>

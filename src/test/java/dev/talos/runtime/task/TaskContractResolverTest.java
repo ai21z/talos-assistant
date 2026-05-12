@@ -787,7 +787,8 @@ class TaskContractResolverTest {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Update index.html and style.css, but leave script.js alone.");
 
-        assertEquals(Set.of("index.html", "style.css", "script.js"), contract.expectedTargets());
+        assertEquals(Set.of("index.html", "style.css"), contract.expectedTargets());
+        assertEquals(Set.of("script.js"), contract.forbiddenTargets());
     }
 
     @Test
@@ -890,6 +891,28 @@ class TaskContractResolverTest {
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
         assertEquals(Set.of("index.html", "styles.css", "scripts.js"), contract.expectedTargets());
+    }
+
+    @Test
+    void negatedFileMentionsAreForbiddenButNotExpectedTargets() {
+        for (String input : List.of(
+                "Create a BMI web page using exactly index.html, styles.css, scripts.js. Do not use script.js.",
+                "Create a BMI web page using exactly index.html, styles.css, scripts.js. Don't use script.js.",
+                "Create a BMI web page using exactly index.html, styles.css, scripts.js. Dont use script.js.",
+                "Create a BMI web page using exactly index.html, styles.css, scripts.js. Avoid script.js.",
+                "Create a BMI web page using exactly index.html, styles.css, scripts.js. Leave script.js alone.",
+                "Create a BMI web page using exactly index.html, styles.css, script.js. Do not create scripts.js.")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertTrue(contract.mutationAllowed(), input);
+            if (input.contains("script.js. Do not create scripts.js")) {
+                assertEquals(Set.of("index.html", "styles.css", "script.js"), contract.expectedTargets(), input);
+                assertEquals(Set.of("scripts.js"), contract.forbiddenTargets(), input);
+            } else {
+                assertEquals(Set.of("index.html", "styles.css", "scripts.js"), contract.expectedTargets(), input);
+                assertEquals(Set.of("script.js"), contract.forbiddenTargets(), input);
+            }
+        }
     }
 
     @Test

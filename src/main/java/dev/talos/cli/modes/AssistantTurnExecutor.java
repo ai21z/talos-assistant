@@ -828,6 +828,17 @@ public final class AssistantTurnExecutor {
 
                 Use talos.list_dir on "." unless the user named another in-workspace directory. Do not inspect, search, retrieve, summarize, infer, write, or edit file contents. Answer with file and directory names only.""".formatted(request);
         }
+        if (contract != null
+                && contract.type() == TaskType.VERIFY_ONLY
+                && "explicit-command-verification-request".equals(contract.classificationReason())) {
+            return """
+                The previous answer did not run the requested bounded command verification.
+
+                Task type: VERIFY_ONLY
+                User request: "%s"
+
+                Use talos.run_command now with the requested approved command profile. Do not call file-inspection, search, retrieval, write, or edit tools on this retry. If the runtime rejects the command profile or no approved profile matches, report that verified command-tool result directly and do not claim the command passed.""".formatted(request);
+        }
         return """
                 The previous answer did not inspect the local workspace, but the current task contract requires evidence.
 

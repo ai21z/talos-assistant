@@ -19,6 +19,8 @@ import java.util.Locale;
 public final class PromptDebugCommand implements Command {
     private static final DateTimeFormatter FILE_TS =
             DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
+    private static final String PROMPT_DEBUG_DIR_PROPERTY = "talos.promptDebugDir";
+    private static final String PROMPT_DEBUG_DIR_ENV = "TALOS_PROMPT_DEBUG_DIR";
 
     @Override
     public CommandSpec spec() {
@@ -33,7 +35,8 @@ public final class PromptDebugCommand implements Command {
 
     @Override
     public Result execute(String args, Context ctx) throws Exception {
-        String q = args == null ? "" : args.trim().toLowerCase(Locale.ROOT);
+        String raw = args == null ? "" : args.trim();
+        String q = raw.toLowerCase(Locale.ROOT);
         if (q.isEmpty() || "help".equals(q)) {
             return new Result.TrustedInfo(help());
         }
@@ -42,22 +45,25 @@ public final class PromptDebugCommand implements Command {
                     .<Result>map(snapshot -> new Result.TrustedInfo(PromptDebugInspector.format(snapshot)))
                     .orElseGet(PromptDebugCommand::missingCaptureInfo);
         }
-        if ("save".equals(q)) {
-            return saveLatest();
+        if (matchesCommand(raw, "save")) {
+            return saveLatest(commandArgument(raw, "save"));
         }
-        if ("save-all".equals(q) || "saveall".equals(q)) {
-            return saveAll();
+        if (matchesCommand(raw, "save-all")) {
+            return saveAll(commandArgument(raw, "save-all"));
         }
-        return new Result.Error("Usage: /prompt-debug [help|last|save]", 204);
+        if (matchesCommand(raw, "saveall")) {
+            return saveAll(commandArgument(raw, "saveall"));
+        }
+        return new Result.Error("Usage: /prompt-debug [help|last|save [directory]|save-all [directory]]", 204);
     }
 
-    private static Result saveLatest() throws Exception {
+    private static Result saveLatest(String explicitDir) throws Exception {
         var latest = PromptDebugCapture.latest();
         if (latest.isEmpty()) {
             return missingCaptureInfo();
         }
         PromptDebugSnapshot snapshot = latest.get();
-        Path dir = Path.of("local", "prompts").toAbsolutePath().normalize();
+        Path dir = promptDebugDirectory(explicitDir);
         Files.createDirectories(dir);
 
         String ts = FILE_TS.format(LocalDateTime.now());
@@ -76,12 +82,12 @@ public final class PromptDebugCommand implements Command {
         return new Result.TrustedInfo(result.toString());
     }
 
-    private static Result saveAll() throws Exception {
+    private static Result saveAll(String explicitDir) throws Exception {
         List<PromptDebugSnapshot> snapshots = PromptDebugCapture.history();
         if (snapshots.isEmpty()) {
             return missingCaptureInfo();
         }
-        Path dir = Path.of("local", "prompts").toAbsolutePath().normalize();
+        Path dir = promptDebugDirectory(explicitDir);
         Files.createDirectories(dir);
 
         String ts = FILE_TS.format(LocalDateTime.now());
@@ -113,6 +119,49 @@ public final class PromptDebugCommand implements Command {
         return new Result.TrustedInfo(result.toString());
     }
 
+    private static boolean matchesCommand(String raw, String command) {
+        if (raw == null) return false;
+        String lower = raw.toLowerCase(Locale.ROOT);
+        return lower.equals(command) || lower.startsWith(command + " ");
+    }
+
+    private static String commandArgument(String raw, String command) {
+        if (raw == null || raw.length() <= command.length()) return "";
+        return raw.substring(command.length()).trim();
+    }
+
+    private static Path promptDebugDirectory(String explicitDir) {
+        String configured = firstNonBlank(
+                explicitDir,
+                System.getProperty(PROMPT_DEBUG_DIR_PROPERTY),
+                System.getenv(PROMPT_DEBUG_DIR_ENV));
+        if (configured == null) {
+            configured = Path.of(
+                    System.getProperty("user.home", "."),
+                    ".talos",
+                    "prompt-debug").toString();
+        }
+        return Path.of(stripOptionalQuotes(configured)).toAbsolutePath().normalize();
+    }
+
+    private static String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) return value.strip();
+        }
+        return null;
+    }
+
+    private static String stripOptionalQuotes(String value) {
+        if (value == null) return "";
+        String stripped = value.strip();
+        if (stripped.length() >= 2
+                && ((stripped.startsWith("\"") && stripped.endsWith("\""))
+                || (stripped.startsWith("'") && stripped.endsWith("'")))) {
+            return stripped.substring(1, stripped.length() - 1);
+        }
+        return stripped;
+    }
+
     private static Result.Info missingCaptureInfo() {
         if (PromptDebugCapture.lastTurnHadNoProviderRequest()) {
             return new Result.Info(
@@ -129,10 +178,11 @@ public final class PromptDebugCommand implements Command {
                 /prompt-debug last
                   Show the latest structured chat request or provider-shaped HTTP body captured by this process.
 
-                /prompt-debug save
-                  Save the same render under local/prompts, plus provider-body JSON when available.
+                /prompt-debug save [directory]
+                  Save the same render outside the active workspace by default, plus provider-body JSON when available.
+                  Destination precedence: explicit directory, talos.promptDebugDir, TALOS_PROMPT_DEBUG_DIR, then ~/.talos/prompt-debug.
 
-                /prompt-debug save-all
+                /prompt-debug save-all [directory]
                   Save every non-background provider request captured since the latest turn started.
                 """;
     }

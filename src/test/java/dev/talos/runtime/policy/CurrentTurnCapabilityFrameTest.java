@@ -219,6 +219,29 @@ class CurrentTurnCapabilityFrameTest {
     }
 
     @Test
+    void renderDoesNotRequireNegatedSimilarFileMention() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Create a BMI calculator web page using exactly index.html, styles.css, scripts.js. "
+                        + "Do not use script.js.");
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                contract,
+                ExecutionPhase.APPLY,
+                List.of("talos.write_file", "talos.edit_file"),
+                List.of("talos.write_file", "talos.edit_file"),
+                List.of());
+
+        String frame = CurrentTurnCapabilityFrame.render(plan);
+
+        assertTrue(frame.contains("[ExpectedTargets]"), frame);
+        assertTrue(frame.contains("requiredTargets:"), frame);
+        assertTrue(frame.contains("index.html"), frame);
+        assertTrue(frame.contains("styles.css"), frame);
+        assertTrue(frame.contains("scripts.js"), frame);
+        assertFalse(frame.contains("requiredTargets: index.html, styles.css, scripts.js, script.js"), frame);
+        assertFalse(frame.contains("script.js, styles.css"), frame);
+    }
+
+    @Test
     void renderUsesWorkspaceOperationGuidanceForMoveTurns() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Move workspace-notes/readme-renamed.md to archive/readme-renamed.md.");
