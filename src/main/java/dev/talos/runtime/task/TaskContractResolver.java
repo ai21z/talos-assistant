@@ -282,21 +282,27 @@ public final class TaskContractResolver {
                     "tool-alias-capability-question");
         }
         boolean sessionMetaEvidenceQuestion = looksLikeSessionMetaEvidenceQuestion(lower);
+        boolean sessionUncertaintyQuestion = looksLikeSessionUncertaintyQuestion(lower);
         boolean priorChangeStatusQuestion = MutationIntent.looksPriorChangeStatusQuestion(original);
         String classificationReason = MutationIntent.classificationReason(original);
         boolean mutationRequested = !sessionMetaEvidenceQuestion
+                && !sessionUncertaintyQuestion
                 && !priorChangeStatusQuestion
                 && MutationIntent.isExplicitMutationClassificationReason(classificationReason);
         boolean commandVerificationRequest = !sessionMetaEvidenceQuestion
+                && !sessionUncertaintyQuestion
                 && !priorChangeStatusQuestion
                 && !mutationRequested
                 && looksExplicitCommandVerificationRequest(lower);
         boolean unsupportedCommandVerificationRequest = !sessionMetaEvidenceQuestion
+                && !sessionUncertaintyQuestion
                 && !priorChangeStatusQuestion
                 && !mutationRequested
                 && !commandVerificationRequest
                 && looksUnsupportedNaturalCommandVerificationRequest(lower);
         TaskType type = sessionMetaEvidenceQuestion
+                ? TaskType.VERIFY_ONLY
+                : sessionUncertaintyQuestion
                 ? TaskType.VERIFY_ONLY
                 : priorChangeStatusQuestion
                 ? TaskType.VERIFY_ONLY
@@ -354,6 +360,8 @@ public final class TaskContractResolver {
                 original,
                 sessionMetaEvidenceQuestion
                         ? "session-meta-evidence-question"
+                        : sessionUncertaintyQuestion
+                        ? "session-uncertainty-question"
                         : commandVerificationRequest
                         ? "explicit-command-verification-request"
                         : unsupportedCommandVerificationRequest
@@ -618,6 +626,21 @@ public final class TaskContractResolver {
                 || lower.contains("what does");
         if (!evidenceScoped && contentRequest) return false;
         return TARGET_FILE.matcher(lower).find() || EXTENSIONLESS_TEXT_TARGET.matcher(lower).find();
+    }
+
+    private static boolean looksLikeSessionUncertaintyQuestion(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        if (!lower.contains("?")) return false;
+        boolean asksUncertainty = lower.contains("unsure")
+                || lower.contains("uncertain")
+                || lower.contains("uncertainty")
+                || lower.contains("not sure");
+        if (!asksUncertainty) return false;
+        return lower.contains("session")
+                || lower.contains("audit")
+                || lower.contains("turn")
+                || lower.contains("trace")
+                || lower.contains("evidence");
     }
 
     private static boolean looksGradleBuildOrTestVerification(String lower) {

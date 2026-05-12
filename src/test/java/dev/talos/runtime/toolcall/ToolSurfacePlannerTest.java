@@ -337,6 +337,20 @@ class ToolSurfacePlannerTest {
     }
 
     @Test
+    void sessionUncertaintyQuestionExposesNoTools() {
+        var contract = TaskContractResolver.fromUserRequest(
+                "what are you unsure about from this session? short and evidence-based.");
+
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(contract, ExecutionPhase.VERIFY, registry());
+
+        assertEquals("session-uncertainty direct answer", plan.reason());
+        assertEquals(List.of(), plan.nativeToolNames());
+        assertEquals(
+                List.of(),
+                ToolSurfacePlanner.defaultVisibleToolNames(contract, ExecutionPhase.VERIFY));
+    }
+
+    @Test
     void defaultNamesMatchCurrentPromptFallbackSurfaces() {
         assertEquals(
                 List.of(),
