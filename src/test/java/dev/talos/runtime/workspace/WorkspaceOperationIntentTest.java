@@ -17,7 +17,8 @@ class WorkspaceOperationIntentTest {
                 "Create a new dir called workspace-notes.",
                 "Create a new folder named audit-output.",
                 "Make a new directory reports/daily.",
-                "Can you create a folder called docs?")) {
+                "Can you create a folder called docs?",
+                "make me a folder called ideas")) {
             var intent = WorkspaceOperationIntent.detect(request);
 
             assertTrue(intent.isPresent(), request);

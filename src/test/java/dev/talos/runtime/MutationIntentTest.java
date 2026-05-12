@@ -25,7 +25,10 @@ class MutationIntentTest {
                 "Move public.txt to archive/public.txt.",
                 "Copy docs/plan.md to docs/archive/plan.md.",
                 "Rename old.txt to new.txt.",
-                "Mkdir docs/reports.")) {
+                "Mkdir docs/reports.",
+                "make me a folder called ideas",
+                "make a folder called docs",
+                "create a directory named reports")) {
             assertTrue(MutationIntent.looksExplicitMutationRequest(input), input);
         }
     }

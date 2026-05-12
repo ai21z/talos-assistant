@@ -47,6 +47,14 @@ public final class TaskContractResolver {
                     + "(?:directories|directory|dirs|dir|folders|folder)\\s+"
                     + "(.{1,180}?)(?=\\s+and\\s+(?:copy|move|rename|write|edit|create\\s+file)\\b|[.;]|$)");
 
+    private static final Pattern SINGLE_DIRECTORY_CREATION_TARGET = Pattern.compile(
+            "(?i)\\b(?:mkdir|"
+                    + "(?:make|create)\\s+(?:me\\s+)?(?:(?:a|an)\\s+)?(?:new\\s+)?"
+                    + "(?:directories|directory|dirs|dir|folders|folder))\\s+"
+                    + "(?:(?:called|named|as)\\s+)?"
+                    + "`?([A-Za-z0-9_.\\\\/-]+(?:[\\\\/][A-Za-z0-9_.-]+)?)`?"
+                    + "(?=$|\\s|[`'\"),;:!?\\]])");
+
     private static final Pattern BATCH_DESTINATION_OPERATION = Pattern.compile(
             "(?i)\\b(?:copy|move|rename)\\s+`?([^\\s,;`]+)`?\\s+"
                     + "(?:to|into)\\s+`?([^\\s,;`]+)`?");
@@ -345,6 +353,11 @@ public final class TaskContractResolver {
         while (extensionlessMatcher.find()) {
             String target = normalizeTarget(extensionlessMatcher.group(1));
             if (!target.isBlank()) out.add(target);
+        }
+        Matcher directoryMatcher = SINGLE_DIRECTORY_CREATION_TARGET.matcher(userRequest);
+        while (directoryMatcher.find()) {
+            String target = normalizeTarget(directoryMatcher.group(1));
+            if (looksLikeDirectoryTarget(target)) out.add(target);
         }
         return Set.copyOf(out);
     }
