@@ -40,6 +40,9 @@ public final class ToolSurfacePlanner {
         if (contract != null && contract.type() == TaskType.SMALL_TALK) {
             return new Plan(List.of(), "small-talk");
         }
+        if (sessionUncertaintyRequest(contract)) {
+            return new Plan(List.of(), "session-uncertainty direct answer");
+        }
         if (unsupportedCommandRequest(contract)) {
             return new Plan(List.of(), "unsupported command request");
         }
@@ -86,6 +89,7 @@ public final class ToolSurfacePlanner {
 
     public static List<String> defaultVisibleToolNames(TaskContract contract, ExecutionPhase phase) {
         if (contract == null || contract.type() == TaskType.SMALL_TALK) return List.of();
+        if (sessionUncertaintyRequest(contract)) return List.of();
         if (unsupportedCommandRequest(contract)) return List.of();
         if (contract.type() == TaskType.DIRECTORY_LISTING) return List.of("talos.list_dir");
         if (!contract.mutationAllowed()
@@ -190,6 +194,11 @@ public final class ToolSurfacePlanner {
     private static boolean unsupportedCommandRequest(TaskContract contract) {
         return contract != null
                 && "unsupported-command-verification-request".equals(contract.classificationReason());
+    }
+
+    private static boolean sessionUncertaintyRequest(TaskContract contract) {
+        return contract != null
+                && "session-uncertainty-question".equals(contract.classificationReason());
     }
 
     private static boolean explicitCommandProfileRequest(TaskContract contract) {

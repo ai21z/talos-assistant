@@ -8778,6 +8778,51 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void sessionUncertaintyQuestionAnswersFromRuntimeEvidenceNotIdentityProse() {
+            SessionMemory memory = new SessionMemory();
+            memory.setChangeSummaryContext(new ChangeSummaryContext(
+                    ChangeSummaryContext.SCHEMA_VERSION,
+                    List.of(
+                            new ChangeSummaryContext.FileChange(
+                                    "index.html",
+                                    "talos.write_file",
+                                    30,
+                                    "trc-index",
+                                    "SUCCEEDED",
+                                    "PASSED",
+                                    "COMPLETED_VERIFIED"),
+                            new ChangeSummaryContext.FileChange(
+                                    "script.js",
+                                    "talos.write_file",
+                                    30,
+                                    "trc-script",
+                                    "SUCCEEDED",
+                                    "FAILED",
+                                    "TASK_INCOMPLETE")),
+                    List.of("scripts.js"),
+                    "FAILED",
+                    "TASK_INCOMPLETE",
+                    List.of("scripts.js: expected target was not successfully mutated.")));
+            var ctx = Context.builder(new Config())
+                    .memory(memory)
+                    .llm(LlmClient.scripted("I am Talos, a local-first workspace assistant."))
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("what are you unsure about from this session? short and evidence-based."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, WS, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().startsWith("Uncertainty:"), out.text());
+            assertTrue(out.text().contains("not verified complete"), out.text());
+            assertTrue(out.text().contains("scripts.js"), out.text());
+            assertTrue(out.text().contains("expected target was not successfully mutated"), out.text());
+            assertTrue(out.text().contains("runtime mutation history"), out.text());
+            assertFalse(out.text().contains("I am Talos"), out.text());
+        }
+
+        @Test
         void repeatedStatusFollowUpDoesNotDuplicatePreviousVerifiedPreamble() {
             var ctx = scriptedContext("Yes, it is done now.");
             var messages = new ArrayList<ChatMessage>();

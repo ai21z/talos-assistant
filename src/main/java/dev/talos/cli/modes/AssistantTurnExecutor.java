@@ -1756,6 +1756,10 @@ public final class AssistantTurnExecutor {
         if (unsupportedCommand != null) {
             return unsupportedCommand;
         }
+        String sessionUncertainty = sessionUncertaintyAnswerIfNeeded(ctx, contract);
+        if (sessionUncertainty != null) {
+            return sessionUncertainty;
+        }
         String runtimeMetaEvidence = runtimeMetaEvidenceAnswerIfNeeded(ctx, userRequest, contract);
         if (runtimeMetaEvidence != null) {
             return runtimeMetaEvidence;
@@ -1784,6 +1788,123 @@ public final class AssistantTurnExecutor {
         return "I can't run that command check because no approved command profile was specified. "
                 + "Talos can only run bounded approved command profiles, such as Gradle test/check/build profiles, "
                 + "when the request names a supported profile.";
+    }
+
+    private static String sessionUncertaintyAnswerIfNeeded(Context ctx, TaskContract contract) {
+        if (contract == null
+                || !"session-uncertainty-question".equals(contract.classificationReason())) {
+            return null;
+        }
+        ChangeSummaryContext context = ctx == null || ctx.memory() == null
+                ? null
+                : ctx.memory().changeSummaryContext();
+        if (context == null || !hasSessionUncertaintyEvidence(context)) {
+            return """
+                    Uncertainty:
+                    - No unresolved Talos runtime evidence is recorded for this session/audit.
+                    - This only covers Talos's runtime mutation history; it does not cover external edits or protected file contents.""";
+        }
+
+        StringBuilder out = new StringBuilder("Uncertainty:\n");
+        boolean added = false;
+        if (latestRecordedWorkNotVerifiedComplete(context)) {
+            out.append("- Latest recorded mutation evidence is not verified complete");
+            String status = sessionUncertaintyStatus(context);
+            if (!status.isBlank()) out.append(" (").append(status).append(')');
+            out.append(".\n");
+            added = true;
+        }
+        if (!context.unresolvedTargets().isEmpty()) {
+            out.append("- Unresolved target(s): ")
+                    .append(String.join(", ", context.unresolvedTargets()))
+                    .append(".\n");
+            added = true;
+        }
+        if (!context.verifierFindings().isEmpty()) {
+            out.append("- Verifier finding(s): ")
+                    .append(String.join("; ", context.verifierFindings().stream().limit(3).toList()))
+                    .append(".\n");
+            added = true;
+        }
+        if (!context.unresolvedVerificationFailures().isEmpty()) {
+            List<String> failures = context.unresolvedVerificationFailures().stream()
+                    .limit(3)
+                    .map(AssistantTurnExecutor::renderSessionUncertaintyFailure)
+                    .filter(text -> !text.isBlank())
+                    .toList();
+            if (!failures.isEmpty()) {
+                out.append("- Unresolved verification failure(s): ")
+                        .append(String.join("; ", failures))
+                        .append(".\n");
+                added = true;
+            }
+        }
+        if (!added) {
+            out.append("- No unresolved runtime verifier failures are recorded; confidence is limited to Talos-recorded tool outcomes.\n");
+        }
+        out.append("- Scope: runtime mutation history only; external edits and protected file contents are outside this answer.");
+        return out.toString();
+    }
+
+    private static boolean hasSessionUncertaintyEvidence(ChangeSummaryContext context) {
+        if (context == null) return false;
+        return context.hasRecordedChanges()
+                || !context.unresolvedTargets().isEmpty()
+                || !context.verifierFindings().isEmpty()
+                || !context.unresolvedVerificationFailures().isEmpty()
+                || !context.verificationStatus().isBlank()
+                || !context.completionStatus().isBlank();
+    }
+
+    private static boolean latestRecordedWorkNotVerifiedComplete(ChangeSummaryContext context) {
+        if (context == null) return false;
+        if (!context.unresolvedTargets().isEmpty()
+                || !context.unresolvedVerificationFailures().isEmpty()) {
+            return true;
+        }
+        if ("FAILED".equalsIgnoreCase(context.verificationStatus())
+                || "TASK_INCOMPLETE".equalsIgnoreCase(context.completionStatus())
+                || "COMPLETED_UNVERIFIED".equalsIgnoreCase(context.completionStatus())) {
+            return true;
+        }
+        for (ChangeSummaryContext.FileChange change : context.changedFiles()) {
+            if (change == null) continue;
+            boolean hasState = !change.verificationStatus().isBlank()
+                    || !change.completionStatus().isBlank();
+            boolean verified = "PASSED".equalsIgnoreCase(change.verificationStatus())
+                    || "COMPLETED_VERIFIED".equalsIgnoreCase(change.completionStatus());
+            if (hasState && !verified) return true;
+        }
+        return false;
+    }
+
+    private static String sessionUncertaintyStatus(ChangeSummaryContext context) {
+        if (context == null) return "";
+        List<String> parts = new ArrayList<>();
+        if (!context.verificationStatus().isBlank()) {
+            parts.add("verifier=" + context.verificationStatus());
+        }
+        if (!context.completionStatus().isBlank()) {
+            parts.add("completion=" + context.completionStatus());
+        }
+        return String.join("; ", parts);
+    }
+
+    private static String renderSessionUncertaintyFailure(ChangeSummaryContext.VerificationFailure failure) {
+        if (failure == null) return "";
+        StringBuilder out = new StringBuilder();
+        if (!failure.paths().isEmpty()) {
+            out.append(String.join(", ", failure.paths()));
+        }
+        if (failure.turnNumber() > 0) {
+            if (!out.isEmpty()) out.append(' ');
+            out.append("(turn ").append(failure.turnNumber()).append(')');
+        }
+        if (!failure.findings().isEmpty()) {
+            if (!out.isEmpty()) out.append(": ");
+            out.append(String.join("; ", failure.findings().stream().limit(2).toList()));
+        }
+        return out.toString();
     }
 
     private static String runtimeMetaEvidenceAnswerIfNeeded(

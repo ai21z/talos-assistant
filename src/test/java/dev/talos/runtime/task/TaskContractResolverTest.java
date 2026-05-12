@@ -1122,6 +1122,31 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void sessionUncertaintyQuestionBecomesVerifyOnlyNotIdentitySmallTalk() {
+        for (String input : List.of(
+                "what are you unsure about from this session? short and evidence-based.",
+                "what are you uncertain about from this audit?")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertEquals(TaskType.VERIFY_ONLY, contract.type(), input);
+            assertFalse(contract.mutationRequested(), input);
+            assertFalse(contract.mutationAllowed(), input);
+            assertTrue(contract.verificationRequired(), input);
+            assertEquals("session-uncertainty-question", contract.classificationReason(), input);
+        }
+    }
+
+    @Test
+    void plainIdentityQuestionRemainsSmallTalk() {
+        TaskContract contract = TaskContractResolver.fromUserRequest("what are you?");
+
+        assertEquals(TaskType.SMALL_TALK, contract.type());
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
+        assertFalse(contract.verificationRequired());
+    }
+
+    @Test
     void nullOrBlankInputIsUnknown() {
         List<String> inputs = List.of("", "   ");
         for (String input : inputs) {
