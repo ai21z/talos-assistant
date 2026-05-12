@@ -17,7 +17,7 @@ class CliStatusDashboardTest {
     void render_includes_required_dashboard_rows() {
         String output = CliStatusDashboard.render(CliStatusDashboard.snapshot(
                 workspace,
-                new Config(),
+                new Config(null),
                 "auto",
                 "qwen2.5-coder:14b",
                 "off",
@@ -37,7 +37,7 @@ class CliStatusDashboardTest {
     void snapshot_reports_missing_index_without_stack_details() {
         String output = CliStatusDashboard.render(CliStatusDashboard.snapshot(
                 workspace,
-                new Config(),
+                new Config(null),
                 "auto",
                 "model",
                 "off",
@@ -48,7 +48,7 @@ class CliStatusDashboardTest {
 
     @Test
     void snapshot_summarizes_local_engine_policy() {
-        Config cfg = new Config();
+        Config cfg = new Config(null);
         cfg.data.put("net", java.util.Map.of("enabled", false));
 
         String output = CliStatusDashboard.render(CliStatusDashboard.snapshot(
@@ -68,7 +68,7 @@ class CliStatusDashboardTest {
 
     @Test
     void snapshot_summarizes_explicit_ollama_policy() {
-        Config cfg = new Config();
+        Config cfg = new Config(null);
         cfg.data.put("llm", java.util.Map.of("default_backend", "ollama"));
 
         String output = CliStatusDashboard.render(CliStatusDashboard.snapshot(

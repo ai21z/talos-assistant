@@ -15,7 +15,7 @@ class DiagnoseCmdTest {
 
     @Test
     void engineSectionUsesActiveBackendNotHardCodedOllama() {
-        String section = DiagnoseCmd.renderEngineSection(new Config(), true);
+        String section = DiagnoseCmd.renderEngineSection(new Config(null), true);
 
         assertTrue(section.contains("Engine:"));
         assertTrue(section.contains("Backend: llama_cpp"));
