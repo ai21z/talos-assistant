@@ -8465,6 +8465,45 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void artifactScopedPdfDocxStatusQuestionDoesNotUseLatestUnrelatedPartialOutcome() {
+            var ctx = scriptedContext("Partially. The latest web task remains partial.");
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("can you create a docx file about a synthwave band page?"));
+            messages.add(ChatMessage.assistant("""
+                    [Document capability note: Talos cannot create valid Microsoft Word .docx files with the current local text-file tool surface.]
+
+                    No file was changed.
+                    """));
+            messages.add(ChatMessage.user("create a pdf version instead please"));
+            messages.add(ChatMessage.assistant("""
+                    [Document capability note: Talos cannot create valid PDF files with the current local text-file tool surface.]
+
+                    No file was changed.
+                    """));
+            messages.add(ChatMessage.user("make a static web page from rough-brief.txt"));
+            messages.add(ChatMessage.assistant("""
+                    [Partial verification: static checks failed - rough-brief.txt: expected target was not successfully mutated.]
+
+                    Remaining static verification problems:
+                    - rough-brief.txt: expected target was not successfully mutated.
+                    - styles.css: expected target was not successfully mutated.
+                    """));
+            messages.add(ChatMessage.user("did you create any valid pdf or docx in this audit? be honest."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, WS, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().startsWith("No."), out.text());
+            assertTrue(out.text().contains("valid PDF or DOCX"), out.text());
+            assertTrue(out.text().contains("runtime evidence"), out.text());
+            assertTrue(out.text().contains("unsupported-document"), out.text());
+            assertFalse(out.text().contains("rough-brief.txt"), out.text());
+            assertFalse(out.text().contains("styles.css"), out.text());
+            assertFalse(out.text().contains("latest web task"), out.text());
+        }
+
+        @Test
         void changedFilesAuditQuestionWithoutRuntimeLedgerDoesNotUsePreviousAssistantProse() {
             var ctx = scriptedContext("The audit changed .env and README.md.");
             var messages = new ArrayList<ChatMessage>();

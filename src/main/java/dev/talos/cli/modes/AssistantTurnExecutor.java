@@ -1765,6 +1765,10 @@ public final class AssistantTurnExecutor {
         if (runtimeChangeSummary != null) {
             return runtimeChangeSummary;
         }
+        String documentCreationStatus = documentCreationStatusIfNeeded(ctx, messages, userRequest);
+        if (documentCreationStatus != null) {
+            return documentCreationStatus;
+        }
         return verifiedFollowUpSummaryIfNeeded(messages, userRequest);
     }
 
@@ -1959,6 +1963,88 @@ public final class AssistantTurnExecutor {
                     : null;
         }
         return context.renderForChangeSummaryQuestion(includeUncertainty);
+    }
+
+    private static String documentCreationStatusIfNeeded(
+            Context ctx,
+            List<ChatMessage> messages,
+            String userRequest
+    ) {
+        Set<String> formats = requestedDocumentCreationStatusFormats(userRequest);
+        if (formats.isEmpty()) return null;
+
+        ChangeSummaryContext context = ctx == null || ctx.memory() == null
+                ? null
+                : ctx.memory().changeSummaryContext();
+        List<String> recordedDocumentPaths = context == null
+                ? List.of()
+                : context.changedFiles().stream()
+                .map(ChangeSummaryContext.FileChange::path)
+                .filter(path -> hasRequestedDocumentExtension(path, formats))
+                .sorted()
+                .toList();
+
+        String formatText = renderDocumentFormats(formats);
+        StringBuilder out = new StringBuilder();
+        out.append("No. Talos has no runtime evidence that it created a valid ")
+                .append(formatText)
+                .append(" in this session/audit.");
+        if (!recordedDocumentPaths.isEmpty()) {
+            out.append("\n\nRuntime-recorded document-path changes exist, but Talos did not verify them as valid binary documents: ")
+                    .append(String.join(", ", recordedDocumentPaths))
+                    .append('.');
+        }
+        if (hasPriorUnsupportedDocumentRefusal(messages, formats)) {
+            out.append("\n\nRelevant prior outcome: Talos recorded unsupported-document capability refusals for the requested binary document format(s), not valid ")
+                    .append(formatText)
+                    .append(" creation.");
+        }
+        return out.toString();
+    }
+
+    private static Set<String> requestedDocumentCreationStatusFormats(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return Set.of();
+        String lower = userRequest.toLowerCase(Locale.ROOT);
+        boolean statusQuestion = lower.contains("did you create")
+                || lower.contains("have you created")
+                || lower.contains("did talos create")
+                || lower.contains("has talos created")
+                || lower.contains("create any")
+                || lower.contains("created any");
+        if (!statusQuestion || !lower.contains("valid")) return Set.of();
+        LinkedHashSet<String> formats = new LinkedHashSet<>();
+        if (lower.contains("pdf")) formats.add("pdf");
+        if (lower.contains("docx") || lower.contains("word document") || lower.contains("word file")) {
+            formats.add("docx");
+        }
+        return Set.copyOf(formats);
+    }
+
+    private static boolean hasPriorUnsupportedDocumentRefusal(List<ChatMessage> messages, Set<String> formats) {
+        if (messages == null || messages.isEmpty() || formats == null || formats.isEmpty()) return false;
+        for (ChatMessage message : messages) {
+            if (message == null || !"assistant".equals(message.role())) continue;
+            String lower = message.content() == null ? "" : message.content().toLowerCase(Locale.ROOT);
+            if (!lower.contains("unsupported") && !lower.contains("cannot create valid")) continue;
+            if (formats.contains("pdf") && lower.contains("pdf")) return true;
+            if (formats.contains("docx") && (lower.contains("docx") || lower.contains("word"))) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasRequestedDocumentExtension(String path, Set<String> formats) {
+        if (path == null || formats == null || formats.isEmpty()) return false;
+        String lower = path.toLowerCase(Locale.ROOT);
+        return formats.stream().anyMatch(format -> lower.endsWith("." + format));
+    }
+
+    private static String renderDocumentFormats(Set<String> formats) {
+        boolean pdf = formats.contains("pdf");
+        boolean docx = formats.contains("docx");
+        if (pdf && docx) return "PDF or DOCX";
+        if (pdf) return "PDF";
+        if (docx) return "DOCX";
+        return "binary document";
     }
 
     static boolean looksLikeAssistantIdentityTurn(String userRequest) {
