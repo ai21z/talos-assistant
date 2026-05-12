@@ -134,6 +134,45 @@ class WorkspaceOperationStaticVerifierTest {
     }
 
     @Test
+    void naturalBatchDirectoryAndCopyPromptVerifiesAllFinalPaths() throws Exception {
+        Files.writeString(workspace.resolve("styles.css"), "body { color: black; }\n");
+
+        String request = "batch this: create batch-one and batch-two, "
+                + "then copy styles.css to batch-one/styles-copy.css.";
+        ToolCallLoop.LoopResult loopResult = runLoop(
+                request,
+                tools(new BatchWorkspaceApplyTool()),
+                """
+                {"name":"talos.apply_workspace_batch","arguments":{"operations_json":"[
+                  {\\"op\\":\\"mkdir\\",\\"path\\":\\"batch-one\\"},
+                  {\\"op\\":\\"mkdir\\",\\"path\\":\\"batch-two\\"},
+                  {\\"op\\":\\"copy_path\\",\\"from\\":\\"styles.css\\",\\"to\\":\\"batch-one/styles-copy.css\\"}
+                ]"}}
+                """);
+
+        assertTrue(Files.isDirectory(workspace.resolve("batch-one")));
+        assertTrue(Files.isDirectory(workspace.resolve("batch-two")));
+        assertEquals("body { color: black; }\n",
+                Files.readString(workspace.resolve("batch-one/styles-copy.css")));
+
+        TaskVerificationResult verification = StaticTaskVerifier.verify(
+                workspace,
+                TaskContractResolver.fromUserRequest(request),
+                loopResult,
+                0);
+
+        assertEquals(TaskVerificationStatus.READBACK_ONLY, verification.status(), verification.problems().toString());
+        assertTrue(verification.problems().isEmpty(), verification.problems().toString());
+        assertTrue(verification.facts().stream().anyMatch(f -> f.contains("directory exists: batch-one")),
+                verification.facts().toString());
+        assertTrue(verification.facts().stream().anyMatch(f -> f.contains("directory exists: batch-two")),
+                verification.facts().toString());
+        assertTrue(verification.facts().stream()
+                        .anyMatch(f -> f.contains("copy destination exists: batch-one/styles-copy.css")),
+                verification.facts().toString());
+    }
+
+    @Test
     void deletePathVerifiesTargetIsAbsentFromToolLoopOutcome() throws Exception {
         Files.createDirectories(workspace.resolve("docs"));
         Files.writeString(workspace.resolve("docs/old-plan.md"), "delete me\n");

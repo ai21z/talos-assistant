@@ -28,6 +28,11 @@ public final class WorkspaceOperationIntent {
                     + "(?:(?:called|named|as)\\s+)?"
                     + PATH_TOKEN,
             Pattern.CASE_INSENSITIVE);
+    private static final Pattern NATURAL_BATCH_MKDIR_REQUEST = Pattern.compile(
+            "\\b(?:create|make)\\s+"
+                    + "[A-Za-z0-9_.\\\\/-]+(?:\\s+and\\s+[A-Za-z0-9_.\\\\/-]+)+"
+                    + "\\s*,?\\s+(?:then\\s+)?(?:copy|move|rename)\\b",
+            Pattern.CASE_INSENSITIVE);
     private static final Pattern DELETE_REQUEST = Pattern.compile(
             "\\b(?:delete|remove|rm)\\s+" + PATH_TOKEN,
             Pattern.CASE_INSENSITIVE);
@@ -62,7 +67,10 @@ public final class WorkspaceOperationIntent {
             return Optional.empty();
         }
         List<Kind> kinds = new ArrayList<>();
-        if (MKDIR_REQUEST.matcher(request).find()) kinds.add(Kind.MKDIR);
+        if (MKDIR_REQUEST.matcher(request).find()
+                || NATURAL_BATCH_MKDIR_REQUEST.matcher(request).find()) {
+            kinds.add(Kind.MKDIR);
+        }
         if (COPY_REQUEST.matcher(request).find()) kinds.add(Kind.COPY_PATH);
         if (RENAME_REQUEST.matcher(request).find()) kinds.add(Kind.RENAME_PATH);
         if (MOVE_REQUEST.matcher(request).find()) kinds.add(Kind.MOVE_PATH);
@@ -74,7 +82,10 @@ public final class WorkspaceOperationIntent {
         if (MOVE_REQUEST.matcher(request).find()) return Optional.of(new Intent(Kind.MOVE_PATH));
         if (COPY_REQUEST.matcher(request).find()) return Optional.of(new Intent(Kind.COPY_PATH));
         if (RENAME_REQUEST.matcher(request).find()) return Optional.of(new Intent(Kind.RENAME_PATH));
-        if (MKDIR_REQUEST.matcher(request).find()) return Optional.of(new Intent(Kind.MKDIR));
+        if (MKDIR_REQUEST.matcher(request).find()
+                || NATURAL_BATCH_MKDIR_REQUEST.matcher(request).find()) {
+            return Optional.of(new Intent(Kind.MKDIR));
+        }
         if (DELETE_REQUEST.matcher(request).find()) return Optional.of(new Intent(Kind.DELETE_PATH));
         return Optional.empty();
     }

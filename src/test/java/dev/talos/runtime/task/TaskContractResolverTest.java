@@ -274,6 +274,17 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void naturalBatchPromptExtractsDirectoryAndCopyTargets() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "batch this: create batch-one and batch-two, then copy styles.css to batch-one/styles-copy.css.");
+
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("batch-one", "batch-two", "styles.css", "batch-one/styles-copy.css"),
+                contract.expectedTargets());
+    }
+
+    @Test
     void explicitBatchWorkspaceApplyPromptExposesBatchToolInApplySurface() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Use talos.apply_workspace_batch only. Apply operations_json for exactly these operations: "

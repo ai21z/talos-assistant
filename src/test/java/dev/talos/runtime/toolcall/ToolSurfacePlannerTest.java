@@ -142,6 +142,20 @@ class ToolSurfacePlannerTest {
     }
 
     @Test
+    void naturalBatchDirectoryAndCopyPromptExposesCompoundWorkspaceSurface() {
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                TaskContractResolver.fromUserRequest(
+                        "batch this: create batch-one and batch-two, then copy styles.css to batch-one/styles-copy.css."),
+                ExecutionPhase.APPLY,
+                registry());
+
+        assertEquals(
+                List.of("talos.apply_workspace_batch", "talos.copy_path", "talos.mkdir"),
+                plan.nativeToolNames());
+        assertEquals("compound workspace operation surface", plan.reason());
+    }
+
+    @Test
     void naturalDirectoryCreationRequestsExposeOnlyMkdirTool() {
         for (String request : List.of(
                 "Create a new dir called workspace-notes.",
