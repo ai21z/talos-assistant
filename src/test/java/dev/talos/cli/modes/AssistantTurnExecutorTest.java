@@ -8504,6 +8504,22 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void unsupportedNaturalCommandRequestReturnsDeterministicNoRunAnswer() {
+            var ctx = scriptedContext("I inspected the workspace and no command is available.");
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "run the safe command check for this folder. if it can't run, say exactly that."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, WS, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(out.text().startsWith("I can't run that command check"), out.text());
+            assertTrue(out.text().contains("approved command profile"), out.text());
+            assertFalse(out.text().contains("I inspected the workspace"), out.text());
+        }
+
+        @Test
         void changedFilesAuditQuestionWithoutRuntimeLedgerDoesNotUsePreviousAssistantProse() {
             var ctx = scriptedContext("The audit changed .env and README.md.");
             var messages = new ArrayList<ChatMessage>();

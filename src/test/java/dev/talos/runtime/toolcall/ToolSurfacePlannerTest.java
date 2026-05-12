@@ -325,6 +325,18 @@ class ToolSurfacePlannerTest {
     }
 
     @Test
+    void unsupportedNaturalCommandRequestExposesNoTools() {
+        var contract = TaskContractResolver.fromUserRequest(
+                "run the safe command check for this folder. if it can't run, say exactly that.");
+
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(contract, ExecutionPhase.VERIFY, registry());
+
+        assertEquals("unsupported command request", plan.reason());
+        assertEquals(List.of(), plan.nativeToolNames());
+        assertFalse(plan.nativeToolNames().contains("talos.run_command"));
+    }
+
+    @Test
     void defaultNamesMatchCurrentPromptFallbackSurfaces() {
         assertEquals(
                 List.of(),

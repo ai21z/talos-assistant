@@ -291,11 +291,18 @@ public final class TaskContractResolver {
                 && !priorChangeStatusQuestion
                 && !mutationRequested
                 && looksExplicitCommandVerificationRequest(lower);
+        boolean unsupportedCommandVerificationRequest = !sessionMetaEvidenceQuestion
+                && !priorChangeStatusQuestion
+                && !mutationRequested
+                && !commandVerificationRequest
+                && looksUnsupportedNaturalCommandVerificationRequest(lower);
         TaskType type = sessionMetaEvidenceQuestion
                 ? TaskType.VERIFY_ONLY
                 : priorChangeStatusQuestion
                 ? TaskType.VERIFY_ONLY
                 : commandVerificationRequest
+                ? TaskType.VERIFY_ONLY
+                : unsupportedCommandVerificationRequest
                 ? TaskType.VERIFY_ONLY
                 : classify(lower, mutationRequested, classificationReason);
         boolean mutationAllowed = mutationRequested
@@ -349,6 +356,8 @@ public final class TaskContractResolver {
                         ? "session-meta-evidence-question"
                         : commandVerificationRequest
                         ? "explicit-command-verification-request"
+                        : unsupportedCommandVerificationRequest
+                        ? "unsupported-command-verification-request"
                         : classificationReason);
     }
 
@@ -556,6 +565,16 @@ public final class TaskContractResolver {
         if (containsAny(lower, COMMAND_TOOL_MARKERS)) return true;
         return containsAny(lower, GRADLE_COMMAND_MARKERS)
                 && looksGradleBuildOrTestVerification(lower);
+    }
+
+    private static boolean looksUnsupportedNaturalCommandVerificationRequest(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        if (!containsAny(lower, COMMAND_EXECUTION_ACTION_MARKERS)) return false;
+        if (!lower.contains("command")) return false;
+        return lower.contains("if it can't run")
+                || lower.contains("if it cannot run")
+                || lower.contains("safe command")
+                || lower.contains("command check");
     }
 
     private static boolean looksLikeSessionMetaEvidenceQuestion(String lower) {
