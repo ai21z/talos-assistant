@@ -17,7 +17,9 @@ public final class ModelsCommand implements Command {
             try (var reg = new EngineRegistry(ctx.cfg())) {
                 var cat = reg.compositeCatalog();
                 var list = cat.installed(); // Use installed(), not all() to avoid subprocess calls
-                if (list.isEmpty()) return new Result.Info("No models found. Make sure Ollama is running and models are installed.");
+                if (list.isEmpty()) {
+                    return new Result.Info("No models found. Run `talos setup models` to configure managed llama.cpp, or select a configured legacy backend.");
+                }
 
                 StringBuilder sb = new StringBuilder("\nInstalled models:\n\n");
                 for (var m : list) {
@@ -28,8 +30,8 @@ public final class ModelsCommand implements Command {
             }
         } catch (Exception e) {
             // Friendly error instead of crashing the REPL
-            return new Result.Error("Ollama not reachable: " + e.getMessage() +
-                "\nMake sure Ollama is running (ollama serve) and try again.", 500);
+            return new Result.Error("Model catalog not reachable: " + e.getMessage() +
+                "\nRun `talos status --verbose` and `talos setup models` to check local model setup.", 500);
         }
     }
 }

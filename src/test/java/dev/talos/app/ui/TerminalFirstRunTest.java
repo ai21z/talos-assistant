@@ -57,6 +57,7 @@ class TerminalFirstRunTest {
         @Test void setupSummary_is_backend_neutral() {
             String summary = TerminalFirstRun.setupSummary();
             assertTrue(summary.contains("llama.cpp"));
+            assertTrue(summary.contains("talos setup models"));
             assertFalse(summary.contains("requires Ollama"));
         }
     }

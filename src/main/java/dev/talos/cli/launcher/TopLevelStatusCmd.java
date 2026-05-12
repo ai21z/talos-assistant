@@ -107,6 +107,16 @@ public class TopLevelStatusCmd implements Runnable {
         if (verbose) {
             System.out.println("\nConfiguration:");
             System.out.println("  Config loaded from: " + cfg.getReport().loadedFrom);
+            System.out.println("  User config path:   " + cfg.getReport().userConfigPath);
+            if (cfg.getReport().userConfigPresent) {
+                if (cfg.getReport().userConfigLoaded) {
+                    System.out.println("  User config:        loaded");
+                } else {
+                    System.out.println("  User config:        parse failed - " + cfg.getReport().userConfigError);
+                }
+            } else {
+                System.out.println("  User config:        not found");
+            }
             System.out.println("  Strict mode:        " + cfg.getReport().strictMode);
             System.out.println("  Defaulted keys:     " + cfg.getReport().defaultedKeys.size());
         }

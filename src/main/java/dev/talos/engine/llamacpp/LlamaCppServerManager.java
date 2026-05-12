@@ -16,7 +16,9 @@ import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 final class LlamaCppServerManager implements AutoCloseable {
@@ -79,12 +81,14 @@ final class LlamaCppServerManager implements AutoCloseable {
         }
 
         List<String> command = buildCommand();
+        Map<String, String> environment = buildEnvironment();
         Path logPath = logPath();
         try {
             prepareLog(logPath);
+            prepareModelCacheDir();
             appendLifecycleLog(logPath, "Talos managed llama.cpp server starting on "
                     + config.listenHost() + ":" + config.port());
-            process = launcher.start(command, logPath);
+            process = launcher.start(command, logPath, environment);
             appendLifecycleLog(logPath, "Talos managed llama.cpp server process launched");
             lastLaunchFailure = "";
         } catch (IOException e) {
@@ -145,6 +149,20 @@ final class LlamaCppServerManager implements AutoCloseable {
         appendManagedAgentDefault(command, config.serverArgs(), PREDICT_FLAGS, "--predict", DEFAULT_AGENT_PREDICT);
         command.addAll(config.serverArgs());
         return command;
+    }
+
+    Map<String, String> buildEnvironment() {
+        if (!config.hasHfSource()) return Map.of();
+        if (config.hfCacheDir() == null || config.hfCacheDir().isBlank()) return Map.of();
+        Map<String, String> environment = new LinkedHashMap<>();
+        environment.put("HF_HOME", config.hfCacheDir());
+        return environment;
+    }
+
+    private void prepareModelCacheDir() throws IOException {
+        if (!config.hasHfSource()) return;
+        if (config.hfCacheDir() == null || config.hfCacheDir().isBlank()) return;
+        Files.createDirectories(Path.of(config.hfCacheDir()));
     }
 
     private static void appendManagedAgentDefault(List<String> command,

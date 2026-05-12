@@ -166,6 +166,27 @@ class TalosBootstrapTest {
     }
 
     @Test
+    void configParseFailureProducesStartupNotice(@TempDir Path home) throws Exception {
+        Path configFile = home.resolve(".talos").resolve("config.yaml");
+        java.nio.file.Files.createDirectories(configFile.getParent());
+        java.nio.file.Files.writeString(configFile, """
+                llm:
+                  transport: "engine"
+                engines:
+                  llama_cpp:
+                    server_path: "C:\\Users\\bad\\llama-server.exe"
+                """, StandardCharsets.UTF_8);
+
+        Config cfg = new Config(configFile);
+
+        String notice = TalosBootstrap.buildConfigNotice(cfg.getReport());
+
+        assertTrue(notice.contains("config warning"));
+        assertTrue(notice.contains("talos status --verbose"));
+        assertTrue(notice.contains("talos setup models"));
+    }
+
+    @Test
     void backwardCompatibleConstructorWorks() {
         SessionState session = new SessionState() {
             private int k = 6; private boolean dbg;

@@ -155,20 +155,30 @@ Current practical setup:
 - Windows
 - Java 21+
 - `llama-server.exe` from llama.cpp, or another configured local backend
-- a local GGUF chat model for the managed llama.cpp path
+- a configured managed llama.cpp model profile or a local GGUF chat model
 - an embeddings model when vector retrieval is needed
 
-The default configuration uses the engine transport with `llama_cpp` as the
-default backend. Configure the llama.cpp paths in `~/.talos/config.yaml`:
+The default product path uses the engine transport with `llama_cpp` as the
+backend. The recommended setup command configures one of the audited managed
+llama.cpp model profiles:
 
-```yaml
-engines:
-  llama_cpp:
-    mode: "managed"
-    server_path: "C:/path/to/llama-server.exe"
-    model_path: "C:/path/to/model.gguf"
+```powershell
+talos setup models
+talos setup models --profile qwen2.5-coder-14b --server-path C:/path/to/llama-server.exe --write
+talos setup models --profile gpt-oss-20b --server-path C:/path/to/llama-server.exe --write
 ```
 
+Those profile commands configure Hugging Face model sources and set the managed
+llama.cpp process to use `~/.talos/models/huggingface` as `HF_HOME`, so model
+files are downloaded under the Talos home folder on first model start.
+
+Users who already keep GGUF files elsewhere can point Talos at that file:
+
+```powershell
+talos setup models --profile my-agent --server-path C:/path/to/llama-server.exe --model-path D:/models/agent.gguf --write
+```
+
+Existing configs can be replaced with `--force`; Talos writes a backup first.
 Ollama can still be selected explicitly as a legacy backend when needed.
 
 ### 2. Build Talos
@@ -219,6 +229,7 @@ Run the approved Gradle test command profile.
 | `talos diagnose` | inspect retrieval and answer-generation behavior |
 | `talos version` | print version information |
 | `talos setup` | first-run setup flow |
+| `talos setup models` | configure tested managed llama.cpp model profiles |
 
 ### Useful REPL Commands
 
@@ -267,6 +278,7 @@ The work-cycle documentation lives here:
 - [work-cycle-docs/work-test-cycle-step-by-step.md](work-cycle-docs/work-test-cycle-step-by-step.md)
 - [work-cycle-docs/milestone-audit-workflow.md](work-cycle-docs/milestone-audit-workflow.md)
 - [work-cycle-docs/full-e2e-audit-workflow.md](work-cycle-docs/full-e2e-audit-workflow.md)
+- [docs/setup-managed-models.md](docs/setup-managed-models.md)
 
 Post-0.9.6 architecture direction is documented in
 [docs/architecture/01-execution-discipline-and-local-trust.md](docs/architecture/01-execution-discipline-and-local-trust.md).
@@ -291,6 +303,7 @@ Current practical setup:
 - Windows as the best-supported day-to-day path in this repo
 - Java 21+
 - managed llama.cpp for the primary local model path
+- `talos setup models` for tested Qwen and GPT-OSS profiles
 - Ollama as an optional legacy backend
 
 ### Network Expectations

@@ -78,7 +78,9 @@ public final class HelpCommand implements Command {
                     List.of(
                             "/models lists installed models. /model is an alias.",
                             "/set model <backend/model> switches the active model.",
-                            "Example: /set model ollama/qwen3:8b.")));
+                            "Use `talos setup models` outside the REPL to configure tested managed llama.cpp profiles.",
+                            "Tested profiles: qwen2.5-coder-14b and gpt-oss-20b.",
+                            "Example: /set model llama_cpp/qwen2.5-coder-14b.")));
             default -> findSpec(q)
                     .map(spec -> (Result) new Result.Ok(detail(spec)))
                     .orElseGet(() -> new Result.Error("No such help topic or command: " + q, 204));

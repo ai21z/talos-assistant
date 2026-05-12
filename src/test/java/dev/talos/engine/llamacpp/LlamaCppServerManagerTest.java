@@ -219,6 +219,35 @@ class LlamaCppServerManagerTest {
     }
 
     @Test
+    void managedModeSetsHfHomeWhenHuggingFaceCacheDirIsConfigured() throws Exception {
+        Path exe = touch("llama-server.exe");
+        Path hfHome = tempDir.resolve("talos-model-cache");
+        HttpServer server = startHealthServer(200, "ok");
+        try {
+            Config cfg = config(Map.ofEntries(
+                    Map.entry("mode", "managed"),
+                    Map.entry("server_path", exe.toString()),
+                    Map.entry("hf_repo", "ggml-org/gpt-oss-20b-GGUF"),
+                    Map.entry("hf_file", "gpt-oss-20b-mxfp4.gguf"),
+                    Map.entry("hf_cache_dir", hfHome.toString()),
+                    Map.entry("model", "gpt-oss-20b"),
+                    Map.entry("host", "http://127.0.0.1"),
+                    Map.entry("port", server.getAddress().getPort())));
+            FakeLauncher launcher = new FakeLauncher();
+            LlamaCppServerManager manager = new LlamaCppServerManager(
+                    LlamaCppConfig.from(cfg), launcher, HttpClient.newHttpClient(),
+                    Duration.ofSeconds(2), Duration.ofMillis(10), tempDir.resolve("logs"));
+
+            manager.ensureStarted();
+
+            assertEquals(hfHome.toString(), launcher.environments.get(0).get("HF_HOME"));
+            assertTrue(Files.isDirectory(hfHome), "Talos should create the configured HF_HOME directory before launch");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void catalogFallbackModelUsesHuggingFaceRepoWhenNoAliasOrModelPath() {
         Config cfg = config(Map.of(
                 "mode", "managed",
@@ -608,13 +637,20 @@ class LlamaCppServerManagerTest {
 
     private static final class FakeLauncher implements LlamaCppProcessLauncher {
         private final List<List<String>> commands = new ArrayList<>();
+        private final List<Map<String, String>> environments = new ArrayList<>();
         private final FakeProcess process = new FakeProcess();
         private IOException failure;
         private String logContentOnStart = "";
 
         @Override
         public LlamaCppProcess start(List<String> command, Path logPath) throws IOException {
+            return start(command, logPath, Map.of());
+        }
+
+        @Override
+        public LlamaCppProcess start(List<String> command, Path logPath, Map<String, String> environment) throws IOException {
             commands.add(List.copyOf(command));
+            environments.add(environment == null ? Map.of() : Map.copyOf(environment));
             if (failure != null) throw failure;
             if (logPath != null && !logContentOnStart.isBlank()) {
                 Files.createDirectories(logPath.getParent());
