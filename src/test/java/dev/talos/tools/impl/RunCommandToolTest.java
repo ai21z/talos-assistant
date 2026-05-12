@@ -14,6 +14,7 @@ import dev.talos.tools.ToolRiskLevel;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -41,7 +42,8 @@ class RunCommandToolTest {
     }
 
     @Test
-    void gradleCommandRunsThroughValidatedPlan() {
+    void gradleCommandRunsThroughValidatedPlan() throws Exception {
+        createGradleWrapper();
         AtomicReference<CommandPlan> captured = new AtomicReference<>();
         RunCommandTool tool = new RunCommandTool(plan -> {
             captured.set(plan);
@@ -60,6 +62,21 @@ class RunCommandToolTest {
                 captured.get().argv());
         assertTrue(result.output().contains("Command succeeded: gradle_test exited with code 0"));
         assertTrue(result.output().contains("BUILD SUCCESSFUL"));
+    }
+
+    @Test
+    void gradleProfileWithoutWrapperIsRejectedBeforeRunner() {
+        RunCommandTool tool = new RunCommandTool(plan -> fail("runner must not execute without a Gradle wrapper"));
+
+        ToolResult result = tool.execute(new ToolCall("talos.run_command", Map.of(
+                "profile", "gradle_check")), context());
+
+        assertFalse(result.success());
+        assertEquals(ToolError.INVALID_PARAMS, result.error().code());
+        assertTrue(result.errorMessage().contains("Gradle command profiles require a Gradle wrapper"),
+                result.errorMessage());
+        assertTrue(result.errorMessage().contains("No approval was requested and no command was executed"),
+                result.errorMessage());
     }
 
     @Test
@@ -100,7 +117,8 @@ class RunCommandToolTest {
     }
 
     @Test
-    void nonZeroExitIsFailureDominantToolResult() {
+    void nonZeroExitIsFailureDominantToolResult() throws Exception {
+        createGradleWrapper();
         RunCommandTool tool = new RunCommandTool(plan -> new CommandResult(
                 plan, 7, 125, false, false, "tests failed", "stacktrace", false, false, false, ""));
 
@@ -116,7 +134,8 @@ class RunCommandToolTest {
     }
 
     @Test
-    void timeoutIsFailureDominantToolResult() {
+    void timeoutIsFailureDominantToolResult() throws Exception {
+        createGradleWrapper();
         RunCommandTool tool = new RunCommandTool(plan -> new CommandResult(
                 plan, -1, 1_001, true, true, "", "timeout", false, false, false, ""));
 
@@ -132,6 +151,10 @@ class RunCommandToolTest {
 
     private ToolContext context() {
         return new ToolContext(workspace, new Sandbox(workspace, Map.of()), new Config());
+    }
+
+    private void createGradleWrapper() throws Exception {
+        Files.writeString(workspace.resolve("gradlew.bat"), "@echo off\r\n");
     }
 
     private static CommandResult success(CommandPlan plan, String stdout, String stderr) {

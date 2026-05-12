@@ -15,6 +15,7 @@ import dev.talos.spi.types.ToolSpec;
 import dev.talos.spi.types.ToolChoiceMode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -33,6 +34,7 @@ class PromptDebugCommandTest {
     @AfterEach
     void clearCapture() {
         PromptDebugCapture.clear();
+        System.clearProperty("talos.promptDebugDir");
     }
 
     @Test
@@ -225,6 +227,45 @@ class PromptDebugCommandTest {
             Files.deleteIfExists(providerBody);
             Files.deleteIfExists(render);
         }
+    }
+
+    @Test
+    void saveUsesConfiguredDirectoryInsteadOfWorkspaceLocalPrompts(@TempDir Path tempDir) throws Exception {
+        Path configuredDir = tempDir.resolve("prompt-debug-artifacts");
+        System.setProperty("talos.promptDebugDir", configuredDir.toString());
+        PromptDebugCapture.record(protectedToolResultSnapshot());
+        PromptDebugCommand command = new PromptDebugCommand();
+
+        Result result = command.execute("save", ctx);
+
+        Result.TrustedInfo info = assertInstanceOf(Result.TrustedInfo.class, result);
+        Path providerBody = savedPath(info.text, "Saved provider body JSON to: ");
+        Path render = savedPath(info.text, "Saved prompt debug render to: ");
+        Path oldWorkspaceDefault = Path.of("local", "prompts").toAbsolutePath().normalize();
+        assertTrue(providerBody.startsWith(configuredDir.toAbsolutePath().normalize()), info.text);
+        assertTrue(render.startsWith(configuredDir.toAbsolutePath().normalize()), info.text);
+        assertFalse(providerBody.startsWith(oldWorkspaceDefault), info.text);
+        assertFalse(render.startsWith(oldWorkspaceDefault), info.text);
+    }
+
+    @Test
+    void saveAllSupportsExplicitDestination(@TempDir Path tempDir) throws Exception {
+        Path explicitDir = tempDir.resolve("explicit-prompt-debug");
+        PromptDebugCapture.record(protectedToolResultSnapshot());
+        PromptDebugCapture.record(secretAssistantHistorySnapshot());
+        PromptDebugCommand command = new PromptDebugCommand();
+
+        Result result = command.execute("save-all " + explicitDir, ctx);
+
+        Result.TrustedInfo info = assertInstanceOf(Result.TrustedInfo.class, result);
+        for (Path path : savedPaths(info.text, "Saved prompt debug render to: ")) {
+            assertTrue(path.startsWith(explicitDir.toAbsolutePath().normalize()), info.text);
+        }
+        for (Path path : savedPaths(info.text, "Saved provider body JSON to: ")) {
+            assertTrue(path.startsWith(explicitDir.toAbsolutePath().normalize()), info.text);
+        }
+        assertTrue(savedPath(info.text, "Saved prompt debug history index to: ")
+                .startsWith(explicitDir.toAbsolutePath().normalize()), info.text);
     }
 
     @Test

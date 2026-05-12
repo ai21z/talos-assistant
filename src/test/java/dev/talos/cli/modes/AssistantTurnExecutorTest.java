@@ -17,7 +17,12 @@ import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.TurnProcessor;
+import dev.talos.runtime.NoOpApprovalGate;
 import dev.talos.runtime.turn.CurrentTurnPlan;
+import dev.talos.tools.ToolRegistry;
+import dev.talos.tools.impl.RunCommandTool;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;
@@ -5201,6 +5206,50 @@ class AssistantTurnExecutorTest {
             assertFalse(lower.contains("raw shell"), out.text());
             assertFalse(lower.contains("as an ai language model"), out.text());
             assertFalse(lower.contains("poems"), out.text());
+        }
+
+        @Test
+        void verifyOnlyCommandRetryPromptMatchesRunCommandToolSurface(@TempDir Path workspace) {
+            String request = "Run the approved Gradle check command profile.";
+            var contract = TaskContractResolver.fromUserRequest(request);
+            var plan = CurrentTurnPlan.compatibility(
+                    contract,
+                    ExecutionPhase.VERIFY,
+                    List.of("talos.run_command"),
+                    List.of("talos.run_command"),
+                    List.of("talos.list_dir", "talos.read_file"));
+            var registry = new ToolRegistry();
+            registry.register(new RunCommandTool(commandPlan -> fail("retry response should not execute a command")));
+            var processor = new TurnProcessor(
+                    ModeController.defaultController(),
+                    new NoOpApprovalGate(),
+                    registry);
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                    List.of(new LlmClient.StreamResult("No command was run.", List.of())),
+                    16_384);
+            var ctx = Context.builder(new Config())
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(new ToolCallLoop(processor))
+                    .nativeToolSpecs(List.of(new ToolSpec("talos.run_command", "Run approved command", "{}")))
+                    .llm(recorded.client())
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("You are Talos."));
+            messages.add(ChatMessage.user(request));
+
+            AssistantTurnExecutor.readOnlyInspectionRetryIfNeeded(
+                    "I cannot verify that from here.", messages, plan, workspace, ctx);
+
+            assertFalse(recorded.requests().isEmpty(), "retry should send a provider request");
+            String retryPrompt = recorded.requests().getFirst().messages.stream()
+                    .filter(message -> "user".equals(message.role()))
+                    .reduce((first, second) -> second)
+                    .orElseThrow()
+                    .content();
+            assertTrue(retryPrompt.contains("talos.run_command"), retryPrompt);
+            assertFalse(retryPrompt.contains("talos.list_dir"), retryPrompt);
+            assertFalse(retryPrompt.contains("Use read-only tools"), retryPrompt);
         }
 
         @Test

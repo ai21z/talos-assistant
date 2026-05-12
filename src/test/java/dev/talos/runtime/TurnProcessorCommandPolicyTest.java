@@ -18,6 +18,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -34,7 +35,8 @@ class TurnProcessorCommandPolicyTest {
     }
 
     @Test
-    void approvedGradleCommandAsksOnceThenRuns(@TempDir Path workspace) {
+    void approvedGradleCommandAsksOnceThenRuns(@TempDir Path workspace) throws Exception {
+        createGradleWrapper(workspace);
         AtomicInteger approvals = new AtomicInteger();
         RecordingRunner runner = new RecordingRunner();
         TurnProcessor processor = processor(workspace, approvals, ApprovalResponse.APPROVED, runner);
@@ -53,7 +55,8 @@ class TurnProcessorCommandPolicyTest {
     }
 
     @Test
-    void deniedApprovalPreventsProcessExecution(@TempDir Path workspace) {
+    void deniedApprovalPreventsProcessExecution(@TempDir Path workspace) throws Exception {
+        createGradleWrapper(workspace);
         AtomicInteger approvals = new AtomicInteger();
         RecordingRunner runner = new RecordingRunner();
         TurnProcessor processor = processor(workspace, approvals, ApprovalResponse.DENIED, runner);
@@ -109,7 +112,8 @@ class TurnProcessorCommandPolicyTest {
     }
 
     @Test
-    void rememberApprovalDoesNotSkipNextCommandApproval(@TempDir Path workspace) {
+    void rememberApprovalDoesNotSkipNextCommandApproval(@TempDir Path workspace) throws Exception {
+        createGradleWrapper(workspace);
         AtomicInteger approvals = new AtomicInteger();
         RecordingRunner runner = new RecordingRunner();
         TurnProcessor processor = processor(workspace, approvals, ApprovalResponse.APPROVED_REMEMBER, runner);
@@ -181,6 +185,10 @@ class TurnProcessorCommandPolicyTest {
                 .sandbox(new Sandbox(workspace, Map.of()))
                 .executionPhaseState(new ExecutionPhaseState(phase))
                 .build();
+    }
+
+    private static void createGradleWrapper(Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("gradlew.bat"), "@echo off\r\n");
     }
 
     private static final class RecordingRunner implements CommandRunner {

@@ -27,8 +27,14 @@ public final class TaskContractResolver {
 
     private static final Pattern NEGATED_TARGET_SPAN = Pattern.compile(
             "(?i)(?:\\b(?:do\\s+not|don't|dont)\\s+"
-                    + "(?:change|edit|modify|write|create|save|apply|touch|mutate)"
-                    + "|\\bwithout\\s+changing)\\s+(.{0,240})");
+                    + "(?:change|edit|modify|write|create|save|apply|touch|mutate|use)"
+                    + "|\\bwithout\\s+(?:changing|using))\\s+(.{0,240})");
+
+    private static final Pattern AVOID_TARGET_SPAN = Pattern.compile(
+            "(?i)\\bavoid\\s+(.{0,240})");
+
+    private static final Pattern LEAVE_TARGET_ALONE_SPAN = Pattern.compile(
+            "(?i)\\bleave\\s+(.{0,120}?)\\s+alone\\b");
 
     private static final Pattern EXTENSIONLESS_TEXT_TARGET = Pattern.compile(
             "(?i)\\b(?:edit|overwrite|replace|update|write|create|set)\\s+`?"
@@ -386,8 +392,14 @@ public final class TaskContractResolver {
 
     public static Set<String> extractForbiddenTargets(String userRequest) {
         if (userRequest == null || userRequest.isBlank()) return Set.of();
-        Matcher spanMatcher = NEGATED_TARGET_SPAN.matcher(userRequest);
         Set<String> out = new LinkedHashSet<>();
+        addTargetsFromSpanMatches(out, NEGATED_TARGET_SPAN.matcher(userRequest));
+        addTargetsFromSpanMatches(out, AVOID_TARGET_SPAN.matcher(userRequest));
+        addTargetsFromSpanMatches(out, LEAVE_TARGET_ALONE_SPAN.matcher(userRequest));
+        return Set.copyOf(out);
+    }
+
+    private static void addTargetsFromSpanMatches(Set<String> out, Matcher spanMatcher) {
         while (spanMatcher.find()) {
             String span = firstSentenceFragment(spanMatcher.group(1));
             Matcher targetMatcher = TARGET_FILE.matcher(span);
@@ -396,7 +408,6 @@ public final class TaskContractResolver {
                 if (!target.isBlank()) out.add(target);
             }
         }
-        return Set.copyOf(out);
     }
 
     private static Set<String> extractReadForbiddenTargets(String userRequest) {

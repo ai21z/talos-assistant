@@ -26,6 +26,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -47,6 +48,7 @@ class LocalTurnTraceCommandTest {
 
     @Test
     void recordsCommandLifecycleWithoutRawOutput(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("gradlew.bat"), "@echo off\r\n");
         AtomicInteger approvals = new AtomicInteger();
         TurnProcessor processor = processor(
                 approvals,

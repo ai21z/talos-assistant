@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.runtime.toolcall.ToolAliasPolicy;
 import dev.talos.tools.ToolCall;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -70,6 +71,7 @@ public final class CommandToolPlanner {
                 workspace,
                 param(call, "cwd", "working_dir", "working_directory"));
         validateRisk(plan);
+        validateGradleWrapperAvailable(plan);
         long timeout = timeoutMs(call);
         return timeout > 0 ? plan.withTimeoutMs(timeout) : plan;
     }
@@ -144,6 +146,18 @@ public final class CommandToolPlanner {
         }
         if (plan.risk() != CommandRisk.BUILD_OR_TEST) {
             throw new CommandPlanRejectedException("Command risk is not available in V1: " + plan.risk());
+        }
+    }
+
+    private static void validateGradleWrapperAvailable(CommandPlan plan) {
+        if (plan == null || plan.cwd() == null) {
+            throw new CommandPlanRejectedException("Command working directory is unavailable.");
+        }
+        if (!Files.isRegularFile(plan.cwd().resolve("gradlew.bat"))
+                && !Files.isRegularFile(plan.cwd().resolve("gradlew"))) {
+            throw new CommandPlanRejectedException(
+                    "Gradle command profiles require a Gradle wrapper in the selected workspace/cwd "
+                            + "(`gradlew.bat` on Windows or `gradlew`).");
         }
     }
 
