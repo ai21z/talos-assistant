@@ -8,14 +8,14 @@ import static org.junit.jupiter.api.Assertions.*;
 class EmbeddingsFactoryTest {
     @Test
     void defaultConfigResolvesCompatEmbeddingProfile() {
-        Config cfg = new Config();
+        Config cfg = new Config(null);
         EmbeddingProfile profile = EmbeddingsFactory.profileFrom(cfg);
         assertEquals("compat", profile.provider());
         assertEquals("talos-embed", profile.model());
     }
     @Test
     void legacyOllamaEmbedKeyResolvesBgeM3() {
-        Config cfg = new Config();
+        Config cfg = new Config(null);
         @SuppressWarnings("unchecked")
         Map<String, Object> ollama = (Map<String, Object>) cfg.data.computeIfAbsent("ollama", k -> new LinkedHashMap<>());
         ollama.put("embed", "bge-m3");
@@ -25,7 +25,7 @@ class EmbeddingsFactoryTest {
     }
     @Test
     void embedModelKeyTakesPrecedenceOverOllamaEmbed() {
-        Config cfg = new Config();
+        Config cfg = new Config(null);
         @SuppressWarnings("unchecked")
         Map<String, Object> ollama = (Map<String, Object>) cfg.data.computeIfAbsent("ollama", k -> new LinkedHashMap<>());
         ollama.put("embed", "bge-m3");
@@ -38,7 +38,7 @@ class EmbeddingsFactoryTest {
     }
     @Test
     void qwen3ModelNameResolvesBuiltInProfile() {
-        Config cfg = new Config();
+        Config cfg = new Config(null);
         Map<String, Object> embedSection = new LinkedHashMap<>();
         embedSection.put("model", "Qwen/Qwen3-Embedding-8B");
         embedSection.put("provider", "ollama");
@@ -51,7 +51,7 @@ class EmbeddingsFactoryTest {
 
     @Test
     void qwen3WithProviderOverridePreservesConfigProvider() {
-        Config cfg = new Config();
+        Config cfg = new Config(null);
         Map<String, Object> embedSection = new LinkedHashMap<>();
         embedSection.put("model", "Qwen/Qwen3-Embedding-8B");
         embedSection.put("provider", "openai_compat");
@@ -69,7 +69,7 @@ class EmbeddingsFactoryTest {
 
     @Test
     void qwen3WithDimensionsOverride() {
-        Config cfg = new Config();
+        Config cfg = new Config(null);
         Map<String, Object> embedSection = new LinkedHashMap<>();
         embedSection.put("model", "Qwen/Qwen3-Embedding-8B");
         embedSection.put("dimensions", 2048);
@@ -87,7 +87,7 @@ class EmbeddingsFactoryTest {
 
     @Test
     void qwen3WithQueryInstructionOverride() {
-        Config cfg = new Config();
+        Config cfg = new Config(null);
         Map<String, Object> embedSection = new LinkedHashMap<>();
         embedSection.put("model", "Qwen/Qwen3-Embedding-8B");
         embedSection.put("query_instruction", "custom: search for relevant code\n");
@@ -104,7 +104,7 @@ class EmbeddingsFactoryTest {
 
     @Test
     void qwen3WithMultipleOverridesPreservesAll() {
-        Config cfg = new Config();
+        Config cfg = new Config(null);
         Map<String, Object> embedSection = new LinkedHashMap<>();
         embedSection.put("model", "Qwen/Qwen3-Embedding-8B");
         embedSection.put("provider", "openai_compat");
@@ -125,7 +125,7 @@ class EmbeddingsFactoryTest {
     }
     @Test
     void customModelBuildsDynamicProfile() {
-        Config cfg = new Config();
+        Config cfg = new Config(null);
         Map<String, Object> embedSection = new LinkedHashMap<>();
         embedSection.put("model", "my-embed-v1");
         embedSection.put("provider", "vllm");
@@ -194,7 +194,7 @@ class EmbeddingsFactoryTest {
     }
     @Test
     void defaultProfileCacheNamespaceUsesFingerprint() {
-        Config cfg = new Config();
+        Config cfg = new Config(null);
         EmbeddingProfile profile = EmbeddingsFactory.profileFrom(cfg);
         assertEquals(profile.fingerprint(), profile.cacheNamespace(),
                 "Cache namespace must equal fingerprint for safe isolation");
@@ -240,7 +240,7 @@ class EmbeddingsFactoryTest {
     @Test
     void profileResolutionAloneDoesNotThrowForUnsupportedProvider() {
         // profileFrom is pure resolution — no transport construction
-        Config cfg = new Config();
+        Config cfg = new Config(null);
         Map<String, Object> embedSection = new LinkedHashMap<>();
         embedSection.put("model", "Qwen/Qwen3-Embedding-8B");
         embedSection.put("provider", "vllm");
@@ -249,7 +249,7 @@ class EmbeddingsFactoryTest {
                 "profileFrom should resolve without touching transport");
     }
     private static Config localOnlyConfig() {
-        Config cfg = new Config();
+        Config cfg = new Config(null);
         @SuppressWarnings("unchecked")
         Map<String, Object> ollama = (Map<String, Object>) cfg.data.computeIfAbsent("ollama", k -> new LinkedHashMap<>());
         ollama.put("host", "http://127.0.0.1:11434");

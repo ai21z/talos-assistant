@@ -6,7 +6,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * Tests for {@link ConfigView} typed accessors.
  */
 class ConfigViewTest {
-    private final Config cfg = new Config();
+    private final Config cfg = new Config(null);
     private final ConfigView view = cfg.view();
     @Nested class RagAccessors {
         @Test void topK_returnsDefault() {
@@ -96,7 +96,7 @@ class ConfigViewTest {
     @Nested class MutationVisibility {
         @Test void runtimeChange_isVisibleThroughView() {
             // ConfigView reads from the live map, so mutations are visible
-            Config mutable = new Config();
+            Config mutable = new Config(null);
             ConfigView v = mutable.view();
             int before = v.rag().topK();
             assertEquals(6, before);

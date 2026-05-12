@@ -12,7 +12,7 @@ class EngineRuntimeConfigTest {
 
     @Test
     void defaultConfigResolvesLlamaCppBackendAndModel() {
-        Config cfg = new Config();
+        Config cfg = new Config(null);
 
         EngineRuntimeConfig runtime = EngineRuntimeConfig.from(cfg);
 
@@ -24,7 +24,7 @@ class EngineRuntimeConfigTest {
 
     @Test
     void llmModelTakesPrecedenceOverBackendSpecificModel() {
-        Config cfg = new Config();
+        Config cfg = new Config(null);
         cfg.data.put("llm", new LinkedHashMap<>(Map.of(
                 "default_backend", "llama_cpp",
                 "model", "explicit-agent")));
@@ -38,7 +38,7 @@ class EngineRuntimeConfigTest {
 
     @Test
     void llamaCppHfRepoCanSupplyDisplayModelWhenAliasIsUnset() {
-        Config cfg = new Config();
+        Config cfg = new Config(null);
         cfg.data.put("llm", new LinkedHashMap<>(Map.of("default_backend", "llama_cpp")));
         cfg.data.put("engines", Map.of("llama_cpp", Map.of(
                 "hf_repo", "ggml-org/gpt-oss-20b-GGUF")));
@@ -51,7 +51,7 @@ class EngineRuntimeConfigTest {
 
     @Test
     void explicitOllamaSelectionStillUsesLegacyOllamaConfig() {
-        Config cfg = new Config();
+        Config cfg = new Config(null);
         cfg.data.put("llm", new LinkedHashMap<>(Map.of("default_backend", "ollama")));
         cfg.data.put("ollama", new LinkedHashMap<>(Map.of(
                 "host", "http://127.0.0.1:11434",
@@ -69,7 +69,7 @@ class EngineRuntimeConfigTest {
 
     @Test
     void embeddingSummaryReadsProviderAndModelFromEmbedBlock() {
-        Config cfg = new Config();
+        Config cfg = new Config(null);
         cfg.data.put("embed", new LinkedHashMap<>(Map.of(
                 "provider", "compat",
                 "model", "talos-embed")));

@@ -13,7 +13,7 @@ class TopLevelStatusCmdTest {
 
     @Test
     void verboseEngineStatusIsBackendNeutralForDefaultLlamaCpp() {
-        String output = TopLevelStatusCmd.renderEngineStatus(new Config());
+        String output = TopLevelStatusCmd.renderEngineStatus(new Config(null));
 
         assertTrue(output.contains("Backend     : llama_cpp"));
         assertTrue(output.contains("Chat model  : talos-agent"));
@@ -23,7 +23,7 @@ class TopLevelStatusCmdTest {
 
     @Test
     void verboseEngineStatusMentionsOllamaOnlyWhenSelected() {
-        Config cfg = new Config();
+        Config cfg = new Config(null);
         cfg.data.put("llm", new LinkedHashMap<>(Map.of("default_backend", "ollama")));
         cfg.data.put("ollama", new LinkedHashMap<>(Map.of(
                 "host", "http://127.0.0.1:11434",

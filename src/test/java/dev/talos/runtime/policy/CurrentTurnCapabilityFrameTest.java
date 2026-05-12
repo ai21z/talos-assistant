@@ -181,7 +181,7 @@ class CurrentTurnCapabilityFrameTest {
         String frame = CurrentTurnCapabilityFrame.render(plan);
 
         assertTrue(frame.contains("[ExpectedTargets]"), frame);
-        assertTrue(frame.contains("requiredTargets: workspace-notes/summary.txt"), frame);
+        assertTrue(frame.contains("requiredTargets: workspace-notes, workspace-notes/summary.txt"), frame);
         assertTrue(frame.contains("[ExactFileWrite]"), frame);
         assertTrue(frame.contains("target: workspace-notes/summary.txt"), frame);
         assertTrue(frame.contains("sourcePattern: literal-create-containing-exactly"), frame);
