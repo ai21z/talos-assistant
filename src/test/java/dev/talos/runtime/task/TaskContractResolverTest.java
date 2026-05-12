@@ -223,6 +223,26 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void naturalSingleDirectoryCreationBecomesMutationAllowedContract() {
+        TaskContract contract = TaskContractResolver.fromUserRequest("make me a folder called ideas");
+
+        assertEquals(TaskType.FILE_CREATE, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("ideas"), contract.expectedTargets());
+    }
+
+    @Test
+    void folderDefinitionQuestionStaysReadOnly() {
+        TaskContract contract = TaskContractResolver.fromUserRequest("what is a folder called ideas?");
+
+        assertEquals(TaskType.READ_ONLY_QA, contract.type());
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
+    }
+
+    @Test
     void explicitBatchWorkspaceApplyPromptsBecomeMutationAllowedContracts() {
         for (String input : List.of(
                 "Use talos.apply_workspace_batch only. Apply operations_json for exactly these operations: "

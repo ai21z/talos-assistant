@@ -146,7 +146,8 @@ class ToolSurfacePlannerTest {
         for (String request : List.of(
                 "Create a new dir called workspace-notes.",
                 "Create a new folder named audit-output.",
-                "Can you create a folder called docs?")) {
+                "Can you create a folder called docs?",
+                "make me a folder called ideas")) {
             assertWorkspaceOperationSurface(
                     request,
                     List.of("talos.mkdir"),

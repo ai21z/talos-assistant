@@ -23,8 +23,8 @@ public final class WorkspaceOperationIntent {
             "\\brename\\s+" + PATH_TOKEN + "\\s+(?:to|as)\\s+" + PATH_TOKEN,
             Pattern.CASE_INSENSITIVE);
     private static final Pattern MKDIR_REQUEST = Pattern.compile(
-            "\\b(?:mkdir|make\\s+(?:(?:a|an)\\s+)?(?:new\\s+)?(?:directories|directory|dirs|dir|folders|folder)"
-                    + "|create\\s+(?:(?:a|an)\\s+)?(?:new\\s+)?(?:directories|directory|dirs|dir|folders|folder))\\s+"
+            "\\b(?:mkdir|make\\s+(?:me\\s+)?(?:(?:a|an)\\s+)?(?:new\\s+)?(?:directories|directory|dirs|dir|folders|folder)"
+                    + "|create\\s+(?:me\\s+)?(?:(?:a|an)\\s+)?(?:new\\s+)?(?:directories|directory|dirs|dir|folders|folder))\\s+"
                     + "(?:(?:called|named|as)\\s+)?"
                     + PATH_TOKEN,
             Pattern.CASE_INSENSITIVE);
@@ -42,7 +42,16 @@ public final class WorkspaceOperationIntent {
                 && contract.expectedTargets().isEmpty()) {
             return Optional.empty();
         }
+        if (intent.isPresent()
+                && intent.get().kind() == Kind.MKDIR
+                && contract.expectedTargets().stream().anyMatch(WorkspaceOperationIntent::looksLikeFileTarget)) {
+            return Optional.empty();
+        }
         return intent;
+    }
+
+    private static boolean looksLikeFileTarget(String target) {
+        return target != null && target.matches("(?i).+\\.[A-Za-z0-9]+$");
     }
 
     public static Optional<Intent> detect(String userRequest) {

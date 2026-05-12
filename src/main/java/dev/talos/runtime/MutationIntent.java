@@ -42,6 +42,10 @@ public final class MutationIntent {
     private static final String MAKE_REFERENCE_REQUEST =
             "make\\s+(?:it|this|that|the)\\b";
 
+    private static final String DIRECTORY_CREATION_REQUEST =
+            "(?:make|create)\\s+(?:me\\s+)?(?:(?:a|an)\\s+)?(?:new\\s+)?"
+                    + "(?:directories|directory|dirs|dir|folders|folder)\\b";
+
     private static final List<Pattern> REQUEST_PATTERNS = List.of(
             Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:please\\s+)?" + CORE_MUTATION_VERBS + "\\b"),
             Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:please\\s+)?(?:can|could|would|will)\\s+you\\s+(?:please\\s+)?" + CORE_MUTATION_VERBS + "\\b"),
@@ -58,6 +62,10 @@ public final class MutationIntent {
             Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:please\\s+)?(?:can|could|would|will)\\s+you\\s+(?:please\\s+)?" + MAKE_REFERENCE_REQUEST),
             Pattern.compile("^" + PREFIX + "i\\s+(?:want|need)\\s+you\\s+to\\s+" + MAKE_REFERENCE_REQUEST),
             Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:let's|lets)\\s+" + MAKE_REFERENCE_REQUEST),
+            Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:please\\s+)?" + DIRECTORY_CREATION_REQUEST),
+            Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:please\\s+)?(?:can|could|would|will)\\s+you\\s+(?:please\\s+)?" + DIRECTORY_CREATION_REQUEST),
+            Pattern.compile("^" + PREFIX + "i\\s+(?:want|need)\\s+you\\s+to\\s+" + DIRECTORY_CREATION_REQUEST),
+            Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:let's|lets)\\s+" + DIRECTORY_CREATION_REQUEST),
             Pattern.compile("\\b(?:can|could|would|will)\\s+you\\s+(?:please\\s+)?"
                     + BUILD_ARTIFACT_VERBS + "\\s+me\\s+(?:\\S+\\s+){0,10}" + ARTIFACT_NOUNS + "\\b")
     );
