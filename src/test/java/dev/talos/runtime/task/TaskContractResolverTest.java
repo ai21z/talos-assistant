@@ -736,6 +736,30 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void scopedPrivacyNegationDoesNotCancelSourceToTargetMutation() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "summarize long-notes.txt into ideas/summary.md. keep it tight. don't touch private files.");
+
+        assertEquals(TaskType.FILE_CREATE, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals("explicit-source-to-target-artifact-request", contract.classificationReason());
+        assertEquals(Set.of("ideas/summary.md"), contract.expectedTargets());
+        assertEquals(Set.of("long-notes.txt"), contract.sourceEvidenceTargets());
+    }
+
+    @Test
+    void globalFileTouchNegationStillCancelsSourceToTargetMutation() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "summarize long-notes.txt into ideas/summary.md, but don't touch files.");
+
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
+        assertEquals("global-read-only-negation", contract.classificationReason());
+    }
+
+    @Test
     void summarizeSourceIntoFilePreservesRequestedPathSpelling() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Summarize README.md into Docs/Summary.md.");

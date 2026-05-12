@@ -342,6 +342,14 @@ public final class MutationIntent {
                 || tail.startsWith("other files")
                 || tail.startsWith("other parts")
                 || tail.startsWith("other things")
+                || tail.startsWith("private file")
+                || tail.startsWith("private files")
+                || tail.startsWith("protected file")
+                || tail.startsWith("protected files")
+                || tail.startsWith("secret file")
+                || tail.startsWith("secret files")
+                || tail.startsWith("secrets")
+                || tail.startsWith("credentials")
                 || tail.startsWith("else")
                 || startsWithNamedFileTarget(tail);
     }
