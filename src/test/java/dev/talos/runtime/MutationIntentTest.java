@@ -85,12 +85,18 @@ class MutationIntentTest {
                 "Fix only styles.css. Do not change index.html or scripts.js."));
         assertTrue(MutationIntent.looksExplicitMutationRequest(
                 "Edit only index.html; don't touch styles.css."));
+        assertTrue(MutationIntent.looksExplicitMutationRequest(
+                "Summarize long-notes.txt into ideas/summary.md. keep it tight. don't touch private files."));
+        assertTrue(MutationIntent.looksExplicitMutationRequest(
+                "Summarize long-notes.txt into ideas/summary.md. do not touch protected files."));
     }
 
     @Test
     void globalReadOnlyNegationStillCancelsMutationIntent() {
         assertFalse(MutationIntent.looksExplicitMutationRequest(
                 "Do not change anything. Just inspect."));
+        assertFalse(MutationIntent.looksExplicitMutationRequest(
+                "Summarize long-notes.txt into ideas/summary.md, but don't touch files."));
         assertFalse(MutationIntent.looksExplicitMutationRequest(
                 "Diagnose this, do not change files."));
         assertFalse(MutationIntent.looksExplicitMutationRequest(
