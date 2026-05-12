@@ -351,9 +351,10 @@ public final class TalosBootstrap {
                 sessionStore, checkpointService, runtimeSession.startedAt());
 
         // ── Assemble router ──────────────────────────────────────────────
-        String startupNotice = restoreSummary.hasSavedSession()
+        String sessionNotice = restoreSummary.hasSavedSession()
                 ? buildRestoreNotice(restoreSummary)
                 : buildSavedSessionNotice(savedSessionSummary);
+        String startupNotice = joinStartupNotices(buildConfigNotice(cfg.getReport()), sessionNotice);
         return new ReplRouter(modes, turnProcessor, runtimeSession, ctx, render,
                               registry, workspace, quit, startupNotice);
     }
@@ -614,6 +615,20 @@ public final class TalosBootstrap {
         if (!age.isBlank()) sb.append(" from ").append(age);
         sb.append(". Not loaded. Use /session load to resume or /session clear to delete.");
         return sb.toString();
+    }
+
+    static String buildConfigNotice(Config.Report report) {
+        if (report == null || !report.userConfigPresent || report.userConfigLoaded) return "";
+        return "  config warning: " + report.userConfigPath
+                + " could not be loaded. Run `talos status --verbose`, then use `talos setup models` to rewrite it.";
+    }
+
+    private static String joinStartupNotices(String first, String second) {
+        String a = first == null ? "" : first.trim();
+        String b = second == null ? "" : second.trim();
+        if (a.isBlank()) return b;
+        if (b.isBlank()) return a;
+        return a + System.lineSeparator() + b;
     }
 
     private static void syncActiveModelIntoConfig(Config cfg, String activeModel) {

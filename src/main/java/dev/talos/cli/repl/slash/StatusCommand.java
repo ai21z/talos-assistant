@@ -109,6 +109,15 @@ public final class StatusCommand implements Command {
 
         sb.append("\n").append(AnsiColor.grey("  Config")).append("\n");
         sb.append(AnsiColor.dim("    from=")).append(AnsiColor.dim(String.valueOf(cfg.getReport().loadedFrom)));
+        sb.append(AnsiColor.dim("  user=")).append(AnsiColor.dim(String.valueOf(cfg.getReport().userConfigPath)));
+        if (cfg.getReport().userConfigPresent) {
+            String userStatus = cfg.getReport().userConfigLoaded
+                    ? "loaded"
+                    : "parse failed: " + cfg.getReport().userConfigError;
+            sb.append(AnsiColor.dim("  user_status=")).append(AnsiColor.dim(userStatus));
+        } else {
+            sb.append(AnsiColor.dim("  user_status=not found"));
+        }
         sb.append(AnsiColor.dim("  strict=")).append(AnsiColor.dim(String.valueOf(cfg.getReport().strictMode)));
         sb.append(AnsiColor.dim("  defaults=")).append(AnsiColor.dim(String.valueOf(cfg.getReport().defaultedKeys.size())));
         sb.append("\n");

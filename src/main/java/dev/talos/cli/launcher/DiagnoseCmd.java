@@ -67,6 +67,13 @@ public class DiagnoseCmd implements Runnable {
             Config.Report report = cfg.getReport();
             System.out.println("  Default config: " + report.loadedFrom);
             System.out.println("  User config:    " + report.userConfigPath);
+            if (report.userConfigPresent) {
+                System.out.println("  User status:    " + (report.userConfigLoaded
+                        ? "loaded"
+                        : "parse failed - " + report.userConfigError));
+            } else {
+                System.out.println("  User status:    not found");
+            }
             System.out.println("  ENV overrides:  " + report.envOverridesApplied);
             System.out.println();
 
@@ -194,13 +201,16 @@ public class DiagnoseCmd implements Runnable {
                     System.out.println();
                 }
 
-                // 10. Exit code: non-zero if we retrieved snippets but got empty answer
-                if (retrievedCount > 0 && answerText.isEmpty()) {
-                    System.err.println("FAIL: Retrieved " + retrievedCount + " snippets but answer is empty!");
-                    System.err.println("Possible causes:");
-                    System.err.println("  - Model context window exceeded (reduce --k)");
-                    System.err.println("  - Model not responding (check selected engine service)");
-                    System.err.println("  - Network disabled (check config)");
+                // 10. Exit code: non-zero for critical configuration or answer-generation failures.
+                String criticalFailure = criticalDiagnosisFailure(report, answerText, retrievedCount);
+                if (!criticalFailure.isBlank()) {
+                    System.err.println("FAIL: " + criticalFailure);
+                    if (retrievedCount > 0 && answerText.isEmpty()) {
+                        System.err.println("Possible causes:");
+                        System.err.println("  - Model context window exceeded (reduce --k)");
+                        System.err.println("  - Model not responding (check selected engine service)");
+                        System.err.println("  - Network disabled (check config)");
+                    }
                     System.exit(1);
                 }
 
@@ -221,6 +231,20 @@ public class DiagnoseCmd implements Runnable {
 
     private static String term(String text, boolean unicodeSafe) {
         return Sanitize.sanitizeForTerminalOutput(text, unicodeSafe);
+    }
+
+    static String criticalDiagnosisFailure(Config.Report report, String answerText, int retrievedCount) {
+        if (report != null && report.userConfigPresent && !report.userConfigLoaded) {
+            return "User config could not be loaded: " + report.userConfigPath;
+        }
+        String text = answerText == null ? "" : answerText.trim();
+        if (text.startsWith("Error:")) {
+            return "Answer generation failed: " + text;
+        }
+        if (retrievedCount > 0 && text.isEmpty()) {
+            return "Retrieved " + retrievedCount + " snippets but answer is empty";
+        }
+        return "";
     }
 
     static String renderEngineSection(Config cfg, boolean unicodeSafe) {

@@ -16,6 +16,7 @@ record LlamaCppConfig(
         String modelPath,
         String hfRepo,
         String hfFile,
+        String hfCacheDir,
         String model,
         String host,
         int port,
@@ -42,6 +43,7 @@ record LlamaCppConfig(
         String modelPath = stringAt(block, "model_path", "");
         String hfRepo = stringAt(block, "hf_repo", "");
         String hfFile = stringAt(block, "hf_file", "");
+        String hfCacheDir = stringAt(block, "hf_cache_dir", "");
         String model = stringAt(block, "model", "");
         String host = stringAt(block, "host", "http://127.0.0.1");
         int port = CfgUtil.intAt(block, "port", portFromHost(host, 8080));
@@ -60,6 +62,7 @@ record LlamaCppConfig(
                 modelPath,
                 hfRepo,
                 hfFile,
+                hfCacheDir,
                 model,
                 host,
                 port,

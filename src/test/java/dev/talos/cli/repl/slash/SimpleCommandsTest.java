@@ -456,6 +456,8 @@ class SimpleCommandsTest {
             assertTrue(text.contains("/models"), text);
             assertTrue(text.contains("/model"), text);
             assertTrue(text.contains("/set model <backend/model>"), text);
+            assertTrue(text.contains("talos setup models"), text);
+            assertTrue(text.contains("qwen2.5-coder-14b"), text);
         }
 
         @Test void help_security_topic() {

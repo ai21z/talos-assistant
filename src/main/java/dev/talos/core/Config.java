@@ -38,13 +38,26 @@ public class Config {
     public static final class Report {
         public final String loadedFrom;            // e.g., "classpath:config/default-config.yaml" or "(none)"
         public final String userConfigPath;        // e.g., "~/.talos/config.yaml" or "(none)"
+        public final boolean userConfigPresent;    // true when the user config file exists
+        public final boolean userConfigLoaded;     // true only when the user config parsed and merged
+        public final String userConfigError;       // parse/load error, blank when none
         public final boolean strictMode;           // env TALOS_STRICT_CONFIG
         public final List<String> defaultedKeys;   // dotted keys that were filled with defaults
         public final int envOverridesApplied;      // count of ENV overrides
 
-        Report(String loadedFrom, String userConfigPath, boolean strictMode, List<String> defaultedKeys, int envOverrides) {
+        Report(String loadedFrom,
+               String userConfigPath,
+               boolean userConfigPresent,
+               boolean userConfigLoaded,
+               String userConfigError,
+               boolean strictMode,
+               List<String> defaultedKeys,
+               int envOverrides) {
             this.loadedFrom = loadedFrom;
             this.userConfigPath = userConfigPath;
+            this.userConfigPresent = userConfigPresent;
+            this.userConfigLoaded = userConfigLoaded;
+            this.userConfigError = userConfigError == null ? "" : userConfigError;
             this.strictMode = strictMode;
             this.defaultedKeys = Collections.unmodifiableList(defaultedKeys);
             this.envOverridesApplied = envOverrides;
@@ -53,11 +66,21 @@ public class Config {
 
     private String loadedFrom = "(none)";
     private String userConfigPath = "(none)";
+    private boolean userConfigPresent = false;
+    private boolean userConfigLoaded = false;
+    private String userConfigError = "";
     private final List<String> defaulted = new ArrayList<>();
     private int envOverridesCount = 0;
     private Report snapshot;
 
     public Config() {
+        this(getUserConfigPath());
+    }
+
+    /**
+     * Test and setup seam for loading a specific user config path.
+     */
+    public Config(Path explicitUserConfigPath) {
         boolean strict = envTrue(STRICT_ENV);
 
         // 1) Load classpath default config
@@ -78,18 +101,24 @@ public class Config {
         ensureDefaults();
 
         // 2) Load user config overlay from ~/.talos/config.yaml
-        Path userConfig = getUserConfigPath();
+        Path userConfig = explicitUserConfigPath;
+        if (userConfig != null) {
+            userConfigPath = userConfig.toString();
+        }
         if (userConfig != null && Files.exists(userConfig) && Files.isRegularFile(userConfig)) {
+            userConfigPresent = true;
             try {
                 ObjectMapper om = new ObjectMapper(new YAMLFactory());
                 @SuppressWarnings("unchecked")
                 Map<String, Object> userMap = om.readValue(userConfig.toFile(), Map.class);
                 if (userMap != null && !userMap.isEmpty()) {
                     CfgUtil.deepMerge(data, userMap);
-                    userConfigPath = userConfig.toString();
                 }
+                userConfigLoaded = true;
+                userConfigError = "";
             } catch (Exception ignored) {
-                // Silently skip if user config is malformed
+                userConfigLoaded = false;
+                userConfigError = summarizeConfigError(ignored);
             }
         }
 
@@ -112,7 +141,15 @@ public class Config {
         }
 
         // 5) Freeze report
-        snapshot = new Report(loadedFrom, userConfigPath, strict, new ArrayList<>(defaulted), envOverridesCount);
+        snapshot = new Report(
+                loadedFrom,
+                userConfigPath,
+                userConfigPresent,
+                userConfigLoaded,
+                userConfigError,
+                strict,
+                new ArrayList<>(defaulted),
+                envOverridesCount);
     }
 
     public Report getReport() {
@@ -148,6 +185,15 @@ public class Config {
             }
         }
         return count;
+    }
+
+    private static String summarizeConfigError(Exception error) {
+        if (error == null) return "unknown error";
+        String message = error.getMessage();
+        if (message == null || message.isBlank()) {
+            message = error.getClass().getSimpleName();
+        }
+        return message.replace('\r', ' ').replace('\n', ' ').trim();
     }
 
     @SuppressWarnings("unchecked")

@@ -4,12 +4,22 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 final class ProcessBuilderLlamaCppProcessLauncher implements LlamaCppProcessLauncher {
     @Override
     public LlamaCppProcess start(List<String> command, Path logPath) throws IOException {
+        return start(command, logPath, Map.of());
+    }
+
+    @Override
+    public LlamaCppProcess start(List<String> command, Path logPath, Map<String, String> environment)
+            throws IOException {
         ProcessBuilder builder = new ProcessBuilder(command);
+        if (environment != null && !environment.isEmpty()) {
+            builder.environment().putAll(environment);
+        }
         builder.redirectErrorStream(true);
         if (logPath != null) {
             builder.redirectOutput(ProcessBuilder.Redirect.appendTo(logPath.toFile()));

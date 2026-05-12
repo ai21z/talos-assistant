@@ -70,7 +70,8 @@ public final class TerminalFirstRun {
 
     public static String setupSummary() {
         return "  Talos uses local model engines. The default path is llama.cpp on Windows.\n"
-                + "  Configure engines.llama_cpp.server_path and engines.llama_cpp.model_path in ~/.talos/config.yaml.\n"
+                + "  Run `talos setup models` to configure a tested managed llama.cpp profile.\n"
+                + "  Advanced users can set engines.llama_cpp.server_path and model_path in ~/.talos/config.yaml.\n"
                 + "  Ollama can still be selected explicitly as a legacy backend.";
     }
 
