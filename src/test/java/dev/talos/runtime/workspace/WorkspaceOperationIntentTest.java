@@ -42,4 +42,16 @@ class WorkspaceOperationIntentTest {
 
         assertTrue(intent.isEmpty());
     }
+
+    @Test
+    void naturalBatchDirectoryAndCopyPromptDetectsCompoundIntent() {
+        var intent = WorkspaceOperationIntent.detect(TaskContractResolver.fromUserRequest(
+                "batch this: create batch-one and batch-two, then copy styles.css to batch-one/styles-copy.css."));
+
+        assertTrue(intent.isPresent());
+        assertEquals(WorkspaceOperationIntent.Kind.COMPOUND, intent.get().kind());
+        assertEquals(
+                List.of("talos.apply_workspace_batch", "talos.mkdir", "talos.copy_path"),
+                intent.get().toolNames());
+    }
 }

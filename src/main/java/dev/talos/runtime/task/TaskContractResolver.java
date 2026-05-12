@@ -47,6 +47,10 @@ public final class TaskContractResolver {
                     + "(?:directories|directory|dirs|dir|folders|folder)\\s+"
                     + "(.{1,180}?)(?=\\s+and\\s+(?:copy|move|rename|write|edit|create\\s+file)\\b|[.;]|$)");
 
+    private static final Pattern NATURAL_BATCH_DIRECTORY_CREATION_SPAN = Pattern.compile(
+            "(?i)\\b(?:create|make)\\s+"
+                    + "(.{1,180}?)(?=\\s*,?\\s+(?:then\\s+)?(?:copy|move|rename)\\b)");
+
     private static final Pattern SINGLE_DIRECTORY_CREATION_TARGET = Pattern.compile(
             "(?i)\\b(?:mkdir|"
                     + "(?:make|create)\\s+(?:me\\s+)?(?:(?:a|an)\\s+)?(?:new\\s+)?"
@@ -312,6 +316,13 @@ public final class TaskContractResolver {
             if (!batchTargets.isEmpty()) {
                 expectedTargets = batchTargets;
             }
+        } else if (mutationRequested && looksNaturalBatchWorkspaceOperation(original)) {
+            Set<String> batchTargets = extractBatchWorkspaceExpectedTargets(original);
+            if (!batchTargets.isEmpty()) {
+                LinkedHashSet<String> merged = new LinkedHashSet<>(expectedTargets);
+                merged.addAll(batchTargets);
+                expectedTargets = Set.copyOf(merged);
+            }
         }
         if (!mutationRequested && StaticWebImportIntent.matches(original)) {
             expectedTargets = StaticWebImportIntent.evidenceTargets(original, expectedTargets);
@@ -371,12 +382,25 @@ public final class TaskContractResolver {
                 if (!target.isBlank()) out.add(target);
             }
         }
+        Matcher naturalDirectoryMatcher = NATURAL_BATCH_DIRECTORY_CREATION_SPAN.matcher(userRequest);
+        while (naturalDirectoryMatcher.find()) {
+            for (String target : splitDirectoryTargets(naturalDirectoryMatcher.group(1))) {
+                if (!target.isBlank()) out.add(target);
+            }
+        }
         Matcher destinationMatcher = BATCH_DESTINATION_OPERATION.matcher(userRequest);
         while (destinationMatcher.find()) {
             String destination = normalizeTarget(destinationMatcher.group(2));
             if (!destination.isBlank()) out.add(destination);
         }
         return Set.copyOf(out);
+    }
+
+    private static boolean looksNaturalBatchWorkspaceOperation(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return false;
+        String lower = userRequest.toLowerCase(Locale.ROOT);
+        return lower.contains("batch this")
+                || NATURAL_BATCH_DIRECTORY_CREATION_SPAN.matcher(userRequest).find();
     }
 
     private static List<String> splitDirectoryTargets(String rawSpan) {

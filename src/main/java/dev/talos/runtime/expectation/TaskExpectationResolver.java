@@ -29,9 +29,12 @@ public final class TaskExpectationResolver {
     private TaskExpectationResolver() {}
 
     public static List<TaskExpectation> resolve(TaskContract contract) {
-        if (contract == null || contract.expectedTargets().size() != 1) return List.of();
+        if (contract == null || contract.expectedTargets().isEmpty()) return List.of();
         String request = contract.originalUserRequest();
         if (request == null || request.isBlank()) return List.of();
+        if (contract.expectedTargets().size() != 1) {
+            return resolveTargetSpecificExpectations(contract, request);
+        }
         String target = contract.expectedTargets().iterator().next();
         if (target == null || target.isBlank()) return List.of();
 
@@ -64,6 +67,40 @@ public final class TaskExpectationResolver {
                 literals.iterator().next(),
                 LiteralContentExpectation.MatchMode.EXACT,
                 firstSourcePattern));
+    }
+
+    private static List<TaskExpectation> resolveTargetSpecificExpectations(
+            TaskContract contract,
+            String request
+    ) {
+        List<TaskExpectation> expectations = new ArrayList<>();
+        for (String target : contract.expectedTargets()) {
+            if (target == null || target.isBlank()) continue;
+            String normalizedTarget = normalizePath(target);
+            List<Candidate> candidates = new ArrayList<>();
+            addTargetSpecificExactCandidates(request, normalizedTarget, candidates);
+            addTargetContainingExactlyCandidates(request, normalizedTarget, candidates);
+            if (candidates.isEmpty()) continue;
+
+            LinkedHashSet<String> literals = new LinkedHashSet<>();
+            String firstSourcePattern = "";
+            for (Candidate candidate : candidates) {
+                String literal = candidate.alreadyExact()
+                        ? normalizeExactLiteral(candidate.literal())
+                        : normalizeLiteral(candidate.literal());
+                if (literal.isBlank()) continue;
+                literals.add(literal);
+                if (firstSourcePattern.isBlank()) firstSourcePattern = candidate.sourcePattern();
+            }
+            if (literals.size() == 1) {
+                expectations.add(new LiteralContentExpectation(
+                        normalizedTarget,
+                        literals.iterator().next(),
+                        LiteralContentExpectation.MatchMode.EXACT,
+                        firstSourcePattern));
+            }
+        }
+        return List.copyOf(expectations);
     }
 
     private static void addTargetSpecificExactCandidates(
