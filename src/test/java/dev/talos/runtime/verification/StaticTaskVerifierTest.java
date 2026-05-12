@@ -782,6 +782,58 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void sourceEvidenceFileIsNotRequiredMutationTargetForStaticWebBuild() throws Exception {
+        Files.writeString(workspace.resolve("rough-brief.txt"), """
+                Neon Harbor needs a synthwave landing page with a hero section,
+                a tour call to action, and a mailing list signup.
+                """);
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html lang="en">
+                  <head>
+                    <meta charset="utf-8">
+                    <title>Neon Harbor</title>
+                    <link rel="stylesheet" href="styles.css">
+                  </head>
+                  <body>
+                    <main>
+                      <h1>Neon Harbor</h1>
+                      <p>Tour dates and mailing list signup.</p>
+                      <button id="join-list">Join list</button>
+                      <p id="status"></p>
+                    </main>
+                    <script src="scripts.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), """
+                body { font-family: system-ui, sans-serif; background: #101018; color: white; }
+                main { max-width: 42rem; margin: 3rem auto; }
+                button { padding: 0.75rem 1rem; }
+                """);
+        Files.writeString(workspace.resolve("scripts.js"), """
+                document.getElementById('join-list').addEventListener('click', () => {
+                  document.getElementById('status').textContent = 'Signed up';
+                });
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "make a real static landing page from rough-brief.txt. "
+                        + "use index.html styles.css scripts.js. do not use script.js.",
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("styles.css", VerificationStatus.PASS),
+                        successfulWrite("scripts.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.problems().toString());
+        assertFalse(result.problems().stream()
+                        .anyMatch(p -> p.contains("rough-brief.txt: expected target was not successfully mutated")),
+                result.problems().toString());
+    }
+
+    @Test
     void staticButtonFixtureFailsWhenResultHandlerHasTruncatedTextContentAssignment() throws Exception {
         writeButtonFixtureWebFiles("""
                 document.querySelector('#run-button').addEventListener('click', () => {

@@ -769,6 +769,21 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void staticWebBuildFromSourceSeparatesSourceEvidenceFromOutputTargets() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "make a real static landing page from rough-brief.txt. "
+                        + "use index.html styles.css scripts.js. do not use script.js.");
+
+        assertEquals(TaskType.FILE_CREATE, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("index.html", "styles.css", "scripts.js"), contract.expectedTargets());
+        assertEquals(Set.of("rough-brief.txt"), contract.sourceEvidenceTargets());
+        assertEquals(Set.of("script.js"), contract.forbiddenTargets());
+    }
+
+    @Test
     void negatedReadTargetsAreRemovedWithoutDroppingPositiveTargets() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Read README.md and notes.md, but do not inspect secrets.env.");
