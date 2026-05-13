@@ -1,6 +1,6 @@
 # T254 - Source File Artifact Builds Need Read-Source / Write-Target Splitting
 Date: 2026-05-12
-Status: Open
+Status: Done
 Priority: High
 
 ## Why This Ticket Exists
@@ -74,3 +74,46 @@ Out of scope:
 - Static verifier tests proving source evidence files are exempt from expected mutation checks.
 - Scripted static-web scenario proving the source file is read but not mutated.
 - Focused two-model audit coverage before closing the milestone batch.
+
+## Resolution
+
+Implemented deterministic build-from-source source/target splitting in
+`MutationIntent.sourceToTargetArtifact(...)`:
+
+- `create/build/make ... from <source> with <outputs>` now treats the source
+  file as source evidence and the listed files as mutation targets;
+- `build ... from <source> as <output>` now supports single-output document
+  artifacts such as `report.md`;
+- forbidden target handling still removes `script.js` while preserving
+  `scripts.js`.
+
+Added contract tests for the missing prompt shapes and a scripted assistant turn
+test proving that a static web build reads the source brief, writes only the
+requested output files, leaves the source file unchanged, and does not create
+the forbidden singular `script.js`.
+
+## Verification
+
+- `.\gradlew.bat test --tests 'dev.talos.runtime.task.TaskContractResolverTest.staticWebBuildFromSourceWithOutputsSeparatesSourceEvidenceFromOutputTargets' --tests 'dev.talos.runtime.task.TaskContractResolverTest.documentBuildFromSourceAsSingleOutputSeparatesSourceEvidenceFromOutputTarget'`
+- `.\gradlew.bat test --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$NonStreaming.staticWebBuildFromSourceReadsBriefAndDoesNotMutateSource'`
+- `.\gradlew.bat test --tests 'dev.talos.runtime.MutationIntentTest' --tests 'dev.talos.runtime.task.TaskContractResolverTest' --tests 'dev.talos.runtime.verification.StaticTaskVerifierTest' --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$NonStreaming.staticWebBuildFromSourceReadsBriefAndDoesNotMutateSource' --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$NonStreaming.summarizeSourceIntoFileReadsSourceThenWritesTarget' --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$NonStreaming.summarizeSourceIntoFileWithoutSourceReadDoesNotCreateUngroundedArtifact'`
+- `.\gradlew.bat test`
+- `.\gradlew.bat build`
+- `.\gradlew.bat installDist`
+- `pwsh .\tools\install-windows.ps1 -Force`
+- Focused two-model audit:
+  `local/manual-testing/t254-source-target-splitting-audit-20260513-153310/FINDINGS-T254-SOURCE-TARGET-SPLITTING.md`
+
+Audit conclusion:
+
+- Qwen and GPT-OSS both received correct prompt-debug frames and traces for
+  source/target separation.
+- Qwen read `brief.txt`, then wrote `index.html`, `styles.css`, and
+  `scripts.js`; `script.js` was not created.
+- GPT-OSS initially attempted `index.html` before reading `brief.txt`; the
+  source-evidence gate blocked that write before approval, then the model read
+  `brief.txt` and wrote the requested output files.
+- Both models read `notes.txt` before writing `report.md`.
+- Static web output quality still failed verification in the live audit, but
+  the runtime classified and reported that as incomplete/partial instead of
+  claiming success. That is not a T254 source-target splitting failure.

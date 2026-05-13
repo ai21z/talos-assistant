@@ -807,6 +807,32 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void staticWebBuildFromSourceWithOutputsSeparatesSourceEvidenceFromOutputTargets() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "create a website from brief.txt with index.html styles.css scripts.js.");
+
+        assertEquals(TaskType.FILE_CREATE, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("index.html", "styles.css", "scripts.js"), contract.expectedTargets());
+        assertEquals(Set.of("brief.txt"), contract.sourceEvidenceTargets());
+    }
+
+    @Test
+    void documentBuildFromSourceAsSingleOutputSeparatesSourceEvidenceFromOutputTarget() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "build a report from notes.txt as report.md");
+
+        assertEquals(TaskType.FILE_CREATE, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("report.md"), contract.expectedTargets());
+        assertEquals(Set.of("notes.txt"), contract.sourceEvidenceTargets());
+    }
+
+    @Test
     void negatedReadTargetsAreRemovedWithoutDroppingPositiveTargets() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Read README.md and notes.md, but do not inspect secrets.env.");

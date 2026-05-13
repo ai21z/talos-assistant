@@ -1140,6 +1140,73 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void staticWebBuildFromSourceReadsBriefAndDoesNotMutateSource(@TempDir Path workspace) throws Exception {
+            String brief = """
+                    Neon Harbor needs a synthwave landing page with a hero section,
+                    a tour call to action, and a mailing list signup.
+                    """;
+            Files.writeString(workspace.resolve("brief.txt"), brief);
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            var undoStack = new dev.talos.tools.FileUndoStack();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"brief.txt\"}}\n"
+                                    + "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"index.html\","
+                                    + "\"content\":\"<!doctype html>\\n<html lang=\\\"en\\\">\\n<head>\\n"
+                                    + "  <meta charset=\\\"utf-8\\\">\\n  <title>Neon Harbor</title>\\n"
+                                    + "  <link rel=\\\"stylesheet\\\" href=\\\"styles.css\\\">\\n</head>\\n"
+                                    + "<body>\\n  <main>\\n    <h1>Neon Harbor</h1>\\n"
+                                    + "    <p>Tour dates and mailing list signup.</p>\\n"
+                                    + "    <button id=\\\"join-list\\\">Join list</button>\\n"
+                                    + "    <p id=\\\"status\\\"></p>\\n  </main>\\n"
+                                    + "  <script src=\\\"scripts.js\\\"></script>\\n</body>\\n</html>\\n\"}}\n"
+                                    + "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"styles.css\","
+                                    + "\"content\":\"body { font-family: system-ui, sans-serif; background: #101018; color: white; }\\n"
+                                    + "main { max-width: 42rem; margin: 3rem auto; }\\n"
+                                    + "button { padding: 0.75rem 1rem; }\\n\"}}\n"
+                                    + "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"scripts.js\","
+                                    + "\"content\":\"document.getElementById('join-list').addEventListener('click', () => {\\n"
+                                    + "  document.getElementById('status').textContent = 'Signed up';\\n});\\n\"}}",
+                            "Created the static page from brief.txt.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "create a website from brief.txt with index.html styles.css scripts.js. do not use script.js."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertEquals(brief, Files.readString(workspace.resolve("brief.txt")),
+                    "Source brief must remain evidence/input, not a mutation target.");
+            assertTrue(Files.exists(workspace.resolve("index.html")), out.text());
+            assertTrue(Files.exists(workspace.resolve("styles.css")), out.text());
+            assertTrue(Files.exists(workspace.resolve("scripts.js")), out.text());
+            assertFalse(Files.exists(workspace.resolve("script.js")),
+                    "Forbidden singular script.js must not be created.");
+            assertFalse(out.text().contains("brief.txt: expected target was not successfully mutated"), out.text());
+            List<String> frames = messages.stream()
+                    .filter(AssistantTurnExecutorTest::isCurrentTurnCapabilityFrame)
+                    .map(ChatMessage::content)
+                    .toList();
+            assertEquals(1, frames.size(), frames.toString());
+            assertTrue(frames.getFirst().contains("requiredTargets: index.html, scripts.js, styles.css")
+                            || frames.getFirst().contains("requiredTargets: index.html, styles.css, scripts.js"),
+                    frames.getFirst());
+            assertTrue(frames.getFirst().contains("sourceTargets: brief.txt"), frames.getFirst());
+            assertFalse(frames.getFirst().contains("requiredTargets: brief.txt"), frames.getFirst());
+        }
+
+        @Test
         void summarizeSourceIntoFileSplitReadThenRetryPreservesSourceEvidence(@TempDir Path workspace) throws Exception {
             Files.writeString(workspace.resolve("long-notes.txt"), """
                     - Alice shipped the prototype.
