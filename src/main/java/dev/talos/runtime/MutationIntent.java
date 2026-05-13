@@ -29,7 +29,7 @@ public final class MutationIntent {
                     + "apply|add|remove|delete|move|copy|rename|mkdir|refactor|put|implement)";
 
     private static final String BUILD_ARTIFACT_VERBS =
-            "(make|build|generate|set\\s+up|setup|scaffold)";
+            "(make|build|create|generate|set\\s+up|setup|scaffold)";
 
     private static final String ARTIFACT_NOUNS =
             "(website|site|web\\s*app|app|application|page|calculator|"
@@ -164,7 +164,15 @@ public final class MutationIntent {
     private static final Pattern BUILD_FROM_SOURCE_TO_TARGETS = Pattern.compile(
             "\\b" + BUILD_ARTIFACT_VERBS + "\\b.{0,120}?\\bfrom\\s+(?:the\\s+)?(?:file\\s+)?"
                     + CAPTURED_FILE_TARGET
-                    + ".{0,200}?\\b(?:use|using)\\s+(.{1,240})",
+                    + ".{0,200}?\\b(?:use|using|with)\\s+(.{1,240})",
+            Pattern.CASE_INSENSITIVE);
+
+    private static final Pattern BUILD_FROM_SOURCE_TO_SINGLE_TARGET = Pattern.compile(
+            "\\b" + BUILD_ARTIFACT_VERBS + "\\b.{0,120}?\\bfrom\\s+(?:the\\s+)?(?:file\\s+)?"
+                    + CAPTURED_FILE_TARGET
+                    + ".{0,160}?\\b(?:as|to|into|in)\\s+(?:the\\s+)?(?:file\\s+)?"
+                    + CAPTURED_FILE_TARGET
+                    + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))",
             Pattern.CASE_INSENSITIVE);
 
     private static final Pattern REVIEW_THEN_MUTATION_REQUEST = Pattern.compile(
@@ -290,22 +298,35 @@ public final class MutationIntent {
 
     private static Optional<SourceToTargetArtifact> buildFromSourceToTargets(String request) {
         Matcher matcher = BUILD_FROM_SOURCE_TO_TARGETS.matcher(request);
-        if (!matcher.find()) return Optional.empty();
-        String source = normalizeArtifactPath(matcher.group(2));
-        if (source.isBlank()) return Optional.empty();
+        if (matcher.find()) {
+            String source = normalizeArtifactPath(matcher.group(2));
+            if (source.isBlank()) return Optional.empty();
 
-        LinkedHashSet<String> outputs = new LinkedHashSet<>();
-        Matcher outputMatcher = NAMED_FILE_TARGET.matcher(matcher.group(3));
-        while (outputMatcher.find()) {
-            String output = normalizeArtifactPath(outputMatcher.group(1));
-            if (!output.isBlank() && !output.equals(source)) {
-                outputs.add(output);
+            LinkedHashSet<String> outputs = new LinkedHashSet<>();
+            Matcher outputMatcher = NAMED_FILE_TARGET.matcher(matcher.group(3));
+            while (outputMatcher.find()) {
+                String output = normalizeArtifactPath(outputMatcher.group(1));
+                if (!output.isBlank() && !output.equals(source)) {
+                    outputs.add(output);
+                }
             }
+            if (outputs.isEmpty()) return Optional.empty();
+
+            LinkedHashSet<String> sources = new LinkedHashSet<>();
+            sources.add(source);
+            return Optional.of(new SourceToTargetArtifact(sources, outputs));
         }
-        if (outputs.isEmpty()) return Optional.empty();
+
+        Matcher singleTargetMatcher = BUILD_FROM_SOURCE_TO_SINGLE_TARGET.matcher(request);
+        if (!singleTargetMatcher.find()) return Optional.empty();
+        String source = normalizeArtifactPath(singleTargetMatcher.group(2));
+        String output = normalizeArtifactPath(singleTargetMatcher.group(3));
+        if (source.isBlank() || output.isBlank() || source.equals(output)) return Optional.empty();
 
         LinkedHashSet<String> sources = new LinkedHashSet<>();
         sources.add(source);
+        LinkedHashSet<String> outputs = new LinkedHashSet<>();
+        outputs.add(output);
         return Optional.of(new SourceToTargetArtifact(sources, outputs));
     }
 
