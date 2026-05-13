@@ -1,6 +1,6 @@
 # T253 - Scoped Privacy Negation Should Not Cancel Mutation
 Date: 2026-05-12
-Status: Open
+Status: Done
 Priority: High
 
 ## Why This Ticket Exists
@@ -80,3 +80,33 @@ Out of scope:
 - Unit tests for scoped negation classification.
 - Integration/scripted REPL test proving the summary file is written and protected/private files are not read.
 - Focused two-model audit coverage before closing the milestone batch.
+
+## Resolution
+
+Resolved by the scoped limiter handling in `MutationIntent` and the
+source-derived artifact flow:
+
+- scoped privacy/safety clauses such as `don't touch private files` no longer
+  trigger `global-read-only-negation`;
+- true global no-touch clauses such as `don't touch files` still cancel
+  mutation;
+- source-to-target summary prompts keep the requested output path as the only
+  expected mutation target and keep the source file as source evidence;
+- protected/private files are not added as expected or source evidence targets
+  unless the user explicitly asks for them.
+
+## Verification
+
+- `.\gradlew.bat test --tests 'dev.talos.runtime.MutationIntentTest' --tests 'dev.talos.runtime.task.TaskContractResolverTest.scopedPrivacyNegationDoesNotCancelSourceToTargetMutation' --tests 'dev.talos.runtime.task.TaskContractResolverTest.globalFileTouchNegationStillCancelsSourceToTargetMutation' --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$NonStreaming.summarizeSourceIntoFileReadsSourceThenWritesTarget' --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$NonStreaming.summarizeSourceIntoFileWithoutSourceReadDoesNotCreateUngroundedArtifact'`
+- Focused two-model audit:
+  `local/manual-testing/t259-source-derived-focused-audit-20260513-151958/FINDINGS-T259-SOURCE-DERIVED.md`
+
+Audit evidence:
+
+- Prompt:
+  `summarize long-notes.txt into ideas/summary.md. keep it tight. don't touch private files.`
+- Both Qwen and GPT-OSS received `requiredTargets: ideas/summary.md` and
+  `sourceTargets: long-notes.txt` in prompt debug.
+- Both models read `long-notes.txt`.
+- Neither model read `.env`.
+- No private/protected file was treated as an expected target.
