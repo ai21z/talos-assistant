@@ -1,6 +1,6 @@
 # T260 - Natural List Prompts Must Not Be Swallowed By DevMode
 Date: 2026-05-13
-Status: Open
+Status: Done
 Priority: High
 
 ## Why This Ticket Exists
@@ -104,4 +104,30 @@ Trigger: action intent (tool-calling)
 Steps include: no dev command match
 ```
 
-Status remains open until the next focused two-model audit confirms the natural prompt no longer returns `Not found: names`.
+## Resolution
+
+The focused T254 two-model audit confirmed that natural evidence/list prompts
+now route through the assistant/tool path instead of DevMode path extraction.
+
+Audit prompt:
+
+```text
+list names only at workspace root. did brief.txt, index.html, styles.css, scripts.js, or script.js get created or changed? answer from evidence only.
+```
+
+Result:
+
+- Qwen reached prompt-debug/tool handling with `WORKSPACE_EXPLAIN` and
+  `talos.read_file`; it did not return `Not found: names`.
+- GPT-OSS reached prompt-debug/tool handling with `WORKSPACE_EXPLAIN` and
+  read-only tools; it did not return `Not found: names`.
+- The remaining quality variance in the model answer is evidence-summary
+  behavior, not DevMode swallowing.
+
+## Closure Verification
+
+- `.\gradlew.bat test --tests 'dev.talos.cli.modes.DevModeTest' --tests 'dev.talos.cli.modes.PromptClassifierTest' --tests 'dev.talos.cli.modes.ModeControllerTest'`
+- Focused two-model audit:
+  `local/manual-testing/t254-source-target-splitting-audit-20260513-153310/TEST-OUTPUT-LLAMA-CPP-QWEN-14B.txt`
+- Focused two-model audit:
+  `local/manual-testing/t254-source-target-splitting-audit-20260513-153310/TEST-OUTPUT-LLAMA-CPP-GPT-OSS-20B.txt`
