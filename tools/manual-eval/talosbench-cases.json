@@ -1152,7 +1152,8 @@
       ],
       "expectedContract": "SMALL_TALK",
       "expectedToolsAllowed": [],
-      "forbiddenOutputSubstrings": [
+      "forbiddenOutputSubstrings": [],
+      "forbiddenFinalTurnSubstrings": [
         "talos.write_file",
         "talos.edit_file"
       ],
