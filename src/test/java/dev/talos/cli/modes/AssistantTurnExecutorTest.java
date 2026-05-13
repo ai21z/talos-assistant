@@ -1140,6 +1140,63 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void readThenCreateFromItDoesNotPermitModelToOverwriteSource(@TempDir Path workspace) throws Exception {
+            String originalSource = """
+                    - Alice shipped the prototype.
+                    - Beta users asked for clearer onboarding.
+                    - Next step is to publish a short release note.
+                    """;
+            Files.writeString(workspace.resolve("long-notes.txt"), originalSource);
+            Files.writeString(workspace.resolve(".env"), "SECRET_MARKER=do-not-read");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            var undoStack = new dev.talos.tools.FileUndoStack();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            registry.register(new dev.talos.tools.impl.FileWriteTool(undoStack));
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 3);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"long-notes.txt\"}}\n"
+                                    + "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"ideas/summary.md\","
+                                    + "\"content\":\"- Prototype shipped.\\n- Onboarding needs clearer guidance.\"}}\n"
+                                    + "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"long-notes.txt\","
+                                    + "\"content\":\"source rewrite\"}}",
+                            "Updated ideas/summary.md and long-notes.txt.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "read long-notes.txt and create ideas/summary.md from it; do not read .env."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertTrue(Files.exists(workspace.resolve("ideas/summary.md")), out.text());
+            assertEquals(originalSource, Files.readString(workspace.resolve("long-notes.txt")),
+                    "Source evidence must remain input-only for read-then-create-from-it requests.");
+            assertFalse(out.text().contains("Updated ideas/summary.md and long-notes.txt."), out.text());
+            assertFalse(out.text().contains("Updated long-notes.txt"), out.text());
+            assertTrue(out.text().contains("Target outside expected targets before approval")
+                            || out.text().contains("outside the current expected target set"),
+                    out.text());
+
+            List<String> frames = messages.stream()
+                    .filter(AssistantTurnExecutorTest::isCurrentTurnCapabilityFrame)
+                    .map(ChatMessage::content)
+                    .toList();
+            assertEquals(1, frames.size(), frames.toString());
+            assertTrue(frames.getFirst().contains("requiredTargets: ideas/summary.md"), frames.getFirst());
+            assertTrue(frames.getFirst().contains("sourceTargets: long-notes.txt"), frames.getFirst());
+            assertFalse(frames.getFirst().contains("requiredTargets: long-notes.txt"), frames.getFirst());
+            assertFalse(frames.getFirst().contains(".env"), frames.getFirst());
+        }
+
+        @Test
         void staticWebBuildFromSourceReadsBriefAndDoesNotMutateSource(@TempDir Path workspace) throws Exception {
             String brief = """
                     Neon Harbor needs a synthwave landing page with a hero section,

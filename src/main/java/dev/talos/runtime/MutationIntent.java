@@ -161,6 +161,17 @@ public final class MutationIntent {
                     + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))",
             Pattern.CASE_INSENSITIVE);
 
+    private static final Pattern READ_SOURCE_THEN_CREATE_OUTPUTS_FROM_IT = Pattern.compile(
+            "\\b(?:read|inspect|open)\\s+(?:the\\s+)?(?:file\\s+)?"
+                    + CAPTURED_FILE_TARGET
+                    + "(.{0,360}?)\\b(?:from|using|based\\s+on)\\s+"
+                    + "(?:it|this|that|that\\s+file|the\\s+file|the\\s+source|the\\s+source\\s+file)\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+
+    private static final Pattern READ_THEN_CREATE_OUTPUT_VERB = Pattern.compile(
+            "\\b(?:create|write|save|put|generate|make|build|scaffold)\\b",
+            Pattern.CASE_INSENSITIVE);
+
     private static final Pattern BUILD_FROM_SOURCE_TO_TARGETS = Pattern.compile(
             "\\b" + BUILD_ARTIFACT_VERBS + "\\b.{0,120}?\\bfrom\\s+(?:the\\s+)?(?:file\\s+)?"
                     + CAPTURED_FILE_TARGET
@@ -246,6 +257,8 @@ public final class MutationIntent {
         Optional<SourceToTargetArtifact> readThenWrite =
                 sourceToTargetArtifact(READ_THEN_WRITE_SUMMARY_TO_TARGET.matcher(request));
         if (readThenWrite.isPresent()) return readThenWrite;
+        Optional<SourceToTargetArtifact> readThenCreateFromIt = readThenCreateOutputsFromIt(request);
+        if (readThenCreateFromIt.isPresent()) return readThenCreateFromIt;
         return buildFromSourceToTargets(request);
     }
 
@@ -293,6 +306,32 @@ public final class MutationIntent {
         LinkedHashSet<String> outputs = new LinkedHashSet<>();
         sources.add(source);
         outputs.add(output);
+        return Optional.of(new SourceToTargetArtifact(sources, outputs));
+    }
+
+    private static Optional<SourceToTargetArtifact> readThenCreateOutputsFromIt(String request) {
+        Matcher matcher = READ_SOURCE_THEN_CREATE_OUTPUTS_FROM_IT.matcher(request);
+        if (!matcher.find()) return Optional.empty();
+        String source = normalizeArtifactPath(matcher.group(1));
+        if (source.isBlank()) return Optional.empty();
+
+        String bridge = matcher.group(2) == null ? "" : matcher.group(2);
+        Matcher verbMatcher = READ_THEN_CREATE_OUTPUT_VERB.matcher(bridge);
+        if (!verbMatcher.find()) return Optional.empty();
+
+        String outputSpan = bridge.substring(verbMatcher.start());
+        LinkedHashSet<String> outputs = new LinkedHashSet<>();
+        Matcher outputMatcher = NAMED_FILE_TARGET.matcher(outputSpan);
+        while (outputMatcher.find()) {
+            String output = normalizeArtifactPath(outputMatcher.group(1));
+            if (!output.isBlank() && !output.equals(source)) {
+                outputs.add(output);
+            }
+        }
+        if (outputs.isEmpty()) return Optional.empty();
+
+        LinkedHashSet<String> sources = new LinkedHashSet<>();
+        sources.add(source);
         return Optional.of(new SourceToTargetArtifact(sources, outputs));
     }
 

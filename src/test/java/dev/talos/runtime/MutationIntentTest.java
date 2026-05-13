@@ -2,6 +2,9 @@ package dev.talos.runtime;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.Set;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -89,6 +92,28 @@ class MutationIntentTest {
                 "Summarize long-notes.txt into ideas/summary.md. keep it tight. don't touch private files."));
         assertTrue(MutationIntent.looksExplicitMutationRequest(
                 "Summarize long-notes.txt into ideas/summary.md. do not touch protected files."));
+    }
+
+    @Test
+    void readThenCreateFromItSeparatesSourceAndOutputTargets() {
+        MutationIntent.SourceToTargetArtifact artifact = MutationIntent.sourceToTargetArtifact(
+                "read long-notes.txt and create ideas/summary.md from it; do not read .env.")
+                .orElseThrow();
+
+        assertEquals(Set.of("long-notes.txt"), artifact.sourceTargets());
+        assertEquals(Set.of("ideas/summary.md"), artifact.outputTargets());
+        assertTrue(MutationIntent.looksExplicitMutationRequest(
+                "read long-notes.txt and create ideas/summary.md from it; do not read .env."));
+    }
+
+    @Test
+    void readThenCreateMultipleOutputsFromItSeparatesSourceAndOutputTargets() {
+        MutationIntent.SourceToTargetArtifact artifact = MutationIntent.sourceToTargetArtifact(
+                "read brief.txt and create index.html, styles.css, and scripts.js from it.")
+                .orElseThrow();
+
+        assertEquals(Set.of("brief.txt"), artifact.sourceTargets());
+        assertEquals(Set.of("index.html", "styles.css", "scripts.js"), artifact.outputTargets());
     }
 
     @Test
