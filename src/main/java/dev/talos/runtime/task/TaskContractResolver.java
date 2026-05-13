@@ -117,6 +117,7 @@ public final class TaskContractResolver {
                     + "(?:what|which)\\s+(?:files|folders|directories|items|entries)\\s+"
                     + "(?:are|exist|do\\s+we\\s+have)?\\s*(?:in|inside)?\\s*"
                     + "(?:this|the|current|here)?\\s*(?:folder|directory|workspace|repo|repository)?"
+                    + "|what(?:'s|\\s+is)\\s+(?:in\\s+)?here"
                     + "|list\\s+(?:the\\s+)?(?:files|folders|directories|items|entries)\\s*"
                     + "(?:here|in\\s+(?:this|the|current)\\s+(?:folder|directory|workspace|repo|repository))?"
                     + "|show\\s+me\\s+(?:the\\s+)?(?:files|folders|directories|items|entries)\\s*"

@@ -707,6 +707,8 @@ class TaskContractResolverTest {
     void simpleFolderListingBecomesDirectoryListingContract() {
         for (String input : List.of(
                 "What files are in this folder?",
+                "What is in here?",
+                "What's in here?",
                 "List the files here.",
                 "Show me the files in this directory.",
                 "What files are in this workspace?")) {
