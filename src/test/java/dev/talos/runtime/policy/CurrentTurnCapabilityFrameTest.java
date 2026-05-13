@@ -219,6 +219,27 @@ class CurrentTurnCapabilityFrameTest {
     }
 
     @Test
+    void renderSeparatesReadThenCreateFromItSourceAndRequiredTargets() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "read long-notes.txt and create ideas/summary.md from it; do not read .env.");
+        CurrentTurnPlan plan = CurrentTurnPlan.create(
+                contract,
+                ExecutionPhase.APPLY,
+                List.of("talos.read_file", "talos.write_file", "talos.edit_file"),
+                List.of("talos.read_file", "talos.write_file", "talos.edit_file"),
+                List.of());
+
+        String frame = CurrentTurnCapabilityFrame.render(plan);
+
+        assertTrue(frame.contains("[ExpectedTargets]"), frame);
+        assertTrue(frame.contains("requiredTargets: ideas/summary.md"), frame);
+        assertTrue(frame.contains("[SourceEvidenceTargets]"), frame);
+        assertTrue(frame.contains("sourceTargets: long-notes.txt"), frame);
+        assertFalse(frame.contains("requiredTargets: long-notes.txt"), frame);
+        assertFalse(frame.contains(".env"), frame);
+    }
+
+    @Test
     void renderDoesNotRequireNegatedSimilarFileMention() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Create a BMI calculator web page using exactly index.html, styles.css, scripts.js. "

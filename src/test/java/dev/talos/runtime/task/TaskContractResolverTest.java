@@ -784,6 +784,35 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void readThenCreateFromItSeparatesSourceEvidenceFromMutationTarget() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "read long-notes.txt and create ideas/summary.md from it; do not read .env.");
+
+        assertEquals(TaskType.FILE_CREATE, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals("explicit-source-to-target-artifact-request", contract.classificationReason());
+        assertEquals(Set.of("ideas/summary.md"), contract.expectedTargets());
+        assertEquals(Set.of("long-notes.txt"), contract.sourceEvidenceTargets());
+        assertFalse(contract.expectedTargets().contains(".env"));
+        assertFalse(contract.sourceEvidenceTargets().contains(".env"));
+    }
+
+    @Test
+    void readThenCreateMultipleOutputsFromItSeparatesSourceEvidenceFromMutationTargets() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "read brief.txt and create index.html, styles.css, and scripts.js from it.");
+
+        assertEquals(TaskType.FILE_CREATE, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("index.html", "styles.css", "scripts.js"), contract.expectedTargets());
+        assertEquals(Set.of("brief.txt"), contract.sourceEvidenceTargets());
+    }
+
+    @Test
     void globalFileTouchNegationStillCancelsSourceToTargetMutation() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "summarize long-notes.txt into ideas/summary.md, but don't touch files.");
