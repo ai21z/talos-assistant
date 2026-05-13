@@ -60,6 +60,14 @@ class DevModeTest {
             // "show me the X" should be handled (normalized in handle(), not canHandle())
             assertTrue(mode.canHandle("show me the README.md"));
         }
+
+        @Test
+        void natural_list_names_evidence_prompt_is_not_a_dev_command() {
+            assertFalse(mode.canHandle(
+                    "List names only at workspace root. Does ideas exist here? Answer from evidence only."));
+            assertFalse(mode.canHandle(
+                    "list names only for batch-one and workspace root. Did batch-two exist? Answer from evidence only."));
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════

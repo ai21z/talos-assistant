@@ -223,6 +223,21 @@ class ModeControllerTest {
         assertFalse(rag.invoked, "show me <file> should NOT route to rag");
     }
 
+    @Test
+    void auto_mode_routes_natural_list_names_evidence_prompt_to_unified() throws Exception {
+        var dev = new RecordingStub("dev");
+        var rag = new RecordingStub("rag");
+        var ask = new RecordingStub("ask");
+        var mc = stubController(dev, rag, ask);
+        var ctx = Context.builder(new Config()).build();
+
+        mc.route("List names only at workspace root. Does ideas exist here? Answer from evidence only.", WS, ctx);
+
+        assertTrue(ask.invoked, "Natural evidence prompt should route to unified assistant");
+        assertFalse(dev.invoked, "Natural evidence prompt must not route to DevMode path extraction");
+        assertFalse(rag.invoked, "Natural evidence prompt should not route to legacy rag mode");
+    }
+
     // ── Conversation context tracking ────────────────────────────────────
 
     @Test

@@ -1,6 +1,6 @@
 # T257 - Natural Command Run Intent Classification
 Date: 2026-05-12
-Status: Open
+Status: Done
 Priority: Medium
 
 ## Why This Ticket Exists
@@ -60,3 +60,12 @@ Out of scope:
 - Unit tests for command-intent classification and unsupported vague command routing.
 - Integration/scripted REPL tests for explicit Gradle/test prompts and vague unsupported command prompts.
 - Audit coverage can be focused; this does not need to block the first folder/summary/static-web fix batch.
+
+## Closure Evidence
+
+Closed after focused Qwen/GPT-OSS llama.cpp re-audit:
+
+- `local/manual-testing/t252-t258-focused-reaudit-20260513-140552/TEST-OUTPUT-LLAMA-CPP-QWEN-14B.txt` lines 3053-3102.
+- `local/manual-testing/t252-t258-focused-reaudit-20260513-140552/TEST-OUTPUT-LLAMA-CPP-GPT-OSS-20B.txt` lines 3874-3923.
+
+The vague command prompt resolved to a deterministic unsupported-command path. No arbitrary command was run and no workspace text was used to infer command capability.

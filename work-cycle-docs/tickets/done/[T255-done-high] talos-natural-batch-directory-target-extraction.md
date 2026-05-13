@@ -1,6 +1,6 @@
 # T255 - Natural Batch Directory Target Extraction
 Date: 2026-05-12
-Status: Open
+Status: Done
 Priority: High
 
 ## Why This Ticket Exists
@@ -74,3 +74,12 @@ Out of scope:
 - Unit tests for natural batch directory extraction and workspace-operation intent detection.
 - Integration/scripted REPL test proving both directories and the copied file exist.
 - Focused two-model audit coverage before closing the milestone batch.
+
+## Closure Evidence
+
+Closed after focused Qwen/GPT-OSS llama.cpp re-audit:
+
+- `local/manual-testing/t252-t258-focused-reaudit-20260513-140552/TEST-OUTPUT-LLAMA-CPP-QWEN-14B.txt` lines 2038-2056.
+- `local/manual-testing/t252-t258-focused-reaudit-20260513-140552/TEST-OUTPUT-LLAMA-CPP-GPT-OSS-20B.txt` lines 2851-2869.
+
+Both models used `talos.apply_workspace_batch`, approval was requested once, and the final workspace state contains `batch-one/`, `batch-two/`, and `batch-one/styles-copy.css`. The audit also exposed a separate source/destination accounting issue for copied source files in later uncertainty summaries, tracked separately as T261.

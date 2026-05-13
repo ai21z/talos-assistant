@@ -1,6 +1,6 @@
 # T252 - Natural Single Directory Creation Intent
 Date: 2026-05-12
-Status: Open
+Status: Done
 Priority: High
 
 ## Why This Ticket Exists
@@ -71,3 +71,12 @@ Out of scope:
 - Unit tests for `MutationIntent`, `TaskContractResolver`, and `ToolSurfacePlanner`.
 - A focused scripted REPL/e2e scenario proving `talos.mkdir` is exposed and `ideas/` is created.
 - Focused two-model audit coverage before closing the milestone batch.
+
+## Closure Evidence
+
+Closed after focused Qwen/GPT-OSS llama.cpp re-audit:
+
+- `local/manual-testing/t252-t258-focused-reaudit-20260513-140552/TEST-OUTPUT-LLAMA-CPP-QWEN-14B.txt` lines 79-117.
+- `local/manual-testing/t252-t258-focused-reaudit-20260513-140552/TEST-OUTPUT-LLAMA-CPP-GPT-OSS-20B.txt` lines 79-117.
+
+Both models received a mutation-allowed mkdir contract, approval was requested, and `ideas/` was created. The same audit exposed a separate natural `List names only...` DevMode interception issue, tracked separately as T260.

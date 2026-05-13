@@ -1,6 +1,6 @@
 # T256 - Scoped Prior-Outcome Verification Answers
 Date: 2026-05-12
-Status: Open
+Status: Done
 Priority: High
 
 ## Why This Ticket Exists
@@ -62,3 +62,12 @@ Out of scope:
 - Unit tests for extension/artifact-scoped prior-outcome routing.
 - Integration/scripted REPL test with unsupported DOCX/PDF refusals followed by unrelated mutation failure.
 - Focused two-model audit coverage before closing the milestone batch.
+
+## Closure Evidence
+
+Closed after focused Qwen/GPT-OSS llama.cpp re-audit:
+
+- `local/manual-testing/t252-t258-focused-reaudit-20260513-140552/TEST-OUTPUT-LLAMA-CPP-QWEN-14B.txt` lines 3241-3263.
+- `local/manual-testing/t252-t258-focused-reaudit-20260513-140552/TEST-OUTPUT-LLAMA-CPP-GPT-OSS-20B.txt` lines 4062-4084.
+
+Both models answered the PDF/DOCX status question from scoped prior outcome evidence instead of the latest unrelated mutation.
