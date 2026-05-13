@@ -1221,7 +1221,7 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
-        void summarizeSourceIntoFileWithoutSourceReadIsEvidenceIncomplete(@TempDir Path workspace) throws Exception {
+        void summarizeSourceIntoFileWithoutSourceReadDoesNotCreateUngroundedArtifact(@TempDir Path workspace) throws Exception {
             Files.writeString(workspace.resolve("long-notes.txt"), "Grounded source text.");
 
             var registry = new dev.talos.tools.ToolRegistry();
@@ -1244,13 +1244,29 @@ class AssistantTurnExecutorTest {
             messages.add(ChatMessage.system("sys"));
             messages.add(ChatMessage.user("Summarize long-notes.txt into docs/summary.md."));
 
-            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
-                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+            LocalTurnTraceCapture.begin("trc-t259-source-write-before-read", "session", 1,
+                    "2026-05-13T00:00:00Z", "ws", "test", "llama_cpp", "qwen",
+                    "Summarize long-notes.txt into docs/summary.md.");
+            AssistantTurnExecutor.TurnOutput out;
+            LocalTurnTrace trace;
+            try {
+                out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
 
-            assertTrue(Files.exists(workspace.resolve("docs/summary.md")));
-            assertTrue(out.text().contains("[Evidence incomplete"), out.text());
+            assertFalse(Files.exists(workspace.resolve("docs/summary.md")),
+                    "A source-derived artifact must not be written before the required source file is read.");
+            assertTrue(out.text().contains("Source-derived artifact write blocked before approval"), out.text());
             assertTrue(out.text().contains("long-notes.txt"), out.text());
             assertFalse(out.text().contains("[File write/readback passed"), out.text());
+            assertFalse(out.text().contains("Created docs/summary.md."), out.text());
+            assertTrue(trace.events().stream()
+                            .anyMatch(event -> "ACTION_OBLIGATION_EVALUATED".equals(event.type())
+                                    && "SOURCE_EVIDENCE_WRITE_BEFORE_READ".equals(event.data().get("failureKind"))),
+                    "Trace should record the source-evidence write-before-read gate.");
         }
 
         @Test

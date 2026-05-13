@@ -10,6 +10,7 @@ import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.ToolCallStreamFilter;
 import dev.talos.runtime.TurnAuditCapture;
 import dev.talos.runtime.TurnPolicyTrace;
+import dev.talos.runtime.TurnSourceEvidenceCapture;
 import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ActiveTaskContextPolicy;
@@ -245,6 +246,7 @@ public final class AssistantTurnExecutor {
         }
         boolean useStreaming = shouldUseStreaming(ctx, currentTurnPlan, workspace);
 
+        TurnSourceEvidenceCapture.begin();
         TurnTaskContractCapture.set(currentTurnPlan.taskContract());
         try {
             if (useStreaming) {
@@ -384,6 +386,7 @@ public final class AssistantTurnExecutor {
             appendGenericLlmFailure(out, e);
         } finally {
             TurnTaskContractCapture.clear();
+            TurnSourceEvidenceCapture.clear();
         }
 
         return new TurnOutput(out.toString(), streamed);
