@@ -6,6 +6,7 @@ import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ArtifactGoal;
 import dev.talos.runtime.context.ChangeSummaryContext;
 import dev.talos.runtime.policy.EvidenceObligationVerifier;
+import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import org.junit.jupiter.api.Test;
 
@@ -193,6 +194,38 @@ class ActiveTaskContextUpdateListenerTest {
         String rendered = context.renderForChangeSummaryQuestion();
         assertTrue(rendered.contains("batch-two"), rendered);
         assertTrue(rendered.contains("batch-one/styles-copy.css"), rendered);
+    }
+
+    @Test
+    void naturalBatchCopySourceIsNotRenderedAsUnresolvedMutationTarget() {
+        SessionMemory memory = new SessionMemory();
+        ActiveTaskContextUpdateListener listener = new ActiveTaskContextUpdateListener(memory);
+        String request = "batch this: create batch-one and batch-two, "
+                + "then copy styles.css -> batch-one/styles-copy.css.";
+        var contract = TaskContractResolver.fromUserRequest(request);
+
+        TurnResult result = mutatingTurn(
+                24,
+                "trace-natural-batch",
+                List.copyOf(contract.expectedTargets()),
+                List.of(new TurnRecord.ToolCallSummary(
+                        "talos.apply_workspace_batch",
+                        "batch-one",
+                        List.of("batch-one", "batch-two", "batch-one/styles-copy.css"),
+                        true,
+                        "")),
+                "READBACK_ONLY",
+                "COMPLETED_UNVERIFIED",
+                List.of());
+
+        listener.onTurnComplete(result, request);
+
+        ChangeSummaryContext context = memory.changeSummaryContext();
+        assertEquals(List.of("batch-one", "batch-two", "batch-one/styles-copy.css"),
+                context.changedFiles().stream().map(ChangeSummaryContext.FileChange::path).toList());
+        assertFalse(context.unresolvedTargets().contains("styles.css"),
+                "Copy source must not be tracked as an unresolved mutation target.");
+        assertTrue(context.unresolvedTargets().isEmpty(), context.renderForChangeSummaryQuestion());
     }
 
     @Test

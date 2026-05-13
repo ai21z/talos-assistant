@@ -280,7 +280,18 @@ class TaskContractResolverTest {
 
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
-        assertEquals(Set.of("batch-one", "batch-two", "styles.css", "batch-one/styles-copy.css"),
+        assertEquals(Set.of("batch-one", "batch-two", "batch-one/styles-copy.css"),
+                contract.expectedTargets());
+    }
+
+    @Test
+    void naturalBatchPromptWithArrowCopyTreatsCopySourceAsInputOnly() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "batch this: create batch-one and batch-two, then copy styles.css -> batch-one/styles-copy.css.");
+
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("batch-one", "batch-two", "batch-one/styles-copy.css"),
                 contract.expectedTargets());
     }
 
