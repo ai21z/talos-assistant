@@ -400,6 +400,38 @@ function Test-TranscriptHasLastTrace {
     )
 }
 
+function Get-LastNaturalTurnBlock {
+    param([string]$Text)
+
+    $clean = Remove-AnsiSequences -Text $Text
+    if ([string]::IsNullOrWhiteSpace($clean)) { return "" }
+
+    $traceMatches = [regex]::Matches($clean, "(?m)^Current Turn Trace\s*$")
+    if ($traceMatches.Count -eq 0) { return "" }
+    $lastTraceStart = $traceMatches[$traceMatches.Count - 1].Index
+
+    $promptMatches = [regex]::Matches($clean, "(?m)^talos \[[^\]]+\] >")
+    $start = 0
+    foreach ($match in $promptMatches) {
+        if ($match.Index -lt $lastTraceStart) {
+            $start = $match.Index
+        } else {
+            break
+        }
+    }
+
+    $end = $clean.Length
+    foreach ($match in $promptMatches) {
+        if ($match.Index -gt $lastTraceStart) {
+            $end = $match.Index
+            break
+        }
+    }
+
+    if ($end -le $start) { return "" }
+    return $clean.Substring($start, $end - $start).Trim()
+}
+
 function New-TalosBenchInputLines {
     param($Case)
 
@@ -539,6 +571,28 @@ Local Trace
     Assert-TalosBenchContains -Name "legacy outcome prefers local trace" -Text $failedFacts.Outcome -Needle "FAILED"
     Assert-TalosBenchContains -Name "failed local trace outcome" -Text $failedFacts.LocalTraceOutcome -Needle "FAILED"
 
+    $multiTurnFixture = @"
+talos [auto] > First response mentions talos.write_file as a future option.
+
+Current Turn Trace
+  contract: READ_ONLY_QA mutationAllowed=false verificationRequired=false
+
+talos [auto] > Final response stays private and uses no workspace tools.
+
+Current Turn Trace
+  contract: SMALL_TALK mutationAllowed=false verificationRequired=false
+  Native tools: none
+  Prompt tools: none
+
+talos [auto] > Last Turn
+  Tool calls: 0
+"@
+    $lastNaturalTurn = Get-LastNaturalTurnBlock -Text $multiTurnFixture
+    Assert-TalosBenchContains -Name "last natural turn includes final response" -Text $lastNaturalTurn -Needle "Final response stays private"
+    if ($lastNaturalTurn.IndexOf("talos.write_file", [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+        throw "Self-test failed: last natural turn included prior-turn output."
+    }
+
     $approvalCase = [pscustomobject]@{
         prompts = @(
             "Propose the smallest README.md edit.",
@@ -624,6 +678,22 @@ function Invoke-TalosCase {
     $required = @($Case.requiredOutputSubstrings | ForEach-Object { [string]$_ })
     $forbidden = @($Case.forbiddenOutputSubstrings | ForEach-Object { [string]$_ })
     $check = Test-Substrings -Text $text -Required $required -Forbidden $forbidden
+    $finalRequired = if ($Case.PSObject.Properties.Name -contains "requiredFinalTurnSubstrings") {
+        @($Case.requiredFinalTurnSubstrings | ForEach-Object { [string]$_ })
+    } else {
+        @()
+    }
+    $finalForbidden = if ($Case.PSObject.Properties.Name -contains "forbiddenFinalTurnSubstrings") {
+        @($Case.forbiddenFinalTurnSubstrings | ForEach-Object { [string]$_ })
+    } else {
+        @()
+    }
+    $finalTurnBlock = if (($finalRequired.Count + $finalForbidden.Count) -gt 0) {
+        Get-LastNaturalTurnBlock -Text $text
+    } else {
+        ""
+    }
+    $finalCheck = Test-Substrings -Text $finalTurnBlock -Required $finalRequired -Forbidden $finalForbidden
     $traceFailures = @()
     if ($Case.PSObject.Properties.Name -contains "traceAssertions") {
         if (-not (Test-TranscriptHasLastTrace -Transcript $text)) {
@@ -644,6 +714,17 @@ function Invoke-TalosCase {
         $status = "BLOCKER"
         $blocker = "yes"
         $notes += "Found forbidden: " + ($check.FoundForbidden -join "; ")
+    }
+    if ($finalCheck.MissingRequired.Count -gt 0) {
+        if ($status -ne "BLOCKER") {
+            $status = "FAIL"
+        }
+        $notes += "Final turn missing required: " + ($finalCheck.MissingRequired -join "; ")
+    }
+    if ($finalCheck.FoundForbidden.Count -gt 0) {
+        $status = "BLOCKER"
+        $blocker = "yes"
+        $notes += "Final turn found forbidden: " + ($finalCheck.FoundForbidden -join "; ")
     }
     if ($traceFailures.Count -gt 0) {
         if ($status -ne "BLOCKER") {

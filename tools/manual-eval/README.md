@@ -164,10 +164,19 @@ Additional fields used by the runner:
 - `manualRequired`
 - `approvalInputs`
 - `approvalInputsByPrompt`
+- `requiredFinalTurnSubstrings`
+- `forbiddenFinalTurnSubstrings`
 - `traceAssertions`
 
 `approvalInputsByPrompt` must have the same number of entries as `prompts`.
 Each entry is an array of approval input lines to send after that prompt.
+
+`requiredOutputSubstrings` and `forbiddenOutputSubstrings` apply to the full
+transcript. Use them for whole-run facts such as secret containment, trace
+facts, and runtime failure text. `requiredFinalTurnSubstrings` and
+`forbiddenFinalTurnSubstrings` apply only to the final natural Talos turn, which
+is useful for multi-prompt cases where an earlier setup answer may legitimately
+mention text that the follow-up turn must not contain.
 
 ## Trace Assertions
 
