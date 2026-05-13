@@ -30,8 +30,9 @@ public final class DevMode implements Mode {
         if (raw == null) return false;
         String s = raw.trim().toLowerCase(Locale.ROOT);
         return s.startsWith("open ") || s.startsWith("show ") || s.startsWith("view ")
-                || s.startsWith("ls ") || s.startsWith("list ") || s.startsWith("dir ")
-                || s.equals("ls") || s.equals("list") || s.equals("dir");
+                || s.startsWith("ls ") || s.startsWith("dir ")
+                || isDirectListCommand(s)
+                || s.equals("ls") || s.equals("dir");
     }
 
     @Override
@@ -127,6 +128,31 @@ public final class DevMode implements Mode {
         return lower.matches("^(?:ls|list|dir) (?:the )?(?:files|folder|directory|workspace|contents)(?: here)?$")
                 || lower.matches("^(?:ls|list|dir) (?:the )?(?:files|contents) in (?:this|the current) (?:folder|directory|workspace)$")
                 || lower.matches("^(?:ls|list|dir) (?:this|the current) (?:folder|directory|workspace)$");
+    }
+
+    private static boolean isDirectListCommand(String lower) {
+        if (lower == null) return false;
+        String s = lower.trim();
+        if (s.equals("list")) return true;
+        if (!s.startsWith("list ")) return false;
+        if (isNaturalRootListRequest(s)) return true;
+
+        String arg = s.substring("list ".length()).trim();
+        if (arg.isEmpty()) return true;
+        if (arg.matches("^(?:all|the|every|files?|folders?|directories|items|entries|names|me)\\b.*")) {
+            return false;
+        }
+        if (isQuotedSingleArgument(arg)) return true;
+        return !arg.matches(".*\\s+.*");
+    }
+
+    private static boolean isQuotedSingleArgument(String arg) {
+        if (arg.length() < 2) return false;
+        char first = arg.charAt(0);
+        char last = arg.charAt(arg.length() - 1);
+        return (first == '"' && last == '"')
+                || (first == '\'' && last == '\'')
+                || (first == '`' && last == '`');
     }
 
     private static final Pattern ARG = Pattern.compile("^[^\\s:]++\\s++(?:\"([^\"]++)\"|'([^']++)'|`([^`]++)`|(\\S++))");

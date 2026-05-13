@@ -44,7 +44,7 @@ public final class PromptClassifier {
         "(?i)^\\s*(?:" +
             "(?:ls|dir)(?:\\s+|$)|" +
             "list\\s*$|" +
-            "list\\s+(?!all\\b|the\\b|every\\b|files\\b|me\\b)\\S|" +
+            "list\\s+(?!all\\b|the\\b|every\\b|files?\\b|folders?\\b|directories\\b|items\\b|entries\\b|names\\b|me\\b)(?:\"[^\"]+\"|'[^']+'|`[^`]+`|\\S+)\\s*$|" +
             "(?:open|view)\\s+(?![\"']?(?:me|the|all|every)\\b)\\S|" +
             "show\\s+(?![\"']?(?:me|the|all|every|how|why|what)\\b)\\S" +
         ")"

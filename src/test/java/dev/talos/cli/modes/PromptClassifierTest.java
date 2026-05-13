@@ -299,6 +299,16 @@ class PromptClassifierTest {
                 "Dev command '" + input + "' should route to COMMAND");
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "List names only at workspace root. Does ideas exist here? Answer from evidence only.",
+        "list names only for batch-one and workspace root. Did batch-two and batch-one/styles-copy.css get created? Answer from evidence only.",
+    })
+    void natural_list_names_evidence_prompts_route_to_assist(String input) {
+        assertEquals(ASSIST, PromptClassifier.route(input),
+                "Natural evidence prompt must use assistant/tool handling, not DevMode path extraction");
+    }
+
     // ── "show me <file>" → COMMAND (not RETRIEVE) ───────────────────────
 
     @ParameterizedTest

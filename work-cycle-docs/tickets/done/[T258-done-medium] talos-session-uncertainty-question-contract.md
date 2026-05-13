@@ -1,6 +1,6 @@
 # T258 - Session Uncertainty Questions Should Not Be Identity Small Talk
 Date: 2026-05-12
-Status: Open
+Status: Done
 Priority: Medium
 
 ## Why This Ticket Exists
@@ -60,3 +60,12 @@ Out of scope:
 - Unit tests for uncertainty/session-evidence classification priority.
 - Integration/scripted REPL test after mixed successful and failed turns.
 - Audit coverage can be focused; this does not need to block the first folder/summary/static-web fix batch.
+
+## Closure Evidence
+
+Closed after focused Qwen/GPT-OSS llama.cpp re-audit:
+
+- `local/manual-testing/t252-t258-focused-reaudit-20260513-140552/TEST-OUTPUT-LLAMA-CPP-QWEN-14B.txt` lines 3145-3192.
+- `local/manual-testing/t252-t258-focused-reaudit-20260513-140552/TEST-OUTPUT-LLAMA-CPP-GPT-OSS-20B.txt` lines 3966-4013.
+
+Both models routed the uncertainty question to a session-evidence contract, not identity small talk. The reported unresolved `styles.css` item is a separate workspace-operation source/destination accounting issue, tracked as T261.
