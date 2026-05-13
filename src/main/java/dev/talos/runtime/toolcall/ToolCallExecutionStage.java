@@ -1,6 +1,7 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.runtime.TurnProcessor;
+import dev.talos.runtime.TurnSourceEvidenceCapture;
 import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.policy.ProtectedPathAliasNormalizer;
@@ -216,6 +217,37 @@ public final class ToolCallExecutionStage {
             state.totalToolsInvoked++;
             state.toolNames.add(effective.toolName());
 
+            List<String> missingSourceEvidenceTargets = missingSourceEvidenceTargets(state, currentTaskContract);
+            if (isSourceDerivedContentMutation(effective) && !missingSourceEvidenceTargets.isEmpty()) {
+                state.failedCalls++;
+                failuresThisIter++;
+                recordFailure(state, effective.toolName(), pathHint);
+                String diagnosticError = sourceEvidenceRequiredDiagnostic(pathHint, missingSourceEvidenceTargets);
+                ToolResult result = ToolResult.fail(ToolError.invalidParams(diagnosticError));
+                emitToolResult(effective.toolName(), result);
+                LocalTurnTraceCapture.recordActionObligation(
+                        "SOURCE_EVIDENCE_BEFORE_DERIVED_WRITE",
+                        "FAILED",
+                        diagnosticError,
+                        "SOURCE_EVIDENCE_WRITE_BEFORE_READ");
+                state.toolOutcomes.add(new dev.talos.runtime.ToolCallLoop.ToolOutcome(
+                        effective.toolName(),
+                        pathHint,
+                        false,
+                        true,
+                        false,
+                        "",
+                        diagnosticError,
+                        null,
+                        ToolError.INVALID_PARAMS,
+                        workspaceOperationPlan));
+                appendResultMessage(state, parsed.useNativePath(), i,
+                        ToolCallSupport.formatToolResult(effective, result));
+                LOG.debug("Blocked source-derived {} for {} until source target(s) are read: {}",
+                        effective.toolName(), pathHint, missingSourceEvidenceTargets);
+                continue;
+            }
+
             String readBeforeWriteNudge = null;
             if (!strict && "talos.edit_file".equals(effective.toolName()) && pathHint != null) {
                 if (!state.pathsReadThisTurn.contains(ToolCallSupport.normalizePath(pathHint))) {
@@ -231,8 +263,9 @@ public final class ToolCallExecutionStage {
                 successesThisIter++;
             }
 
-            if ("talos.read_file".equals(effective.toolName()) && pathHint != null && result.success()) {
+            if (isReadFileTool(effective) && pathHint != null && result.success()) {
                 recordSuccessfulRead(state, pathHint);
+                TurnSourceEvidenceCapture.recordRead(pathHint);
             }
             if (result.success() && ToolCallSupport.isReadOnlyTool(effective.toolName())) {
                 String readSignature = ToolCallSupport.buildReadCallSignature(effective);
@@ -261,7 +294,7 @@ public final class ToolCallExecutionStage {
             if (!result.success()
                     && result.error() != null
                     && ToolError.UNSUPPORTED_FORMAT.equals(result.error().code())
-                    && "talos.read_file".equals(effective.toolName())
+                    && isReadFileTool(effective)
                     && pathHint != null
                     && !pathHint.isBlank()) {
                 unsupportedReadPathsThisIter.add(ToolCallSupport.normalizePath(pathHint));
@@ -440,6 +473,53 @@ public final class ToolCallExecutionStage {
         state.successfulReadCallBodies.clear();
     }
 
+    private static List<String> missingSourceEvidenceTargets(LoopState state, TaskContract contract) {
+        if (state == null || contract == null || contract.sourceEvidenceTargets().isEmpty()) {
+            return List.of();
+        }
+        Set<String> readPaths = new HashSet<>();
+        readPaths.addAll(TurnSourceEvidenceCapture.readPaths());
+        for (String readPath : state.pathsReadThisTurn) {
+            String normalized = evidencePathKey(readPath);
+            if (!normalized.isBlank()) {
+                readPaths.add(normalized);
+            }
+        }
+        List<String> missing = new ArrayList<>();
+        for (String sourceTarget : contract.sourceEvidenceTargets()) {
+            String normalized = evidencePathKey(sourceTarget);
+            if (normalized.isBlank()) continue;
+            if (!readPaths.contains(normalized)) {
+                missing.add(sourceTarget);
+            }
+        }
+        return List.copyOf(missing);
+    }
+
+    private static boolean isSourceDerivedContentMutation(ToolCall call) {
+        if (call == null) return false;
+        String canonical = ToolAliasPolicy.localCanonicalName(call.toolName());
+        return "write_file".equals(canonical) || "edit_file".equals(canonical);
+    }
+
+    private static boolean isReadFileTool(ToolCall call) {
+        if (call == null) return false;
+        return "read_file".equals(ToolAliasPolicy.localCanonicalName(call.toolName()));
+    }
+
+    private static String sourceEvidenceRequiredDiagnostic(String pathHint, List<String> missingSourceTargets) {
+        String target = pathHint == null || pathHint.isBlank()
+                ? "the derived artifact"
+                : "`" + pathHint + "`";
+        String sources = missingSourceTargets == null || missingSourceTargets.isEmpty()
+                ? "(unknown)"
+                : String.join(", ", missingSourceTargets);
+        return "Source-derived artifact write blocked before approval: the current task requires reading "
+                + "source target(s) " + sources + " before writing " + target + ". "
+                + "Call talos.read_file for the source target(s) first, then retry the write. "
+                + "No approval was requested and no file was changed.";
+    }
+
     private static void recordEmptyEditArgumentFailure(LoopState state, String pathHint) {
         if (state == null || pathHint == null || pathHint.isBlank()) return;
         state.emptyEditArgumentFailuresByPath.merge(
@@ -522,6 +602,17 @@ public final class ToolCallExecutionStage {
 
     private static String normalizePath(String pathHint) {
         return ToolCallSupport.normalizePath(pathHint == null ? "" : pathHint);
+    }
+
+    private static String evidencePathKey(String pathHint) {
+        String normalized = normalizePath(pathHint).strip();
+        while (normalized.startsWith("./")) {
+            normalized = normalized.substring(2);
+        }
+        while (normalized.length() > 1 && normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        return normalized;
     }
 
     private static String emptyEditArgumentDiagnostic(String pathHint, boolean pathWasRead) {

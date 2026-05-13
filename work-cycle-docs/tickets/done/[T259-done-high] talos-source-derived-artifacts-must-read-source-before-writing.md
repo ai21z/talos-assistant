@@ -1,6 +1,6 @@
 # T259 - Source-Derived Artifacts Must Read Source Before Writing
 Date: 2026-05-13
-Status: Open
+Status: Done
 Priority: High
 
 ## Why This Ticket Exists
@@ -67,3 +67,26 @@ Out of scope:
 - Unit tests for source-evidence gating.
 - AssistantTurnExecutor or ToolCallLoop integration test covering write-before-read.
 - Focused two-model audit probe using Qwen and GPT-OSS after implementation.
+
+## Resolution
+
+Implemented a source-evidence gate in `ToolCallExecutionStage`:
+
+- source-derived `write_file` / `edit_file` calls are blocked before approval if
+  required source targets have not been read in the same assistant turn;
+- successful `read_file` evidence is tracked across multiple tool-loop runs
+  inside one `AssistantTurnExecutor.execute(...)` turn;
+- blocked writes record `SOURCE_EVIDENCE_WRITE_BEFORE_READ` in local trace;
+- read-then-write and split read-then-retry paths remain valid.
+
+## Verification
+
+- `.\gradlew.bat test --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$NonStreaming.summarizeSourceIntoFileWithoutSourceReadDoesNotCreateUngroundedArtifact' --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$NonStreaming.summarizeSourceIntoFileReadsSourceThenWritesTarget' --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$NonStreaming.summarizeSourceIntoFileSplitReadThenRetryPreservesSourceEvidence' --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest$NonStreaming.summarizeSourceIntoFileInstructionEchoFailsVerification'`
+- `.\gradlew.bat test --tests 'dev.talos.runtime.ToolCallLoopTest'`
+- `.\gradlew.bat test --tests 'dev.talos.cli.modes.AssistantTurnExecutorTest'`
+- `.\gradlew.bat test`
+- `.\gradlew.bat build`
+- `.\gradlew.bat installDist`
+- `pwsh .\tools\install-windows.ps1 -Force`
+- Focused two-model audit:
+  `local/manual-testing/t259-source-derived-focused-audit-20260513-151958/FINDINGS-T259-SOURCE-DERIVED.md`
