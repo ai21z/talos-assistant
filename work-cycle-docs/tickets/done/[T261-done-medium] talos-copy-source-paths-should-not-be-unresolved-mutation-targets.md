@@ -1,6 +1,6 @@
 # T261 - Copy Source Paths Should Not Be Unresolved Mutation Targets
 Date: 2026-05-13
-Status: Open
+Status: Done
 Priority: Medium
 
 ## Why This Ticket Exists
@@ -58,3 +58,19 @@ Out of scope:
 - Unit tests for workspace-operation target extraction/accounting.
 - Integration/scripted REPL test for batch copy followed by session uncertainty question.
 - Focused audit coverage after implementation.
+
+## Resolution
+
+Natural batch copy parsing now removes copy/move/rename source paths from required mutation targets before merging batch destination targets. Arrow copy syntax (`copy styles.css -> batch-one/styles-copy.css`) is also recognized by the batch destination extractor.
+
+The source path remains available to the actual workspace operation as source/input evidence, but it is no longer tracked as an unresolved mutation target in later change-summary/uncertainty answers.
+
+## Verification
+
+- `.\gradlew.bat test --tests 'dev.talos.runtime.task.TaskContractResolverTest.naturalBatchPromptExtractsDirectoryAndCopyTargets' --tests 'dev.talos.runtime.task.TaskContractResolverTest.naturalBatchPromptWithArrowCopyTreatsCopySourceAsInputOnly'`
+- `.\gradlew.bat test --tests 'dev.talos.runtime.task.TaskContractResolverTest.naturalBatchPromptExtractsDirectoryAndCopyTargets' --tests 'dev.talos.runtime.task.TaskContractResolverTest.naturalBatchPromptWithArrowCopyTreatsCopySourceAsInputOnly' --tests 'dev.talos.runtime.ActiveTaskContextUpdateListenerTest.naturalBatchCopySourceIsNotRenderedAsUnresolvedMutationTarget' --tests 'dev.talos.runtime.ActiveTaskContextUpdateListenerTest.batchWorkspaceMutationRecordsEveryChangedPathInSummary'`
+- `.\gradlew.bat test --tests 'dev.talos.runtime.task.TaskContractResolverTest' --tests 'dev.talos.runtime.ActiveTaskContextUpdateListenerTest' --tests 'dev.talos.runtime.WorkspaceBatchTurnProcessorTest' --tests 'dev.talos.runtime.verification.WorkspaceOperationStaticVerifierTest'`
+- `.\gradlew.bat test`
+- `.\gradlew.bat build`
+- Installed with `.\gradlew.bat installDist` and `pwsh .\tools\install-windows.ps1 -Force`
+- Focused Qwen/GPT-OSS audit: `local/manual-testing/t261-copy-source-target-audit-20260513-154932/FINDINGS-T261-COPY-SOURCE-TARGET.md`

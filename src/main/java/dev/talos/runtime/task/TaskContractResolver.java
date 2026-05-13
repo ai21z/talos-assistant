@@ -61,7 +61,7 @@ public final class TaskContractResolver {
 
     private static final Pattern BATCH_DESTINATION_OPERATION = Pattern.compile(
             "(?i)\\b(?:copy|move|rename)\\s+`?([^\\s,;`]+)`?\\s+"
-                    + "(?:to|into)\\s+`?([^\\s,;`]+)`?");
+                    + "(?:(?:to|into)\\s+|->\\s*)`?([^\\s,;`]+)`?");
 
     private static final Pattern NEGATED_READ_TARGET_SPAN = Pattern.compile(
             "(?i)(?:\\b(?:do\\s+not|don't|dont)\\s+"
@@ -330,6 +330,10 @@ public final class TaskContractResolver {
                 expectedTargets = batchTargets;
             }
         } else if (mutationRequested && looksNaturalBatchWorkspaceOperation(original)) {
+            Set<String> batchSources = extractBatchWorkspaceSourceTargets(original);
+            if (!batchSources.isEmpty()) {
+                expectedTargets = withoutForbiddenTargets(expectedTargets, batchSources);
+            }
             Set<String> batchTargets = extractBatchWorkspaceExpectedTargets(original);
             if (!batchTargets.isEmpty()) {
                 LinkedHashSet<String> merged = new LinkedHashSet<>(expectedTargets);
@@ -409,6 +413,17 @@ public final class TaskContractResolver {
         while (destinationMatcher.find()) {
             String destination = normalizeTarget(destinationMatcher.group(2));
             if (!destination.isBlank()) out.add(destination);
+        }
+        return Set.copyOf(out);
+    }
+
+    private static Set<String> extractBatchWorkspaceSourceTargets(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return Set.of();
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        Matcher sourceMatcher = BATCH_DESTINATION_OPERATION.matcher(userRequest);
+        while (sourceMatcher.find()) {
+            String source = normalizeTarget(sourceMatcher.group(1));
+            if (!source.isBlank()) out.add(source);
         }
         return Set.copyOf(out);
     }
