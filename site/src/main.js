@@ -28,7 +28,7 @@ approval required:
 
 choice:
   allow? [y=yes, a=yes for session, N=no] _`,
-  verify: `talos [auto] > run the approved Gradle test command profile
+  check: `talos [auto] > run the approved Gradle test command profile
 
 command profile:
   gradle_test
@@ -72,6 +72,7 @@ function showToast(message) {
 function setTerminalState(nextState) {
   const output = document.querySelector("#terminal-output code");
   const panel = document.querySelector("#terminal-output");
+  const status = document.querySelector("#terminal-status");
   const tabs = Array.from(document.querySelectorAll("[data-terminal-state]"));
   const activeTab = tabs.find((tab) => tab.dataset.terminalState === nextState);
 
@@ -79,6 +80,9 @@ function setTerminalState(nextState) {
 
   output.textContent = terminalStates[nextState];
   panel.setAttribute("aria-labelledby", activeTab.id);
+  if (status) {
+    status.textContent = `${activeTab.textContent.trim()} terminal example selected.`;
+  }
 
   tabs.forEach((tab) => {
     const selected = tab === activeTab;
@@ -121,6 +125,12 @@ document.querySelectorAll("[data-copy]").forEach((button) => {
     } catch {
       showToast("Copy unavailable in this browser.");
     }
+  });
+});
+
+document.querySelectorAll("[data-beta-placeholder]").forEach((button) => {
+  button.addEventListener("click", () => {
+    showToast("Beta download placeholder. Build artifacts will be added later.");
   });
 });
 

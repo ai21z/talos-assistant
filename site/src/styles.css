@@ -134,6 +134,10 @@ pre {
   padding: 5.7rem 0;
 }
 
+section[id] {
+  scroll-margin-top: 104px;
+}
+
 .site-header {
   position: sticky;
   top: 0;
@@ -233,6 +237,7 @@ pre {
   padding: 0.78rem 1.15rem;
   font-weight: 730;
   letter-spacing: 0.04em;
+  cursor: pointer;
   transition:
     transform 180ms ease,
     border-color 180ms ease,
@@ -303,11 +308,12 @@ h3 {
 }
 
 h1 {
+  max-width: 46rem;
   margin-bottom: 1rem;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 4.7rem;
+  font-size: 4.05rem;
   font-weight: 500;
-  letter-spacing: 0.34em;
+  letter-spacing: 0;
 }
 
 h1 span {
@@ -337,7 +343,7 @@ h3 {
   margin-bottom: 1.45rem;
   color: var(--text);
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 2rem;
+  font-size: 1.58rem;
   line-height: 1.32;
 }
 
@@ -803,7 +809,7 @@ h3 {
 .timeline {
   list-style: none;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
   gap: 1rem;
   margin: 0;
   padding: 0;
@@ -965,6 +971,18 @@ h3 {
   color: var(--muted);
 }
 
+.roadmap-card--cta {
+  border-color: rgba(67, 215, 210, 0.3);
+  background:
+    linear-gradient(180deg, rgba(67, 215, 210, 0.08), rgba(67, 215, 210, 0.015)),
+    var(--panel);
+}
+
+.roadmap-card--cta .button {
+  width: fit-content;
+  margin-top: 1rem;
+}
+
 .site-footer {
   border-top: 1px solid var(--border);
   padding: 2rem 0;
@@ -1057,6 +1075,18 @@ h3 {
   transform: translateY(0);
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+  padding: 0;
+}
+
 .reveal {
   opacity: 1;
   transform: none;
@@ -1112,7 +1142,7 @@ h3 {
   }
 
   h1 {
-    font-size: 3.75rem;
+    font-size: 3.25rem;
   }
 
   .sentinel-frame {
@@ -1193,8 +1223,8 @@ h3 {
 
   h1 {
     margin-bottom: 0.7rem;
-    font-size: 3rem;
-    letter-spacing: 0.22em;
+    font-size: 2.55rem;
+    letter-spacing: 0;
   }
 
   h2 {
@@ -1325,7 +1355,7 @@ h3 {
   }
 
   h1 {
-    font-size: 2.55rem;
+    font-size: 2.18rem;
   }
 
   .hero-subtitle {
