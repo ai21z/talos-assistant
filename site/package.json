@@ -1,5 +1,5 @@
 {
-  "name": "talos-landing-prototype",
+  "name": "talos-site",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -7,9 +7,12 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test test/site.test.js"
+    "test": "npm run test:static",
+    "test:static": "node --test test/site.test.js",
+    "test:e2e": "playwright test"
   },
   "devDependencies": {
+    "@playwright/test": "^1.57.0",
     "vite": "^7.1.12"
   }
 }

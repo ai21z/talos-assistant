@@ -36,7 +36,13 @@
             <a href="#cli-preview">CLI</a>
             <a href="#beta">Beta</a>
           </nav>
-          <a class="button button--primary header-cta" href="#models">Setup models</a>
+          <button
+            class="button button--primary header-cta"
+            type="button"
+            data-beta-placeholder
+          >
+            Get beta build
+          </button>
         </div>
         <div class="greek-key greek-key--header" aria-hidden="true"></div>
       </header>
@@ -45,29 +51,28 @@
         <section class="section hero-section" id="product">
           <div class="container hero-grid">
             <div class="hero-copy reveal">
-              <p class="eyebrow">Windows-first local workspace assistant</p>
-              <h1><span>TALOS</span></h1>
-              <p class="hero-statement">
-                Talos is a local-first CLI workspace assistant for real developer work.
-              </p>
+              <p class="eyebrow">TALOS / Windows-first workspace assistant</p>
+              <h1>Talos is a local-first CLI operator for your workspace.</h1>
               <p class="hero-subtitle">
-                Inspect, change, check, and trace a workspace
-                <strong>governed by design.</strong>
+                It reads the workspace, proposes bounded changes, asks before
+                mutation, checks the result, and leaves a trace.
               </p>
               <p class="hero-proof">
-                Contracts define intent. Bounded tools execute. Governed operations
-                are checked and reported. Tool turns are traceable. Runtime-owned
-                outcomes keep final answers grounded.
+                Talos is built for deliberate local work: inspect files, apply
+                approved edits, run bounded command profiles, and report what
+                actually happened.
               </p>
               <div class="hero-actions" aria-label="Primary actions">
-                <a class="button button--primary" href="#models">Setup models</a>
+                <button class="button button--primary" type="button" data-beta-placeholder>
+                  Get beta build
+                </button>
                 <a class="button button--ghost" href="#workflow">View work cycle</a>
               </div>
               <ul class="status-row" aria-label="Talos operating principles">
                 <li class="status-chip">Managed llama.cpp</li>
                 <li class="status-chip">Tested Qwen/GPT-OSS profiles</li>
                 <li class="status-chip">Approved writes</li>
-                <li class="status-chip">Prompt-debug evidence</li>
+                <li class="status-chip">Traceable turns</li>
               </ul>
               <p class="machine-note">
                 <span aria-hidden="true">&gt;_</span>
@@ -107,8 +112,7 @@ outcome:
                   <svg
                     class="sentinel-emblem"
                     viewBox="0 0 360 360"
-                    role="img"
-                    aria-label="Abstract bronze sentinel emblem"
+                    focusable="false"
                   >
                     <defs>
                       <linearGradient id="bronzeGradient" x1="0" x2="1" y1="0" y2="1">
@@ -158,14 +162,14 @@ outcome:
               <p class="eyebrow">What Talos does today</p>
               <h2 id="workflow-heading">Visible work before local changes.</h2>
               <p>
-                Talos handles bounded workspace tasks: inspect a project, retrieve
-                local context, create and edit files after approval, run bounded
-                command profiles, and report checked outcomes with trace evidence.
+                Talos helps with ordinary developer workspace work: look around,
+                read files, search project text, prepare edits, create files,
+                move workspace items, and run approved verification commands.
               </p>
               <p>
-                It supports approved file creation and edits, approved workspace
-                operations, bounded command profiles, prompt-debug evidence, and
-                runtime-owned outcomes instead of model-authored victory prose.
+                It keeps the important handoffs visible. Reads happen first.
+                Mutations need approval. Unsupported binary files are refused
+                instead of faked. Final answers are grounded in checked outcomes.
               </p>
             </div>
 
@@ -204,9 +208,9 @@ outcome:
                   aria-controls="terminal-output"
                   aria-selected="false"
                   tabindex="-1"
-                  data-terminal-state="verify"
+                  data-terminal-state="check"
                 >
-                  Verify
+                  Check
                 </button>
                 <button
                   type="button"
@@ -230,7 +234,6 @@ outcome:
                   id="terminal-output"
                   role="tabpanel"
                   aria-labelledby="tab-inspect"
-                  aria-live="polite"
                 ><code>talos [auto] &gt; what does this workspace do?
 
 runtime:
@@ -243,6 +246,9 @@ allowed tools:
 
 write status:
   no mutation tools exposed</code></pre>
+                <p id="terminal-status" class="sr-only" aria-live="polite" aria-atomic="true">
+                  Inspect terminal example selected.
+                </p>
               </div>
             </div>
           </div>
@@ -299,7 +305,7 @@ write status:
           <div class="container">
             <div class="section-header reveal">
               <p class="eyebrow">How a Talos turn works</p>
-              <h2 id="how-heading">Classify, inspect, approve, check.</h2>
+              <h2 id="how-heading">Classify, inspect, approve, mutate, check, trace.</h2>
             </div>
             <ol class="timeline">
               <li class="timeline-step reveal">
@@ -319,8 +325,18 @@ write status:
               </li>
               <li class="timeline-step reveal">
                 <span class="timeline-index">04</span>
+                <h3>Mutate</h3>
+                <p>Run only the approved file, workspace, or command operation.</p>
+              </li>
+              <li class="timeline-step reveal">
+                <span class="timeline-index">05</span>
                 <h3>Check</h3>
-                <p>Check the result, record the trace, and report the runtime-owned outcome.</p>
+                <p>Read back file changes or inspect command evidence before reporting success.</p>
+              </li>
+              <li class="timeline-step reveal">
+                <span class="timeline-index">06</span>
+                <h3>Trace</h3>
+                <p>Keep the prompt, tools, approvals, actions, and result evidence inspectable.</p>
               </li>
             </ol>
           </div>
@@ -338,7 +354,7 @@ write status:
               <article class="cycle-panel reveal">
                 <p class="eyebrow">Execution Cycle</p>
                 <h3>Act with control.</h3>
-                <div class="cycle-diagram" aria-label="Execution cycle: Contract, Context, Tool Call, Approval, Action, Verify, Trace">
+                <div class="cycle-diagram" aria-label="Execution cycle: Contract, Context, Tool Call, Approval, Action, Check, Trace">
                   <span class="cycle-core">
                     <span class="brand-mark" aria-hidden="true">
                       <svg viewBox="0 0 64 64" focusable="false">
@@ -451,6 +467,7 @@ write status:
                   <button
                     class="copy-button"
                     type="button"
+                    aria-label="Copy Qwen setup command"
                     data-copy="talos setup models --profile qwen2.5-coder-14b --server-path C:/path/to/llama-server.exe --write"
                   >
                     Copy
@@ -464,6 +481,7 @@ write status:
                   <button
                     class="copy-button"
                     type="button"
+                    aria-label="Copy GPT-OSS setup command"
                     data-copy="talos setup models --profile gpt-oss-20b --server-path C:/path/to/llama-server.exe --write"
                   >
                     Copy
@@ -474,7 +492,12 @@ write status:
               <article class="code-card">
                 <div class="code-card-header">
                   <h3>Status check</h3>
-                  <button class="copy-button" type="button" data-copy="talos status --verbose">
+                  <button
+                    class="copy-button"
+                    type="button"
+                    aria-label="Copy status command"
+                    data-copy="talos status --verbose"
+                  >
                     Copy
                   </button>
                 </div>
@@ -494,7 +517,12 @@ write status:
               <article class="code-card reveal">
                 <div class="code-card-header">
                   <h3>Start Talos</h3>
-                  <button class="copy-button" type="button" data-copy="talos">
+                  <button
+                    class="copy-button"
+                    type="button"
+                    aria-label="Copy start command"
+                    data-copy="talos"
+                  >
                     Copy
                   </button>
                 </div>
@@ -503,7 +531,12 @@ write status:
               <article class="code-card reveal">
                 <div class="code-card-header">
                   <h3>Inspect runtime</h3>
-                  <button class="copy-button" type="button" data-copy="/tools">
+                  <button
+                    class="copy-button"
+                    type="button"
+                    aria-label="Copy runtime inspection command"
+                    data-copy="/tools&#10;/models&#10;/workspace"
+                  >
                     Copy
                   </button>
                 </div>
@@ -514,7 +547,12 @@ write status:
               <article class="code-card reveal">
                 <div class="code-card-header">
                   <h3>Review trace</h3>
-                  <button class="copy-button" type="button" data-copy="/last trace">
+                  <button
+                    class="copy-button"
+                    type="button"
+                    aria-label="Copy trace command"
+                    data-copy="/last trace"
+                  >
                     Copy
                   </button>
                 </div>
@@ -531,6 +569,13 @@ write status:
               <h2 id="beta-heading">Built around audits, traces, and honest limits.</h2>
             </div>
             <div class="roadmap-grid">
+              <article class="roadmap-card roadmap-card--cta reveal">
+                <span>Beta build placeholder</span>
+                <small>Download artifacts are intentionally not wired yet. The public build link will be added after release packaging.</small>
+                <button class="button button--primary" type="button" data-beta-placeholder>
+                  Get beta build
+                </button>
+              </article>
               <article class="roadmap-card reveal">
                 <span>Windows-first setup</span>
                 <small>Java 21, managed llama.cpp, model setup profiles, installDist, and installer scripts are the supported path.</small>

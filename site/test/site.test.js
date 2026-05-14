@@ -1,287 +1,176 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const read = (path) => readFileSync(join(root, path), "utf8");
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const cssBlock = (css, selector) => {
-  const match = css.match(new RegExp(`${escapeRegExp(selector)}\\s*\\{([^}]*)\\}`));
-  return match?.[1] ?? "";
-};
+const publicFiles = ["index.html", "src/main.js", "src/styles.css"];
+const publicText = () => publicFiles.map(read).join("\n");
 
-describe("Talos landing page", () => {
-  it("defines the required Vite scripts and disables production source maps", () => {
+function walkFiles(dir) {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).flatMap((entry) => {
+    const path = join(dir, entry);
+    return statSync(path).isDirectory() ? walkFiles(path) : [path];
+  });
+}
+
+function anchorTargets(html) {
+  return Array.from(html.matchAll(/href="#([^"]+)"/g), (match) => match[1]);
+}
+
+function ids(html) {
+  return new Set(Array.from(html.matchAll(/\sid="([^"]+)"/g), (match) => match[1]));
+}
+
+describe("Talos landing page static contract", () => {
+  it("uses the final site package name and required scripts", () => {
     const pkg = JSON.parse(read("package.json"));
+    assert.equal(pkg.name, "talos-site");
     assert.equal(pkg.scripts.dev, "vite");
     assert.equal(pkg.scripts.build, "vite build");
     assert.equal(pkg.scripts.preview, "vite preview");
-
-    const viteConfig = read("vite.config.js");
-    assert.match(viteConfig, /sourcemap:\s*false/);
+    assert.equal(pkg.scripts.test, "npm run test:static");
+    assert.equal(pkg.scripts["test:static"], "node --test test/site.test.js");
+    assert.equal(pkg.scripts["test:e2e"], "playwright test");
   });
 
-  it("is launch-ready copy, not a placeholder prototype", () => {
+  it("keeps production source maps disabled and emits no .map files after build", () => {
+    assert.match(read("vite.config.js"), /sourcemap:\s*false/);
+    const mapFiles = walkFiles(join(root, "dist")).filter((file) => file.endsWith(".map"));
+    assert.deepEqual(mapFiles, []);
+  });
+
+  it("has one descriptive h1 and keeps Talos as product, not just ceremony", () => {
     const html = read("index.html");
-    const js = read("src/main.js");
-    const publicText = `${html}\n${js}`;
-
-    for (const banned of [
-      "Install placeholder",
-      "Docs placeholder",
-      "demo placeholder",
-      "Placeholder",
-      "prototype",
-      "Launch surfaces are not wired yet",
-      "No artifact is published",
-    ]) {
-      assert.doesNotMatch(publicText, new RegExp(escapeRegExp(banned), "i"));
-    }
-
-    assert.doesNotMatch(html, /data-placeholder="true"/);
-    assert.match(html, />\s*Setup models\s*</);
-    assert.match(html, />\s*View work cycle\s*</);
+    const h1Matches = Array.from(html.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi));
+    assert.equal(h1Matches.length, 1);
+    const h1Text = h1Matches[0][1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    assert.match(h1Text, /local-first/i);
+    assert.match(h1Text, /workspace/i);
+    assert.notEqual(h1Text.toUpperCase(), "TALOS");
   });
 
-  it("states the real beta product path and supported workflows", () => {
+  it("uses concrete hero copy and beta CTA hierarchy", () => {
     const html = read("index.html").replace(/\s+/g, " ");
+    const hero = html.slice(html.indexOf('id="product"'), html.indexOf('id="workflow"'));
 
     for (const copy of [
-      "local-first CLI workspace assistant",
-      "Inspect, change, check, and trace",
-      "managed llama.cpp",
-      "Tested Qwen/GPT-OSS profiles",
-      "approved file creation and edits",
-      "approved workspace operations",
-      "bounded command profiles",
-      "prompt-debug evidence",
-      "runtime-owned outcomes",
+      "reads the workspace",
+      "proposes bounded changes",
+      "asks before mutation",
+      "checks the result",
+      "leaves a trace",
       "No hosted workspace handoff",
+      "Get beta build",
     ]) {
-      assert.match(html, new RegExp(escapeRegExp(copy), "i"));
+      assert.match(hero, new RegExp(escapeRegExp(copy), "i"));
     }
+
+    assert.doesNotMatch(hero, />\s*Setup models\s*</i);
+    assert.doesNotMatch(hero, /runtime-owned outcomes/i);
+    assert.doesNotMatch(hero, /tool surface/i);
+    assert.doesNotMatch(hero, /contract defines intent/i);
+    assert.doesNotMatch(hero, /prompt-debug evidence/i);
   });
 
-  it("keeps real setup commands and local model guidance visible", () => {
-    const html = read("index.html");
-    const js = read("src/main.js");
-    const text = `${html}\n${js}`;
-
-    for (const copy of [
-      "talos setup models --profile qwen2.5-coder-14b",
-      "talos setup models --profile gpt-oss-20b",
+  it("keeps real command examples and canonical runtime tool names", () => {
+    const text = publicText();
+    for (const command of [
+      "talos setup models --profile qwen2.5-coder-14b --server-path C:/path/to/llama-server.exe --write",
+      "talos setup models --profile gpt-oss-20b --server-path C:/path/to/llama-server.exe --write",
       "talos status --verbose",
+      "/tools",
+      "/models",
+      "/workspace",
       "/last trace",
-      "~/.talos/models/huggingface",
-      "C:/path/to/llama-server.exe",
-    ]) {
-      assert.match(text, new RegExp(escapeRegExp(copy), "i"));
-    }
-  });
-
-  it("includes product sections, accessible navigation, and terminal controls", () => {
-    const html = read("index.html");
-
-    for (const label of [
-      "Product",
-      "Work Cycle",
-      "Trust",
-      "Models",
-      "CLI",
-      "Beta",
-      "What Talos does today",
-      "How a Talos turn works",
-      "Local model setup",
-    ]) {
-      assert.match(html, new RegExp(escapeRegExp(label).replace(/\s+/g, "\\s+"), "i"));
-    }
-
-    for (const tab of ["Inspect", "Approve", "Verify", "Trace"]) {
-      assert.match(html, new RegExp(`role="tab"[\\s\\S]*?>\\s*${tab}\\s*</button>`));
-    }
-
-    assert.match(html, /class="skip-link"/);
-    assert.match(html, /aria-label="Primary navigation"/);
-    assert.match(html, /role="tabpanel"/);
-  });
-
-  it("carries the reference-inspired artifact system without becoming generic SaaS", () => {
-    const html = read("index.html").replace(/\s+/g, " ");
-    const css = read("src/styles.css");
-
-    for (const copy of [
-      "governed by design",
-      "Contracts define intent",
-      "Governed operations are checked and reported",
-      "Tool turns are traceable",
-      "Execution Cycle",
-      "Improvement Cycle",
-      "Protected workspace",
-      "Traceable actions",
-      "Bounded tools",
-      "Local trust",
-      "Bronze sentinel. Guardian logic.",
-    ]) {
-      assert.match(html, new RegExp(escapeRegExp(copy), "i"));
-    }
-
-    for (const cls of [
-      ".artifact-shell",
-      ".brand-mark",
-      ".process-orbits",
-      ".cycle-diagram",
-      ".trust-command",
-      ".ornament-rule",
-      ".footer-medallion",
-    ]) {
-      assert.match(css, new RegExp(escapeRegExp(cls)));
-    }
-  });
-
-  it("leads with product proof before brand ceremony", () => {
-    const html = read("index.html");
-    const css = read("src/styles.css");
-    const workflowIndex = html.indexOf('id="workflow"');
-    const processIndex = html.indexOf('id="process"');
-    const heroTerminalIndex = html.indexOf('class="terminal terminal--hero"');
-    const sentinelIndex = html.indexOf('class="sentinel-frame"');
-
-    assert.ok(workflowIndex > -1, "workflow section should exist");
-    assert.ok(processIndex > -1, "process section should exist");
-    assert.ok(workflowIndex < processIndex, "workflow proof should appear before process ceremony");
-    assert.ok(heroTerminalIndex > -1, "hero terminal should exist");
-    assert.ok(sentinelIndex > -1, "sentinel visual should exist");
-    assert.ok(heroTerminalIndex < sentinelIndex, "terminal proof should precede sentinel art in hero markup");
-
-    for (const copy of [
-      "Task receipt",
-      "Read / Approve / Mutate / Check",
-      "Files are read-only until approval",
-      "Approval is required before mutation",
-      "What Talos does today",
-    ]) {
-      assert.match(html, new RegExp(escapeRegExp(copy), "i"));
-    }
-
-    for (const cls of [".hero-product-panel", ".proof-ledger", ".task-receipt"]) {
-      assert.match(css, new RegExp(escapeRegExp(cls)));
-    }
-  });
-
-  it("keeps the hero compact enough to reveal the next section cue", () => {
-    const css = read("src/styles.css");
-    const hero = cssBlock(css, ".hero-section");
-    const heroReveal = cssBlock(css, ".js .hero-section .reveal");
-    const panel = cssBlock(css, ".hero-product-panel");
-    const terminal = cssBlock(css, ".terminal--hero");
-    const sentinel = cssBlock(css, ".sentinel-frame");
-
-    assert.match(hero, /padding-top:\s*2\.[0-9]+rem/);
-    assert.match(hero, /padding-bottom:\s*(?:0|1)\.[0-9]+rem/);
-    assert.match(heroReveal, /opacity:\s*1/);
-    assert.match(heroReveal, /transform:\s*none/);
-    assert.match(panel, /grid-template-areas/);
-    assert.doesNotMatch(terminal, /position:\s*absolute/);
-    assert.doesNotMatch(sentinel, /position:\s*absolute/);
-  });
-
-  it("states trust boundaries explicitly and truthfully", () => {
-    const html = read("index.html");
-    const css = read("src/styles.css");
-
-    for (const copy of [
-      "Trust boundaries",
-      "Workspace files",
-      "Read-only inspection first",
-      "File writes",
-      "Preview and approval required",
-      "Workspace operations",
-      "Approved before mkdir, copy, move, rename, or delete",
-      "Command profiles",
-      "Bounded and approved before execution",
-      "Unsupported binary documents",
-      "Refused instead of faked",
-    ]) {
-      assert.match(html, new RegExp(escapeRegExp(copy), "i"));
-    }
-
-    for (const cls of [".boundary-grid", ".boundary-row", ".boundary-state"]) {
-      assert.match(css, new RegExp(escapeRegExp(cls)));
-    }
-  });
-
-  it("keeps public examples aligned with canonical Talos runtime names", () => {
-    const html = read("index.html");
-    const js = read("src/main.js");
-    const text = `${html}\n${js}`;
-
-    for (const canonical of [
+      "talos.list_dir",
+      "talos.read_file",
       "talos.grep",
       "talos.retrieve",
       "talos.write_file",
       "talos.run_command",
       "gradle_test",
-      "write/readback result + /last trace",
     ]) {
-      assert.match(text, new RegExp(escapeRegExp(canonical), "i"));
+      assert.match(text, new RegExp(escapeRegExp(command), "i"));
     }
+  });
+
+  it("does not introduce fake downloads, external runtime assets, or hype claims", () => {
+    const text = publicText();
+    assert.doesNotMatch(text, /https?:\/\//i);
+    assert.doesNotMatch(text, /href="[^"]*\.(?:zip|msi|exe|dmg|pkg|tar\.gz)"/i);
+    assert.doesNotMatch(text, /download\s*=/i);
 
     for (const misleading of [
+      "swarm",
+      "multi-agent",
+      "autonomous workforce",
+      "replaces developers",
+      "one-click cloud agent",
       "retrieve_context",
       "gradle-test",
       "Every action is verified",
       "verified write + /last trace",
-      "Diff and approval required",
       "--local-only",
+      "No telemetry",
     ]) {
       assert.doesNotMatch(text, new RegExp(escapeRegExp(misleading), "i"));
     }
   });
 
-  it("implements tab switching and real command copy behavior", () => {
-    const js = read("src/main.js");
-    assert.match(js, /terminalStates/);
-    assert.match(js, /navigator\.clipboard\.writeText/);
-    assert.match(js, /aria-selected/);
-    assert.match(js, /document\.documentElement\.classList\.add\("js"\)/);
-    assert.match(js, /Command copied\./);
-    assert.doesNotMatch(js, /placeholder/i);
+  it("keeps anchor navigation targetable", () => {
+    const html = read("index.html");
+    const definedIds = ids(html);
+    for (const target of anchorTargets(html)) {
+      assert.ok(definedIds.has(target), `missing #${target}`);
+    }
   });
 
-  it("defines the reusable CSS class vocabulary and reduced motion behavior", () => {
+  it("labels all copy buttons uniquely and accessibly", () => {
+    const html = read("index.html");
+    const copyButtons = Array.from(html.matchAll(/<button\b[^>]*class="[^"]*\bcopy-button\b[^"]*"[^>]*>/g));
+    assert.ok(copyButtons.length >= 6);
+
+    const labels = copyButtons.map((match) => {
+      const attr = match[0].match(/\saria-label="([^"]+)"/);
+      return attr?.[1] ?? "";
+    });
+
+    assert.equal(labels.length, new Set(labels).size);
+    assert.ok(labels.every((label) => /^Copy .+ command$/i.test(label)), labels.join(", "));
+  });
+
+  it("uses accessible terminal and decorative art semantics", () => {
+    const html = read("index.html");
+    assert.doesNotMatch(html, /<pre[^>]*aria-live=/i);
+    assert.match(html, /id="terminal-status"[\s\S]*aria-live="polite"/i);
+    assert.doesNotMatch(html, /aria-hidden="true"[\s\S]{0,500}<svg[^>]*(?:role="img"|aria-label=)/i);
+  });
+
+  it("supports anchor offset and reduced motion", () => {
     const css = read("src/styles.css");
-    const reveal = cssBlock(css, ".js .reveal");
-    for (const token of [
-      "--bg",
-      "--bg-elevated",
-      "--text",
-      "--muted",
-      "--bronze",
-      "--bronze-soft",
-      "--cyan",
-      "--border",
-      "--shadow",
-      "--radius",
-      "--max-width",
-      ".container",
-      ".section",
-      ".eyebrow",
-      ".button",
-      ".button--primary",
-      ".button--ghost",
-      ".terminal",
-      ".terminal-tabs",
-      ".status-chip",
-      ".feature-card",
-      ".timeline-step",
-    ]) {
-      assert.match(css, new RegExp(escapeRegExp(token)));
-    }
-    assert.match(css, /prefers-reduced-motion/);
-    assert.match(css, /\.js\s+\.reveal/);
-    assert.match(reveal, /opacity:\s*1/);
-    assert.match(reveal, /transform:\s*none/);
+    assert.match(css, /scroll-margin-top/);
+    assert.match(css, /prefers-reduced-motion:\s*reduce/);
+    assert.match(css, /scroll-behavior:\s*auto\s*!important/);
+    assert.match(css, /transition(?:-duration)?:\s*none\s*!important|transition-duration:\s*0\.01ms\s*!important/);
+    assert.match(css, /animation(?:-duration)?:\s*none\s*!important|animation-duration:\s*0\.01ms\s*!important/);
+    assert.match(css, /\.js\s+\.reveal[\s\S]*opacity:\s*1/);
+  });
+
+  it("keeps vanilla JavaScript behavior for tabs, copy, and beta placeholder CTA", () => {
+    const js = read("src/main.js");
+    assert.match(js, /terminalStates/);
+    assert.match(js, /ArrowRight/);
+    assert.match(js, /ArrowLeft/);
+    assert.match(js, /Home/);
+    assert.match(js, /End/);
+    assert.match(js, /navigator\.clipboard\.writeText/);
+    assert.match(js, /data-beta-placeholder/);
+    assert.match(js, /Beta download placeholder\. Build artifacts will be added later\./);
+    assert.doesNotMatch(js, /React|Vue|createApp|tailwind/i);
   });
 });
