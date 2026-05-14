@@ -1,0 +1,587 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Talos is a local-first CLI workspace assistant for inspecting, changing, checking, and tracing developer workspaces with governed local tools."
+    />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg viewBox='0 0 64 64' fill='none' stroke='%23c28a4c' stroke-width='3' stroke-linejoin='bevel'%3E%3Cpath d='M12 9h40v9L32 29 12 18V9Z'/%3E%3Cpath d='M12 23l15 8v22L12 43V23Zm40 0-15 8v22l15-10V23Z'/%3E%3Cpath d='M25 23h14l-7 5-7-5Zm3 12 4 3 4-3v19h-8V35Z'/%3E%3C/svg%3E"
+    />
+    <title>Talos | Local-first CLI workspace assistant</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <div class="page-shell artifact-shell">
+      <header class="site-header">
+        <div class="container header-inner">
+          <a class="wordmark" href="#product" aria-label="Talos home">
+            <span class="brand-mark wordmark-mark" aria-hidden="true">
+              <svg viewBox="0 0 64 64" focusable="false">
+                <path d="M12 9h40v9L32 29 12 18V9Z" />
+                <path d="M12 23l15 8v22L12 43V23Zm40 0-15 8v22l15-10V23Z" />
+                <path d="M25 23h14l-7 5-7-5Zm3 12 4 3 4-3v19h-8V35Z" />
+              </svg>
+            </span>
+            <span class="wordmark-name">Talos</span>
+          </a>
+          <nav class="site-nav" aria-label="Primary navigation">
+            <a href="#product">Product</a>
+            <a href="#workflow">Work Cycle</a>
+            <a href="#trust-model">Trust</a>
+            <a href="#models">Models</a>
+            <a href="#cli-preview">CLI</a>
+            <a href="#beta">Beta</a>
+          </nav>
+          <a class="button button--primary header-cta" href="#models">Setup models</a>
+        </div>
+        <div class="greek-key greek-key--header" aria-hidden="true"></div>
+      </header>
+
+      <main id="main">
+        <section class="section hero-section" id="product">
+          <div class="container hero-grid">
+            <div class="hero-copy reveal">
+              <p class="eyebrow">Windows-first local workspace assistant</p>
+              <h1><span>TALOS</span></h1>
+              <p class="hero-statement">
+                Talos is a local-first CLI workspace assistant for real developer work.
+              </p>
+              <p class="hero-subtitle">
+                Inspect, change, check, and trace a workspace
+                <strong>governed by design.</strong>
+              </p>
+              <p class="hero-proof">
+                Contracts define intent. Bounded tools execute. Governed operations
+                are checked and reported. Tool turns are traceable. Runtime-owned
+                outcomes keep final answers grounded.
+              </p>
+              <div class="hero-actions" aria-label="Primary actions">
+                <a class="button button--primary" href="#models">Setup models</a>
+                <a class="button button--ghost" href="#workflow">View work cycle</a>
+              </div>
+              <ul class="status-row" aria-label="Talos operating principles">
+                <li class="status-chip">Managed llama.cpp</li>
+                <li class="status-chip">Tested Qwen/GPT-OSS profiles</li>
+                <li class="status-chip">Approved writes</li>
+                <li class="status-chip">Prompt-debug evidence</li>
+              </ul>
+              <p class="machine-note">
+                <span aria-hidden="true">&gt;_</span>
+                Runs in the selected local workspace. No hosted workspace handoff.
+              </p>
+            </div>
+
+            <div class="hero-visual reveal" aria-label="Talos CLI preview visual">
+              <div class="hero-product-panel">
+                <div class="terminal terminal--hero">
+                  <div class="terminal-bar">
+                    <span class="terminal-dot"></span>
+                    <span class="terminal-title">workflow sketch, not raw transcript</span>
+                    <span class="terminal-state">engine: llama_cpp</span>
+                  </div>
+                  <pre><code>talos [auto] &gt; create docs/summary.md from this repo
+
+turn model:
+  Read / Approve / Mutate / Check
+  Files are read-only until approval
+
+runtime surface:
+  target: docs/summary.md
+  read tools: talos.list_dir, talos.read_file, talos.grep, talos.retrieve
+  mutation tool after approval: talos.write_file
+
+approval:
+  preview shown before workspace mutation
+
+outcome:
+  write/readback result + /last trace</code></pre>
+                </div>
+
+                <div class="sentinel-frame" aria-hidden="true">
+                  <div class="radial-grid"></div>
+                  <div class="greek-key greek-key--top"></div>
+                  <svg
+                    class="sentinel-emblem"
+                    viewBox="0 0 360 360"
+                    role="img"
+                    aria-label="Abstract bronze sentinel emblem"
+                  >
+                    <defs>
+                      <linearGradient id="bronzeGradient" x1="0" x2="1" y1="0" y2="1">
+                        <stop offset="0" stop-color="#f3c982" />
+                        <stop offset="0.46" stop-color="#a46a33" />
+                        <stop offset="1" stop-color="#49311d" />
+                      </linearGradient>
+                      <linearGradient id="cyanEdge" x1="0" x2="1">
+                        <stop offset="0" stop-color="#47ded6" stop-opacity="0" />
+                        <stop offset="0.5" stop-color="#47ded6" stop-opacity="0.9" />
+                        <stop offset="1" stop-color="#47ded6" stop-opacity="0" />
+                      </linearGradient>
+                    </defs>
+                    <circle cx="180" cy="180" r="126" fill="none" stroke="#6b4829" stroke-width="2" />
+                    <circle cx="180" cy="180" r="92" fill="none" stroke="#3d2c20" stroke-width="1.5" />
+                    <path d="M105 84h150v36l-75 40-75-40V84Z" fill="url(#bronzeGradient)" opacity="0.86" />
+                    <path d="M105 142l54 28v104l-54-36V142Zm150 0-54 28v104l54-36V142Z" fill="url(#bronzeGradient)" opacity="0.68" />
+                    <path d="M154 132h52l-26 18-26-18Zm11 56 15 11 15-11v88h-30v-88Z" fill="#111412" stroke="#8a5b2d" stroke-width="2" />
+                    <path d="M130 146h43M187 146h43M180 118v178" stroke="url(#cyanEdge)" stroke-width="4" stroke-linecap="round" />
+                    <path d="M78 180h204M180 78v204" stroke="#47ded6" stroke-opacity="0.18" stroke-width="1" />
+                  </svg>
+                  <div class="greek-key greek-key--bottom"></div>
+                </div>
+
+                <div class="proof-ledger" aria-label="Current Talos task receipt">
+                  <div class="task-receipt">
+                    <span>Turn model</span>
+                    <strong>Read / Approve / Mutate / Check</strong>
+                  </div>
+                  <div>
+                    <span>Engine path</span>
+                    <strong>managed llama.cpp</strong>
+                  </div>
+                  <div>
+                    <span>Guardrail</span>
+                    <strong>Approval is required before mutation</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section workflow-section" id="workflow" aria-labelledby="workflow-heading">
+          <div class="container two-column">
+            <div class="section-copy reveal">
+              <p class="eyebrow">What Talos does today</p>
+              <h2 id="workflow-heading">Visible work before local changes.</h2>
+              <p>
+                Talos handles bounded workspace tasks: inspect a project, retrieve
+                local context, create and edit files after approval, run bounded
+                command profiles, and report checked outcomes with trace evidence.
+              </p>
+              <p>
+                It supports approved file creation and edits, approved workspace
+                operations, bounded command profiles, prompt-debug evidence, and
+                runtime-owned outcomes instead of model-authored victory prose.
+              </p>
+            </div>
+
+            <div class="terminal-card reveal">
+              <div class="task-receipt task-receipt--wide" aria-label="Task receipt">
+                <span>Task receipt</span>
+                <strong>Read / Approve / Mutate / Check</strong>
+                <small>Files are read-only until approval. Approval is required before mutation.</small>
+              </div>
+              <div class="terminal-tabs" role="tablist" aria-label="Terminal demo states">
+                <button
+                  type="button"
+                  role="tab"
+                  id="tab-inspect"
+                  aria-controls="terminal-output"
+                  aria-selected="true"
+                  data-terminal-state="inspect"
+                >
+                  Inspect
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  id="tab-approve"
+                  aria-controls="terminal-output"
+                  aria-selected="false"
+                  tabindex="-1"
+                  data-terminal-state="approve"
+                >
+                  Approve
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  id="tab-verify"
+                  aria-controls="terminal-output"
+                  aria-selected="false"
+                  tabindex="-1"
+                  data-terminal-state="verify"
+                >
+                  Verify
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  id="tab-trace"
+                  aria-controls="terminal-output"
+                  aria-selected="false"
+                  tabindex="-1"
+                  data-terminal-state="trace"
+                >
+                  Trace
+                </button>
+              </div>
+              <div class="terminal">
+                <div class="terminal-bar">
+                  <span class="terminal-dot"></span>
+                  <span class="terminal-title">talos session</span>
+                  <span class="terminal-state">local</span>
+                </div>
+                <pre
+                  id="terminal-output"
+                  role="tabpanel"
+                  aria-labelledby="tab-inspect"
+                  aria-live="polite"
+                ><code>talos [auto] &gt; what does this workspace do?
+
+runtime:
+  classify request
+  expose read-only tools
+  inspect local files inside the workspace
+
+allowed tools:
+  talos.list_dir, talos.read_file, talos.grep, talos.retrieve
+
+write status:
+  no mutation tools exposed</code></pre>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="why-heading">
+          <div class="container">
+            <div class="section-header reveal">
+              <p class="eyebrow">Why Talos</p>
+              <h2 id="why-heading">A local operator with a hard evidence trail.</h2>
+            </div>
+            <div class="feature-grid">
+              <article class="feature-card reveal">
+                <div class="card-icon" aria-hidden="true">▣</div>
+                <h3>Protected workspace</h3>
+                <p>
+                  Talos works inside the selected workspace and separates
+                  read-only investigation from mutation. The user keeps the final say.
+                </p>
+                <code class="trust-command">/workspace</code>
+              </article>
+              <article class="feature-card reveal">
+                <div class="card-icon" aria-hidden="true">▤</div>
+                <h3>Traceable actions</h3>
+                <p>
+                  The session can preserve prompts, tool calls, approvals,
+                  verification results, and trace records for review.
+                </p>
+                <code class="trust-command">/last trace</code>
+              </article>
+              <article class="feature-card reveal">
+                <div class="card-icon" aria-hidden="true">◖</div>
+                <h3>Bounded tools</h3>
+                <p>
+                  Tools are exposed according to the current task contract, not
+                  as an always-open toolbox for the model.
+                </p>
+                <code class="trust-command">/tools</code>
+              </article>
+              <article class="feature-card reveal">
+                <div class="card-icon" aria-hidden="true">◉</div>
+                <h3>Local trust</h3>
+                <p>
+                  Trust is earned through visible plans, explicit approvals,
+                  checked file outcomes, and inspectable local state.
+                </p>
+                <code class="trust-command">talos status</code>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="section timeline-section" id="how-it-works" aria-labelledby="how-heading">
+          <div class="container">
+            <div class="section-header reveal">
+              <p class="eyebrow">How a Talos turn works</p>
+              <h2 id="how-heading">Classify, inspect, approve, check.</h2>
+            </div>
+            <ol class="timeline">
+              <li class="timeline-step reveal">
+                <span class="timeline-index">01</span>
+                <h3>Classify</h3>
+                <p>Resolve the request into a bounded task contract and expected target shape.</p>
+              </li>
+              <li class="timeline-step reveal">
+                <span class="timeline-index">02</span>
+                <h3>Inspect</h3>
+                <p>Expose only the tools needed for read-only context gathering.</p>
+              </li>
+              <li class="timeline-step reveal">
+                <span class="timeline-index">03</span>
+                <h3>Approve</h3>
+                <p>Show mutation intent, target path, risk, and preview before local writes.</p>
+              </li>
+              <li class="timeline-step reveal">
+                <span class="timeline-index">04</span>
+                <h3>Check</h3>
+                <p>Check the result, record the trace, and report the runtime-owned outcome.</p>
+              </li>
+            </ol>
+          </div>
+        </section>
+
+        <section class="section process-section" id="process" aria-labelledby="process-heading">
+          <div class="container">
+            <div class="ornament-rule" aria-hidden="true"></div>
+            <div class="section-header section-header--center reveal">
+              <p class="eyebrow">The Talos Process</p>
+              <h2 id="process-heading">Execution and improvement cycles, not open-ended autonomy.</h2>
+            </div>
+
+            <div class="process-orbits">
+              <article class="cycle-panel reveal">
+                <p class="eyebrow">Execution Cycle</p>
+                <h3>Act with control.</h3>
+                <div class="cycle-diagram" aria-label="Execution cycle: Contract, Context, Tool Call, Approval, Action, Verify, Trace">
+                  <span class="cycle-core">
+                    <span class="brand-mark" aria-hidden="true">
+                      <svg viewBox="0 0 64 64" focusable="false">
+                        <path d="M12 9h40v9L32 29 12 18V9Z" />
+                        <path d="M12 23l15 8v22L12 43V23Zm40 0-15 8v22l15-10V23Z" />
+                        <path d="M25 23h14l-7 5-7-5Zm3 12 4 3 4-3v19h-8V35Z" />
+                      </svg>
+                    </span>
+                  </span>
+                  <span class="cycle-node node-1">Contract</span>
+                  <span class="cycle-node node-2">Context</span>
+                  <span class="cycle-node node-3">Tool call</span>
+                  <span class="cycle-node node-4">Approval</span>
+                  <span class="cycle-node node-5">Action</span>
+                  <span class="cycle-node node-6">Check</span>
+                  <span class="cycle-node node-7">Trace</span>
+                </div>
+              </article>
+
+              <article class="cycle-panel reveal">
+                <p class="eyebrow">Improvement Cycle</p>
+                <h3>Learn and refine.</h3>
+                <div class="cycle-diagram cycle-diagram--laurel" aria-label="Improvement cycle: Inspect, Reason, Edit, Test, Review, Report">
+                  <span class="cycle-core">
+                    <span class="brand-mark" aria-hidden="true">
+                      <svg viewBox="0 0 64 64" focusable="false">
+                        <path d="M12 9h40v9L32 29 12 18V9Z" />
+                        <path d="M12 23l15 8v22L12 43V23Zm40 0-15 8v22l15-10V23Z" />
+                        <path d="M25 23h14l-7 5-7-5Zm3 12 4 3 4-3v19h-8V35Z" />
+                      </svg>
+                    </span>
+                  </span>
+                  <span class="cycle-node node-1">Inspect</span>
+                  <span class="cycle-node node-2">Reason</span>
+                  <span class="cycle-node node-3">Edit</span>
+                  <span class="cycle-node node-4">Test</span>
+                  <span class="cycle-node node-5">Review</span>
+                  <span class="cycle-node node-6">Report</span>
+                </div>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="section trust-section" id="trust-model" aria-labelledby="trust-heading">
+          <div class="container trust-layout">
+            <div class="section-copy reveal">
+              <p class="eyebrow">Trust boundaries</p>
+              <h2 id="trust-heading">Control surfaces are visible before action.</h2>
+              <p>
+                Talos should never depend on the model sounding confident. The
+                runtime owns approval, tool exposure, result checks, protected
+                reads, unsupported file handling, and final mutation truth.
+              </p>
+            </div>
+            <div class="trust-panel reveal">
+              <p class="eyebrow">Trust boundaries</p>
+              <div class="boundary-grid" role="list">
+                <article class="boundary-row" role="listitem">
+                  <span>Workspace files</span>
+                  <strong>Read-only inspection first</strong>
+                  <p>Talos starts by inspecting scoped workspace files before mutation tools are exposed.</p>
+                </article>
+                <article class="boundary-row" role="listitem">
+                  <span>File writes</span>
+                  <strong>Preview and approval required</strong>
+                  <p>File creation and edits are approved before the workspace is changed.</p>
+                </article>
+                <article class="boundary-row" role="listitem">
+                  <span>Workspace operations</span>
+                  <strong>Approved before mkdir, copy, move, rename, or delete</strong>
+                  <p>Directory, file movement, and destructive tools are treated as workspace mutations.</p>
+                </article>
+                <article class="boundary-row" role="listitem">
+                  <span>Command profiles</span>
+                  <strong>Bounded and approved before execution</strong>
+                  <p>Command execution is routed through configured profiles and approval gates.</p>
+                </article>
+                <article class="boundary-row" role="listitem">
+                  <span>Unsupported binary documents</span>
+                  <strong>Refused instead of faked</strong>
+                  <p>Talos does not pretend a text write is a valid PDF, DOCX, or unsupported binary file.</p>
+                </article>
+              </div>
+              <p class="boundary-state">Default posture: selected workspace, local engine, approved mutation, checked outcome.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="section model-section" id="models" aria-labelledby="models-heading">
+          <div class="container two-column">
+            <div class="section-copy reveal">
+              <p class="eyebrow">Local model setup</p>
+              <h2 id="models-heading">Managed llama.cpp is the beta path.</h2>
+              <p>
+                The current product path uses managed llama.cpp with tested
+                Qwen and GPT-OSS profiles. Talos can place Hugging Face model
+                files under <code>~/.talos/models/huggingface</code> on first start,
+                or use a user-owned GGUF path.
+              </p>
+              <p>
+                Ollama remains available as a legacy backend, but the landing
+                page should lead with the engine path Talos is hardening now.
+              </p>
+            </div>
+            <div class="model-command-stack reveal" aria-label="Model setup commands">
+              <article class="code-card">
+                <div class="code-card-header">
+                  <h3>Qwen coder profile</h3>
+                  <button
+                    class="copy-button"
+                    type="button"
+                    data-copy="talos setup models --profile qwen2.5-coder-14b --server-path C:/path/to/llama-server.exe --write"
+                  >
+                    Copy
+                  </button>
+                </div>
+                <pre><code>talos setup models --profile qwen2.5-coder-14b --server-path C:/path/to/llama-server.exe --write</code></pre>
+              </article>
+              <article class="code-card">
+                <div class="code-card-header">
+                  <h3>GPT-OSS profile</h3>
+                  <button
+                    class="copy-button"
+                    type="button"
+                    data-copy="talos setup models --profile gpt-oss-20b --server-path C:/path/to/llama-server.exe --write"
+                  >
+                    Copy
+                  </button>
+                </div>
+                <pre><code>talos setup models --profile gpt-oss-20b --server-path C:/path/to/llama-server.exe --write</code></pre>
+              </article>
+              <article class="code-card">
+                <div class="code-card-header">
+                  <h3>Status check</h3>
+                  <button class="copy-button" type="button" data-copy="talos status --verbose">
+                    Copy
+                  </button>
+                </div>
+                <pre><code>talos status --verbose</code></pre>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="section cli-section" id="cli-preview" aria-labelledby="cli-heading">
+          <div class="container">
+            <div class="section-header reveal">
+              <p class="eyebrow">CLI surface</p>
+              <h2 id="cli-heading">Real commands and truthful workflow sketches.</h2>
+            </div>
+            <div class="cli-grid">
+              <article class="code-card reveal">
+                <div class="code-card-header">
+                  <h3>Start Talos</h3>
+                  <button class="copy-button" type="button" data-copy="talos">
+                    Copy
+                  </button>
+                </div>
+                <pre><code>talos</code></pre>
+              </article>
+              <article class="code-card reveal">
+                <div class="code-card-header">
+                  <h3>Inspect runtime</h3>
+                  <button class="copy-button" type="button" data-copy="/tools">
+                    Copy
+                  </button>
+                </div>
+                <pre><code>/tools
+/models
+/workspace</code></pre>
+              </article>
+              <article class="code-card reveal">
+                <div class="code-card-header">
+                  <h3>Review trace</h3>
+                  <button class="copy-button" type="button" data-copy="/last trace">
+                    Copy
+                  </button>
+                </div>
+                <pre><code>/last trace</code></pre>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="section beta-section" id="beta" aria-labelledby="beta-heading">
+          <div class="container">
+            <div class="section-header reveal">
+              <p class="eyebrow">Beta 0.9 readiness</p>
+              <h2 id="beta-heading">Built around audits, traces, and honest limits.</h2>
+            </div>
+            <div class="roadmap-grid">
+              <article class="roadmap-card reveal">
+                <span>Windows-first setup</span>
+                <small>Java 21, managed llama.cpp, model setup profiles, installDist, and installer scripts are the supported path.</small>
+              </article>
+              <article class="roadmap-card reveal">
+                <span>Human approval</span>
+                <small>Mutation, workspace operations, and command execution stay behind explicit gates.</small>
+              </article>
+              <article class="roadmap-card reveal">
+                <span>Audit discipline</span>
+                <small>Prompt-debug, trace review, model answer truthfulness, and full workflow audits shape the release.</small>
+              </article>
+              <article class="roadmap-card reveal">
+                <span>Engine neutrality</span>
+                <small>llama.cpp leads the beta path while Talos continues to separate runtime policy from backend transport.</small>
+              </article>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="site-footer">
+        <div class="container footer-inner">
+          <div class="footer-medallion" aria-hidden="true"></div>
+          <div class="footer-brand">
+            <a class="wordmark wordmark--footer" href="#product" aria-label="Talos home">
+              <span class="brand-mark wordmark-mark" aria-hidden="true">
+                <svg viewBox="0 0 64 64" focusable="false">
+                  <path d="M12 9h40v9L32 29 12 18V9Z" />
+                  <path d="M12 23l15 8v22L12 43V23Zm40 0-15 8v22l15-10V23Z" />
+                  <path d="M25 23h14l-7 5-7-5Zm3 12 4 3 4-3v19h-8V35Z" />
+                </svg>
+              </span>
+              <span>Talos</span>
+            </a>
+            <p class="footer-motto">Bronze sentinel. Guardian logic.</p>
+            <p>Built for local workspace work, visible control, and checked outcomes.</p>
+          </div>
+          <nav class="footer-nav" aria-label="Footer navigation">
+            <a href="#product">Product</a>
+            <a href="#workflow">Work Cycle</a>
+            <a href="#trust-model">Trust</a>
+            <a href="#models">Models</a>
+            <a href="#cli-preview">CLI</a>
+            <a href="#beta">Beta</a>
+          </nav>
+          <div class="footer-medallion footer-medallion--temple" aria-hidden="true"></div>
+        </div>
+      </footer>
+    </div>
+    <div class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
