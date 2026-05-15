@@ -672,10 +672,11 @@ public final class TurnProcessor {
         } catch (Exception e) {
             LOG.warn("Tool {} threw unexpected exception: {} — returning fail result instead of crashing turn",
                     call.toolName(), SafeLogFormatter.throwableMessage(e));
-            LOG.debug("Tool execution exception stack trace:", e);
+            LOG.debug("Tool execution exception stack trace suppressed; sanitized reason={}",
+                    SafeLogFormatter.throwableMessage(e));
             result = ToolResult.fail(ToolError.internal(
                     "Tool execution failed unexpectedly: "
-                            + e.getClass().getSimpleName() + ": " + e.getMessage()));
+                            + e.getClass().getSimpleName() + ": " + SafeLogFormatter.throwableMessage(e)));
         }
         if (result.success()) {
             TurnAuditCapture.recordToolCall(

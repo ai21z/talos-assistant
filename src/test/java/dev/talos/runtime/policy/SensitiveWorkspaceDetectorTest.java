@@ -80,4 +80,40 @@ class SensitiveWorkspaceDetectorTest {
 
         assertFalse(assessment.sensitive(), assessment.toString());
     }
+
+    @Test
+    void sensitive_folder_detection_does_not_warn_for_valid_project(@TempDir Path tempDir) throws Exception {
+        Path workspace = Files.createDirectory(tempDir.resolve("valid-project"));
+
+        SensitiveWorkspaceDetector.Assessment assessment = SensitiveWorkspaceDetector.assess(workspace);
+
+        assertFalse(assessment.sensitive(), assessment.toString());
+    }
+
+    @Test
+    void sensitive_folder_detection_does_not_warn_for_grid_ui(@TempDir Path tempDir) throws Exception {
+        Path workspace = Files.createDirectory(tempDir.resolve("grid-ui"));
+
+        SensitiveWorkspaceDetector.Assessment assessment = SensitiveWorkspaceDetector.assess(workspace);
+
+        assertFalse(assessment.sensitive(), assessment.toString());
+    }
+
+    @Test
+    void sensitive_folder_detection_warns_for_id_documents_when_tokenized(@TempDir Path tempDir) throws Exception {
+        Path workspace = Files.createDirectory(tempDir.resolve("id-documents"));
+
+        SensitiveWorkspaceDetector.Assessment assessment = SensitiveWorkspaceDetector.assess(workspace);
+
+        assertTrue(assessment.sensitive(), assessment.toString());
+    }
+
+    @Test
+    void sensitive_folder_detection_warns_for_passport_folder(@TempDir Path tempDir) throws Exception {
+        Path workspace = Files.createDirectory(tempDir.resolve("passport-renewal"));
+
+        SensitiveWorkspaceDetector.Assessment assessment = SensitiveWorkspaceDetector.assess(workspace);
+
+        assertTrue(assessment.sensitive(), assessment.toString());
+    }
 }

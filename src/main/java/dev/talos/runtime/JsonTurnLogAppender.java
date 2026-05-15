@@ -2,6 +2,7 @@ package dev.talos.runtime;
 
 import dev.talos.cli.repl.Result;
 import dev.talos.core.retrieval.RetrievalTrace;
+import dev.talos.runtime.policy.SafeLogFormatter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -51,7 +52,7 @@ public final class JsonTurnLogAppender implements SessionListener {
             try {
                 store.saveTrace(sessionId, audit.localTrace());
             } catch (Exception e) {
-                LOG.warn("Failed to persist local turn trace: {}", e.getMessage());
+                LOG.warn("Failed to persist local turn trace: {}", SafeLogFormatter.throwableMessage(e));
             }
         }
 
@@ -74,7 +75,7 @@ public final class JsonTurnLogAppender implements SessionListener {
         try {
             store.appendTurn(sessionId, record);
         } catch (Exception e) {
-            LOG.warn("Failed to append structured turn record: {}", e.getMessage());
+            LOG.warn("Failed to append structured turn record: {}", SafeLogFormatter.throwableMessage(e));
         }
     }
 

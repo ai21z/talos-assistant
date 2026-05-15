@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
 import dev.talos.core.cache.CacheDb;
+import dev.talos.runtime.policy.SafeLogFormatter;
 import dev.talos.spi.Embeddings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -69,7 +70,7 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
             String modelKey = host + "/" + model;
             Integer cachedDim = cache.getModelDimension(modelKey);
             if (cachedDim != null) {
-                LOG.debug("Using cached dimension {} for model {}", cachedDim, modelKey);
+                LOG.debug("Using cached dimension {} for model {}", cachedDim, SafeLogFormatter.value(modelKey));
                 dim = cachedDim;
                 return dim;
             }
@@ -85,9 +86,9 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
             // Cache the dimension for future runs
             try {
                 cache.putModelDimension(modelKey, dim);
-                LOG.debug("Cached dimension {} for model {}", dim, modelKey);
+                LOG.debug("Cached dimension {} for model {}", dim, SafeLogFormatter.value(modelKey));
             } catch (Exception e) {
-                LOG.debug("Failed to cache dimension: {}", e.getMessage());
+                LOG.debug("Failed to cache dimension: {}", SafeLogFormatter.throwableMessage(e));
                 // Non-fatal, continue without caching
             }
 
@@ -136,8 +137,9 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
                 if (resp.statusCode() / 100 != 2) {
                     attemptFailures.add(ep.path + " " + ep.param + " -> HTTP "
                             + resp.statusCode() + " " + truncate(resp.body(), 120));
-                    LOG.debug("embed non-2xx at {} {} -> {} {}", ep.path, ep.param, resp.statusCode(),
-                            truncate(resp.body(), 120));
+                    LOG.debug("embed non-2xx at {} {} -> {} {}", SafeLogFormatter.value(ep.path),
+                            SafeLogFormatter.value(ep.param), resp.statusCode(),
+                            SafeLogFormatter.text(truncate(resp.body(), 120)));
                     continue;
                 }
 
@@ -162,7 +164,8 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
                 lastErr = e;
                 attemptFailures.add(ep.path + " " + ep.param + " -> " + e.getClass().getSimpleName()
                         + ": " + truncate(e.getMessage(), 120));
-                LOG.debug("embed attempt failed at {} {} : {}", ep.path, ep.param, e.toString());
+                LOG.debug("embed attempt failed at {} {} : {}", SafeLogFormatter.value(ep.path),
+                        SafeLogFormatter.value(ep.param), SafeLogFormatter.throwableMessage(e));
             }
         }
         // If we got here, we failed all permutations
@@ -269,7 +272,8 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
         try {
             return embedBatchInternal(texts);
         } catch (Exception e) {
-            LOG.debug("Batch embedding failed ({}), falling back to individual requests", e.getMessage());
+            LOG.debug("Batch embedding failed ({}), falling back to individual requests",
+                    SafeLogFormatter.throwableMessage(e));
 
             // Fallback: process each text individually
             List<float[]> results = new ArrayList<>();
@@ -324,8 +328,9 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
                 }
 
                 if (resp.statusCode() / 100 != 2) {
-                    LOG.debug("batch embed non-2xx at {} {} -> {} {}", ep.path, ep.param, resp.statusCode(),
-                            truncate(resp.body(), 120));
+                    LOG.debug("batch embed non-2xx at {} {} -> {} {}", SafeLogFormatter.value(ep.path),
+                            SafeLogFormatter.value(ep.param), resp.statusCode(),
+                            SafeLogFormatter.text(truncate(resp.body(), 120)));
                     continue;
                 }
 
@@ -342,7 +347,8 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
                 throw e; // Re-throw to trigger individual fallback
             } catch (Exception e) {
                 lastErr = e;
-                LOG.debug("batch embed attempt failed at {} {} : {}", ep.path, ep.param, e.toString());
+                LOG.debug("batch embed attempt failed at {} {} : {}", SafeLogFormatter.value(ep.path),
+                        SafeLogFormatter.value(ep.param), SafeLogFormatter.throwableMessage(e));
             }
         }
 

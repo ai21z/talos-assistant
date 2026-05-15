@@ -4,6 +4,7 @@ import dev.talos.cli.repl.Result;
 import dev.talos.cli.repl.SessionMemory;
 import dev.talos.core.context.ConversationManager;
 import dev.talos.core.llm.LlmClient;
+import dev.talos.runtime.policy.SafeLogFormatter;
 import dev.talos.runtime.trace.TraceRedactor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -95,7 +96,7 @@ public final class MemoryUpdateListener implements SessionListener {
                         LOG.debug("Conversation compacted after turn");
                     }
                 } catch (Exception e) {
-                    LOG.warn("Compaction check failed (non-fatal): {}", e.getMessage());
+                    LOG.warn("Compaction check failed (non-fatal): {}", SafeLogFormatter.throwableMessage(e));
                 }
             }
         }

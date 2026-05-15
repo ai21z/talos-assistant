@@ -68,3 +68,9 @@ Raw audit artifacts must not be committed.
 
 - `work-cycle-docs/reports/t267-live-two-model-audit.md`
 - `work-cycle-docs/reports/t267-live-two-model-audit-results.md`
+
+## 2026-05-15 final pre-beta update
+
+Added `scripts/run-t267-live-audit.ps1` preflight. Current preflight remains BLOCKED because GPT-OSS is configured but Qwen is missing. Running a one-model audit must not be counted as completion.
+
+Follow-up ticket: T286.

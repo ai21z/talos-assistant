@@ -94,4 +94,31 @@ class PrivacyCommandTest {
         assertTrue(info.text.contains("session"), info.text);
         assertTrue(info.text.contains("/privacy private on"), info.text);
     }
+
+    @Test
+    void privacy_private_on_is_session_scoped_unless_persistence_exists(@TempDir Path workspace) throws Exception {
+        Config currentSession = new Config(null);
+        PrivacyCommand command = new PrivacyCommand(workspace);
+
+        command.execute("private on", Context.builder(currentSession).build());
+        Config freshProcessConfig = new Config(null);
+
+        assertTrue(ProtectedReadScopePolicy.privateMode(currentSession));
+        assertFalse(ProtectedReadScopePolicy.privateMode(freshProcessConfig));
+        Result.Info status = assertInstanceOf(Result.Info.class,
+                command.execute("status", Context.builder(currentSession).build()));
+        assertTrue(status.text.contains("current session/config state"), status.text);
+        assertTrue(status.text.contains("~/.talos/config.yaml"), status.text);
+    }
+
+    @Test
+    void privacy_help_mentions_persistence_semantics(@TempDir Path workspace) throws Exception {
+        PrivacyCommand command = new PrivacyCommand(workspace);
+
+        Result.Info info = assertInstanceOf(Result.Info.class,
+                command.execute("help", Context.builder(new Config(null)).build()));
+
+        assertTrue(info.text.contains("current session/config state"), info.text);
+        assertTrue(info.text.contains("~/.talos/config.yaml"), info.text);
+    }
 }

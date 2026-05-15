@@ -18,6 +18,7 @@ import dev.talos.core.util.Sanitize;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.TurnTraceCapture;
+import dev.talos.runtime.policy.SafeLogFormatter;
 import dev.talos.spi.types.ChatMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -82,7 +83,7 @@ public final class RagMode implements Mode {
 
         // Surface retrieval warnings when empty due to error (vs. genuinely no matches)
         if (prepared.hasError() && prepared.snippets().isEmpty()) {
-            LOG.debug("Retrieval returned empty due to error: {}", prepared.errorReason());
+            LOG.debug("Retrieval returned empty due to error: {}", SafeLogFormatter.text(prepared.errorReason()));
         }
 
         // Pack snippets using unified ContextPacker (pinned-first, budget-aware, deduplicated)
@@ -293,7 +294,8 @@ public final class RagMode implements Mode {
 
             // Reject anything outside workspace
             if (!sandbox.allowedPath(candidate)) {
-                LOG.debug("pinned-miss:{} (outside workspace, normalized:{})", originalToken, tokenNormalized);
+                LOG.debug("pinned-miss:{} (outside workspace, normalized:{})",
+                        SafeLogFormatter.value(originalToken), SafeLogFormatter.value(tokenNormalized));
                 continue;
             }
 
@@ -302,7 +304,8 @@ public final class RagMode implements Mode {
                 // Compute relative path and normalize to forward slashes
                 String rel = ws.relativize(candidate).toString().replace('\\', '/');
                 addSnippet(ws, out, candidate, maxChars, rel);
-                LOG.debug("pin-found:{} (from token:{})", rel, originalToken);
+                LOG.debug("pin-found:{} (from token:{})",
+                        SafeLogFormatter.value(rel), SafeLogFormatter.value(originalToken));
             } else {
                 // If not found directly, search by filename
                 String base = Path.of(tokenNormalized).getFileName().toString();
@@ -316,12 +319,16 @@ public final class RagMode implements Mode {
                         Path hitPath = hit.get();
                         String rel = ws.relativize(hitPath).toString().replace('\\', '/');
                         addSnippet(ws, out, hitPath, maxChars, rel);
-                        LOG.debug("pin-found:{} (basename match from:{})", rel, originalToken);
+                        LOG.debug("pin-found:{} (basename match from:{})",
+                                SafeLogFormatter.value(rel), SafeLogFormatter.value(originalToken));
                     } else {
-                        LOG.debug("pinned-miss:{} (normalized:{}, not found)", originalToken, tokenNormalized);
+                        LOG.debug("pinned-miss:{} (normalized:{}, not found)",
+                                SafeLogFormatter.value(originalToken), SafeLogFormatter.value(tokenNormalized));
                     }
                 } catch (Exception e) {
-                    LOG.debug("pinned-miss:{} (normalized:{}, walk failed: {})", originalToken, tokenNormalized, e.getMessage());
+                    LOG.debug("pinned-miss:{} (normalized:{}, walk failed: {})",
+                            SafeLogFormatter.value(originalToken), SafeLogFormatter.value(tokenNormalized),
+                            SafeLogFormatter.throwableMessage(e));
                 }
             }
         }
@@ -338,7 +345,8 @@ public final class RagMode implements Mode {
             if (text.length() > maxChars) text = text.substring(0, maxChars);
             out.add(new PinnedSnippet(relPath + "#0", text));
         } catch (Exception e) {
-            LOG.debug("Failed to read pinned file {}: {}", relPath, e.getMessage());
+            LOG.debug("Failed to read pinned file {}: {}",
+                    SafeLogFormatter.value(relPath), SafeLogFormatter.throwableMessage(e));
         }
     }
 

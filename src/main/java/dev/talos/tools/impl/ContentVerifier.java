@@ -1,6 +1,7 @@
 package dev.talos.tools.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.talos.runtime.policy.SafeLogFormatter;
 import dev.talos.tools.VerificationStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,12 +46,13 @@ final class ContentVerifier {
         try {
             readBack = Files.readString(file);
         } catch (IOException e) {
-            LOG.warn("Read-back failed for {}: {}", file, e.getMessage());
-            return new VerifyResult(VerificationStatus.FAIL, "read-back failed: " + e.getMessage());
+            String reason = SafeLogFormatter.throwableMessage(e);
+            LOG.warn("Read-back failed for {}: {}", SafeLogFormatter.value(file), reason);
+            return new VerifyResult(VerificationStatus.FAIL, "read-back failed: " + reason);
         }
         if (!readBack.equals(writtenContent)) {
             LOG.warn("Read-back mismatch for {}: wrote {} chars, read {} chars",
-                    file, writtenContent.length(), readBack.length());
+                    SafeLogFormatter.value(file), writtenContent.length(), readBack.length());
             return new VerifyResult(VerificationStatus.FAIL,
                     "read-back mismatch (wrote " + writtenContent.length()
                     + " chars, read " + readBack.length() + " chars)");

@@ -3,6 +3,7 @@ package dev.talos.engine.compat;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.talos.runtime.policy.SafeLogFormatter;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatMessage.NativeToolCall;
@@ -282,7 +283,7 @@ public final class CompatChatClient {
         try {
             return mapper.readTree(schemaJson);
         } catch (Exception e) {
-            LOG.warn("Failed to parse JSON schema for compat chat request: {}", e.getMessage());
+            LOG.warn("Failed to parse JSON schema for compat chat request: {}", SafeLogFormatter.throwableMessage(e));
             return Map.of("type", "object", "properties", Map.of());
         }
     }

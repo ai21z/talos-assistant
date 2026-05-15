@@ -76,11 +76,27 @@ Private mode is user-visible in the REPL:
 
 - `/privacy status` shows the current privacy mode, protected-read handoff
   scope, RAG/retrieve behavior in private mode, and raw artifact persistence
-  setting.
-- `/privacy private on` switches the session/config state to private mode.
+  setting. It also states whether the command is changing only the current
+  session/config state.
+- `/privacy private on` switches the current session/config state to private
+  mode.
 - `/privacy private off` restores developer/default behavior after an explicit
   user command.
 - `/privacy help` explains model-context and artifact boundaries.
+
+`/privacy` does not write persistent defaults to `~/.talos/config.yaml`. Edit
+`~/.talos/config.yaml` when a machine or workspace should start in private mode
+by default.
+
+After a live audit, maintainers can scan runtime artifacts with:
+
+```powershell
+./gradlew.bat checkRuntimeArtifactCanaries -PartifactScanRoots="local/manual-testing/<audit-id>,local/manual-workspaces/<audit-id>" --no-daemon
+```
+
+The normal CI-style broad scan and the targeted live-audit scan are different:
+the targeted scan is the one intended for prompt-debug, provider-body, session,
+trace, turn JSONL, command-output, and generated audit-report directories.
 
 Talos may warn when a workspace name or shallow metadata looks sensitive, such
 as tax, health, legal, finance, secrets, protected folders, or many private
@@ -310,7 +326,7 @@ Run the approved Gradle test command profile.
 | `/status` | show runtime and indexing details |
 | `/tools` | show the registered tool set |
 | `/privacy status` | show privacy mode, protected-read scope, RAG/retrieve, and artifact persistence |
-| `/privacy private on` | enable stricter private-mode defaults for this session/config |
+| `/privacy private on` | enable stricter private-mode defaults for this current session/config state |
 | `/privacy private off` | restore developer/default privacy behavior explicitly |
 | `/session info` | inspect current session state |
 | `/clear` | clear conversation memory |

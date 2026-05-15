@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.talos.core.util.Hash;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
+import dev.talos.runtime.policy.SafeLogFormatter;
 import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ArtifactGoal;
 import dev.talos.runtime.trace.LocalTurnTrace;
@@ -51,7 +52,8 @@ public final class JsonSessionStore implements SessionStore {
         try {
             Files.createDirectories(sessionsDir);
         } catch (IOException e) {
-            LOG.warn("Could not create sessions directory {}: {}", sessionsDir, e.getMessage());
+            LOG.warn("Could not create sessions directory {}: {}",
+                    SafeLogFormatter.value(sessionsDir), SafeLogFormatter.throwableMessage(e));
         }
     }
 
@@ -77,9 +79,10 @@ public final class JsonSessionStore implements SessionStore {
             String json = sanitizedPrettyJson(root);
             Path file = fileFor(data.sessionId());
             Files.writeString(file, json);
-            LOG.debug("Session saved: {} ({} turns)", file.getFileName(), data.turnCount());
+            LOG.debug("Session saved: {} ({} turns)", SafeLogFormatter.value(file.getFileName()), data.turnCount());
         } catch (Exception e) {
-            LOG.warn("Failed to save session {}: {}", data.sessionId(), e.getMessage());
+            LOG.warn("Failed to save session {}: {}",
+                    SafeLogFormatter.value(data.sessionId()), SafeLogFormatter.throwableMessage(e));
         }
     }
 
@@ -116,7 +119,8 @@ public final class JsonSessionStore implements SessionStore {
             return Optional.of(new SessionData(sid, workspace, sketch, turnCount, created, turns, model,
                     activeTaskContext, artifactGoal));
         } catch (Exception e) {
-            LOG.warn("Failed to load session {}: {}", sessionId, e.getMessage());
+            LOG.warn("Failed to load session {}: {}",
+                    SafeLogFormatter.value(sessionId), SafeLogFormatter.throwableMessage(e));
             return Optional.empty();
         }
     }
@@ -131,7 +135,8 @@ public final class JsonSessionStore implements SessionStore {
             boolean traces = deleteTraceDirectory(sessionId);
             return snap || turns || traces;
         } catch (IOException e) {
-            LOG.warn("Failed to delete session {}: {}", sessionId, e.getMessage());
+            LOG.warn("Failed to delete session {}: {}",
+                    SafeLogFormatter.value(sessionId), SafeLogFormatter.throwableMessage(e));
             return false;
         }
     }
@@ -173,7 +178,8 @@ public final class JsonSessionStore implements SessionStore {
                     java.nio.file.StandardOpenOption.CREATE,
                     java.nio.file.StandardOpenOption.APPEND);
         } catch (Exception e) {
-            LOG.warn("Failed to append turn record for {}: {}", sessionId, e.getMessage());
+            LOG.warn("Failed to append turn record for {}: {}",
+                    SafeLogFormatter.value(sessionId), SafeLogFormatter.throwableMessage(e));
         }
     }
 
@@ -203,11 +209,13 @@ public final class JsonSessionStore implements SessionStore {
                     Map<String, Object> row = MAPPER.readValue(line, new TypeReference<>() {});
                     out.add(rowToRecord(row));
                 } catch (Exception lineErr) {
-                    LOG.warn("Skipping malformed turn line in {}: {}", file.getFileName(), lineErr.getMessage());
+                    LOG.warn("Skipping malformed turn line in {}: {}",
+                            SafeLogFormatter.value(file.getFileName()), SafeLogFormatter.throwableMessage(lineErr));
                 }
             }
         } catch (IOException e) {
-            LOG.warn("Failed to read turn log {}: {}", file, e.getMessage());
+            LOG.warn("Failed to read turn log {}: {}",
+                    SafeLogFormatter.value(file), SafeLogFormatter.throwableMessage(e));
         }
         return out;
     }
@@ -328,7 +336,8 @@ public final class JsonSessionStore implements SessionStore {
             String json = sanitizedPrettyJson(trace);
             Files.writeString(dir.resolve(traceFileName(trace)), json);
         } catch (Exception e) {
-            LOG.warn("Failed to save local turn trace for {}: {}", sessionId, e.getMessage());
+            LOG.warn("Failed to save local turn trace for {}: {}",
+                    SafeLogFormatter.value(sessionId), SafeLogFormatter.throwableMessage(e));
         }
     }
 
@@ -348,7 +357,9 @@ public final class JsonSessionStore implements SessionStore {
                     .map(Optional::get)
                     .findFirst();
         } catch (Exception e) {
-            LOG.warn("Failed to load local turn trace {} for {}: {}", traceId, sessionId, e.getMessage());
+            LOG.warn("Failed to load local turn trace {} for {}: {}",
+                    SafeLogFormatter.value(traceId), SafeLogFormatter.value(sessionId),
+                    SafeLogFormatter.throwableMessage(e));
             return Optional.empty();
         }
     }
@@ -367,7 +378,8 @@ public final class JsonSessionStore implements SessionStore {
                     .map(Optional::get)
                     .findFirst();
         } catch (Exception e) {
-            LOG.warn("Failed to load latest local turn trace for {}: {}", sessionId, e.getMessage());
+            LOG.warn("Failed to load latest local turn trace for {}: {}",
+                    SafeLogFormatter.value(sessionId), SafeLogFormatter.throwableMessage(e));
             return Optional.empty();
         }
     }
@@ -376,7 +388,8 @@ public final class JsonSessionStore implements SessionStore {
         try {
             return Optional.of(MAPPER.readValue(Files.readString(path), LocalTurnTrace.class));
         } catch (Exception e) {
-            LOG.warn("Skipping malformed local trace {}: {}", path.getFileName(), e.getMessage());
+            LOG.warn("Skipping malformed local trace {}: {}",
+                    SafeLogFormatter.value(path.getFileName()), SafeLogFormatter.throwableMessage(e));
             return Optional.empty();
         }
     }
@@ -533,7 +546,8 @@ public final class JsonSessionStore implements SessionStore {
                 try {
                     Files.deleteIfExists(path);
                 } catch (IOException e) {
-                    LOG.warn("Failed to delete trace artifact {}: {}", path, e.getMessage());
+                    LOG.warn("Failed to delete trace artifact {}: {}",
+                            SafeLogFormatter.value(path), SafeLogFormatter.throwableMessage(e));
                 }
             });
         }

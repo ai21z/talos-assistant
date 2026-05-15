@@ -6,6 +6,8 @@ Not release-ready
 
 Deterministic hardening improved protected-read scope control, private-mode UX, sensitive-folder warnings, log/parameter redaction, artifact scanning, RAG index metadata, dirty-index coverage, and unsupported-format answer correction. The release gate is still not clean because the two-model live audit has not run and document extraction is still unsupported.
 
+Final pre-beta update: `/privacy` persistence wording is now explicit, sensitive-folder `id` matching is token-aware, high-risk raw log exception-message call sites were converted to safe formatting, a targeted release artifact scan task exists, and the live audit preflight is reproducible. The live audit itself remains blocked because Qwen is not configured.
+
 ## 2. What changed in this pass
 
 - Added `ProtectedReadScopePolicy`.
@@ -18,6 +20,11 @@ Deterministic hardening improved protected-read scope control, private-mode UX, 
 - Added focused tests for scope, logs, artifact scanning, RAG metadata, and unsupported final-answer truthfulness.
 - Added `/privacy status`, `/privacy private on`, `/privacy private off`, and `/privacy help`.
 - Added warning-only sensitive workspace detection.
+- Clarified `/privacy` as current session/config state only; persistent defaults require editing `~/.talos/config.yaml`.
+- Tokenized short sensitive-folder terms such as `id` to avoid `valid-project`/`grid-ui` false positives.
+- Added `ArtifactCanaryScanCli` and Gradle task `checkRuntimeArtifactCanaries` for live-audit artifact directories.
+- Added `scripts/run-t267-live-audit.ps1` preflight and recorded the current BLOCKED result.
+- Added initial private-mode scripted e2e tests.
 - Added Lucene-backed dirty-index integration tests for missing metadata, config-hash changes, old protected chunks, and private-mode retrieval disablement.
 - Updated README, source crosscheck, source matrix, release-gate report, live-audit runbook, and tickets.
 
@@ -36,13 +43,13 @@ Deterministic hardening improved protected-read scope control, private-mode UX, 
 |---|---|---|---|
 | debug logs | Reduced; formatted tool params use sanitizer | `SensitiveLogRedactionTest` | Focused pass |
 | tool call params | Sanitized in execution-stage debug formatting | `ProtectedContentPolicy.sanitizeToolParameters` | Focused pass |
-| command args | Approval detail sanitized; broader command-plan logs still need review | code review | Partial |
+| command args | Approval detail sanitized; command-plan/log paths need live failure-path capture | code review | Partial |
 | command stdout/stderr | Central redaction now used | `ProcessCommandRunner` | Focused pass |
 | provider-body captures | Existing prompt-debug redaction path plus indirect tool-result sanitizer | existing tests | Partial |
 | approval prompt logs | Local approval prompts intentionally show the target path for user control; persisted approval/log artifacts still need broader redaction review | code review | Partial |
-| exception messages | Tool exception warning sanitized | code review | Partial |
-| RAG trace | Snippet text sanitized; trace summaries still need broader artifact tests | code review | Partial |
-| session/turn log | Existing persistence redaction tests remain relevant | existing tests | Partial |
+| exception messages | High-risk raw `LOG.* getMessage()` / `e.toString()` call sites converted or source-guarded | `SensitiveLogRedactionTest` | Focused pass |
+| RAG trace | Snippet text and trace/failure summaries sanitized in touched paths | code review + tests | Focused pass |
+| session/turn log | Persistence logs now safe-format paths/session ids/exception messages; persistence content remains redacted | existing tests + source audit | Focused pass |
 
 ## 5. RAG dirty index status
 
@@ -71,16 +78,19 @@ Minimal user-visible V1 exists:
 
 Missing:
 
-- broad e2e private-mode scenarios
+- broader e2e private-mode scenarios beyond the initial scripted read/grep cases
 - two-model live audit evidence
 
 ## 8. Artifact canary scan status
 
 Automated: yes, as JUnit test coverage through `ArtifactCanaryScanTest`.
 
+Release-facing targeted task: yes.
+
 Command:
 
 - `./gradlew.bat test --tests "*ArtifactCanary*" --no-daemon`
+- `./gradlew.bat checkRuntimeArtifactCanaries -PartifactScanRoots="local/manual-testing/<audit-id>,local/manual-workspaces/<audit-id>" --no-daemon`
 - `./gradlew.bat clean check e2eTest --no-daemon`
 
 Directories scanned in focused current-artifact test:
@@ -96,32 +106,36 @@ Allowlist/skip behavior:
 Result:
 
 - focused artifact scanner tests passed.
-- full `clean check e2eTest` passed on 2026-05-15, so the scanner currently runs through `check`.
+- targeted task exists and is intended for completed live-audit directories.
 
 ## 9. Two-model live audit status
 
-Not run.
+BLOCKED / not run.
 
-Models/backend: not started. `ollama list` crashed with access violation `0xc0000005`; local Talos config showed a GPT-OSS llama.cpp profile but no Qwen profile for the required pair.
+Models/backend: prompt bank not started. Prior `ollama list` crashed with access violation `0xc0000005`; current preflight found GPT-OSS configured, managed llama.cpp signal present, Qwen missing, and Ollama legacy probe blocked.
 
-Artifacts: runbook created in `work-cycle-docs/reports/t267-live-two-model-audit.md`.
+Artifacts: executable runbook and preflight helper exist in `work-cycle-docs/reports/t267-live-two-model-audit.md` and `scripts/run-t267-live-audit.ps1`.
 
 Verdict: release blocker remains.
 
 ## 10. Tests run
 
-- `./gradlew.bat test --tests "*ProtectedReadScope*" --tests "*Privacy*" --tests "*SensitiveFolder*" --tests "*SensitiveWorkspaceDetector*" --tests "*SensitiveLog*" --tests "*ArtifactCanary*" --tests "*IndexerPolicyMetadata*" --tests "*Rag*Dirty*" --tests "*UnsupportedFinalAnswer*" --tests "*Config*Privacy*" --no-daemon` - passed.
+- `./gradlew.bat test --tests "*ProtectedReadScope*" --tests "*PrivacyCommand*" --tests "*SensitiveWorkspaceDetector*" --tests "*SensitiveLog*" --tests "*ArtifactCanary*" --tests "*ConfigPrivacyDefaults*" --tests "*Rag*Dirty*" --tests "*UnsupportedFinalAnswer*" --tests "*ReadmePrivacy*" --no-daemon` - passed.
+- `./gradlew.bat e2eTest --tests "*PrivateModeScriptedE2e*" --no-daemon` - passed.
+- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-t267-live-audit.ps1 -PreflightOnly` - BLOCKED as expected because Qwen is missing; prompt bank not run.
+- `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=C:\Users\arisz\Projects\LOQ\loqj-cli\local\manual-testing\t267-live-audit-20260515-215132" --no-daemon` - passed.
 - `./gradlew.bat clean check e2eTest --no-daemon` - passed.
 
 ## 11. Tests not run
 
-- Live two-model prompt-bank audit not run because the required local model/backend pair was unavailable. `ollama list` crashed with access violation `0xc0000005`; local Talos config showed GPT-OSS only, not the required Qwen/GPT-OSS pair.
-- Focused private-mode e2e scenario pack not added yet; unit/integration coverage exists.
+- Live two-model prompt-bank audit not run because the required local model/backend pair was unavailable. Current preflight found GPT-OSS configured but no Qwen profile.
+- Full private-mode live prompt-bank not run; initial scripted private-mode e2e tests were added.
 
 ## 12. Remaining blockers
 
 - Two-model live audit with Qwen and GPT-OSS.
-- Broader private-mode live/e2e prompt-bank evidence.
+- Broader private-mode live prompt-bank evidence.
+- Targeted artifact scan on completed live-audit artifacts.
 - Local PDF/Office/image/OCR/archive extraction if private-document positioning is desired.
 
 ## 13. Allowed product claims

@@ -417,6 +417,32 @@ tasks.check {
     dependsOn(tasks.test, e2eTest, tasks.jacocoTestCoverageVerification)
 }
 
+tasks.register<JavaExec>("checkRuntimeArtifactCanaries") {
+    description = "Scans targeted runtime/live-audit artifact directories for raw privacy canaries."
+    group = "verification"
+    dependsOn(tasks.classes)
+    mainClass.set("dev.talos.runtime.policy.ArtifactCanaryScanCli")
+    classpath = sourceSets["main"].runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        val roots = providers.gradleProperty("artifactScanRoots")
+            .orElse("local/manual-testing,local/manual-workspaces")
+            .get()
+        val allowlist = providers.gradleProperty("artifactScanAllowlist")
+            .orElse("")
+            .get()
+        val out = mutableListOf("--runtime")
+        roots.split(',', ';')
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .forEach { out.addAll(listOf("--root", it)) }
+        allowlist.split(',', ';')
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .forEach { out.addAll(listOf("--allow", it)) }
+        out
+    })
+}
+
 tasks.register<Exec>("qodanaLocal") {
     description = "Runs optional local Qodana Community analysis using Docker with persistent Qodana/Gradle cache volumes."
     group = "verification"
