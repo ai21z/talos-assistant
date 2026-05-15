@@ -15,7 +15,10 @@ import dev.talos.runtime.policy.DeclarativePermissionPolicy;
 import dev.talos.runtime.policy.PermissionAction;
 import dev.talos.runtime.policy.PermissionDecision;
 import dev.talos.runtime.policy.PermissionRequest;
+import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.runtime.policy.ProtectedPathAliasNormalizer;
+import dev.talos.runtime.policy.ProtectedPathPolicy;
+import dev.talos.runtime.policy.ProtectedReadScopePolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
@@ -590,7 +593,8 @@ public final class TurnProcessor {
                     path,
                     scopeWarning,
                     permissionDecision.userMessage(),
-                    session.workspace());
+                    session.workspace(),
+                    session.config());
             ApprovalResponse response = approvalGate.approveFull(desc, detail);
 
             if (response == ApprovalResponse.DENIED) {
@@ -666,7 +670,7 @@ public final class TurnProcessor {
             result = toolRegistry.execute(call, toolCtx);
         } catch (Exception e) {
             LOG.warn("Tool {} threw unexpected exception: {} — returning fail result instead of crashing turn",
-                    call.toolName(), e.getMessage());
+                    call.toolName(), ProtectedContentPolicy.sanitizeText(e.getMessage()));
             LOG.debug("Tool execution exception stack trace:", e);
             result = ToolResult.fail(ToolError.internal(
                     "Tool execution failed unexpectedly: "
@@ -1174,28 +1178,40 @@ public final class TurnProcessor {
             String path,
             String scopeWarning,
             String permissionMessage,
-            java.nio.file.Path workspace
+            java.nio.file.Path workspace,
+            dev.talos.core.Config cfg
     ) {
         var sb = new StringBuilder();
 
         if (permissionMessage != null && !permissionMessage.isBlank()) {
-            sb.append("permission: ").append(permissionMessage.strip()).append('\n');
+            String safePermissionMessage = sanitizeApprovalText(permissionMessage.strip());
+            sb.append("permission: ")
+                    .append(safePermissionMessage)
+                    .append('\n');
             sb.append("    ");
         }
 
         if (scopeWarning != null && !scopeWarning.isBlank()) {
-            sb.append("warning: ").append(scopeWarning).append('\n');
+            sb.append("warning: ")
+                    .append(sanitizeApprovalText(scopeWarning))
+                    .append('\n');
             sb.append("    ");
         }
 
         if (CommandToolPlanner.isRunCommandTool(call.toolName())) {
             try {
-                sb.append(CommandToolPlanner.approvalDetail(call, workspace));
+                sb.append(ProtectedContentPolicy.sanitizeText(
+                        CommandToolPlanner.approvalDetail(call, workspace)));
             } catch (RuntimeException e) {
                 sb.append("command: invalid talos.run_command request");
             }
         } else if (path != null && !path.isBlank()) {
+            boolean protectedPath = ProtectedPathPolicy.classify(workspace, path).protectedPath()
+                    || ProtectedContentPolicy.looksProtectedPathString(path);
             sb.append("target: ").append(path);
+            if (isReadFileTool(call.toolName()) && protectedPath) {
+                sb.append("\n    ").append(ProtectedReadScopePolicy.approvedProtectedReadModelHandoffNote(cfg));
+            }
         } else if ("apply_workspace_batch".equals(ToolAliasPolicy.localCanonicalName(call.toolName()))) {
             try {
                 WorkspaceBatchPlanParser.parse(call)
@@ -1222,7 +1238,7 @@ public final class TurnProcessor {
             int previewCount = Math.min(5, contentLines.length);
             sb.append("\n    preview:");
             for (int i = 0; i < previewCount; i++) {
-                String line = contentLines[i];
+                String line = ProtectedContentPolicy.sanitizeText(contentLines[i]);
                 if (line.length() > 80) line = line.substring(0, 77) + "...";
                 sb.append("\n      ").append(line);
             }
@@ -1235,6 +1251,8 @@ public final class TurnProcessor {
         String oldStr = call.param("old_string");
         String newStr = call.param("new_string");
         if (oldStr != null && newStr != null) {
+            oldStr = ProtectedContentPolicy.sanitizeText(oldStr);
+            newStr = ProtectedContentPolicy.sanitizeText(newStr);
             String oldPreview = oldStr.length() > 60 ? oldStr.substring(0, 57) + "..." : oldStr;
             String newPreview = newStr.length() > 60 ? newStr.substring(0, 57) + "..." : newStr;
             sb.append("\n    replace: ").append(oldPreview.replace("\n", "\\n"));
@@ -1242,6 +1260,10 @@ public final class TurnProcessor {
         }
 
         return sb.toString();
+    }
+
+    private static String sanitizeApprovalText(String text) {
+        return ProtectedContentPolicy.sanitizeText(text);
     }
 
     private record PathParam(String name, String value) { }

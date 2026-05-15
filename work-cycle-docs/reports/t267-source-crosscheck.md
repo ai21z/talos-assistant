@@ -356,3 +356,37 @@ Documentation/tickets expected:
 - RAG config changes can break existing `.env` indexing expectations. That is correct for privacy release gates but should be called out in release notes.
 - Provider-body and prompt-debug redaction must happen before save/display; model-context safety must happen earlier, before message append.
 - Full `./gradlew clean check e2eTest --no-daemon` may take minutes but is required before any release-gate claim.
+
+## 9. 2026-05-15 hardening update
+
+This report was re-checked against current source and official upstream docs during the next-release hardening pass.
+
+Local source update:
+
+- `src/main/java/dev/talos/runtime/policy/ProtectedReadScopePolicy.java` now separates approved protected reads into default/developer send-to-model behavior and private-mode `LOCAL_DISPLAY_ONLY` behavior.
+- `src/main/java/dev/talos/runtime/toolcall/ToolCallExecutionStage.java` now withholds successful protected direct-read output from model-loop messages when policy does not allow `SEND_TO_MODEL_CONTEXT`.
+- `src/main/java/dev/talos/runtime/policy/ArtifactCanaryScanner.java` now provides a deterministic artifact canary scan path.
+- `src/main/java/dev/talos/core/index/Indexer.java` now writes/checks privacy and file-capability policy metadata for RAG indexes.
+- `src/main/java/dev/talos/core/rag/RagService.java` rebuilds stale/missing-policy indexes instead of silently trusting them.
+
+Updated OpenAI Codex source/doc check:
+
+- `https://developers.openai.com/codex/agent-approvals-security` states Codex uses a sandbox layer for what the agent can technically do and an approval policy layer for when it must ask before acting.
+- `https://developers.openai.com/codex/concepts/sandboxing` lists read-only, workspace-write, and danger-full-access as separate sandbox modes, with approval policies such as on-request and never.
+- `https://github.com/openai/codex/blob/main/codex-rs/core/config.schema.json` still exposes `approval_policy` and `approvals_reviewer` as config concepts.
+
+Updated Gemini CLI source/doc check:
+
+- `https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/sandbox.md` describes sandbox configuration, current-workspace mounting, sandbox expansion, and explicit outside-workspace mounts.
+- `https://github.com/google-gemini/gemini-cli/blob/main/docs/reference/policy-engine.md` documents allow/deny/ask_user policy decisions and mode-aware approval behavior.
+- `https://github.com/google-gemini/gemini-cli/blob/main/docs/reference/tools.md` documents that tools extend the model by reading files, executing commands, and searching, with confirmation for mutating tools and commands.
+
+`alex000kim-article.txt` status:
+
+- Searched locally for `alex000kim-article.txt`, `local coding assistant Source Leak`, `KAIROS`, `bashSecurity`, and `promptCacheBreakDetection`.
+- The article is still absent from this repository workspace.
+- This report does not claim to have used that article.
+
+Current conclusion:
+
+Central runtime policy remains required. The new scope control, parameter/log sanitization, artifact scanner, and RAG policy metadata move Talos closer to a developer/text-project beta boundary, but they do not complete private-document release readiness. Approval is now explicitly documented as separate from privacy safety.

@@ -18,6 +18,7 @@ import dev.talos.core.retrieval.*;
 import dev.talos.core.retrieval.stages.*;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
+import dev.talos.runtime.policy.ProtectedReadScopePolicy;
 import dev.talos.spi.CorpusStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -107,6 +108,14 @@ public class RagService {
     public Object reindex(Path root) throws Exception { return indexer.reindex(root); }
 
     public Prepared prepare(Path ws, String query, Integer topKOverride) {
+        if (ProtectedReadScopePolicy.privateMode(cfg)
+                && !ProtectedReadScopePolicy.ragEnabledInPrivateMode(cfg)) {
+            return new Prepared(
+                    List.of(),
+                    List.of(),
+                    null,
+                    "RAG retrieval is disabled in private mode. Enable it explicitly only after confirming protected and unsupported files stay outside the searchable corpus.");
+        }
         // Ensure index exists before retrieval (lazy indexing on first query)
         ensureIndexExists(ws);
 
@@ -292,17 +301,26 @@ public class RagService {
      * Guard with AtomicBoolean to prevent re-entrancy. Falls back to full rebuild on corruption.
      */
     private void ensureIndexExists(Path workspace) {
+        if (ProtectedReadScopePolicy.privateMode(cfg)
+                && !ProtectedReadScopePolicy.ragEnabledInPrivateMode(cfg)) {
+            LOG.info("RAG indexing skipped because private mode disables retrieval/indexing by default.");
+            return;
+        }
         Path indexDir = indexer.indexDirFor(workspace);
 
         // Check if index exists and is readable
         if (Files.exists(indexDir) && Files.isDirectory(indexDir)) {
             // Try to verify it's a valid Lucene index by attempting to open it
             try (LuceneStore store = new LuceneStore(indexDir, 0)) {
-                // If we can open it, assume it's valid
-                return;
+                if (indexer.isPolicyMetadataCurrent(workspace)) {
+                    return;
+                }
+                LOG.warn("RAG index was built before the current privacy/file-capability policy; rebuilding.");
+                indexer.invalidateIndex(workspace);
             } catch (Exception e) {
                 // Index exists but is corrupted - log and proceed to rebuild
                 LOG.warn("Index directory exists but appears corrupted, will rebuild: {}", e.getMessage());
+                indexer.invalidateIndex(workspace);
             }
         }
 

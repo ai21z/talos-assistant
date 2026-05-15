@@ -71,3 +71,17 @@ None.
 - `work-cycle-docs/reports/t267-source-crosscheck.md`
 - `work-cycle-docs/reports/source-comparison-matrix.md`
 - `work-cycle-docs/reports/t267-and-file-format-release-gate.md`
+
+## 2026-05-15 hardening update
+
+Completed:
+
+- Re-checked official OpenAI Codex approval/sandbox/config sources.
+- Re-checked official Gemini CLI sandbox, policy-engine, and tool docs.
+- Searched the repo for `alex000kim-article.txt`, `local coding assistant Source Leak`, `KAIROS`, `bashSecurity`, and `promptCacheBreakDetection`.
+- Confirmed `alex000kim-article.txt` is absent from this workspace and must not be claimed as inspected.
+
+Still open:
+
+- If project policy requires that article, add it explicitly to project sources or remove it from required-source lists.
+- Consider CI/report existence checks for future release-gate tickets.

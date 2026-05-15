@@ -224,11 +224,19 @@ public class Config {
         Object excObj = rag.get("excludes");
         if (!(excObj instanceof List<?> exc) || exc.isEmpty()) {
             rag.put("excludes", new ArrayList<>(List.of(
+                    "**/.env", "**/.env.*", "**/*.env",
+                    "**/secrets/**", "**/.ssh/**", "**/.aws/**", "**/.azure/**",
+                    "**/.gnupg/**", "**/.config/gcloud/**", "**/protected/**",
                     "**/.git/**", "**/.idea/**",
                     "**/build/**", "**/out/**", "**/target/**",
                     "**/*.class", "**/*.jar", "**/*.zip", "**/*.tar", "**/*.gz",
-                    "**/*.png", "**/*.jpg", "**/*.jpeg", "**/*.gif", "**/*.pdf",
-                    "**/*.exe", "**/*.dll", "**/*.so"
+                    "**/*.tgz", "**/*.7z", "**/*.rar",
+                    "**/*.png", "**/*.jpg", "**/*.jpeg", "**/*.gif", "**/*.bmp",
+                    "**/*.webp", "**/*.tif", "**/*.tiff", "**/*.pdf",
+                    "**/*.doc", "**/*.docx", "**/*.xls", "**/*.xlsx",
+                    "**/*.ppt", "**/*.pptx",
+                    "**/*.exe", "**/*.dll", "**/*.so", "**/*.dylib",
+                    "**/*.war", "**/*.ear", "**/*.bin", "**/*.dat"
             )));
             defaulted("rag.excludes");
         }
@@ -270,6 +278,27 @@ public class Config {
         Map<String,Object> net = map(data.get("net"));
         if (net == null) { net = new LinkedHashMap<>(); data.put("net", net); defaulted("net"); }
         if (!net.containsKey("enabled")) { net.put("enabled", Boolean.FALSE); defaulted("net.enabled"); }
+
+        // ----- privacy -----
+        Map<String,Object> privacy = map(data.get("privacy"));
+        if (privacy == null) { privacy = new LinkedHashMap<>(); data.put("privacy", privacy); defaulted("privacy"); }
+        putIfAbsent(privacy, "mode", "developer", "privacy.mode");
+        Map<String,Object> protectedRead = map(privacy.get("protected_read"));
+        if (protectedRead == null) {
+            protectedRead = new LinkedHashMap<>();
+            privacy.put("protected_read", protectedRead);
+            defaulted("privacy.protected_read");
+        }
+        putIfAbsent(protectedRead, "default_scope", "SEND_TO_MODEL_CONTEXT", "privacy.protected_read.default_scope");
+        putIfAbsent(protectedRead, "allow_send_to_model", Boolean.FALSE, "privacy.protected_read.allow_send_to_model");
+        putIfAbsent(protectedRead, "persist_raw_artifacts", Boolean.FALSE, "privacy.protected_read.persist_raw_artifacts");
+        Map<String,Object> privacyRag = map(privacy.get("rag"));
+        if (privacyRag == null) {
+            privacyRag = new LinkedHashMap<>();
+            privacy.put("rag", privacyRag);
+            defaulted("privacy.rag");
+        }
+        putIfAbsent(privacyRag, "enabled_in_private_mode", Boolean.FALSE, "privacy.rag.enabled_in_private_mode");
 
         // ----- limits -----
         Map<String,Object> limits = map(data.get("limits"));

@@ -1,0 +1,66 @@
+# T280 - Two-Model Live Audit Before Beta
+
+Status: open
+Severity: high / release gate
+Release gate: yes
+Branch: v0.9.0-beta-dev
+Created/updated: 2026-05-15
+Owner: unassigned
+
+## Problem
+
+Deterministic tests are necessary but do not prove live model/tool/prompt behavior. The two-model prompt-bank audit was not run in this pass.
+
+## Evidence from current code
+
+No code issue by itself. This is a release-process gate.
+
+## Evidence from tests/audits
+
+- `work-cycle-docs/reports/t267-live-two-model-audit.md` records the runbook and marks execution not run.
+
+## User impact
+
+Without live evidence, runtime policy and model behavior may interact in untested ways.
+
+## Product risk
+
+High for developer/text beta; blocker for private-document beta.
+
+## Runtime boundary affected
+
+Policy classification, tool visibility, approval gates, provider-body safety, final-answer truthfulness, artifacts.
+
+## Non-goals
+
+- Do not replace deterministic tests with live audit.
+- Do not accept final answers without traces/artifacts.
+
+## Required behavior
+
+Run the prompt bank against `qwen2.5-coder:14b` and `gpt-oss:20b` or configured audited local profiles.
+
+## Proposed implementation
+
+Use the runbook in `t267-live-two-model-audit.md` and store artifacts under ignored `local/manual-testing/<audit-id>`.
+
+## Tests
+
+Live audit prompts and artifact canary scan.
+
+## Acceptance criteria
+
+- Report states pass/fail per model.
+- No private-document release-ready claim if audit is not run or fails.
+
+## Rollback / migration notes
+
+Raw audit artifacts must not be committed.
+
+## Open questions
+
+- Which local profiles are considered release-audited if Qwen/GPT-OSS are unavailable?
+
+## Related files
+
+- `work-cycle-docs/reports/t267-live-two-model-audit.md`

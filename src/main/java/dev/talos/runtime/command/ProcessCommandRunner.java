@@ -1,5 +1,7 @@
 package dev.talos.runtime.command;
 
+import dev.talos.runtime.policy.ProtectedContentPolicy;
+
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -9,14 +11,11 @@ import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.regex.Pattern;
 
 /** Bounded argv-only process runner. This class is internal and not a tool surface. */
 public final class ProcessCommandRunner implements CommandRunner {
     private static final List<String> ENV_ALLOWLIST = List.of(
             "SystemRoot", "WINDIR", "ComSpec", "PATHEXT", "TEMP", "TMP", "JAVA_HOME", "PATH");
-    private static final Pattern SECRET_ASSIGNMENT = Pattern.compile(
-            "(?i)\\b([A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|CREDENTIAL|AUTH|KEY)[A-Z0-9_]*)=([^\\s\\r\\n]+)");
 
     @Override
     public CommandResult run(CommandPlan plan) {
@@ -118,8 +117,7 @@ public final class ProcessCommandRunner implements CommandRunner {
 
     private static Redaction redact(String value) {
         if (value == null || value.isBlank()) return new Redaction("", false);
-        var matcher = SECRET_ASSIGNMENT.matcher(value);
-        String redacted = matcher.replaceAll("$1=<redacted>");
+        String redacted = ProtectedContentPolicy.sanitizeText(value);
         return new Redaction(redacted, !redacted.equals(value));
     }
 

@@ -54,11 +54,23 @@ artifact-redaction, RAG-safety, unsupported-format, and private-folder-mode
 release gates all pass.
 
 Talos may create local artifacts such as model context, provider-body captures,
-prompt-debug files, local turn traces, session logs, and RAG indexes. Current
-runtime policy redacts known protected markers and secret-like values before
-tool results are handed back to the model and before key debug/session artifacts
-are persisted, but broader private-folder mode and full document extraction are
-still tracked separately.
+prompt-debug files, local turn traces, session logs, and RAG indexes.
+
+Indirect read results are treated as a privacy boundary. `grep`, slash `/grep`,
+`retrieve`, and RAG snippets are sanitized or omitted before they are handed
+back to the model. Protected and unsupported files are excluded from new RAG
+indexes by default, and stale index metadata is used to force rebuilds when the
+privacy/file-capability policy changes.
+
+Approved direct protected reads are different. In developer/default mode, an
+approved `talos.read_file(".env")` or `talos.read_file("secrets/...")` may place
+protected file contents into model context for that turn. In private mode,
+approved protected reads default to `LOCAL_DISPLAY_ONLY`: the runtime reads the
+file locally after approval, but withholds raw contents from model context and
+redacts persisted artifacts unless an explicit `SEND_TO_MODEL_CONTEXT` scope is
+enabled. This is still not enough to position Talos as safe for sensitive
+paperwork folders; private-folder UX and the live two-model audit remain release
+gates.
 
 ## How A Turn Works
 

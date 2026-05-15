@@ -9,6 +9,8 @@ import java.util.Optional;
 public final class FileCapabilityPolicy {
     private FileCapabilityPolicy() {}
 
+    public static final String POLICY_VERSION = "file-capability-policy-v2";
+
     public enum Capability {
         SUPPORTED_TEXT,
         UNSUPPORTED_BINARY_DOCUMENT,

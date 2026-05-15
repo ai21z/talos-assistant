@@ -147,6 +147,15 @@ engines:
 net:
   enabled: true
 
+privacy:
+  mode: "developer"              # developer or private
+  protected_read:
+    default_scope: "SEND_TO_MODEL_CONTEXT"
+    allow_send_to_model: false    # private mode requires explicit opt-in before protected content reaches model context
+    persist_raw_artifacts: false
+  rag:
+    enabled_in_private_mode: false
+
 limits:
   top_k_max: 100
   response_max_chars: 10485760   # 10 MiB

@@ -80,7 +80,7 @@ class ProcessCommandRunnerTest {
 
         assertTrue(result.success(), result.stderr());
         assertTrue(result.redactionApplied());
-        assertTrue(result.stdout().contains("API_TOKEN=<redacted>"), result.stdout());
+        assertTrue(result.stdout().contains("API_TOKEN=[redacted]"), result.stdout());
         assertFalse(result.stdout().contains("abc123"), result.stdout());
     }
 

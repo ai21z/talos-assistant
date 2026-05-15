@@ -73,3 +73,19 @@ Private mode should be opt-in initially unless folder heuristics are highly reli
 - future design doc under `docs/architecture/`
 - runtime policy/tool-surface planner files
 
+## 2026-05-15 hardening update
+
+Implemented config-level V1:
+
+- `privacy.mode = private`
+- private mode disables RAG retrieval/indexing by default
+- approved protected direct reads default to `LOCAL_DISPLAY_ONLY`
+
+Still open:
+
+- `/privacy private on/off` command or equivalent user-facing UX
+- visible private-mode status in help/status/tool-permission views
+- sensitive-folder warning heuristics
+- broader private-mode e2e tests
+
+This ticket remains a private-document release blocker.
