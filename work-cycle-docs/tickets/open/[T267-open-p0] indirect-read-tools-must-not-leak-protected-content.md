@@ -52,7 +52,7 @@ Release blocker for any claim that Talos is safe for tax, health, legal, family,
 ## Required behavior
 
 - Protected files and directories are skipped, blocked, or safely summarized by indirect read tools.
-- Raw `DO_NOT_LEAK*`, `TALOS_CANARY_*`, `CANARY_*`, `PRIVATE_MARKER`, and secret-like assignment values never enter model context or generated artifacts.
+- Raw `DO_NOT_LEAK*`, `TALOS_CANARY_*`, `CANARY_*`, `PRIVATE_MARKER`, and secret-like assignment values from indirect read tools never enter model context or generated artifacts.
 - `protected/` is treated as protected for beta trust.
 - If matches exist only in protected content, Talos reports that matches were found but lines were withheld.
 - Dirty RAG indexes cannot surface raw protected snippets.
@@ -63,7 +63,7 @@ Implemented `ProtectedContentPolicy` as the central runtime policy and integrate
 
 Remaining implementation work:
 
-- Decide and implement RAG index versioning/invalidation for old dirty indexes.
+- Add broader live/e2e coverage for stale RAG indexes and private-folder workflows.
 - Extend private-folder mode beyond the current protected-path defaults.
 - Expand generated-artifact scanning beyond the focused T267 canary set.
 - Run the two-model live audit prompt bank before any private-document beta claim.
@@ -110,3 +110,19 @@ Existing RAG indexes may contain protected content. Implement retrieval-time san
 - `src/main/java/dev/talos/core/rag/RagService.java`
 - `src/main/java/dev/talos/core/index/Indexer.java`
 - `src/main/resources/config/default-config.yaml`
+
+## 2026-05-15 hardening update
+
+Additional implementation completed:
+
+- Approved direct protected reads now have explicit scope policy.
+- Private mode defaults approved protected direct reads to local-display-only model handoff.
+- Tool-call debug parameter formatting now sanitizes canaries, secret-like values, and protected path arguments.
+- Command output redaction now delegates to `ProtectedContentPolicy`.
+- RAG policy metadata/version checks were implemented; stale/missing-policy indexes rebuild before retrieval.
+
+Still open:
+
+- Two-model live prompt-bank audit.
+- Broader private-folder UX and sensitive-folder warning.
+- Private-document release claim remains forbidden.

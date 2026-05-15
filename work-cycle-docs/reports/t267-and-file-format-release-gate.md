@@ -2,72 +2,66 @@
 
 ## 1. Executive verdict
 
-Release-ready only for developer/text-project beta.
+Not release-ready.
 
-Talos is not release-ready for broader private-document beta. It still must not be positioned as safe for tax folders, health documents, legal paperwork, family/admin folders, or arbitrary private document folders because private-folder mode and local document extraction are not implemented.
+The deterministic hardening work improved the developer/text-project beta boundary, and the required Gradle gate passes. Private-document beta remains blocked: the two-model live prompt-bank audit has not run in this pass, private-folder UX is only a config-level V1, and Talos still has no local PDF/Office/image/archive extraction.
 
 ## 2. Source crosscheck summary
 
-OpenAI Codex comparison: sandboxing and approvals are separate. Approval reduces interruptions but does not replace enforced filesystem/content boundaries.
+OpenAI Codex docs separate sandbox mode from approval policy: the sandbox is the technical boundary, while approval controls when the agent must pause. Gemini CLI docs likewise show that tools read files, execute commands, and require confirmation/sandbox policy for risky actions. Both support the Talos rule that approval is not privacy safety and model prompts are not the security boundary.
 
-Gemini CLI comparison: tool calls are validated/executed by the runtime, and tool outputs are sent back to the model. That makes tool-result sanitization before model handoff mandatory.
-
-Claude Code/leaked-source lessons: use only design lessons. Agent harnesses need explicit validation, permission checks, bounded loops, and artifact caution. No leaked implementation was copied.
-
-Agent-design lesson: traces and prompt-debug artifacts are useful for audit, but they are also durable sensitive artifacts.
-
-Talos implication: runtime policy must own protected content, unsupported-format truthfulness, and artifact redaction. Prompt-only fixes are unacceptable.
+The project-provided `alex000kim-article.txt` source was searched again and is absent from this workspace. No claims in this report rely on it.
 
 ## 3. T267 status
 
-Status: fixed for the tested indirect-read and artifact-safety paths required for a developer/text-project beta boundary.
+Status: partial.
 
-Code changes:
+Fixed in this pass:
 
-- Added central protected-content redaction/sanitization policy.
-- Sanitized tool results before they are appended to model-loop messages.
-- Routed native `talos.grep`, slash `/grep`, `talos.retrieve`, RAG indexing/retrieval, prompt-debug, trace redaction, and session persistence through shared policy.
-- Expanded protected path classification for `protected/`, `*.env`, password-like paths, and related secret path terms.
-- Removed `.env` from default RAG includes and added protected default excludes.
+- Added config-backed protected-read scope policy.
+- Private mode defaults approved protected reads to `LOCAL_DISPLAY_ONLY`.
+- Default/developer mode preserves existing approved direct-read behavior unless config changes.
+- Tool-call parameter/debug formatting now delegates to protected-content sanitization.
+- Command stdout/stderr redaction delegates to the central policy.
+- Artifact canary scanner exists as a JUnit path and runs under `test`/`check`.
+- New RAG indexes write privacy/file-capability policy metadata.
+- Stale or missing-policy RAG metadata causes rebuild before retrieval.
+- Unsupported-format final-answer correction is covered for scripted summarize/compare fabrication cases.
+- Bounded Ollama probe subprocesses prevent `TerminalFirstRunTest` from hanging the unit-test gate.
 
-Tests:
+Still open:
 
-- Focused privacy, retrieval, artifact, protected-path, default-config, and unsupported-format tests pass.
-- Full `clean check e2eTest` passes.
-- Runtime artifact canary scan over generated build/local artifacts found no raw T267 canary values outside source/spec locations.
-
-Remaining risks:
-
-- Dirty historical RAG indexes may still exist on user machines. Retrieval-time sanitization now reduces leak risk, but index invalidation/versioning remains an open hardening item.
-- Private-folder mode is still open.
+- Two-model live audit not run in this pass.
+- Private-folder mode has no `/privacy private on/off` UX yet.
+- Artifact scan is CI-grade for controlled generated surfaces, but legacy ignored manual audit folders are deliberately skipped in the unit scan.
 
 ## 4. Unsupported-format status
 
 | Format family | Extensions | Current behavior | Tests | Verdict |
 |---|---|---|---|---|
-| PDF | `.pdf` | Classified unsupported; direct read/write should be honest; RAG excludes. | Existing and focused unsupported tests | Not extractable |
-| Word | `.doc`, `.docx` | Classified unsupported; grep/search skips and reports. | Focused grep/format tests | Not extractable |
-| Excel | `.xls`, `.xlsx` | Classified unsupported; direct read/write should be honest. | Focused unsupported tests | Not extractable |
-| PowerPoint | `.ppt`, `.pptx` | Classified unsupported. | Focused unsupported tests | Not extractable |
-| Images/scans | `.png`, `.jpg`, `.jpeg`, `.gif`, `.bmp`, `.webp`, `.tif`, `.tiff` | Classified unsupported image/scan. No OCR. | Focused unsupported tests | Not extractable |
-| Archives | `.zip`, `.tar`, `.gz`, `.tgz`, `.7z`, `.rar` | Classified unsupported archive. | Focused unsupported tests | Not extractable |
-| Binaries | `.exe`, `.dll`, `.so`, `.dylib`, `.class`, `.jar`, `.war`, `.ear`, `.bin`, `.dat` | Classified unsupported binary/compiled. | Focused unsupported tests | Not extractable |
+| PDF | `.pdf` | Classified unsupported; no extraction. | Existing unsupported tests | Not extractable |
+| Word | `.doc`, `.docx` | Classified unsupported; final-answer fabrication guarded in scripted tests. | `UnsupportedFinalAnswerTruthfulnessTest` | Not extractable |
+| Excel | `.xls`, `.xlsx` | Classified unsupported; compare flow must report partial only. | `UnsupportedFinalAnswerTruthfulnessTest` | Not extractable |
+| PowerPoint | `.ppt`, `.pptx` | Classified unsupported; no extraction. | Existing capability tests | Not extractable |
+| Images/scans | `.png`, `.jpg`, `.jpeg`, `.gif`, `.bmp`, `.webp`, `.tif`, `.tiff` | Classified unsupported image/scan. No OCR. | Existing capability tests | Not extractable |
+| Archives | `.zip`, `.tar`, `.gz`, `.tgz`, `.7z`, `.rar` | Classified unsupported archive. | Existing capability tests | Not extractable |
+| Binaries | `.exe`, `.dll`, `.so`, `.dylib`, `.class`, `.jar`, `.war`, `.ear`, `.bin`, `.dat` | Classified unsupported binary/compiled. | Existing capability tests | Not extractable |
 | Unknown text-like files | no known unsupported extension, no binary sniff failure | Text attempt allowed. | Existing parser/read/search tests | Supported cautiously |
 
 ## 5. Artifact safety status
 
 | Surface | Can raw protected/canary content appear? | Evidence | Verdict |
 |---|---|---|---|
-| model context | Should not for tested indirect tool-result paths | `ToolCallExecutionStage` sanitizes indirect `ToolResult` values before message append; focused formatting test passes | Pass for tested boundary |
-| provider body | Should not for tested grep/tool-result captures | prompt-debug provider-body test passes | Pass for tested boundary |
-| prompt-debug markdown | Should not for tested grep/tool-result captures | prompt-debug render test passes | Pass for tested boundary |
-| prompt-debug provider-body JSON | Should not for tested grep/tool-result captures | prompt-debug save test passes | Pass for tested boundary |
-| local turn trace | Redaction policy now covers canaries/private markers | focused redactor test passes | Pass for tested boundary |
-| session JSON | Save path redacts JSON text-node values without corrupting JSON | session persistence regression tests pass | Pass for tested boundary |
-| turn JSONL | Should not for tested grep-style turn record | session turn log test passes | Pass for tested boundary |
-| logs | Runtime artifact scan found no raw T267 canaries in generated build/local artifacts | canary scan command passed with no hits | Pass for tested boundary |
-| RAG index | Protected/unsupported files excluded by code and config; dirty retrieval sanitized/skipped | default config and retrieve dirty-index tests pass | Pass for tested boundary |
-| final answer | Model should not receive raw indirect tool-result canaries in tested path | model-context/tool-result tests pass | Pass for tested boundary |
+| model context | Indirect reads should not; default approved direct protected reads may in developer mode. | `ToolCallExecutionStage`, `ProtectedReadScopeIntegrationTest` | Partial |
+| provider body | Indirect read path covered by sanitizer; approved direct send-to-model scope remains explicit risk. | Prompt-debug/provider-body redaction tests plus new scope policy | Partial |
+| prompt-debug markdown | Redacted by default for tested surfaces. | Existing prompt-debug tests | Pass for tested boundary |
+| prompt-debug provider-body JSON | Redacted by default for tested surfaces. | Existing prompt-debug tests | Pass for tested boundary |
+| local turn trace | Central policy covers canaries/private markers. | Existing trace tests | Pass for tested boundary |
+| session JSON | Redacted through session persistence path. | Existing session tests | Pass for tested boundary |
+| turn JSONL | Redacted for tested turn records. | Existing turn-log tests | Pass for tested boundary |
+| logs | Tool params and command output now use central redaction helpers. | `SensitiveLogRedactionTest` | Pass for focused boundary |
+| RAG index | New indexes write policy metadata; stale/missing metadata rebuilds. | `IndexerPolicyMetadataTest` | Partial until broader RAG tests run |
+| final answer | Unsupported summarize/compare fabrication guarded in focused tests. | `UnsupportedFinalAnswerTruthfulnessTest` | Partial until live audit |
 
 ## 6. User-facing copy recommendation
 
@@ -79,7 +73,7 @@ Allowed claims:
 - local-first execution harness
 - unsupported documents are identified honestly rather than silently summarized
 
-Forbidden claims unless all gates pass:
+Forbidden claims unless all private-document gates pass:
 
 - safe for tax folders
 - safe for health documents
@@ -91,35 +85,25 @@ Forbidden claims unless all gates pass:
 - can read PowerPoint decks
 - can summarize images/scans
 - can inspect arbitrary binary files
+- all protected content is guaranteed never to reach model context
 
 ## 7. Tickets created/updated
 
-| Ticket | Severity | Release gate? | Next step |
-|---|---:|---|---|
-| T267 indirect-read tools must not leak protected content | P0 | yes | Keep dirty-index invalidation/versioning as follow-up hardening |
-| T268 unsupported document formats must not be misrepresented | P0 | yes | Broaden final-answer unsupported-format scenarios |
-| T269 user-facing file capability matrix and beta warning | high | yes | Keep README/docs in sync with runtime |
-| T270 RAG index protected and unsupported format safety | high | yes | Add index version/invalidation decision |
-| T271 prompt-debug/trace/session redaction release gate | high | yes | Expand artifact scan coverage beyond current T267 fixtures |
-| T272 private folder mode | high | yes for sensitive-document beta | Design/implement before private paperwork positioning |
-| T273 local document extraction roadmap | medium | no for developer beta | Plan local parsers/OCR |
-| T274 source-crosscheck and release-gate discipline | high | yes | Keep source matrix required for future trust gates |
+T267-T280 are open/updated for indirect-read safety, unsupported-format truthfulness, RAG policy metadata, artifact scanning, approved protected-read scope, log/parameter redaction, private-folder mode, source crosscheck discipline, and live audit.
 
 ## 8. Tests run
 
-- `./gradlew.bat test --tests "*GrepToolTest" --tests "*WorkspaceCommandsTest" --tests "*ProtectedPathPolicyTest" --tests "*TraceRedactorTest" --tests "*ToolCallSupportTest" --tests "*RetrieveToolTest" --tests "*UnsupportedDocumentFormatsTest" --tests "*RagDefaultConfigPrivacyTest" --tests "*PromptDebugCommandTest" --tests "*JsonSessionStoreTurnsTest" --no-daemon` - passed.
-- `./gradlew.bat test --tests "dev.talos.cli.modes.AssistantTurnExecutorTest*approvedProtectedReadRefusalUsesRuntimePostcondition*" --tests "dev.talos.cli.repl.ExplainLastTurnCommandTest*traceViewIncludesLocalTraceWhenTurnHasTraceId*" --tests "dev.talos.runtime.JsonTurnLogAppenderTest*writesStructuredRecordWithProtectedContentRedacted*" --no-daemon` - passed.
+- `./gradlew.bat test --tests "*ProtectedReadScopePolicyTest" --tests "*ProtectedReadScopeIntegrationTest" --tests "*SensitiveLogRedactionTest" --tests "*ArtifactCanaryScanTest" --tests "*IndexerPolicyMetadataTest" --tests "*UnsupportedFinalAnswerTruthfulnessTest" --no-daemon` - passed.
+- `./gradlew.bat test --tests "dev.talos.app.ui.TerminalFirstRunTest" --no-daemon` - passed.
 - `./gradlew.bat clean check e2eTest --no-daemon` - passed.
-- `rg -n --hidden -a --glob '!classes/**' --glob '!tmp/**' --glob '!generated/**' "DO_NOT_LEAK_T267|t267-token-should-not-appear|t267-password-should-not-appear|t267-client-secret-should-not-appear|TALOS_CANARY_T267|PRIVATE_MARKER = DO_NOT_LEAK_T267|API_TOKEN=t267-token" build local 2>$null` - no hits.
 
 ## 9. Tests not run
 
-- No two-model live Talos audit was run in this work cycle.
-- No manual prompt-bank audit was run in this work cycle.
+- Two-model live Talos prompt-bank audit not run in this pass.
 
 ## 10. Remaining blockers
 
 - Not ready for sensitive personal paperwork positioning.
-- Private-folder mode is not implemented.
+- Live two-model audit still required.
+- Private-folder mode needs user-facing UX and broader tests.
 - Local PDF/Office/image/OCR/archive extraction is not implemented.
-- RAG index invalidation/versioning for old dirty indexes is not implemented.

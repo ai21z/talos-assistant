@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Terminal-based first-run setup flow.
@@ -29,6 +30,7 @@ public final class TerminalFirstRun {
             Paths.get(System.getProperty("user.home"), ".talos", "first_run_done");
 
     private static final String DEFAULT_MODEL = "talos-agent";
+    private static final long OLLAMA_PROBE_TIMEOUT_SECONDS = 5;
 
     private TerminalFirstRun() {}
 
@@ -80,7 +82,7 @@ public final class TerminalFirstRun {
             Process p = new ProcessBuilder("ollama", "version")
                     .redirectErrorStream(true)
                     .start();
-            p.waitFor();
+            if (!waitForProbe(p)) return false;
             return p.exitValue() == 0;
         } catch (Exception e) {
             return false;
@@ -92,8 +94,8 @@ public final class TerminalFirstRun {
             Process p = new ProcessBuilder("ollama", "version")
                     .redirectErrorStream(true)
                     .start();
+            if (!waitForProbe(p)) return null;
             String output = new String(p.getInputStream().readAllBytes()).trim();
-            p.waitFor();
             return p.exitValue() == 0 ? output : null;
         } catch (Exception e) {
             return null;
@@ -106,8 +108,8 @@ public final class TerminalFirstRun {
             Process p = new ProcessBuilder("ollama", "list")
                     .redirectErrorStream(true)
                     .start();
+            if (!waitForProbe(p)) return false;
             String output = new String(p.getInputStream().readAllBytes());
-            p.waitFor();
             if (p.exitValue() != 0) return false;
             // Model name may appear with tag, e.g. "qwen3:8b"
             String baseName = model.contains(":") ? model.substring(0, model.indexOf(':')) : model;
@@ -129,6 +131,14 @@ public final class TerminalFirstRun {
             LOG.warn("Failed to pull model {}: {}", model, e.getMessage());
             return false;
         }
+    }
+
+    private static boolean waitForProbe(Process process) throws InterruptedException {
+        if (process.waitFor(OLLAMA_PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+            return true;
+        }
+        process.destroyForcibly();
+        return false;
     }
 
     static void writeSentinel() {

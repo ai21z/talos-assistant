@@ -75,3 +75,18 @@ Existing local artifacts may already contain raw values. Document that old artif
 - `src/main/java/dev/talos/runtime/JsonSessionStore.java`
 - `src/main/java/dev/talos/runtime/JsonTurnLogAppender.java`
 
+## 2026-05-15 hardening update
+
+Implemented:
+
+- `ProtectedContentPolicy.sanitizeToolParameters(...)`
+- `ProtectedContentPolicy.sanitizeMap(...)`
+- `ProtectedContentPolicy.sanitizeForLog(...)`
+- command stdout/stderr redaction through central policy
+- JUnit artifact scanner for explicit generated-artifact canaries
+
+Still open:
+
+- Expand generated-artifact scan beyond controlled T275 canaries.
+- Decide whether to add `/redact-artifacts` or `/purge-debug-artifacts`.
+- Two-model live audit still required to prove provider-body and prompt-debug behavior under real model/tool trajectories.

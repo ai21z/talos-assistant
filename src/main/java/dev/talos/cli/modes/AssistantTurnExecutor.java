@@ -4785,6 +4785,7 @@ public final class AssistantTurnExecutor {
                 || lower.contains("document files");
         boolean mentionsUnsupportedExact = false;
         boolean mentionsUnsupportedStem = false;
+        boolean mentionsUnsupportedFamily = false;
         for (String path : unsupportedPaths) {
             if (path == null || path.isBlank()) continue;
             String lowerPath = path.toLowerCase(Locale.ROOT);
@@ -4800,8 +4801,14 @@ public final class AssistantTurnExecutor {
             if (!extension.isBlank() && lower.contains("." + extension)) {
                 mentionsUnsupportedExact = true;
             }
+            if (mentionsUnsupportedFamilyTerm(lower, extension)) {
+                mentionsUnsupportedFamily = true;
+            }
         }
-        boolean mentionsUnsupported = mentionsGenericUnsupported || mentionsUnsupportedExact || mentionsUnsupportedStem;
+        boolean mentionsUnsupported = mentionsGenericUnsupported
+                || mentionsUnsupportedExact
+                || mentionsUnsupportedStem
+                || mentionsUnsupportedFamily;
         if (!mentionsUnsupported) return false;
         boolean claimsContent = lower.contains("no extractable text")
                 || lower.contains("no readable text")
@@ -4815,10 +4822,37 @@ public final class AssistantTurnExecutor {
                 || lower.contains("states")
                 || lower.contains("contains")
                 || lower.contains("describes")
+                || lower.contains("compared")
+                || lower.contains("compare")
                 || lower.contains("summar");
         if (!claimsContent) return false;
-        if (mentionsSuccessfulRead && !mentionsUnsupportedExact && !mentionsGenericUnsupported) return false;
+        if (mentionsSuccessfulRead
+                && !mentionsUnsupportedExact
+                && !mentionsGenericUnsupported
+                && !mentionsUnsupportedFamily) return false;
         return true;
+    }
+
+    private static boolean mentionsUnsupportedFamilyTerm(String lowerLine, String extension) {
+        if (lowerLine == null || lowerLine.isBlank() || extension == null || extension.isBlank()) return false;
+        return switch (extension) {
+            case "xls", "xlsx" -> lowerLine.contains("spreadsheet")
+                    || lowerLine.contains("workbook")
+                    || lowerLine.contains("excel");
+            case "doc", "docx" -> lowerLine.contains("word document")
+                    || lowerLine.contains("document");
+            case "ppt", "pptx" -> lowerLine.contains("powerpoint")
+                    || lowerLine.contains("presentation")
+                    || lowerLine.contains("deck");
+            case "png", "jpg", "jpeg", "gif", "bmp", "webp", "tif", "tiff" -> lowerLine.contains("image")
+                    || lowerLine.contains("scan")
+                    || lowerLine.contains("picture");
+            case "zip", "tar", "gz", "tgz", "7z", "rar" -> lowerLine.contains("archive")
+                    || lowerLine.contains("zip")
+                    || lowerLine.contains("compressed");
+            case "pdf" -> lowerLine.contains("pdf") || lowerLine.contains("document");
+            default -> lowerLine.contains("binary file") || lowerLine.contains("unsupported file");
+        };
     }
 
     private static List<String> successfulReadPaths(ToolCallLoop.LoopResult loopResult) {

@@ -103,3 +103,15 @@ Users relying on accidental text reads of unknown extensions may see more cautio
 - `src/main/java/dev/talos/tools/impl/GrepTool.java`
 - `src/main/java/dev/talos/cli/repl/slash/GrepCommand.java`
 - `src/main/java/dev/talos/core/index/Indexer.java`
+
+## 2026-05-15 hardening update
+
+Additional implementation completed:
+
+- Scripted final-answer tests now cover fabricated DOCX summaries and XLSX-vs-text compare claims.
+- Runtime answer shaping removes unsupported-family claims such as spreadsheet/workbook content claims when extraction failed.
+
+Still open:
+
+- Broader live prompt-bank coverage for PDF, PowerPoint, image, archive, binary, and unsupported write/create flows.
+- No current local extraction support for PDF/Office/images/OCR/archive formats.

@@ -7,6 +7,7 @@ import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.runtime.policy.ProtectedPathAliasNormalizer;
 import dev.talos.runtime.policy.ProtectedPathPolicy;
+import dev.talos.runtime.policy.ProtectedReadScopePolicy;
 import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -133,7 +134,9 @@ public final class ToolCallExecutionStage {
             WorkspaceOperationPlan workspaceOperationPlan = workspaceOperationPlan(effective);
             String pathHint = pathHint(effective, workspaceOperationPlan);
             emitProgress(effective.toolName(), "executing", pathHint);
-            LOG.debug("  Executing tool: {} (params: {})", effective.toolName(), effective.parameters());
+            LOG.debug("  Executing tool: {} (params: {})",
+                    effective.toolName(),
+                    ProtectedContentPolicy.sanitizeToolParameters(effective.parameters()));
 
             boolean isEditFile = "talos.edit_file".equals(effective.toolName());
             if (isEditFile
@@ -260,11 +263,20 @@ public final class ToolCallExecutionStage {
             }
 
             ToolResult rawResult = turnProcessor.executeTool(state.toolSession, effective, state.ctx);
+            boolean successfulProtectedRead =
+                    isSuccessfulProtectedRead(state, effective, pathHint, rawResult);
             boolean preserveApprovedProtectedReadResult =
-                    shouldPreserveApprovedProtectedReadResult(state, effective, pathHint, rawResult);
-            ToolResult result = preserveApprovedProtectedReadResult
-                    ? rawResult
-                    : ProtectedContentPolicy.sanitizeToolResult(rawResult);
+                    successfulProtectedRead
+                            && ProtectedReadScopePolicy.sendApprovedProtectedReadToModel(
+                                    state.ctx == null ? null : state.ctx.cfg());
+            ToolResult result;
+            if (successfulProtectedRead && !preserveApprovedProtectedReadResult) {
+                result = approvedProtectedReadWithheldResult(pathHint, state);
+            } else {
+                result = preserveApprovedProtectedReadResult
+                        ? rawResult
+                        : ProtectedContentPolicy.sanitizeToolResult(rawResult);
+            }
             emitToolResult(effective.toolName(), result);
             if (result.success()) {
                 successesThisIter++;
@@ -372,9 +384,11 @@ public final class ToolCallExecutionStage {
             }
             appendResultMessage(state, parsed.useNativePath(), i, resultText);
 
-            LOG.debug("  Tool {} → {}", effective.toolName(),
-                    result.success() ? "success (" + ToolCallSupport.truncateForLog(result.output()) + ")"
-                            : "error: " + result.errorMessage());
+            LOG.debug("  Tool {} -> {}", effective.toolName(),
+                    result.success()
+                            ? "success (" + ProtectedContentPolicy.sanitizeText(
+                                    ToolCallSupport.truncateForLog(result.output())) + ")"
+                            : "error: " + ProtectedContentPolicy.sanitizeText(result.errorMessage()));
         }
 
         return new IterationOutcome(
@@ -517,7 +531,7 @@ public final class ToolCallExecutionStage {
         return "read_file".equals(ToolAliasPolicy.localCanonicalName(call.toolName()));
     }
 
-    private static boolean shouldPreserveApprovedProtectedReadResult(
+    private static boolean isSuccessfulProtectedRead(
             LoopState state,
             ToolCall call,
             String pathHint,
@@ -528,6 +542,18 @@ public final class ToolCallExecutionStage {
         }
         if (!result.success() || !isReadFileTool(call)) return false;
         return ProtectedPathPolicy.classify(state.workspace, pathHint).protectedPath();
+    }
+
+    private static ToolResult approvedProtectedReadWithheldResult(String pathHint, LoopState state) {
+        String scopeNote = ProtectedReadScopePolicy.approvedProtectedReadModelHandoffNote(
+                state == null || state.ctx == null ? null : state.ctx.cfg());
+        return new ToolResult(
+                true,
+                "Protected file content was read after approval but withheld from model context by privacy policy. "
+                        + "Target: " + ProtectedContentPolicy.REDACTED_PATH + ". "
+                        + scopeNote,
+                null,
+                null);
     }
 
     private static String sourceEvidenceRequiredDiagnostic(String pathHint, List<String> missingSourceTargets) {

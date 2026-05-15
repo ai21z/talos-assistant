@@ -1,5 +1,6 @@
 package dev.talos.core.index;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
 import dev.talos.core.cache.CacheDb;
@@ -7,12 +8,14 @@ import dev.talos.core.embed.CachingEmbeddings;
 import dev.talos.core.embed.EmbeddingProfile;
 import dev.talos.core.embed.EmbeddingsFactory;
 import dev.talos.core.ingest.Chunker;
+import dev.talos.core.ingest.FileCapabilityPolicy;
 import dev.talos.core.ingest.FileWalker;
 import dev.talos.core.ingest.ParsedChunk;
 import dev.talos.core.ingest.ParserUtil;
 import dev.talos.core.ingest.UnsupportedDocumentFormats;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.spi.Embeddings;
+import dev.talos.core.util.BuildInfo;
 import dev.talos.core.util.Hash;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,7 +25,10 @@ import java.nio.file.FileSystem;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.PathMatcher;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -34,6 +40,8 @@ import java.util.regex.Pattern;
 public class Indexer {
     private static final Logger LOG = LoggerFactory.getLogger(Indexer.class);
     private static final boolean IS_WINDOWS = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("windows");
+    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final int INDEX_METADATA_SCHEMA_VERSION = 1;
 
     private final Config cfg;
     private volatile IndexingStats lastRunStats;
@@ -49,6 +57,42 @@ public class Indexer {
             Files.createDirectories(base);
             return base;
         } catch (Exception e) { throw new RuntimeException(e); }
+    }
+
+    public Path policyMetadataFile(Path root) {
+        return indexDirFor(root).resolve("talos-index-metadata.json");
+    }
+
+    public boolean isPolicyMetadataCurrent(Path root) {
+        Path metadata = policyMetadataFile(root);
+        if (!Files.isRegularFile(metadata)) return false;
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> data = JSON.readValue(metadata.toFile(), Map.class);
+            return INDEX_METADATA_SCHEMA_VERSION == intValue(data.get("schemaVersion"))
+                    && ProtectedContentPolicy.POLICY_VERSION.equals(String.valueOf(data.get("privacyPolicyVersion")))
+                    && FileCapabilityPolicy.POLICY_VERSION.equals(String.valueOf(data.get("fileCapabilityPolicyVersion")))
+                    && currentRagConfigHash().equals(String.valueOf(data.get("ragConfigHash")));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public void invalidateIndex(Path root) {
+        Path indexDir = indexDirFor(root);
+        if (!Files.exists(indexDir)) return;
+        try (var paths = Files.walk(indexDir)) {
+            paths.sorted(Comparator.reverseOrder())
+                    .forEach(path -> {
+                        try {
+                            Files.deleteIfExists(path);
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
+                    });
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to invalidate stale RAG index: " + e.getMessage(), e);
+        }
     }
 
     public void index(Path root) {
@@ -70,6 +114,9 @@ public class Indexer {
 
         // Check force_full_reindex config
         boolean configForceReindex = CfgUtil.intAt(rag, "force_full_reindex", 0) == 1;
+        if (forceFullReindex || configForceReindex) {
+            invalidateIndex(rootPath);
+        }
         final boolean skipHashing = forceFullReindex || configForceReindex;
 
         // Accept either includes/excludes OR include/exclude
@@ -267,6 +314,7 @@ public class Indexer {
 
                 long commitStart = System.currentTimeMillis();
                 store.commit();
+                writePolicyMetadata(rootPath);
                 stats.addCommitTime(System.currentTimeMillis() - commitStart);
 
                 stats.setTotalTime(System.currentTimeMillis() - startTime);
@@ -315,6 +363,37 @@ public class Indexer {
 
     public IndexingStats getLastRunStats() {
         return lastRunStats;
+    }
+
+    private void writePolicyMetadata(Path root) throws IOException {
+        Path metadata = policyMetadataFile(root);
+        Files.createDirectories(metadata.getParent());
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("schemaVersion", INDEX_METADATA_SCHEMA_VERSION);
+        data.put("privacyPolicyVersion", ProtectedContentPolicy.POLICY_VERSION);
+        data.put("fileCapabilityPolicyVersion", FileCapabilityPolicy.POLICY_VERSION);
+        data.put("ragConfigHash", currentRagConfigHash());
+        data.put("workspaceRootHash", Hash.sha1Hex(root.toAbsolutePath().normalize().toString()));
+        data.put("createdAt", Instant.now().toString());
+        data.put("talosVersion", BuildInfo.version());
+        JSON.writerWithDefaultPrettyPrinter().writeValue(metadata.toFile(), data);
+    }
+
+    private String currentRagConfigHash() {
+        try {
+            return Hash.sha1Hex(JSON.writeValueAsString(CfgUtil.map(cfg.data.get("rag"))));
+        } catch (Exception e) {
+            return Hash.sha1Hex(String.valueOf(CfgUtil.map(cfg.data.get("rag"))));
+        }
+    }
+
+    private static int intValue(Object value) {
+        if (value instanceof Number number) return number.intValue();
+        try {
+            return Integer.parseInt(String.valueOf(value));
+        } catch (Exception e) {
+            return -1;
+        }
     }
 
     /**

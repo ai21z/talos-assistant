@@ -77,3 +77,18 @@ Index invalidation can be disruptive. If deferred, retrieval-time sanitization i
 - `src/main/java/dev/talos/tools/impl/RetrieveTool.java`
 - `src/main/resources/config/default-config.yaml`
 
+## 2026-05-15 hardening update
+
+Implemented:
+
+- `ProtectedContentPolicy.POLICY_VERSION`
+- `FileCapabilityPolicy.POLICY_VERSION`
+- RAG index metadata file: `talos-index-metadata.json`
+- metadata fields for schema, privacy policy, file-capability policy, RAG config hash, workspace root hash, creation time, and Talos version
+- stale/missing-policy metadata detection
+- rebuild-before-retrieval behavior in `RagService`
+
+Still open:
+
+- Broader tests for old protected chunks, config-hash changes, and rebuild failure modes.
+- User-facing stale-index message when automatic rebuild is not possible.
