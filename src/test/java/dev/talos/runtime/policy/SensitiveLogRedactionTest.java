@@ -2,6 +2,8 @@ package dev.talos.runtime.policy;
 
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -65,5 +67,62 @@ class SensitiveLogRedactionTest {
         assertFalse(rendered.contains("secrets/private-notes.md"));
         assertTrue(rendered.contains("API_TOKEN=[redacted]"));
         assertTrue(rendered.contains("<protected-path>"));
+    }
+
+    @Test
+    void all_tool_execution_debug_params_are_sanitized() throws Exception {
+        String source = source("src/main/java/dev/talos/runtime/toolcall/ToolCallExecutionStage.java");
+
+        assertTrue(source.contains("SafeLogFormatter.parameters(effective.parameters())"), source);
+    }
+
+    @Test
+    void log_callsite_toolcallparser_malformed_payload_redacts_canary() throws Exception {
+        String source = source("src/main/java/dev/talos/runtime/ToolCallParser.java");
+
+        assertTrue(source.contains("SafeLogFormatter.value(json)"), source);
+        assertFalse(source.contains("LOG.warn(\"tool_call missing 'name' field: {}\", json)"), source);
+    }
+
+    @Test
+    void log_callsite_json_session_store_redacts_exception_message() throws Exception {
+        String source = source("src/main/java/dev/talos/runtime/JsonSessionStore.java");
+
+        assertTrue(source.contains("SafeLogFormatter.throwableMessage(e)"), source);
+        assertFalse(source.contains("e.getMessage()"), source);
+    }
+
+    @Test
+    void log_callsite_provider_exception_redacts_canary() throws Exception {
+        String compat = source("src/main/java/dev/talos/engine/compat/CompatChatClient.java");
+        String ollama = source("src/main/java/dev/talos/engine/ollama/OllamaChatClient.java");
+
+        assertTrue(compat.contains("SafeLogFormatter.throwableMessage(e)"), compat);
+        assertTrue(ollama.contains("SafeLogFormatter.throwableMessage(e)"), ollama);
+    }
+
+    @Test
+    void no_log_callsite_uses_raw_exception_message() throws Exception {
+        try (var paths = Files.walk(Path.of("src/main/java"))) {
+            var offenders = paths
+                    .filter(path -> path.toString().endsWith(".java"))
+                    .flatMap(path -> {
+                        try {
+                            return Files.readAllLines(path).stream()
+                                    .filter(line -> line.contains("LOG."))
+                                    .filter(line -> line.contains("getMessage()") || line.contains("e.toString()"))
+                                    .filter(line -> !line.contains("SafeLogFormatter"))
+                                    .map(line -> path + ": " + line.strip());
+                        } catch (Exception e) {
+                            throw new RuntimeException(e);
+                        }
+                    })
+                    .toList();
+            assertTrue(offenders.isEmpty(), offenders.toString());
+        }
+    }
+
+    private static String source(String path) throws Exception {
+        return Files.readString(Path.of(path));
     }
 }

@@ -70,3 +70,8 @@ Continue converting risky call sites to `SafeLogFormatter` or more specific stru
 - `src/test/java/dev/talos/runtime/policy/SensitiveLogRedactionTest.java`
 - `work-cycle-docs/reports/log-redaction-audit.md`
 
+## 2026-05-15 final pre-beta update
+
+High-risk raw exception-message log call sites were converted to `SafeLogFormatter` in this pass, including parser, session/turn persistence, RAG/index, provider parse, and retry/failure paths. `SensitiveLogRedactionTest.no_log_callsite_uses_raw_exception_message` now source-scans for raw `LOG.* getMessage()`/`e.toString()` patterns without safe formatting.
+
+This ticket remains open because live provider/backend failure logs have not been exercised under the two-model audit and command/provider failure paths still need runtime log-capture evidence.

@@ -512,7 +512,7 @@ public final class ToolCallParser {
         JsonNode root = MAPPER.readTree(json);
         ToolCall call = parseJsonNode(root);
         if (call == null) {
-            LOG.warn("tool_call missing 'name' field: {}", json);
+            LOG.warn("tool_call missing 'name' field: {}", SafeLogFormatter.value(json));
         }
         return call;
     }

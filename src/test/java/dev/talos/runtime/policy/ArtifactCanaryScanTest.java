@@ -3,6 +3,8 @@ package dev.talos.runtime.policy;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -129,4 +131,71 @@ class ArtifactCanaryScanTest {
         assertEquals(1, findings.size());
         assertTrue(findings.getFirst().path().endsWith("report.md"));
     }
+
+    @Test
+    void artifact_scan_task_fails_on_prompt_debug_canary(@TempDir Path tempDir) throws Exception {
+        Path promptDebug = Files.createDirectories(tempDir.resolve("prompt-debug"));
+        Files.writeString(promptDebug.resolve("turn.md"), "FILE_DISCOVERED_CANARY_TASK_PROMPT\n");
+
+        RunResult result = runCli("--runtime", "--root", promptDebug.toString());
+
+        assertEquals(2, result.code());
+        assertTrue(result.stderr().contains("turn.md:1"), result.stderr());
+        assertTrue(result.stderr().contains("[redacted-canary]"), result.stderr());
+        assertFalse(result.stderr().contains("FILE_DISCOVERED_CANARY_TASK_PROMPT"), result.stderr());
+    }
+
+    @Test
+    void artifact_scan_task_accepts_allowlisted_fixture(@TempDir Path tempDir) throws Exception {
+        Path fixture = tempDir.resolve("fixture.txt");
+        Files.writeString(fixture, "FILE_DISCOVERED_CANARY_TASK_ALLOW\n");
+
+        RunResult result = runCli("--runtime", "--root", tempDir.toString(), "--allow", fixture.toString());
+
+        assertEquals(0, result.code(), result.stderr());
+    }
+
+    @Test
+    void artifact_scan_task_scans_manual_testing_when_targeted(@TempDir Path tempDir) throws Exception {
+        Path manual = Files.createDirectories(tempDir.resolve("local/manual-testing/audit"));
+        Files.writeString(manual.resolve("provider-body.json"), "{\"x\":\"FILE_DISCOVERED_CANARY_TASK_MANUAL\"}\n");
+
+        RunResult result = runCli("--runtime", "--root", manual.toString());
+
+        assertEquals(2, result.code());
+        assertTrue(result.stderr().contains("provider-body.json:1"), result.stderr());
+    }
+
+    @Test
+    void artifact_scan_task_scans_manual_workspaces_when_targeted(@TempDir Path tempDir) throws Exception {
+        Path manual = Files.createDirectories(tempDir.resolve("local/manual-workspaces/audit"));
+        Files.writeString(manual.resolve("trace.log"), "FILE_DISCOVERED_CANARY_TASK_WORKSPACE\n");
+
+        RunResult result = runCli("--runtime", "--root", manual.toString());
+
+        assertEquals(2, result.code());
+        assertTrue(result.stderr().contains("trace.log:1"), result.stderr());
+    }
+
+    @Test
+    void artifact_scan_task_does_not_scan_compiled_classes(@TempDir Path tempDir) throws Exception {
+        Path classes = Files.createDirectories(tempDir.resolve("classes"));
+        Files.writeString(classes.resolve("Fake.class"), "FILE_DISCOVERED_CANARY_TASK_CLASS\n");
+
+        RunResult result = runCli("--runtime", "--root", tempDir.toString());
+
+        assertEquals(0, result.code(), result.stderr());
+    }
+
+    private static RunResult runCli(String... args) {
+        ByteArrayOutputStream stdout = new ByteArrayOutputStream();
+        ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+        int code = ArtifactCanaryScanCli.run(
+                List.of(args),
+                new PrintStream(stdout),
+                new PrintStream(stderr));
+        return new RunResult(code, stdout.toString(), stderr.toString());
+    }
+
+    private record RunResult(int code, String stdout, String stderr) {}
 }

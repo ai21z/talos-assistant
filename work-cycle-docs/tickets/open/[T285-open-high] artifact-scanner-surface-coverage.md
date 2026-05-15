@@ -69,3 +69,12 @@ Preserve the broad scan for current generated output and add targeted scans wher
 - `src/main/java/dev/talos/runtime/policy/ArtifactCanaryScanner.java`
 - `src/test/java/dev/talos/runtime/policy/ArtifactCanaryScanTest.java`
 
+## 2026-05-15 final pre-beta update
+
+Added `ArtifactCanaryScanCli` and Gradle task `checkRuntimeArtifactCanaries` for targeted release scans of live-audit artifact directories:
+
+```powershell
+./gradlew.bat checkRuntimeArtifactCanaries -PartifactScanRoots="local/manual-testing/<audit-id>,local/manual-workspaces/<audit-id>" --no-daemon
+```
+
+Follow-up ticket: T288.

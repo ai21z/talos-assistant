@@ -156,7 +156,7 @@ public class RagService {
                     qvec = emb.embed(query);
                 } catch (Exception e) {
                     // If embeddings fail, proceed BM25-only but record why
-                    embedFailReason = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                    embedFailReason = SafeLogFormatter.throwableMessage(e);
                     LOG.debug("Embedding failed, proceeding BM25-only: {}", embedFailReason);
                 }
             }
@@ -184,7 +184,7 @@ public class RagService {
         } catch (Exception e) {
             // Log the failure so it's visible in debug/audit, but don't explode the CLI
             String reason = SafeLogFormatter.throwableMessage(e);
-            LOG.warn("Retrieval pipeline failed: {}", reason, e);
+            LOG.warn("Retrieval pipeline failed: {}", reason);
             return new Prepared(snippets, citations, trace, reason);
         }
 
@@ -343,8 +343,8 @@ public class RagService {
             System.out.println();
 
         } catch (Exception e) {
-            LOG.error("Lazy indexing failed: {}", SafeLogFormatter.throwableMessage(e), e);
-            System.err.println("\rIndexing failed: " + e.getMessage());
+            LOG.error("Lazy indexing failed: {}", SafeLogFormatter.throwableMessage(e));
+            System.err.println("\rIndexing failed: " + SafeLogFormatter.throwableMessage(e));
         } finally {
             indexingNow.set(false);
         }

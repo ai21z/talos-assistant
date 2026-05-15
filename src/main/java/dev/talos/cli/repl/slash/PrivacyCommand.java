@@ -60,7 +60,8 @@ public final class PrivacyCommand implements Command {
                 + "  protected read default scope: " + ProtectedReadScopePolicy.defaultScope(cfg) + "\n"
                 + "  approved protected reads can enter model context: " + (sendToModel ? "yes" : "no") + "\n"
                 + "  RAG/retrieve in private mode: " + (ragInPrivate ? "enabled" : "disabled") + "\n"
-                + "  raw artifact persistence: " + (persistRaw ? "on" : "off") + "\n";
+                + "  raw artifact persistence: " + (persistRaw ? "on" : "off") + "\n"
+                + "  persistence: current session/config state only; edit ~/.talos/config.yaml for persistent defaults\n";
     }
 
     private static String helpText() {
@@ -69,12 +70,15 @@ public final class PrivacyCommand implements Command {
                   Show current privacy mode, model-context handoff, RAG/retrieve, and artifact persistence settings.
 
                 /privacy private on
-                  Switch this session to private mode. Approved protected reads default to LOCAL_DISPLAY_ONLY:
+                  Switch the current session/config state to private mode. Approved protected reads default to LOCAL_DISPLAY_ONLY:
                   content is read locally after approval but withheld from model context and persisted artifacts.
                   RAG/retrieve is disabled by default in private mode.
 
                 /privacy private off
-                  Restore developer/default mode. Approved direct protected reads may enter model context.
+                  Restore developer/default mode for the current session/config state. Approved direct protected reads may enter model context.
+
+                Persistence
+                  This command does not write ~/.talos/config.yaml. Edit ~/.talos/config.yaml for persistent defaults.
 
                 Private mode keeps prompt-debug, provider-body captures, traces, sessions, logs, and command
                 stdout/stderr redacted by default. It does not make Talos ready for tax, health, legal,

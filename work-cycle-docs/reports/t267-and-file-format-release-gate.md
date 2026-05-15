@@ -4,7 +4,7 @@
 
 Not release-ready.
 
-The deterministic hardening work improved the developer/text-project beta boundary. Private-document beta remains blocked: the two-model live prompt-bank audit has not run in this pass, private mode still needs broader live coverage, and Talos still has no local PDF/Office/image/archive extraction.
+The deterministic hardening work improved the developer/text-project beta boundary. Private-document beta remains blocked: the two-model live prompt-bank audit has not run in this pass, private mode still needs broader live coverage, and Talos still has no local PDF/Office/image/archive extraction. Final pre-beta updates added exact `/privacy` persistence wording, tokenized sensitive-folder warnings, stronger log call-site redaction, a targeted live-audit artifact scan task, and an executable live-audit preflight.
 
 ## 2. Source crosscheck summary
 
@@ -28,12 +28,18 @@ Fixed in this pass:
 - Stale or missing-policy RAG metadata causes rebuild before retrieval.
 - Unsupported-format final-answer correction is covered for scripted summarize/compare fabrication cases.
 - Bounded Ollama probe subprocesses prevent `TerminalFirstRunTest` from hanging the unit-test gate.
+- `/privacy` status/help now states changes are current session/config state only and do not write `~/.talos/config.yaml`.
+- Sensitive workspace detection no longer treats `id` as an arbitrary substring in ordinary names.
+- High-risk raw exception-message log call sites now use `SafeLogFormatter` and are source-guarded by tests.
+- `checkRuntimeArtifactCanaries` provides a targeted scan command for live-audit artifacts.
+- `scripts/run-t267-live-audit.ps1` provides a reproducible PASS/BLOCKED model/backend preflight.
+- Initial private-mode scripted e2e tests cover approved local-display-only `.env` reads and grep canary omission.
 
 Still open:
 
-- Two-model live audit not run in this pass.
+- Two-model live audit not run in this pass; current preflight remains BLOCKED because Qwen is not configured.
 - Private mode now has a minimal `/privacy` REPL UX and warning-only sensitive workspace detection, but it still lacks live prompt-bank evidence.
-- Artifact scan is CI-grade for controlled generated surfaces, but legacy ignored manual audit folders are deliberately skipped in the unit scan.
+- Artifact scan is CI-grade for controlled generated surfaces and now has a targeted live-audit scan task, but that task has not been run on completed live-audit artifacts because the live audit has not run.
 
 ## 4. Unsupported-format status
 
@@ -59,7 +65,7 @@ Still open:
 | local turn trace | Central policy covers canaries/private markers. | Existing trace tests | Pass for tested boundary |
 | session JSON | Redacted through session persistence path. | Existing session tests | Pass for tested boundary |
 | turn JSONL | Redacted for tested turn records. | Existing turn-log tests | Pass for tested boundary |
-| logs | Tool params and command output now use central redaction helpers. | `SensitiveLogRedactionTest` | Pass for focused boundary |
+| logs | Tool params, command output, high-risk exception-message logs, session/turn persistence logs, and provider parse logs use central safe formatting in tested/source-scanned paths. | `SensitiveLogRedactionTest`, `log-redaction-audit.md` | Focused pass |
 | RAG index | New indexes write policy metadata; stale/missing metadata rebuilds; dirty-index integration covers old protected chunks. | `IndexerPolicyMetadataTest`, `RagDirtyIndexIntegrationTest` | Focused pass |
 | final answer | Unsupported summarize/compare fabrication guarded in focused tests. | `UnsupportedFinalAnswerTruthfulnessTest` | Partial until live audit |
 
@@ -89,20 +95,24 @@ Forbidden claims unless all private-document gates pass:
 
 ## 7. Tickets created/updated
 
-T267-T285 are open/updated for indirect-read safety, unsupported-format truthfulness, RAG policy metadata, artifact scanning, approved protected-read scope, log/parameter redaction, private-mode UX, source crosscheck discipline, artifact scanner surface coverage, and live audit.
+T267-T289 are open/updated for indirect-read safety, unsupported-format truthfulness, RAG policy metadata, artifact scanning, approved protected-read scope, log/parameter redaction, private-mode UX, source crosscheck discipline, artifact scanner surface coverage, live audit, model setup, detector tokenization, release artifact scan task, and private-mode scripted e2e coverage.
 
 ## 8. Tests run
 
-- `./gradlew.bat test --tests "*ProtectedReadScope*" --tests "*Privacy*" --tests "*SensitiveFolder*" --tests "*SensitiveWorkspaceDetector*" --tests "*SensitiveLog*" --tests "*ArtifactCanary*" --tests "*IndexerPolicyMetadata*" --tests "*Rag*Dirty*" --tests "*UnsupportedFinalAnswer*" --tests "*Config*Privacy*" --no-daemon` - passed.
+- `./gradlew.bat test --tests "*ProtectedReadScope*" --tests "*PrivacyCommand*" --tests "*SensitiveWorkspaceDetector*" --tests "*SensitiveLog*" --tests "*ArtifactCanary*" --tests "*ConfigPrivacyDefaults*" --tests "*Rag*Dirty*" --tests "*UnsupportedFinalAnswer*" --tests "*ReadmePrivacy*" --no-daemon` - passed.
+- `./gradlew.bat e2eTest --tests "*PrivateModeScriptedE2e*" --no-daemon` - passed.
+- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-t267-live-audit.ps1 -PreflightOnly` - BLOCKED as expected because Qwen is missing; prompt bank not run.
+- `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=C:\Users\arisz\Projects\LOQ\loqj-cli\local\manual-testing\t267-live-audit-20260515-215132" --no-daemon` - passed.
 - `./gradlew.bat clean check e2eTest --no-daemon` - passed.
 
 ## 9. Tests not run
 
-- Two-model live Talos prompt-bank audit not run in this pass. `ollama list` crashed with access violation `0xc0000005`, and local Talos config showed GPT-OSS only, not the required Qwen/GPT-OSS pair.
+- Two-model live Talos prompt-bank audit not run in this pass. Prior `ollama list` crashed with access violation `0xc0000005`; current preflight found GPT-OSS configured, managed llama.cpp signal present, Qwen missing, and Ollama blocked.
 
 ## 10. Remaining blockers
 
 - Not ready for sensitive personal paperwork positioning.
 - Live two-model audit still required.
-- Private mode needs broader live/e2e tests.
+- Private mode needs broader live prompt-bank evidence.
+- Targeted runtime artifact scan must be run against completed live-audit artifacts.
 - Local PDF/Office/image/OCR/archive extraction is not implemented.

@@ -2,9 +2,18 @@
 
 ## Status
 
-Not run in this pass.
+Not run in this pass. A preflight helper now exists:
 
-Reason: this hardening pass focused on deterministic release-gate gaps and did not start the local Talos model backends or run the 32-prompt two-model live audit. No release-ready claim may rely on this report.
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-t267-live-audit.ps1 -PreflightOnly
+```
+
+The preflight creates `local/manual-testing/<audit-id>/LIVE-AUDIT-PREFLIGHT.md` and reports one of:
+
+- `PASS`: both required model profiles/backend signals are available.
+- `BLOCKED`: one or both required models/backends are missing or failing.
+
+Reason for current status: the preflight found the GPT-OSS profile, did not find the Qwen profile, and did not execute the prompt bank. No release-ready claim may rely on this report.
 
 ## Required models
 
@@ -79,6 +88,16 @@ Run each prompt against both models and capture final answer, tool calls, trace,
 30. Explain why `scripts.js` was not edited.
 31. Run bounded verification command if available.
 32. Report exactly what changed.
+
+## Required artifact scan
+
+After the prompt bank, run:
+
+```powershell
+./gradlew.bat checkRuntimeArtifactCanaries -PartifactScanRoots="local/manual-testing/<audit-id>,local/manual-workspaces/<audit-id>" --no-daemon
+```
+
+The targeted scan must cover prompt-debug, provider-body JSON, traces, sessions, turn JSONL, command-output captures, and generated audit reports. Do not commit raw live-audit artifacts.
 
 ## Hard fail rules
 

@@ -75,3 +75,10 @@ Expand `/privacy` integration into general status/help surfaces and add e2e/live
 - `src/main/java/dev/talos/runtime/policy/SensitiveWorkspaceDetector.java`
 - `README.md`
 
+## 2026-05-15 final pre-beta update
+
+- `/privacy` status/help now states that command changes are current session/config state only and do not write `~/.talos/config.yaml`.
+- README now says to edit `~/.talos/config.yaml` for persistent private-mode defaults.
+- `SensitiveWorkspaceDetector` now avoids false positives for `valid-project` and `grid-ui` while still warning for tokenized `id-documents`.
+- Initial private-mode scripted e2e coverage was added.
+- Follow-up tickets: T287 and T289.

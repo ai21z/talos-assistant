@@ -65,3 +65,6 @@ Fix/confirm local model setup, then execute the runbook into a fresh ignored aud
 - `work-cycle-docs/reports/t267-live-two-model-audit.md`
 - `work-cycle-docs/reports/t267-live-two-model-audit-results.md`
 
+## 2026-05-15 final pre-beta update
+
+The live-audit results report now records the executable preflight command and the current BLOCKED result. No prompt-bank prompts were executed.

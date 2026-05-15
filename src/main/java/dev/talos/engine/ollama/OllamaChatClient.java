@@ -2,6 +2,7 @@ package dev.talos.engine.ollama;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.talos.runtime.policy.SafeLogFormatter;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatMessage.NativeToolCall;
@@ -208,7 +209,8 @@ final class OllamaChatClient {
                     JsonNode schemaNode = mapper.readTree(spec.parametersSchemaJson());
                     fnDef.put("parameters", schemaNode);
                 } catch (Exception e) {
-                    LOG.warn("Failed to parse parameters schema for tool '{}': {}", spec.name(), e.getMessage());
+                    LOG.warn("Failed to parse parameters schema for tool '{}': {}",
+                            SafeLogFormatter.value(spec.name()), SafeLogFormatter.throwableMessage(e));
                     fnDef.put("parameters", Map.of("type", "object", "properties", Map.of()));
                 }
             } else {
@@ -378,7 +380,9 @@ final class OllamaChatClient {
                         String textContent = msg.path("content").asText("");
                         if (textContent != null && !textContent.isBlank()) {
                             LOG.debug("Stream: tool_calls chunk also had text content: {}",
-                                    textContent.length() > 60 ? textContent.substring(0, 57) + "..." : textContent);
+                                    SafeLogFormatter.text(textContent.length() > 60
+                                            ? textContent.substring(0, 57) + "..."
+                                            : textContent));
                         }
                         List<NativeToolCall> nativeCalls = parseNativeToolCalls(toolCallsNode);
                         if (!nativeCalls.isEmpty()) {
@@ -387,7 +391,7 @@ final class OllamaChatClient {
                         }
                     }
                 } catch (Exception e) {
-                    LOG.warn("Failed to parse tool_calls from stream chunk: {}", e.getMessage());
+                    LOG.warn("Failed to parse tool_calls from stream chunk: {}", SafeLogFormatter.throwableMessage(e));
                 }
             }
 

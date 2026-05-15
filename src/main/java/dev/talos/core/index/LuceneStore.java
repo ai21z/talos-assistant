@@ -5,6 +5,7 @@ import dev.talos.core.ingest.MediaType;
 import dev.talos.core.ingest.SourceFormat;
 import dev.talos.core.ingest.SourceIdentity;
 import dev.talos.core.ingest.SourceType;
+import dev.talos.runtime.policy.SafeLogFormatter;
 import dev.talos.spi.CorpusStore;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
@@ -445,7 +446,8 @@ public class LuceneStore implements AutoCloseable, CorpusStore {
             TopDocs hits = s.search(combined, 1);
             return hits.scoreDocs.length > 0;
         } catch (Exception e) {
-            LOG.debug("Error checking file freshness for {}: {}", filePath, e.getMessage());
+            LOG.debug("Error checking file freshness for {}: {}",
+                    SafeLogFormatter.value(filePath), SafeLogFormatter.throwableMessage(e));
             return false;
         } finally {
             if (s != null) {
@@ -462,7 +464,8 @@ public class LuceneStore implements AutoCloseable, CorpusStore {
             Query pathPrefix = new PrefixQuery(new Term(F_PATH, filePath + "#"));
             writer.deleteDocuments(pathPrefix);
         } catch (IOException e) {
-            LOG.warn("Failed to remove chunks for {}: {}", filePath, e.getMessage());
+            LOG.warn("Failed to remove chunks for {}: {}",
+                    SafeLogFormatter.value(filePath), SafeLogFormatter.throwableMessage(e));
         }
     }
 

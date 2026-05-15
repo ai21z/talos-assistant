@@ -12,6 +12,7 @@ import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.runtime.policy.ActionObligation;
 import dev.talos.runtime.policy.ConditionalReviewFixPolicy;
 import dev.talos.runtime.policy.ResponseObligationVerifier;
+import dev.talos.runtime.policy.SafeLogFormatter;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
@@ -83,7 +84,7 @@ public final class ToolCallRepromptStage {
             state.currentText = failurePolicyStopMessage(state.failureDecision);
             state.currentNativeCalls = List.of();
             LOG.debug("Stopping tool-call loop after stale edit retry ignored reread requirement for {}",
-                    state.staleEditRereadIgnoredPath);
+                    SafeLogFormatter.value(state.staleEditRereadIgnoredPath));
             return false;
         }
 
@@ -304,7 +305,8 @@ public final class ToolCallRepromptStage {
         } catch (EngineException.ContextBudgetExceeded budget) {
             return stopAfterContextBudgetExceeded(state, budget, "tool-call loop continuation");
         } catch (EngineException.ConnectionFailed cf) {
-            LOG.warn("Ollama not reachable during tool-call loop iteration {}: {}", state.iterations, cf.getMessage());
+            LOG.warn("Ollama not reachable during tool-call loop iteration {}: {}",
+                    state.iterations, SafeLogFormatter.throwableMessage(cf));
             state.currentText = "[Ollama not reachable — tool loop aborted. " + cf.guidance() + "]";
             state.currentNativeCalls = List.of();
             return false;
@@ -314,7 +316,8 @@ public final class ToolCallRepromptStage {
             state.currentNativeCalls = List.of();
             return false;
         } catch (EngineException.Transient tr) {
-            LOG.warn("Transient error during tool-call loop iteration {}: {}", state.iterations, tr.getMessage());
+            LOG.warn("Transient error during tool-call loop iteration {}: {}",
+                    state.iterations, SafeLogFormatter.throwableMessage(tr));
             try {
                 Thread.sleep(400);
                 LlmClient.StreamResult retryResult =
@@ -349,12 +352,14 @@ public final class ToolCallRepromptStage {
                 return false;
             }
         } catch (EngineException ee) {
-            LOG.warn("Engine error during tool-call loop iteration {}: {}", state.iterations, ee.getMessage());
+            LOG.warn("Engine error during tool-call loop iteration {}: {}",
+                    state.iterations, SafeLogFormatter.throwableMessage(ee));
             state.currentText = "[Engine error during tool loop: " + ee.getMessage() + "]";
             state.currentNativeCalls = List.of();
             return false;
         } catch (Exception e) {
-            LOG.warn("LLM call failed during tool-call loop iteration {}: {}", state.iterations, e.getMessage());
+            LOG.warn("LLM call failed during tool-call loop iteration {}: {}",
+                    state.iterations, SafeLogFormatter.throwableMessage(e));
             state.currentText = "(error during follow-up LLM call: " + e.getMessage() + ")";
             state.currentNativeCalls = List.of();
             return false;
@@ -903,7 +908,8 @@ public final class ToolCallRepromptStage {
         } catch (EngineException.ContextBudgetExceeded budget) {
             return stopAfterContextBudgetExceeded(state, budget, retryName);
         } catch (EngineException.ConnectionFailed cf) {
-            LOG.warn("Ollama not reachable during {}: {}", retryName, cf.getMessage());
+            LOG.warn("Ollama not reachable during {}: {}",
+                    SafeLogFormatter.value(retryName), SafeLogFormatter.throwableMessage(cf));
             state.currentText = "[Ollama not reachable — tool loop aborted. " + cf.guidance() + "]";
             state.currentNativeCalls = List.of();
             return false;
@@ -914,12 +920,14 @@ public final class ToolCallRepromptStage {
             state.currentNativeCalls = List.of();
             return false;
         } catch (EngineException ee) {
-            LOG.warn("Engine error during {}: {}", retryName, ee.getMessage());
+            LOG.warn("Engine error during {}: {}",
+                    SafeLogFormatter.value(retryName), SafeLogFormatter.throwableMessage(ee));
             state.currentText = "[Engine error during tool loop: " + ee.getMessage() + "]";
             state.currentNativeCalls = List.of();
             return false;
         } catch (Exception e) {
-            LOG.warn("LLM call failed during {}: {}", retryName, e.getMessage());
+            LOG.warn("LLM call failed during {}: {}",
+                    SafeLogFormatter.value(retryName), SafeLogFormatter.throwableMessage(e));
             state.currentText = "(error during follow-up LLM call: " + e.getMessage() + ")";
             state.currentNativeCalls = List.of();
             return false;
@@ -1294,7 +1302,7 @@ public final class ToolCallRepromptStage {
             }
             return stripped;
         } catch (Exception e) {
-            LOG.warn("Response-only synthesis after denied mutation failed: {}", e.getMessage());
+            LOG.warn("Response-only synthesis after denied mutation failed: {}", SafeLogFormatter.throwableMessage(e));
             return deniedMutationStopMessage();
         } finally {
             if (anchorIndex < state.messages.size()) {

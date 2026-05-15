@@ -1,5 +1,6 @@
 package dev.talos.app.ui;
 
+import dev.talos.runtime.policy.SafeLogFormatter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -128,7 +129,8 @@ public final class TerminalFirstRun {
             int code = p.waitFor();
             return code == 0;
         } catch (Exception e) {
-            LOG.warn("Failed to pull model {}: {}", model, e.getMessage());
+            LOG.warn("Failed to pull model {}: {}",
+                    SafeLogFormatter.value(model), SafeLogFormatter.throwableMessage(e));
             return false;
         }
     }

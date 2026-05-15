@@ -32,6 +32,7 @@ import dev.talos.runtime.policy.EvidenceGate;
 import dev.talos.runtime.policy.ProviderRequestControlPolicy;
 import dev.talos.runtime.policy.ProtectedPathPolicy;
 import dev.talos.runtime.policy.ResponseObligationVerifier;
+import dev.talos.runtime.policy.SafeLogFormatter;
 import dev.talos.runtime.policy.UnsupportedDocumentMutationPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -404,7 +405,7 @@ public final class AssistantTurnExecutor {
         }
         if (ex instanceof EngineException.ConnectionFailed cf) {
             recordBackendFailureOutcome("BACKEND_CONNECTION_FAILED");
-            LOG.warn("Model engine not reachable: {}", cf.getMessage());
+            LOG.warn("Model engine not reachable: {}", SafeLogFormatter.throwableMessage(cf));
             String detail = actionableConnectionFailureDetail(cf);
             out.append("\n[Model engine not reachable - ");
             if (!detail.isBlank()) {
@@ -422,7 +423,7 @@ public final class AssistantTurnExecutor {
         }
         if (ex instanceof EngineException.Transient tr) {
             recordBackendFailureOutcome("BACKEND_TRANSIENT_ERROR");
-            LOG.warn("Transient engine error: {}", tr.getMessage());
+            LOG.warn("Transient engine error: {}", SafeLogFormatter.throwableMessage(tr));
             out.append("\n[").append(tr.guidance()).append("]\n");
             return;
         }
@@ -443,14 +444,14 @@ public final class AssistantTurnExecutor {
             return;
         }
         recordBackendFailureOutcome(engineFailureClassification(ex));
-        LOG.warn("Engine error: {}", ex.getMessage());
+        LOG.warn("Engine error: {}", SafeLogFormatter.throwableMessage(ex));
         out.append("\n[Engine error: ").append(ex.getMessage()).append("]\n");
     }
 
     private static void appendGenericLlmFailure(StringBuilder out, Throwable e) {
         recordBackendFailureOutcome("LLM_CALL_FAILED");
         String detail = e == null ? null : e.getMessage();
-        LOG.warn("LLM call failed: {}", detail);
+        LOG.warn("LLM call failed: {}", SafeLogFormatter.text(detail));
         out.append("\n[Error during LLM call")
                 .append(detail != null && !detail.isBlank() ? ": " + detail : "")
                 .append("]\n");
@@ -711,7 +712,7 @@ public final class AssistantTurnExecutor {
                     loop,
                     loop.summary());
         } catch (Exception e) {
-            LOG.warn("Read evidence handoff failed: {}", e.getMessage());
+            LOG.warn("Read evidence handoff failed: {}", SafeLogFormatter.throwableMessage(e));
             return new ReadEvidenceHandoffResult(answer, null, null);
         }
     }
@@ -803,7 +804,7 @@ public final class AssistantTurnExecutor {
                         ToolCallParser.stripToolCalls(retryText), null, null);
             }
         } catch (Exception e) {
-            LOG.warn("Read-only inspection retry failed: {}", e.getMessage());
+            LOG.warn("Read-only inspection retry failed: {}", SafeLogFormatter.throwableMessage(e));
         }
         return new ReadOnlyInspectionRetryResult(answer, null, null);
     }
@@ -3116,7 +3117,7 @@ public final class AssistantTurnExecutor {
             }
             LOG.warn("Synthesis retry still deflected. Returning original answer.");
         } catch (Exception e) {
-            LOG.warn("Synthesis retry failed: {}", e.getMessage());
+            LOG.warn("Synthesis retry failed: {}", SafeLogFormatter.throwableMessage(e));
         }
         return answer;
     }
@@ -3853,7 +3854,7 @@ public final class AssistantTurnExecutor {
                     null,
                     true);
         } catch (Exception e) {
-            LOG.warn("Missing-mutation retry failed: {}", e.getMessage());
+            LOG.warn("Missing-mutation retry failed: {}", SafeLogFormatter.throwableMessage(e));
         }
         LocalTurnTraceCapture.recordActionObligation(
                 obligation.name(),
@@ -4578,7 +4579,7 @@ public final class AssistantTurnExecutor {
                 return new InspectRetryResult(retryText, null, null);
             }
         } catch (Exception e) {
-            LOG.warn("Inspect-completeness retry failed: {}", e.getMessage());
+            LOG.warn("Inspect-completeness retry failed: {}", SafeLogFormatter.throwableMessage(e));
         }
         return new InspectRetryResult(answer, null, null);
     }
@@ -5535,7 +5536,7 @@ public final class AssistantTurnExecutor {
             LOG.warn("Grounding retry did not produce a substantive new answer. "
                     + "Annotating original.");
         } catch (Exception e) {
-            LOG.warn("Grounding retry failed: {}. Annotating original.", e.getMessage());
+            LOG.warn("Grounding retry failed: {}. Annotating original.", SafeLogFormatter.throwableMessage(e));
         }
         return UNGROUNDED_ANNOTATION + answer;
     }

@@ -173,7 +173,8 @@ public class Indexer {
                 try {
                     dim = cachedEmb.dimension();
                 } catch (Exception e) {
-                    LOG.warn("Embeddings dimension probe failed; falling back to BM25-only: {}", e.toString());
+                    LOG.warn("Embeddings dimension probe failed; falling back to BM25-only: {}",
+                            SafeLogFormatter.throwableMessage(e));
                     useVectors = false;
                 }
                 if (dim <= 0) {
@@ -309,7 +310,9 @@ public class Indexer {
                     }
                     for (Future<Void> f : futures) {
                         try { f.get(); }
-                        catch (ExecutionException ee) { LOG.warn("task failed", ee.getCause()); }
+                        catch (ExecutionException ee) {
+                            LOG.warn("task failed: {}", SafeLogFormatter.throwableMessage(ee.getCause()));
+                        }
                     }
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
