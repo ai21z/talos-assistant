@@ -8,6 +8,7 @@ import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.runtime.policy.ProtectedPathAliasNormalizer;
 import dev.talos.runtime.policy.ProtectedPathPolicy;
 import dev.talos.runtime.policy.ProtectedReadScopePolicy;
+import dev.talos.runtime.policy.SafeLogFormatter;
 import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -136,7 +137,7 @@ public final class ToolCallExecutionStage {
             emitProgress(effective.toolName(), "executing", pathHint);
             LOG.debug("  Executing tool: {} (params: {})",
                     effective.toolName(),
-                    ProtectedContentPolicy.sanitizeToolParameters(effective.parameters()));
+                    SafeLogFormatter.parameters(effective.parameters()));
 
             boolean isEditFile = "talos.edit_file".equals(effective.toolName());
             if (isEditFile
@@ -153,7 +154,7 @@ public final class ToolCallExecutionStage {
                         effective.toolName(), pathHint, false, true, false, "", diagnosticError,
                         null, ToolError.INVALID_PARAMS));
                 appendResultMessage(state, parsed.useNativePath(), i, diagnostic);
-                LOG.debug("Blocked edit_file for full-rewrite repair target {}", pathHint);
+                LOG.debug("Blocked edit_file for full-rewrite repair target {}", SafeLogFormatter.value(pathHint));
                 continue;
             }
 
@@ -170,7 +171,8 @@ public final class ToolCallExecutionStage {
                         effective.toolName(), pathHint, false, true, false, "", diagnosticError,
                         null, ToolError.INVALID_PARAMS));
                 appendResultMessage(state, parsed.useNativePath(), i, diagnostic);
-                LOG.debug("Blocked stale edit retry for path {} until read_file runs in a later iteration", pathHint);
+                LOG.debug("Blocked stale edit retry for path {} until read_file runs in a later iteration",
+                        SafeLogFormatter.value(pathHint));
                 continue;
             }
 
@@ -199,7 +201,7 @@ public final class ToolCallExecutionStage {
                             effective.toolName(), pathHint, false, true, false, "", diagnosticError,
                             null, ToolError.INVALID_PARAMS));
                     appendResultMessage(state, parsed.useNativePath(), i, diagnostic);
-                    LOG.debug("  Skipped duplicate failing edit_file call for path: {}", pathHint);
+                    LOG.debug("  Skipped duplicate failing edit_file call for path: {}", SafeLogFormatter.value(pathHint));
                     continue;
                 }
             }
@@ -214,7 +216,8 @@ public final class ToolCallExecutionStage {
                             + "Answer the user's question now using the evidence you already have."
                             + "\n[/tool_result]";
                     appendResultMessage(state, parsed.useNativePath(), i, diagnostic);
-                    LOG.debug("  Suppressed redundant {} call (sig: {})", effective.toolName(), readSig);
+                    LOG.debug("  Suppressed redundant {} call (sig: {})",
+                            effective.toolName(), SafeLogFormatter.value(readSig));
                     continue;
                 }
             }
@@ -249,7 +252,9 @@ public final class ToolCallExecutionStage {
                 appendResultMessage(state, parsed.useNativePath(), i,
                         ToolCallSupport.formatToolResult(effective, result));
                 LOG.debug("Blocked source-derived {} for {} until source target(s) are read: {}",
-                        effective.toolName(), pathHint, missingSourceEvidenceTargets);
+                        effective.toolName(),
+                        SafeLogFormatter.value(pathHint),
+                        SafeLogFormatter.value(missingSourceEvidenceTargets));
                 continue;
             }
 
@@ -386,9 +391,9 @@ public final class ToolCallExecutionStage {
 
             LOG.debug("  Tool {} -> {}", effective.toolName(),
                     result.success()
-                            ? "success (" + ProtectedContentPolicy.sanitizeText(
+                            ? "success (" + SafeLogFormatter.text(
                                     ToolCallSupport.truncateForLog(result.output())) + ")"
-                            : "error: " + ProtectedContentPolicy.sanitizeText(result.errorMessage()));
+                            : "error: " + SafeLogFormatter.text(result.errorMessage()));
         }
 
         return new IterationOutcome(
@@ -737,7 +742,7 @@ public final class ToolCallExecutionStage {
             try {
                 progressSink.onToolProgress(toolName, action, detail);
             } catch (Exception e) {
-                LOG.debug("Progress sink error (ignored): {}", e.getMessage());
+                LOG.debug("Progress sink error (ignored): {}", SafeLogFormatter.throwableMessage(e));
             }
         }
     }

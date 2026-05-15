@@ -13,7 +13,7 @@ Even after T267, Talos needs a clear mode for folders likely to contain tax, hea
 
 ## Evidence from current code
 
-Current protected-path behavior is tied to specific path names and direct read approval. It does not provide a user-facing private-folder mode state or stricter defaults for sensitive folders.
+Current protected-path behavior is tied to specific path names and direct read approval. This pass adds a minimal user-facing private mode, but broader live/e2e evidence is still missing for sensitive-folder positioning.
 
 ## Evidence from external/source crosscheck
 
@@ -46,7 +46,7 @@ Workspace mode classification, indexing defaults, grep/search/retrieve output, a
 
 ## Proposed implementation
 
-Design a `private-folder-mode` setting and runtime state that tightens read/search/retrieve behavior. Integrate with `ProtectedContentPolicy` and RAG defaults.
+Implement and expand a `private-folder-mode` setting and runtime state that tightens read/search/retrieve behavior. Integrate with `ProtectedContentPolicy`, RAG defaults, slash commands, and startup warnings.
 
 ## Tests
 
@@ -62,7 +62,7 @@ Design a `private-folder-mode` setting and runtime state that tightens read/sear
 
 ## Rollback / migration notes
 
-Private mode should be opt-in initially unless folder heuristics are highly reliable.
+Private mode remains opt-in. Folder heuristics warn only and must not silently switch modes.
 
 ## Open questions
 
@@ -75,17 +75,21 @@ Private mode should be opt-in initially unless folder heuristics are highly reli
 
 ## 2026-05-15 hardening update
 
-Implemented config-level V1:
+Implemented V1:
 
 - `privacy.mode = private`
 - private mode disables RAG retrieval/indexing by default
 - approved protected direct reads default to `LOCAL_DISPLAY_ONLY`
+- `/privacy status`
+- `/privacy private on`
+- `/privacy private off`
+- `/privacy help`
+- warning-only sensitive workspace detection
 
 Still open:
 
-- `/privacy private on/off` command or equivalent user-facing UX
-- visible private-mode status in help/status/tool-permission views
-- sensitive-folder warning heuristics
 - broader private-mode e2e tests
+- two-model live prompt-bank audit
+- UX polish for status/help outside the `/privacy` command
 
 This ticket remains a private-document release blocker.

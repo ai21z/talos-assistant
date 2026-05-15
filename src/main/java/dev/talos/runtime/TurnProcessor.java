@@ -19,6 +19,7 @@ import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.runtime.policy.ProtectedPathAliasNormalizer;
 import dev.talos.runtime.policy.ProtectedPathPolicy;
 import dev.talos.runtime.policy.ProtectedReadScopePolicy;
+import dev.talos.runtime.policy.SafeLogFormatter;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
@@ -670,7 +671,7 @@ public final class TurnProcessor {
             result = toolRegistry.execute(call, toolCtx);
         } catch (Exception e) {
             LOG.warn("Tool {} threw unexpected exception: {} — returning fail result instead of crashing turn",
-                    call.toolName(), ProtectedContentPolicy.sanitizeText(e.getMessage()));
+                    call.toolName(), SafeLogFormatter.throwableMessage(e));
             LOG.debug("Tool execution exception stack trace:", e);
             result = ToolResult.fail(ToolError.internal(
                     "Tool execution failed unexpectedly: "

@@ -41,4 +41,29 @@ class SensitiveLogRedactionTest {
         assertTrue(ProtectedContentPolicy.looksProtectedPathString("secrets/private-notes.md"));
         assertTrue(ProtectedContentPolicy.looksProtectedPathString("protected/private-notes.md"));
     }
+
+    @Test
+    void malformed_tool_payload_log_is_redacted() {
+        String payload = "{\"arguments\":{\"pattern\":\"FILE_DISCOVERED_CANARY_LOG_PAYLOAD\",\"path\":\".env\"}}";
+
+        String rendered = SafeLogFormatter.value(payload);
+
+        assertFalse(rendered.contains("FILE_DISCOVERED_CANARY_LOG_PAYLOAD"));
+        assertFalse(rendered.contains(".env"));
+        assertTrue(rendered.contains("[redacted-canary]"));
+        assertTrue(rendered.contains("<protected-path>"));
+    }
+
+    @Test
+    void exception_message_logs_redact_canaries() {
+        RuntimeException error = new RuntimeException(
+                "failed reading secrets/private-notes.md: API_TOKEN=FILE_DISCOVERED_CANARY_LOG_EXCEPTION");
+
+        String rendered = SafeLogFormatter.throwableMessage(error);
+
+        assertFalse(rendered.contains("FILE_DISCOVERED_CANARY_LOG_EXCEPTION"));
+        assertFalse(rendered.contains("secrets/private-notes.md"));
+        assertTrue(rendered.contains("API_TOKEN=[redacted]"));
+        assertTrue(rendered.contains("<protected-path>"));
+    }
 }

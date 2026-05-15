@@ -1,6 +1,6 @@
 # T278 - RAG Index Policy Versioning and Dirty Index Invalidation
 
-Status: open - metadata V1 implemented, broader rebuild/refusal tests still needed
+Status: open - metadata V1 implemented, focused dirty-index integration added; live audit still needed
 Severity: high
 Release gate: yes
 Branch: v0.9.0-beta-dev
@@ -19,6 +19,7 @@ Dirty historical RAG indexes may contain protected chunks. Retrieval-time saniti
 ## Evidence from tests/audits
 
 - `IndexerPolicyMetadataTest`
+- `RagDirtyIndexIntegrationTest`
 
 ## User impact
 
@@ -42,18 +43,22 @@ New indexes write policy metadata. Missing/stale metadata triggers rebuild or re
 
 ## Proposed implementation
 
-Metadata V1 is implemented. Add e2e dirty-index fixtures and failure-mode tests.
+Metadata V1 is implemented. This pass adds Lucene-backed dirty-index integration for missing metadata, old protected chunks, config-hash changes, and private-mode retrieval disablement. Add live prompt-bank coverage next.
 
 ## Tests
 
 - `index_metadata_written_on_reindex`
 - `index_missing_metadata_is_treated_dirty`
 - `index_old_privacy_policy_version_is_dirty`
+- `rag_missing_metadata_triggers_rebuild_and_removes_old_protected_chunks`
+- `rag_config_hash_change_triggers_rebuild`
+- `rag_private_mode_disables_lazy_indexing_by_default`
 
 ## Acceptance criteria
 
 - No stale index silently serves raw snippets.
 - User-facing message is clear when rebuild cannot happen.
+- Private mode does not lazily build/retrieve by default.
 
 ## Rollback / migration notes
 

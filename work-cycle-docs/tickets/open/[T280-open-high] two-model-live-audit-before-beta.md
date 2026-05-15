@@ -17,7 +17,10 @@ No code issue by itself. This is a release-process gate.
 
 ## Evidence from tests/audits
 
-- `work-cycle-docs/reports/t267-live-two-model-audit.md` records the runbook and marks execution not run.
+- `work-cycle-docs/reports/t267-live-two-model-audit.md` records the runbook.
+- `work-cycle-docs/reports/t267-live-two-model-audit-results.md` records that execution was not run in this pass.
+- `ollama list` crashed with access violation `0xc0000005`.
+- Local Talos config showed a GPT-OSS llama.cpp profile but no Qwen profile for the required pair.
 
 ## User impact
 
@@ -64,3 +67,4 @@ Raw audit artifacts must not be committed.
 ## Related files
 
 - `work-cycle-docs/reports/t267-live-two-model-audit.md`
+- `work-cycle-docs/reports/t267-live-two-model-audit-results.md`

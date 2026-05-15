@@ -26,9 +26,12 @@ public final class ArtifactCanaryScanner {
             ".log", ".trace", ".out", ".err", ".csv", ".tsv", ".html", ".xml",
             ".properties", ".conf", ".config");
 
-    private static final Set<String> SKIPPED_DIRECTORY_NAMES = Set.of(
+    private static final Set<String> ALWAYS_SKIPPED_DIRECTORY_NAMES = Set.of(
             ".git", ".gradle", "classes", "generated", "generated-sources",
-            "generated-test-sources", "test-results", "reports", "tmp", "jacoco");
+            "generated-test-sources", "jacoco");
+
+    private static final Set<String> BROAD_SCAN_SKIPPED_DIRECTORY_NAMES = Set.of(
+            "test-results", "reports", "tmp");
 
     public record Finding(Path path, int line, String snippet) {}
 
@@ -40,6 +43,15 @@ public final class ArtifactCanaryScanner {
     }
 
     public static List<Finding> scan(List<Path> roots, List<Path> allowlist) throws IOException {
+        return scanInternal(roots, allowlist, true);
+    }
+
+    public static List<Finding> scanRuntimeArtifacts(List<Path> roots, List<Path> allowlist) throws IOException {
+        return scanInternal(roots, allowlist, false);
+    }
+
+    private static List<Finding> scanInternal(List<Path> roots, List<Path> allowlist, boolean broadScan)
+            throws IOException {
         if (roots == null || roots.isEmpty()) return List.of();
         Set<Path> allowed = normalizedAllowlist(allowlist);
         List<Finding> findings = new ArrayList<>();
@@ -48,7 +60,7 @@ public final class ArtifactCanaryScanner {
             try (Stream<Path> stream = Files.walk(root)) {
                 for (Path path : stream
                         .filter(Files::isRegularFile)
-                        .filter(path -> !isUnderSkippedDirectory(path))
+                        .filter(path -> !isUnderSkippedDirectory(path, broadScan))
                         .filter(path -> !allowed.contains(normalize(path)))
                         .filter(ArtifactCanaryScanner::looksTextLike)
                         .toList()) {
@@ -97,15 +109,18 @@ public final class ArtifactCanaryScanner {
         return path.toAbsolutePath().normalize();
     }
 
-    private static boolean isUnderSkippedDirectory(Path path) {
+    private static boolean isUnderSkippedDirectory(Path path, boolean broadScan) {
         for (Path part : path) {
             String name = part.toString().toLowerCase(Locale.ROOT);
-            if (SKIPPED_DIRECTORY_NAMES.contains(name)) return true;
+            if (ALWAYS_SKIPPED_DIRECTORY_NAMES.contains(name)) return true;
+            if (broadScan && BROAD_SCAN_SKIPPED_DIRECTORY_NAMES.contains(name)) return true;
         }
         String normalized = path.toString().replace('\\', '/').toLowerCase(Locale.ROOT);
         if (normalized.startsWith("build/resources/") || normalized.contains("/build/resources/")) return true;
-        if (normalized.startsWith("local/manual-testing/") || normalized.contains("/local/manual-testing/")) return true;
-        if (normalized.startsWith("local/manual-workspaces/") || normalized.contains("/local/manual-workspaces/")) return true;
+        if (broadScan && (normalized.startsWith("local/manual-testing/")
+                || normalized.contains("/local/manual-testing/"))) return true;
+        if (broadScan && (normalized.startsWith("local/manual-workspaces/")
+                || normalized.contains("/local/manual-workspaces/"))) return true;
         return false;
     }
 

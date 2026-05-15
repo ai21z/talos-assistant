@@ -28,6 +28,7 @@ import dev.talos.runtime.TurnProcessor;
 import dev.talos.runtime.checkpoint.CheckpointService;
 import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ArtifactGoal;
+import dev.talos.runtime.policy.SensitiveWorkspaceDetector;
 import dev.talos.tools.FileUndoStack;
 import dev.talos.tools.ToolProgressSink;
 import dev.talos.tools.ToolRegistry;
@@ -354,7 +355,10 @@ public final class TalosBootstrap {
         String sessionNotice = restoreSummary.hasSavedSession()
                 ? buildRestoreNotice(restoreSummary)
                 : buildSavedSessionNotice(savedSessionSummary);
-        String startupNotice = joinStartupNotices(buildConfigNotice(cfg.getReport()), sessionNotice);
+        String startupNotice = joinStartupNotices(
+                buildConfigNotice(cfg.getReport()),
+                sessionNotice,
+                buildSensitiveWorkspaceNotice(workspace));
         return new ReplRouter(modes, turnProcessor, runtimeSession, ctx, render,
                               registry, workspace, quit, startupNotice);
     }
@@ -399,6 +403,7 @@ public final class TalosBootstrap {
         registry.register(new DebugCommand(rt));
         registry.register(new QuitCommand(quit));
         registry.register(new PolicyCommand());
+        registry.register(new PrivacyCommand(workspace));
         registry.register(new AuditToggleCommand());
         registry.register(new SecretCommand(cfg, ctx.audit()));
         registry.register(new ModelsCommand());
@@ -427,6 +432,11 @@ public final class TalosBootstrap {
         registry.register(new CheckpointCommand(workspace, checkpointService));
         // Session persistence
         registry.register(new SessionCommand(workspace, sessionStore));
+    }
+
+    private static String buildSensitiveWorkspaceNotice(Path workspace) {
+        var assessment = SensitiveWorkspaceDetector.assess(workspace);
+        return assessment.sensitive() ? assessment.warning() : "";
     }
 
     // ── Session reconciliation helpers ──────────────────────────────────
@@ -623,12 +633,15 @@ public final class TalosBootstrap {
                 + " could not be loaded. Run `talos status --verbose`, then use `talos setup models` to rewrite it.";
     }
 
-    private static String joinStartupNotices(String first, String second) {
-        String a = first == null ? "" : first.trim();
-        String b = second == null ? "" : second.trim();
-        if (a.isBlank()) return b;
-        if (b.isBlank()) return a;
-        return a + System.lineSeparator() + b;
+    private static String joinStartupNotices(String... notices) {
+        if (notices == null || notices.length == 0) return "";
+        java.util.List<String> lines = new java.util.ArrayList<>();
+        for (String notice : notices) {
+            if (notice != null && !notice.trim().isBlank()) {
+                lines.add(notice.trim());
+            }
+        }
+        return String.join(System.lineSeparator(), lines);
     }
 
     private static void syncActiveModelIntoConfig(Config cfg, String activeModel) {

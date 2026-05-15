@@ -14,11 +14,13 @@ Manual artifact scanning is not a release gate. Talos needs deterministic tests/
 ## Evidence from current code
 
 - `ArtifactCanaryScanner` scans text-like artifact files for explicit raw canaries and T275 secret values.
-- `ArtifactCanaryScanTest` exercises detection, allowlisting, and current generated roots.
+- `ArtifactCanaryScanner.scanRuntimeArtifacts(...)` applies narrower skip behavior for targeted runtime artifact directories.
+- `ArtifactCanaryScanTest` exercises detection, allowlisting, current generated roots, and targeted runtime artifact dirs.
 
 ## Evidence from tests/audits
 
 - Focused artifact scan test passed in this pass.
+- Targeted tests cover prompt-debug, provider body, session, trace, turn JSONL, command-output artifacts, generated reports, exact file/line reporting, and compiled-class skipping.
 
 ## User impact
 
@@ -50,6 +52,15 @@ JUnit path exists. Add a dedicated Gradle task if release engineering wants a na
 - `artifact_scan_detects_disallowed_file_discovered_canary`
 - `artifact_scan_allows_explicit_allowlisted_files`
 - `artifact_canary_scan_current_generated_artifacts_passes`
+- `artifact_scan_checks_prompt_debug_dir`
+- `artifact_scan_checks_provider_body_dir`
+- `artifact_scan_checks_session_dir`
+- `artifact_scan_checks_trace_dir`
+- `artifact_scan_checks_turn_jsonl_dir`
+- `artifact_scan_checks_command_output_artifacts`
+- `artifact_scan_does_not_hide_generated_reports_unless_allowlisted`
+- `artifact_scan_reports_exact_file_and_line`
+- `artifact_scan_ignores_compiled_classes_without_skipping_text_reports`
 
 ## Acceptance criteria
 

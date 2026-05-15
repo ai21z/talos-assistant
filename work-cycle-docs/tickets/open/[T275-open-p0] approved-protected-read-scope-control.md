@@ -1,6 +1,6 @@
 # T275 - Approved Protected Read Scope Control
 
-Status: open - runtime V1 implemented, UX/live-audit coverage still required
+Status: open - runtime V1 and minimal UX implemented, live-audit coverage still required
 Severity: P0 for private-document beta
 Release gate: yes
 Branch: v0.9.0-beta-dev
@@ -49,12 +49,18 @@ Protected direct-read approval, model context, provider-body capture, prompt-deb
 ## Proposed implementation
 
 Runtime V1 is implemented. Add user-facing `/privacy` UX and live-audit cases.
+Minimal `/privacy` UX is implemented in this pass; live-audit cases remain.
 
 ## Tests
 
 - `approved_protected_read_local_display_only_does_not_enter_model_context`
 - `approved_protected_read_send_to_model_requires_explicit_scope`
 - `approved_protected_read_persistence_is_redacted`
+- `private_mode_approved_protected_read_is_withheld_from_model_context`
+- `developer_mode_approved_protected_read_can_reach_model_context_explicit_risk`
+- `private_mode_send_to_model_requires_explicit_opt_in`
+- `private_mode_send_to_model_opt_in_allows_handoff_but_persistence_redacts`
+- `persist_raw_artifacts_false_even_when_send_to_model_true`
 
 ## Acceptance criteria
 

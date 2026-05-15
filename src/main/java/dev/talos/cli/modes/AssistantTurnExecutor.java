@@ -4707,9 +4707,13 @@ public final class AssistantTurnExecutor {
             ToolCallLoop.LoopResult loopResult) {
         if (loopResult == null || loopResult.toolOutcomes() == null) return answer;
         List<String> unsupportedPaths = unsupportedDocumentReadPaths(loopResult);
-        if (unsupportedPaths.isEmpty()) return answer;
-
         String current = answer == null ? "" : answer;
+        String searchNote = unsupportedSearchNoteIfNeeded(current, loopResult);
+        if (!searchNote.isBlank() && !current.toLowerCase(Locale.ROOT).contains("unsupported")) {
+            current = searchNote + "\n\n" + current.strip();
+        }
+        if (unsupportedPaths.isEmpty()) return current;
+
         String cleaned = removeUnsupportedDocumentContentClaims(
                 current,
                 unsupportedPaths,
@@ -4721,6 +4725,22 @@ public final class AssistantTurnExecutor {
         }
         if (cleaned.startsWith(note)) return cleaned;
         return note + "\n\n" + cleaned;
+    }
+
+    private static String unsupportedSearchNoteIfNeeded(String answer, ToolCallLoop.LoopResult loopResult) {
+        if (loopResult == null || loopResult.messages() == null) return "";
+        String current = answer == null ? "" : answer.strip().toLowerCase(Locale.ROOT);
+        if (!current.contains("no matches")) return "";
+        for (ChatMessage message : loopResult.messages()) {
+            if (message == null || message.content() == null) continue;
+            String content = message.content();
+            String lower = content.toLowerCase(Locale.ROOT);
+            if (!lower.contains("[tool_result: talos.grep]")) continue;
+            if (!lower.contains("skipped unsupported") && !lower.contains("search was limited")) continue;
+            return "Search was limited to searchable text files. Unsupported/binary files were skipped, "
+                    + "so Talos cannot truthfully claim there were no matches in those skipped files.";
+        }
+        return "";
     }
 
     private static List<String> unsupportedDocumentReadPaths(ToolCallLoop.LoopResult loopResult) {

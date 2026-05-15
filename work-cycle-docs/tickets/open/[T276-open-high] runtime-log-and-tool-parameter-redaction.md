@@ -14,8 +14,10 @@ Tool results may be sanitized while logs still persist raw tool parameters, comm
 ## Evidence from current code
 
 - `ProtectedContentPolicy.sanitizeToolParameters`, `sanitizeMap`, and `sanitizeForLog` exist.
+- `SafeLogFormatter` wraps log values, maps, protected path tokens, and exception messages.
 - `ToolCallExecutionStage` debug parameter/result logs use central sanitization.
 - `ProcessCommandRunner` command output redaction delegates to `ProtectedContentPolicy`.
+- `ToolCallParser`, `RagService`, and `Indexer` touched call sites use safe formatting for the high-risk paths updated in this pass.
 
 ## Evidence from tests/audits
 
@@ -50,6 +52,8 @@ Continue replacing raw log formatting with safe summaries and add focused tests 
 
 - `debug_log_sanitizes_tool_parameters`
 - `command_trace_sanitizes_stdout_stderr_canaries`
+- `malformed_tool_payload_log_is_redacted`
+- `exception_message_logs_redact_canaries`
 - future log-capture tests for approval and RAG trace summaries
 
 ## Acceptance criteria
@@ -68,5 +72,7 @@ Existing logs may already contain raw content; users should purge old debug arti
 ## Related files
 
 - `src/main/java/dev/talos/runtime/policy/ProtectedContentPolicy.java`
+- `src/main/java/dev/talos/runtime/policy/SafeLogFormatter.java`
 - `src/main/java/dev/talos/runtime/toolcall/ToolCallExecutionStage.java`
 - `src/main/java/dev/talos/runtime/command/ProcessCommandRunner.java`
+- `work-cycle-docs/reports/log-redaction-audit.md`

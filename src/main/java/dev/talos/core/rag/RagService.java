@@ -19,6 +19,7 @@ import dev.talos.core.retrieval.stages.*;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.runtime.policy.ProtectedReadScopePolicy;
+import dev.talos.runtime.policy.SafeLogFormatter;
 import dev.talos.spi.CorpusStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -166,7 +167,7 @@ public class RagService {
             RetrievalResult result = pipeline.execute(request);
 
             trace = result.trace();
-            LOG.debug("Retrieval pipeline trace:\n{}", trace.summary());
+            LOG.debug("Retrieval pipeline trace:\n{}", SafeLogFormatter.value(trace.summary()));
 
             // Build typed snippets from pipeline results
             for (RetrievalCandidate c : result.candidates()) {
@@ -182,7 +183,7 @@ public class RagService {
             citations.addAll(ContextPacker.buildCitations(snippets));
         } catch (Exception e) {
             // Log the failure so it's visible in debug/audit, but don't explode the CLI
-            String reason = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            String reason = SafeLogFormatter.throwableMessage(e);
             LOG.warn("Retrieval pipeline failed: {}", reason, e);
             return new Prepared(snippets, citations, trace, reason);
         }
@@ -319,7 +320,8 @@ public class RagService {
                 indexer.invalidateIndex(workspace);
             } catch (Exception e) {
                 // Index exists but is corrupted - log and proceed to rebuild
-                LOG.warn("Index directory exists but appears corrupted, will rebuild: {}", e.getMessage());
+                LOG.warn("Index directory exists but appears corrupted, will rebuild: {}",
+                        SafeLogFormatter.throwableMessage(e));
                 indexer.invalidateIndex(workspace);
             }
         }
@@ -341,7 +343,7 @@ public class RagService {
             System.out.println();
 
         } catch (Exception e) {
-            LOG.error("Lazy indexing failed: {}", e.getMessage(), e);
+            LOG.error("Lazy indexing failed: {}", SafeLogFormatter.throwableMessage(e), e);
             System.err.println("\rIndexing failed: " + e.getMessage());
         } finally {
             indexingNow.set(false);
