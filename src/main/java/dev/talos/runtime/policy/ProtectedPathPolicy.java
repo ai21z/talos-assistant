@@ -119,9 +119,19 @@ public final class ProtectedPathPolicy {
 
         for (String segment : segments) {
             if (segment.equals(".env") || segment.startsWith(".env.")) return "SECRET";
-            if (segment.equals("secrets")) return "SECRET";
+            if (segment.endsWith(".env")) return "SECRET";
+            if (segment.equals("secrets") || segment.equals("tokens") || segment.equals("credentials")) return "SECRET";
+            if (segment.equals("protected")) return "SECRET";
             if (segment.equals(".ssh") || segment.equals(".aws") || segment.equals(".azure")) return "SECRET";
             if (PRIVATE_KEY_FILENAMES.contains(segment)) return "SECRET";
+            if (segment.contains("secret")
+                    || segment.contains("token")
+                    || segment.contains("credential")
+                    || segment.contains("password")
+                    || segment.contains("private_key")
+                    || segment.contains("private-key")) {
+                return "SECRET";
+            }
         }
         for (int i = 0; i + 1 < segments.size(); i++) {
             if (".config".equals(segments.get(i)) && "gcloud".equals(segments.get(i + 1))) {
@@ -132,7 +142,10 @@ public final class ProtectedPathPolicy {
         String filename = segments.isEmpty() ? lowerRelative : segments.get(segments.size() - 1);
         if (filename.contains("secret")
                 || filename.contains("token")
-                || filename.contains("credential")) {
+                || filename.contains("credential")
+                || filename.contains("password")
+                || filename.contains("private_key")
+                || filename.contains("private-key")) {
             return "SECRET";
         }
         for (String ext : PRIVATE_KEY_EXTENSIONS) {

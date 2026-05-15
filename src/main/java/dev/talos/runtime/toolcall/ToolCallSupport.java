@@ -2,6 +2,7 @@ package dev.talos.runtime.toolcall;
 
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatMessage.NativeToolCall;
+import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolResult;
 import org.slf4j.Logger;
@@ -67,10 +68,16 @@ public final class ToolCallSupport {
     }
 
     public static String formatToolResult(ToolCall call, ToolResult result) {
+        return formatToolResult(call, result, false);
+    }
+
+    public static String formatToolResult(ToolCall call, ToolResult result, boolean preserveSuccessOutput) {
         var sb = new StringBuilder();
         sb.append("[tool_result: ").append(call.toolName()).append("]\n");
         if (result.success()) {
-            String output = result.output();
+            String output = preserveSuccessOutput
+                    ? result.output()
+                    : ProtectedContentPolicy.sanitizeText(result.output());
             if (output == null || output.isBlank()) {
                 sb.append("(empty result)");
             } else if (output.length() > 32_000) {
@@ -83,7 +90,7 @@ public final class ToolCallSupport {
                 sb.append("\n[verification_status: ").append(result.verification().name()).append("]");
             }
         } else {
-            sb.append("[error] ").append(result.errorMessage());
+            sb.append("[error] ").append(ProtectedContentPolicy.sanitizeText(result.errorMessage()));
         }
         sb.append("\n[/tool_result]");
         return sb.toString();

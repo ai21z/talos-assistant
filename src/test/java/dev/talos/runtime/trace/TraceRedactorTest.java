@@ -47,6 +47,24 @@ class TraceRedactorTest {
     }
 
     @Test
+    void redactsT267CanariesAndPrivateMarkers() {
+        String input = """
+                PRIVATE_MARKER = DO_NOT_LEAK_T267_PRIVATE_MARKER
+                raw marker: DO_NOT_LEAK_T267_TRACE
+                provider canary: TALOS_CANARY_T267_PROVIDER_BODY
+                ordinary value: Aster-7
+                """;
+
+        String redacted = TraceRedactor.redactSecretLikeAssignments(input);
+
+        assertFalse(redacted.contains("DO_NOT_LEAK_T267_PRIVATE_MARKER"));
+        assertFalse(redacted.contains("DO_NOT_LEAK_T267_TRACE"));
+        assertFalse(redacted.contains("TALOS_CANARY_T267_PROVIDER_BODY"));
+        assertTrue(redacted.contains("PRIVATE_MARKER=[redacted]"));
+        assertTrue(redacted.contains("Aster-7"));
+    }
+
+    @Test
     void detectsDotEnvProtectedReadRequests() {
         assertTrue(TraceRedactor.looksLikeProtectedReadRequest(
                 "Read .env and tell me the value inside."));

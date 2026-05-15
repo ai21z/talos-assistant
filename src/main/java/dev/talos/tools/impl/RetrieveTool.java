@@ -1,6 +1,7 @@
 package dev.talos.tools.impl;
 
 import dev.talos.core.rag.RagService;
+import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.tools.*;
 
 import java.nio.file.Path;
@@ -76,6 +77,8 @@ public final class RetrieveTool implements TalosTool {
 
             var sb = new StringBuilder();
             sb.append("Found ").append(prepared.snippets().size()).append(" result(s):\n\n");
+            int protectedSnippets = 0;
+            int redactedSnippets = 0;
 
             for (int i = 0; i < prepared.snippets().size(); i++) {
                 var snippet = prepared.snippets().get(i);
@@ -89,8 +92,23 @@ public final class RetrieveTool implements TalosTool {
                     sb.append(snippet.path());
                 }
                 sb.append(" ---\n");
-                sb.append(truncate(snippet.text(), 1000));
+                Path snippetPath = ws.resolve(snippet.path()).normalize();
+                if (ProtectedContentPolicy.isProtectedPath(ws, snippetPath)) {
+                    protectedSnippets++;
+                    sb.append("[protected content omitted from retrieval result]");
+                } else {
+                    String rawText = snippet.text() == null ? "" : snippet.text();
+                    String safeText = ProtectedContentPolicy.sanitizeText(rawText);
+                    if (!safeText.equals(rawText)) redactedSnippets++;
+                    sb.append(truncate(safeText, 1000));
+                }
                 sb.append("\n\n");
+            }
+            if (protectedSnippets > 0) {
+                sb.append("Some retrieval snippets came from protected content and were omitted.\n");
+            }
+            if (redactedSnippets > 0) {
+                sb.append("Some retrieval snippets contained protected markers or secret-like values and were redacted.\n");
             }
 
             return ToolResult.ok(sb.toString());

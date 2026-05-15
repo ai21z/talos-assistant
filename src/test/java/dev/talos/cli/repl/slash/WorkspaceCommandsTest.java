@@ -110,6 +110,44 @@ class WorkspaceCommandsTest {
         }
 
         @Test
+        void slash_grep_does_not_leak_env_canary() throws IOException {
+            Files.writeString(ws.resolve(".env"), "TALOS_SECRET=DO_NOT_LEAK_T267_ENV\n");
+            var cmd = new GrepCommand(ws);
+
+            Result r = cmd.execute("DO_NOT_LEAK_T267_ENV", ctx);
+
+            assertTrue(r instanceof Result.Ok || r instanceof Result.Info);
+            assertFalse(r.toString().contains("DO_NOT_LEAK_T267_ENV"));
+            assertTrue(r.toString().contains("protected content") || r.toString().contains("[redacted"));
+        }
+
+        @Test
+        void slash_grep_does_not_leak_private_marker() throws IOException {
+            Files.writeString(ws.resolve("notes.md"),
+                    "PRIVATE_MARKER = DO_NOT_LEAK_T267_PRIVATE_MARKER\nordinary searchable text\n");
+            var cmd = new GrepCommand(ws);
+
+            Result r = cmd.execute("PRIVATE_MARKER", ctx);
+
+            assertInstanceOf(Result.Ok.class, r);
+            assertTrue(r.toString().contains("PRIVATE_MARKER=[redacted]"));
+            assertFalse(r.toString().contains("DO_NOT_LEAK_T267_PRIVATE_MARKER"));
+        }
+
+        @Test
+        void slash_grep_unsupported_binary_skips_and_reports() throws IOException {
+            Files.writeString(ws.resolve("report.docx"), "budget canary in fake docx payload\n");
+            var cmd = new GrepCommand(ws);
+
+            Result r = cmd.execute("budget", ctx);
+
+            assertTrue(r instanceof Result.Ok || r instanceof Result.Info);
+            assertFalse(r.toString().contains("fake docx payload"));
+            assertTrue(r.toString().contains("Search was limited to searchable text files")
+                    || r.toString().contains("Skipped unsupported"));
+        }
+
+        @Test
         void skips_build_directories() throws IOException {
             Path buildDir = ws.resolve("build");
             Files.createDirectories(buildDir);

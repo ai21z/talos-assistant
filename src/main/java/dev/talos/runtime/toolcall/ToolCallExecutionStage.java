@@ -4,7 +4,9 @@ import dev.talos.runtime.TurnProcessor;
 import dev.talos.runtime.TurnSourceEvidenceCapture;
 import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
+import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.runtime.policy.ProtectedPathAliasNormalizer;
+import dev.talos.runtime.policy.ProtectedPathPolicy;
 import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -257,7 +259,12 @@ public final class ToolCallExecutionStage {
                 }
             }
 
-            ToolResult result = turnProcessor.executeTool(state.toolSession, effective, state.ctx);
+            ToolResult rawResult = turnProcessor.executeTool(state.toolSession, effective, state.ctx);
+            boolean preserveApprovedProtectedReadResult =
+                    shouldPreserveApprovedProtectedReadResult(state, effective, pathHint, rawResult);
+            ToolResult result = preserveApprovedProtectedReadResult
+                    ? rawResult
+                    : ProtectedContentPolicy.sanitizeToolResult(rawResult);
             emitToolResult(effective.toolName(), result);
             if (result.success()) {
                 successesThisIter++;
@@ -356,7 +363,10 @@ public final class ToolCallExecutionStage {
                 }
             }
 
-            String resultText = ToolCallSupport.formatToolResult(effective, result);
+            String resultText = ToolCallSupport.formatToolResult(
+                    effective,
+                    result,
+                    preserveApprovedProtectedReadResult);
             if (readBeforeWriteNudge != null) {
                 resultText = resultText + readBeforeWriteNudge;
             }
@@ -505,6 +515,19 @@ public final class ToolCallExecutionStage {
     private static boolean isReadFileTool(ToolCall call) {
         if (call == null) return false;
         return "read_file".equals(ToolAliasPolicy.localCanonicalName(call.toolName()));
+    }
+
+    private static boolean shouldPreserveApprovedProtectedReadResult(
+            LoopState state,
+            ToolCall call,
+            String pathHint,
+            ToolResult result
+    ) {
+        if (state == null || call == null || pathHint == null || pathHint.isBlank() || result == null) {
+            return false;
+        }
+        if (!result.success() || !isReadFileTool(call)) return false;
+        return ProtectedPathPolicy.classify(state.workspace, pathHint).protectedPath();
     }
 
     private static String sourceEvidenceRequiredDiagnostic(String pathHint, List<String> missingSourceTargets) {

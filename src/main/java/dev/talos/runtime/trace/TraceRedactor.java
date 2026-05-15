@@ -1,5 +1,7 @@
 package dev.talos.runtime.trace;
 
+import dev.talos.runtime.policy.ProtectedContentPolicy;
+
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.LinkedHashSet;
@@ -74,31 +76,11 @@ public final class TraceRedactor {
     }
 
     public static String redactSecretLikeAssignments(String text) {
-        if (text == null || text.isBlank()) return text;
-        Matcher matcher = SECRET_LIKE_ASSIGNMENT.matcher(text);
-        Set<String> values = new LinkedHashSet<>();
-        StringBuilder out = new StringBuilder();
-        while (matcher.find()) {
-            String key = matcher.group(1);
-            String rawValue = matcher.group(2);
-            String value = normalizedSecretValue(rawValue);
-            if (shouldRedactValueEcho(value)) {
-                values.add(value);
-            }
-            String suffix = trailingSentencePunctuation(rawValue);
-            matcher.appendReplacement(out, Matcher.quoteReplacement(key + "=[redacted]" + suffix));
-        }
-        matcher.appendTail(out);
-        String redacted = out.toString();
-        for (String value : values) {
-            redacted = redacted.replace(value, "[redacted]");
-        }
-        return redacted;
+        return ProtectedContentPolicy.sanitizeText(text);
     }
 
     public static boolean containsSecretLikeAssignment(String text) {
-        return text != null && !text.isBlank()
-                && SECRET_LIKE_ASSIGNMENT.matcher(text).find();
+        return ProtectedContentPolicy.containsProtectedContentSignal(text);
     }
 
     public static String redactProtectedReadAnswerForPersistence(String userInput, String assistantText) {

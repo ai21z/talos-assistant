@@ -21,6 +21,45 @@ auditable outcomes.
 The preferred model backend for the current product path is managed
 `llama.cpp`. Ollama remains available as a legacy backend option.
 
+### File Capability And Privacy Boundaries
+
+Talos is currently best suited for developer and text-oriented local
+workspaces:
+
+- code projects
+- Markdown and plain-text notes
+- JSON, YAML, XML, TOML, INI, properties, and config files
+- CSV and TSV files
+- static websites and source assets
+- non-sensitive workspace folders where local indexing/search is acceptable
+
+Talos can inspect and edit supported text-oriented files such as `.md`,
+`.markdown`, `.txt`, `.json`, `.yaml`, `.yml`, `.csv`, `.tsv`, `.html`, `.htm`,
+`.css`, `.js`, `.ts`, `.java`, `.kt`, `.kts`, `.py`, `.go`, `.rs`, `.c`,
+`.cpp`, `.h`, `.hpp`, `.xml`, `.toml`, `.ini`, `.properties`, `.conf`,
+`.config`, shell scripts, PowerShell scripts, Gradle files, Dockerfiles,
+README files, LICENSE files, and similar project text files.
+
+Talos does not currently extract or summarize PDF, Word, Excel, PowerPoint,
+image/scan, archive, executable, or most binary file contents. If one of those
+files exists, Talos may identify that the file exists, but it must not claim it
+reviewed the body unless a local extractor actually produced text evidence.
+Convert unsupported documents to text, Markdown, HTML, CSV, or another
+supported text format before relying on Talos to inspect their contents.
+
+Sensitive personal paperwork is not an approved product claim yet. Do not
+position this beta as safe for tax folders, health records, legal paperwork,
+family/admin documents, or other private document folders until the privacy,
+artifact-redaction, RAG-safety, unsupported-format, and private-folder-mode
+release gates all pass.
+
+Talos may create local artifacts such as model context, provider-body captures,
+prompt-debug files, local turn traces, session logs, and RAG indexes. Current
+runtime policy redacts known protected markers and secret-like values before
+tool results are handed back to the model and before key debug/session artifacts
+are persisted, but broader private-folder mode and full document extraction are
+still tracked separately.
+
 ## How A Turn Works
 
 A Talos turn is handled as an execution cycle:

@@ -312,6 +312,29 @@ class PromptDebugCommandTest {
     }
 
     @Test
+    void prompt_debug_does_not_save_raw_canary_after_grep() throws Exception {
+        PromptDebugCapture.record(grepCanaryToolResultSnapshot());
+        PromptDebugCommand command = new PromptDebugCommand();
+
+        Result result = command.execute("save", ctx);
+
+        Result.TrustedInfo info = assertInstanceOf(Result.TrustedInfo.class, result);
+        Path providerBody = savedPath(info.text, "Saved provider body JSON to: ");
+        Path render = savedPath(info.text, "Saved prompt debug render to: ");
+        try {
+            String savedJson = Files.readString(providerBody);
+            String savedRender = Files.readString(render);
+            assertFalse(savedJson.contains("DO_NOT_LEAK_T267_PROVIDER_BODY"));
+            assertFalse(savedRender.contains("DO_NOT_LEAK_T267_PROVIDER_BODY"));
+            assertTrue(savedJson.contains("[protected tool result redacted by prompt-debug policy]")
+                    || savedJson.contains("PRIVATE_MARKER=[redacted]"));
+        } finally {
+            Files.deleteIfExists(providerBody);
+            Files.deleteIfExists(render);
+        }
+    }
+
+    @Test
     void saveRedactsStandaloneProtectedAssistantAnswerInProviderBody() throws Exception {
         PromptDebugCapture.record(standaloneProtectedAssistantAnswerSnapshot());
         PromptDebugCommand command = new PromptDebugCommand();
@@ -545,6 +568,34 @@ class PromptDebugCommandTest {
                 null,
                 List.of(),
                 List.of(),
+                ChatRequestControls.defaults(),
+                providerBody);
+    }
+
+    private static PromptDebugSnapshot grepCanaryToolResultSnapshot() {
+        var grepCall = new ChatMessage.NativeToolCall(
+                "call-grep",
+                "talos.grep",
+                Map.of("pattern", "DO_NOT_LEAK"));
+        String providerBody = """
+                {"model":"gpt-oss-20b","messages":[
+                  {"role":"assistant","content":"","tool_calls":[
+                    {"id":"call-grep","type":"function","function":{"name":"talos.grep","arguments":{"pattern":"DO_NOT_LEAK"}}}
+                  ]},
+                  {"role":"tool","tool_call_id":"call-grep","content":"[tool_result: talos.grep]\\nnotes.md:1 | PRIVATE_MARKER = DO_NOT_LEAK_T267_PROVIDER_BODY\\n[/tool_result]"}
+                ]}
+                """;
+        return new PromptDebugSnapshot(
+                "COMPAT_CHAT_HTTP_BODY",
+                "llama_cpp",
+                "gpt-oss-20b",
+                false,
+                null,
+                List.of(
+                        ChatMessage.assistantWithToolCalls("", List.of(grepCall)),
+                        ChatMessage.toolResult("call-grep",
+                                "[tool_result: talos.grep]\nnotes.md:1 | PRIVATE_MARKER = DO_NOT_LEAK_T267_PROVIDER_BODY\n[/tool_result]")),
+                List.of(new ToolSpec("talos.grep", "Search", "{}")),
                 ChatRequestControls.defaults(),
                 providerBody);
     }
