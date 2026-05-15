@@ -1,552 +1,162 @@
-# Contributing to LOQ-J
+# CONTRIBUTING.md (LOQ-J)
 
-**Version:** `v0.9.0-beta`  
-**Last verified commit:** `ec2f6e9`
+## 0) Support Matrix & Prereqs
 
-Thank you for your interest in contributing to LOQ-J! This guide outlines the development workflow, coding standards, and contribution process for the project.
+* **Java:** 21+ (JDK with `jpackage` for MSI)
+* **OS:** Windows, macOS, Linux
+* **Models:** Ollama installed locally (default small: Qwen2.5-Coder-7B; embeddings: bge-m3)
+* **No telemetry.** Network is **off by default**; any network use must be explicitly gated.
 
 ---
 
-## Branch Policy
-
-**Development for release-level code should be on the `v0.9.0-beta-dev` branch until our team releases it.**
-
-### Branch Structure
-
-- **`v0.9.0-beta-dev`** - Active development branch for v0.9.0-beta release
-- **`main`** - Stable release branch (protected)
-- **Feature branches** - Short-lived branches off `v0.9.0-beta-dev`
-
-### Workflow
-
-```powershell
-# 1. Start from development branch
-git checkout v0.9.0-beta-dev
-```
-
-```powershell
-git pull origin v0.9.0-beta-dev
-```
-
-```powershell
-# 2. Create feature branch
-git checkout -b feature/your-feature-name
-```
-
-```powershell
-# 3. Work on your changes
-# ... make commits ...
-```
-
-```powershell
-# 4. Push and create MR to v0.9.0-beta-dev
-git push origin feature/your-feature-name
-```
+## 1) Repository Layout
 
 ```
-# Create MR via GitLab UI targeting v0.9.0-beta-dev
+src/main/java/dev/loqj/      # CLI entrypoint (dev.loqj.app.Main), REPL modes, commands
+src/main/java/dev/loqj/core  # Indexer, Lucene store (BM25+ANN), RAG service, packing
+src/main/resources/          # default-config.yaml, prompt templates
+src/test/java/               # JUnit 5 tests (mirrors prod pkgs)
+docs/                        # product notes, roadmaps, assessments
+tools/, scripts/             # installers, helper scripts
+config/                      # sample configs (do not put secrets here)
 ```
 
 ---
 
-## Getting Started
+## 2) Build & Test
 
-### Prerequisites
+* Build & unit tests:
+  `./gradlew clean build`  (Windows: `.\gradlew clean build`)
+* Unit tests only:
+  `./gradlew test`
+* Install local distribution:
+  `./gradlew installDist` → `build/install/loqj/bin/loqj :status`
+* Package (Windows MSI):
+  `./gradlew jpackageApp` (requires JDK with `jpackage`)
+* **Smoke transcripts** (TTY): see `smoke_test_commands.txt`, `validation_commands.txt`, `test_commands.txt`.
 
-- **Java 21+** with Vector API support
-- **Git** for version control
-- **Ollama** running locally for testing
-- **PowerShell** (recommended for Windows development)
+**CI gate (expected to pass locally before a PR):**
 
-### Development Setup
-
-```powershell
-# Clone the repository
-git clone <repository-url>
-```
-
-```powershell
-cd loqj
-```
-
-```powershell
-# Switch to development branch
-git checkout v0.9.0-beta-dev
-```
-
-```powershell
-# Build and test
-.\gradlew clean build
-```
-
-```powershell
-# Install locally for testing
-.\gradlew installDist
-```
-
-```powershell
-pwsh tools\install-windows.ps1
-```
-
-### Verify Setup
-
-```powershell
-# Run unit tests
-.\gradlew test
-```
-
-```powershell
-# Run smoke tests
-loqj --version
-```
-
-```powershell
-loqj status
-```
-
-```powershell
-# Quick integration test
-cd C:\some\test\project
-```
-
-```powershell
-loqj rag-index --stats
-```
-
-```powershell
-loqj rag-ask "What files are in this project?"
-```
+* `./gradlew test` green
+* REPL smoke: `:reindex --full`, `:files`, two-file comparison, Auto→Ask trivia
+* `rag-ask` exit code non-zero on retrieval error (scriptable)
 
 ---
 
-## Development Workflow
+## 3) Local-First & Security Policy (must-follow)
 
-### 1. Code Changes
-
-**Key areas to understand:**
-- **CLI commands**: `src/main/java/dev/loqj/cli/cmds/`
-- **REPL modes**: `src/main/java/dev/loqj/cli/modes/`
-- **RAG pipeline**: `src/main/java/dev/loqj/core/rag/`
-- **Configuration**: `src/main/resources/config/default-config.yaml`
-
-**Coding standards:**
-- Follow existing Java code style
-- Use meaningful variable names
-- Add Javadoc for public APIs
-- Prefer composition over inheritance
-- Keep methods focused and testable
-
-### 2. Testing Requirements
-
-**Unit tests** (required for all new code):
-```powershell
-# Run specific test class
-.\gradlew test --tests "dev.loqj.core.rag.RagFlowSmokeTest"
-```
-
-```powershell
-# Run all tests with coverage
-.\gradlew test jacocoTestReport
-```
-
-**Integration tests** (for CLI and RAG changes):
-```powershell
-# Test CLI commands
-loqj setup --help
-```
-
-```powershell
-loqj rag-index --stats
-```
-
-```powershell
-loqj rag-ask "test question"
-```
-
-```powershell
-# Test REPL commands
-loqj
-```
-
-```
-:help
-:status
-:mode rag
-:k 5
-:q
-```
-
-### 3. Documentation Updates
-
-**Update documentation** for user-facing changes:
-- **README.md** - CLI usage, configuration, troubleshooting
-- **docs/TECHNICAL_ANALYSIS_v0.9.0-beta.md** - Architecture changes
-- **Javadoc** - Public API documentation
-- **Configuration** - Update default-config.yaml comments
-
-### 4. Security Review
-
-**Security checklist** (critical for acceptance):
-- [ ] No external network calls without `net.enabled` check
-- [ ] All user input sanitized (SQL, file paths, shell commands)
-- [ ] No secrets in logs or error messages
-- [ ] File system access respects workspace boundaries
-- [ ] Ollama connections validate localhost-only (unless `allow_remote`)
-
-### 5. Performance Considerations
-
-**Performance guidelines:**
-- Use streaming for interactive responses
-- Implement proper connection pooling for HTTP clients
-- Cache embeddings to avoid redundant computation
-- Respect configured timeout and rate limits
-- Profile memory usage for large workspaces
+* **Default:** offline. The CLI **must not** call the network unless the user opts in (e.g., `--web`, or explicit `connectors sync` in future).
+* Secrets: only via `:secret set|get|del` (encrypted-at-rest). Never commit secrets or tokens.
+* Index sandbox: respect workspace root; prevent path traversal; do not index outside root.
+* Archives: excluded by default; if encountered, log a one-line **skip warning**.
 
 ---
 
-## Merge Request Process
+## 4) Indexing & Retrieval Guarantees
 
-### Before Submitting
-
-**Pre-submission checklist:**
-- [ ] Code builds successfully (`.\gradlew clean build`)
-- [ ] All tests pass (`.\gradlew test`)
-- [ ] No new security vulnerabilities introduced
-- [ ] Documentation updated for user-facing changes
-- [ ] PowerShell examples use one command per line (no `&&` chaining)
-- [ ] Configuration changes include proper defaults and validation
-
-### MR Requirements
-
-**Title format:** Use Conventional Commits style
-```
-feat: add support for PDF parsing in rag indexing
-fix: resolve Ollama timeout handling in batch embeddings
-docs: update installation guide for Java 21 requirement
-refactor: simplify mode controller routing logic
-```
-
-**Description template:**
-```markdown
-## Summary
-Brief description of what this MR does.
-
-## Changes Made
-- Specific change 1
-- Specific change 2  
-- Configuration/API changes (if any)
-
-## Testing Done
-- Unit tests: [pass/fail]
-- Integration tests: [describe testing done]
-- Manual testing: [describe manual verification]
-
-## Security Impact
-- No external network calls added: [yes/no]
-- Input validation added for new inputs: [yes/no/n/a]
-- Backward compatibility maintained: [yes/no/n/a]
-
-## Documentation Updated
-- [ ] README.md (if user-facing)
-- [ ] Technical analysis (if architectural)
-- [ ] Javadoc (if public API)
-```
-
-### Review Criteria
-
-**Automatic checks:**
-- GitLab CI pipeline passes
-- No merge conflicts with target branch
-- Branch up-to-date with `v0.9.0-beta-dev`
-
-**Manual review focus:**
-- Code quality and maintainability
-- Security posture (local-only, no telemetry)
-- Performance impact on large workspaces
-- Backward compatibility with existing configurations
-- Test coverage for new functionality
+* **Hybrid retrieval:** Lucene BM25 + HNSW vectors; vectors can be toggled in config.
+* **Path semantics:** treat `\` and `/` equivalently; normalize to `/` internally.
+* **Pinning:** quoted or inline paths map to workspace files; prefer full relpath, then unique basename fallback.
+* **Snippet packing:** pinned files first; stable ordering; `[Sources]` list **deduped** and **chunk suffix stripped**.
+* **Limits enforced:** `file_bytes_max`, `file_lines_max` applied **before** parsing/embedding; oversized files are skipped and reported.
+* `:files` uses a **MatchAll** query (not `"*"`); for very large indexes, listing is paginated/streamed.
+* **Health visibility:** `:status --verbose` and `:health` show index dir, doc count, last index time, vector on/off, and **last retrieval/index error**.
 
 ---
 
-## Commit Guidelines
+## 5) CLI UX Rules
 
-### Commit Message Format
-
-Follow **Conventional Commits** specification:
-
-```
-<type>[optional scope]: <description>
-
-[optional body]
-
-[optional footer(s)]
-```
-
-**Types:**
-- `feat`: New feature
-- `fix`: Bug fix
-- `docs`: Documentation changes
-- `style`: Code style changes (formatting, missing semicolons, etc.)
-- `refactor`: Code refactoring (no functionality change)
-- `test`: Adding or updating tests
-- `chore`: Maintenance tasks (build, CI, dependencies)
-- `perf`: Performance improvements
-- `security`: Security fixes or improvements
-
-**Examples:**
-```
-feat(cli): add --bm25-only flag to disable vector search
-
-fix(rag): handle empty search results gracefully in RagService
-
-docs: update README with multi-workspace usage examples
-
-refactor(embed): extract batch processing to separate class
-
-test(index): add comprehensive file filtering tests
-
-security(ollama): validate localhost-only connections by default
-```
-
-### Commit Best Practices
-
-- **Keep commits focused** on single logical changes
-- **Write clear commit messages** explaining the "why", not just "what"
-- **Reference issues** when applicable: `fixes #123`
-- **Avoid breaking changes** in patch releases
-- **Test each commit** - should build and pass basic tests
+* **TTY-aware output:** spinner and “Answering…” status only when attached to a TTY; disable when piped.
+* **ASCII fallback:** use ASCII borders when Unicode is not supported (legacy Windows consoles).
+* **Auto routing:** trivia/general questions → **Ask** (no sources). File-grounded questions → **RAG**.
+* **Exit codes:** `rag-ask` returns non-zero on errors (missing index, retrieval failure).
 
 ---
 
-## Code Style Guide
+## 6) Coding Style
 
-### Java Conventions
-
-```java
-// Class names: PascalCase
-public class RagService {
-    
-    // Constants: SCREAMING_SNAKE_CASE  
-    private static final int DEFAULT_TOP_K = 6;
-    
-    // Methods: camelCase
-    public RagAnswer askQuestion(String query, int topK) {
-        // Local variables: camelCase
-        List<SearchResult> results = searchService.search(query, topK);
-        
-        // Use meaningful names
-        String assembledPrompt = promptBuilder.build(query, results);
-        return llmClient.generate(assembledPrompt);
-    }
-}
-```
-
-**Import organization:**
-1. Java standard library (`java.*`, `javax.*`)
-2. Third-party libraries (alphabetical)
-3. Project imports (`dev.loqj.*`)
-
-### Configuration Style
-
-```yaml
-# Use lowercase with underscores for keys
-rag:
-  top_k: 6                    # Numbers without quotes
-  include_patterns:           # Arrays with dashes
-    - "**/*.md"
-    - "**/*.java"
-  force_reindex: false        # Booleans without quotes
-  
-# Group related settings
-limits:
-  max_file_size: 20000
-  timeout_ms: 30000
-```
-
-### PowerShell Examples
-
-**Always use one command per line** (never chain with `&&`):
-
-```powershell
-# Good
-.\gradlew clean build
-```
-
-```powershell
-pwsh tools\install-windows.ps1
-```
-
-```powershell
-loqj --version
-```
-
-```powershell
-# Bad - don't chain commands
-.\gradlew clean build && pwsh tools\install-windows.ps1 && loqj --version
-```
+* Java: 4-space indent, UTF-8, ~120-char line target, grouped imports.
+* Naming: Classes/Enums `UpperCamelCase`; methods/fields `lowerCamelCase`; constants `SCREAMING_SNAKE_CASE`.
+* Prefer immutable value objects; avoid shared mutable state across modes.
+* Javadoc public APIs; inline comments explain **rationale**.
+* Keep CLI help strings and docs in sync for any command additions/renames.
 
 ---
 
-## Issue Labels & Triage
+## 7) Tests
 
-### Label Categories
+* Place tests under `src/test/java`, mirroring package structure; names end with `*Test`.
+* **Regression must-haves:**
 
-**Type:**
-- `enhancement` - New feature requests
-- `bug` - Confirmed bugs
-- `documentation` - Documentation improvements  
-- `question` - Support questions
-- `security` - Security-related issues
-
-**Priority:**
-- `critical` - Security issues, data loss, crashes
-- `high` - Major functionality broken
-- `medium` - Important but not blocking
-- `low` - Nice to have improvements
-
-**Component:**
-- `cli` - Command-line interface
-- `rag` - RAG pipeline and search
-- `config` - Configuration system
-- `docs` - Documentation
-- `build` - Build system and CI
-
-### Issue Templates
-
-**Bug Report:**
-```markdown
-## Description
-Brief description of the issue.
-
-## Steps to Reproduce
-1. Run command: `loqj rag-index`
-2. Observe error: [error message]
-
-## Expected Behavior
-What should happen instead.
-
-## Environment
-- OS: Windows 10/11
-- Java version: `java -version`
-- Ollama version: `ollama --version`
-- LOQ-J version: `loqj --version`
-
-## Additional Context
-Logs, screenshots, or other relevant information.
-```
-
-**Feature Request:**
-```markdown
-## Feature Description
-Clear description of the proposed feature.
-
-## Use Case
-Why is this feature needed? What problem does it solve?
-
-## Proposed Implementation
-High-level approach (if you have ideas).
-
-## Alternative Solutions
-Other ways this could be addressed.
-```
+  * Pin normalization (`docs\landing.md` → `docs/landing.md`)
+  * `[Sources]` dedup + pin-first policy
+  * `:files` listing (match-all, pagination if large)
+  * Auto→Ask routing for trivia (no sources)
+  * Index limits (skip >N bytes / >N lines) and skip messaging
+  * Corrupt index → surfaced error + rebuild hint
+  * ASCII/Unicode box snapshots
+* Add scripted transcripts for new CLI verbs.
 
 ---
 
-## Release Process
+## 8) Branching, Commits & PRs
 
-### Release Preparation
+* Work branch from and target: **`v0.9.0-beta-dev`**
+* Commit style: `type: imperative summary` (`feat:`, `fix:`, `docs:`, `refactor:`).
+* PR description must include: **Motivation**, **User-visible changes**, **Testing commands**, **Screenshots/Transcripts**, **Docs updated**, **Security/Config notes**.
 
-**Pre-release checklist** (maintainers only):
-- [ ] All tests pass on `v0.9.0-beta-dev`
-- [ ] Documentation updated and reviewed
-- [ ] Security audit completed
-- [ ] Performance benchmarks run
-- [ ] Breaking changes documented
-- [ ] Migration guide prepared (if needed)
+### Definition of Done (for PRs)
 
-**Version bumping:**
-```powershell
-# Update version in build.gradle.kts
-# Update README.md version references
-# Update technical analysis version
-# Tag release commit
-git tag -a v0.9.0-beta -m "LOQ-J v0.9.0-beta release"
-```
+* Tests added/updated and green
+* `:help`/docs updated if CLI changes
+* No secret leakage; network calls gated
+* Smoke transcript included (copy/paste run)
 
 ---
 
-## Code of Conduct
+## 9) Release Process (Beta)
 
-### Our Standards
+* Cut release branch: `release/v0.9.0-beta`
+* Ensure:
 
-**Positive behavior:**
-- Using welcoming and inclusive language
-- Being respectful of differing viewpoints
-- Gracefully accepting constructive criticism
-- Focusing on what is best for the community
-- Showing empathy towards other community members
-
-**Unacceptable behavior:**
-- Trolling, insulting/derogatory comments, personal attacks
-- Public or private harassment
-- Publishing others' private information without permission
-- Other conduct which could reasonably be considered inappropriate
-
-### Enforcement
-
-Project maintainers are responsible for clarifying standards and taking corrective action in response to unacceptable behavior.
-
-**Contact:** Report issues to project maintainers via GitLab private messages.
+  * `:reindex --full` summary shows Scan/Embed/Skip counts
+  * `:files` and `:health` work on a clean workspace
+  * README has Quickstart (Ollama + `:reindex` + ask), a 60–90s GIF, **Limitations** (text/HTML by default), and **Model matrix**
+* Tag `v0.9.0-beta` and publish binaries (MSI, tar.gz)
+* Post changelog + checksums
 
 ---
 
-## Getting Help
+## 10) Roadmap Notes for Contributors (Near-term)
 
-### Resources
-
-- **Technical questions:** Create issue with `question` label
-- **Feature requests:** Create issue with `enhancement` label  
-- **Bug reports:** Create issue with `bug` label
-- **Security issues:** Contact maintainers privately
-
-### Development Support
-
-**Common development questions:**
-- **"How do I add a new CLI command?"** - See `dev.loqj.cli.cmds` package
-- **"How do I add a new REPL mode?"** - Implement `dev.loqj.cli.modes.Mode` interface
-- **"How do I modify the RAG pipeline?"** - Start with `dev.loqj.core.rag.RagService`
-- **"How do I add configuration options?"** - Update `default-config.yaml` and related classes
-
-**Debugging tips:**
-```powershell
-# Enable debug logging
-loqj run
-```
-
-```
-:debug on
-```
-
-```powershell
-# Run with JVM debug flags
-$env:JAVA_OPTS="-Dloqj.debug=true"
-```
-
-```powershell
-loqj status --verbose
-```
-
-```powershell
-# Check configuration loading
-loqj status --verbose
-```
+* `:health` command (index stats + last error)
+* ASCII border fallback + spinner parity (TTY only)
+* Retrieval error surfacing in RAG path with “Try :reindex” hint
+* Index limits enforced pre-parse; skip summary
+* `rag-ask` exit codes
+* (Later) Extractor SPI for PDFs/Office; connectors as **read-only sync** to local cache
 
 ---
 
-**Thank you for contributing to LOQ-J!**
+## 11) Communication
 
-LOQ-J thrives on community contributions. Whether you're fixing bugs, adding features, improving documentation, or helping other users, your contributions make the project better for everyone.
+* Use GitHub Issues with labels: `bug`, `feat`, `polish`, `docs`, `p0`, `p1`, `p2`.
+* Use Discussions or a lightweight chat for Q&A; keep technical decisions in issues/PRs.
 
 ---
 
-**Contributing Guide** - Version `v0.9.0-beta` • Commit `ec2f6e9`
+### Notes on AGENTS.md
+
+If you still want an **AGENTS.md**, scope it to “how multi-agents (e.g., code review bot, planning agent) should behave in this repo.” For repo guidelines, **rename to `CONTRIBUTING.md`** (standardized; discoverable).
+
+---
+
+## What changed vs. Codex’s AGENTS.md (and why)
+
+* **Renamed & refocused**: AGENTS.md → CONTRIBUTING.md (clear contributor guide).
+* **Local-first/security clarified**: explicit network gating, secrets handling, archive skip policy.
+* **Index/RAG guarantees**: path normalization, pin policy, `[Sources]` dedupe, limits enforcement, `:files` match-all.
+* **Health & diagnostics**: explicit `:health` and surfaced errors (prevents “indexed but empty” UX).
+* **TTY/ASCII**: mandated fallback and spinner discipline.
+* **PR DoD & release checklist**: concrete gates so quality stays consistent.
+* **Roadmap hooks**: near-term items aligned with your beta plan.
