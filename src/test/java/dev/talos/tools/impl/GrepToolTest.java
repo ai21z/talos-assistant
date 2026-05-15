@@ -96,6 +96,80 @@ class GrepToolTest {
         assertTrue(r.output().contains("cannot extract PDF/Office binary contents"));
     }
 
+    @Test void grep_does_not_leak_env_canary() throws IOException {
+        Files.writeString(workspace.resolve(".env"), "TALOS_SECRET=DO_NOT_LEAK_T267_ENV\n");
+
+        var r = tool.execute(new ToolCall("talos.grep", Map.of("pattern", "DO_NOT_LEAK_T267_ENV")), ctx);
+
+        assertTrue(r.success());
+        assertFalse(r.output().contains("DO_NOT_LEAK_T267_ENV"));
+        assertTrue(r.output().contains("protected content") || r.output().contains("[redacted"));
+    }
+
+    @Test void grep_does_not_leak_env_local_canary() throws IOException {
+        Files.writeString(workspace.resolve(".env.local"), "TALOS_SECRET=DO_NOT_LEAK_T267_ENV\n");
+
+        var r = tool.execute(new ToolCall("talos.grep", Map.of("pattern", "DO_NOT_LEAK_T267_ENV")), ctx);
+
+        assertTrue(r.success());
+        assertFalse(r.output().contains("DO_NOT_LEAK_T267_ENV"));
+        assertTrue(r.output().contains("protected content") || r.output().contains("[redacted"));
+    }
+
+    @Test void grep_does_not_leak_secrets_directory_canary() throws IOException {
+        Files.createDirectories(workspace.resolve("secrets"));
+        Files.writeString(workspace.resolve("secrets/private-notes.md"), "DO_NOT_LEAK_T267_SECRETS\n");
+
+        var r = tool.execute(new ToolCall("talos.grep", Map.of("pattern", "DO_NOT_LEAK_T267_SECRETS")), ctx);
+
+        assertTrue(r.success());
+        assertFalse(r.output().contains("DO_NOT_LEAK_T267_SECRETS"));
+        assertTrue(r.output().contains("protected content") || r.output().contains("[redacted"));
+    }
+
+    @Test void grep_does_not_leak_protected_directory_canary() throws IOException {
+        Files.createDirectories(workspace.resolve("protected"));
+        Files.writeString(workspace.resolve("protected/private-notes.md"), "DO_NOT_LEAK_T267_PROTECTED_DIR\n");
+
+        var r = tool.execute(new ToolCall("talos.grep", Map.of("pattern", "DO_NOT_LEAK_T267_PROTECTED_DIR")), ctx);
+
+        assertTrue(r.success());
+        assertFalse(r.output().contains("DO_NOT_LEAK_T267_PROTECTED_DIR"));
+        assertTrue(r.output().contains("protected content") || r.output().contains("[redacted"));
+    }
+
+    @Test void grep_redacts_secret_like_assignment_in_normal_file() throws IOException {
+        Files.writeString(workspace.resolve("notes.md"), "API_TOKEN=t267-token-should-not-appear\n");
+
+        var r = tool.execute(new ToolCall("talos.grep", Map.of("pattern", "API_TOKEN")), ctx);
+
+        assertTrue(r.success());
+        assertTrue(r.output().contains("API_TOKEN=[redacted]"));
+        assertFalse(r.output().contains("t267-token-should-not-appear"));
+    }
+
+    @Test void grep_redacts_private_marker_in_normal_file() throws IOException {
+        Files.writeString(workspace.resolve("notes.md"),
+                "PRIVATE_MARKER = DO_NOT_LEAK_T267_PRIVATE_MARKER\nordinary searchable text\n");
+
+        var r = tool.execute(new ToolCall("talos.grep", Map.of("pattern", "PRIVATE_MARKER")), ctx);
+
+        assertTrue(r.success());
+        assertTrue(r.output().contains("PRIVATE_MARKER=[redacted]"));
+        assertFalse(r.output().contains("DO_NOT_LEAK_T267_PRIVATE_MARKER"));
+    }
+
+    @Test void unsupported_binary_grep_skips_and_reports_without_include_glob() throws IOException {
+        Files.writeString(workspace.resolve("report.docx"), "budget canary in fake docx payload\n");
+
+        var r = tool.execute(new ToolCall("talos.grep", Map.of("pattern", "budget")), ctx);
+
+        assertTrue(r.success());
+        assertFalse(r.output().contains("fake docx payload"));
+        assertTrue(r.output().contains("Search was limited to searchable text files")
+                || r.output().contains("Skipped unsupported"));
+    }
+
     @Test void maxResultsRespected() {
         var r = tool.execute(new ToolCall("talos.grep", Map.of("pattern", "public", "max_results", "1")), ctx);
         assertTrue(r.success());

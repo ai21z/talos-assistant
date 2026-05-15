@@ -55,6 +55,34 @@ class JsonSessionStoreTurnsTest {
     }
 
     @Test
+    void session_turn_log_does_not_contain_raw_canary_after_grep(@TempDir Path dir) throws Exception {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "session-canary";
+
+        store.appendTurn(sid, new TurnRecord(
+                1,
+                Instant.parse("2026-04-18T10:00:00Z"),
+                250,
+                "Search for DO_NOT_LEAK but do not print values.",
+                "PRIVATE_MARKER = DO_NOT_LEAK_T267_SESSION",
+                List.of(new TurnRecord.ToolCallSummary(
+                        "talos.grep",
+                        "notes.md",
+                        true,
+                        "notes.md:1 | PRIVATE_MARKER = DO_NOT_LEAK_T267_SESSION")),
+                0,
+                0,
+                0,
+                "trace: DO_NOT_LEAK_T267_TRACE"));
+
+        String rawJsonl = java.nio.file.Files.readString(dir.resolve(sid + ".turns.jsonl"));
+
+        assertFalse(rawJsonl.contains("DO_NOT_LEAK_T267_SESSION"));
+        assertFalse(rawJsonl.contains("DO_NOT_LEAK_T267_TRACE"));
+        assertTrue(rawJsonl.contains("PRIVATE_MARKER=[redacted]"));
+    }
+
+    @Test
     void policyTraceRoundTrips(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "session-policy";

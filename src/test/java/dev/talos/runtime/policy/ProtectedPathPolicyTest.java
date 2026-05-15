@@ -19,9 +19,12 @@ class ProtectedPathPolicyTest {
     void classifiesSecretLikePathsWithWindowsSafeNormalization() {
         assertProtected(".env", "SECRET");
         assertProtected(".env.local", "SECRET");
+        assertProtected("config/app.env", "SECRET");
         assertProtected("app/.env.production", "SECRET");
         assertProtected("config/secrets/api.txt", "SECRET");
+        assertProtected("protected/private-notes.md", "SECRET");
         assertProtected("src/project-token.txt", "SECRET");
+        assertProtected("src/passwords.txt", "SECRET");
         assertProtected("src/serviceCredential.json", "SECRET");
         assertProtected("keys/private.pem", "SECRET");
         assertProtected(".ssh/id_ed25519", "SECRET");

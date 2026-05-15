@@ -10,6 +10,8 @@ import dev.talos.core.ingest.Chunker;
 import dev.talos.core.ingest.FileWalker;
 import dev.talos.core.ingest.ParsedChunk;
 import dev.talos.core.ingest.ParserUtil;
+import dev.talos.core.ingest.UnsupportedDocumentFormats;
+import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.spi.Embeddings;
 import dev.talos.core.util.Hash;
 import org.slf4j.Logger;
@@ -337,6 +339,9 @@ public class Indexer {
         for (String g : excludeGlobs) excludeMatchers.add(fs.getPathMatcher("glob:" + g));
 
         return p -> {
+            if (ProtectedContentPolicy.isProtectedPath(rootPath, p) || UnsupportedDocumentFormats.isUnsupported(p)) {
+                return false;
+            }
             Path rel = rootPath.relativize(p);
             boolean inc = includeMatchers.isEmpty() || includeMatchers.stream().anyMatch(m -> m.matches(rel));
             boolean exc = excludeMatchers.stream().anyMatch(m -> m.matches(rel));
@@ -359,6 +364,9 @@ public class Indexer {
         }
 
         return p -> {
+            if (ProtectedContentPolicy.isProtectedPath(rootPath, p) || UnsupportedDocumentFormats.isUnsupported(p)) {
+                return false;
+            }
             Path rel = rootPath.relativize(p);
             String relStr = rel.toString().replace('\\', '/').toLowerCase(Locale.ROOT);
 

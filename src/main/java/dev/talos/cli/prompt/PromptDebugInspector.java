@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.talos.core.security.Redactor;
+import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.runtime.trace.TraceRedactor;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -384,13 +385,11 @@ public final class PromptDebugInspector {
     }
 
     private static boolean hasProtectedContentSignal(String content) {
-        if (content == null || content.isBlank()) return false;
-        return PROTECTED_CONTENT_SIGNAL.matcher(content).find()
-                || TraceRedactor.containsSecretLikeAssignment(content);
+        return ProtectedContentPolicy.containsProtectedContentSignal(content);
     }
 
     private static String redact(String value) {
-        return TraceRedactor.redactSecretLikeAssignments(
+        return ProtectedContentPolicy.sanitizeText(
                 REDACTOR.redactBlock(Objects.toString(value, "")));
     }
 }

@@ -1,6 +1,7 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.tools.ToolCall;
+import dev.talos.tools.ToolResult;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
@@ -58,5 +59,20 @@ class ToolCallSupportTest {
                 "talos.apply_workspace_batch", "batch_apply")) {
             assertTrue(ToolCallSupport.isMutatingTool(name), name);
         }
+    }
+
+    @Test
+    void provider_body_does_not_contain_raw_canary_after_grep_result_formatting() {
+        ToolCall call = new ToolCall("talos.grep", Map.of("pattern", "DO_NOT_LEAK"));
+        ToolResult result = ToolResult.ok("""
+                notes.md:1 | PRIVATE_MARKER = DO_NOT_LEAK_T267_PROVIDER_BODY
+                safe-normal.txt:1 | ordinary searchable text
+                """);
+
+        String formatted = ToolCallSupport.formatToolResult(call, result);
+
+        assertFalse(formatted.contains("DO_NOT_LEAK_T267_PROVIDER_BODY"));
+        assertTrue(formatted.contains("PRIVATE_MARKER=[redacted]"));
+        assertTrue(formatted.contains("ordinary searchable text"));
     }
 }

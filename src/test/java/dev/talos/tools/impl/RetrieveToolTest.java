@@ -1,12 +1,15 @@
 package dev.talos.tools.impl;
 
 import dev.talos.core.Config;
+import dev.talos.core.context.ContextResult;
+import dev.talos.core.ingest.ChunkMetadata;
 import dev.talos.core.rag.RagService;
 import dev.talos.core.security.Sandbox;
 import dev.talos.tools.*;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -98,6 +101,28 @@ class RetrieveToolTest {
         ToolResult r = tool.execute(call, null);
 
         assertNotNull(r);
+    }
+
+    @Test
+    void retrieve_does_not_leak_dirty_index_canary() {
+        RetrieveTool tool = new RetrieveTool(new RagService(new Config()) {
+            @Override
+            public Prepared prepare(Path ws, String query, Integer topKOverride) {
+                return new Prepared(
+                        List.of(new ContextResult.Snippet(
+                                ".env",
+                                "TALOS_SECRET=DO_NOT_LEAK_T267_ENV",
+                                ChunkMetadata.empty())),
+                        List.of(".env"));
+            }
+        });
+
+        ToolResult r = tool.execute(new ToolCall("talos.retrieve", Map.of("query", "DO_NOT_LEAK_T267_ENV")),
+                testContext());
+
+        assertTrue(r.success());
+        assertFalse(r.output().contains("DO_NOT_LEAK_T267_ENV"));
+        assertTrue(r.output().contains("[redacted") || r.output().contains("protected content"));
     }
 }
 

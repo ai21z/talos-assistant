@@ -17,6 +17,7 @@ import dev.talos.core.rerank.ScoreThresholdReranker;
 import dev.talos.core.retrieval.*;
 import dev.talos.core.retrieval.stages.*;
 import dev.talos.runtime.ToolCallParser;
+import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.spi.CorpusStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -162,7 +163,11 @@ public class RagService {
             for (RetrievalCandidate c : result.candidates()) {
                 String text = store.getTextByPath(c.path());
                 if (text == null || text.isBlank()) continue;
-                snippets.add(new ContextResult.Snippet(c.path(), text, c.metadata()));
+                Path snippetPath = ws.resolve(c.path()).normalize();
+                if (ProtectedContentPolicy.isProtectedPath(ws, snippetPath)) {
+                    continue;
+                }
+                snippets.add(new ContextResult.Snippet(c.path(), ProtectedContentPolicy.sanitizeText(text), c.metadata()));
             }
             // Build rich citations using the same metadata-aware formatting as ContextPacker
             citations.addAll(ContextPacker.buildCitations(snippets));

@@ -1,8 +1,12 @@
 package dev.talos.runtime;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.talos.core.util.Hash;
+import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ArtifactGoal;
 import dev.talos.runtime.trace.LocalTurnTrace;
@@ -70,7 +74,7 @@ public final class JsonSessionStore implements SessionStore {
                     .map(t -> Map.of("role", t.role(), "content", t.content(), "status", t.status()))
                     .toList());
 
-            String json = MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(root);
+            String json = sanitizedPrettyJson(root);
             Path file = fileFor(data.sessionId());
             Files.writeString(file, json);
             LOG.debug("Session saved: {} ({} turns)", file.getFileName(), data.turnCount());
@@ -163,7 +167,7 @@ public final class JsonSessionStore implements SessionStore {
             row.put("toolCalls", calls);
 
             // JSONL: one compact JSON object per line.
-            String line = MAPPER.writeValueAsString(row) + System.lineSeparator();
+            String line = sanitizedCompactJson(row) + System.lineSeparator();
             Path file = turnsFileFor(sessionId);
             Files.writeString(file, line,
                     java.nio.file.StandardOpenOption.CREATE,
@@ -321,7 +325,7 @@ public final class JsonSessionStore implements SessionStore {
         try {
             Path dir = traceDirFor(sessionId);
             Files.createDirectories(dir);
-            String json = MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(trace);
+            String json = sanitizedPrettyJson(trace);
             Files.writeString(dir.resolve(traceFileName(trace)), json);
         } catch (Exception e) {
             LOG.warn("Failed to save local turn trace for {}: {}", sessionId, e.getMessage());
@@ -374,6 +378,46 @@ public final class JsonSessionStore implements SessionStore {
         } catch (Exception e) {
             LOG.warn("Skipping malformed local trace {}: {}", path.getFileName(), e.getMessage());
             return Optional.empty();
+        }
+    }
+
+    private static String sanitizedPrettyJson(Object value) throws IOException {
+        JsonNode root = MAPPER.valueToTree(value);
+        sanitizeJsonTextNodes(root);
+        return MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(root);
+    }
+
+    private static String sanitizedCompactJson(Object value) throws IOException {
+        JsonNode root = MAPPER.valueToTree(value);
+        sanitizeJsonTextNodes(root);
+        return MAPPER.writeValueAsString(root);
+    }
+
+    private static void sanitizeJsonTextNodes(JsonNode node) {
+        if (node == null) return;
+        if (node instanceof ObjectNode objectNode) {
+            var fields = objectNode.fields();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> field = fields.next();
+                JsonNode child = field.getValue();
+                if (child != null && child.isTextual()) {
+                    objectNode.put(field.getKey(), ProtectedContentPolicy.sanitizeText(child.asText()));
+                } else {
+                    sanitizeJsonTextNodes(child);
+                }
+            }
+            return;
+        }
+        if (node instanceof ArrayNode arrayNode) {
+            for (int i = 0; i < arrayNode.size(); i++) {
+                JsonNode child = arrayNode.get(i);
+                if (child != null && child.isTextual()) {
+                    arrayNode.set(i, MAPPER.getNodeFactory().textNode(
+                            ProtectedContentPolicy.sanitizeText(child.asText())));
+                } else {
+                    sanitizeJsonTextNodes(child);
+                }
+            }
         }
     }
 

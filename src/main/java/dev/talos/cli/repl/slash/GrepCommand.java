@@ -3,7 +3,10 @@ package dev.talos.cli.repl.slash;
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
 import dev.talos.core.ingest.FileWalker;
+import dev.talos.core.ingest.UnsupportedDocumentFormats;
+import dev.talos.runtime.policy.ProtectedContentPolicy;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.PathMatcher;
@@ -46,6 +49,8 @@ public final class GrepCommand implements Command {
             var sb = new StringBuilder();
             int totalMatches = 0;
             int fileCount = 0;
+            int skippedProtected = 0;
+            java.util.ArrayList<String> skippedUnsupported = new java.util.ArrayList<>();
 
             // Get files using broader filtering that includes scripts, configs, and markup
             var fs = workspace.getFileSystem();
@@ -71,6 +76,10 @@ public final class GrepCommand implements Command {
                     pathStr.startsWith(".git/") || pathStr.startsWith(".idea/")) {
                     return false;
                 }
+                if (ProtectedContentPolicy.isProtectedPath(workspace, p)
+                        || UnsupportedDocumentFormats.isUnsupported(p)) {
+                    return true;
+                }
 
                 // Match both nested files and root-level files
                 return codeMatcher.matches(rel) || codeRootMatcher.matches(rel) ||
@@ -80,6 +89,14 @@ public final class GrepCommand implements Command {
 
             for (Path file : files) {
                 if (Files.size(file) > 100_000) continue; // Skip very large files
+                if (ProtectedContentPolicy.isProtectedPath(workspace, file)) {
+                    skippedProtected++;
+                    continue;
+                }
+                if (UnsupportedDocumentFormats.isUnsupported(file) || looksLikeBinary(file)) {
+                    skippedUnsupported.add(workspace.relativize(file).toString().replace('\\', '/'));
+                    continue;
+                }
 
                 String content = Files.readString(file);
                 String[] lines = content.split("\\r?\\n");
@@ -93,8 +110,9 @@ public final class GrepCommand implements Command {
                             hasMatches = true;
                             fileCount++;
                         }
+                        String safeLine = ProtectedContentPolicy.sanitizeSearchLine(lines[i]);
                         sb.append(String.format("  %d: %s\n", i + 1,
-                            lines[i].length() > 120 ? lines[i].substring(0, 120) + "..." : lines[i]));
+                            safeLine.length() > 120 ? safeLine.substring(0, 120) + "..." : safeLine));
                         totalMatches++;
 
                         // Limit matches per file
@@ -105,14 +123,45 @@ public final class GrepCommand implements Command {
             }
 
             if (totalMatches == 0) {
-                return new Result.Info("No matches found for pattern: " + regex);
+                return new Result.Info("No matches found in searchable non-protected text files for pattern: "
+                        + ProtectedContentPolicy.sanitizeText(regex)
+                        + ProtectedContentPolicy.protectedContentNote(skippedProtected)
+                        + unsupportedNote(skippedUnsupported));
             } else {
                 sb.insert(0, String.format("Found %d matches in %d files:\n", totalMatches, fileCount));
+                sb.append(ProtectedContentPolicy.protectedContentNote(skippedProtected));
+                sb.append(unsupportedNote(skippedUnsupported));
                 return new Result.Ok(sb.toString());
             }
 
         } catch (Exception e) {
             return new Result.Error("Grep failed: " + e.getMessage(), 500);
+        }
+    }
+
+    private static String unsupportedNote(List<String> skippedUnsupported) {
+        if (skippedUnsupported == null || skippedUnsupported.isEmpty()) return "";
+        int limit = Math.min(5, skippedUnsupported.size());
+        StringBuilder out = new StringBuilder();
+        out.append("\n\nSearch was limited to searchable text files. Skipped unsupported/binary files: ");
+        out.append(String.join(", ", skippedUnsupported.subList(0, limit)));
+        if (skippedUnsupported.size() > limit) {
+            out.append(", ... ").append(skippedUnsupported.size() - limit).append(" more");
+        }
+        out.append(".");
+        return out.toString();
+    }
+
+    private static boolean looksLikeBinary(Path file) {
+        try (var is = Files.newInputStream(file)) {
+            byte[] head = is.readNBytes(512);
+            int nullCount = 0;
+            for (byte b : head) {
+                if (b == 0) nullCount++;
+            }
+            return nullCount > 4;
+        } catch (IOException e) {
+            return true;
         }
     }
 }
