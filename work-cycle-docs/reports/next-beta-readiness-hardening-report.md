@@ -4,7 +4,7 @@
 
 Not release-ready
 
-Deterministic hardening improved protected-read scope control, log/parameter redaction, artifact scanning, RAG index metadata, and unsupported-format answer correction. The required Gradle gate now passes, but the release gate is still not clean because the two-model live audit has not run, private-folder mode lacks user-facing UX, and document extraction is still unsupported.
+Deterministic hardening improved protected-read scope control, private-mode UX, sensitive-folder warnings, log/parameter redaction, artifact scanning, RAG index metadata, dirty-index coverage, and unsupported-format answer correction. The release gate is still not clean because the two-model live audit has not run and document extraction is still unsupported.
 
 ## 2. What changed in this pass
 
@@ -16,6 +16,9 @@ Deterministic hardening improved protected-read scope control, log/parameter red
 - Added `ArtifactCanaryScanner`.
 - Added RAG index privacy/file-capability metadata and stale-index rebuild behavior.
 - Added focused tests for scope, logs, artifact scanning, RAG metadata, and unsupported final-answer truthfulness.
+- Added `/privacy status`, `/privacy private on`, `/privacy private off`, and `/privacy help`.
+- Added warning-only sensitive workspace detection.
+- Added Lucene-backed dirty-index integration tests for missing metadata, config-hash changes, old protected chunks, and private-mode retrieval disablement.
 - Updated README, source crosscheck, source matrix, release-gate report, live-audit runbook, and tickets.
 
 ## 3. Approved protected read scope status
@@ -45,28 +48,31 @@ Deterministic hardening improved protected-read scope control, log/parameter red
 
 New indexes write `talos-index-metadata.json` with schema, privacy policy version, file-capability policy version, RAG config hash, workspace root hash, creation time, and Talos version. `RagService` treats valid Lucene indexes with missing/stale metadata as dirty and rebuilds them before retrieval.
 
-Remaining risk: broader RAG e2e tests should cover old protected chunks and config hash changes across realistic workspaces.
+Focused Lucene-backed integration now covers missing metadata, old protected chunks, config-hash changes, and private-mode retrieval disablement. Remaining risk: live prompt-bank coverage has not exercised this with local models.
 
 ## 6. Unsupported-format final-answer status
 
-Scripted model tests now cover fabricated DOCX summary and XLSX-vs-text compare claims. Runtime answer shaping removes unsupported-family claims and prepends a document capability note.
+Scripted model tests now cover fabricated summaries/claims across PDF, Word/DOCX, Excel/XLSX, PowerPoint/PPTX, images, archives, binaries, compare flows, skipped archive search, and unsupported PDF/DOCX write attempts. Runtime answer shaping removes unsupported-family claims and prepends a document capability note.
 
-Remaining risk: live model behavior across PDF, images, archives, and write/create flows still needs the prompt-bank audit.
+Remaining risk: live model behavior still needs the prompt-bank audit.
 
 ## 7. Private-folder mode status
 
-Config-level V1 exists:
+Minimal user-visible V1 exists:
 
 - `privacy.mode = private`
 - private mode disables RAG retrieval/indexing by default
 - approved protected reads default to local-display-only model handoff
+- `/privacy status`
+- `/privacy private on`
+- `/privacy private off`
+- `/privacy help`
+- warning-only sensitive workspace detection
 
 Missing:
 
-- `/privacy private on/off`
-- startup sensitive-folder warning
-- full private-folder help/docs UX
 - broad e2e private-mode scenarios
+- two-model live audit evidence
 
 ## 8. Artifact canary scan status
 
@@ -74,7 +80,8 @@ Automated: yes, as JUnit test coverage through `ArtifactCanaryScanTest`.
 
 Command:
 
-- `./gradlew.bat test --tests "*ArtifactCanaryScanTest" --no-daemon`
+- `./gradlew.bat test --tests "*ArtifactCanary*" --no-daemon`
+- `./gradlew.bat clean check e2eTest --no-daemon`
 
 Directories scanned in focused current-artifact test:
 
@@ -89,13 +96,13 @@ Allowlist/skip behavior:
 Result:
 
 - focused artifact scanner tests passed.
-- full `clean check e2eTest` passed, so the scanner currently runs through `check`.
+- full `clean check e2eTest` passed on 2026-05-15, so the scanner currently runs through `check`.
 
 ## 9. Two-model live audit status
 
 Not run.
 
-Models/backend: not started in this pass.
+Models/backend: not started. `ollama list` crashed with access violation `0xc0000005`; local Talos config showed a GPT-OSS llama.cpp profile but no Qwen profile for the required pair.
 
 Artifacts: runbook created in `work-cycle-docs/reports/t267-live-two-model-audit.md`.
 
@@ -103,21 +110,18 @@ Verdict: release blocker remains.
 
 ## 10. Tests run
 
-- `./gradlew.bat test --tests "*ProtectedReadScopePolicyTest" --tests "*ProtectedReadScopeIntegrationTest" --tests "*SensitiveLogRedactionTest" --tests "*ArtifactCanaryScanTest" --tests "*IndexerPolicyMetadataTest" --tests "*UnsupportedFinalAnswerTruthfulnessTest" --no-daemon` - passed.
-- `./gradlew.bat test --tests "*ArtifactCanaryScanTest" --no-daemon` - passed during debugging.
-- `./gradlew.bat test --tests "dev.talos.app.ui.TerminalFirstRunTest" --no-daemon` - passed after adding bounded Ollama probe timeouts.
+- `./gradlew.bat test --tests "*ProtectedReadScope*" --tests "*Privacy*" --tests "*SensitiveFolder*" --tests "*SensitiveWorkspaceDetector*" --tests "*SensitiveLog*" --tests "*ArtifactCanary*" --tests "*IndexerPolicyMetadata*" --tests "*Rag*Dirty*" --tests "*UnsupportedFinalAnswer*" --tests "*Config*Privacy*" --no-daemon` - passed.
 - `./gradlew.bat clean check e2eTest --no-daemon` - passed.
 
 ## 11. Tests not run
 
-- Live two-model prompt-bank audit not run.
-- Focused private-mode e2e scenario pack not added yet.
+- Live two-model prompt-bank audit not run because the required local model/backend pair was unavailable. `ollama list` crashed with access violation `0xc0000005`; local Talos config showed GPT-OSS only, not the required Qwen/GPT-OSS pair.
+- Focused private-mode e2e scenario pack not added yet; unit/integration coverage exists.
 
 ## 12. Remaining blockers
 
-- Two-model live audit.
-- Private-folder user-facing mode and sensitive-folder warning.
-- Broader RAG dirty-index e2e coverage.
+- Two-model live audit with Qwen and GPT-OSS.
+- Broader private-mode live/e2e prompt-bank evidence.
 - Local PDF/Office/image/OCR/archive extraction if private-document positioning is desired.
 
 ## 13. Allowed product claims

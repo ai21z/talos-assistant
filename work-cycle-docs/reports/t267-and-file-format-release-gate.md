@@ -4,7 +4,7 @@
 
 Not release-ready.
 
-The deterministic hardening work improved the developer/text-project beta boundary, and the required Gradle gate passes. Private-document beta remains blocked: the two-model live prompt-bank audit has not run in this pass, private-folder UX is only a config-level V1, and Talos still has no local PDF/Office/image/archive extraction.
+The deterministic hardening work improved the developer/text-project beta boundary. Private-document beta remains blocked: the two-model live prompt-bank audit has not run in this pass, private mode still needs broader live coverage, and Talos still has no local PDF/Office/image/archive extraction.
 
 ## 2. Source crosscheck summary
 
@@ -32,20 +32,20 @@ Fixed in this pass:
 Still open:
 
 - Two-model live audit not run in this pass.
-- Private-folder mode has no `/privacy private on/off` UX yet.
+- Private mode now has a minimal `/privacy` REPL UX and warning-only sensitive workspace detection, but it still lacks live prompt-bank evidence.
 - Artifact scan is CI-grade for controlled generated surfaces, but legacy ignored manual audit folders are deliberately skipped in the unit scan.
 
 ## 4. Unsupported-format status
 
 | Format family | Extensions | Current behavior | Tests | Verdict |
 |---|---|---|---|---|
-| PDF | `.pdf` | Classified unsupported; no extraction. | Existing unsupported tests | Not extractable |
+| PDF | `.pdf` | Classified unsupported; no extraction; scripted fabrication override covered. | `UnsupportedFinalAnswerTruthfulnessTest` | Not extractable |
 | Word | `.doc`, `.docx` | Classified unsupported; final-answer fabrication guarded in scripted tests. | `UnsupportedFinalAnswerTruthfulnessTest` | Not extractable |
 | Excel | `.xls`, `.xlsx` | Classified unsupported; compare flow must report partial only. | `UnsupportedFinalAnswerTruthfulnessTest` | Not extractable |
-| PowerPoint | `.ppt`, `.pptx` | Classified unsupported; no extraction. | Existing capability tests | Not extractable |
-| Images/scans | `.png`, `.jpg`, `.jpeg`, `.gif`, `.bmp`, `.webp`, `.tif`, `.tiff` | Classified unsupported image/scan. No OCR. | Existing capability tests | Not extractable |
-| Archives | `.zip`, `.tar`, `.gz`, `.tgz`, `.7z`, `.rar` | Classified unsupported archive. | Existing capability tests | Not extractable |
-| Binaries | `.exe`, `.dll`, `.so`, `.dylib`, `.class`, `.jar`, `.war`, `.ear`, `.bin`, `.dat` | Classified unsupported binary/compiled. | Existing capability tests | Not extractable |
+| PowerPoint | `.ppt`, `.pptx` | Classified unsupported; scripted fabrication override covered. | `UnsupportedFinalAnswerTruthfulnessTest` | Not extractable |
+| Images/scans | `.png`, `.jpg`, `.jpeg`, `.gif`, `.bmp`, `.webp`, `.tif`, `.tiff` | Classified unsupported image/scan. No OCR; scripted fabrication override covered. | `UnsupportedFinalAnswerTruthfulnessTest` | Not extractable |
+| Archives | `.zip`, `.tar`, `.gz`, `.tgz`, `.7z`, `.rar` | Classified unsupported archive; search must disclose skipped archives. | `UnsupportedFinalAnswerTruthfulnessTest` | Not extractable |
+| Binaries | `.exe`, `.dll`, `.so`, `.dylib`, `.class`, `.jar`, `.war`, `.ear`, `.bin`, `.dat` | Classified unsupported binary/compiled; scripted fabrication override covered. | `UnsupportedFinalAnswerTruthfulnessTest` | Not extractable |
 | Unknown text-like files | no known unsupported extension, no binary sniff failure | Text attempt allowed. | Existing parser/read/search tests | Supported cautiously |
 
 ## 5. Artifact safety status
@@ -60,7 +60,7 @@ Still open:
 | session JSON | Redacted through session persistence path. | Existing session tests | Pass for tested boundary |
 | turn JSONL | Redacted for tested turn records. | Existing turn-log tests | Pass for tested boundary |
 | logs | Tool params and command output now use central redaction helpers. | `SensitiveLogRedactionTest` | Pass for focused boundary |
-| RAG index | New indexes write policy metadata; stale/missing metadata rebuilds. | `IndexerPolicyMetadataTest` | Partial until broader RAG tests run |
+| RAG index | New indexes write policy metadata; stale/missing metadata rebuilds; dirty-index integration covers old protected chunks. | `IndexerPolicyMetadataTest`, `RagDirtyIndexIntegrationTest` | Focused pass |
 | final answer | Unsupported summarize/compare fabrication guarded in focused tests. | `UnsupportedFinalAnswerTruthfulnessTest` | Partial until live audit |
 
 ## 6. User-facing copy recommendation
@@ -89,21 +89,20 @@ Forbidden claims unless all private-document gates pass:
 
 ## 7. Tickets created/updated
 
-T267-T280 are open/updated for indirect-read safety, unsupported-format truthfulness, RAG policy metadata, artifact scanning, approved protected-read scope, log/parameter redaction, private-folder mode, source crosscheck discipline, and live audit.
+T267-T285 are open/updated for indirect-read safety, unsupported-format truthfulness, RAG policy metadata, artifact scanning, approved protected-read scope, log/parameter redaction, private-mode UX, source crosscheck discipline, artifact scanner surface coverage, and live audit.
 
 ## 8. Tests run
 
-- `./gradlew.bat test --tests "*ProtectedReadScopePolicyTest" --tests "*ProtectedReadScopeIntegrationTest" --tests "*SensitiveLogRedactionTest" --tests "*ArtifactCanaryScanTest" --tests "*IndexerPolicyMetadataTest" --tests "*UnsupportedFinalAnswerTruthfulnessTest" --no-daemon` - passed.
-- `./gradlew.bat test --tests "dev.talos.app.ui.TerminalFirstRunTest" --no-daemon` - passed.
+- `./gradlew.bat test --tests "*ProtectedReadScope*" --tests "*Privacy*" --tests "*SensitiveFolder*" --tests "*SensitiveWorkspaceDetector*" --tests "*SensitiveLog*" --tests "*ArtifactCanary*" --tests "*IndexerPolicyMetadata*" --tests "*Rag*Dirty*" --tests "*UnsupportedFinalAnswer*" --tests "*Config*Privacy*" --no-daemon` - passed.
 - `./gradlew.bat clean check e2eTest --no-daemon` - passed.
 
 ## 9. Tests not run
 
-- Two-model live Talos prompt-bank audit not run in this pass.
+- Two-model live Talos prompt-bank audit not run in this pass. `ollama list` crashed with access violation `0xc0000005`, and local Talos config showed GPT-OSS only, not the required Qwen/GPT-OSS pair.
 
 ## 10. Remaining blockers
 
 - Not ready for sensitive personal paperwork positioning.
 - Live two-model audit still required.
-- Private-folder mode needs user-facing UX and broader tests.
+- Private mode needs broader live/e2e tests.
 - Local PDF/Office/image/OCR/archive extraction is not implemented.

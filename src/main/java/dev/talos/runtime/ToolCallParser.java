@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import dev.talos.runtime.toolcall.ToolAliasPolicy;
 import dev.talos.tools.ToolCall;
+import dev.talos.runtime.policy.SafeLogFormatter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -442,7 +443,8 @@ public final class ToolCallParser {
                 try {
                     node = iter.nextValue();
                 } catch (Exception e) {
-                    LOG.debug("Adjacent JSON pass: stopping at non-JSON boundary: {}", e.getMessage());
+                    LOG.debug("Adjacent JSON pass: stopping at non-JSON boundary: {}",
+                            SafeLogFormatter.throwableMessage(e));
                     break;
                 }
                 if (!node.isObject()) continue;
@@ -458,7 +460,7 @@ public final class ToolCallParser {
                 }
             }
         } catch (Exception e) {
-            LOG.debug("Adjacent JSON pass: extraction failed: {}", e.getMessage());
+            LOG.debug("Adjacent JSON pass: extraction failed: {}", SafeLogFormatter.throwableMessage(e));
         }
     }
 
@@ -481,8 +483,8 @@ public final class ToolCallParser {
                     calls.add(call);
                 }
             } catch (Exception e) {
-                LOG.warn("Failed to parse tool_call JSON: {}", e.getMessage());
-                LOG.debug("Malformed payload: {}", jsonPayload);
+                LOG.warn("Failed to parse tool_call JSON: {}", SafeLogFormatter.throwableMessage(e));
+                LOG.debug("Malformed payload: {}", SafeLogFormatter.value(jsonPayload));
             }
         }
     }

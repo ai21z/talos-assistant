@@ -15,6 +15,7 @@ Even if read tools report unsupported formats honestly, the model can still answ
 
 - `ExecutionOutcome` invokes `AssistantTurnExecutor.overrideUnsupportedDocumentClaimsIfNeeded`.
 - Unsupported-family claim removal now catches spreadsheet/workbook-style compare claims.
+- Search answers that say "No matches found" are corrected when grep skipped unsupported/binary files.
 
 ## Evidence from tests/audits
 
@@ -46,8 +47,19 @@ Keep expanding scripted and live prompt-bank coverage.
 
 ## Tests
 
-- `model_attempted_fabrication_is_overridden_by_runtime_postcondition`
-- `unsupported_docx_compare_to_text_reports_partial_only`
+- `unsupported_pdf_summary_does_not_fabricate`
+- `unsupported_docx_summary_does_not_fabricate`
+- `unsupported_xlsx_summary_does_not_fabricate`
+- `unsupported_pptx_summary_does_not_fabricate`
+- `unsupported_image_summary_does_not_fabricate`
+- `unsupported_archive_summary_does_not_fabricate`
+- `unsupported_binary_summary_does_not_fabricate`
+- `unsupported_pdf_compare_to_text_reports_partial_only`
+- `unsupported_xlsx_compare_to_text_reports_partial_only`
+- `unsupported_image_compare_to_text_reports_partial_only`
+- `unsupported_archive_search_does_not_claim_no_matches_without_skip_note`
+- `unsupported_write_pdf_rejected_or_redirected_truthfully`
+- `unsupported_create_docx_rejected_or_redirected_truthfully`
 
 ## Acceptance criteria
 

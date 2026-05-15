@@ -14,6 +14,7 @@ import dev.talos.core.ingest.ParsedChunk;
 import dev.talos.core.ingest.ParserUtil;
 import dev.talos.core.ingest.UnsupportedDocumentFormats;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
+import dev.talos.runtime.policy.SafeLogFormatter;
 import dev.talos.spi.Embeddings;
 import dev.talos.core.util.BuildInfo;
 import dev.talos.core.util.Hash;
@@ -108,7 +109,7 @@ public class Indexer {
         final long startTime = System.currentTimeMillis();
 
         final Path rootPath = root.toAbsolutePath().normalize();
-        LOG.info("Indexing root: {} (force_full={})", rootPath, forceFullReindex);
+        LOG.info("Indexing root: {} (force_full={})", SafeLogFormatter.value(rootPath), forceFullReindex);
 
         Map<String,Object> rag = CfgUtil.map(cfg.data.get("rag"));
 
@@ -138,7 +139,8 @@ public class Indexer {
         try {
             files = FileWalker.listFiles(rootPath, pred);
         } catch (IOException ioe) {
-            LOG.warn("Failed to walk files under {}: {}", rootPath, ioe.toString());
+            LOG.warn("Failed to walk files under {}: {}",
+                    SafeLogFormatter.value(rootPath), SafeLogFormatter.throwableMessage(ioe));
             return;
         }
         stats.addWalkTime(System.currentTimeMillis() - walkStart);
@@ -203,7 +205,7 @@ public class Indexer {
                             if (!skipHashing) {
                                 String currentHash = Hash.sha256Hex(Files.readAllBytes(p));
                                 if (store.isUpToDate(rel, currentHash)) {
-                                    LOG.debug("Skipping unchanged file: {}", rel);
+                                    LOG.debug("Skipping unchanged file: {}", SafeLogFormatter.value(rel));
                                     stats.incrementFilesSkipped();
                                     return null; // Skip processing
                                 }
@@ -232,7 +234,8 @@ public class Indexer {
                                 try {
                                     vectors = embForTasks.embedBatch(chunkTexts);
                                 } catch (Exception ex) {
-                                    LOG.debug("Batch embedding failed for {}: {} (falling back to individual)", rel, ex.toString());
+                                    LOG.debug("Batch embedding failed for {}: {} (falling back to individual)",
+                                            SafeLogFormatter.value(rel), SafeLogFormatter.throwableMessage(ex));
                                     // Fallback to individual processing
                                     vectors = new ArrayList<>();
                                     for (String chunkText : chunkTexts) {
@@ -240,7 +243,7 @@ public class Indexer {
                                             float[] vec = embForTasks.embed(chunkText);
                                             vectors.add(vec);
                                         } catch (Exception e) {
-                                            LOG.debug("Individual embedding failed: {}", e.toString());
+                                            LOG.debug("Individual embedding failed: {}", SafeLogFormatter.throwableMessage(e));
                                             vectors.add(null);
                                         }
                                     }
@@ -253,7 +256,8 @@ public class Indexer {
                                     float[] vec = i < vectors.size() ? vectors.get(i) : null;
 
                                     if (vec == null || vec.length == 0) {
-                                        LOG.debug("Empty/null embedding for {}, BM25-only for this chunk", c.id());
+                                        LOG.debug("Empty/null embedding for {}, BM25-only for this chunk",
+                                                SafeLogFormatter.value(c.id()));
                                         vec = null;
                                     }
 
@@ -274,7 +278,7 @@ public class Indexer {
                                 }
                             }
                         } catch (Exception ex) {
-                            LOG.warn("Skip {} : {}", p, ex.toString());
+                            LOG.warn("Skip {} : {}", SafeLogFormatter.value(p), SafeLogFormatter.throwableMessage(ex));
                         } finally {
                             listener.onFileComplete(filesCompleted.incrementAndGet(), totalFiles, rel);
                         }

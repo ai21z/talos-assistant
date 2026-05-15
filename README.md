@@ -69,8 +69,23 @@ approved protected reads default to `LOCAL_DISPLAY_ONLY`: the runtime reads the
 file locally after approval, but withholds raw contents from model context and
 redacts persisted artifacts unless an explicit `SEND_TO_MODEL_CONTEXT` scope is
 enabled. This is still not enough to position Talos as safe for sensitive
-paperwork folders; private-folder UX and the live two-model audit remain release
-gates.
+paperwork folders; broader private-mode audit coverage and the live two-model
+audit remain release gates.
+
+Private mode is user-visible in the REPL:
+
+- `/privacy status` shows the current privacy mode, protected-read handoff
+  scope, RAG/retrieve behavior in private mode, and raw artifact persistence
+  setting.
+- `/privacy private on` switches the session/config state to private mode.
+- `/privacy private off` restores developer/default behavior after an explicit
+  user command.
+- `/privacy help` explains model-context and artifact boundaries.
+
+Talos may warn when a workspace name or shallow metadata looks sensitive, such
+as tax, health, legal, finance, secrets, protected folders, or many private
+document formats. This warning does not prove the folder is safe, and Talos does
+not inspect protected file contents to decide whether to show it.
 
 ## How A Turn Works
 
@@ -294,6 +309,9 @@ Run the approved Gradle test command profile.
 | `/workspace` | show current workspace status |
 | `/status` | show runtime and indexing details |
 | `/tools` | show the registered tool set |
+| `/privacy status` | show privacy mode, protected-read scope, RAG/retrieve, and artifact persistence |
+| `/privacy private on` | enable stricter private-mode defaults for this session/config |
+| `/privacy private off` | restore developer/default privacy behavior explicitly |
 | `/session info` | inspect current session state |
 | `/clear` | clear conversation memory |
 | `/q` | exit |
