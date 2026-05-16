@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -24,6 +25,15 @@ import static org.junit.jupiter.api.Assertions.*;
 class RagModeToolLoopTest {
 
     private static final Path WS = Path.of(".").toAbsolutePath().normalize();
+
+    private static Config placeholderConfig() {
+        Config cfg = new Config();
+        Map<String, Object> llm = new LinkedHashMap<>();
+        llm.put("transport", "placeholder");
+        llm.put("default_backend", "ollama");
+        cfg.data.put("llm", llm);
+        return cfg;
+    }
 
     // ═══════════════════════════════════════════════════════════════════════
     //  buildMessages — structured /api/chat messages
@@ -188,7 +198,7 @@ class RagModeToolLoopTest {
 
         @Test
         void handle_returns_ok_result() throws Exception {
-            var ctx = Context.builder(new Config()).build();
+            var ctx = Context.builder(placeholderConfig()).build();
             var mode = new RagMode();
 
             Optional<Result> result = mode.handle("what is this project", WS, ctx);
@@ -201,7 +211,7 @@ class RagModeToolLoopTest {
 
         @Test
         void handle_empty_query_returns_info() throws Exception {
-            var ctx = Context.builder(new Config()).build();
+            var ctx = Context.builder(placeholderConfig()).build();
             var mode = new RagMode();
 
             Optional<Result> result = mode.handle("", WS, ctx);
@@ -214,7 +224,7 @@ class RagModeToolLoopTest {
         void handle_does_not_update_memory_directly() throws Exception {
             // Memory updates are centralized in TurnProcessor via MemoryUpdateListener
             var memory = new SessionMemory();
-            var ctx = Context.builder(new Config()).memory(memory).build();
+            var ctx = Context.builder(placeholderConfig()).memory(memory).build();
             var mode = new RagMode();
 
             mode.handle("test query", WS, ctx);
@@ -226,7 +236,7 @@ class RagModeToolLoopTest {
         @Test
         void handle_null_toolCallLoop_does_not_throw() throws Exception {
             // Context with no toolCallLoop (null) should not cause NPE
-            var ctx = Context.builder(new Config()).build();
+            var ctx = Context.builder(placeholderConfig()).build();
             var mode = new RagMode();
 
             assertDoesNotThrow(() -> mode.handle("test query", WS, ctx));
@@ -243,7 +253,7 @@ class RagModeToolLoopTest {
         @Test
         void context_toolCallLoop_is_accessible() {
             // Verify the Context record exposes toolCallLoop() for RagMode to use
-            var ctx = Context.builder(new Config()).build();
+            var ctx = Context.builder(placeholderConfig()).build();
             // Default builder produces null toolCallLoop
             assertNull(ctx.toolCallLoop(),
                     "Default context should have null toolCallLoop (no TurnProcessor wired)");

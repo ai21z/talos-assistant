@@ -8,6 +8,13 @@ Not fully run in this pass. A preflight helper now exists:
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-t267-live-audit.ps1 -PreflightOnly
 ```
 
+For backend cleanup plus model smoke verification:
+
+```powershell
+./gradlew.bat installDist --no-daemon
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-t267-live-audit.ps1 -SmokeModels -StopStaleServers
+```
+
 The preflight creates `local/manual-testing/<audit-id>/LIVE-AUDIT-PREFLIGHT.md` and reports one of:
 
 - `PASS`: both required model files/backend signals are available.
@@ -20,6 +27,7 @@ Current status on 2026-05-16:
 - The managed `llama.cpp` server path exists.
 - 53 stale repo-owned `llama-server.exe` processes were found and stopped because they left only 282 MiB GPU memory free and caused Qwen startup failure.
 - After cleanup, both GPT-OSS and Qwen passed a minimal model-forced smoke prompt through isolated `-Duser.home` configs.
+- Latest smoke evidence: audit id `t267-live-audit-20260516-091319`; GPT-OSS returned `GPTOSS_SMOKE_123`; Qwen returned `QWEN_SMOKE_123`; targeted artifact scan passed on the smoke roots; repo-owned stale server count after the run was 0.
 - The full prompt bank below has not yet been executed/classified, so no release-ready claim may rely on this report.
 
 ## Required models

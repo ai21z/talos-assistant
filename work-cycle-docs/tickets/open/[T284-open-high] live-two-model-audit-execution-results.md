@@ -20,9 +20,10 @@ The runbook exists at `work-cycle-docs/reports/t267-live-two-model-audit.md`.
 This pass did not run the full live prompt bank. The local model setup improved:
 
 - Updated preflight now checks actual managed `llama.cpp` server/model files and records the need for sequential isolated configs.
+- The preflight script now supports `-StopStaleServers` and `-SmokeModels`.
 - GPT-OSS and Qwen GGUF files were found locally.
 - 53 stale repo-owned `llama-server.exe` processes were stopped after they caused Qwen startup to fail from GPU memory exhaustion.
-- Both Qwen and GPT-OSS passed a minimal model-forced Talos smoke prompt after cleanup.
+- Both Qwen and GPT-OSS passed a minimal model-forced Talos smoke prompt after cleanup; latest smoke evidence is `t267-live-audit-20260516-091319`, which left zero repo-owned stale server processes after cleanup.
 
 The release gate remains open because smoke prompts are not the prompt-bank audit.
 
@@ -79,4 +80,11 @@ The live-audit results report now records the executable preflight command and t
 
 ## 2026-05-16 update
 
-Backend smoke is now PARTIAL rather than BLOCKED: both required local model files exist and both models answer a model-forced smoke prompt through Talos after stale `llama-server.exe` processes are stopped. The full prompt bank still has not run, so this ticket remains open.
+Backend smoke is now PARTIAL rather than BLOCKED: both required local model files exist and both models answer a model-forced smoke prompt through Talos after stale `llama-server.exe` processes are stopped. The script can now perform cleanup and smoke in one command:
+
+```powershell
+./gradlew.bat installDist --no-daemon
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-t267-live-audit.ps1 -SmokeModels -StopStaleServers
+```
+
+The full prompt bank still has not run, so this ticket remains open.

@@ -3,6 +3,7 @@ package dev.talos.runtime;
 import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
+import dev.talos.core.llm.LlmClient;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.*;
 import org.junit.jupiter.api.Nested;
@@ -10,7 +11,9 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -25,7 +28,8 @@ import static org.junit.jupiter.api.Assertions.*;
  * emit a deterministic action summary built from the tool output.
  *
  * <p>Proof-of-skip technique: build the loop with a {@link Context} whose
- * {@code llm()} is {@code null}. If the loop tried to re-prompt, it would NPE.
+     * {@code llm()} is an unavailable scripted client. If the loop tried to re-prompt,
+     * the final answer would come from the handled failure path instead of the mutation summary.
  * Therefore a passing test is direct evidence that the re-prompt was skipped.
  */
 class ToolCallLoopP0Test {
@@ -97,7 +101,8 @@ class ToolCallLoopP0Test {
         @Test
         void noSkipWhenBatchIsOnlyReadOnly() {
             // No mutations → the existing re-prompt path must still run.
-            // With a null llm this SHOULD NPE, which proves the skip is
+            // With an unavailable scripted LLM this SHOULD hit the handled
+            // re-prompt failure path, which proves the skip is
             // correctly gated on the presence of successful mutations.
             var loop = createLoop(readOnlyEchoTool());
             var messages = new ArrayList<>(List.of(
@@ -168,7 +173,7 @@ class ToolCallLoopP0Test {
             // Regression guard: the original P0 behavior must still hold
             // when there are zero failures in the iteration. A null-llm
             // stub proves re-prompt was not attempted (any attempt would
-            // NPE or error-stub the answer).
+            // error-stub the answer).
             var loop = createLoop(fakeWriteFileTool());
             var messages = new ArrayList<>(List.of(
                     ChatMessage.system("system"),
@@ -247,9 +252,20 @@ class ToolCallLoopP0Test {
         return new ToolCallLoop(processor);
     }
 
-    /** A Context with no LLM wired — any re-prompt attempt will NPE. */
+    /** A Context with an unavailable scripted LLM; any re-prompt attempt returns an error-stub answer. */
     private static Context ctxWithoutLlm() {
-        return Context.builder(new Config()).build();
+        return Context.builder(placeholderConfig())
+                .llm(LlmClient.scriptedFailure(new IllegalStateException("test LLM unavailable")))
+                .build();
+    }
+
+    private static Config placeholderConfig() {
+        Config cfg = new Config();
+        Map<String, Object> llm = new LinkedHashMap<>();
+        llm.put("transport", "placeholder");
+        llm.put("default_backend", "ollama");
+        cfg.data.put("llm", llm);
+        return cfg;
     }
 
     /** A fake {@code talos.write_file} that returns the real success string shape. */

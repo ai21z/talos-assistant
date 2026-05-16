@@ -103,8 +103,8 @@ T267-T289 are open/updated for indirect-read safety, unsupported-format truthful
 - `./gradlew.bat e2eTest --tests "*PrivateModeScriptedE2e*" --no-daemon` - passed.
 - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-t267-live-audit.ps1 -PreflightOnly` - passed after updated file-based preflight and stale server cleanup; prompt bank not run.
 - Isolated Talos model smoke prompts passed for Qwen (`QWEN_SMOKE_123`) and GPT-OSS (`GPTOSS_SMOKE_123`).
-- `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/t267-live-audit-20260516-074959,local/manual-workspaces/t267-live-audit-20260516-074959" --no-daemon` - passed.
-- `./gradlew.bat clean check e2eTest --no-daemon` - passed.
+- `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/t267-live-audit-20260516-091319,local/manual-workspaces/t267-live-audit-20260516-091319" --no-daemon` - passed.
+- `./gradlew.bat clean check e2eTest --no-daemon` - passed; repo-owned `llama-server.exe` process count after the run was 0.
 
 ## 9. Tests not run
 

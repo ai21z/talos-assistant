@@ -31,7 +31,7 @@ Verification answers:
 1. `/privacy` exists and works as documented at command/test level.
 2. `/privacy` is registered in `TalosBootstrap`.
 3. `/privacy private on/off` appears session/current-`Config` scoped. No writeback to `~/.talos/config.yaml` is present in `PrivacyCommand` or `ProtectedReadScopePolicy`.
-4. README currently says "`/privacy private on` switches the session/config state" and "`/privacy private off` restores developer/default behavior"; this is too ambiguous because it can imply persistent config. It must say current session/in-memory config state and point users to `~/.talos/config.yaml` for persistent defaults.
+4. README now says `/privacy` changes the current session/config state and does not write persistent defaults to `~/.talos/config.yaml`.
 5. Developer/default mode still allows approved protected reads into model context as an explicit risk.
 6. Private mode withholds approved protected reads from model context by default.
 7. Protected-read integration tests cover both private/default behaviors.
@@ -49,7 +49,7 @@ Verification answers:
 Verification answers:
 
 8. Sensitive workspace detection does not read file contents in the current implementation; it uses folder/file names and a shallow metadata walk.
-9. Sensitive workspace detection can over-warn on the substring `id` in ordinary names such as `valid-project` and `grid-ui`. This needs token-aware matching for short terms while preserving broader matching for unambiguous longer terms.
+9. Sensitive workspace detection now tokenizes short terms such as `id`, reducing false positives for ordinary names such as `valid-project` and `grid-ui` while preserving warnings for tokenized `id` folders.
 
 ## 4. Artifact scanning
 
@@ -65,7 +65,7 @@ Verification answers:
 Verification answers:
 
 10. Targeted artifact scanning covers prompt-debug, provider-body, sessions, traces, turn JSONL, command output, and generated reports in unit tests.
-11. Broad scans still skip generated/report/manual-audit directories to avoid fixture and build-output noise. Targeted runtime-artifact scans do not skip manual audit directories the same way, but there is not yet a maintainer-facing release task/script for scanning a completed live-audit artifact tree.
+11. Broad scans still skip generated/report/manual-audit directories to avoid fixture and build-output noise. Targeted runtime-artifact scans do not skip manual audit directories the same way, and `checkRuntimeArtifactCanaries` now provides a maintainer-facing task for completed live-audit artifact trees.
 
 ## 5. Logging
 
@@ -132,23 +132,25 @@ Verification answers:
 
 ## 9. Live audit and reports
 
-- `work-cycle-docs/reports/t267-live-two-model-audit-results.md` says the live audit was not run and remains a release blocker.
-- `work-cycle-docs/reports/t267-live-two-model-audit.md` is still a runbook/status document, not an executed two-model evidence packet.
+- `work-cycle-docs/reports/t267-live-two-model-audit-results.md` says the full prompt-bank live audit was not run and remains a release blocker.
+- `work-cycle-docs/reports/t267-live-two-model-audit.md` is still a runbook/status document, not an executed two-model prompt-bank evidence packet.
+- Latest backend evidence: `scripts/run-t267-live-audit.ps1 -SmokeModels -StopStaleServers` produced smoke audit id `t267-live-audit-20260516-091319`, where GPT-OSS returned `GPTOSS_SMOKE_123`, Qwen returned `QWEN_SMOKE_123`, targeted artifact canary scan passed on the smoke roots, and repo-owned stale server count after the run was 0.
+- Deterministic test lifecycle evidence: tests that previously loaded the real user LLM config now use placeholder/scripted LLMs, and `./gradlew.bat clean check e2eTest --no-daemon` completed with repo-owned `llama-server.exe` process count 0.
 - `work-cycle-docs/reports/next-beta-readiness-hardening-report.md` states `Not release-ready`.
 - `work-cycle-docs/reports/t267-and-file-format-release-gate.md` states `Not release-ready` and forbids private-document and unsupported-extraction claims.
 
 Verification answers:
 
-16. The two-model live audit was not actually run.
-17. The inspected release reports do not mark Talos private-document release-ready. They correctly keep live audit and unsupported extraction as blockers. README also forbids tax/health/legal/family/admin private-document positioning, but its `/privacy` persistence wording is ambiguous and needs correction.
+16. The two-model prompt-bank live audit was not actually run. The local backend pair is smoke-verified only.
+17. The inspected release reports do not mark Talos private-document release-ready. They correctly keep live audit and unsupported extraction as blockers. README also forbids tax/health/legal/family/admin private-document positioning and now states `/privacy` persistence semantics directly.
 
 ## 10. Ticket freshness
 
 - T267-T285 open tickets exist under `work-cycle-docs/tickets/open/`.
-- T281 covers private-mode UX and sensitive-folder warning but does not yet reflect the `id` tokenization false-positive.
+- T281 covers private-mode UX and sensitive-folder warning and now reflects the `id` tokenization false-positive work.
 - T283 remains open and is justified by remaining raw/partially raw log call sites.
 - T284/T280 cover the live audit blocker.
-- T286-T289 do not yet exist and should be created for:
+- T286-T289 exist for:
   - two-model local backend setup,
   - sensitive-workspace detector tokenization,
   - runtime artifact scan release task,
@@ -166,6 +168,6 @@ Targeted work only:
 2. Add tests and token-aware matching for short sensitive terms such as `id` without reading file contents.
 3. Convert high-risk log call sites to `SafeLogFormatter` and update `log-redaction-audit.md` with a call-site table.
 4. Add a maintainer-facing targeted runtime artifact canary scan utility/task and tests.
-5. Make the live two-model audit runbook executable with a preflight script and precise BLOCKED/PARTIAL/PASS reporting.
+5. Make the live two-model audit runbook executable with a preflight script and precise BLOCKED/PARTIAL/PASS reporting. Completed for preflight/smoke; full prompt-bank execution remains open.
 6. Add or extend private-mode scripted/e2e tests where practical.
 7. Update README, release reports, and tickets T267-T289 without claiming private-document release readiness.

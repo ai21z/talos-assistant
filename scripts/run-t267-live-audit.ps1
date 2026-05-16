@@ -5,6 +5,8 @@ param(
     [string]$ServerPath = "",
     [string]$GptOssModelPath = "",
     [string]$QwenModelPath = "",
+    [switch]$StopStaleServers,
+    [switch]$SmokeModels,
     [switch]$PreflightOnly
 )
 
@@ -77,20 +79,144 @@ function Test-FilePath {
     return (-not [string]::IsNullOrWhiteSpace($PathText)) -and (Test-Path -LiteralPath $PathText -PathType Leaf)
 }
 
-function Count-RepoLlamaServers {
+function Get-RepoLlamaServers {
     param([string]$ExpectedServerPath)
-    if ([string]::IsNullOrWhiteSpace($ExpectedServerPath)) { return 0 }
+    if ([string]::IsNullOrWhiteSpace($ExpectedServerPath)) { return @() }
     try {
         $normalized = [System.IO.Path]::GetFullPath($ExpectedServerPath)
-        $servers = Get-CimInstance Win32_Process -Filter "name = 'llama-server.exe'" -ErrorAction SilentlyContinue |
+        return @(Get-CimInstance Win32_Process -Filter "name = 'llama-server.exe'" -ErrorAction SilentlyContinue |
             Where-Object {
                 -not [string]::IsNullOrWhiteSpace($_.ExecutablePath) -and
                 [System.IO.Path]::GetFullPath($_.ExecutablePath) -eq $normalized
-            }
-        return @($servers).Count
+            })
     } catch {
-        return 0
+        return @()
     }
+}
+
+function Stop-RepoLlamaServers {
+    param([object[]]$Processes)
+    $stopped = 0
+    $processIds = @($Processes | ForEach-Object { $_.ProcessId })
+    foreach ($proc in @($Processes)) {
+        try {
+            Invoke-CimMethod -InputObject $proc -MethodName Terminate | Out-Null
+            $stopped += 1
+        } catch {
+            try {
+                Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
+                $stopped += 1
+            } catch {
+                # Keep preflight best-effort; remaining processes are counted again below.
+            }
+        }
+    }
+    if ($stopped -gt 0) {
+        for ($attempt = 0; $attempt -lt 10; $attempt++) {
+            $remaining = @($processIds | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue })
+            if ($remaining.Count -eq 0) { break }
+            Start-Sleep -Milliseconds 500
+        }
+    }
+    return $stopped
+}
+
+function Write-IsolatedConfig {
+    param(
+        [string]$AuditHome,
+        [string]$ModelName,
+        [string]$ModelPath,
+        [int]$Port,
+        [string]$ManagedServerPath
+    )
+    $talosDir = Join-Path $AuditHome ".talos"
+    New-Item -ItemType Directory -Force -Path $talosDir | Out-Null
+    $serverYaml = $ManagedServerPath.Replace('\', '/')
+    $modelYaml = $ModelPath.Replace('\', '/')
+    $yaml = @"
+llm:
+  transport: "engine"
+  default_backend: "llama_cpp"
+  model: "$ModelName"
+
+engines:
+  llama_cpp:
+    mode: "managed"
+    server_path: "$serverYaml"
+    model_path: "$modelYaml"
+    hf_repo: ""
+    hf_file: ""
+    hf_cache_dir: ""
+    model: "$ModelName"
+    host: "http://127.0.0.1"
+    port: $Port
+    context: 8192
+    jinja: true
+    server_args: []
+
+embed:
+  provider: "disabled"
+  model: "none"
+  host: ""
+  allow_remote: false
+
+rag:
+  vectors:
+    enabled: false
+"@
+    Set-Content -LiteralPath (Join-Path $talosDir "config.yaml") -Value $yaml -Encoding UTF8
+}
+
+function Invoke-ModelSmoke {
+    param(
+        [string]$ModelKey,
+        [string]$ModelName,
+        [string]$ExpectedToken,
+        [string]$AuditHome,
+        [string]$Workspace,
+        [string]$TalosBat,
+        [string]$ManualTesting
+    )
+    New-Item -ItemType Directory -Force -Path $Workspace | Out-Null
+    Set-Content -LiteralPath (Join-Path $Workspace "README.md") `
+        -Value "# Live Audit Smoke`n`nPublic smoke fixture for $ModelName." `
+        -Encoding UTF8
+
+    $inputPath = Join-Path $ManualTesting "$ModelKey-smoke-input.txt"
+    $outputPath = Join-Path $ManualTesting "$ModelKey-smoke-output.txt"
+    Set-Content -LiteralPath $inputPath `
+        -Value @("Return exactly $ExpectedToken and no other text.", "/quit") `
+        -Encoding UTF8
+
+    $oldJavaOpts = $env:JAVA_OPTS
+    $env:JAVA_OPTS = "-Duser.home=$AuditHome"
+    try {
+        Get-Content -LiteralPath $inputPath | & $TalosBat run --no-logo --root $Workspace *> $outputPath
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $env:JAVA_OPTS = $oldJavaOpts
+    }
+
+    $output = if (Test-Path -LiteralPath $outputPath) {
+        Get-Content -LiteralPath $outputPath -Raw
+    } else {
+        ""
+    }
+    $passed = ($exitCode -eq 0) -and ($output -match [regex]::Escape($ExpectedToken))
+    return [pscustomobject]@{
+        Model = $ModelName
+        Key = $ModelKey
+        Passed = $passed
+        ExitCode = $exitCode
+        OutputPath = $outputPath
+    }
+}
+
+function Get-TalosBatPath {
+    param([string]$Root)
+    $candidate = Join-Path $Root "build\install\talos\bin\talos.bat"
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+    return ""
 }
 
 $manualTesting = Join-Path $RepoRoot "local\manual-testing\$AuditId"
@@ -136,7 +262,13 @@ if ([string]::IsNullOrWhiteSpace($QwenModelPath)) {
 $hasGptOss = Test-FilePath $GptOssModelPath
 $hasQwen = Test-FilePath $QwenModelPath
 $hasManagedLlama = Test-FilePath $ServerPath
-$repoLlamaServerCount = Count-RepoLlamaServers $ServerPath
+$repoLlamaServers = @(Get-RepoLlamaServers $ServerPath)
+$stoppedRepoServers = 0
+if ($StopStaleServers -and $repoLlamaServers.Count -gt 0) {
+    $stoppedRepoServers = Stop-RepoLlamaServers $repoLlamaServers
+    $repoLlamaServers = @(Get-RepoLlamaServers $ServerPath)
+}
+$repoLlamaServerCount = $repoLlamaServers.Count
 $ollamaStatus = Test-OllamaList
 
 Add-Line $lines ""
@@ -151,6 +283,7 @@ Add-Line $lines "| GPT-OSS GGUF path | $GptOssModelPath |"
 Add-Line $lines "| Qwen GGUF exists | $hasQwen |"
 Add-Line $lines "| Qwen GGUF path | $QwenModelPath |"
 Add-Line $lines "| Existing repo-owned llama-server processes | $repoLlamaServerCount |"
+Add-Line $lines "| Repo-owned llama-server processes stopped by preflight | $stoppedRepoServers |"
 Add-Line $lines "| Ollama legacy backend probe | $ollamaStatus |"
 Add-Line $lines "| Audit config model strategy | sequential isolated user homes; Talos managed llama.cpp supports one active model_path per config |"
 
@@ -171,6 +304,52 @@ if ($blockedReasons.Count -eq 0) {
     Add-Line $lines '```powershell'
     Add-Line $lines "./gradlew.bat checkRuntimeArtifactCanaries -PartifactScanRoots=`"local/manual-testing/$AuditId,local/manual-workspaces/$AuditId`" --no-daemon"
     Add-Line $lines '```'
+
+    if ($SmokeModels) {
+        $talosBat = Get-TalosBatPath $RepoRoot
+        Add-Line $lines ""
+        Add-Line $lines "## Model smoke"
+        Add-Line $lines ""
+        if ([string]::IsNullOrWhiteSpace($talosBat)) {
+            Add-Line $lines "Smoke verdict: BLOCKED"
+            Add-Line $lines ""
+            Add-Line $lines "Blocked reason: built Talos launcher not found at `build/install/talos/bin/talos.bat`; run `./gradlew.bat installDist --no-daemon` first."
+            Add-Line $blockedReasons "Built Talos launcher not found for smoke run."
+        } else {
+            $gptHome = Join-Path $manualTesting "home-gptoss"
+            $qwenHome = Join-Path $manualTesting "home-qwen"
+            Write-IsolatedConfig $gptHome "gpt-oss-20b" $GptOssModelPath 18115 $ServerPath
+            Write-IsolatedConfig $qwenHome "qwen2.5-coder-14b" $QwenModelPath 18116 $ServerPath
+
+            $smokeResults = @()
+            $smokeResults += Invoke-ModelSmoke "gptoss" "gpt-oss-20b" "GPTOSS_SMOKE_123" `
+                $gptHome (Join-Path $manualWorkspace "gptoss") $talosBat $manualTesting
+            if ($StopStaleServers) {
+                Stop-RepoLlamaServers @(Get-RepoLlamaServers $ServerPath) | Out-Null
+            }
+            $smokeResults += Invoke-ModelSmoke "qwen" "qwen2.5-coder-14b" "QWEN_SMOKE_123" `
+                $qwenHome (Join-Path $manualWorkspace "qwen") $talosBat $manualTesting
+            if ($StopStaleServers) {
+                Stop-RepoLlamaServers @(Get-RepoLlamaServers $ServerPath) | Out-Null
+            }
+
+            Add-Line $lines "| Model | Passed | Exit code | Output |"
+            Add-Line $lines "| --- | --- | --- | --- |"
+            foreach ($result in $smokeResults) {
+                Add-Line $lines "| $($result.Model) | $($result.Passed) | $($result.ExitCode) | $($result.OutputPath) |"
+                if (-not $result.Passed) {
+                    Add-Line $blockedReasons "Smoke failed for $($result.Model); see $($result.OutputPath)."
+                }
+            }
+            if (($smokeResults | Where-Object { -not $_.Passed }).Count -eq 0) {
+                Add-Line $lines ""
+                Add-Line $lines "Smoke verdict: PASS"
+            } else {
+                Add-Line $lines ""
+                Add-Line $lines "Smoke verdict: BLOCKED"
+            }
+        }
+    }
 } else {
     Add-Line $lines "Preflight verdict: BLOCKED"
     Add-Line $lines ""

@@ -205,7 +205,7 @@ class ConversationCompactionTest {
         void maybeCompact_belowThreshold_returnsFalse() {
             SessionMemory mem = new SessionMemory();
             ConversationManager cm = new ConversationManager(mem, new TokenBudget(8192));
-            LlmClient llm = new LlmClient(null);
+            LlmClient llm = new LlmClient(placeholderConfig());
 
             // Add fewer than COMPACTION_THRESHOLD_PAIRS
             for (int i = 0; i < ConversationManager.COMPACTION_THRESHOLD_PAIRS - 1; i++) {
@@ -227,7 +227,7 @@ class ConversationCompactionTest {
             // Use a large budget so everything fits
             SessionMemory mem = new SessionMemory();
             ConversationManager cm = new ConversationManager(mem, new TokenBudget(1_000_000));
-            LlmClient llm = new LlmClient(null);
+            LlmClient llm = new LlmClient(placeholderConfig());
 
             for (int i = 0; i < 10; i++) {
                 cm.addTurn("short q" + i, "short a" + i);
@@ -243,7 +243,7 @@ class ConversationCompactionTest {
             SessionMemory mem = new SessionMemory();
             TokenBudget tinyBudget = new TokenBudget(200); // ~200 tokens = 800 chars total, 25% = 50 tokens = 200 chars for history
             ConversationManager cm = new ConversationManager(mem, tinyBudget);
-            LlmClient llm = new LlmClient(null);
+            LlmClient llm = new LlmClient(placeholderConfig());
 
             // Add enough turns to overflow: 6+ pairs with decent-length content
             for (int i = 0; i < 8; i++) {
@@ -400,7 +400,7 @@ class ConversationCompactionTest {
         void listener_withLlm_recordsTurn() {
             SessionMemory mem = new SessionMemory();
             ConversationManager cm = new ConversationManager(mem, new TokenBudget(8192));
-            LlmClient llm = new LlmClient(null);
+            LlmClient llm = new LlmClient(placeholderConfig());
             var listener = new dev.talos.runtime.MemoryUpdateListener(cm, llm);
 
             var result = new dev.talos.runtime.TurnResult(
