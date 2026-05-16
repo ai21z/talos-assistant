@@ -4,7 +4,7 @@ Status: open
 Severity: high / release gate
 Release gate: yes
 Branch: v0.9.0-beta-dev
-Created/updated: 2026-05-15
+Created/updated: 2026-05-16
 Owner: unassigned
 
 ## Problem
@@ -17,7 +17,14 @@ The runbook exists at `work-cycle-docs/reports/t267-live-two-model-audit.md`.
 
 ## Evidence from tests/audits
 
-This pass did not run the live audit. `ollama list` crashed with access violation `0xc0000005`, and local Talos config showed a GPT-OSS llama.cpp profile but no Qwen profile for the required pair.
+This pass did not run the full live prompt bank. The local model setup improved:
+
+- Updated preflight now checks actual managed `llama.cpp` server/model files and records the need for sequential isolated configs.
+- GPT-OSS and Qwen GGUF files were found locally.
+- 53 stale repo-owned `llama-server.exe` processes were stopped after they caused Qwen startup to fail from GPU memory exhaustion.
+- Both Qwen and GPT-OSS passed a minimal model-forced Talos smoke prompt after cleanup.
+
+The release gate remains open because smoke prompts are not the prompt-bank audit.
 
 ## User impact
 
@@ -42,7 +49,7 @@ Tool-call loop, prompt-debug, provider-body capture, traces, sessions, RAG, appr
 
 ## Proposed implementation
 
-Fix/confirm local model setup, then execute the runbook into a fresh ignored audit directory.
+Execute the runbook into a fresh ignored audit directory with sequential isolated configs for Qwen and GPT-OSS.
 
 ## Tests
 
@@ -54,7 +61,8 @@ Fix/confirm local model setup, then execute the runbook into a fresh ignored aud
 
 ## Remaining blockers
 
-- Required local two-model backend unavailable in this pass.
+- Full two-model prompt-bank execution/classification remains unrun.
+- Approval-sensitive prompts need synchronized human-operated capture or a purpose-built runner; naive scripted stdin can drift if the model does not request the expected approval.
 
 ## Open questions
 
@@ -67,4 +75,8 @@ Fix/confirm local model setup, then execute the runbook into a fresh ignored aud
 
 ## 2026-05-15 final pre-beta update
 
-The live-audit results report now records the executable preflight command and the current BLOCKED result. No prompt-bank prompts were executed.
+The live-audit results report now records the executable preflight command and the previous BLOCKED result. No prompt-bank prompts were executed.
+
+## 2026-05-16 update
+
+Backend smoke is now PARTIAL rather than BLOCKED: both required local model files exist and both models answer a model-forced smoke prompt through Talos after stale `llama-server.exe` processes are stopped. The full prompt bank still has not run, so this ticket remains open.
