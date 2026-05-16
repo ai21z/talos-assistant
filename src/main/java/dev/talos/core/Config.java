@@ -215,7 +215,10 @@ public class Config {
                     "**/*.json",
                     "**/*.csv", "**/*.tsv",
                     "**/*.properties",
-                    "**/*.html", "**/*.htm"
+                    "**/*.html", "**/*.htm",
+                    "**/*.pdf", "**/*.docx", "**/*.xls", "**/*.xlsx",
+                    "**/*.png", "**/*.jpg", "**/*.jpeg", "**/*.gif", "**/*.bmp",
+                    "**/*.webp", "**/*.tif", "**/*.tiff"
             )));
             defaulted("rag.includes");
         }
@@ -232,10 +235,7 @@ public class Config {
                     "**/build/**", "**/out/**", "**/target/**",
                     "**/dist/**", "**/prompts/**", "**/META-INF/**",
                     "**/*.class", "**/*.jar", "**/*.zip", "**/*.tar", "**/*.gz",
-                    "**/*.tgz", "**/*.7z", "**/*.rar",
-                    "**/*.png", "**/*.jpg", "**/*.jpeg", "**/*.gif", "**/*.bmp",
-                    "**/*.webp", "**/*.tif", "**/*.tiff", "**/*.pdf",
-                    "**/*.doc", "**/*.docx", "**/*.xls", "**/*.xlsx",
+                    "**/*.tgz", "**/*.7z", "**/*.rar", "**/*.doc",
                     "**/*.ppt", "**/*.pptx",
                     "**/*.exe", "**/*.dll", "**/*.so", "**/*.dylib",
                     "**/*.war", "**/*.ear", "**/*.bin", "**/*.dat"
@@ -254,6 +254,22 @@ public class Config {
             defaulted("rag.vectors");
         }
         if (!vectors.containsKey("enabled")) { vectors.put("enabled", Boolean.FALSE); defaulted("rag.vectors.enabled"); }
+
+        // ----- document extraction -----
+        Map<String,Object> documentExtraction = map(data.get("document_extraction"));
+        if (documentExtraction == null) {
+            documentExtraction = new LinkedHashMap<>();
+            data.put("document_extraction", documentExtraction);
+            defaulted("document_extraction");
+        }
+        putIfAbsent(documentExtraction, "enabled", Boolean.TRUE, "document_extraction.enabled");
+        ensureExtractionFamily(documentExtraction, "pdf", Boolean.TRUE);
+        ensureExtractionFamily(documentExtraction, "word", Boolean.TRUE);
+        ensureExtractionFamily(documentExtraction, "excel", Boolean.TRUE);
+        Map<String,Object> imageOcr = ensureExtractionFamily(documentExtraction, "image_ocr", Boolean.FALSE);
+        putIfAbsent(imageOcr, "command", "", "document_extraction.image_ocr.command");
+        putIfAbsent(imageOcr, "args", new ArrayList<>(), "document_extraction.image_ocr.args");
+        putIfAbsent(imageOcr, "timeout_ms", 10_000L, "document_extraction.image_ocr.timeout_ms");
 
         // ----- ollama -----
         Map<String,Object> ollama = map(data.get("ollama"));
@@ -348,6 +364,17 @@ public class Config {
 
     private void putIfAbsent(Map<String,Object> m, String key, Object def, String dotted) {
         if (!m.containsKey(key)) { m.put(key, def); defaulted(dotted); }
+    }
+
+    private Map<String,Object> ensureExtractionFamily(Map<String,Object> documentExtraction, String family, Boolean enabled) {
+        Map<String,Object> familyConfig = map(documentExtraction.get(family));
+        if (familyConfig == null) {
+            familyConfig = new LinkedHashMap<>();
+            documentExtraction.put(family, familyConfig);
+            defaulted("document_extraction." + family);
+        }
+        putIfAbsent(familyConfig, "enabled", enabled, "document_extraction." + family + ".enabled");
+        return familyConfig;
     }
 
     private void defaulted(String dottedKey) {

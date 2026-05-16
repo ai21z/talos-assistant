@@ -7,6 +7,7 @@ import dev.talos.runtime.policy.ActionObligation;
 import dev.talos.runtime.policy.ActionObligationPolicy;
 import dev.talos.runtime.policy.EvidenceObligationPolicy;
 import dev.talos.runtime.task.TaskContract;
+import dev.talos.core.Config;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -78,9 +79,52 @@ public record CurrentTurnPlan(
             List<String> nativeTools,
             List<String> promptTools,
             List<String> blockedTools,
+            Config cfg
+    ) {
+        return create(
+                contract,
+                phase,
+                nativeTools,
+                promptTools,
+                blockedTools,
+                NONE_OR_NOT_DERIVED,
+                NONE_OR_NOT_DERIVED,
+                NONE_OR_NOT_DERIVED,
+                cfg);
+    }
+
+    public static CurrentTurnPlan create(
+            TaskContract contract,
+            ExecutionPhase phase,
+            List<String> nativeTools,
+            List<String> promptTools,
+            List<String> blockedTools,
             String activeTaskContext,
             String artifactGoal,
             String verifierProfile
+    ) {
+        return create(
+                contract,
+                phase,
+                nativeTools,
+                promptTools,
+                blockedTools,
+                activeTaskContext,
+                artifactGoal,
+                verifierProfile,
+                null);
+    }
+
+    public static CurrentTurnPlan create(
+            TaskContract contract,
+            ExecutionPhase phase,
+            List<String> nativeTools,
+            List<String> promptTools,
+            List<String> blockedTools,
+            String activeTaskContext,
+            String artifactGoal,
+            String verifierProfile,
+            Config cfg
     ) {
         TaskContract safeContract = contract == null ? TaskContract.unknown("") : contract;
         List<TaskExpectation> expectations = TaskExpectationResolver.resolve(safeContract);
@@ -94,7 +138,7 @@ public record CurrentTurnPlan(
                 nativeTools,
                 promptTools,
                 blockedTools,
-                EvidenceObligationPolicy.derive(safeContract, phase, Path.of("").toAbsolutePath()).name(),
+                EvidenceObligationPolicy.derive(safeContract, phase, Path.of("").toAbsolutePath(), cfg).name(),
                 NOT_DERIVED,
                 activeTaskContext,
                 artifactGoal,

@@ -71,6 +71,27 @@ class AssistantTurnExecutorTest {
         return count;
     }
 
+    private static Config documentExtractionEnabled(String family) {
+        Config cfg = new Config(null);
+        java.util.Map<String, Object> documentExtraction = new java.util.LinkedHashMap<>();
+        documentExtraction.put("enabled", Boolean.TRUE);
+        java.util.Map<String, Object> familyCfg = new java.util.LinkedHashMap<>();
+        familyCfg.put("enabled", Boolean.TRUE);
+        documentExtraction.put(family, familyCfg);
+        cfg.data.put("document_extraction", documentExtraction);
+        return cfg;
+    }
+
+    private static void writeDocxFixture(Path path, String text) throws Exception {
+        try (org.apache.poi.xwpf.usermodel.XWPFDocument document =
+                     new org.apache.poi.xwpf.usermodel.XWPFDocument()) {
+            document.createParagraph().createRun().setText(text);
+            try (var out = Files.newOutputStream(path)) {
+                document.write(out);
+            }
+        }
+    }
+
     private static void writePassingBmiFixture(Path workspace) throws Exception {
         Files.writeString(workspace.resolve("index.html"), """
                 <!doctype html>
@@ -2279,6 +2300,111 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void partialMultiTargetReadRunsEvidenceRecoveryForAllTargets(@TempDir Path workspace)
+                throws Exception {
+            Files.writeString(workspace.resolve("a.txt"), "Alpha evidence.\n");
+            Files.writeString(workspace.resolve("b.txt"), "Beta evidence.\n");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null, new dev.talos.runtime.NoOpApprovalGate(), registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"a.txt\"}}",
+                            "I only read a.txt.",
+                            "Both targets were gathered: Alpha evidence and Beta evidence.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Compare a.txt with b.txt."));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-t77-partial-read-evidence-recovery",
+                    "sid",
+                    1,
+                    "2026-05-02T00:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "scripted",
+                    "test-model",
+                    "Compare a.txt with b.txt.");
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertTrue(out.text().contains("Both targets were gathered"), out.text());
+                assertFalse(out.text().contains("[Evidence incomplete:"), out.text());
+                assertEquals("READ_TARGET_REQUIRED", trace.promptAudit().evidenceObligation());
+                assertEquals("COMPLETE", trace.outcome().status());
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        }
+
+        @Test
+        void offTargetDeniedProtectedReadDoesNotBlockRequestedDocxEvidenceRecovery(@TempDir Path workspace)
+                throws Exception {
+            writeDocxFixture(workspace.resolve("report.docx"), "DOCX requested target evidence.");
+            Files.createDirectories(workspace.resolve("protected"));
+            Files.createDirectories(workspace.resolve("secrets"));
+            Files.writeString(workspace.resolve("protected/private-notes.md"), "FILE_DISCOVERED_CANARY_OFFTARGET\n");
+            Files.writeString(workspace.resolve("secrets/private-notes.md"), "FILE_DISCOVERED_CANARY_SECRET\n");
+
+            var registry = new dev.talos.tools.ToolRegistry();
+            registry.register(new dev.talos.tools.impl.ReadFileTool());
+            var processor = new dev.talos.runtime.TurnProcessor(
+                    null,
+                    (description, detail) -> false,
+                    registry);
+            var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
+            var ctx = Context.builder(documentExtractionEnabled("word"))
+                    .llm(LlmClient.scripted(List.of(
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"protected/private-notes.md\"}}\n"
+                                    + "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"secrets/private-notes.md\"}}",
+                            "Protected content was not read because approval was denied.",
+                            "Recovered requested DOCX evidence: DOCX requested target evidence.")))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .toolRegistry(registry)
+                    .toolCallLoop(loop)
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Summarize report.docx using extracted text only, and mention any extraction limitation."));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-off-target-protected-denial-docx-recovery",
+                    "sid",
+                    1,
+                    "2026-05-16T00:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "scripted",
+                    "test-model",
+                    "Summarize report.docx using extracted text only, and mention any extraction limitation.");
+            try {
+                AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                        messages, workspace, ctx, new AssistantTurnExecutor.Options());
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+                assertTrue(out.text().contains("Recovered requested DOCX evidence"), out.text());
+                assertTrue(out.text().contains("DOCX requested target evidence"), out.text());
+                assertFalse(out.text().contains("FILE_DISCOVERED_CANARY_OFFTARGET"), out.text());
+                assertFalse(out.text().contains("FILE_DISCOVERED_CANARY_SECRET"), out.text());
+                assertEquals("READ_TARGET_REQUIRED", trace.promptAudit().evidenceObligation());
+                assertEquals("COMPLETE", trace.outcome().status());
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        }
+
+        @Test
         void readOnlyReadmeProposalFlagsUnverifiedCommandsAsNotObserved(@TempDir Path workspace)
                 throws Exception {
             Files.writeString(workspace.resolve("README.md"),
@@ -3855,9 +3981,9 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
-        void unsupportedDocxReadReportsCapabilityWithoutClaimingSummary(@TempDir Path workspace)
+        void unsupportedPptxReadReportsCapabilityWithoutClaimingSummary(@TempDir Path workspace)
                 throws Exception {
-            Files.writeString(workspace.resolve("report.docx"), "fake-binary-docx-placeholder");
+            Files.writeString(workspace.resolve("slides.pptx"), "fake-binary-pptx-placeholder");
 
             var registry = new dev.talos.tools.ToolRegistry();
             registry.register(new dev.talos.tools.impl.ReadFileTool());
@@ -3866,7 +3992,7 @@ class AssistantTurnExecutorTest {
             var loop = new dev.talos.runtime.ToolCallLoop(processor, 5);
             var ctx = Context.builder(new Config())
                     .llm(LlmClient.scripted(List.of(
-                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"report.docx\"}}",
+                            "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"slides.pptx\"}}",
                             "The report says PROFIT-ALPHA.")))
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
                     .toolRegistry(registry)
@@ -3874,10 +4000,10 @@ class AssistantTurnExecutorTest {
                     .build();
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
-            messages.add(ChatMessage.user("Can you read report.docx and summarize it?"));
+            messages.add(ChatMessage.user("Can you read slides.pptx and summarize it?"));
 
             LocalTurnTraceCapture.begin(
-                    "trc-t57-unsupported-docx",
+                    "trc-t57-unsupported-pptx",
                     "sid",
                     1,
                     "2026-04-30T00:00:00Z",
@@ -3885,7 +4011,7 @@ class AssistantTurnExecutorTest {
                     "auto",
                     "scripted",
                     "test-model",
-                    "Can you read report.docx and summarize it?");
+                    "Can you read slides.pptx and summarize it?");
             try {
                 AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
                         messages, workspace, ctx, new AssistantTurnExecutor.Options());
@@ -3901,9 +4027,9 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
-        void unsupportedOnlyNamedTargetPreflightsBeforeDriftingModelReads(@TempDir Path workspace)
+        void unsupportedOnlyNamedPptxTargetPreflightsBeforeDriftingModelReads(@TempDir Path workspace)
                 throws Exception {
-            Files.writeString(workspace.resolve("report.docx"), "fake-binary-docx-placeholder");
+            Files.writeString(workspace.resolve("slides.pptx"), "fake-binary-pptx-placeholder");
             Files.writeString(workspace.resolve("README.md"), "README-SECRET should not be read.\n");
             Files.writeString(workspace.resolve("notes.md"), "NOTES-SECRET should not be read.\n");
 
@@ -3926,11 +4052,11 @@ class AssistantTurnExecutorTest {
             var messages = new ArrayList<ChatMessage>();
             messages.add(ChatMessage.system("sys"));
             messages.add(ChatMessage.user("What files are here?"));
-            messages.add(ChatMessage.assistant("Directory entries:\n- README.md\n- notes.md\n- report.docx"));
-            messages.add(ChatMessage.user("Summarize report.docx."));
+            messages.add(ChatMessage.assistant("Directory entries:\n- README.md\n- notes.md\n- slides.pptx"));
+            messages.add(ChatMessage.user("Summarize slides.pptx."));
 
             LocalTurnTraceCapture.begin(
-                    "trc-t90-unsupported-docx-preflight",
+                    "trc-t90-unsupported-pptx-preflight",
                     "sid",
                     2,
                     "2026-05-02T00:00:00Z",
@@ -3938,7 +4064,7 @@ class AssistantTurnExecutorTest {
                     "auto",
                     "scripted",
                     "test-model",
-                    "Summarize report.docx.");
+                    "Summarize slides.pptx.");
             TurnAuditCapture.begin();
             try {
                 AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
@@ -3947,13 +4073,13 @@ class AssistantTurnExecutorTest {
                 LocalTurnTrace trace = LocalTurnTraceCapture.complete();
 
                 assertTrue(out.text().contains("[Document capability note:"), out.text());
-                assertTrue(out.text().contains("report.docx"), out.text());
+                assertTrue(out.text().contains("slides.pptx"), out.text());
                 assertFalse(out.text().contains("README-SECRET"), out.text());
                 assertFalse(out.text().contains("NOTES-SECRET"), out.text());
                 assertEquals("UNSUPPORTED_CAPABILITY_CHECK_REQUIRED", trace.promptAudit().evidenceObligation());
                 assertEquals(List.of("talos.read_file"),
                         audit.toolCalls().stream().map(dev.talos.runtime.TurnRecord.ToolCallSummary::name).toList());
-                assertEquals(List.of("report.docx"),
+                assertEquals(List.of("slides.pptx"),
                         audit.toolCalls().stream().map(dev.talos.runtime.TurnRecord.ToolCallSummary::pathHint).toList());
             } finally {
                 if (TurnAuditCapture.isActive()) TurnAuditCapture.end();

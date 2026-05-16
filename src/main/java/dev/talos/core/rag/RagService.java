@@ -5,6 +5,7 @@ import dev.talos.core.Config;
 import dev.talos.core.embed.CachingEmbeddings;
 import dev.talos.core.embed.EmbeddingProfile;
 import dev.talos.core.embed.EmbeddingsFactory;
+import dev.talos.core.index.IndexProgressListener;
 import dev.talos.core.index.Indexer;
 import dev.talos.core.index.LuceneStore;
 import dev.talos.core.llm.LlmClient;
@@ -31,6 +32,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public class RagService {
     private static final Logger LOG = LoggerFactory.getLogger(RagService.class);
+    private static final String PRIVATE_MODE_REINDEX_DISABLED =
+            "RAG indexing is disabled in private mode. Enable private-mode RAG explicitly only after confirming protected and unsupported files stay outside the searchable corpus.";
 
     private final Config cfg;
     private final Indexer indexer;
@@ -106,7 +109,25 @@ public class RagService {
 
     public Indexer getIndexer() { return indexer; }
 
-    public Object reindex(Path root) throws Exception { return indexer.reindex(root); }
+    public record ReindexOutcome(boolean indexed, String message) {}
+
+    public Object reindex(Path root) throws Exception {
+        return reindex(root, false, IndexProgressListener.NOOP).message();
+    }
+
+    public ReindexOutcome reindex(Path root, boolean forceFullReindex, IndexProgressListener listener) {
+        if (ProtectedReadScopePolicy.privateMode(cfg)
+                && !ProtectedReadScopePolicy.ragEnabledInPrivateMode(cfg)) {
+            LOG.info("Explicit RAG reindex refused because private mode disables indexing by default.");
+            return new ReindexOutcome(false, PRIVATE_MODE_REINDEX_DISABLED);
+        }
+        if (forceFullReindex) {
+            indexer.index(root, true, listener == null ? IndexProgressListener.NOOP : listener);
+        } else {
+            indexer.reindex(root, listener == null ? IndexProgressListener.NOOP : listener);
+        }
+        return new ReindexOutcome(true, "Reindexed.");
+    }
 
     public Prepared prepare(Path ws, String query, Integer topKOverride) {
         if (ProtectedReadScopePolicy.privateMode(cfg)

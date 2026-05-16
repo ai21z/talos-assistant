@@ -2,7 +2,13 @@ package dev.talos.cli.repl.slash;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
+import dev.talos.core.Config;
+import dev.talos.core.extract.DocumentExtractionRequest;
+import dev.talos.core.extract.DocumentExtractionResult;
+import dev.talos.core.extract.DocumentExtractionService;
+import dev.talos.core.extract.DocumentExtractionStatus;
 import dev.talos.core.ingest.FileWalker;
+import dev.talos.core.ingest.FileCapabilityPolicy;
 import dev.talos.core.ingest.UnsupportedDocumentFormats;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
 
@@ -76,7 +82,11 @@ public final class GrepCommand implements Command {
                     pathStr.startsWith(".git/") || pathStr.startsWith(".idea/")) {
                     return false;
                 }
+                FileCapabilityPolicy.FormatInfo capability = FileCapabilityPolicy
+                        .describe(p, cfg(ctx))
+                        .orElse(null);
                 if (ProtectedContentPolicy.isProtectedPath(workspace, p)
+                        || capability != null && capability.enabled()
                         || UnsupportedDocumentFormats.isUnsupported(p)) {
                     return true;
                 }
@@ -91,6 +101,38 @@ public final class GrepCommand implements Command {
                 if (Files.size(file) > 100_000) continue; // Skip very large files
                 if (ProtectedContentPolicy.isProtectedPath(workspace, file)) {
                     skippedProtected++;
+                    continue;
+                }
+                FileCapabilityPolicy.FormatInfo capability = FileCapabilityPolicy
+                        .describe(file, cfg(ctx))
+                        .orElse(null);
+                if (capability != null && capability.enabled()) {
+                    DocumentExtractionResult extraction = new DocumentExtractionService(cfg(ctx))
+                            .extract(DocumentExtractionRequest.search(file, workspace));
+                    if (extraction.status() != DocumentExtractionStatus.SUCCESS
+                            && extraction.status() != DocumentExtractionStatus.PARTIAL) {
+                        skippedUnsupported.add(workspace.relativize(file).toString().replace('\\', '/'));
+                        continue;
+                    }
+
+                    String[] lines = extraction.safeText().split("\\R", -1);
+                    boolean hasMatches = false;
+                    for (int i = 0; i < lines.length; i++) {
+                        Matcher m = pattern.matcher(lines[i]);
+                        if (m.find()) {
+                            if (!hasMatches) {
+                                sb.append("\n").append(workspace.relativize(file)).append(":\n");
+                                hasMatches = true;
+                                fileCount++;
+                            }
+                            String safeLine = ProtectedContentPolicy.sanitizeSearchLine(lines[i]);
+                            sb.append(String.format("  %d: %s\n", i + 1,
+                                    safeLine.length() > 120 ? safeLine.substring(0, 120) + "..." : safeLine));
+                            totalMatches++;
+                            if (totalMatches >= 50) break;
+                        }
+                    }
+                    if (totalMatches >= 50) break;
                     continue;
                 }
                 if (UnsupportedDocumentFormats.isUnsupported(file) || looksLikeBinary(file)) {
@@ -150,6 +192,10 @@ public final class GrepCommand implements Command {
         }
         out.append(".");
         return out.toString();
+    }
+
+    private static Config cfg(Context ctx) {
+        return ctx == null || ctx.cfg() == null ? new Config(null) : ctx.cfg();
     }
 
     private static boolean looksLikeBinary(Path file) {

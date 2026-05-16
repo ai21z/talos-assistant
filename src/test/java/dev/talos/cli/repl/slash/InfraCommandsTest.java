@@ -4,14 +4,18 @@ import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
 import dev.talos.core.Config;
+import dev.talos.core.rag.RagService;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.XmlCompatTelemetry;
 import dev.talos.core.index.LuceneStore;
+import dev.talos.runtime.policy.ProtectedReadScopePolicy;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -108,6 +112,19 @@ class InfraCommandsTest {
             assertTrue(text.contains("XML Compat"), "Should contain XML compatibility telemetry section");
             assertTrue(text.contains("parser_activations=1"), "Should surface XML parser fallback counter");
             assertTrue(text.contains("last_tools=talos.read_file"), "Should show last XML-derived tool names");
+        }
+
+        @Test void verbose_contains_document_extraction_preflight() {
+            var cmd = new StatusCommand(ModeController.defaultController(), ws);
+
+            String text = cmd.execute("--verbose", ctx).toString();
+
+            assertTrue(text.contains("Document Extraction"), text);
+            assertTrue(text.contains("PDF"), text);
+            assertTrue(text.contains("Word"), text);
+            assertTrue(text.contains("Excel"), text);
+            assertTrue(text.contains("Image OCR"), text);
+            assertTrue(text.contains("not configured"), text);
         }
     }
 
@@ -264,6 +281,53 @@ class InfraCommandsTest {
             assertTrue(cmd.spec().aliases().contains("--stats"));
             assertTrue(cmd.spec().aliases().contains("--full"));
             assertTrue(cmd.spec().aliases().contains("--prune"));
+        }
+
+        @Test void private_mode_reindex_refuses_when_rag_disabled() throws Exception {
+            Files.writeString(ws.resolve("README.md"), "public searchable text\n");
+            Config cfg = configWithVectorsDisabled();
+            ProtectedReadScopePolicy.setPrivateMode(cfg, true);
+            Context privateCtx = Context.builder(cfg).rag(new RagService(cfg)).build();
+            var cmd = new ReindexCommand(ws);
+
+            Result r = cmd.execute("", privateCtx);
+
+            Result.Info info = assertInstanceOf(Result.Info.class, r);
+            assertTrue(info.text.contains("private mode"), info.text);
+            assertTrue(info.text.contains("RAG"), info.text);
+            Path indexDir = new RagService(cfg).getIndexer().indexDirFor(ws);
+            try (var entries = Files.list(indexDir)) {
+                assertTrue(entries.findAny().isEmpty(),
+                        "private-mode /reindex must not write index artifacts when private-mode RAG is disabled");
+            }
+        }
+
+        @Test void private_mode_reindex_allows_when_explicitly_enabled() throws Exception {
+            Files.writeString(ws.resolve("README.md"), "public searchable text\n");
+            Config cfg = configWithVectorsDisabled();
+            ProtectedReadScopePolicy.setPrivateMode(cfg, true);
+            privacyRag(cfg).put("enabled_in_private_mode", Boolean.TRUE);
+            Context privateCtx = Context.builder(cfg).rag(new RagService(cfg)).build();
+            var cmd = new ReindexCommand(ws);
+
+            Result r = cmd.execute("", privateCtx);
+
+            assertInstanceOf(Result.Ok.class, r);
+            assertTrue(Files.exists(new RagService(cfg).getIndexer().indexDirFor(ws)));
+        }
+
+        private Config configWithVectorsDisabled() {
+            Config cfg = new Config(null);
+            Map<String, Object> rag = new LinkedHashMap<>();
+            rag.put("vectors", new LinkedHashMap<>(Map.of("enabled", Boolean.FALSE)));
+            cfg.data.put("rag", rag);
+            return cfg;
+        }
+
+        @SuppressWarnings("unchecked")
+        private Map<String, Object> privacyRag(Config cfg) {
+            Map<String, Object> privacy = (Map<String, Object>) cfg.data.computeIfAbsent("privacy", ignored -> new LinkedHashMap<>());
+            return (Map<String, Object>) privacy.computeIfAbsent("rag", ignored -> new LinkedHashMap<>());
         }
     }
 

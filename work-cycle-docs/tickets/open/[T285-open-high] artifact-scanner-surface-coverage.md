@@ -38,7 +38,8 @@ Prompt-debug output, provider-body JSON, local traces, sessions, turn JSONL, com
 
 ## Required behavior
 
-- Keep targeted runtime artifact scans in `check`.
+- Keep deterministic scanner unit coverage in `check`.
+- Require explicit live-audit roots for targeted runtime artifact scans.
 - Avoid blanket report-directory skipping for generated runtime artifacts.
 - Distinguish fixture/source canaries, user-supplied query canaries, and file-discovered canaries.
 
@@ -58,7 +59,8 @@ Preserve the broad scan for current generated output and add targeted scans wher
 
 ## Remaining blockers
 
-- Live audit artifact directories still need a post-run scan after T284 executes.
+- Keep adding targeted scan roots as new runtime artifact surfaces are introduced.
+- Private-document beta still needs a larger private-paperwork live audit and targeted scan.
 
 ## Open questions
 
@@ -78,3 +80,7 @@ Added `ArtifactCanaryScanCli` and Gradle task `checkRuntimeArtifactCanaries` for
 ```
 
 Follow-up ticket: T288.
+
+## 2026-05-16 update
+
+`checkRuntimeArtifactCanaries` now requires explicit `-PartifactScanRoots=...`. Running it without roots fails fast with a usage error instead of scanning every historical ignored `local/manual-testing` and `local/manual-workspaces` tree. Targeted scan passed on beta-core audit `capability-live-audit-20260516-195820`.

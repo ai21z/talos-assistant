@@ -1,8 +1,16 @@
 package dev.talos.tools.impl;
 
 import dev.talos.core.Config;
+import dev.talos.core.extract.FakeOcrCli;
 import dev.talos.core.security.Sandbox;
 import dev.talos.tools.*;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.font.PDType1Font;
+import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -10,6 +18,8 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -94,6 +104,71 @@ class GrepToolTest {
         assertTrue(r.output().contains("No matches found"));
         assertTrue(r.output().contains("Skipped unsupported binary document(s): sample.xlsx"));
         assertTrue(r.output().contains("cannot extract PDF/Office binary contents"));
+    }
+
+    @Test void enabledPdfExtractionGrepFindsKnownText() throws IOException {
+        writePdf(workspace.resolve("report.pdf"), "Quarterly budget alpha");
+        ToolContext extractionCtx = extractionCtx("pdf");
+
+        var r = tool.execute(new ToolCall("talos.grep", Map.of("pattern", "budget alpha")), extractionCtx);
+
+        assertTrue(r.success(), r.errorMessage());
+        assertTrue(r.output().contains("report.pdf"), r.output());
+        assertTrue(r.output().contains("Quarterly budget alpha"), r.output());
+    }
+
+    @Test void enabledPdfExtractionGrepReportsNoTextPdfAsSkipped() throws IOException {
+        writeEmptyPdf(workspace.resolve("scan.pdf"));
+        ToolContext extractionCtx = extractionCtx("pdf");
+
+        var r = tool.execute(new ToolCall("talos.grep", Map.of("pattern", "budget alpha")), extractionCtx);
+
+        assertTrue(r.success(), r.errorMessage());
+        assertTrue(r.output().contains("No matches found"), r.output());
+        assertTrue(r.output().contains("Skipped unsupported binary document(s): scan.pdf"), r.output());
+        assertTrue(r.output().contains("OCR_REQUIRED"), r.output());
+        assertFalse(r.output().contains("scan.pdf:"), r.output());
+    }
+
+    @Test void enabledDocxExtractionGrepFindsKnownText() throws IOException {
+        writeDocx(workspace.resolve("brief.docx"), "Word roadmap beta");
+        ToolContext extractionCtx = extractionCtx("word");
+
+        var r = tool.execute(new ToolCall("talos.grep", Map.of("pattern", "roadmap beta")), extractionCtx);
+
+        assertTrue(r.success(), r.errorMessage());
+        assertTrue(r.output().contains("brief.docx"), r.output());
+        assertTrue(r.output().contains("Word roadmap beta"), r.output());
+    }
+
+    @Test void enabledXlsxExtractionGrepFindsKnownCellText() throws IOException {
+        writeXlsx(workspace.resolve("budget.xlsx"), "Excel revenue gamma");
+        ToolContext extractionCtx = extractionCtx("excel");
+
+        var r = tool.execute(new ToolCall("talos.grep", Map.of("pattern", "revenue gamma")), extractionCtx);
+
+        assertTrue(r.success(), r.errorMessage());
+        assertTrue(r.output().contains("budget.xlsx"), r.output());
+        assertTrue(r.output().contains("B2: Excel revenue gamma"), r.output());
+    }
+
+    @Test void enabledImageOcrGrepFindsConfiguredOcrText() throws IOException {
+        Files.write(workspace.resolve("scan.png"), new byte[] { (byte) 0x89, 'P', 'N', 'G' });
+        Config cfg = extractionEnabled("image_ocr");
+        family(cfg, "image_ocr").put("command", javaExecutable());
+        family(cfg, "image_ocr").put("args", List.of(
+                "-cp",
+                System.getProperty("java.class.path"),
+                FakeOcrCli.class.getName(),
+                "{input}"));
+        ToolContext extractionCtx = new ToolContext(workspace, new Sandbox(workspace, Map.of()), cfg);
+
+        var r = tool.execute(new ToolCall("talos.grep", Map.of("pattern", "visible text")), extractionCtx);
+
+        assertTrue(r.success(), r.errorMessage());
+        assertTrue(r.output().contains("scan.png"), r.output());
+        assertTrue(r.output().contains("OCR fixture visible text"), r.output());
+        assertFalse(r.output().contains("t267-token-should-not-appear"), r.output());
     }
 
     @Test void grep_does_not_leak_env_canary() throws IOException {
@@ -205,5 +280,72 @@ class GrepToolTest {
         var r = tool.execute(new ToolCall("talos.grep", Map.of("pattern", "PUBLIC CLASS")), ctx);
         assertTrue(r.success());
         assertFalse(r.output().contains("No matches"));
+    }
+
+    private ToolContext extractionCtx(String family) {
+        return new ToolContext(workspace, new Sandbox(workspace, Map.of()), extractionEnabled(family));
+    }
+
+    private static Config extractionEnabled(String family) {
+        Config cfg = new Config(null);
+        Map<String, Object> documentExtraction = new LinkedHashMap<>();
+        documentExtraction.put("enabled", Boolean.TRUE);
+        Map<String, Object> familyCfg = new LinkedHashMap<>();
+        familyCfg.put("enabled", Boolean.TRUE);
+        documentExtraction.put(family, familyCfg);
+        cfg.data.put("document_extraction", documentExtraction);
+        return cfg;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> family(Config cfg, String family) {
+        return (Map<String, Object>) ((Map<String, Object>) cfg.data.get("document_extraction")).get(family);
+    }
+
+    private static String javaExecutable() {
+        String exe = System.getProperty("os.name", "").toLowerCase().contains("windows") ? "java.exe" : "java";
+        return Path.of(System.getProperty("java.home"), "bin", exe).toString();
+    }
+
+    private static void writePdf(Path path, String text) throws IOException {
+        try (PDDocument document = new PDDocument()) {
+            PDPage page = new PDPage();
+            document.addPage(page);
+            try (PDPageContentStream stream = new PDPageContentStream(document, page)) {
+                stream.beginText();
+                stream.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA), 12);
+                stream.newLineAtOffset(72, 720);
+                stream.showText(text);
+                stream.endText();
+            }
+            document.save(path.toFile());
+        }
+    }
+
+    private static void writeEmptyPdf(Path path) throws IOException {
+        try (PDDocument document = new PDDocument()) {
+            document.addPage(new PDPage());
+            document.save(path.toFile());
+        }
+    }
+
+    private static void writeDocx(Path path, String text) throws IOException {
+        try (XWPFDocument document = new XWPFDocument()) {
+            document.createParagraph().createRun().setText(text);
+            try (var out = Files.newOutputStream(path)) {
+                document.write(out);
+            }
+        }
+    }
+
+    private static void writeXlsx(Path path, String text) throws IOException {
+        try (XSSFWorkbook workbook = new XSSFWorkbook()) {
+            var sheet = workbook.createSheet("Budget");
+            var row = sheet.createRow(1);
+            row.createCell(1).setCellValue(text);
+            try (var out = Files.newOutputStream(path)) {
+                workbook.write(out);
+            }
+        }
     }
 }

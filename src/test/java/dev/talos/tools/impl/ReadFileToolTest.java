@@ -1,8 +1,16 @@
 package dev.talos.tools.impl;
 
 import dev.talos.core.Config;
+import dev.talos.core.extract.FakeOcrCli;
 import dev.talos.core.security.Sandbox;
 import dev.talos.tools.*;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.font.PDType1Font;
+import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -10,6 +18,8 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -158,7 +168,7 @@ class ReadFileToolTest {
     }
 
     @Test
-    void unsupportedBinaryDocumentReportsCapabilityLimit() throws IOException {
+    void malformedPdfReportsExtractionFailureWithoutFabrication() throws IOException {
         Files.writeString(workspace.resolve("sample.pdf"), "%PDF-1.7 fake test payload");
 
         ToolCall call = new ToolCall("talos.read_file", Map.of("path", "sample.pdf"));
@@ -166,9 +176,85 @@ class ReadFileToolTest {
 
         assertFalse(r.success());
         assertEquals(ToolError.UNSUPPORTED_FORMAT, r.error().code());
-        assertTrue(r.errorMessage().contains("Unsupported binary document format: sample.pdf"));
-        assertTrue(r.errorMessage().contains("cannot extract PDF contents"));
-        assertFalse(r.errorMessage().contains("empty"));
+        assertTrue(r.errorMessage().contains("Cannot extract text from sample.pdf"), r.errorMessage());
+        assertTrue(r.errorMessage().contains("PDF extraction failed"), r.errorMessage());
+        assertFalse(r.errorMessage().contains("fake test payload"), r.errorMessage());
+    }
+
+    @Test
+    void enabledPdfExtractionReadsKnownText() throws IOException {
+        writePdf(workspace.resolve("sample.pdf"), "Talos read-file PDF text");
+        Config cfg = extractionEnabled("pdf");
+        ToolContext extractionCtx = new ToolContext(workspace, new Sandbox(workspace, Map.of()), cfg);
+
+        ToolResult r = tool.execute(new ToolCall("talos.read_file", Map.of("path", "sample.pdf")), extractionCtx);
+
+        assertTrue(r.success(), r.errorMessage());
+        assertTrue(r.output().contains("Talos read-file PDF text"), r.output());
+        assertTrue(r.output().contains("Extracted document text"), r.output());
+        assertTrue(r.output().contains("PDF text extraction may not match visual order"), r.output());
+    }
+
+    @Test
+    void enabledPdfExtractionReportsOcrRequiredForNoTextPdf() throws IOException {
+        writeEmptyPdf(workspace.resolve("scan.pdf"));
+        Config cfg = extractionEnabled("pdf");
+        ToolContext extractionCtx = new ToolContext(workspace, new Sandbox(workspace, Map.of()), cfg);
+
+        ToolResult r = tool.execute(new ToolCall("talos.read_file", Map.of("path", "scan.pdf")), extractionCtx);
+
+        assertFalse(r.success());
+        assertEquals(ToolError.UNSUPPORTED_FORMAT, r.error().code());
+        assertTrue(r.errorMessage().contains("OCR_REQUIRED"), r.errorMessage());
+        assertTrue(r.errorMessage().contains("OCR"), r.errorMessage());
+        assertFalse(r.errorMessage().contains("Extracted document text"), r.errorMessage());
+    }
+
+    @Test
+    void enabledDocxExtractionReadsKnownText() throws IOException {
+        writeDocx(workspace.resolve("sample.docx"), "Talos read-file DOCX text");
+        Config cfg = extractionEnabled("word");
+        ToolContext extractionCtx = new ToolContext(workspace, new Sandbox(workspace, Map.of()), cfg);
+
+        ToolResult r = tool.execute(new ToolCall("talos.read_file", Map.of("path", "sample.docx")), extractionCtx);
+
+        assertTrue(r.success(), r.errorMessage());
+        assertTrue(r.output().contains("Talos read-file DOCX text"), r.output());
+        assertTrue(r.output().contains("DOCX extraction is text-oriented"), r.output());
+    }
+
+    @Test
+    void enabledXlsxExtractionReadsKnownCells() throws IOException {
+        writeXlsx(workspace.resolve("sample.xlsx"), "Talos read-file XLSX text");
+        Config cfg = extractionEnabled("excel");
+        ToolContext extractionCtx = new ToolContext(workspace, new Sandbox(workspace, Map.of()), cfg);
+
+        ToolResult r = tool.execute(new ToolCall("talos.read_file", Map.of("path", "sample.xlsx")), extractionCtx);
+
+        assertTrue(r.success(), r.errorMessage());
+        assertTrue(r.output().contains("Sheet: Budget"), r.output());
+        assertTrue(r.output().contains("B2: Talos read-file XLSX text"), r.output());
+        assertTrue(r.output().contains("formulas are not recalculated"), r.output());
+    }
+
+    @Test
+    void enabledImageOcrReadsConfiguredLocalCommandOutput() throws IOException {
+        Files.write(workspace.resolve("scan.png"), new byte[] { (byte) 0x89, 'P', 'N', 'G' });
+        Config cfg = extractionEnabled("image_ocr");
+        family(cfg, "image_ocr").put("command", javaExecutable());
+        family(cfg, "image_ocr").put("args", List.of(
+                "-cp",
+                System.getProperty("java.class.path"),
+                FakeOcrCli.class.getName(),
+                "{input}"));
+        ToolContext extractionCtx = new ToolContext(workspace, new Sandbox(workspace, Map.of()), cfg);
+
+        ToolResult r = tool.execute(new ToolCall("talos.read_file", Map.of("path", "scan.png")), extractionCtx);
+
+        assertTrue(r.success(), r.errorMessage());
+        assertTrue(r.output().contains("OCR fixture visible text"), r.output());
+        assertTrue(r.output().contains("API_TOKEN=[redacted]"), r.output());
+        assertFalse(r.output().contains("t267-token-should-not-appear"), r.output());
     }
 
     @Test
@@ -220,6 +306,69 @@ class ReadFileToolTest {
         assertTrue(r.output().contains("talos.grep"), "Truncation message should suggest talos.grep");
         assertTrue(r.output().length() <= ReadFileTool.MAX_OUTPUT_CHARS + 200,
                 "Output should not greatly exceed the cap");
+    }
+
+    private static Config extractionEnabled(String family) {
+        Config cfg = new Config(null);
+        Map<String, Object> documentExtraction = new LinkedHashMap<>();
+        documentExtraction.put("enabled", Boolean.TRUE);
+        Map<String, Object> familyCfg = new LinkedHashMap<>();
+        familyCfg.put("enabled", Boolean.TRUE);
+        documentExtraction.put(family, familyCfg);
+        cfg.data.put("document_extraction", documentExtraction);
+        return cfg;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> family(Config cfg, String family) {
+        return (Map<String, Object>) ((Map<String, Object>) cfg.data.get("document_extraction")).get(family);
+    }
+
+    private static String javaExecutable() {
+        String exe = System.getProperty("os.name", "").toLowerCase().contains("windows") ? "java.exe" : "java";
+        return Path.of(System.getProperty("java.home"), "bin", exe).toString();
+    }
+
+    private static void writePdf(Path path, String text) throws IOException {
+        try (PDDocument document = new PDDocument()) {
+            PDPage page = new PDPage();
+            document.addPage(page);
+            try (PDPageContentStream stream = new PDPageContentStream(document, page)) {
+                stream.beginText();
+                stream.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA), 12);
+                stream.newLineAtOffset(72, 720);
+                stream.showText(text);
+                stream.endText();
+            }
+            document.save(path.toFile());
+        }
+    }
+
+    private static void writeEmptyPdf(Path path) throws IOException {
+        try (PDDocument document = new PDDocument()) {
+            document.addPage(new PDPage());
+            document.save(path.toFile());
+        }
+    }
+
+    private static void writeDocx(Path path, String text) throws IOException {
+        try (XWPFDocument document = new XWPFDocument()) {
+            document.createParagraph().createRun().setText(text);
+            try (var out = Files.newOutputStream(path)) {
+                document.write(out);
+            }
+        }
+    }
+
+    private static void writeXlsx(Path path, String text) throws IOException {
+        try (XSSFWorkbook workbook = new XSSFWorkbook()) {
+            var sheet = workbook.createSheet("Budget");
+            var row = sheet.createRow(1);
+            row.createCell(1).setCellValue(text);
+            try (var out = Files.newOutputStream(path)) {
+                workbook.write(out);
+            }
+        }
     }
 }
 

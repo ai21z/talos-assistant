@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.9.9] - 2026-05-15
+
+### Changed
+- Consolidated post-0.9.8 beta hardening into a named candidate, including the
+  runtime control-plane, active-context, evidence-obligation, outcome-dominance,
+  protected-read, static-web verification, workspace-operation, command-policy,
+  and TalosBench work already landed on `v0.9.0-beta-dev`.
+- [T251-done-high] Added managed llama.cpp model setup and config diagnostics,
+  including audited `qwen2.5-coder-14b` and `gpt-oss-20b` setup profiles,
+  YAML-safe Windows config generation, Talos-owned Hugging Face cache support,
+  and verbose malformed-config reporting.
+- [T252-done-high], [T255-done-high], and [T257-done-medium] improved natural
+  intent routing for directory creation, batch workspace operations, and
+  bounded command requests without exposing arbitrary shell execution.
+- [T253-done-high], [T254-done-high], [T259-done-high], and [T262-done-high]
+  hardened source-derived artifact work so source files are read as evidence,
+  output files are tracked as mutation targets, privacy negations stay scoped,
+  and derived writes before source reads are blocked before approval.
+- [T256-done-high], [T258-done-medium], and [T261-done-medium] corrected
+  prior-outcome and session-evidence answers so status and uncertainty
+  responses are scoped to the asked artifact or workspace operation instead of
+  the latest unrelated turn.
+- [T260-done-high] and [T264-done-medium] kept natural list-style prompts on
+  filename-only evidence paths, including casual `what is in here?` phrasing,
+  without reading file contents.
+- [T263-done-medium] and [T265-done-medium] refreshed TalosBench expectations
+  and assertion scope so the benchmark checks the current product contract and
+  final natural turn where appropriate.
+- Added and polished the Talos beta landing page under `site/`, with honest
+  placeholder beta calls to action, no fake release artifact URL, static tests,
+  and Playwright e2e coverage.
+- [T266-done-high] Declared the 0.9.9 beta candidate and produced the candidate
+  build/test/site/static-analysis summary evidence packet for release review.
+
 ## [0.9.8] - 2026-04-29
 
 ### Changed

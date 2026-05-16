@@ -1,5 +1,10 @@
 package dev.talos.tools.impl;
 
+import dev.talos.core.extract.DocumentExtractionRequest;
+import dev.talos.core.extract.DocumentExtractionResult;
+import dev.talos.core.extract.DocumentExtractionService;
+import dev.talos.core.extract.DocumentExtractionStatus;
+import dev.talos.core.ingest.FileCapabilityPolicy;
 import dev.talos.core.ingest.UnsupportedDocumentFormats;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.tools.*;
@@ -139,6 +144,15 @@ public final class GrepTool implements TalosTool {
                         }
                     }
 
+                    FileCapabilityPolicy.FormatInfo capability =
+                            FileCapabilityPolicy.describe(file, ctx.config()).orElse(null);
+                    if (capability != null && capability.enabled()) {
+                        searchExtractedFile(file, root, ctx, pattern, matches, maxResults, skippedUnsupportedDocuments);
+                        return matches.size() >= maxResults
+                                ? FileVisitResult.TERMINATE
+                                : FileVisitResult.CONTINUE;
+                    }
+
                     if (UnsupportedDocumentFormats.isUnsupported(file)) {
                         skippedUnsupportedDocuments.add(root.relativize(file).toString().replace('\\', '/'));
                         return FileVisitResult.CONTINUE;
@@ -228,6 +242,32 @@ public final class GrepTool implements TalosTool {
             }
         } catch (IOException ignored) {
             // skip files that can't be read as text
+        }
+    }
+
+    private static void searchExtractedFile(
+            Path file,
+            Path root,
+            ToolContext ctx,
+            Pattern pattern,
+            List<String> matches,
+            int maxResults,
+            List<String> skippedUnsupportedDocuments) {
+        String relPath = root.relativize(file).toString().replace('\\', '/');
+        DocumentExtractionResult extraction = new DocumentExtractionService(ctx.config())
+                .extract(DocumentExtractionRequest.search(file, root));
+        if (extraction.status() != DocumentExtractionStatus.SUCCESS
+                && extraction.status() != DocumentExtractionStatus.PARTIAL) {
+            skippedUnsupportedDocuments.add(relPath + " (" + extraction.status() + ")");
+            return;
+        }
+        String[] lines = extraction.safeText().split("\\R", -1);
+        for (int i = 0; i < lines.length && matches.size() < maxResults; i++) {
+            String line = lines[i];
+            if (pattern.matcher(line).find()) {
+                String safeLine = ProtectedContentPolicy.sanitizeSearchLine(line.stripTrailing());
+                matches.add(relPath + ":" + (i + 1) + " | " + truncate(safeLine, 200));
+            }
         }
     }
 

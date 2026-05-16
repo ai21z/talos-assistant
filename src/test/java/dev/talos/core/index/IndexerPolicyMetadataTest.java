@@ -1,6 +1,7 @@
 package dev.talos.core.index;
 
 import dev.talos.core.Config;
+import dev.talos.core.extract.DocumentExtractionService;
 import dev.talos.core.ingest.FileCapabilityPolicy;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
 import org.junit.jupiter.api.Test;
@@ -36,6 +37,7 @@ class IndexerPolicyMetadataTest {
         String text = Files.readString(metadata);
         assertTrue(text.contains(ProtectedContentPolicy.POLICY_VERSION));
         assertTrue(text.contains(FileCapabilityPolicy.POLICY_VERSION));
+        assertTrue(text.contains(DocumentExtractionService.EXTRACTION_POLICY_VERSION));
         assertTrue(indexer.isPolicyMetadataCurrent(tempDir));
     }
 

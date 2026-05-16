@@ -1,6 +1,7 @@
 package dev.talos.runtime.policy;
 
-import dev.talos.core.ingest.UnsupportedDocumentFormats;
+import dev.talos.core.Config;
+import dev.talos.core.ingest.FileCapabilityPolicy;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
@@ -10,9 +11,20 @@ import java.util.Locale;
 
 /** Deterministic derivation for current-turn evidence obligations. */
 public final class EvidenceObligationPolicy {
+    private static final Config DEFAULT_CAPABILITY_CONFIG = new Config(null);
+
     private EvidenceObligationPolicy() {}
 
     public static EvidenceObligation derive(TaskContract contract, ExecutionPhase phase, Path workspace) {
+        return derive(contract, phase, workspace, DEFAULT_CAPABILITY_CONFIG);
+    }
+
+    public static EvidenceObligation derive(
+            TaskContract contract,
+            ExecutionPhase phase,
+            Path workspace,
+            Config cfg
+    ) {
         if (contract == null) return EvidenceObligation.NONE;
         TaskType type = contract.type() == null ? TaskType.UNKNOWN : contract.type();
         if (type == TaskType.UNKNOWN || type == TaskType.SMALL_TALK) {
@@ -24,7 +36,7 @@ public final class EvidenceObligationPolicy {
         if (type == TaskType.VERIFY_ONLY) {
             return EvidenceObligation.VERIFY_FROM_TRACE_OR_EVIDENCE;
         }
-        if (hasUnsupportedDocumentTarget(contract)) {
+        if (hasUnsupportedDocumentTarget(contract, cfg)) {
             return EvidenceObligation.UNSUPPORTED_CAPABILITY_CHECK_REQUIRED;
         }
         if (hasSourceEvidenceTargets(contract) && hasProtectedExpectedTarget(contract, workspace)) {
@@ -57,13 +69,25 @@ public final class EvidenceObligationPolicy {
         }
     }
 
-    private static boolean hasUnsupportedDocumentTarget(TaskContract contract) {
+    private static boolean hasUnsupportedDocumentTarget(TaskContract contract, Config cfg) {
         for (String target : evidenceTargets(contract)) {
-            if (UnsupportedDocumentFormats.isUnsupported(Path.of(target))) {
+            if (requiresUnsupportedCapabilityCheck(Path.of(target), cfg)) {
                 return true;
             }
         }
         return false;
+    }
+
+    static boolean requiresUnsupportedCapabilityCheck(Path target) {
+        return requiresUnsupportedCapabilityCheck(target, DEFAULT_CAPABILITY_CONFIG);
+    }
+
+    static boolean requiresUnsupportedCapabilityCheck(Path target, Config cfg) {
+        if (target == null) return false;
+        Config safeCfg = cfg == null ? DEFAULT_CAPABILITY_CONFIG : cfg;
+        return FileCapabilityPolicy.describe(target, safeCfg)
+                .map(info -> !info.enabled())
+                .orElse(false);
     }
 
     private static boolean hasProtectedExpectedTarget(TaskContract contract, Path workspace) {

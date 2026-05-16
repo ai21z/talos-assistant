@@ -1,5 +1,6 @@
 package dev.talos.runtime.policy;
 
+import dev.talos.core.Config;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
@@ -7,6 +8,8 @@ import dev.talos.runtime.task.TaskType;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -73,8 +76,30 @@ class EvidenceObligationPolicyTest {
     }
 
     @Test
-    void unsupportedDocumentTargetRequiresCapabilityCheck() {
+    void extractableDocumentTargetRequiresNormalReadEvidence() {
         TaskContract contract = TaskContractResolver.fromUserRequest("Read report.docx and summarize it.");
+
+        assertEquals(
+                EvidenceObligation.READ_TARGET_REQUIRED,
+                EvidenceObligationPolicy.derive(contract, ExecutionPhase.INSPECT, WORKSPACE));
+    }
+
+    @Test
+    void imageOcrTargetRequiresNormalReadEvidenceWhenOcrIsEnabled() {
+        TaskContract contract = TaskContractResolver.fromUserRequest("Summarize image.png using OCR text only.");
+
+        assertEquals(
+                EvidenceObligation.READ_TARGET_REQUIRED,
+                EvidenceObligationPolicy.derive(
+                        contract,
+                        ExecutionPhase.INSPECT,
+                        WORKSPACE,
+                        imageOcrEnabledConfig()));
+    }
+
+    @Test
+    void deferredDocumentTargetRequiresCapabilityCheck() {
+        TaskContract contract = TaskContractResolver.fromUserRequest("Read slides.pptx and summarize it.");
 
         assertEquals(
                 EvidenceObligation.UNSUPPORTED_CAPABILITY_CHECK_REQUIRED,
@@ -122,5 +147,16 @@ class EvidenceObligationPolicyTest {
         assertEquals(EvidenceObligation.NONE, EvidenceObligationPolicy.parse(null));
         assertEquals(EvidenceObligation.NONE, EvidenceObligationPolicy.parse("  "));
         assertEquals(EvidenceObligation.NONE, EvidenceObligationPolicy.parse("NOPE"));
+    }
+
+    private static Config imageOcrEnabledConfig() {
+        Config cfg = new Config(null);
+        Map<String, Object> extraction = new LinkedHashMap<>();
+        extraction.put("enabled", Boolean.TRUE);
+        Map<String, Object> image = new LinkedHashMap<>();
+        image.put("enabled", Boolean.TRUE);
+        extraction.put("image_ocr", image);
+        cfg.data.put("document_extraction", extraction);
+        return cfg;
     }
 }

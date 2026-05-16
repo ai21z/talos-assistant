@@ -128,10 +128,22 @@ class EvidenceObligationVerifierTest {
     void unsupportedDocumentUnsupportedFormatSatisfiesCapabilityCheck() {
         var result = EvidenceObligationVerifier.verify(
                 EvidenceObligation.UNSUPPORTED_CAPABILITY_CHECK_REQUIRED,
+                Set.of("slides.pptx"),
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.read_file", "slides.pptx", false, false, false,
+                        "", "Unsupported binary document format.", null, ToolError.UNSUPPORTED_FORMAT)));
+
+        assertEquals(EvidenceObligationVerifier.Status.SATISFIED, result.status());
+    }
+
+    @Test
+    void extractableDocumentReadSatisfiesCapabilityCheckIfRecordedFromOldPlan() {
+        var result = EvidenceObligationVerifier.verify(
+                EvidenceObligation.UNSUPPORTED_CAPABILITY_CHECK_REQUIRED,
                 Set.of("sample.pdf"),
                 List.of(new ToolCallLoop.ToolOutcome(
-                        "talos.read_file", "sample.pdf", false, false, false,
-                        "", "Unsupported binary document format.", null, ToolError.UNSUPPORTED_FORMAT)));
+                        "talos.read_file", "sample.pdf", true, false, false,
+                        "Extracted document text from sample.pdf (status: SUCCESS)", "")));
 
         assertEquals(EvidenceObligationVerifier.Status.SATISFIED, result.status());
     }
@@ -140,9 +152,9 @@ class EvidenceObligationVerifierTest {
     void unsupportedCapabilityRequiresEvidenceForEachMixedTarget() {
         var result = EvidenceObligationVerifier.verify(
                 EvidenceObligation.UNSUPPORTED_CAPABILITY_CHECK_REQUIRED,
-                Set.of("sample.pdf", "config.json"),
+                Set.of("slides.pptx", "config.json"),
                 List.of(new ToolCallLoop.ToolOutcome(
-                        "talos.read_file", "sample.pdf", false, false, false,
+                        "talos.read_file", "slides.pptx", false, false, false,
                         "", "Unsupported binary document format.", null, ToolError.UNSUPPORTED_FORMAT)));
 
         assertEquals(EvidenceObligationVerifier.Status.UNSATISFIED, result.status());
@@ -152,10 +164,10 @@ class EvidenceObligationVerifierTest {
     void unsupportedCapabilityAcceptsNormalReadForNonUnsupportedTarget() {
         var result = EvidenceObligationVerifier.verify(
                 EvidenceObligation.UNSUPPORTED_CAPABILITY_CHECK_REQUIRED,
-                Set.of("sample.pdf", "config.json"),
+                Set.of("slides.pptx", "config.json"),
                 List.of(
                         new ToolCallLoop.ToolOutcome(
-                                "talos.read_file", "sample.pdf", false, false, false,
+                                "talos.read_file", "slides.pptx", false, false, false,
                                 "", "Unsupported binary document format.", null, ToolError.UNSUPPORTED_FORMAT),
                         new ToolCallLoop.ToolOutcome(
                                 "talos.read_file", "config.json", true, false, false,

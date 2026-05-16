@@ -1,5 +1,6 @@
 package dev.talos.runtime.policy;
 
+import dev.talos.core.Config;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
@@ -7,8 +8,10 @@ import dev.talos.runtime.turn.CurrentTurnPlan;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.LinkedHashMap;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -110,15 +113,50 @@ class EvidenceGateTest {
                 false,
                 false,
                 false,
-                Set.of("report.docx", "README.md"),
+                Set.of("slides.pptx", "README.md"),
                 Set.of(),
-                "Read report.docx and README.md.");
+                "Read slides.pptx and README.md.");
 
         assertFalse(EvidenceGate.hasOnlyUnsupportedExpectedTargets(contract));
-        assertEquals(List.of("report.docx"), EvidenceGate.handoffTargets(
+        assertEquals(List.of("slides.pptx"), EvidenceGate.handoffTargets(
                 contract,
                 EvidenceObligation.UNSUPPORTED_CAPABILITY_CHECK_REQUIRED,
                 workspace));
+    }
+
+    @Test
+    void configAwareSelectionUpgradesEnabledImageOcrToReadTarget(@TempDir Path workspace) {
+        TaskContract contract = new TaskContract(
+                TaskType.READ_ONLY_QA,
+                false,
+                false,
+                false,
+                Set.of("image.png"),
+                Set.of(),
+                "Summarize image.png using OCR text only.");
+        CurrentTurnPlan plan = new CurrentTurnPlan(
+                contract,
+                contract.originalUserRequest(),
+                ExecutionPhase.INSPECT,
+                ExecutionPhase.INSPECT,
+                null,
+                List.of(),
+                List.of("talos.read_file"),
+                List.of("talos.read_file"),
+                List.of(),
+                EvidenceObligation.UNSUPPORTED_CAPABILITY_CHECK_REQUIRED.name(),
+                CurrentTurnPlan.NOT_DERIVED,
+                CurrentTurnPlan.NONE_OR_NOT_DERIVED,
+                CurrentTurnPlan.NONE_OR_NOT_DERIVED,
+                CurrentTurnPlan.NONE_OR_NOT_DERIVED);
+
+        assertEquals(EvidenceObligation.READ_TARGET_REQUIRED,
+                EvidenceGate.selectObligation(plan, workspace, imageOcrEnabledConfig()));
+        assertEquals(List.of("image.png"), EvidenceGate.handoffTargets(
+                contract,
+                EvidenceObligation.READ_TARGET_REQUIRED,
+                workspace,
+                imageOcrEnabledConfig()));
     }
 
     @Test
@@ -138,5 +176,16 @@ class EvidenceGateTest {
                 contract,
                 EvidenceObligation.READ_TARGET_REQUIRED,
                 workspace));
+    }
+
+    private static Config imageOcrEnabledConfig() {
+        Config cfg = new Config(null);
+        Map<String, Object> extraction = new LinkedHashMap<>();
+        extraction.put("enabled", Boolean.TRUE);
+        Map<String, Object> image = new LinkedHashMap<>();
+        image.put("enabled", Boolean.TRUE);
+        extraction.put("image_ocr", image);
+        cfg.data.put("document_extraction", extraction);
+        return cfg;
     }
 }

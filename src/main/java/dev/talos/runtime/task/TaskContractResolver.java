@@ -21,7 +21,9 @@ public final class TaskContractResolver {
     private static final Pattern TARGET_FILE = Pattern.compile(
             "(?i)(?<![A-Za-z0-9_./\\\\-])((?:[A-Za-z0-9_.\\\\/-]+\\."
                     + "(?:html|htm|css|js|jsx|ts|tsx|java|md|txt|json|yaml|yml|xml|"
-                    + "properties|gradle|kts|toml|ini|env|csv|pdf|doc|docx|xls|xlsx|ppt|pptx)"
+                    + "properties|gradle|kts|toml|ini|env|csv|pdf|doc|docx|xls|xlsx|ppt|pptx|"
+                    + "png|jpg|jpeg|gif|bmp|webp|tif|tiff|zip|tar|gz|tgz|7z|rar|"
+                    + "exe|dll|so|dylib|class|jar|war|ear|bin|dat)"
                     + ")|(?:(?:[A-Za-z0-9_.\\\\/-]+/)?\\.env(?:\\.[A-Za-z0-9_.-]+)?))"
                     + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
 

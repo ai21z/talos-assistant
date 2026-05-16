@@ -1,6 +1,6 @@
 # T268 - Unsupported Document Formats Must Not Be Misrepresented
 
-Status: open - implemented for tested format-classification/search/index paths; still open for broader private-document release gate
+Status: open - implemented for tested extractable/deferred format paths; still open for broader private-document release gate
 Severity: P0
 Release gate: yes - private-document positioning and broad beta
 Branch: v0.9.0-beta-dev
@@ -11,16 +11,16 @@ Owner: unassigned
 
 Talos previously had partial unsupported-format handling for direct PDF/Office reads and writes, but format truthfulness was not centralized across read, grep, slash grep, retrieve/RAG, summarize, compare, and final-answer behavior.
 
-This work cycle added central format classification and integrated it into search and indexing paths. The ticket remains open because private-document positioning still requires broader final-answer scenario coverage and a future local extraction roadmap.
+This work cycle added central format classification, local extraction for text PDFs/DOCX/XLS/XLSX, and integrated those paths into read/search/RAG. The ticket remains open because private-document positioning still requires broader real-world fixtures, and image/OCR plus PowerPoint are frozen for v1/open work.
 
 ## Evidence from current code
 
-- `FileCapabilityPolicy` now classifies PDF/Office, images/scans, archives, compiled/executable files, generic binary/data files, and unknown text-attempt files.
-- `UnsupportedDocumentFormats` delegates to `FileCapabilityPolicy`, preserving the existing direct read/write boundary while broadening coverage.
+- `FileCapabilityPolicy` now distinguishes extractable text PDFs/DOCX/XLS/XLSX from deferred images/OCR, PowerPoint, archives, compiled/executable files, generic binary/data files, and unknown text-attempt files.
+- `UnsupportedDocumentFormats` delegates to `FileCapabilityPolicy`, preserving the direct read/write boundary while broadening coverage.
 - `GrepTool` and slash `GrepCommand` now skip/report unsupported and binary files.
-- `Indexer` now excludes unsupported formats through code-level policy, not config alone.
+- `Indexer` now uses code-level capability policy for protected/deferred/unsupported and extractable document paths, not config alone.
 - `default-config.yaml` excludes protected paths plus unsupported Office/image/archive/binary extensions.
-- Remaining gap: final-answer truthfulness for complex summarize/compare flows still needs broader live/e2e scenario coverage.
+- Remaining gap: final-answer truthfulness for complex private-document summarize/compare flows still needs broader live/e2e scenario coverage.
 
 ## Evidence from external/source crosscheck
 
@@ -28,7 +28,7 @@ This work cycle added central format classification and integrated it into searc
 
 ## User impact
 
-Users may believe Talos read a PDF, Word document, spreadsheet, slide deck, image, archive, or binary when it only saw the filename, skipped the file, or failed to extract content.
+Users may believe Talos read a full PDF, Word document, spreadsheet, slide deck, image, archive, or binary when it only extracted text, saw the filename, skipped the file, or failed to extract content.
 
 ## Product risk
 
@@ -44,12 +44,13 @@ Release blocker for claims that Talos can read/summarize personal paperwork or a
 
 ## Non-goals
 
-- Full local PDF/Office/image/OCR/archive extraction before beta.
+- Full-fidelity PDF/Office/image/OCR/archive extraction before beta.
 - Remote extraction by default.
 
 ## Required behavior
 
-- Talos never claims to read or summarize unsupported content unless extraction actually occurred.
+- Talos never claims to read or summarize unsupported/deferred content unless extraction actually occurred.
+- Talos reports PDF/DOCX/XLS/XLSX extraction limitations instead of claiming full document review.
 - It distinguishes filename-only inference from content evidence.
 - Grep/search reports skipped unsupported/binary files when relevant.
 - Retrieve/RAG does not index or surface unsupported binary contents.
@@ -62,7 +63,7 @@ Implemented central `FileCapabilityPolicy` and routed `UnsupportedDocumentFormat
 Remaining implementation work:
 
 - Add broader summarize/compare/final-answer scenarios that assert filename-only versus content-evidence wording.
-- Design future local-only extraction tools for PDF/Office/images/OCR without implying current support.
+- Keep image/OCR and PowerPoint as explicit v1/open issues without implying beta support.
 - Keep documentation aligned with the unsupported-format boundary.
 
 ## Tests
@@ -110,8 +111,10 @@ Additional implementation completed:
 
 - Scripted final-answer tests now cover fabricated DOCX summaries and XLSX-vs-text compare claims.
 - Runtime answer shaping removes unsupported-family claims such as spreadsheet/workbook content claims when extraction failed.
+- PDF/DOCX/XLSX checked-in canonical fixtures now prove small text extraction independently of live-audit-generated fixtures.
+- Large extracted output now reports `PARTIAL` plus an `extraction-truncated` warning instead of allowing complete-review language.
 
 Still open:
 
-- Broader live prompt-bank coverage for PDF, PowerPoint, image, archive, binary, and unsupported write/create flows.
-- No current local extraction support for PDF/Office/images/OCR/archive formats.
+- Broader live prompt-bank coverage for private-document PDFs/DOCX/XLS/XLSX, formula/truncation wording, PowerPoint refusal, image refusal/OCR-unavailable behavior, archive, binary, and unsupported write/create flows.
+- Image/OCR and PowerPoint remain frozen for v1; archives/binaries remain unsupported.

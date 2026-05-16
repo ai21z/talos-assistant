@@ -2,9 +2,16 @@
 
 ## 1. Executive verdict
 
-Not release-ready.
+Release-ready only for developer/text-project beta, not private-document beta.
 
-The deterministic hardening work improved the developer/text-project beta boundary. Private-document beta remains blocked: the two-model live prompt-bank audit has not run in this pass, private mode still needs broader live coverage, and Talos still has no local PDF/Office/image/archive extraction. Final pre-beta updates added exact `/privacy` persistence wording, tokenized sensitive-folder warnings, stronger log call-site redaction, a targeted live-audit artifact scan task, and an executable live-audit preflight. 2026-05-16 update: both Qwen and GPT-OSS local GGUF files were found and both passed minimal Talos smoke prompts after stale repo-owned `llama-server.exe` processes were stopped; the full prompt bank remains unrun.
+2026-05-16 superseding update: Talos now has narrow local extraction for
+text-bearing PDFs, `.docx`, `.xls`, and `.xlsx`. Images and PowerPoint are frozen
+out of beta and remain v1/open issues. A two-model beta-core capability audit ran
+against GPT-OSS and Qwen with audit id `capability-live-audit-20260516-195820`,
+and the targeted runtime artifact canary scan passed on that audit root.
+Private-document beta remains blocked by broader sensitive-paperwork fixtures,
+adversarial document quality evidence, and the still-present developer/default
+mode risk that approved direct protected reads may enter model context.
 
 ## 2. Source crosscheck summary
 
@@ -45,11 +52,11 @@ Still open:
 
 | Format family | Extensions | Current behavior | Tests | Verdict |
 |---|---|---|---|---|
-| PDF | `.pdf` | Classified unsupported; no extraction; scripted fabrication override covered. | `UnsupportedFinalAnswerTruthfulnessTest` | Not extractable |
-| Word | `.doc`, `.docx` | Classified unsupported; final-answer fabrication guarded in scripted tests. | `UnsupportedFinalAnswerTruthfulnessTest` | Not extractable |
-| Excel | `.xls`, `.xlsx` | Classified unsupported; compare flow must report partial only. | `UnsupportedFinalAnswerTruthfulnessTest` | Not extractable |
-| PowerPoint | `.ppt`, `.pptx` | Classified unsupported; scripted fabrication override covered. | `UnsupportedFinalAnswerTruthfulnessTest` | Not extractable |
-| Images/scans | `.png`, `.jpg`, `.jpeg`, `.gif`, `.bmp`, `.webp`, `.tif`, `.tiff` | Classified unsupported image/scan. No OCR; scripted fabrication override covered. | `UnsupportedFinalAnswerTruthfulnessTest` | Not extractable |
+| PDF | `.pdf` | Local text extraction enabled through PDFBox; layout/visual order limitations are reported. | `DocumentExtractionAdaptersTest`, `ReadFileToolTest`, `GrepToolTest`, live audit `05-pdf-summary` | Extractable text, not layout-perfect |
+| Word | `.docx`; `.doc` deferred | DOCX text extraction enabled through POI XWPF. Legacy `.doc` remains deferred/unsupported. | `DocumentExtractionAdaptersTest`, live audit `06-docx-summary` | DOCX extractable; DOC deferred |
+| Excel | `.xls`, `.xlsx` | Local cell text extraction enabled through POI HSSF/XSSF; formulas are not recalculated; formula cells show formula text plus cached display value when available; large output is partial/truncated. | `DocumentExtractionAdaptersTest`, `DocumentExtractionCanonicalFixturesTest`, live audit `07-xlsx-summary`, `10-compare-xlsx-text` | Extractable cell text, not spreadsheet execution |
+| PowerPoint | `.ppt`, `.pptx` | Frozen out of beta; truthful refusal remains required. | `UnsupportedFinalAnswerTruthfulnessTest`; excluded from beta-core live audit | v1/open issue |
+| Images/scans | `.png`, `.jpg`, `.jpeg`, `.gif`, `.bmp`, `.webp`, `.tif`, `.tiff` | Frozen out of beta; experimental OCR adapter exists but is not beta evidence. | `DocumentExtractionAdaptersTest`, `DocumentExtractionPreflightTest`; excluded from beta-core live audit | v1/open issue |
 | Archives | `.zip`, `.tar`, `.gz`, `.tgz`, `.7z`, `.rar` | Classified unsupported archive; search must disclose skipped archives. | `UnsupportedFinalAnswerTruthfulnessTest` | Not extractable |
 | Binaries | `.exe`, `.dll`, `.so`, `.dylib`, `.class`, `.jar`, `.war`, `.ear`, `.bin`, `.dat` | Classified unsupported binary/compiled; scripted fabrication override covered. | `UnsupportedFinalAnswerTruthfulnessTest` | Not extractable |
 | Unknown text-like files | no known unsupported extension, no binary sniff failure | Text attempt allowed. | Existing parser/read/search tests | Supported cautiously |
@@ -85,11 +92,9 @@ Forbidden claims unless all private-document gates pass:
 - safe for health documents
 - safe for legal paperwork
 - safe for family/admin private paperwork
-- can read PDFs
-- can read Word documents
-- can read Excel workbooks
+- safe for arbitrary private PDFs, Word documents, Excel workbooks, or images
 - can read PowerPoint decks
-- can summarize images/scans
+- can understand images visually
 - can inspect arbitrary binary files
 - all protected content is guaranteed never to reach model context
 
@@ -101,19 +106,19 @@ T267-T289 are open/updated for indirect-read safety, unsupported-format truthful
 
 - `./gradlew.bat test --tests "*ProtectedReadScope*" --tests "*PrivacyCommand*" --tests "*SensitiveWorkspaceDetector*" --tests "*SensitiveLog*" --tests "*ArtifactCanary*" --tests "*ConfigPrivacyDefaults*" --tests "*Rag*Dirty*" --tests "*UnsupportedFinalAnswer*" --tests "*ReadmePrivacy*" --no-daemon` - passed.
 - `./gradlew.bat e2eTest --tests "*PrivateModeScriptedE2e*" --no-daemon` - passed.
-- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-t267-live-audit.ps1 -PreflightOnly` - passed after updated file-based preflight and stale server cleanup; prompt bank not run.
-- Isolated Talos model smoke prompts passed for Qwen (`QWEN_SMOKE_123`) and GPT-OSS (`GPTOSS_SMOKE_123`).
-- `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/t267-live-audit-20260516-091319,local/manual-workspaces/t267-live-audit-20260516-091319" --no-daemon` - passed.
-- `./gradlew.bat clean check e2eTest --no-daemon` - passed; repo-owned `llama-server.exe` process count after the run was 0.
+- `./gradlew.bat clean check e2eTest --no-daemon` - passed after document extraction and evidence-gate fixes.
+- `./gradlew.bat installDist --no-daemon` - passed.
+- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-capability-live-audit.ps1 -BetaCoreOnly -StopStaleServers` - passed with audit id `capability-live-audit-20260516-195820`.
+- `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/capability-live-audit-20260516-195820,local/manual-workspaces/capability-live-audit-20260516-195820" ... --no-daemon` - passed.
 
 ## 9. Tests not run
 
-- Two-model live Talos prompt-bank audit not run in this pass. Current preflight/smoke evidence proves both local model files and managed `llama.cpp` can run, but the approval-sensitive prompt bank still needs synchronized execution and classification.
+- Image/OCR and PowerPoint were intentionally excluded from the beta-core audit because they are frozen for v1.
 
 ## 10. Remaining blockers
 
 - Not ready for sensitive personal paperwork positioning.
-- Live two-model audit still required.
-- Private mode needs broader live prompt-bank evidence.
-- Targeted runtime artifact scan must be run against completed live-audit artifacts.
-- Local PDF/Office/image/OCR/archive extraction is not implemented.
+- PowerPoint and legacy `.doc` remain unsupported/deferred.
+- Image/OCR remains frozen for v1; do not claim beta image support.
+- Private-document beta still needs broader real private-paperwork fixtures and review.
+- Developer/default approved direct protected reads can still enter model context after approval; this must remain explicit in product claims.

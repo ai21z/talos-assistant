@@ -1,5 +1,11 @@
 package dev.talos.tools.impl;
 
+import dev.talos.core.extract.DocumentExtractionRequest;
+import dev.talos.core.extract.DocumentExtractionResult;
+import dev.talos.core.extract.DocumentExtractionService;
+import dev.talos.core.extract.DocumentExtractionStatus;
+import dev.talos.core.extract.DocumentExtractionWarning;
+import dev.talos.core.ingest.FileCapabilityPolicy;
 import dev.talos.core.ingest.UnsupportedDocumentFormats;
 import dev.talos.tools.*;
 
@@ -73,6 +79,11 @@ public final class ReadFileTool implements TalosTool {
         if (Files.isDirectory(resolved)) {
             return ToolResult.fail(ToolError.invalidParams("Path is a directory, not a file: " + pathParam));
         }
+        FileCapabilityPolicy.FormatInfo fileCapability =
+                FileCapabilityPolicy.describe(resolved, ctx.config()).orElse(null);
+        if (fileCapability != null && fileCapability.enabled()) {
+            return readWithExtractionService(resolved, ctx);
+        }
         if (UnsupportedDocumentFormats.isUnsupported(resolved)) {
             return ToolResult.fail(ToolError.unsupportedFormat(
                     UnsupportedDocumentFormats.capabilityMessage(resolved)));
@@ -120,6 +131,60 @@ public final class ReadFileTool implements TalosTool {
             return ToolResult.ok(output);
         } catch (IOException e) {
             return ToolResult.fail(ToolError.internal("Failed to read file: " + e.getMessage()));
+        }
+    }
+
+    private static ToolResult readWithExtractionService(Path resolved, ToolContext ctx) {
+        DocumentExtractionResult extraction = new DocumentExtractionService(ctx.config())
+                .extract(DocumentExtractionRequest.read(resolved, ctx.workspace()));
+        if (extraction.status() == DocumentExtractionStatus.SUCCESS
+                || extraction.status() == DocumentExtractionStatus.PARTIAL) {
+            return ToolResult.ok(formatExtraction(extraction));
+        }
+        return ToolResult.fail(ToolError.unsupportedFormat(formatExtractionLimit(extraction)));
+    }
+
+    private static String formatExtraction(DocumentExtractionResult result) {
+        StringBuilder out = new StringBuilder();
+        out.append("Extracted document text from ")
+                .append(result.sourcePath())
+                .append(" (status: ")
+                .append(result.status())
+                .append(")\n");
+        appendWarnings(out, result);
+        if (result.provenance() != null && !result.provenance().adapterName().isBlank()) {
+            out.append("Extractor: ")
+                    .append(result.provenance().adapterName());
+            if (!result.provenance().adapterVersion().isBlank()) {
+                out.append(" ").append(result.provenance().adapterVersion());
+            }
+            out.append('\n');
+        }
+        out.append('\n').append(result.safeText());
+        String output = out.toString();
+        if (output.length() > MAX_OUTPUT_CHARS) {
+            output = output.substring(0, MAX_OUTPUT_CHARS)
+                    + "\n... [output truncated at 16K chars - request a narrower range or search term]";
+        }
+        return output;
+    }
+
+    private static String formatExtractionLimit(DocumentExtractionResult result) {
+        StringBuilder out = new StringBuilder();
+        out.append("Cannot extract text from ")
+                .append(result.sourcePath())
+                .append(" (status: ")
+                .append(result.status())
+                .append(").");
+        appendWarnings(out, result);
+        return out.toString();
+    }
+
+    private static void appendWarnings(StringBuilder out, DocumentExtractionResult result) {
+        for (DocumentExtractionWarning warning : result.warnings()) {
+            if (!warning.message().isBlank()) {
+                out.append("Warning: ").append(warning.message()).append('\n');
+            }
         }
     }
 

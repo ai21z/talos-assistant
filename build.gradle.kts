@@ -211,6 +211,11 @@ dependencies {
     implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:${project.property("jacksonVersion")}")
     implementation("org.slf4j:slf4j-api:${project.property("slf4jVersion")}")
     runtimeOnly("ch.qos.logback:logback-classic:${project.property("logbackVersion")}")
+    runtimeOnly("org.apache.logging.log4j:log4j-to-slf4j:${project.property("log4jVersion")}")
+
+    // Local document extraction: narrow adapters, not broad recursive parsing.
+    implementation("org.apache.pdfbox:pdfbox:${project.property("pdfboxVersion")}")
+    implementation("org.apache.poi:poi-ooxml:${project.property("poiVersion")}")
 
     // REPL
     implementation("org.jline:jline:3.26.3")
@@ -423,9 +428,18 @@ tasks.register<JavaExec>("checkRuntimeArtifactCanaries") {
     dependsOn(tasks.classes)
     mainClass.set("dev.talos.runtime.policy.ArtifactCanaryScanCli")
     classpath = sourceSets["main"].runtimeClasspath
+    doFirst {
+        val roots = providers.gradleProperty("artifactScanRoots").orNull
+        if (roots.isNullOrBlank()) {
+            throw GradleException(
+                "checkRuntimeArtifactCanaries requires -PartifactScanRoots=<dir[,dir...]> " +
+                    "so old ignored manual-audit artifacts are not scanned accidentally."
+            )
+        }
+    }
     argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
         val roots = providers.gradleProperty("artifactScanRoots")
-            .orElse("local/manual-testing,local/manual-workspaces")
+            .orElse("")
             .get()
         val allowlist = providers.gradleProperty("artifactScanAllowlist")
             .orElse("")

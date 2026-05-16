@@ -1,9 +1,9 @@
 package dev.talos.runtime.policy;
 
-import dev.talos.core.ingest.UnsupportedDocumentFormats;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.turn.CurrentTurnPlan;
+import dev.talos.core.Config;
 
 import java.nio.file.Path;
 import java.util.LinkedHashSet;
@@ -21,6 +21,10 @@ public final class EvidenceGate {
     private EvidenceGate() {}
 
     public static EvidenceObligation selectObligation(CurrentTurnPlan plan, Path workspace) {
+        return selectObligation(plan, workspace, null);
+    }
+
+    public static EvidenceObligation selectObligation(CurrentTurnPlan plan, Path workspace, Config cfg) {
         if (plan == null) return EvidenceObligation.NONE;
         TaskContract contract = plan.taskContract();
         if (contract == null) return EvidenceObligation.NONE;
@@ -28,8 +32,9 @@ public final class EvidenceGate {
         EvidenceObligation derived = EvidenceObligationPolicy.derive(
                 contract,
                 phase(plan),
-                workspace);
-        return recorded == EvidenceObligation.NONE ? derived : recorded;
+                workspace,
+                cfg);
+        return derived == EvidenceObligation.NONE ? recorded : derived;
     }
 
     public static boolean requiresReadEvidenceHandoff(EvidenceObligation obligation) {
@@ -43,6 +48,15 @@ public final class EvidenceGate {
             EvidenceObligation obligation,
             Path workspace
     ) {
+        return handoffTargets(contract, obligation, workspace, null);
+    }
+
+    public static List<String> handoffTargets(
+            TaskContract contract,
+            EvidenceObligation obligation,
+            Path workspace,
+            Config cfg
+    ) {
         List<String> evidenceTargets = evidenceTargets(contract);
         if (contract == null || workspace == null || evidenceTargets.isEmpty()) {
             return List.of();
@@ -54,7 +68,7 @@ public final class EvidenceGate {
             if (obligation == EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED) {
                 targets.add(target);
             } else if (obligation == EvidenceObligation.UNSUPPORTED_CAPABILITY_CHECK_REQUIRED
-                    && isUnsupportedExpectedTarget(target)) {
+                    && isUnsupportedExpectedTarget(target, cfg)) {
                 targets.add(target);
             } else if (obligation == EvidenceObligation.READ_TARGET_REQUIRED && !protectedTarget) {
                 targets.add(target);
@@ -64,13 +78,17 @@ public final class EvidenceGate {
     }
 
     public static boolean hasOnlyUnsupportedExpectedTargets(TaskContract contract) {
+        return hasOnlyUnsupportedExpectedTargets(contract, null);
+    }
+
+    public static boolean hasOnlyUnsupportedExpectedTargets(TaskContract contract, Config cfg) {
         List<String> evidenceTargets = evidenceTargets(contract);
         if (contract == null || evidenceTargets.isEmpty()) return false;
         boolean sawTarget = false;
         for (String target : evidenceTargets) {
             if (target == null || target.isBlank()) continue;
             sawTarget = true;
-            if (!isUnsupportedExpectedTarget(target)) return false;
+            if (!isUnsupportedExpectedTarget(target, cfg)) return false;
         }
         return sawTarget;
     }
@@ -112,9 +130,13 @@ public final class EvidenceGate {
     }
 
     static boolean isUnsupportedExpectedTarget(String target) {
+        return isUnsupportedExpectedTarget(target, null);
+    }
+
+    static boolean isUnsupportedExpectedTarget(String target, Config cfg) {
         if (target == null || target.isBlank()) return false;
         try {
-            return UnsupportedDocumentFormats.isUnsupported(Path.of(target));
+            return EvidenceObligationPolicy.requiresUnsupportedCapabilityCheck(Path.of(target), cfg);
         } catch (RuntimeException ignored) {
             return false;
         }

@@ -2,11 +2,17 @@
 
 ## 1. Executive verdict
 
-Not release-ready
+Release-ready only for developer/text-project beta, not private-document beta.
 
-Deterministic hardening improved protected-read scope control, private-mode UX, sensitive-folder warnings, log/parameter redaction, artifact scanning, RAG index metadata, dirty-index coverage, and unsupported-format answer correction. The release gate is still not clean because the two-model live audit has not run and document extraction is still unsupported.
-
-Final pre-beta update: `/privacy` persistence wording is now explicit, sensitive-folder `id` matching is token-aware, high-risk raw log exception-message call sites were converted to safe formatting, a targeted release artifact scan task exists, and the live audit preflight is reproducible. 2026-05-16 update: both Qwen and GPT-OSS local GGUF files were found and both passed a minimal Talos smoke prompt after stale repo-owned `llama-server.exe` processes were stopped. The live prompt-bank audit itself still has not run.
+2026-05-16 superseding update: PDF text extraction, DOCX text extraction,
+XLS/XLSX cell extraction, and extraction-aware grep/RAG plumbing are implemented
+behind runtime policy. Images and PowerPoint are frozen out of beta. A two-model
+beta-core capability audit ran against GPT-OSS and Qwen with audit id
+`capability-live-audit-20260516-195820`, and the targeted runtime artifact
+canary scan passed. Private-document beta remains blocked by broader
+sensitive-paperwork fixtures, adversarial document quality evidence, and the
+explicit developer/default-mode risk that approved direct protected reads may
+enter model context.
 
 ## 2. What changed in this pass
 
@@ -27,6 +33,10 @@ Final pre-beta update: `/privacy` persistence wording is now explicit, sensitive
 - Extended `scripts/run-t267-live-audit.ps1` with `-StopStaleServers` and `-SmokeModels` so maintainers can clean repo-owned stale managed backends and prove both audit models answer through isolated Talos configs before attempting the prompt bank.
 - Added initial private-mode scripted e2e tests.
 - Added Lucene-backed dirty-index integration tests for missing metadata, config-hash changes, old protected chunks, and private-mode retrieval disablement.
+- Added a central document extraction service with PDFBox PDF extraction, POI DOCX/XLS/XLSX extraction, and a bounded local OCR command adapter.
+- Routed `read_file`, native grep, slash grep, and RAG indexing through extraction-aware capability policy.
+- Added config-aware evidence gating so enabled extractable documents are read before answers and disabled/deferred formats still trigger truthfulness constraints.
+- Added a capability live-audit script and ran a two-model audit against GPT-OSS and Qwen.
 - Corrected unit tests that accidentally loaded the real user LLM config (`AskModeTest`, `RagModeToolLoopTest`, `ToolCallLoopP0Test`, and `ConversationCompactionTest`) so deterministic tests use placeholder/scripted LLMs and do not launch managed `llama.cpp`.
 - Updated README, source crosscheck, source matrix, release-gate report, live-audit runbook, and tickets.
 
@@ -88,6 +98,7 @@ Missing:
 Automated: yes, as JUnit test coverage through `ArtifactCanaryScanTest`.
 
 Release-facing targeted task: yes.
+It requires explicit `-PartifactScanRoots=...`; no-root invocation fails fast so old ignored manual-audit directories are not scanned accidentally.
 
 Command:
 
@@ -109,37 +120,40 @@ Result:
 
 - focused artifact scanner tests passed.
 - targeted task exists and is intended for completed live-audit directories.
+- targeted task passed on `capability-live-audit-20260516-195820`.
 
 ## 9. Two-model live audit status
 
-PARTIAL / prompt bank not run.
+PASS for the focused capability prompt bank, still not private-document release-ready.
 
-Models/backend: prompt bank not started. Prior `ollama list` crashed with access violation `0xc0000005`. Updated preflight now finds the managed `llama.cpp` server, GPT-OSS GGUF, and Qwen GGUF. A Qwen startup attempt initially failed because stale repo-owned `llama-server.exe` processes left only 282 MiB free GPU memory; after stopping 53 stale repo-owned servers, both Qwen and GPT-OSS answered model-forced smoke prompts through isolated temp-home configs. Latest smoke evidence is `t267-live-audit-20260516-091319`, which left zero repo-owned stale server processes after cleanup.
+Models/backend: managed `llama.cpp` with GPT-OSS and Qwen ran sequentially through isolated temp-home configs. The latest beta-core capability audit is `capability-live-audit-20260516-195820`.
 
-Artifacts: executable runbook and preflight helper exist in `work-cycle-docs/reports/t267-live-two-model-audit.md` and `scripts/run-t267-live-audit.ps1`.
+Artifacts: `local/manual-testing/capability-live-audit-20260516-195820/LIVE-CAPABILITY-AUDIT-RESULTS.md` and `LIVE-CAPABILITY-AUDIT-SUMMARY.csv`; runtime workspaces under `local/manual-workspaces/capability-live-audit-20260516-195820`.
 
-Verdict: release blocker remains because the smoke prompts do not replace the full prompt-bank audit.
+Format scope: beta core. Image/OCR and PowerPoint prompts were intentionally excluded.
+
+Verdict: the focused two-model capability audit passed its process/tool-artifact heuristics, but it is not a substitute for broader private-document correctness/quality evaluation.
 
 ## 10. Tests run
 
 - `./gradlew.bat test --tests "*ProtectedReadScope*" --tests "*PrivacyCommand*" --tests "*SensitiveWorkspaceDetector*" --tests "*SensitiveLog*" --tests "*ArtifactCanary*" --tests "*ConfigPrivacyDefaults*" --tests "*Rag*Dirty*" --tests "*UnsupportedFinalAnswer*" --tests "*ReadmePrivacy*" --no-daemon` - passed.
 - `./gradlew.bat e2eTest --tests "*PrivateModeScriptedE2e*" --no-daemon` - passed.
-- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-t267-live-audit.ps1 -PreflightOnly` - passed after updated file-based preflight and stale `llama-server.exe` cleanup; prompt bank not run.
-- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-t267-live-audit.ps1 -SmokeModels -StopStaleServers` - passed; isolated model smoke prompts through Talos passed for Qwen (`QWEN_SMOKE_123`) and GPT-OSS (`GPTOSS_SMOKE_123`).
-- `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/t267-live-audit-20260516-091319,local/manual-workspaces/t267-live-audit-20260516-091319" --no-daemon` - passed.
-- `./gradlew.bat clean check e2eTest --no-daemon` - passed; repo-owned `llama-server.exe` process count after the run was 0.
+- `./gradlew.bat clean check e2eTest --no-daemon` - passed after document extraction/evidence-gate fixes.
+- `./gradlew.bat installDist --no-daemon` - passed.
+- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-capability-live-audit.ps1 -BetaCoreOnly -StopStaleServers` - passed with audit id `capability-live-audit-20260516-195820`.
+- `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/capability-live-audit-20260516-195820,local/manual-workspaces/capability-live-audit-20260516-195820" ... --no-daemon` - passed.
 
 ## 11. Tests not run
 
-- Live two-model prompt-bank audit not run. The local model/backend pair is now smoke-verified, but the approval-sensitive prompt bank still needs synchronized execution and evidence capture.
-- Full private-mode live prompt-bank not run; initial scripted private-mode e2e tests were added.
+- Image/OCR and PowerPoint were intentionally excluded from beta-core scope.
+- Full tax/health/legal/admin paperwork corpus audit not run.
 
 ## 12. Remaining blockers
 
-- Two-model live audit with Qwen and GPT-OSS.
-- Broader private-mode live prompt-bank evidence.
-- Targeted artifact scan on completed live-audit artifacts.
-- Local PDF/Office/image/OCR/archive extraction if private-document positioning is desired.
+- Broader private-mode and private-paperwork corpus evidence.
+- PowerPoint and legacy `.doc` remain unsupported/deferred.
+- Image/OCR remains frozen for v1.
+- Developer/default approved direct protected reads can still enter model context after approval.
 
 ## 13. Allowed product claims
 
@@ -147,7 +161,10 @@ Verdict: release blocker remains because the smoke prompts do not replace the fu
 - code/text/config/static-web assistant
 - approved edits with traces/evidence
 - non-sensitive workspace folders
-- unsupported formats are identified honestly
+- PDF text extraction with layout/order limitations
+- DOCX text extraction with structure/layout limitations
+- XLS/XLSX visible cell extraction without formula recalculation; formula cells expose formula text plus cached display value when available, and large output can be partial/truncated
+- unsupported/deferred formats are identified honestly
 
 ## 14. Forbidden product claims
 
@@ -155,10 +172,8 @@ Verdict: release blocker remains because the smoke prompts do not replace the fu
 - safe for health records
 - safe for legal paperwork
 - safe for family/admin document folders
-- can read PDFs
-- can read Word documents
-- can read Excel workbooks
+- safe for arbitrary private PDFs, Word documents, Excel workbooks, or images
 - can read PowerPoint decks
-- can summarize images/scans
+- image OCR, image understanding, or scan understanding
 - can inspect arbitrary binary files
 - guarantees no protected content reaches model context
