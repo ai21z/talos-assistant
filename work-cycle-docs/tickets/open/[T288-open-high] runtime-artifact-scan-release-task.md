@@ -22,6 +22,12 @@ This pass adds:
 
 `ArtifactCanaryScanTest` covers prompt-debug leaks, allowlisted fixtures, targeted manual-testing/manual-workspace scan roots, exact file/line reporting, and compiled class skipping.
 
+The release task also passed against the latest two-model smoke artifact roots:
+
+```powershell
+./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/t267-live-audit-20260516-091319,local/manual-workspaces/t267-live-audit-20260516-091319" --no-daemon
+```
+
 ## User impact
 
 Maintainers can fail a release packet if prompt-debug/provider-body/session/trace/turn/log artifacts contain raw file-discovered canaries.
@@ -63,7 +69,7 @@ Keep `ArtifactCanaryScanCli` as a small wrapper over `ArtifactCanaryScanner.scan
 
 ## Remaining blockers
 
-The task has not yet been run against a completed two-model live audit because the live audit remains blocked.
+The task has not yet been run against a completed two-model prompt-bank live audit because the prompt bank remains unrun.
 
 ## Open questions
 

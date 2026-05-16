@@ -36,6 +36,7 @@ Earlier audit notes recorded `ollama list` crashing with access violation `0xc00
 - 53 stale repo-owned `llama-server.exe` processes were stopped after Qwen failed with only 282 MiB free GPU memory.
 - After cleanup, Qwen answered a model-forced smoke prompt (`QWEN_SMOKE_123`) through Talos using an isolated temp-home config.
 - After cleanup, GPT-OSS answered a model-forced smoke prompt (`GPTOSS_SMOKE_123`) through Talos using an isolated temp-home config.
+- Latest smoke evidence is `t267-live-audit-20260516-091319`; repo-owned stale server count after the run was 0.
 - `checkRuntimeArtifactCanaries` passed on the smoke artifact roots.
 
 ## User impact
@@ -68,6 +69,13 @@ Use sequential isolated configs for both managed llama.cpp models. Validate with
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-t267-live-audit.ps1 -PreflightOnly
+```
+
+Validate backend lifecycle and minimal model answers with:
+
+```powershell
+./gradlew.bat installDist --no-daemon
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-t267-live-audit.ps1 -SmokeModels -StopStaleServers
 ```
 
 ## Tests

@@ -24,8 +24,10 @@ Final pre-beta update: `/privacy` persistence wording is now explicit, sensitive
 - Tokenized short sensitive-folder terms such as `id` to avoid `valid-project`/`grid-ui` false positives.
 - Added `ArtifactCanaryScanCli` and Gradle task `checkRuntimeArtifactCanaries` for live-audit artifact directories.
 - Updated `scripts/run-t267-live-audit.ps1` preflight to check actual managed `llama.cpp` server/model files and the required sequential isolated-config strategy.
+- Extended `scripts/run-t267-live-audit.ps1` with `-StopStaleServers` and `-SmokeModels` so maintainers can clean repo-owned stale managed backends and prove both audit models answer through isolated Talos configs before attempting the prompt bank.
 - Added initial private-mode scripted e2e tests.
 - Added Lucene-backed dirty-index integration tests for missing metadata, config-hash changes, old protected chunks, and private-mode retrieval disablement.
+- Corrected unit tests that accidentally loaded the real user LLM config (`AskModeTest`, `RagModeToolLoopTest`, `ToolCallLoopP0Test`, and `ConversationCompactionTest`) so deterministic tests use placeholder/scripted LLMs and do not launch managed `llama.cpp`.
 - Updated README, source crosscheck, source matrix, release-gate report, live-audit runbook, and tickets.
 
 ## 3. Approved protected read scope status
@@ -112,7 +114,7 @@ Result:
 
 PARTIAL / prompt bank not run.
 
-Models/backend: prompt bank not started. Prior `ollama list` crashed with access violation `0xc0000005`. Updated preflight now finds the managed `llama.cpp` server, GPT-OSS GGUF, and Qwen GGUF. A Qwen startup attempt initially failed because stale repo-owned `llama-server.exe` processes left only 282 MiB free GPU memory; after stopping 53 stale repo-owned servers, both Qwen and GPT-OSS answered model-forced smoke prompts through isolated temp-home configs.
+Models/backend: prompt bank not started. Prior `ollama list` crashed with access violation `0xc0000005`. Updated preflight now finds the managed `llama.cpp` server, GPT-OSS GGUF, and Qwen GGUF. A Qwen startup attempt initially failed because stale repo-owned `llama-server.exe` processes left only 282 MiB free GPU memory; after stopping 53 stale repo-owned servers, both Qwen and GPT-OSS answered model-forced smoke prompts through isolated temp-home configs. Latest smoke evidence is `t267-live-audit-20260516-091319`, which left zero repo-owned stale server processes after cleanup.
 
 Artifacts: executable runbook and preflight helper exist in `work-cycle-docs/reports/t267-live-two-model-audit.md` and `scripts/run-t267-live-audit.ps1`.
 
@@ -123,9 +125,9 @@ Verdict: release blocker remains because the smoke prompts do not replace the fu
 - `./gradlew.bat test --tests "*ProtectedReadScope*" --tests "*PrivacyCommand*" --tests "*SensitiveWorkspaceDetector*" --tests "*SensitiveLog*" --tests "*ArtifactCanary*" --tests "*ConfigPrivacyDefaults*" --tests "*Rag*Dirty*" --tests "*UnsupportedFinalAnswer*" --tests "*ReadmePrivacy*" --no-daemon` - passed.
 - `./gradlew.bat e2eTest --tests "*PrivateModeScriptedE2e*" --no-daemon` - passed.
 - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-t267-live-audit.ps1 -PreflightOnly` - passed after updated file-based preflight and stale `llama-server.exe` cleanup; prompt bank not run.
-- Isolated model smoke prompts through Talos passed for Qwen (`QWEN_SMOKE_123`) and GPT-OSS (`GPTOSS_SMOKE_123`).
-- `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/t267-live-audit-20260516-074959,local/manual-workspaces/t267-live-audit-20260516-074959" --no-daemon` - passed.
-- `./gradlew.bat clean check e2eTest --no-daemon` - passed.
+- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-t267-live-audit.ps1 -SmokeModels -StopStaleServers` - passed; isolated model smoke prompts through Talos passed for Qwen (`QWEN_SMOKE_123`) and GPT-OSS (`GPTOSS_SMOKE_123`).
+- `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/t267-live-audit-20260516-091319,local/manual-workspaces/t267-live-audit-20260516-091319" --no-daemon` - passed.
+- `./gradlew.bat clean check e2eTest --no-daemon` - passed; repo-owned `llama-server.exe` process count after the run was 0.
 
 ## 11. Tests not run
 

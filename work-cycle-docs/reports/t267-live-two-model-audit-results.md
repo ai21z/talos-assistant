@@ -22,6 +22,12 @@ Current preflight command:
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-t267-live-audit.ps1 -PreflightOnly
 ```
 
+Current cleanup/smoke command:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-t267-live-audit.ps1 -SmokeModels -StopStaleServers
+```
+
 Previous preflight result:
 
 - GPT-OSS profile configured: true
@@ -52,12 +58,12 @@ Backend cleanup evidence:
 
 - Before cleanup, Qwen startup failed because `llama-server` reported only 282 MiB free GPU memory.
 - 53 stale repo-owned `llama-server.exe` processes were found and stopped.
-- After cleanup, Qwen answered `QWEN_SMOKE_123` from an isolated temp-home config.
-- After cleanup, GPT-OSS answered `GPTOSS_SMOKE_123` from an isolated temp-home config.
+- Latest preflight evidence, audit id `t267-live-audit-20260516-090643`: managed `llama.cpp`, GPT-OSS GGUF, and Qwen GGUF all present; repo-owned stale server count was 0.
+- Latest smoke evidence, audit id `t267-live-audit-20260516-091319`: Qwen answered `QWEN_SMOKE_123` from an isolated temp-home config, GPT-OSS answered `GPTOSS_SMOKE_123` from an isolated temp-home config, and repo-owned stale server count after the run was 0.
 - Targeted artifact scan passed on the smoke artifact roots:
 
 ```powershell
-./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/t267-live-audit-20260516-074959,local/manual-workspaces/t267-live-audit-20260516-074959" --no-daemon
+./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/t267-live-audit-20260516-091319,local/manual-workspaces/t267-live-audit-20260516-091319" --no-daemon
 ```
 
 ## 4. Audit execution

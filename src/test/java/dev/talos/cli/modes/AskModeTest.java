@@ -8,7 +8,9 @@ import dev.talos.spi.types.ChatMessage;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -26,6 +28,15 @@ import static org.junit.jupiter.api.Assertions.*;
 class AskModeTest {
 
     private static final Path WS = Path.of(".").toAbsolutePath().normalize();
+
+    private static Config placeholderConfig() {
+        Config cfg = new Config();
+        Map<String, Object> llm = new LinkedHashMap<>();
+        llm.put("transport", "placeholder");
+        llm.put("default_backend", "ollama");
+        cfg.data.put("llm", llm);
+        return cfg;
+    }
 
     // ═══════════════════════════════════════════════════════════════════════
     //  buildMessages (structured /api/chat messages — primary code path)
@@ -106,7 +117,7 @@ class AskModeTest {
         // Memory updates are now centralized in TurnProcessor via MemoryUpdateListener.
         // AskMode.handle() should NOT call memory.update() — that's the TurnProcessor's job.
         var memory = new SessionMemory();
-        var ctx = Context.builder(new Config()).memory(memory).build();
+        var ctx = Context.builder(placeholderConfig()).memory(memory).build();
         var mode = new AskMode();
 
         mode.handle("first question", WS, ctx);
@@ -126,7 +137,7 @@ class AskModeTest {
     void handle_returns_ok_result_for_memory_listener() throws Exception {
         // TurnProcessor's MemoryUpdateListener extracts the answer from Result.Ok
         // Verify AskMode returns a Result.Ok with content that can be recorded
-        var ctx = Context.builder(new Config()).build();
+        var ctx = Context.builder(placeholderConfig()).build();
         var mode = new AskMode();
 
         Optional<Result> result = mode.handle("hello there", WS, ctx);
@@ -140,7 +151,7 @@ class AskModeTest {
     void handle_does_not_accumulate_memory_directly() throws Exception {
         // Verifies the architectural change: modes don't own memory management
         var memory = new SessionMemory();
-        var ctx = Context.builder(new Config()).memory(memory).build();
+        var ctx = Context.builder(placeholderConfig()).memory(memory).build();
         var mode = new AskMode();
 
         mode.handle("first question", WS, ctx);
@@ -154,7 +165,7 @@ class AskModeTest {
     @Test
     void handle_returns_content_across_multiple_turns() throws Exception {
         var memory = new SessionMemory();
-        var ctx = Context.builder(new Config()).memory(memory).build();
+        var ctx = Context.builder(placeholderConfig()).memory(memory).build();
         var mode = new AskMode();
 
         // Turn 1
@@ -174,7 +185,7 @@ class AskModeTest {
     @Test
     void exact_echo_does_not_update_memory() throws Exception {
         var memory = new SessionMemory();
-        var ctx = Context.builder(new Config()).memory(memory).build();
+        var ctx = Context.builder(placeholderConfig()).memory(memory).build();
         var mode = new AskMode();
 
         mode.handle("Respond with exactly: test output", WS, ctx);
@@ -186,7 +197,7 @@ class AskModeTest {
     @Test
     void think_strip_does_not_update_memory() throws Exception {
         var memory = new SessionMemory();
-        var ctx = Context.builder(new Config()).memory(memory).build();
+        var ctx = Context.builder(placeholderConfig()).memory(memory).build();
         var mode = new AskMode();
 
         mode.handle("Print this without the think tags: <think>reasoning</think> output", WS, ctx);
@@ -202,14 +213,14 @@ class AskModeTest {
     @Test
     void handle_null_returns_empty() throws Exception {
         var mode = new AskMode();
-        var ctx = Context.builder(new Config()).build();
+        var ctx = Context.builder(placeholderConfig()).build();
         assertEquals(Optional.empty(), mode.handle(null, WS, ctx));
     }
 
     @Test
     void handle_blank_returns_empty() throws Exception {
         var mode = new AskMode();
-        var ctx = Context.builder(new Config()).build();
+        var ctx = Context.builder(placeholderConfig()).build();
         assertEquals(Optional.empty(), mode.handle("   ", WS, ctx));
     }
 

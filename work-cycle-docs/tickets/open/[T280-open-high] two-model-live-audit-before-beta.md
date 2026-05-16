@@ -21,7 +21,7 @@ No code issue by itself. This is a release-process gate.
 - `work-cycle-docs/reports/t267-live-two-model-audit-results.md` records that full prompt-bank execution was not run in this pass.
 - `ollama list` crashed with access violation `0xc0000005`.
 - Local Talos config showed one GPT-OSS llama.cpp config. That is expected because managed `llama_cpp` currently has one active `model_path` per config; Qwen/GPT-OSS audit execution must use sequential isolated configs.
-- On 2026-05-16 both Qwen and GPT-OSS GGUF files were found locally and both passed a model-forced Talos smoke prompt after stale repo-owned `llama-server.exe` processes were stopped.
+- On 2026-05-16 both Qwen and GPT-OSS GGUF files were found locally and both passed a model-forced Talos smoke prompt after stale repo-owned `llama-server.exe` processes were stopped. Latest smoke evidence: `t267-live-audit-20260516-091319`; repo-owned stale server count after the run was 0.
 
 ## User impact
 
@@ -73,5 +73,7 @@ Raw audit artifacts must not be committed.
 ## 2026-05-15 final pre-beta update
 
 Added `scripts/run-t267-live-audit.ps1` preflight. Previous preflight was BLOCKED because it expected Qwen and GPT-OSS in one config. Updated preflight checks actual model files and supports the correct sequential isolated-config strategy. Running only smoke prompts must not be counted as prompt-bank completion.
+
+2026-05-16 follow-up: the script now supports `-StopStaleServers` and `-SmokeModels`. This makes the local backend setup reproducible, but the prompt-bank execution/classification is still open.
 
 Follow-up ticket: T286.
