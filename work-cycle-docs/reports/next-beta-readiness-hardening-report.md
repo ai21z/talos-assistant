@@ -6,7 +6,7 @@ Not release-ready
 
 Deterministic hardening improved protected-read scope control, private-mode UX, sensitive-folder warnings, log/parameter redaction, artifact scanning, RAG index metadata, dirty-index coverage, and unsupported-format answer correction. The release gate is still not clean because the two-model live audit has not run and document extraction is still unsupported.
 
-Final pre-beta update: `/privacy` persistence wording is now explicit, sensitive-folder `id` matching is token-aware, high-risk raw log exception-message call sites were converted to safe formatting, a targeted release artifact scan task exists, and the live audit preflight is reproducible. The live audit itself remains blocked because Qwen is not configured.
+Final pre-beta update: `/privacy` persistence wording is now explicit, sensitive-folder `id` matching is token-aware, high-risk raw log exception-message call sites were converted to safe formatting, a targeted release artifact scan task exists, and the live audit preflight is reproducible. 2026-05-16 update: both Qwen and GPT-OSS local GGUF files were found and both passed a minimal Talos smoke prompt after stale repo-owned `llama-server.exe` processes were stopped. The live prompt-bank audit itself still has not run.
 
 ## 2. What changed in this pass
 
@@ -23,7 +23,7 @@ Final pre-beta update: `/privacy` persistence wording is now explicit, sensitive
 - Clarified `/privacy` as current session/config state only; persistent defaults require editing `~/.talos/config.yaml`.
 - Tokenized short sensitive-folder terms such as `id` to avoid `valid-project`/`grid-ui` false positives.
 - Added `ArtifactCanaryScanCli` and Gradle task `checkRuntimeArtifactCanaries` for live-audit artifact directories.
-- Added `scripts/run-t267-live-audit.ps1` preflight and recorded the current BLOCKED result.
+- Updated `scripts/run-t267-live-audit.ps1` preflight to check actual managed `llama.cpp` server/model files and the required sequential isolated-config strategy.
 - Added initial private-mode scripted e2e tests.
 - Added Lucene-backed dirty-index integration tests for missing metadata, config-hash changes, old protected chunks, and private-mode retrieval disablement.
 - Updated README, source crosscheck, source matrix, release-gate report, live-audit runbook, and tickets.
@@ -110,25 +110,26 @@ Result:
 
 ## 9. Two-model live audit status
 
-BLOCKED / not run.
+PARTIAL / prompt bank not run.
 
-Models/backend: prompt bank not started. Prior `ollama list` crashed with access violation `0xc0000005`; current preflight found GPT-OSS configured, managed llama.cpp signal present, Qwen missing, and Ollama legacy probe blocked.
+Models/backend: prompt bank not started. Prior `ollama list` crashed with access violation `0xc0000005`. Updated preflight now finds the managed `llama.cpp` server, GPT-OSS GGUF, and Qwen GGUF. A Qwen startup attempt initially failed because stale repo-owned `llama-server.exe` processes left only 282 MiB free GPU memory; after stopping 53 stale repo-owned servers, both Qwen and GPT-OSS answered model-forced smoke prompts through isolated temp-home configs.
 
 Artifacts: executable runbook and preflight helper exist in `work-cycle-docs/reports/t267-live-two-model-audit.md` and `scripts/run-t267-live-audit.ps1`.
 
-Verdict: release blocker remains.
+Verdict: release blocker remains because the smoke prompts do not replace the full prompt-bank audit.
 
 ## 10. Tests run
 
 - `./gradlew.bat test --tests "*ProtectedReadScope*" --tests "*PrivacyCommand*" --tests "*SensitiveWorkspaceDetector*" --tests "*SensitiveLog*" --tests "*ArtifactCanary*" --tests "*ConfigPrivacyDefaults*" --tests "*Rag*Dirty*" --tests "*UnsupportedFinalAnswer*" --tests "*ReadmePrivacy*" --no-daemon` - passed.
 - `./gradlew.bat e2eTest --tests "*PrivateModeScriptedE2e*" --no-daemon` - passed.
-- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-t267-live-audit.ps1 -PreflightOnly` - BLOCKED as expected because Qwen is missing; prompt bank not run.
-- `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=C:\Users\arisz\Projects\LOQ\loqj-cli\local\manual-testing\t267-live-audit-20260515-215132" --no-daemon` - passed.
+- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-t267-live-audit.ps1 -PreflightOnly` - passed after updated file-based preflight and stale `llama-server.exe` cleanup; prompt bank not run.
+- Isolated model smoke prompts through Talos passed for Qwen (`QWEN_SMOKE_123`) and GPT-OSS (`GPTOSS_SMOKE_123`).
+- `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/t267-live-audit-20260516-074959,local/manual-workspaces/t267-live-audit-20260516-074959" --no-daemon` - passed.
 - `./gradlew.bat clean check e2eTest --no-daemon` - passed.
 
 ## 11. Tests not run
 
-- Live two-model prompt-bank audit not run because the required local model/backend pair was unavailable. Current preflight found GPT-OSS configured but no Qwen profile.
+- Live two-model prompt-bank audit not run. The local model/backend pair is now smoke-verified, but the approval-sensitive prompt bank still needs synchronized execution and evidence capture.
 - Full private-mode live prompt-bank not run; initial scripted private-mode e2e tests were added.
 
 ## 12. Remaining blockers

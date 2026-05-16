@@ -2,7 +2,7 @@
 
 ## Status
 
-Not run in this pass. A preflight helper now exists:
+Not fully run in this pass. A preflight helper now exists:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-t267-live-audit.ps1 -PreflightOnly
@@ -10,16 +10,29 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-t267-live-audit.
 
 The preflight creates `local/manual-testing/<audit-id>/LIVE-AUDIT-PREFLIGHT.md` and reports one of:
 
-- `PASS`: both required model profiles/backend signals are available.
+- `PASS`: both required model files/backend signals are available.
 - `BLOCKED`: one or both required models/backends are missing or failing.
 
-Reason for current status: the preflight found the GPT-OSS profile, did not find the Qwen profile, and did not execute the prompt bank. No release-ready claim may rely on this report.
+Current status on 2026-05-16:
+
+- The preflight now checks actual managed `llama.cpp` server/model files rather than requiring both models in one Talos config. Talos currently supports one active managed `llama_cpp.model_path` per config, so the audit must run the models sequentially with isolated temp homes/configs.
+- Both local GGUF files were found: `gpt-oss-20b-mxfp4.gguf` and `qwen2.5-coder-14b-instruct-q4_k_m.gguf`.
+- The managed `llama.cpp` server path exists.
+- 53 stale repo-owned `llama-server.exe` processes were found and stopped because they left only 282 MiB GPU memory free and caused Qwen startup failure.
+- After cleanup, both GPT-OSS and Qwen passed a minimal model-forced smoke prompt through isolated `-Duser.home` configs.
+- The full prompt bank below has not yet been executed/classified, so no release-ready claim may rely on this report.
 
 ## Required models
 
 - `qwen2.5-coder:14b`
 - `gpt-oss:20b`
 - Preferred backend: managed `llama.cpp`, if configured for this branch.
+
+Managed `llama.cpp` model strategy:
+
+- GPT-OSS and Qwen must run sequentially, not as two profiles inside one active `engines.llama_cpp` block.
+- Each model run should use an isolated temp `user.home` containing its own `.talos/config.yaml`.
+- Each model run should use a fresh workspace and artifact directory.
 
 ## Fixture
 

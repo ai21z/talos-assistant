@@ -4,20 +4,22 @@ Status: open
 Severity: high / release gate
 Release gate: yes - private-document beta and broad beta evidence
 Branch: v0.9.0-beta-dev
-Created/updated: 2026-05-15
+Created/updated: 2026-05-16
 Owner: unassigned
 
 ## Problem
 
-The required two-model live audit cannot run until both local model profiles and a stable backend are available.
+The required two-model live audit cannot pass the release gate until both local model backends are smoke-verified and the full prompt bank is executed from isolated audit configs.
 
 ## Evidence from current code
 
 `scripts/run-t267-live-audit.ps1` now performs a reproducible preflight and writes `LIVE-AUDIT-PREFLIGHT.md` under `local/manual-testing/<audit-id>/`.
 
+The preflight was corrected on 2026-05-16: Talos managed `llama_cpp` has one active `model_path` per config, so the release audit must run Qwen and GPT-OSS sequentially using isolated temp homes/config files instead of pretending both profiles live in one active config.
+
 ## Evidence from tests/audits
 
-The current preflight found:
+Previous preflight found:
 
 - GPT-OSS profile configured.
 - Qwen profile missing.
@@ -25,6 +27,16 @@ The current preflight found:
 - Ollama legacy probe blocked.
 
 Earlier audit notes recorded `ollama list` crashing with access violation `0xc0000005`.
+
+2026-05-16 evidence:
+
+- GPT-OSS GGUF file exists locally.
+- Qwen GGUF file exists locally.
+- Managed `llama.cpp` server path exists.
+- 53 stale repo-owned `llama-server.exe` processes were stopped after Qwen failed with only 282 MiB free GPU memory.
+- After cleanup, Qwen answered a model-forced smoke prompt (`QWEN_SMOKE_123`) through Talos using an isolated temp-home config.
+- After cleanup, GPT-OSS answered a model-forced smoke prompt (`GPTOSS_SMOKE_123`) through Talos using an isolated temp-home config.
+- `checkRuntimeArtifactCanaries` passed on the smoke artifact roots.
 
 ## User impact
 
@@ -45,14 +57,14 @@ Model backend, provider-body capture, prompt-debug, trace/session artifacts, too
 
 ## Required behavior
 
-- Configure `qwen2.5-coder:14b`.
-- Configure `gpt-oss:20b`.
+- Configure or generate isolated temp-home configs for `qwen2.5-coder:14b`.
+- Configure or generate isolated temp-home configs for `gpt-oss:20b`.
 - Prefer managed llama.cpp where supported.
 - Preflight must report PASS before the prompt bank runs.
 
 ## Proposed implementation
 
-Add or repair managed llama.cpp profiles for both models in the Talos user config or profile store. Validate with:
+Use sequential isolated configs for both managed llama.cpp models. Validate with:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-t267-live-audit.ps1 -PreflightOnly
@@ -65,17 +77,18 @@ Run the live prompt bank from `work-cycle-docs/reports/t267-live-two-model-audit
 ## Acceptance criteria
 
 - Preflight reports PASS.
+- Both model-forced smoke prompts pass through Talos.
 - Both models complete the prompt bank.
 - `checkRuntimeArtifactCanaries` passes on the generated audit directories.
 - Results are recorded in `work-cycle-docs/reports/t267-live-two-model-audit-results.md`.
 
 ## Remaining blockers
 
-Qwen profile is missing in the inspected local config.
+Full prompt bank execution/classification is still missing. The smoke tests are not a substitute for the live audit.
 
 ## Open questions
 
-Where should model profile definitions live for release audit reproducibility: user config, repo-local sample config, or a dedicated audit config?
+Should the live audit helper grow a fully synchronized prompt runner, or should approval-sensitive prompts remain a human-operated transcript capture to avoid stdin desynchronization?
 
 ## Related files
 
