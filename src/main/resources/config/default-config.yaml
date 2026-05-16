@@ -47,6 +47,18 @@ rag:
     - "**/*.conf"
     - "**/*.config"
     - "**/*.toml"
+    - "**/*.pdf"
+    - "**/*.docx"
+    - "**/*.xls"
+    - "**/*.xlsx"
+    - "**/*.png"
+    - "**/*.jpg"
+    - "**/*.jpeg"
+    - "**/*.gif"
+    - "**/*.bmp"
+    - "**/*.webp"
+    - "**/*.tif"
+    - "**/*.tiff"
   excludes:
     - "**/.env"
     - "**/.env.*"
@@ -79,19 +91,7 @@ rag:
     - "**/*.tgz"
     - "**/*.7z"
     - "**/*.rar"
-    - "**/*.png"
-    - "**/*.jpg"
-    - "**/*.jpeg"
-    - "**/*.gif"
-    - "**/*.bmp"
-    - "**/*.webp"
-    - "**/*.tif"
-    - "**/*.tiff"
-    - "**/*.pdf"
     - "**/*.doc"
-    - "**/*.docx"
-    - "**/*.xls"
-    - "**/*.xlsx"
     - "**/*.ppt"
     - "**/*.pptx"
     - "**/*.exe"
@@ -109,6 +109,20 @@ rag:
   force_full_reindex: false  # Set to true to ignore file hashes and rebuild everything
   vectors:
     enabled: true
+
+document_extraction:
+  enabled: true
+  pdf:
+    enabled: true
+  word:
+    enabled: true
+  excel:
+    enabled: true
+  image_ocr:
+    enabled: false
+    command: ""
+    args: []
+    timeout_ms: 10000
 
 llm:
   transport: "engine"

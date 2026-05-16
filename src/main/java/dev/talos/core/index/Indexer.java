@@ -4,6 +4,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
 import dev.talos.core.cache.CacheDb;
+import dev.talos.core.extract.DocumentExtractionRequest;
+import dev.talos.core.extract.DocumentExtractionResult;
+import dev.talos.core.extract.DocumentExtractionService;
+import dev.talos.core.extract.DocumentExtractionStatus;
 import dev.talos.core.embed.CachingEmbeddings;
 import dev.talos.core.embed.EmbeddingProfile;
 import dev.talos.core.embed.EmbeddingsFactory;
@@ -73,7 +77,9 @@ public class Indexer {
             return INDEX_METADATA_SCHEMA_VERSION == intValue(data.get("schemaVersion"))
                     && ProtectedContentPolicy.POLICY_VERSION.equals(String.valueOf(data.get("privacyPolicyVersion")))
                     && FileCapabilityPolicy.POLICY_VERSION.equals(String.valueOf(data.get("fileCapabilityPolicyVersion")))
-                    && currentRagConfigHash().equals(String.valueOf(data.get("ragConfigHash")));
+                    && DocumentExtractionService.EXTRACTION_POLICY_VERSION.equals(String.valueOf(data.get("documentExtractionPolicyVersion")))
+                    && currentRagConfigHash().equals(String.valueOf(data.get("ragConfigHash")))
+                    && currentDocumentExtractionConfigHash().equals(String.valueOf(data.get("documentExtractionConfigHash")));
         } catch (Exception e) {
             return false;
         }
@@ -218,7 +224,7 @@ public class Indexer {
 
                             // Parse with timing
                             long parseStart = System.currentTimeMillis();
-                            String text = ParserUtil.smartParse(p);
+                            String text = parseIndexableText(rootPath, p);
                             stats.addParseTime(System.currentTimeMillis() - parseStart);
 
                             List<ParsedChunk> chunks = Chunker.chunk(rel, text, chunkChars, overlap);
@@ -379,7 +385,9 @@ public class Indexer {
         data.put("schemaVersion", INDEX_METADATA_SCHEMA_VERSION);
         data.put("privacyPolicyVersion", ProtectedContentPolicy.POLICY_VERSION);
         data.put("fileCapabilityPolicyVersion", FileCapabilityPolicy.POLICY_VERSION);
+        data.put("documentExtractionPolicyVersion", DocumentExtractionService.EXTRACTION_POLICY_VERSION);
         data.put("ragConfigHash", currentRagConfigHash());
+        data.put("documentExtractionConfigHash", currentDocumentExtractionConfigHash());
         data.put("workspaceRootHash", Hash.sha1Hex(root.toAbsolutePath().normalize().toString()));
         data.put("createdAt", Instant.now().toString());
         data.put("talosVersion", BuildInfo.version());
@@ -391,6 +399,14 @@ public class Indexer {
             return Hash.sha1Hex(JSON.writeValueAsString(CfgUtil.map(cfg.data.get("rag"))));
         } catch (Exception e) {
             return Hash.sha1Hex(String.valueOf(CfgUtil.map(cfg.data.get("rag"))));
+        }
+    }
+
+    private String currentDocumentExtractionConfigHash() {
+        try {
+            return Hash.sha1Hex(JSON.writeValueAsString(CfgUtil.map(cfg.data.get("document_extraction"))));
+        } catch (Exception e) {
+            return Hash.sha1Hex(String.valueOf(CfgUtil.map(cfg.data.get("document_extraction"))));
         }
     }
 
@@ -425,7 +441,8 @@ public class Indexer {
         for (String g : excludeGlobs) excludeMatchers.add(fs.getPathMatcher("glob:" + g));
 
         return p -> {
-            if (ProtectedContentPolicy.isProtectedPath(rootPath, p) || UnsupportedDocumentFormats.isUnsupported(p)) {
+            if (ProtectedContentPolicy.isProtectedPath(rootPath, p)
+                    || unsupportedAndNotExtractionEnabled(p)) {
                 return false;
             }
             Path rel = rootPath.relativize(p);
@@ -450,7 +467,8 @@ public class Indexer {
         }
 
         return p -> {
-            if (ProtectedContentPolicy.isProtectedPath(rootPath, p) || UnsupportedDocumentFormats.isUnsupported(p)) {
+            if (ProtectedContentPolicy.isProtectedPath(rootPath, p)
+                    || unsupportedAndNotExtractionEnabled(p)) {
                 return false;
             }
             Path rel = rootPath.relativize(p);
@@ -481,5 +499,31 @@ public class Indexer {
             .replace("__DOUBLESTAR__", ".*");              // Matches anything
 
         return Pattern.compile("^" + regex + "$", Pattern.CASE_INSENSITIVE);
+    }
+
+    private String parseIndexableText(Path rootPath, Path path) throws IOException {
+        FileCapabilityPolicy.FormatInfo capability = FileCapabilityPolicy
+                .describe(path, cfg)
+                .orElse(null);
+        if (capability != null && capability.enabled()) {
+            DocumentExtractionResult result = new DocumentExtractionService(cfg)
+                    .extract(DocumentExtractionRequest.index(path, rootPath));
+            if (result.status() == DocumentExtractionStatus.SUCCESS
+                    || result.status() == DocumentExtractionStatus.PARTIAL) {
+                return result.safeText();
+            }
+            throw new IOException("Document extraction unavailable for index status=" + result.status());
+        }
+        return ParserUtil.smartParse(path);
+    }
+
+    private boolean unsupportedAndNotExtractionEnabled(Path path) {
+        FileCapabilityPolicy.FormatInfo capability = FileCapabilityPolicy
+                .describe(path, cfg)
+                .orElse(null);
+        if (capability != null && capability.enabled()) {
+            return false;
+        }
+        return UnsupportedDocumentFormats.isUnsupported(path);
     }
 }

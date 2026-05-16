@@ -1,6 +1,5 @@
 package dev.talos.runtime.policy;
 
-import dev.talos.core.ingest.UnsupportedDocumentFormats;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.toolcall.ToolAliasPolicy;
 import dev.talos.runtime.toolcall.ToolCallSupport;
@@ -443,7 +442,7 @@ public final class EvidenceObligationVerifier {
             List<ToolCallLoop.ToolOutcome> outcomes
     ) {
         String expected = normalizePath(expectedTarget);
-        boolean unsupportedTarget = UnsupportedDocumentFormats.isUnsupported(Path.of(expectedTarget));
+        boolean unsupportedTarget = EvidenceObligationPolicy.requiresUnsupportedCapabilityCheck(Path.of(expectedTarget));
         for (ToolCallLoop.ToolOutcome outcome : outcomes) {
             if (!"talos.read_file".equals(canonicalToolName(outcome.toolName()))) continue;
             if (!expected.equals(normalizePath(outcome.pathHint()))) continue;

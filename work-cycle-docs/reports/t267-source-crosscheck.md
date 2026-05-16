@@ -149,7 +149,7 @@ Evidence:
   - It does not sanitize protected content or unsupported-format claims.
 - `src/main/java/dev/talos/runtime/trace/TraceRedactor.java`
   - Redacts secret-like assignments when keys contain secret/token/api-key/password/credential/private-key terms.
-  - Does not redact `DO_NOT_LEAK*`, `TALOS_CANARY_*`, `CANARY_*`, or `PRIVATE_MARKER = ...`.
+  - Earlier evidence showed it did not centrally redact the project canary prefix patterns or private-marker assignments.
   - `looksSensitivePath(...)` covers `.env`, `/secrets/`, secret/token/credential/id_rsa/id_ed25519/private-key patterns, but not `protected/`.
 - `src/main/java/dev/talos/cli/prompt/PromptDebugInspector.java`
   - `PROTECTED_CONTENT_SIGNAL` only detects keys like api-key/token/secret/password/credential/bearer with assignment syntax.

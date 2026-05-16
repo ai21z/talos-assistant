@@ -7,6 +7,7 @@ import dev.talos.cli.ui.AnsiColor;
 import dev.talos.cli.ui.CliStatusDashboard;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.IndexPathResolver;
+import dev.talos.core.extract.DocumentExtractionPreflight;
 import dev.talos.runtime.XmlCompatTelemetry;
 
 import java.nio.file.Path;
@@ -142,6 +143,18 @@ public final class StatusCommand implements Command {
 
         if (!cfg.getReport().defaultedKeys.isEmpty()) {
             sb.append(AnsiColor.dim("  Defaulted: " + String.join(", ", cfg.getReport().defaultedKeys))).append("\n");
+        }
+
+        sb.append("\n").append(AnsiColor.grey("  Document Extraction")).append("\n");
+        for (var extractionStatus : DocumentExtractionPreflight.assess(cfg)) {
+            sb.append(AnsiColor.dim("    "))
+                    .append(extractionStatus.label())
+                    .append(AnsiColor.dim(": "))
+                    .append(extractionStatus.summary());
+            if (!extractionStatus.detail().isBlank()) {
+                sb.append(AnsiColor.dim(" - ")).append(extractionStatus.detail());
+            }
+            sb.append("\n");
         }
 
         var xmlCompat = XmlCompatTelemetry.snapshot();

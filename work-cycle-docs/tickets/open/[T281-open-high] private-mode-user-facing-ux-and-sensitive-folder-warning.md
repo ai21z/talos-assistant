@@ -17,7 +17,7 @@ This pass adds `PrivacyCommand` and `SensitiveWorkspaceDetector`. `/privacy stat
 
 ## Evidence from tests/audits
 
-`PrivacyCommandTest` and `SensitiveWorkspaceDetectorTest` cover the minimal command and warning behavior. The two-model live audit has not run.
+`PrivacyCommandTest` and `SensitiveWorkspaceDetectorTest` cover the minimal command and warning behavior. A later focused two-model beta-core capability audit ran as `capability-live-audit-20260516-195820`, including private search/status prompts.
 
 ## User impact
 
@@ -62,8 +62,8 @@ Expand `/privacy` integration into general status/help surfaces and add e2e/live
 
 ## Remaining blockers
 
-- Two-model live audit not run.
-- Broad private-mode e2e coverage missing.
+- Broad private-document/private-mode corpus coverage missing.
+- Sensitive paperwork fixtures missing.
 
 ## Open questions
 
@@ -82,3 +82,9 @@ Expand `/privacy` integration into general status/help surfaces and add e2e/live
 - `SensitiveWorkspaceDetector` now avoids false positives for `valid-project` and `grid-ui` while still warning for tokenized `id-documents`.
 - Initial private-mode scripted e2e coverage was added.
 - Follow-up tickets: T287 and T289.
+
+## 2026-05-16 capability audit update
+
+- Focused two-model beta-core capability audit `capability-live-audit-20260516-195820` ran against GPT-OSS and Qwen.
+- Private-mode search/status prompts passed the script heuristics.
+- This does not make Talos private-document ready; broader tax/health/legal/admin fixtures remain required.

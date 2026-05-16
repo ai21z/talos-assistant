@@ -13,7 +13,7 @@ Prompt-debug, provider-body JSON, local traces, session snapshots, turn JSONL, a
 
 ## Evidence from current code
 
-- `TraceRedactor` redacts secret-like assignments but not `DO_NOT_LEAK*`, `TALOS_CANARY_*`, `CANARY_*`, or `PRIVATE_MARKER`.
+- `TraceRedactor` redacts secret-like assignments, and earlier evidence showed the need to cover project canary prefix patterns and private-marker values as well.
 - `PromptDebugInspector` uses its own protected content signal and delegates provider-body redaction to `TraceRedactor`.
 - `JsonSessionStore` persists turn content and local traces; it does not own comprehensive redaction.
 - Live audit Prompt 17 saved raw marker values in prompt-debug/provider-body artifacts.

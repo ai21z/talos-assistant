@@ -40,12 +40,33 @@ Talos can inspect and edit supported text-oriented files such as `.md`,
 `.config`, shell scripts, PowerShell scripts, Gradle files, Dockerfiles,
 README files, LICENSE files, and similar project text files.
 
-Talos does not currently extract or summarize PDF, Word, Excel, PowerPoint,
-image/scan, archive, executable, or most binary file contents. If one of those
-files exists, Talos may identify that the file exists, but it must not claim it
-reviewed the body unless a local extractor actually produced text evidence.
-Convert unsupported documents to text, Markdown, HTML, CSV, or another
-supported text format before relying on Talos to inspect their contents.
+Talos now has narrow local extraction for text-bearing PDFs, `.docx` Word
+documents, and `.xls`/`.xlsx` Excel workbooks. These are text extraction paths,
+not layout-perfect document review. PDF visual order, scanned/image-only PDFs,
+DOCX layout/comments/tracked changes/embedded objects, hidden workbook sheets,
+charts, macros, and workbook formula recalculation remain limited and must be
+reported as extraction limitations. Workbook formula cells are shown as formula
+text plus cached display value when available; Talos does not recalculate them.
+Large extracted output is capped and reported as partial/truncated rather than
+treated as complete. Scanned or image-only PDFs are reported as requiring OCR
+rather than treated as successfully reviewed. Encrypted and corrupt documents
+are reported as unreadable evidence, not summarized from guesswork.
+
+Images are frozen out of the beta scope and tracked for v1. The current code has
+an experimental OCR command adapter, but beta product claims must not depend on
+it. Talos must not describe image contents from filenames or guesswork. Use
+`/status --verbose` to see document-extraction preflight, including whether
+Image OCR is disabled, unavailable, or backed by a resolved local OCR command.
+This preflight checks configuration and command resolution; it does not execute
+the OCR command just to render status.
+
+PowerPoint (`.ppt`, `.pptx`) is also frozen out of beta and tracked for v1.
+Legacy Word `.doc`, archives, executables, and most binary files remain
+unsupported or deferred. If one of those files exists,
+Talos may identify that the file exists, but it must not claim it reviewed the
+body unless a local extractor actually produced text evidence. Convert
+unsupported documents to text, Markdown, HTML, CSV, or another supported text
+format before relying on Talos to inspect their contents.
 
 Sensitive personal paperwork is not an approved product claim yet. Do not
 position this beta as safe for tax folders, health records, legal paperwork,
@@ -69,8 +90,8 @@ approved protected reads default to `LOCAL_DISPLAY_ONLY`: the runtime reads the
 file locally after approval, but withholds raw contents from model context and
 redacts persisted artifacts unless an explicit `SEND_TO_MODEL_CONTEXT` scope is
 enabled. This is still not enough to position Talos as safe for sensitive
-paperwork folders; broader private-mode audit coverage and the live two-model
-audit remain release gates.
+paperwork folders; private-document positioning still needs stronger real-world
+fixture coverage and private-folder release evidence.
 
 Private mode is user-visible in the REPL:
 
@@ -97,6 +118,30 @@ After a live audit, maintainers can scan runtime artifacts with:
 The normal CI-style broad scan and the targeted live-audit scan are different:
 the targeted scan is the one intended for prompt-debug, provider-body, session,
 trace, turn JSONL, command-output, and generated audit-report directories.
+`checkRuntimeArtifactCanaries` intentionally requires explicit
+`-PartifactScanRoots=...`; it does not default to all historical manual-audit
+folders because older ignored audits can contain stale canaries by design.
+
+The document-capability live audit script can run a beta-core audit that
+excludes frozen image/PPT prompts:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-capability-live-audit.ps1 -BetaCoreOnly -StopStaleServers
+```
+
+It can also run the frozen image/OCR path separately when that work resumes:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-capability-live-audit.ps1 -StopStaleServers
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-capability-live-audit.ps1 -UseRealOcr -StopStaleServers
+```
+
+The default non-beta-core mode uses a controlled OCR stub and proves tool
+routing, privacy boundaries, and artifact handling. `-UseRealOcr` requires a
+real local OCR command such as Tesseract, or `-OcrCommand <path>`, and is the
+only mode that counts as production image-OCR evidence. Neither image OCR nor
+PowerPoint counts as beta readiness evidence while those formats are frozen for
+v1.
 
 Talos may warn when a workspace name or shallow metadata looks sensitive, such
 as tax, health, legal, finance, secrets, protected folders, or many private

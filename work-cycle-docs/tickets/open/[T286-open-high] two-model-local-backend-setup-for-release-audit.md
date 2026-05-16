@@ -38,6 +38,9 @@ Earlier audit notes recorded `ollama list` crashing with access violation `0xc00
 - After cleanup, GPT-OSS answered a model-forced smoke prompt (`GPTOSS_SMOKE_123`) through Talos using an isolated temp-home config.
 - Latest smoke evidence is `t267-live-audit-20260516-091319`; repo-owned stale server count after the run was 0.
 - `checkRuntimeArtifactCanaries` passed on the smoke artifact roots.
+- The focused beta-core capability live audit now runs both GPT-OSS and Qwen through `scripts/run-capability-live-audit.ps1 -BetaCoreOnly -StopStaleServers`.
+- Latest focused beta-core audit: `capability-live-audit-20260516-195820`; both models completed 13 prompts, expected PDF/DOCX/XLSX reads were satisfied, and the targeted artifact canary scan passed.
+- The focused helper uses an isolated config with explicit protected direct-read deny rules so unexpected protected reads fail closed without interactive approval prompts consuming later trace/debug commands.
 
 ## User impact
 
@@ -92,11 +95,11 @@ Run the live prompt bank from `work-cycle-docs/reports/t267-live-two-model-audit
 
 ## Remaining blockers
 
-Full prompt bank execution/classification is still missing. The smoke tests are not a substitute for the live audit.
+The focused beta-core capability bank has run. The broader private-document prompt bank and any approval-sensitive transcript still require either a synchronized prompt runner or a human-operated capture process.
 
 ## Open questions
 
-Should the live audit helper grow a fully synchronized prompt runner, or should approval-sensitive prompts remain a human-operated transcript capture to avoid stdin desynchronization?
+Should approval-sensitive prompts remain human-operated, or should Talos add a synchronized prompt runner that can respond to approval prompts without risking stdin desynchronization?
 
 ## Related files
 

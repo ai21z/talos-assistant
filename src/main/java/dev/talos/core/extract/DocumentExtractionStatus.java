@@ -1,0 +1,19 @@
+package dev.talos.core.extract;
+
+public enum DocumentExtractionStatus {
+    NOT_ATTEMPTED,
+    SUCCESS,
+    PARTIAL,
+    OCR_REQUIRED,
+    OCR_UNAVAILABLE,
+    PASSWORD_PROTECTED,
+    ENCRYPTED,
+    CORRUPT,
+    LIMIT_EXCEEDED,
+    FAILED,
+    BLOCKED_BY_PRIVACY,
+    UNSUPPORTED_DISABLED,
+    DEFERRED_UNSUPPORTED,
+    UNSUPPORTED_ARCHIVE,
+    UNSUPPORTED_BINARY
+}

@@ -955,6 +955,20 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void imageReadQuestionsCaptureExpectedTargetsWithoutMutationIntent() {
+        for (String input : List.of(
+                "Summarize image.png using OCR text only.",
+                "Read scans/receipt.jpeg and extract the visible text.",
+                "Open documents/passport.tiff and tell me what text was extracted.")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertFalse(contract.mutationRequested(), input);
+            assertFalse(contract.mutationAllowed(), input);
+            assertEquals(1, contract.expectedTargets().size(), input);
+        }
+    }
+
+    @Test
     void syntheticToolResultTailIsSkippedWhenResolvingFromMessages() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.user("Edit index.html."));

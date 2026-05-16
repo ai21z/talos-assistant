@@ -1,0 +1,2 @@
+CANONICAL_DOCX_TEXT_BETA
+DOCX fixture for Talos extraction evidence

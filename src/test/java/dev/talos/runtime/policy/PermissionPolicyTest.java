@@ -86,6 +86,23 @@ class PermissionPolicyTest {
     }
 
     @Test
+    void explicitDenyRuleBeatsProtectedReadAsk() {
+        Config cfg = configWithRules(List.of(
+                rule("deny", List.of("talos.read_file"), List.of("READ_ONLY"), List.of("INSPECT"), List.of(".env"))
+        ));
+        PermissionPolicy policy = new DeclarativePermissionPolicy(ApprovalPolicy.ALWAYS_ASK);
+
+        PermissionDecision decision = policy.decide(request(cfg,
+                new ToolCall("talos.read_file", Map.of("path", ".env")),
+                ToolRiskLevel.READ_ONLY,
+                ExecutionPhase.INSPECT));
+
+        assertEquals(PermissionAction.DENY, decision.action());
+        assertEquals("CONFIG_DENY", decision.reasonCode());
+        assertTrue(decision.userMessage().contains("deny test rule"));
+    }
+
+    @Test
     void defaultSafeWriteAsksAndCanBeRemembered() {
         PermissionPolicy policy = new DeclarativePermissionPolicy(ApprovalPolicy.ALWAYS_ASK);
 

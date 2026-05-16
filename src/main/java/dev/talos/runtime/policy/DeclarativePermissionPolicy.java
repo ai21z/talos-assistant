@@ -42,6 +42,10 @@ public final class DeclarativePermissionPolicy implements PermissionPolicy {
                     protectedResource);
         }
 
+        PermissionConfig config = PermissionConfig.from(request.config());
+        PermissionDecision explicit = explicitDecision(config, request, resource, PermissionAction.DENY);
+        if (explicit != null) return explicit;
+
         if (!risk.requiresApproval() && protectedResource != null && isSpecificReadTool(request.call().toolName())) {
             return PermissionDecision.ask("PROTECTED_PATH_ASK",
                     "Permission policy requires approval before reading protected path `"
@@ -50,9 +54,6 @@ public final class DeclarativePermissionPolicy implements PermissionPolicy {
                     false);
         }
 
-        PermissionConfig config = PermissionConfig.from(request.config());
-        PermissionDecision explicit = explicitDecision(config, request, resource, PermissionAction.DENY);
-        if (explicit != null) return explicit;
         explicit = explicitDecision(config, request, resource, PermissionAction.ASK);
         if (explicit != null) return explicit;
         explicit = explicitDecision(config, request, resource, PermissionAction.ALLOW);

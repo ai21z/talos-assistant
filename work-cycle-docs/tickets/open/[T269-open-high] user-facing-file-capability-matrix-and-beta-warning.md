@@ -9,11 +9,11 @@ Owner: unassigned
 
 ## Problem
 
-Talos documentation must clearly say what Talos can and cannot handle. Without a capability matrix, users may assume sensitive-paperwork or PDF/Office/image support that does not exist yet.
+Talos documentation must clearly say what Talos can and cannot handle. Without a capability matrix, users may assume sensitive-paperwork, image/OCR, PowerPoint, or full-fidelity document support that does not exist yet.
 
 ## Evidence from current code
 
-Talos supports strong local code/text/config workflows, but unsupported-format handling is partial and indirect-read privacy is not yet release-gate safe.
+Talos supports strong local code/text/config workflows, local text extraction for text-bearing PDFs, DOCX, and XLS/XLSX, plus hardened indirect-read privacy paths. Image/OCR and PowerPoint are frozen out of beta and must stay documented as v1/open work.
 
 ## Evidence from external/source crosscheck
 
@@ -40,9 +40,11 @@ Documentation and user expectation boundary.
 
 Docs must state:
 
-- Good now: code projects, Markdown/plain text notes, JSON/YAML/config/source files, CSV/TSV, static websites, local developer workflows, non-sensitive workspace folders.
+- Good now: code projects, Markdown/plain text notes, JSON/YAML/config/source files, CSV/TSV, static websites, PDF/DOCX/XLS/XLSX text extraction with limitations, local developer workflows, non-sensitive workspace folders.
 - Supported text formats: Markdown, text, JSON/YAML/XML/TOML/INI/config, CSV/TSV, HTML/CSS/JS/TS, Java/Kotlin/Python/Go/Rust/C/C++ headers, scripts, Gradle/Dockerfile/README/LICENSE/project files.
-- Unsupported/not-yet-extractable: PDF, Word, Excel, PowerPoint, images/scans, archives, most binaries.
+- Supported document extraction with limitations: text-bearing PDFs, DOCX, XLS, XLSX. Excel formula cells expose formula text plus cached display value when available; formulas are not recalculated. Large extracted output can be partial/truncated.
+- Frozen for v1/open issue: images/scans/OCR and PowerPoint.
+- Unsupported/not-yet-extractable: legacy `.doc`, archives, most binaries, and arbitrary visual/layout understanding.
 - Before all privacy gates pass, Talos must not be positioned as safe for tax/health/legal/family/admin paperwork.
 
 ## Proposed implementation
@@ -74,4 +76,3 @@ None.
 - `docs/evaluation/*`
 - `docs/release/beta-readiness.md`
 - `work-cycle-docs/reports/t267-and-file-format-release-gate.md`
-

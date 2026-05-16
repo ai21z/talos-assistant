@@ -52,7 +52,7 @@ Release blocker for any claim that Talos is safe for tax, health, legal, family,
 ## Required behavior
 
 - Protected files and directories are skipped, blocked, or safely summarized by indirect read tools.
-- Raw `DO_NOT_LEAK*`, `TALOS_CANARY_*`, `CANARY_*`, `PRIVATE_MARKER`, and secret-like assignment values from indirect read tools never enter model context or generated artifacts.
+- Raw project canary prefix patterns, private-marker values, and secret-like assignment values from indirect read tools never enter model context or generated artifacts.
 - `protected/` is treated as protected for beta trust.
 - If matches exist only in protected content, Talos reports that matches were found but lines were withheld.
 - Dirty RAG indexes cannot surface raw protected snippets.

@@ -101,10 +101,9 @@ public final class ReindexCommand implements Command {
                 }
             } : IndexProgressListener.NOOP;
 
-            if (forceFullReindex) {
-                indexer.index(workspace, true, progress);
-            } else {
-                indexer.reindex(workspace, progress);
+            var outcome = ctx.rag().reindex(workspace, forceFullReindex, progress);
+            if (!outcome.indexed()) {
+                return new Result.Info(outcome.message() + "\n");
             }
 
             // Get and display statistics

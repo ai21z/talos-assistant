@@ -1,5 +1,7 @@
 # Final Pre-Beta Verification
 
+Supersession note, 2026-05-16: this report captures an earlier pre-document-extraction verification pass. Current document-extraction and live-audit decisions must use `work-cycle-docs/reports/full-talos-capability-state-and-document-extraction-audit.md` plus the latest beta-core capability audit `capability-live-audit-20260516-195820`.
+
 ## 1. Scope
 
 This report verifies the current `v0.9.0-beta-dev` branch before the final pre-beta evidence and hardening pass. It focuses on privacy UX, protected-read scope, sensitive workspace warnings, artifact scanning, log redaction, RAG dirty-index handling, config fallback safety, unsupported-format truthfulness, reports, and ticket freshness.
@@ -132,8 +134,8 @@ Verification answers:
 
 ## 9. Live audit and reports
 
-- `work-cycle-docs/reports/t267-live-two-model-audit-results.md` says the full prompt-bank live audit was not run and remains a release blocker.
-- `work-cycle-docs/reports/t267-live-two-model-audit.md` is still a runbook/status document, not an executed two-model prompt-bank evidence packet.
+- Later evidence supersedes this subsection for document extraction: the focused two-model beta-core capability audit `capability-live-audit-20260516-195820` ran against GPT-OSS and Qwen, with targeted artifact scan passing afterward. Images and PowerPoint were intentionally excluded from beta-core scope.
+- The broader historical T267 32-prompt bank remains a runbook/status document, not a completed private-document evidence packet.
 - Latest backend evidence: `scripts/run-t267-live-audit.ps1 -SmokeModels -StopStaleServers` produced smoke audit id `t267-live-audit-20260516-091319`, where GPT-OSS returned `GPTOSS_SMOKE_123`, Qwen returned `QWEN_SMOKE_123`, targeted artifact canary scan passed on the smoke roots, and repo-owned stale server count after the run was 0.
 - Deterministic test lifecycle evidence: tests that previously loaded the real user LLM config now use placeholder/scripted LLMs, and `./gradlew.bat clean check e2eTest --no-daemon` completed with repo-owned `llama-server.exe` process count 0.
 - `work-cycle-docs/reports/next-beta-readiness-hardening-report.md` states `Not release-ready`.
@@ -141,7 +143,7 @@ Verification answers:
 
 Verification answers:
 
-16. The two-model prompt-bank live audit was not actually run. The local backend pair is smoke-verified only.
+16. Superseded for the focused document-capability bank: a later two-model beta-core capability audit ran. The broader historical private-document bank remains incomplete. Images/OCR and PowerPoint are frozen for v1.
 17. The inspected release reports do not mark Talos private-document release-ready. They correctly keep live audit and unsupported extraction as blockers. README also forbids tax/health/legal/family/admin private-document positioning and now states `/privacy` persistence semantics directly.
 
 ## 10. Ticket freshness

@@ -1,6 +1,6 @@
 # T288 - Runtime Artifact Scan Release Task
 
-Status: open - implemented in this pass, pending live-audit use
+Status: open - implemented and used on focused capability audit roots
 Severity: high
 Release gate: yes for private-document beta
 Branch: v0.9.0-beta-dev
@@ -27,6 +27,14 @@ The release task also passed against the latest two-model smoke artifact roots:
 ```powershell
 ./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/t267-live-audit-20260516-091319,local/manual-workspaces/t267-live-audit-20260516-091319" --no-daemon
 ```
+
+Latest focused capability audit scan:
+
+```powershell
+./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/capability-live-audit-20260516-195820,local/manual-workspaces/capability-live-audit-20260516-195820" "-PartifactScanAllowlist=<fixture allowlist>" --no-daemon
+```
+
+The task now requires explicit `-PartifactScanRoots=...`. A no-root invocation fails fast with a usage error so historical ignored manual-audit directories are not scanned accidentally.
 
 ## User impact
 
@@ -69,7 +77,9 @@ Keep `ArtifactCanaryScanCli` as a small wrapper over `ArtifactCanaryScanner.scan
 
 ## Remaining blockers
 
-The task has not yet been run against a completed two-model prompt-bank live audit because the prompt bank remains unrun.
+- The task has run against the focused two-model capability audit.
+- Private-document beta still needs the broader private-paperwork prompt bank plus targeted scan.
+- Future v1 image/OCR audit artifacts will need their own targeted scan after image/OCR work resumes.
 
 ## Open questions
 

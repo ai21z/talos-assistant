@@ -547,6 +547,12 @@ public final class AssistantTurnExecutor {
         ToolCallLoop.LoopResult outcomeLoopResult = mrr.retryLoopResult() != null
                 ? mergeMutationRetryEvidence(loopResult, mrr.retryLoopResult())
                 : irr.loopResult() != null ? irr.loopResult() : loopResult;
+        ReadEvidenceHandoffResult evidenceRecovery = readEvidenceRecoveryForPartialTargetsIfNeeded(
+                answer, messages, plan, outcomeLoopResult, workspace, ctx);
+        if (evidenceRecovery.loopResult() != null) {
+            answer = evidenceRecovery.answer();
+            outcomeLoopResult = evidenceRecovery.loopResult();
+        }
         int outcomeExtraMutationSuccesses = 0;
 
         moveToVerifyAfterSuccessfulMutation(ctx, outcomeLoopResult, outcomeExtraMutationSuccesses);
@@ -557,7 +563,9 @@ public final class AssistantTurnExecutor {
 
         return new ToolLoopAnswerResolution(
                 finalAnswer,
-                visibleToolLoopSummary(loopResult, mrr, irr)
+                joinExtraSummaries(
+                        visibleToolLoopSummary(loopResult, mrr, irr),
+                        evidenceRecovery.extraSummary())
         );
     }
 
@@ -648,12 +656,12 @@ public final class AssistantTurnExecutor {
             Context ctx
     ) {
         CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, ctx);
-        if (EvidenceGate.selectObligation(safePlan, workspace)
+        if (EvidenceGate.selectObligation(safePlan, workspace, ctx == null ? null : ctx.cfg())
                 != EvidenceObligation.UNSUPPORTED_CAPABILITY_CHECK_REQUIRED) {
             return new ReadEvidenceHandoffResult("", null, null);
         }
         TaskContract contract = safePlan.taskContract();
-        if (!EvidenceGate.hasOnlyUnsupportedExpectedTargets(contract)) {
+        if (!EvidenceGate.hasOnlyUnsupportedExpectedTargets(contract, ctx == null ? null : ctx.cfg())) {
             return new ReadEvidenceHandoffResult("", null, null);
         }
         TurnTaskContractCapture.set(contract);
@@ -674,7 +682,10 @@ public final class AssistantTurnExecutor {
         if (answer == null) answer = "";
         CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, ctx);
         TaskContract contract = safePlan.taskContract();
-        EvidenceObligation obligation = EvidenceGate.selectObligation(safePlan, workspace);
+        EvidenceObligation obligation = EvidenceGate.selectObligation(
+                safePlan,
+                workspace,
+                ctx == null ? null : ctx.cfg());
         if (!EvidenceGate.requiresReadEvidenceHandoff(obligation)) {
             return new ReadEvidenceHandoffResult(answer, null, null);
         }
@@ -691,7 +702,11 @@ public final class AssistantTurnExecutor {
                         EvidenceGate.protectedExpectedTargets(contract, workspace))) {
             return new ReadEvidenceHandoffResult(answer, null, null);
         }
-        List<String> targets = EvidenceGate.handoffTargets(contract, obligation, workspace);
+        List<String> targets = EvidenceGate.handoffTargets(
+                contract,
+                obligation,
+                workspace,
+                ctx == null ? null : ctx.cfg());
         if (targets.isEmpty()) {
             return new ReadEvidenceHandoffResult(answer, null, null);
         }
@@ -715,6 +730,82 @@ public final class AssistantTurnExecutor {
             LOG.warn("Read evidence handoff failed: {}", SafeLogFormatter.throwableMessage(e));
             return new ReadEvidenceHandoffResult(answer, null, null);
         }
+    }
+
+    static ReadEvidenceHandoffResult readEvidenceRecoveryForPartialTargetsIfNeeded(
+            String answer,
+            List<ChatMessage> messages,
+            CurrentTurnPlan plan,
+            ToolCallLoop.LoopResult loopResult,
+            Path workspace,
+            Context ctx
+    ) {
+        CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, ctx);
+        TaskContract contract = safePlan.taskContract();
+        EvidenceObligation obligation = EvidenceGate.selectObligation(
+                safePlan,
+                workspace,
+                ctx == null ? null : ctx.cfg());
+        if (obligation != EvidenceObligation.READ_TARGET_REQUIRED) {
+            return new ReadEvidenceHandoffResult(answer, null, null);
+        }
+        if (contract.mutationRequested() || contract.mutationAllowed()) {
+            return new ReadEvidenceHandoffResult(answer, null, null);
+        }
+        if (loopResult == null || loopResult.toolOutcomes() == null || loopResult.toolOutcomes().isEmpty()) {
+            return new ReadEvidenceHandoffResult(answer, null, null);
+        }
+        if (loopResult.failureDecision() != null && loopResult.failureDecision().shouldStop()) {
+            return new ReadEvidenceHandoffResult(answer, null, null);
+        }
+        Set<String> targets = evidenceTargets(contract);
+        if (deniedOutcomesBlockReadEvidenceRecovery(loopResult.toolOutcomes(), targets, workspace)) {
+            return new ReadEvidenceHandoffResult(answer, null, null);
+        }
+        EvidenceObligationVerifier.Result evidence = EvidenceObligationVerifier.verify(
+                obligation,
+                targets,
+                loopResult.toolOutcomes(),
+                workspace);
+        if (evidence.status() != EvidenceObligationVerifier.Status.UNSATISFIED) {
+            return new ReadEvidenceHandoffResult(answer, null, null);
+        }
+        return readEvidenceHandoffIfNeeded("", messages, safePlan, workspace, ctx);
+    }
+
+    private static boolean deniedOutcomesBlockReadEvidenceRecovery(
+            List<ToolCallLoop.ToolOutcome> outcomes,
+            Set<String> evidenceTargets,
+            Path workspace
+    ) {
+        if (outcomes == null || outcomes.isEmpty()) return false;
+        for (ToolCallLoop.ToolOutcome outcome : outcomes) {
+            if (outcome == null || !outcome.denied()) continue;
+            String deniedPath = ToolCallSupport.normalizePath(outcome.pathHint());
+            if (deniedPath.isBlank()) return true;
+            if (matchesEvidenceTarget(deniedPath, evidenceTargets)) return true;
+            if (!"talos.read_file".equals(canonicalToolName(outcome.toolName()))) return true;
+            if (workspace == null || !ProtectedPathPolicy.classify(workspace, deniedPath).protectedPath()) return true;
+        }
+        return false;
+    }
+
+    private static boolean matchesEvidenceTarget(String normalizedPath, Set<String> evidenceTargets) {
+        if (normalizedPath == null || normalizedPath.isBlank() || evidenceTargets == null) return false;
+        for (String target : evidenceTargets) {
+            if (normalizedPath.equals(ToolCallSupport.normalizePath(target))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static Set<String> evidenceTargets(TaskContract contract) {
+        if (contract == null) return Set.of();
+        if (!contract.sourceEvidenceTargets().isEmpty()) {
+            return contract.sourceEvidenceTargets();
+        }
+        return contract.expectedTargets();
     }
 
     private static String readFileToolCallJson(String target) {
@@ -926,7 +1017,8 @@ public final class AssistantTurnExecutor {
                 List.of(),
                 activeTaskContext,
                 artifactGoal,
-                ActiveTaskContext.NONE_OR_NOT_DERIVED);
+                ActiveTaskContext.NONE_OR_NOT_DERIVED,
+                ctx == null ? null : ctx.cfg());
     }
 
     private static String renderActiveTaskContextForPlan(ActiveTaskContextPolicy.Decision activeDecision) {
@@ -1047,7 +1139,10 @@ public final class AssistantTurnExecutor {
         if (ctx == null || ctx.streamSink() == null) return false;
         TaskContract taskContract = plan == null ? null : plan.taskContract();
         if (taskContract != null && taskContract.mutationAllowed()) return false;
-        if (EvidenceGate.requiresReadEvidenceHandoff(EvidenceGate.selectObligation(plan, workspace))) return false;
+        if (EvidenceGate.requiresReadEvidenceHandoff(EvidenceGate.selectObligation(
+                plan,
+                workspace,
+                ctx == null ? null : ctx.cfg()))) return false;
         return !requiresWorkspaceEvidence(taskContract);
     }
 
@@ -4840,8 +4935,11 @@ public final class AssistantTurnExecutor {
                 || lower.contains("no content")
                 || lower.contains("nothing to extract")
                 || lower.contains("says")
+                || lower.contains("shows")
+                || lower.contains("showed")
                 || lower.contains("states")
                 || lower.contains("contains")
+                || lower.contains("includes")
                 || lower.contains("describes")
                 || lower.contains("compared")
                 || lower.contains("compare")
