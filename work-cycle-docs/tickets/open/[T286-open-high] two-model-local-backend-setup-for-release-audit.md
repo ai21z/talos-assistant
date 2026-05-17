@@ -39,9 +39,10 @@ Earlier audit notes recorded `ollama list` crashing with access violation `0xc00
 - Latest smoke evidence is `t267-live-audit-20260516-091319`; repo-owned stale server count after the run was 0.
 - `checkRuntimeArtifactCanaries` passed on the smoke artifact roots.
 - The focused beta-core capability live audit now runs both GPT-OSS and Qwen through `scripts/run-capability-live-audit.ps1 -BetaCoreOnly -StopStaleServers`.
-- Latest focused beta-core audit: `capability-live-audit-20260516-210854`; both models completed 13 prompts, expected PDF/DOCX/XLSX reads were satisfied, and the targeted artifact canary scan passed.
+- Earlier focused beta-core audit: `capability-live-audit-20260516-210854`; both models completed 13 prompts, expected PDF/DOCX/XLSX reads were satisfied, and the targeted artifact canary scan passed.
 - The focused helper uses an isolated config with explicit protected direct-read deny rules so unexpected protected reads fail closed without interactive approval prompts consuming later trace/debug commands.
 - Updated focused beta-core audit: `capability-live-audit-20260518-001437`; both models completed 16 prompts, including private-mode PDF/DOCX/XLSX ordinary-fact fixture prompts, and the targeted artifact canary scan passed with only source fixtures allowlisted.
+- Private-folder bank audit: `capability-live-audit-20260518-004603`; both models completed 22 prompts, including private-mode `/show`, reindex, retrieve-style, and protected-read denial probes, and the targeted artifact canary scan passed with only source fixtures allowlisted.
 
 ## User impact
 
@@ -96,7 +97,7 @@ Run the live prompt bank from `work-cycle-docs/reports/t267-live-two-model-audit
 
 ## Remaining blockers
 
-The focused beta-core capability bank has run with private-document provenance prompts. The broader private-document prompt bank and any approval-sensitive transcript still require either a synchronized prompt runner or a human-operated capture process.
+The focused beta-core capability bank and scripted private-folder bank have run with private-document provenance prompts. Approval-sensitive transcripts still require either a synchronized prompt runner or a human-operated capture process.
 
 ## Open questions
 

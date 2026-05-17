@@ -236,6 +236,36 @@ Targeted artifact scan passed:
 
 Important limitation: the scan allowlisted the source fixture files in `local/manual-workspaces/...` because those files intentionally contain fixture canaries. The runtime artifact directories were not allowlisted and did not contain the raw private-document fact values.
 
+## 6.2 Private-folder bank update
+
+A broader scripted private-folder bank was added to `scripts/run-capability-live-audit.ps1` and run on 2026-05-18.
+
+Audit command:
+
+```text
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-capability-live-audit.ps1 -BetaCoreOnly -PrivateFolderBank -StopStaleServers
+```
+
+Audit ID:
+
+```text
+capability-live-audit-20260518-004603
+```
+
+Evidence:
+
+- GPT-OSS and Qwen both ran 22 prompts, 44 total prompt runs.
+- The bank extends the beta-core prompts with private-mode `/show` checks for PDF/DOCX/XLSX, private-mode retrieve/reindex checks, and a protected direct-read denial probe.
+- The run generated `PRIVATE-FOLDER-MANUAL-AUDIT-RUNBOOK.md` for approval-sensitive probes that should not be automated through piped stdin.
+- Targeted runtime artifact scan passed over the audit roots with only source fixtures allowlisted.
+- Direct grep over generated runtime artifact directories found no raw protected or private-document fixture values.
+
+Bug found and fixed during this run:
+
+- Before the fix, `/show private-report.pdf` in private mode could display an existing Lucene snippet if a developer-mode reindex had already created one. That bypassed the intended local-display extraction path and omitted the explicit `Model context: not used (/show local display)` marker.
+- `ShowCommand` now skips Lucene snippet lookup in private mode unless private-mode RAG is explicitly enabled, forcing direct local-display extraction for private-mode `/show`.
+- Regression coverage: `private_mode_show_skips_index_snippet_when_private_rag_disabled`.
+
 ## 7. What is working now
 
 - Private-mode document extraction sets `modelHandoffAllowed=false` by default for extracted documents.
@@ -258,12 +288,12 @@ Important limitation: the scan allowlisted the source fixture files in `local/ma
 ## 8. What is still not proven
 
 - General PII redaction for arbitrary private documents. The current deterministic private-document fact canary class is evidence instrumentation, not a broad personal-data detector.
-- End-to-end live Talos extraction artifact safety for the generated PDF/DOCX/XLS/XLSX private fact fixtures now has focused two-model evidence, but not broad real-world private-paperwork evidence.
+- End-to-end live Talos extraction artifact safety for the generated PDF/DOCX/XLS/XLSX private fact fixtures now has focused two-model evidence and a broader scripted private-folder bank, but not broad real-world private-paperwork evidence.
 - General final-answer suppression for arbitrary private facts. The deterministic test proves configured canary suppression only.
 - Per-turn explicit send-to-model approval UX for extracted documents. Current evidence covers config opt-in, not an interactive approval scope.
 - Dirty historical extracted-document RAG indexes containing ordinary private facts from pre-metadata or manually corrupted stores are partially covered by stale-index rebuild tests, but still need live-audit artifact evidence.
 - The focused private-document live audit uses ordinary private facts, but the broader private-folder/manual-audit bank is still incomplete.
-- `/show` local-display extraction still needs live manual evidence with real fixture files and terminal output capture; deterministic tests cover PDF/DOCX/XLS/XLSX safe-text extraction only.
+- `/show` local-display extraction now has deterministic and scripted live evidence for generated PDF/DOCX/XLS/XLSX fixtures. It still needs larger real-world fixture coverage.
 
 ## 9. Release impact
 
@@ -279,6 +309,7 @@ Allowed claim after this pass:
 - `/show` direct file fallback does not read outside the workspace in the covered test.
 - `/show` provides a local-display-only PDF/DOCX/XLS/XLSX extraction path in the covered tests.
 - Two-model beta-core live audit `capability-live-audit-20260518-001437` passed 32/32 process/tool-artifact heuristic checks and the targeted runtime artifact canary scan, including private-mode PDF/DOCX/XLSX ordinary-fact fixture prompts.
+- Two-model private-folder bank audit `capability-live-audit-20260518-004603` passed 44/44 process/tool-artifact heuristic checks and targeted runtime artifact canary scan, including `/show`, private-mode reindex, private-mode retrieve-style, and protected-read denial probes.
 
 Forbidden claims after this pass:
 
@@ -296,8 +327,8 @@ The next hard slice is broader private-document UX and evidence hardening:
 
 1. Add a synchronized/human-operated approval flow for per-turn extracted-document `SEND_TO_MODEL_CONTEXT`, with trace/status evidence.
 2. Add larger non-generated private-document fixture sets outside the repo or under explicit manual-audit storage, with expected extraction limitations.
-3. Expand the live audit from focused beta-core provenance prompts to the broader private-folder prompt bank with approval, denial, retrieve, reindex, `/show`, and checkpoint evidence.
-4. Package a manual-test runbook so a human tester can reproduce the private-document scenario without relying on Codex memory.
+3. Add a synchronized approval runner or human-operated transcript procedure for approval grant/deny prompts, because piped stdin is intentionally not used for those cases.
+4. Add checkpoint and mutation/restore probes to the private-folder bank.
 5. Keep private-document release blocked until those broader fixtures and UX gates pass.
 
 Do not start broad `AssistantTurnExecutor` cleanup before this artifact boundary is proven.

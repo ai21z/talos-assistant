@@ -86,6 +86,27 @@ Audit evidence:
 - Both models read the private document targets and received/returned withheld-content behavior rather than raw extracted facts.
 - Generated runtime artifacts did not contain the raw private-document fact fixture values in direct grep or targeted artifact scan.
 
+Private-folder bank live audit passed on 2026-05-18:
+
+```text
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-capability-live-audit.ps1 -BetaCoreOnly -PrivateFolderBank -StopStaleServers
+./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/capability-live-audit-20260518-004603,local/manual-workspaces/capability-live-audit-20260518-004603" "-PartifactScanAllowlist=<source fixture allowlist>" --no-daemon
+```
+
+Audit evidence:
+
+- Audit ID: `capability-live-audit-20260518-004603`.
+- GPT-OSS and Qwen each ran 22 prompts.
+- Private-folder probes covered `/show`, private-mode reindex refusal, private-mode retrieve-style behavior, and protected-read denial.
+- The run generated a manual runbook for approval-sensitive probes.
+- Targeted artifact scan passed.
+
+Bug found and fixed:
+
+- Private-mode `/show` could use an existing Lucene snippet after a developer-mode reindex, bypassing the local-display extraction path.
+- `ShowCommand` now skips index lookup in private mode unless private-mode RAG is explicitly enabled.
+- Regression coverage: `private_mode_show_skips_index_snippet_when_private_rag_disabled`.
+
 ## User impact
 
 In private mode, a user can ask Talos to read a DOCX/XLSX-style private document without that private extracted text being handed back into the model loop by default. The model sees a truthful withheld-content placeholder instead of raw private facts.
@@ -156,6 +177,7 @@ Implemented:
 - `private_mode_withheld_document_final_answer_redacts_model_fabricated_private_fact`
 - `private_mode_document_send_to_model_opt_in_allows_model_handoff`
 - `file_fallback_rejects_workspace_escape`
+- `private_mode_show_skips_index_snippet_when_private_rag_disabled`
 - `document_fallback_extracts_docx_for_local_display_in_private_mode`
 - `document_fallback_extracts_pdf_for_local_display_in_private_mode`
 - `document_fallback_extracts_xls_for_local_display_in_private_mode`
@@ -167,6 +189,7 @@ Still required:
 - `private_mode_explicit_send_to_model_for_extracted_document_is_traced`
 - per-turn extracted-document send-to-model approval UX, separate from config-only opt-in
 - broader private-folder live audit over larger/adversarial private-document fixtures
+- synchronized or human-operated approval transcript coverage
 
 ## Acceptance criteria
 
@@ -179,7 +202,7 @@ Still required:
 
 Current status against acceptance criteria:
 
-- Focused beta-core live audit now includes ordinary private facts and passed for generated PDF/DOCX/XLSX fixtures.
+- Focused beta-core and private-folder bank live audits now include ordinary private facts and passed for generated PDF/DOCX/XLSX fixtures.
 - Private-document beta remains blocked by lack of per-turn send-to-model approval UX/tracing and lack of broad real-world private-document fixture evidence.
 
 ## Rollback / migration notes

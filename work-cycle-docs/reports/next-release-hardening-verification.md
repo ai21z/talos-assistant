@@ -3,6 +3,11 @@
 Branch: `v0.9.0-beta-dev`
 Verified: 2026-05-15
 
+Supersession note, 2026-05-18: this report captures an older hardening snapshot.
+Current document extraction, private-document provenance, and live-audit decisions
+must use `work-cycle-docs/reports/private-document-provenance-boundary-audit.md`
+and `work-cycle-docs/reports/full-talos-capability-state-and-document-extraction-audit.md`.
+
 ## 1. What is already fixed
 
 - Indirect grep/retrieve path protection exists for the tested boundary.

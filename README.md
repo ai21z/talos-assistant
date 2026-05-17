@@ -130,6 +130,15 @@ provenance prompts with ordinary private-document fact fixtures:
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-capability-live-audit.ps1 -BetaCoreOnly -StopStaleServers
 ```
 
+For the broader private-folder scripted bank, add `-PrivateFolderBank`. This
+adds `/show` local-display checks, private-mode retrieve/reindex checks, a
+protected-read denial probe, and a generated manual runbook for approval-sensitive
+cases that still require interactive capture:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-capability-live-audit.ps1 -BetaCoreOnly -PrivateFolderBank -StopStaleServers
+```
+
 It can also run the frozen image/OCR path separately when that work resumes:
 
 ```powershell

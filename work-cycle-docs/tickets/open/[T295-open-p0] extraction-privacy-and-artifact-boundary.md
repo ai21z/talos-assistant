@@ -157,6 +157,28 @@ Evidence:
 
 This materially improves the private-document artifact-boundary evidence, but the ticket remains open. The live audit uses small generated fixtures, not a broad real-world private-paperwork corpus, and it does not yet cover a per-turn explicit send-to-model approval UX for extracted documents.
 
+## 2026-05-18 private-folder bank update
+
+The broader scripted private-folder bank was added and run.
+
+Evidence:
+
+- Audit ID: `capability-live-audit-20260518-004603`.
+- Command: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-capability-live-audit.ps1 -BetaCoreOnly -PrivateFolderBank -StopStaleServers`.
+- Prompt count: 22 prompts per model, 44 total.
+- Added probes: private-mode `/show` for PDF/DOCX/XLSX, private-mode reindex disabled, private-mode retrieve-style behavior, and protected direct-read denial.
+- Result: 44/44 prompt runs passed process/tool-artifact heuristics.
+- Targeted `checkRuntimeArtifactCanaries` passed over the audit roots with only source fixtures allowlisted.
+- The script now generates `PRIVATE-FOLDER-MANUAL-AUDIT-RUNBOOK.md` for approval-sensitive probes that must be captured interactively.
+
+Bug found and fixed:
+
+- Private-mode `/show` could use an existing Lucene snippet after a developer-mode reindex instead of the direct local-display extraction path.
+- `ShowCommand` now skips Lucene snippet lookup in private mode unless private-mode RAG is explicitly enabled.
+- Regression: `private_mode_show_skips_index_snippet_when_private_rag_disabled`.
+
+Remaining P0 work: per-turn explicit send-to-model approval UX/tracing for extracted documents, larger real-world private corpus, and approval-sensitive transcript capture.
+
 ## Rollback / migration notes
 
 If any artifact leak appears, keep the relevant extractor disabled and revert that format to honest unsupported behavior.

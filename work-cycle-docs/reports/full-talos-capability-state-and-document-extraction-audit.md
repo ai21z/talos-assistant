@@ -6,7 +6,7 @@ Updated: 2026-05-18
 
 Branch: `v0.9.0-beta-dev`
 
-Latest live audit id: `capability-live-audit-20260518-001437`
+Latest live audit id: `capability-live-audit-20260518-004603`
 
 ## 1. Executive Verdict
 
@@ -14,7 +14,7 @@ Verdict: developer/text-project beta candidate after maintainer trace review, no
 
 Confidence: moderate-high for the implemented code/test state; moderate for real-world PDF/DOCX/Excel document quality; moderate for the focused generated-fixture private-document provenance path; low for broad private-document readiness.
 
-The hard truth: Talos is stronger than it was at the start of this cycle, but it is not yet a serious private-paperwork product. It can now extract text from text PDFs, DOCX, XLS, and XLSX, and those beta-core paths passed a two-model capability audit plus targeted artifact scan. The latest focused audit also proves private-mode PDF/DOCX/XLSX generated fixtures are read locally and withheld from model context/artifacts by the tested provenance path. That is enough for a developer/text-project beta candidate and stronger private-document direction, not enough for an automatic private-document release call. Maintainer trace review, larger real-world fixtures, and explicit send-to-model UX evidence are still required. Images and PowerPoint are frozen out of beta and remain v1/open issues. Private tax, health, legal, and family/admin positioning is still forbidden.
+The hard truth: Talos is stronger than it was at the start of this cycle, but it is not yet a serious private-paperwork product. It can now extract text from text PDFs, DOCX, XLS, and XLSX, and those beta-core paths passed a two-model capability audit plus targeted artifact scan. The latest private-folder bank also proves generated PDF/DOCX/XLSX fixtures are read/displayed through private-mode boundaries, that `/show` no longer uses stale index snippets when private-mode RAG is disabled, and that private-mode reindex/retrieve-style probes fail closed by default. That is enough for a developer/text-project beta candidate and stronger private-document direction, not enough for an automatic private-document release call. Maintainer trace review, larger real-world fixtures, and explicit send-to-model UX evidence are still required. Images and PowerPoint are frozen out of beta and remain v1/open issues. Private tax, health, legal, and family/admin positioning is still forbidden.
 
 ## 2. Source-Crosschecked Technical Basis
 
@@ -49,6 +49,7 @@ Implemented:
 - Added a two-model capability live-audit script: `scripts/run-capability-live-audit.ps1`, including explicit controlled-stub versus `-UseRealOcr` modes.
 - Added Log4j-to-SLF4J bridge to remove user-visible Log4j provider errors from document extraction runs.
 - Added focused private-mode live-audit prompts for generated PDF/DOCX/XLSX fixtures containing ordinary private-document facts.
+- Added a `-PrivateFolderBank` live-audit mode covering `/show`, private-mode reindex/retrieve-style behavior, and protected-read denial probes, plus a generated manual runbook for approval-sensitive cases.
 
 ## 4. Current Capability Matrix
 
@@ -64,7 +65,7 @@ Implemented:
 | Archives | Not recursed/extracted | capability policy and unsupported tests | Unsupported |
 | Executables/binaries | Not inspected as documents | capability policy and unsupported tests | Unsupported |
 | RAG indexing | Extractable text can be indexed when policy allows; protected/deferred/unsupported paths remain guarded | `IndexerPolicyMetadataTest`, `RagDirtyIndexIntegrationTest`, live prompt `11-reindex` | Better, still needs larger corpus |
-| Private mode | Protects approved protected reads and private-mode extracted document text as local-display-only by default | `ProtectedReadScopeIntegrationTest`, README, live private search prompt, live private PDF/DOCX/XLSX provenance prompts | Useful, not enough for private-paperwork release |
+| Private mode | Protects approved protected reads and private-mode extracted document text as local-display-only by default; `/show` skips stale index snippets when private-mode RAG is disabled | `ProtectedReadScopeIntegrationTest`, README, live private search prompt, live private PDF/DOCX/XLSX provenance prompts, private-folder bank | Useful, not enough for private-paperwork release |
 
 ## 5. Runtime Boundary State
 
@@ -90,6 +91,7 @@ Implemented:
 | Evidence recovery reopened protected/escaped/failure-policy paths. | Could violate existing protected-path/failure-boundary semantics. | Recovery now only runs for ordinary `READ_TARGET_REQUIRED`, skips denied outcomes, and skips failure-policy stops. |
 | PDF extraction provenance hardcoded PDFBox 3.0.6 after dependency bump. | Stale runtime evidence. | Provenance now reads loaded package implementation version; test asserts it is not stale. |
 | POI/PDF extraction emitted Log4j provider errors to CLI output. | User-visible noise during document reads. | Added `org.apache.logging.log4j:log4j-to-slf4j:2.25.4` runtime bridge. |
+| Private-mode `/show` could use stale Lucene snippets after a developer-mode reindex. | A private-folder local-display check could bypass the explicit document extraction display path and omit the model-context marker. | `ShowCommand` now skips index snippet lookup in private mode unless private-mode RAG is explicitly enabled; regression test added. |
 
 ## 7. Strengths Worth Preserving
 
@@ -152,24 +154,26 @@ Result: passed.
 Two-model live audit:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-capability-live-audit.ps1 -BetaCoreOnly -StopStaleServers
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-capability-live-audit.ps1 -BetaCoreOnly -PrivateFolderBank -StopStaleServers
 ```
 
 Results: beta-core audit passed. Images and PowerPoint were intentionally excluded.
 
 Latest live audit:
 
-- `local/manual-testing/capability-live-audit-20260518-001437/LIVE-CAPABILITY-AUDIT-RESULTS.md`
-- `local/manual-testing/capability-live-audit-20260518-001437/LIVE-CAPABILITY-AUDIT-SUMMARY.csv`
-- GPT-OSS prompts: 16/16 exit 0, no raw secret/canary leak detected by script, no unsupported overclaim detected.
-- Qwen prompts: 16/16 exit 0, no raw secret/canary leak detected by script, no unsupported overclaim detected.
+- `local/manual-testing/capability-live-audit-20260518-004603/LIVE-CAPABILITY-AUDIT-RESULTS.md`
+- `local/manual-testing/capability-live-audit-20260518-004603/LIVE-CAPABILITY-AUDIT-SUMMARY.csv`
+- `local/manual-testing/capability-live-audit-20260518-004603/PRIVATE-FOLDER-MANUAL-AUDIT-RUNBOOK.md`
+- GPT-OSS prompts: 22/22 exit 0, no raw secret/canary leak detected by script, no unsupported overclaim detected.
+- Qwen prompts: 22/22 exit 0, no raw secret/canary leak detected by script, no unsupported overclaim detected.
 - Private-mode generated PDF/DOCX/XLSX fixture prompts: both models read the target files and answered with withheld-content wording instead of revealing the ordinary private fact fixture.
+- Private-folder bank prompts: `/show` local-display, private-mode reindex disabled, private-mode retrieve-style behavior, and protected-read denial probes passed expected-output checks.
 - Format scope: beta core; image/PPT prompts excluded.
 
 Targeted artifact scan:
 
 ```powershell
-./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/capability-live-audit-20260518-001437,local/manual-workspaces/capability-live-audit-20260518-001437" "-PartifactScanAllowlist=<fixture allowlist>" --no-daemon
+./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/capability-live-audit-20260518-004603,local/manual-workspaces/capability-live-audit-20260518-004603" "-PartifactScanAllowlist=<fixture allowlist>" --no-daemon
 ```
 
 Result: passed.
@@ -177,7 +181,7 @@ Result: passed.
 Manual checks:
 
 ```powershell
-rg "Log4j API could not find|ERROR Log4j|3\.0\.6" local/manual-testing/capability-live-audit-20260518-001437 -n
+rg "Log4j API could not find|ERROR Log4j|3\.0\.6" local/manual-testing/capability-live-audit-20260518-004603 -n
 Get-Command tesseract -ErrorAction SilentlyContinue
 ```
 
@@ -220,7 +224,7 @@ Forbidden:
 | T294 | OCR adapter and preflight implemented, but image/OCR is frozen out of beta and remains v1/open. |
 | T295 | Extraction privacy boundary improved and artifact scan passed for latest audit, including generated private-document fact fixtures. Needs larger private corpus and explicit send-to-model UX evidence. |
 | T296 | Extraction-aware RAG path implemented and tested; still needs performance/corpus evidence. |
-| T299 | Live audit now runs with generated valid fixtures plus generated private-document ordinary-fact fixtures, and checked-in canonical PDF/DOCX/XLSX fixtures with expected-text files now exist. Still needs larger real-world and protected document fixture sets. |
+| T299 | Live audit now runs with generated valid fixtures plus generated private-document ordinary-fact fixtures and a private-folder bank. Checked-in canonical PDF/DOCX/XLSX fixtures with expected-text files now exist. Still needs larger real-world and protected document fixture sets. |
 | T301 | README updated; older reports are superseded by this report. Capability docs still need generated/drift-resistant tests. |
 | T302 | PowerPoint correctly deferred. |
 | T303 | Capability state machine implemented enough for current formats; dynamic outcomes still need more edge states. |

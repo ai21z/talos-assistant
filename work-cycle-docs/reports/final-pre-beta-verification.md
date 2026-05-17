@@ -1,6 +1,6 @@
 # Final Pre-Beta Verification
 
-Supersession note, 2026-05-16: this report captures an earlier pre-document-extraction verification pass. Current document-extraction and live-audit decisions must use `work-cycle-docs/reports/full-talos-capability-state-and-document-extraction-audit.md` plus the latest beta-core capability audit `capability-live-audit-20260516-210854`.
+Supersession note, 2026-05-18: this report captures an earlier pre-document-extraction verification pass. Current document-extraction and live-audit decisions must use `work-cycle-docs/reports/full-talos-capability-state-and-document-extraction-audit.md` plus the latest private-folder bank audit `capability-live-audit-20260518-004603`.
 
 ## 1. Scope
 
