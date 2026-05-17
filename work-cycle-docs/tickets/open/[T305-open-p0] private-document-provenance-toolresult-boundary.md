@@ -140,11 +140,14 @@ Implemented:
 - `private_mode_xls_extraction_is_withheld_from_model_context`
 - `private_mode_withheld_document_final_answer_redacts_model_fabricated_private_fact`
 - `private_mode_document_send_to_model_opt_in_allows_model_handoff`
+- `file_fallback_rejects_workspace_escape`
+- `document_fallback_extracts_docx_for_local_display_in_private_mode`
 
 Still required:
 
 - `artifact_scan_distinguishes_private_fact_canary_from_secret_canary`
 - `private_mode_explicit_send_to_model_for_extracted_document_is_traced`
+- PDF/XLS/XLSX `/show` local-display coverage if `/show` becomes the manual private-document display path
 - per-turn extracted-document send-to-model approval UX, separate from config-only opt-in
 - live-audit artifact scan over generated private-document runtime artifacts
 

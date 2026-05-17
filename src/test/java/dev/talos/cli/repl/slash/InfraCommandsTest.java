@@ -9,9 +9,11 @@ import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.XmlCompatTelemetry;
 import dev.talos.core.index.LuceneStore;
 import dev.talos.runtime.policy.ProtectedReadScopePolicy;
+import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -174,6 +176,38 @@ class InfraCommandsTest {
                 assertTrue(ok.text.contains("test content here"));
             }
             // If index lookup throws, we get an error — that's also acceptable
+        }
+
+        @Test void file_fallback_rejects_workspace_escape() throws Exception {
+            Path outside = ws.resolveSibling("outside.txt");
+            Files.writeString(outside, "outside workspace content");
+            var cmd = new ShowCommand(ws);
+
+            Result r = cmd.execute("../outside.txt", ctx);
+
+            assertInstanceOf(Result.Error.class, r);
+            assertFalse(r.toString().contains("outside workspace content"));
+        }
+
+        @Test void document_fallback_extracts_docx_for_local_display_in_private_mode() throws Exception {
+            Path docx = ws.resolve("private-medical.docx");
+            try (XWPFDocument doc = new XWPFDocument()) {
+                doc.createParagraph().createRun().setText("Patient Name: Eleni Nikolaou");
+                try (OutputStream out = Files.newOutputStream(docx)) {
+                    doc.write(out);
+                }
+            }
+            Config cfg = new Config(null);
+            ProtectedReadScopePolicy.setPrivateMode(cfg, true);
+            var cmd = new ShowCommand(ws);
+
+            Result r = cmd.execute("private-medical.docx", Context.builder(cfg).build());
+
+            Result.Ok ok = assertInstanceOf(Result.Ok.class, r);
+            assertTrue(ok.text.contains("Document: private-medical.docx"), ok.text);
+            assertTrue(ok.text.contains("local display"), ok.text);
+            assertTrue(ok.text.contains("[redacted-private-document-canary]"), ok.text);
+            assertFalse(ok.text.contains("Eleni Nikolaou"), ok.text);
         }
 
         @Test void nonexistent_file_returns_error() {
