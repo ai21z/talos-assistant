@@ -7,11 +7,29 @@ package dev.talos.tools;
  * <p>For write/edit tools, {@link #verification} carries structured verification
  * status (PASS/WARN/FAIL/UNKNOWN). For all other tools it is null.
  */
-public record ToolResult(boolean success, String output, ToolError error, VerificationStatus verification) {
+public record ToolResult(
+        boolean success,
+        String output,
+        ToolError error,
+        VerificationStatus verification,
+        ToolContentMetadata contentMetadata) {
+
+    public ToolResult {
+        contentMetadata = contentMetadata == null ? ToolContentMetadata.normal() : contentMetadata;
+    }
+
+    public ToolResult(boolean success, String output, ToolError error, VerificationStatus verification) {
+        this(success, output, error, verification, ToolContentMetadata.normal());
+    }
 
     /** Create a successful result with the given output (no verification metadata). */
     public static ToolResult ok(String output) {
         return new ToolResult(true, output, null, null);
+    }
+
+    /** Create a successful result with output and provenance/handoff metadata. */
+    public static ToolResult ok(String output, ToolContentMetadata contentMetadata) {
+        return new ToolResult(true, output, null, null, contentMetadata);
     }
 
     /** Create a successful result with output and structured verification status. */

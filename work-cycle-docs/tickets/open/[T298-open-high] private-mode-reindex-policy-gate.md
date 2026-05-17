@@ -9,14 +9,15 @@ Owner: unassigned
 
 ## Problem
 
-Private mode says RAG/retrieve is disabled by default, but slash `/reindex` can call the indexer directly. This is a runtime policy gap and becomes more serious when document extraction makes PDFs, DOCX files, XLSX files, and OCR text indexable.
+Private mode says RAG/retrieve is disabled by default. Any explicit indexing command that calls the indexer directly bypasses that runtime policy and can create durable artifacts from private workspaces. This becomes more serious when document extraction makes PDFs, DOCX files, XLSX files, and OCR text indexable.
 
 ## Evidence from current code
 
 - Private-mode RAG toggle exists in `ProtectedReadScopePolicy.ragEnabledInPrivateMode(...)`: `src/main/java/dev/talos/runtime/policy/ProtectedReadScopePolicy.java:53`.
 - `RagService.prepare(...)` blocks retrieval in private mode: `src/main/java/dev/talos/core/rag/RagService.java:113` through `:118`.
 - `RagService.ensureIndexExists(...)` blocks lazy indexing in private mode: `src/main/java/dev/talos/core/rag/RagService.java:304` through `:307`.
-- `ReindexCommand` bypasses those guards by calling `ctx.rag().getIndexer()` then `indexer.index(...)` or `indexer.reindex(...)`: `src/main/java/dev/talos/cli/repl/slash/ReindexCommand.java:39`, `:105`, `:107`.
+- Slash `/reindex` now uses `RagService.reindex(...)` and has private-mode coverage in `InfraCommandsTest`.
+- Top-level `rag-index` now uses `RagService.reindex(...)`: `src/main/java/dev/talos/cli/launcher/RagIndexCmd.java:34`, `:42`.
 
 ## Evidence from tests/audits
 
@@ -26,6 +27,12 @@ Live prompt 18 showed inconsistent results:
 - Qwen reported private mode with RAG/retrieve disabled, then `/reindex` skipped all files.
 
 The direct indexer call is sufficient evidence for a policy bug even before explaining the model-specific difference.
+
+2026-05-17 focused regression:
+
+- `dev.talos.cli.launcher.RagIndexCmdPrivateModeTest.rag_index_command_refuses_private_mode_when_rag_disabled`
+
+The test first failed while `RagIndexCmd` called `Indexer` directly, then passed after routing the command through `RagService.reindex(...)`.
 
 ## User impact
 
@@ -47,16 +54,18 @@ Slash command policy, RAG index creation, private mode, sensitive workspace hand
 ## Required behavior
 
 - `/reindex` in private mode refuses by default or requires explicit opt-in/approval.
+- Top-level `rag-index` in private mode refuses by default or requires explicit opt-in/approval.
 - The user-facing message must say private mode blocks indexing unless explicitly enabled.
 - The command must not silently index extracted document text in private mode.
 
 ## Proposed implementation
 
-Move reindex policy enforcement into `RagService.reindex(...)` and make `ReindexCommand` call that mode-aware method. If private mode disables RAG, return a clear `Result.Info` or `Result.Error` without calling `Indexer`.
+Move reindex policy enforcement into `RagService.reindex(...)` and make every command path call that mode-aware method. If private mode disables RAG, return a clear message without calling `Indexer`.
 
 ## Tests
 
 - `reindex_command_private_mode_refuses_when_rag_disabled`
+- `rag_index_command_refuses_private_mode_when_rag_disabled`
 - `reindex_command_private_mode_allows_when_explicitly_enabled`
 - `reindex_command_private_mode_message_names_privacy_reason`
 - `live_prompt_18_private_reindex_consistent_for_both_models`
@@ -64,6 +73,7 @@ Move reindex policy enforcement into `RagService.reindex(...)` and make `Reindex
 ## Acceptance criteria
 
 - No code path from `/reindex` reaches `Indexer` in private mode unless policy explicitly allows it.
+- No code path from top-level `rag-index` reaches `Indexer` in private mode unless policy explicitly allows it.
 - Live audit prompt 18 becomes consistent.
 
 ## Rollback / migration notes

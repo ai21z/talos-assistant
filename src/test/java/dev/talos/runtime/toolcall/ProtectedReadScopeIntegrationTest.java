@@ -12,9 +12,12 @@ import dev.talos.runtime.TurnProcessor;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.impl.ReadFileTool;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -132,6 +135,84 @@ class ProtectedReadScopeIntegrationTest {
     }
 
     @Test
+    void private_mode_docx_extraction_is_withheld_from_model_context() throws Exception {
+        Path docx = workspace.resolve("medical-notes.docx");
+        try (XWPFDocument doc = new XWPFDocument()) {
+            doc.createParagraph().createRun().setText("Patient Name: Eleni Nikolaou");
+            try (OutputStream out = Files.newOutputStream(docx)) {
+                doc.write(out);
+            }
+        }
+
+        Config cfg = privateModeConfig();
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new ReadFileTool());
+        TurnProcessor processor = new TurnProcessor(null, new NoOpApprovalGate(), registry);
+        ToolCallLoop loop = new ToolCallLoop(processor, 5);
+        Context ctx = Context.builder(cfg)
+                .llm(LlmClient.scripted(List.of("I cannot see the raw private document text.")))
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .toolRegistry(registry)
+                .toolCallLoop(loop)
+                .build();
+
+        List<ChatMessage> messages = new ArrayList<>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Read medical-notes.docx and tell me the patient name."));
+
+        ToolCallLoop.LoopResult result = loop.run(
+                "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"medical-notes.docx\"}}",
+                messages,
+                workspace,
+                ctx);
+
+        String transcript = messages.toString();
+        assertFalse(transcript.contains("Patient Name: Eleni Nikolaou"), transcript);
+        assertTrue(transcript.contains("withheld from model context"), transcript);
+        assertFalse(transcript.contains("protected file contents"), transcript);
+        assertFalse(result.finalAnswer().contains("Patient Name: Eleni Nikolaou"), result.finalAnswer());
+    }
+
+    @Test
+    void private_mode_xlsx_extraction_is_withheld_from_model_context() throws Exception {
+        Path xlsx = workspace.resolve("family-budget.xlsx");
+        try (XSSFWorkbook workbook = new XSSFWorkbook()) {
+            var sheet = workbook.createSheet("Budget");
+            sheet.createRow(0).createCell(0).setCellValue("Family medical bill: 1837.42 EUR");
+            try (OutputStream out = Files.newOutputStream(xlsx)) {
+                workbook.write(out);
+            }
+        }
+
+        Config cfg = privateModeConfig();
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new ReadFileTool());
+        TurnProcessor processor = new TurnProcessor(null, new NoOpApprovalGate(), registry);
+        ToolCallLoop loop = new ToolCallLoop(processor, 5);
+        Context ctx = Context.builder(cfg)
+                .llm(LlmClient.scripted(List.of("I cannot see the raw private workbook text.")))
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .toolRegistry(registry)
+                .toolCallLoop(loop)
+                .build();
+
+        List<ChatMessage> messages = new ArrayList<>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Read family-budget.xlsx and tell me the bill amount."));
+
+        loop.run(
+                "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"family-budget.xlsx\"}}",
+                messages,
+                workspace,
+                ctx);
+
+        String transcript = messages.toString();
+        assertFalse(transcript.contains("Family medical bill: 1837.42 EUR"), transcript);
+        assertTrue(transcript.contains("withheld from model context"), transcript);
+        assertFalse(transcript.contains("protected file contents"), transcript);
+    }
+
+    @Test
     void private_mode_send_to_model_opt_in_allows_handoff_but_persistence_redacts() throws Exception {
         Files.writeString(workspace.resolve(".env"), "API_TOKEN=FILE_DISCOVERED_CANARY_SCOPE_ENV\n");
 
@@ -198,5 +279,11 @@ class ProtectedReadScopeIntegrationTest {
 
         assertTrue(dev.talos.runtime.policy.ProtectedReadScopePolicy.sendApprovedProtectedReadToModel(cfg));
         assertFalse(dev.talos.runtime.policy.ProtectedReadScopePolicy.persistRawArtifacts(cfg));
+    }
+
+    private static Config privateModeConfig() {
+        Config cfg = new Config(null);
+        cfg.data.put("privacy", new LinkedHashMap<>(Map.of("mode", "private")));
+        return cfg;
     }
 }

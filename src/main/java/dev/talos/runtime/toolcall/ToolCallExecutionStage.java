@@ -8,6 +8,7 @@ import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.runtime.policy.ProtectedPathAliasNormalizer;
 import dev.talos.runtime.policy.ProtectedPathPolicy;
 import dev.talos.runtime.policy.ProtectedReadScopePolicy;
+import dev.talos.runtime.policy.PrivateDocumentPolicy;
 import dev.talos.runtime.policy.SafeLogFormatter;
 import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.runtime.task.TaskContract;
@@ -277,6 +278,11 @@ public final class ToolCallExecutionStage {
             ToolResult result;
             if (successfulProtectedRead && !preserveApprovedProtectedReadResult) {
                 result = approvedProtectedReadWithheldResult(pathHint, state);
+            } else if (rawResult != null
+                    && rawResult.success()
+                    && rawResult.contentMetadata() != null
+                    && !rawResult.contentMetadata().modelHandoffAllowed()) {
+                result = privateContentWithheldResult(rawResult, state);
             } else {
                 result = preserveApprovedProtectedReadResult
                         ? rawResult
@@ -559,6 +565,23 @@ public final class ToolCallExecutionStage {
                         + scopeNote,
                 null,
                 null);
+    }
+
+    private static ToolResult privateContentWithheldResult(ToolResult rawResult, LoopState state) {
+        String reason = rawResult == null || rawResult.contentMetadata() == null
+                ? "private content policy"
+                : rawResult.contentMetadata().decisionReason();
+        String scopeNote = PrivateDocumentPolicy.modelHandoffNote(
+                state == null || state.ctx == null ? null : state.ctx.cfg());
+        return new ToolResult(
+                true,
+                "Private document content was read locally but withheld from model context by privacy policy. "
+                        + "Target: <private-document>. "
+                        + "Reason: " + ProtectedContentPolicy.sanitizeText(reason) + ". "
+                        + scopeNote,
+                null,
+                rawResult == null ? null : rawResult.verification(),
+                rawResult == null ? null : rawResult.contentMetadata());
     }
 
     private static String sourceEvidenceRequiredDiagnostic(String pathHint, List<String> missingSourceTargets) {
