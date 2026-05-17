@@ -2,17 +2,19 @@
 
 Generated: 2026-05-16
 
+Updated: 2026-05-18
+
 Branch: `v0.9.0-beta-dev`
 
-Latest live audit id: `capability-live-audit-20260516-210854`
+Latest live audit id: `capability-live-audit-20260518-001437`
 
 ## 1. Executive Verdict
 
 Verdict: developer/text-project beta candidate after maintainer trace review, not private-document beta.
 
-Confidence: moderate-high for the implemented code/test state; moderate for real-world PDF/DOCX/Excel document quality; low for private-document readiness.
+Confidence: moderate-high for the implemented code/test state; moderate for real-world PDF/DOCX/Excel document quality; moderate for the focused generated-fixture private-document provenance path; low for broad private-document readiness.
 
-The hard truth: Talos is stronger than it was at the start of this cycle, but it is not yet a serious private-paperwork product. It can now extract text from text PDFs, DOCX, XLS, and XLSX, and those beta-core paths passed a two-model capability audit plus targeted artifact scan. That is enough for a developer/text-project beta candidate, not enough for an automatic release call. Maintainer trace review and broader real-world fixtures are still required. Images and PowerPoint are frozen out of beta and remain v1/open issues. Private tax, health, legal, and family/admin positioning is still forbidden.
+The hard truth: Talos is stronger than it was at the start of this cycle, but it is not yet a serious private-paperwork product. It can now extract text from text PDFs, DOCX, XLS, and XLSX, and those beta-core paths passed a two-model capability audit plus targeted artifact scan. The latest focused audit also proves private-mode PDF/DOCX/XLSX generated fixtures are read locally and withheld from model context/artifacts by the tested provenance path. That is enough for a developer/text-project beta candidate and stronger private-document direction, not enough for an automatic private-document release call. Maintainer trace review, larger real-world fixtures, and explicit send-to-model UX evidence are still required. Images and PowerPoint are frozen out of beta and remain v1/open issues. Private tax, health, legal, and family/admin positioning is still forbidden.
 
 ## 2. Source-Crosschecked Technical Basis
 
@@ -46,6 +48,7 @@ Implemented:
 - Added partial multi-target evidence recovery so compare flows do not silently read only one side.
 - Added a two-model capability live-audit script: `scripts/run-capability-live-audit.ps1`, including explicit controlled-stub versus `-UseRealOcr` modes.
 - Added Log4j-to-SLF4J bridge to remove user-visible Log4j provider errors from document extraction runs.
+- Added focused private-mode live-audit prompts for generated PDF/DOCX/XLSX fixtures containing ordinary private-document facts.
 
 ## 4. Current Capability Matrix
 
@@ -61,14 +64,14 @@ Implemented:
 | Archives | Not recursed/extracted | capability policy and unsupported tests | Unsupported |
 | Executables/binaries | Not inspected as documents | capability policy and unsupported tests | Unsupported |
 | RAG indexing | Extractable text can be indexed when policy allows; protected/deferred/unsupported paths remain guarded | `IndexerPolicyMetadataTest`, `RagDirtyIndexIntegrationTest`, live prompt `11-reindex` | Better, still needs larger corpus |
-| Private mode | Protects approved protected reads as local-display-only by default | `ProtectedReadScopeIntegrationTest`, README, live private search prompt | Useful, not enough for private-paperwork release |
+| Private mode | Protects approved protected reads and private-mode extracted document text as local-display-only by default | `ProtectedReadScopeIntegrationTest`, README, live private search prompt, live private PDF/DOCX/XLSX provenance prompts | Useful, not enough for private-paperwork release |
 
 ## 5. Runtime Boundary State
 
 | Boundary | Current state | Remaining risk |
 |---|---|---|
-| Model context | Indirect reads are sanitized/omitted. Enabled document extraction text can enter model context when the target is not protected and the task requires synthesis. | Developer/default approved direct protected reads may still enter model context after approval. This is documented and remains a private-document blocker. |
-| Prompt-debug/provider body | Targeted artifact scan passed for the latest live audit. | The scan is only as good as the generated surfaces included in the run. Broader private-paperwork audit still needed. |
+| Model context | Indirect reads are sanitized/omitted. Private-mode extracted document text is withheld from model context by default in the focused generated-fixture audit. Enabled document extraction text can enter model context in developer/default mode when the target is not protected and the task requires synthesis. | Developer/default approved direct protected reads may still enter model context after approval. This is documented and remains a private-document risk outside private mode. |
+| Prompt-debug/provider body | Targeted artifact scan passed for the latest live audit, including generated private-document fixture prompts. | The scan is only as good as the generated surfaces included in the run. Broader private-paperwork audit still needed. |
 | Trace/session/turn logs | Central redaction and targeted scan passed for latest audit. | Need larger corpus and log-site review as code grows. |
 | RAG index | Metadata includes privacy/file-capability/document-extraction policy; stale metadata rebuilds/refuses. | Real-world extraction cache/versioning and large corpus performance still need work. |
 | Final answer truthfulness | Runtime shaping blocks unsupported/deferred overclaims and forces evidence reads for named extractable targets. | Model quality still varies; final answer quality must be judged against traces, not prose. |
@@ -156,16 +159,17 @@ Results: beta-core audit passed. Images and PowerPoint were intentionally exclud
 
 Latest live audit:
 
-- `local/manual-testing/capability-live-audit-20260516-210854/LIVE-CAPABILITY-AUDIT-RESULTS.md`
-- `local/manual-testing/capability-live-audit-20260516-210854/LIVE-CAPABILITY-AUDIT-SUMMARY.csv`
-- GPT-OSS prompts: 13/13 exit 0, no raw secret/canary leak detected by script, no unsupported overclaim detected.
-- Qwen prompts: 13/13 exit 0, no raw secret/canary leak detected by script, no unsupported overclaim detected.
+- `local/manual-testing/capability-live-audit-20260518-001437/LIVE-CAPABILITY-AUDIT-RESULTS.md`
+- `local/manual-testing/capability-live-audit-20260518-001437/LIVE-CAPABILITY-AUDIT-SUMMARY.csv`
+- GPT-OSS prompts: 16/16 exit 0, no raw secret/canary leak detected by script, no unsupported overclaim detected.
+- Qwen prompts: 16/16 exit 0, no raw secret/canary leak detected by script, no unsupported overclaim detected.
+- Private-mode generated PDF/DOCX/XLSX fixture prompts: both models read the target files and answered with withheld-content wording instead of revealing the ordinary private fact fixture.
 - Format scope: beta core; image/PPT prompts excluded.
 
 Targeted artifact scan:
 
 ```powershell
-./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/capability-live-audit-20260516-210854,local/manual-workspaces/capability-live-audit-20260516-210854" "-PartifactScanAllowlist=<fixture allowlist>" --no-daemon
+./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/capability-live-audit-20260518-001437,local/manual-workspaces/capability-live-audit-20260518-001437" "-PartifactScanAllowlist=<fixture allowlist>" --no-daemon
 ```
 
 Result: passed.
@@ -173,7 +177,7 @@ Result: passed.
 Manual checks:
 
 ```powershell
-rg "Log4j API could not find|ERROR Log4j|3\.0\.6" local/manual-testing/capability-live-audit-20260516-210854 -n
+rg "Log4j API could not find|ERROR Log4j|3\.0\.6" local/manual-testing/capability-live-audit-20260518-001437 -n
 Get-Command tesseract -ErrorAction SilentlyContinue
 ```
 
@@ -189,6 +193,7 @@ Allowed for a developer/text-project beta candidate, if deterministic and live a
 - Talos can extract text from DOCX with structure/layout limitations.
 - Talos can extract visible cells from XLS/XLSX without formula recalculation; formula cells expose formula text plus cached display value when available; hidden sheets are skipped with a warning; large output can be partial/truncated; corrupt workbooks fail explicitly.
 - Talos identifies deferred/unsupported formats honestly.
+- In private mode, generated-fixture PDF/DOCX/XLSX extracted document text is withheld from model context by default in the focused two-model audit.
 
 Forbidden:
 
@@ -213,9 +218,9 @@ Forbidden:
 | T292 | DOCX text extraction implemented and live-audited. Legacy `.doc` remains deferred. |
 | T293 | XLS/XLSX visible-cell extraction implemented and live-audited. Hidden sheets are skipped with a warning, corrupt workbook fixtures report `CORRUPT`, formula cells show formula plus cached display value, and large output reports `PARTIAL`/truncated. Charts, macros, password protection, and real-world large workbook performance remain open. |
 | T294 | OCR adapter and preflight implemented, but image/OCR is frozen out of beta and remains v1/open. |
-| T295 | Extraction privacy boundary improved and artifact scan passed for latest audit. Needs larger private corpus. |
+| T295 | Extraction privacy boundary improved and artifact scan passed for latest audit, including generated private-document fact fixtures. Needs larger private corpus and explicit send-to-model UX evidence. |
 | T296 | Extraction-aware RAG path implemented and tested; still needs performance/corpus evidence. |
-| T299 | Live audit now runs with generated valid fixtures, and checked-in canonical PDF/DOCX/XLSX fixtures with expected-text files now exist. Still needs larger real-world and protected document fixture sets. |
+| T299 | Live audit now runs with generated valid fixtures plus generated private-document ordinary-fact fixtures, and checked-in canonical PDF/DOCX/XLSX fixtures with expected-text files now exist. Still needs larger real-world and protected document fixture sets. |
 | T301 | README updated; older reports are superseded by this report. Capability docs still need generated/drift-resistant tests. |
 | T302 | PowerPoint correctly deferred. |
 | T303 | Capability state machine implemented enough for current formats; dynamic outcomes still need more edge states. |
@@ -228,9 +233,10 @@ Do not start PowerPoint next. PPT can wait.
 The next serious beta move is broader document and privacy evidence, not image/PPT:
 
 1. Add real-world and adversarial document fixtures: messy PDFs, DOCX comments/tracked changes, password-protected workbooks, charts/macros, and large workbook performance cases.
-2. Add protected document fixtures and artifact scans that prove extracted PDF/DOCX/XLSX text obeys private-mode/model-context boundaries.
+2. Add larger protected/private document fixtures and artifact scans that prove extracted PDF/DOCX/XLS/XLSX text obeys private-mode/model-context boundaries beyond small generated fixtures.
 3. Add scanned PDF routing evidence: text PDF uses PDFBox; scanned PDF must say OCR required because images/OCR are v1.
 4. Split evidence recovery and unsupported-answer correction out of `AssistantTurnExecutor`.
+5. Add explicit per-turn extracted-document send-to-model approval UX/tracing, separate from config-only opt-in.
 6. Keep images and PowerPoint out of beta claims until the v1 tickets are implemented and audited.
 
 Parallel but lower-risk work:

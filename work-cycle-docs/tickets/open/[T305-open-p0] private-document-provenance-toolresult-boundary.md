@@ -71,6 +71,21 @@ Additional artifact-sink suite passed on 2026-05-17 after a failing red run:
 ./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=work-cycle-docs/reports,work-cycle-docs/tickets" --no-daemon
 ```
 
+Focused two-model live audit passed on 2026-05-18:
+
+```text
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-capability-live-audit.ps1 -BetaCoreOnly -StopStaleServers
+./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/capability-live-audit-20260518-001437,local/manual-workspaces/capability-live-audit-20260518-001437" "-PartifactScanAllowlist=<source fixture allowlist>" --no-daemon
+```
+
+Audit evidence:
+
+- Audit ID: `capability-live-audit-20260518-001437`.
+- GPT-OSS and Qwen each ran 16 beta-core prompts.
+- Private-mode PDF/DOCX/XLSX prompts used ordinary private-document fact fixtures.
+- Both models read the private document targets and received/returned withheld-content behavior rather than raw extracted facts.
+- Generated runtime artifacts did not contain the raw private-document fact fixture values in direct grep or targeted artifact scan.
+
 ## User impact
 
 In private mode, a user can ask Talos to read a DOCX/XLSX-style private document without that private extracted text being handed back into the model loop by default. The model sees a truthful withheld-content placeholder instead of raw private facts.
@@ -151,7 +166,7 @@ Still required:
 - `artifact_scan_distinguishes_private_fact_canary_from_secret_canary`
 - `private_mode_explicit_send_to_model_for_extracted_document_is_traced`
 - per-turn extracted-document send-to-model approval UX, separate from config-only opt-in
-- live-audit artifact scan over generated private-document runtime artifacts
+- broader private-folder live audit over larger/adversarial private-document fixtures
 
 ## Acceptance criteria
 
@@ -161,6 +176,11 @@ Still required:
 - Scripted final answers do not preserve configured private-document fact canaries after runtime withheld the document result from model context.
 - Private-document live audit includes ordinary private facts, not only token-shaped canaries.
 - Full `clean check e2eTest` passes after the artifact tests are added.
+
+Current status against acceptance criteria:
+
+- Focused beta-core live audit now includes ordinary private facts and passed for generated PDF/DOCX/XLSX fixtures.
+- Private-document beta remains blocked by lack of per-turn send-to-model approval UX/tracing and lack of broad real-world private-document fixture evidence.
 
 ## Rollback / migration notes
 

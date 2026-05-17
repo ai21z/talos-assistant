@@ -13,7 +13,7 @@ Follow-up work in the same gate also closes the remaining RAG indexing policy ho
 
 This pass adds deterministic artifact-sink proof for ordinary private-document fact canaries. `ProtectedContentPolicy.sanitizeText(...)` now redacts the configured private-document fact canary class centrally, so prompt-debug markdown, provider-body JSON formatting, session snapshots, turn JSONL, local trace JSON, conversation memory, and log/trace sanitizers no longer depend only on token-shaped secret regexes in the covered tests.
 
-The fix remains partial because this is deterministic canary proof, not general PII detection, and the two-model live private-document audit has not been rerun after this pass.
+The fix remains partial because this is deterministic canary proof, not general PII detection. A follow-up two-model beta-core live audit now exercises private-mode PDF/DOCX/XLSX fixtures containing ordinary private facts and passes the targeted artifact scan, but the fixture set is still small/generated and does not prove broad private-paperwork readiness.
 
 ## 2. Claim challenged
 
@@ -193,6 +193,49 @@ locally and labels the output as `/show local display`.
 
 Note: running `checkRuntimeArtifactCanaries` without `-PartifactScanRoots=...` failed by design because the task requires explicit scan roots and refuses to scan stale ignored manual-audit directories accidentally.
 
+## 6.1 Two-model live audit update
+
+The private-document provenance prompt bank was added to `scripts/run-capability-live-audit.ps1` and run on 2026-05-18.
+
+Preflight:
+
+```text
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-capability-live-audit.ps1 -BetaCoreOnly -StopStaleServers -PreflightOnly
+```
+
+Result: PASS for the built Talos launcher, managed `llama.cpp` server, GPT-OSS model, and Qwen model after `./gradlew.bat installDist --no-daemon`.
+
+Audit command:
+
+```text
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-capability-live-audit.ps1 -BetaCoreOnly -StopStaleServers
+```
+
+Audit ID:
+
+```text
+capability-live-audit-20260518-001437
+```
+
+Evidence:
+
+- GPT-OSS and Qwen both ran the beta-core prompt bank.
+- Prompt count: 16 prompts per model, 32 total prompt runs.
+- Private-mode document prompts covered PDF, DOCX, and XLSX fixtures containing an ordinary private-document fact, not only token-shaped secrets.
+- Both models called `talos.read_file` for the private PDF/DOCX/XLSX targets.
+- Both models answered with withheld-content wording instead of summarizing or revealing the private fact.
+- `rg` over generated `artifacts-gptoss` and `artifacts-qwen` found no raw private-document fact fixture values.
+- The generated audit summary recorded `raw_secret_leak=False`, `raw_canary_leak=False`, and `unsupported_overclaim=False` for all 32 prompt runs.
+- The public XLSX compare prompt preserved the extracted amount value in both final answers during this run.
+
+Targeted artifact scan passed:
+
+```text
+./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/capability-live-audit-20260518-001437,local/manual-workspaces/capability-live-audit-20260518-001437" "-PartifactScanAllowlist=<source fixture allowlist>" --no-daemon
+```
+
+Important limitation: the scan allowlisted the source fixture files in `local/manual-workspaces/...` because those files intentionally contain fixture canaries. The runtime artifact directories were not allowlisted and did not contain the raw private-document fact values.
+
 ## 7. What is working now
 
 - Private-mode document extraction sets `modelHandoffAllowed=false` by default for extracted documents.
@@ -215,11 +258,11 @@ Note: running `checkRuntimeArtifactCanaries` without `-PartifactScanRoots=...` f
 ## 8. What is still not proven
 
 - General PII redaction for arbitrary private documents. The current deterministic private-document fact canary class is evidence instrumentation, not a broad personal-data detector.
-- End-to-end live Talos extraction artifact safety after a real model turn using PDF/DOCX/XLS/XLSX private fact fixtures.
+- End-to-end live Talos extraction artifact safety for the generated PDF/DOCX/XLS/XLSX private fact fixtures now has focused two-model evidence, but not broad real-world private-paperwork evidence.
 - General final-answer suppression for arbitrary private facts. The deterministic test proves configured canary suppression only.
 - Per-turn explicit send-to-model approval UX for extracted documents. Current evidence covers config opt-in, not an interactive approval scope.
 - Dirty historical extracted-document RAG indexes containing ordinary private facts from pre-metadata or manually corrupted stores are partially covered by stale-index rebuild tests, but still need live-audit artifact evidence.
-- Full private-document live audit using ordinary private facts rather than only token/canary-shaped secrets.
+- The focused private-document live audit uses ordinary private facts, but the broader private-folder/manual-audit bank is still incomplete.
 - `/show` local-display extraction still needs live manual evidence with real fixture files and terminal output capture; deterministic tests cover PDF/DOCX/XLS/XLSX safe-text extraction only.
 
 ## 9. Release impact
@@ -235,6 +278,7 @@ Allowed claim after this pass:
 - Deterministic model-loop tests now cover private-mode PDF/DOCX/XLS/XLSX withholding, final-answer canary suppression after withheld extraction, and config-level document send-to-model opt-in.
 - `/show` direct file fallback does not read outside the workspace in the covered test.
 - `/show` provides a local-display-only PDF/DOCX/XLS/XLSX extraction path in the covered tests.
+- Two-model beta-core live audit `capability-live-audit-20260518-001437` passed 32/32 process/tool-artifact heuristic checks and the targeted runtime artifact canary scan, including private-mode PDF/DOCX/XLSX ordinary-fact fixture prompts.
 
 Forbidden claims after this pass:
 
@@ -248,12 +292,12 @@ Forbidden claims after this pass:
 
 ## 10. Next required slice
 
-The next hard slice is live private-document provenance audit and remaining UX coverage:
+The next hard slice is broader private-document UX and evidence hardening:
 
-1. Run a private-document live audit with ordinary private facts in PDF/DOCX/XLS/XLSX fixtures.
-2. Capture `/last trace`, `/prompt-debug last`, prompt-debug save output, provider-body JSON, session/turn JSONL, local trace JSON, diffs, logs, and targeted artifact scan roots.
-3. Confirm final answers do not fabricate private facts from withheld extraction in live model runs, not only scripted tests.
-4. Add trace/status assertions for config-level extracted-document send-to-model opt-in, and design a per-turn approval UX if private-document beta requires it.
-5. Package a manual-test runbook so a human tester can reproduce the private-document scenario without relying on Codex memory.
+1. Add a synchronized/human-operated approval flow for per-turn extracted-document `SEND_TO_MODEL_CONTEXT`, with trace/status evidence.
+2. Add larger non-generated private-document fixture sets outside the repo or under explicit manual-audit storage, with expected extraction limitations.
+3. Expand the live audit from focused beta-core provenance prompts to the broader private-folder prompt bank with approval, denial, retrieve, reindex, `/show`, and checkpoint evidence.
+4. Package a manual-test runbook so a human tester can reproduce the private-document scenario without relying on Codex memory.
+5. Keep private-document release blocked until those broader fixtures and UX gates pass.
 
 Do not start broad `AssistantTurnExecutor` cleanup before this artifact boundary is proven.

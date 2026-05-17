@@ -110,7 +110,7 @@ Additional red-green artifact-sink proof passed on 2026-05-17:
 
 The red run failed before the sanitizer patch in prompt-debug markdown, provider-body JSON, session snapshots, turn JSONL, local trace JSON, memory persistence, log sanitizer, and trace redaction. After the patch, the same suite passed.
 
-This still does not close the ticket. Remaining P0 work is live-audit proof using real Talos turns and ordinary private facts, final-answer suppression when a model tries to restate withheld private facts, explicit send-to-model UX/tracing for extracted documents, and broader PDF/XLS model-loop coverage. The deterministic private-document fact canary class is evidence instrumentation, not general PII detection. Positive RAG indexing tests now use non-canary content so they do not conflict with the leak-detection canary class.
+This did not close the ticket by itself. At that point, remaining P0 work was live-audit proof using real Talos turns and ordinary private facts, final-answer suppression when a model tries to restate withheld private facts, explicit send-to-model UX/tracing for extracted documents, and broader PDF/XLS model-loop coverage. The deterministic private-document fact canary class is evidence instrumentation, not general PII detection. Positive RAG indexing tests now use non-canary content so they do not conflict with the leak-detection canary class.
 
 Follow-up model-loop provenance tests passed on 2026-05-17:
 
@@ -137,7 +137,25 @@ New coverage:
 - `/show` can extract PDF/DOCX/XLS/XLSX text for local display without using model context.
 - The local-display path uses the safe extracted text path and redacts configured private-document fact canaries.
 
-Remaining P0 work is now live-audit proof using real Talos turns and ordinary private facts, per-turn explicit send-to-model UX/tracing for extracted documents, and final manual-test packaging. The deterministic final-answer test is not a general PII filter.
+Remaining P0 work after this deterministic slice was live-audit proof using real Talos turns and ordinary private facts, per-turn explicit send-to-model UX/tracing for extracted documents, and final manual-test packaging. The deterministic final-answer test is not a general PII filter.
+
+## 2026-05-18 live audit update
+
+The focused two-model beta-core live audit was rerun after adding private-mode PDF/DOCX/XLSX ordinary-fact fixture prompts to `scripts/run-capability-live-audit.ps1`.
+
+Evidence:
+
+- Audit ID: `capability-live-audit-20260518-001437`.
+- Command: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-capability-live-audit.ps1 -BetaCoreOnly -StopStaleServers`.
+- Models: GPT-OSS and Qwen through managed `llama.cpp`.
+- Prompt count: 16 prompts per model, 32 total.
+- Private-document prompts: private-mode PDF, DOCX, and XLSX summary requests.
+- Result: 32/32 prompt runs passed the script's process/tool-artifact heuristics.
+- Both models read the private document targets and answered with withheld-content wording instead of revealing the ordinary private fact fixture.
+- Direct grep over generated runtime artifact roots found no raw private-document fact fixture values.
+- Targeted `checkRuntimeArtifactCanaries` passed over `local/manual-testing/capability-live-audit-20260518-001437` and `local/manual-workspaces/capability-live-audit-20260518-001437` with only source fixtures allowlisted.
+
+This materially improves the private-document artifact-boundary evidence, but the ticket remains open. The live audit uses small generated fixtures, not a broad real-world private-paperwork corpus, and it does not yet cover a per-turn explicit send-to-model approval UX for extracted documents.
 
 ## Rollback / migration notes
 
