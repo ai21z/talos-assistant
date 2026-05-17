@@ -3,9 +3,11 @@ package dev.talos.core.extract;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.core.Config;
 import dev.talos.core.ingest.FileCapabilityPolicy;
+import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -73,11 +75,36 @@ class DocumentExtractionServiceTest {
         assertTrue(result.warnings().stream().anyMatch(w -> w.message().contains("OCR")));
     }
 
+    @Test
+    void private_mode_document_extraction_is_not_model_handoff_by_default(@TempDir Path workspace) throws Exception {
+        Path docx = workspace.resolve("medical-notes.docx");
+        try (XWPFDocument doc = new XWPFDocument()) {
+            doc.createParagraph().createRun().setText("Patient Name: Eleni Nikolaou");
+            try (OutputStream out = Files.newOutputStream(docx)) {
+                doc.write(out);
+            }
+        }
+
+        DocumentExtractionResult result = new DocumentExtractionService(privateModeConfig())
+                .extract(DocumentExtractionRequest.read(docx, workspace));
+
+        assertEquals(DocumentExtractionStatus.SUCCESS, result.status());
+        assertTrue(result.safeText().contains("Patient Name: Eleni Nikolaou"), result.safeText());
+        assertFalse(result.modelHandoffAllowed(),
+                "ordinary extracted document text must default to local-display-only in private mode");
+    }
+
     private static Config extractionDisabled() {
         Config cfg = new Config(null);
         Map<String, Object> documentExtraction = new LinkedHashMap<>();
         documentExtraction.put("enabled", Boolean.FALSE);
         cfg.data.put("document_extraction", documentExtraction);
+        return cfg;
+    }
+
+    private static Config privateModeConfig() {
+        Config cfg = new Config(null);
+        cfg.data.put("privacy", new LinkedHashMap<>(Map.of("mode", "private")));
         return cfg;
     }
 }

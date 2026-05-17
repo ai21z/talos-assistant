@@ -3,8 +3,8 @@ package dev.talos.core.extract;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
 import dev.talos.core.ingest.FileCapabilityPolicy;
+import dev.talos.runtime.policy.PrivateDocumentPolicy;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
-import dev.talos.runtime.policy.ProtectedReadScopePolicy;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
@@ -72,7 +72,7 @@ public final class DocumentExtractionService {
                     safe,
                     List.of(),
                     provenance(sourcePath, "text", "builtin"),
-                    modelHandoffAllowed(request));
+                    PrivateDocumentPolicy.modelHandoffAllowed(cfg, request, info));
         } catch (IOException | RuntimeException e) {
             return new DocumentExtractionResult(
                     sourcePath,
@@ -233,7 +233,7 @@ public final class DocumentExtractionService {
                 safe,
                 List.copyOf(effectiveWarnings),
                 provenance(sourcePath, adapterName, adapterVersion),
-                modelHandoffAllowed(request));
+                PrivateDocumentPolicy.modelHandoffAllowed(cfg, request, info));
     }
 
     private static String extractPdf(Path path) throws IOException {
@@ -440,12 +440,6 @@ public final class DocumentExtractionService {
                 List.of(warning),
                 provenance(sourcePath, "unsupported", "builtin"),
                 false);
-    }
-
-    private boolean modelHandoffAllowed(DocumentExtractionRequest request) {
-        if (request.intent() == DocumentExtractionIntent.LOCAL_DISPLAY) return false;
-        if (!ProtectedContentPolicy.isProtectedPath(request.workspaceRoot(), request.path())) return true;
-        return ProtectedReadScopePolicy.sendApprovedProtectedReadToModel(cfg);
     }
 
     private static DocumentExtractionProvenance provenance(String sourcePath, String adapterName, String adapterVersion) {

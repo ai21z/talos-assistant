@@ -16,7 +16,8 @@ Once PDF, Word, Excel, and image OCR text exist, RAG can index far more sensitiv
 - `Indexer` writes policy metadata with privacy policy version, file capability policy version, RAG config hash, workspace hash, timestamp, and Talos version: `src/main/java/dev/talos/core/index/Indexer.java:380` through `:386`.
 - `RagService.prepare(...)` blocks retrieval in private mode by default: `src/main/java/dev/talos/core/rag/RagService.java:113` through `:118`.
 - `RagService.ensureIndexExists(...)` skips lazy indexing in private mode: `src/main/java/dev/talos/core/rag/RagService.java:304` through `:307`.
-- Slash `/reindex` bypasses the `RagService` private-mode guard by calling `Indexer` directly: `src/main/java/dev/talos/cli/repl/slash/ReindexCommand.java:39`, `:105`, `:107`.
+- Slash `/reindex` routes through `RagService.reindex(...)` and has private-mode tests.
+- Top-level `rag-index` now routes through `RagService.reindex(...)`: `src/main/java/dev/talos/cli/launcher/RagIndexCmd.java:34`, `:42`.
 
 ## Evidence from source crosscheck
 
@@ -76,6 +77,16 @@ This work should start before the format adapters are broadly enabled. Otherwise
 - Extracted document text is never indexed through a path that bypasses privacy policy.
 - Retrieval results cite extracted-document provenance accurately.
 - The first enabled extraction adapter has RAG/index tests in the same feature pass, not a later cleanup pass.
+
+## 2026-05-17 update
+
+The top-level launcher bypass is fixed at the command path: `RagIndexCmd` now constructs `RagService` and calls `reindex(...)`, so private-mode RAG refusal is enforced by the same service used by slash commands. Regression test:
+
+```text
+dev.talos.cli.launcher.RagIndexCmdPrivateModeTest.rag_index_command_refuses_private_mode_when_rag_disabled
+```
+
+Remaining work: `Indexer` still needs deeper extraction-provenance metadata in chunks/citations and tests proving private-document fact canaries cannot survive through stale extracted-document indexes or artifact scans.
 
 ## Rollback / migration notes
 

@@ -1,7 +1,8 @@
 package dev.talos.cli.launcher;
 
 import dev.talos.core.Config;
-import dev.talos.core.index.Indexer;
+import dev.talos.core.index.IndexProgressListener;
+import dev.talos.core.rag.RagService;
 import picocli.CommandLine;
 
 import java.nio.file.Files;
@@ -30,16 +31,20 @@ public class RagIndexCmd implements Runnable {
             }
 
             var cfg = new Config();
-            var indexer = new Indexer(cfg);
+            var rag = new RagService(cfg);
 
             if (statsOnly) {
-                renderStats(indexer.getLastRunStats(), asJson);
+                renderStats(rag.getIndexer().getLastRunStats(), asJson);
                 return;
             }
 
             System.out.println("Indexing root: " + r);
-            indexer.index(r, forceFull);
-            renderStats(indexer.getLastRunStats(), asJson);
+            RagService.ReindexOutcome outcome = rag.reindex(r, forceFull, IndexProgressListener.NOOP);
+            if (!outcome.indexed()) {
+                System.out.println(outcome.message());
+                return;
+            }
+            renderStats(rag.getIndexer().getLastRunStats(), asJson);
         } catch (Exception e) {
             System.err.println("Index failed: " + e.getMessage());
         }

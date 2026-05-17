@@ -224,6 +224,26 @@ class ReadFileToolTest {
     }
 
     @Test
+    void privateModeDocxSendToModelStillCarriesPrivateDocumentMetadata() throws IOException {
+        writeDocx(workspace.resolve("private-notes.docx"), "Family medical note");
+        Config cfg = extractionEnabled("word");
+        cfg.data.put("privacy", new LinkedHashMap<>(Map.of(
+                "mode", "private",
+                "document_extraction", new LinkedHashMap<>(Map.of(
+                        "allow_send_to_model", Boolean.TRUE,
+                        "persist_raw_artifacts", Boolean.FALSE,
+                        "allow_rag_indexing", Boolean.FALSE)))));
+        ToolContext extractionCtx = new ToolContext(workspace, new Sandbox(workspace, Map.of()), cfg);
+
+        ToolResult r = tool.execute(new ToolCall("talos.read_file", Map.of("path", "private-notes.docx")), extractionCtx);
+
+        assertTrue(r.success(), r.errorMessage());
+        assertTrue(r.contentMetadata().modelHandoffAllowed());
+        assertEquals(ToolContentMetadata.ContentPrivacyClass.PRIVATE_DOCUMENT_EXTRACTED_TEXT,
+                r.contentMetadata().privacyClass());
+    }
+
+    @Test
     void enabledXlsxExtractionReadsKnownCells() throws IOException {
         writeXlsx(workspace.resolve("sample.xlsx"), "Talos read-file XLSX text");
         Config cfg = extractionEnabled("excel");

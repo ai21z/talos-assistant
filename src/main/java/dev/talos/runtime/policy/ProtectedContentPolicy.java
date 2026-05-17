@@ -124,7 +124,8 @@ public final class ProtectedContentPolicy {
     public static ToolResult sanitizeToolResult(ToolResult result) {
         if (result == null) return null;
         if (result.success()) {
-            return new ToolResult(true, sanitizeText(result.output()), null, result.verification());
+            return new ToolResult(true, sanitizeText(result.output()), null, result.verification(),
+                    result.contentMetadata());
         }
         ToolError error = result.error();
         if (error == null) return result;

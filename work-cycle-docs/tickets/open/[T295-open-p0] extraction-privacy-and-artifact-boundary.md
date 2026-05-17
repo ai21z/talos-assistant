@@ -72,6 +72,27 @@ Before any consumer sees text, route through a single policy method such as `Pro
 - No extraction adapter logs raw content.
 - No public extraction DTO, trace DTO, or session DTO serializes raw text.
 
+## 2026-05-17 update
+
+Partial runtime boundary work landed for model-context handoff:
+
+- `ToolResult` now carries `ToolContentMetadata`, preserving privacy class, source, model-handoff, artifact-persistence, and RAG-indexing decisions.
+- `PrivateDocumentPolicy` now makes private-mode extracted document text local-display-only by default.
+- `ReadFileTool` preserves extraction metadata when returning successful document extraction output.
+- `ToolCallExecutionStage` withholds any successful tool result whose metadata says `modelHandoffAllowed=false` before appending the tool result to model-loop messages.
+- Top-level `rag-index` now routes through `RagService.reindex(...)`, closing the launcher bypass for private-mode indexing.
+
+Focused tests passed on 2026-05-17:
+
+```text
+./gradlew.bat test --tests "dev.talos.core.extract.DocumentExtractionServiceTest" --tests "dev.talos.runtime.toolcall.ProtectedReadScopeIntegrationTest" --tests "dev.talos.cli.launcher.RagIndexCmdPrivateModeTest" --no-daemon
+./gradlew.bat test --tests "*DocumentExtraction*" --tests "*ProtectedReadScope*" --tests "*ReadFileTool*" --tests "*Rag*Dirty*" --tests "*IndexerPolicyMetadata*" --tests "*ArtifactCanary*" --no-daemon
+./gradlew.bat clean check e2eTest --no-daemon
+./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=build/reports,build/test-results" --no-daemon
+```
+
+This does not close the ticket. Remaining P0 work is provenance-aware artifact safety for ordinary private facts in prompt-debug/provider-body captures, session snapshots, turn JSONL, local traces, logs, final answers, and live-audit artifacts. Secret/canary regex redaction is not enough for real private documents.
+
 ## Rollback / migration notes
 
 If any artifact leak appears, keep the relevant extractor disabled and revert that format to honest unsupported behavior.
