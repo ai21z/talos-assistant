@@ -123,7 +123,8 @@ trace, turn JSONL, command-output, and generated audit-report directories.
 folders because older ignored audits can contain stale canaries by design.
 
 The document-capability live audit script can run a beta-core audit that
-excludes frozen image/PPT prompts:
+excludes frozen image/PPT prompts and includes private-mode PDF/DOCX/XLSX
+provenance prompts with ordinary private-document fact fixtures:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-capability-live-audit.ps1 -BetaCoreOnly -StopStaleServers
