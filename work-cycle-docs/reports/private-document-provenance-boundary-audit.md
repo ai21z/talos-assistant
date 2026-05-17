@@ -7,7 +7,9 @@ Branch: `v0.9.0-beta-dev`
 
 Private-document beta is still not release-ready.
 
-This pass closes the first concrete model-context leak in the new document extraction path: private-mode extracted DOCX/XLSX-style document text is no longer treated as ordinary tool output when the tool result is appended back into the model loop. The fix is partial because artifact/session/trace/provider-body safety for ordinary private facts is not yet fully proven.
+This pass closes the first concrete model-context leak in the new document extraction path: private-mode extracted DOCX/XLSX-style document text is no longer treated as ordinary tool output when the tool result is appended back into the model loop.
+
+Follow-up work in the same gate also closes the remaining RAG indexing policy hole found after review: `Indexer` now honors `PrivateDocumentPolicy.ragIndexAllowed(...)`, records privacy skips explicitly, and treats privacy-config changes as index-metadata changes. The fix remains partial because prompt-debug/session/trace/provider-body safety for ordinary private facts is still not fully proven end-to-end.
 
 ## 2. Claim challenged
 
@@ -49,6 +51,21 @@ Verdict: correct before this pass. The dangerous part was not the extractor itse
 - Top-level `rag-index` now uses `RagService.reindex(...)`: `src/main/java/dev/talos/cli/launcher/RagIndexCmd.java:34`, `src/main/java/dev/talos/cli/launcher/RagIndexCmd.java:42`.
 - Private-mode refusal is now shared with the service-layer RAG policy instead of being reimplemented in the launcher.
 
+### RAG extracted-document policy enforcement
+
+- `Indexer.parseIndexableText(...)` now refuses extracted document text when `PrivateDocumentPolicy.ragIndexAllowed(...)` is false.
+- `IndexingStats` now tracks privacy skips separately from ordinary skipped files.
+- Index metadata schema now includes a privacy-config hash, so changing `privacy.document_extraction.allow_rag_indexing` makes the old index stale instead of silently serving old extracted chunks.
+
+### Privacy UX and config visibility
+
+- `Config.ensureDefaults()` and `default-config.yaml` now explicitly include `privacy.document_extraction.allow_send_to_model=false`, `persist_raw_artifacts=false`, and `allow_rag_indexing=false`.
+- `/privacy status` now reports private-mode document-extraction model-context opt-in, raw artifact persistence, and RAG indexing separately from protected-read controls.
+
+### Artifact scanner canary class
+
+- `ArtifactCanaryScanner` now has a deterministic private-document fact canary class for tests/live-audit artifacts. This is not general PII detection; it proves that the scanner can catch ordinary private-document fixture facts, not only token-shaped secrets.
+
 ## 5. Tests added or strengthened
 
 - `private_mode_document_extraction_is_not_model_handoff_by_default`: `src/test/java/dev/talos/core/extract/DocumentExtractionServiceTest.java:79`.
@@ -56,6 +73,12 @@ Verdict: correct before this pass. The dangerous part was not the extractor itse
 - `private_mode_xlsx_extraction_is_withheld_from_model_context`: `src/test/java/dev/talos/runtime/toolcall/ProtectedReadScopeIntegrationTest.java:177`.
 - `privateModeDocxSendToModelStillCarriesPrivateDocumentMetadata`: `src/test/java/dev/talos/tools/impl/ReadFileToolTest.java:227`.
 - `rag_index_command_refuses_private_mode_when_rag_disabled`: `src/test/java/dev/talos/cli/launcher/RagIndexCmdPrivateModeTest.java:20`.
+- `privateMode_ragEnabled_privateDocRagIndexingFalse_pdfNotIndexed`: `src/test/java/dev/talos/core/index/IndexerPrivateDocumentPolicyTest.java`.
+- `privateMode_ragEnabled_privateDocRagIndexingFalse_docxNotIndexed`: `src/test/java/dev/talos/core/index/IndexerPrivateDocumentPolicyTest.java`.
+- `privateMode_ragEnabled_privateDocRagIndexingFalse_xlsxNotIndexed`: `src/test/java/dev/talos/core/index/IndexerPrivateDocumentPolicyTest.java`.
+- `privateDocumentRagIndexingPolicyChangeMarksOldIndexDirtyAndRebuildsWithoutPrivateChunks`: `src/test/java/dev/talos/core/index/IndexerPrivateDocumentPolicyTest.java`.
+- `private_document_extraction_privacy_defaults_are_explicit_and_safe`: `src/test/java/dev/talos/core/ConfigPrivacyDefaultsTest.java`.
+- `artifact_scan_detects_private_document_fact_canary_and_redacts_snippet`: `src/test/java/dev/talos/runtime/policy/ArtifactCanaryScanTest.java`.
 
 The RAG launcher test was observed red first: it failed while `RagIndexCmd` called `Indexer` directly. It passed after routing through `RagService.reindex(...)`.
 
@@ -71,6 +94,12 @@ Broader focused slice passed:
 
 ```text
 ./gradlew.bat test --tests "*DocumentExtraction*" --tests "*ProtectedReadScope*" --tests "*ReadFileTool*" --tests "*Rag*Dirty*" --tests "*IndexerPolicyMetadata*" --tests "*ArtifactCanary*" --no-daemon
+```
+
+Additional focused private-document provenance slice passed:
+
+```text
+./gradlew.bat test --tests "*IndexerPrivateDocumentPolicyTest" --tests "*ConfigPrivacyDefaultsTest" --tests "*PrivacyCommandTest" --tests "*DocumentExtraction*" --tests "*ProtectedReadScope*" --tests "*ReadFileTool*" --tests "*Rag*Dirty*" --tests "*IndexerPolicyMetadata*" --tests "*ArtifactCanary*" --no-daemon
 ```
 
 Full deterministic gate passed:
@@ -95,6 +124,10 @@ Note: running `checkRuntimeArtifactCanaries` without `-PartifactScanRoots=...` f
 - The withheld placeholder no longer reuses protected-path wording for ordinary private extracted documents.
 - Explicit send-to-model opt-in for extracted private documents does not erase the private-document metadata class.
 - Top-level `rag-index` no longer bypasses the `RagService` private-mode indexing refusal.
+- Indexer-level extraction now honors private-document RAG indexing policy, not only launcher/service-level private-mode refusal.
+- Privacy-config changes now invalidate old indexes; an index built while private-document RAG indexing was allowed is no longer current after that opt-in is disabled.
+- `/privacy status` exposes private-mode document-extraction opt-ins separately from protected-read scope.
+- The artifact scanner can detect configured ordinary private-document fact canaries and redact those snippets in findings.
 
 ## 8. What is still not proven
 
@@ -105,7 +138,7 @@ Note: running `checkRuntimeArtifactCanaries` without `-PartifactScanRoots=...` f
 - Final-answer suppression when the model tries to fabricate private facts from a withheld extraction.
 - Explicit send-to-model opt-in for extracted documents, separate from protected-path reads.
 - PDF and legacy XLS model-loop provenance tests. DOCX and XLSX are covered in this pass; the policy is generic, but the evidence is not yet complete.
-- Dirty historical extracted-document RAG indexes containing ordinary private facts.
+- Dirty historical extracted-document RAG indexes containing ordinary private facts from pre-metadata or manually corrupted stores are partially covered by stale-index rebuild tests, but still need live-audit artifact evidence.
 - Full private-document live audit using ordinary private facts rather than only token/canary-shaped secrets.
 
 ## 9. Release impact
@@ -115,6 +148,8 @@ This pass improves the private-document architecture, but it does not make Talos
 Allowed claim after this pass:
 
 - In private mode, successful DOCX/XLSX extraction results are not handed back into model context by default in the covered tests.
+- In private mode, extracted PDF/DOCX/XLSX text is not indexed when private-mode RAG is enabled but `privacy.document_extraction.allow_rag_indexing=false`, in the covered tests.
+- `/privacy status` now makes private document extraction opt-ins visible.
 
 Forbidden claims after this pass:
 
@@ -133,6 +168,6 @@ The next hard slice is provenance-aware artifact redaction:
 1. Add ordinary private-fact canaries to prompt-debug/provider-body/session/trace tests.
 2. Prove they fail where provenance is currently lost or assistant text persists derived content.
 3. Add a provenance-aware artifact boundary or prevent raw private document text from entering all persisted message/artifact surfaces.
-4. Extend artifact scanner tests beyond `DO_NOT_LEAK`/token-shaped canaries.
+4. Run the private-document live audit and targeted runtime artifact scan over the audit output.
 
 Do not start broad `AssistantTurnExecutor` cleanup before this artifact boundary is proven.

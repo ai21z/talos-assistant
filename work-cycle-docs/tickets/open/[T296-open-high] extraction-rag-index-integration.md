@@ -1,6 +1,6 @@
 # T296 - Extraction RAG Index Integration
 
-Status: open
+Status: partial implementation, open
 Severity: high / P0 for private-document beta
 Release gate: yes
 Branch: v0.9.0-beta-dev
@@ -18,6 +18,9 @@ Once PDF, Word, Excel, and image OCR text exist, RAG can index far more sensitiv
 - `RagService.ensureIndexExists(...)` skips lazy indexing in private mode: `src/main/java/dev/talos/core/rag/RagService.java:304` through `:307`.
 - Slash `/reindex` routes through `RagService.reindex(...)` and has private-mode tests.
 - Top-level `rag-index` now routes through `RagService.reindex(...)`: `src/main/java/dev/talos/cli/launcher/RagIndexCmd.java:34`, `:42`.
+- `Indexer.parseIndexableText(...)` now checks `PrivateDocumentPolicy.ragIndexAllowed(...)` before returning extracted text for indexing.
+- Index metadata now includes privacy config hash, so changes to private-document RAG indexing opt-ins make prior indexes stale.
+- `IndexingStats` now reports privacy skips separately from ordinary skips.
 
 ## Evidence from source crosscheck
 
@@ -86,7 +89,11 @@ The top-level launcher bypass is fixed at the command path: `RagIndexCmd` now co
 dev.talos.cli.launcher.RagIndexCmdPrivateModeTest.rag_index_command_refuses_private_mode_when_rag_disabled
 ```
 
-Remaining work: `Indexer` still needs deeper extraction-provenance metadata in chunks/citations and tests proving private-document fact canaries cannot survive through stale extracted-document indexes or artifact scans.
+2026-05-17 second update:
+
+`Indexer` now enforces private-document RAG indexing policy directly. The tests cover PDF, DOCX, and XLSX extraction in private mode with private-mode RAG enabled but `privacy.document_extraction.allow_rag_indexing=false`; the extracted private fact canaries are not written to the index. A policy-change regression also proves an index built while the opt-in was enabled becomes stale after the opt-in is disabled and rebuilds without private chunks.
+
+Remaining work: chunk/citation provenance still needs richer page/sheet/cell metadata, and live-audit artifact evidence still needs to prove private-document fact canaries do not survive prompt-debug/provider-body/session/trace/log surfaces.
 
 ## Rollback / migration notes
 

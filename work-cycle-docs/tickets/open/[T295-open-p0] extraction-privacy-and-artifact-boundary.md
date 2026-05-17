@@ -81,17 +81,23 @@ Partial runtime boundary work landed for model-context handoff:
 - `ReadFileTool` preserves extraction metadata when returning successful document extraction output.
 - `ToolCallExecutionStage` withholds any successful tool result whose metadata says `modelHandoffAllowed=false` before appending the tool result to model-loop messages.
 - Top-level `rag-index` now routes through `RagService.reindex(...)`, closing the launcher bypass for private-mode indexing.
+- `Indexer` now enforces private-document RAG indexing policy directly and records privacy skips.
+- Index metadata now hashes privacy config, so private-document RAG indexing opt-in changes invalidate prior indexes.
+- `Config.ensureDefaults()` and `default-config.yaml` now expose `privacy.document_extraction` defaults explicitly.
+- `/privacy status` now reports private document extraction opt-ins.
+- `ArtifactCanaryScanner` now includes a deterministic ordinary private-document fact canary class for test/live-audit artifact scans.
 
 Focused tests passed on 2026-05-17:
 
 ```text
 ./gradlew.bat test --tests "dev.talos.core.extract.DocumentExtractionServiceTest" --tests "dev.talos.runtime.toolcall.ProtectedReadScopeIntegrationTest" --tests "dev.talos.cli.launcher.RagIndexCmdPrivateModeTest" --no-daemon
 ./gradlew.bat test --tests "*DocumentExtraction*" --tests "*ProtectedReadScope*" --tests "*ReadFileTool*" --tests "*Rag*Dirty*" --tests "*IndexerPolicyMetadata*" --tests "*ArtifactCanary*" --no-daemon
+./gradlew.bat test --tests "*IndexerPrivateDocumentPolicyTest" --tests "*ConfigPrivacyDefaultsTest" --tests "*PrivacyCommandTest" --tests "*DocumentExtraction*" --tests "*ProtectedReadScope*" --tests "*ReadFileTool*" --tests "*Rag*Dirty*" --tests "*IndexerPolicyMetadata*" --tests "*ArtifactCanary*" --no-daemon
 ./gradlew.bat clean check e2eTest --no-daemon
 ./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=build/reports,build/test-results" --no-daemon
 ```
 
-This does not close the ticket. Remaining P0 work is provenance-aware artifact safety for ordinary private facts in prompt-debug/provider-body captures, session snapshots, turn JSONL, local traces, logs, final answers, and live-audit artifacts. Secret/canary regex redaction is not enough for real private documents.
+This does not close the ticket. Remaining P0 work is provenance-aware artifact safety for ordinary private facts in prompt-debug/provider-body captures, session snapshots, turn JSONL, local traces, logs, final answers, and live-audit artifacts. The scanner can now detect configured ordinary private-document fact canaries, but scanner detection is not the same thing as a runtime artifact boundary.
 
 ## Rollback / migration notes
 

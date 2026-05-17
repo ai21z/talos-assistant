@@ -99,6 +99,18 @@ public final class PrivateDocumentPolicy {
         return "Private document extraction scope: LOCAL_DISPLAY_ONLY. Extracted document text was read locally but withheld from model context and persisted artifacts.";
     }
 
+    public static boolean privateDocumentModelHandoffOptIn(Config cfg) {
+        return allowPrivateDocumentModelHandoff(cfg);
+    }
+
+    public static boolean privateDocumentRawArtifactPersistenceOptIn(Config cfg) {
+        return allowPrivateDocumentRawArtifacts(cfg);
+    }
+
+    public static boolean privateDocumentRagIndexingOptIn(Config cfg) {
+        return allowPrivateDocumentRagIndexing(cfg);
+    }
+
     private static boolean allowPrivateDocumentModelHandoff(Config cfg) {
         Map<String, Object> documentPrivacy = documentPrivacy(cfg);
         return CfgUtil.boolAt(documentPrivacy, "allow_send_to_model", false);

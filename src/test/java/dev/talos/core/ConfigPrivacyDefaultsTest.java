@@ -110,6 +110,20 @@ class ConfigPrivacyDefaultsTest {
         assertFalse(ProtectedReadScopePolicy.ragEnabledInPrivateMode(cfg));
     }
 
+    @Test
+    void private_document_extraction_privacy_defaults_are_explicit_and_safe() {
+        Config cfg = new Config(null);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> privacy = (Map<String, Object>) cfg.data.get("privacy");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> documentExtraction = (Map<String, Object>) privacy.get("document_extraction");
+
+        assertFalse(Boolean.TRUE.equals(documentExtraction.get("allow_send_to_model")));
+        assertFalse(Boolean.TRUE.equals(documentExtraction.get("persist_raw_artifacts")));
+        assertFalse(Boolean.TRUE.equals(documentExtraction.get("allow_rag_indexing")));
+    }
+
     @SuppressWarnings("unchecked")
     private static List<String> excludes(Config cfg) {
         Map<String, Object> rag = (Map<String, Object>) cfg.data.get("rag");

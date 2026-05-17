@@ -29,6 +29,9 @@ class PrivacyCommandTest {
         assertTrue(info.text.contains("protected read default scope: SEND_TO_MODEL_CONTEXT"), info.text);
         assertTrue(info.text.contains("approved protected reads can enter model context: yes"), info.text);
         assertTrue(info.text.contains("raw artifact persistence: off"), info.text);
+        assertTrue(info.text.contains("private-mode document extraction model-context opt-in: disabled"), info.text);
+        assertTrue(info.text.contains("private-mode document extraction raw artifact persistence: off"), info.text);
+        assertTrue(info.text.contains("private-mode document extraction RAG indexing: disabled"), info.text);
     }
 
     @Test
@@ -92,6 +95,8 @@ class PrivacyCommandTest {
         assertTrue(info.text.contains("model context"), info.text);
         assertTrue(info.text.contains("prompt-debug"), info.text);
         assertTrue(info.text.contains("session"), info.text);
+        assertTrue(info.text.contains("Private document extraction"), info.text);
+        assertTrue(info.text.contains("PDF/DOCX/XLS/XLSX"), info.text);
         assertTrue(info.text.contains("/privacy private on"), info.text);
     }
 

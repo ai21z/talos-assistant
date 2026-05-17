@@ -167,6 +167,10 @@ privacy:
     default_scope: "SEND_TO_MODEL_CONTEXT"
     allow_send_to_model: false    # private mode requires explicit opt-in before protected content reaches model context
     persist_raw_artifacts: false
+  document_extraction:
+    allow_send_to_model: false    # private mode keeps extracted PDF/DOCX/XLS/XLSX text local-display-only unless explicitly enabled
+    persist_raw_artifacts: false
+    allow_rag_indexing: false
   rag:
     enabled_in_private_mode: false
 

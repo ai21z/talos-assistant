@@ -121,6 +121,19 @@ class ArtifactCanaryScanTest {
     }
 
     @Test
+    void artifact_scan_detects_private_document_fact_canary_and_redacts_snippet(@TempDir Path tempDir) throws Exception {
+        Path promptDebug = tempDir.resolve("prompt-debug.md");
+        Files.writeString(promptDebug, "summary\nPatient Name: Eleni Nikolaou\n");
+
+        var findings = ArtifactCanaryScanner.scanRuntimeArtifacts(List.of(tempDir), List.of());
+
+        assertEquals(1, findings.size());
+        assertEquals(2, findings.getFirst().line());
+        assertTrue(findings.getFirst().snippet().contains("[redacted-private-document-canary]"));
+        assertFalse(findings.getFirst().snippet().contains("Eleni Nikolaou"), findings.getFirst().snippet());
+    }
+
+    @Test
     void artifact_scan_ignores_compiled_classes_without_skipping_text_reports(@TempDir Path tempDir) throws Exception {
         Files.createDirectories(tempDir.resolve("classes"));
         Files.writeString(tempDir.resolve("classes").resolve("Fake.class"), "FILE_DISCOVERED_CANARY_ARTIFACT_CLASS\n");
