@@ -208,6 +208,60 @@ class JsonSessionStoreTest {
             assertTrue(content.contains("\"turns\""));
             assertTrue(content.contains("\"goal sketch\""));
         }
+
+        @Test void savedSessionRedactsPrivateDocumentFactCanaries() throws Exception {
+            var store = store();
+            store.save(new SessionData("private-doc", "/tmp/ws", "Patient Name: Eleni Nikolaou", 1,
+                    Instant.parse("2026-05-17T10:00:00Z"),
+                    List.of(new SessionData.Turn("assistant", "Diagnosis: fictional-condition-alpha")),
+                    "llama_cpp/qwen2.5-coder:14b"));
+
+            String content = Files.readString(tempDir.resolve("private-doc.json"));
+            assertFalse(content.contains("Eleni Nikolaou"), content);
+            assertFalse(content.contains("fictional-condition-alpha"), content);
+            assertTrue(content.contains("[redacted-private-document-canary]"), content);
+        }
+
+        @Test void turnJsonlRedactsPrivateDocumentFactCanaries() throws Exception {
+            var store = store();
+            store.appendTurn("private-doc-turn", new dev.talos.runtime.TurnRecord(
+                    1,
+                    Instant.parse("2026-05-17T10:00:00Z"),
+                    50,
+                    "Read private-medical.pdf",
+                    "Patient Name: Eleni Nikolaou\nInvoice Total: 1837.42 EUR",
+                    List.of(),
+                    0,
+                    0,
+                    0,
+                    "",
+                    "ok"));
+
+            String content = Files.readString(tempDir.resolve("private-doc-turn.turns.jsonl"));
+            assertFalse(content.contains("Eleni Nikolaou"), content);
+            assertFalse(content.contains("1837.42 EUR"), content);
+            assertTrue(content.contains("[redacted-private-document-canary]"), content);
+        }
+
+        @Test void localTraceJsonRedactsPrivateDocumentFactCanaries() throws Exception {
+            var store = store();
+            store.saveTrace("private-doc-trace", dev.talos.runtime.trace.LocalTurnTrace.builder(
+                            "tr-private-doc",
+                            "private-doc-trace",
+                            1,
+                            "2026-05-17T10:00:00Z")
+                    .warning("PRIVATE_DOC_FACT", "Patient Name: Eleni Nikolaou")
+                    .outcome("OK", "NOT_RUN", "NONE", "NONE", "Invoice Total: 1837.42 EUR")
+                    .build());
+
+            Path trace = tempDir.resolve("traces")
+                    .resolve("private-doc-trace")
+                    .resolve("000001-tr-private-doc.json");
+            String content = Files.readString(trace);
+            assertFalse(content.contains("Eleni Nikolaou"), content);
+            assertFalse(content.contains("1837.42 EUR"), content);
+            assertTrue(content.contains("[redacted-private-document-canary]"), content);
+        }
         @Test void corruptFile_returnsEmpty() throws Exception {
             var store = store();
             Path file = tempDir.resolve("corrupt.json");

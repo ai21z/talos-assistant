@@ -9,7 +9,11 @@ Private-document beta is still not release-ready.
 
 This pass closes the first concrete model-context leak in the new document extraction path: private-mode extracted DOCX/XLSX-style document text is no longer treated as ordinary tool output when the tool result is appended back into the model loop.
 
-Follow-up work in the same gate also closes the remaining RAG indexing policy hole found after review: `Indexer` now honors `PrivateDocumentPolicy.ragIndexAllowed(...)`, records privacy skips explicitly, and treats privacy-config changes as index-metadata changes. The fix remains partial because prompt-debug/session/trace/provider-body safety for ordinary private facts is still not fully proven end-to-end.
+Follow-up work in the same gate also closes the remaining RAG indexing policy hole found after review: `Indexer` now honors `PrivateDocumentPolicy.ragIndexAllowed(...)`, records privacy skips explicitly, and treats privacy-config changes as index-metadata changes.
+
+This pass adds deterministic artifact-sink proof for ordinary private-document fact canaries. `ProtectedContentPolicy.sanitizeText(...)` now redacts the configured private-document fact canary class centrally, so prompt-debug markdown, provider-body JSON formatting, session snapshots, turn JSONL, local trace JSON, conversation memory, and log/trace sanitizers no longer depend only on token-shaped secret regexes in the covered tests.
+
+The fix remains partial because this is deterministic canary proof, not general PII detection, and the two-model live private-document audit has not been rerun after this pass.
 
 ## 2. Claim challenged
 
@@ -66,6 +70,18 @@ Verdict: correct before this pass. The dangerous part was not the extractor itse
 
 - `ArtifactCanaryScanner` now has a deterministic private-document fact canary class for tests/live-audit artifacts. This is not general PII detection; it proves that the scanner can catch ordinary private-document fixture facts, not only token-shaped secrets.
 
+### Runtime artifact sink sanitizer
+
+- `ProtectedContentPolicy` now owns the deterministic private-document fact canary class instead of leaving it scanner-only.
+- `PromptDebugInspector`, `JsonSessionStore`, `JsonTurnLogAppender`, `MemoryUpdateListener`, and `TraceRedactor` already route their persisted strings through `ProtectedContentPolicy.sanitizeText(...)` or helpers backed by it, so these sinks now redact configured ordinary private-document fixture facts in the covered tests.
+- This is a release-evidence guard for fixture facts, not a general natural-language PII classifier.
+
+### Final-answer suppression after withheld private content
+
+- `LoopState` now records when a tool result was withheld from model context by protected-read or private-document policy.
+- `ToolCallLoop` sanitizes the final model answer only when runtime withheld content from model context during that loop. This keeps developer/default approved protected-read risk explicit while preventing a model-authored final answer from restating configured private-document fact canaries after a private-mode withheld extraction.
+- `ToolCallExecutionStage` sets this flag for approved protected reads withheld by scope policy and for successful tool results whose `ToolContentMetadata.modelHandoffAllowed=false`.
+
 ## 5. Tests added or strengthened
 
 - `private_mode_document_extraction_is_not_model_handoff_by_default`: `src/test/java/dev/talos/core/extract/DocumentExtractionServiceTest.java:79`.
@@ -79,6 +95,19 @@ Verdict: correct before this pass. The dangerous part was not the extractor itse
 - `privateDocumentRagIndexingPolicyChangeMarksOldIndexDirtyAndRebuildsWithoutPrivateChunks`: `src/test/java/dev/talos/core/index/IndexerPrivateDocumentPolicyTest.java`.
 - `private_document_extraction_privacy_defaults_are_explicit_and_safe`: `src/test/java/dev/talos/core/ConfigPrivacyDefaultsTest.java`.
 - `artifact_scan_detects_private_document_fact_canary_and_redacts_snippet`: `src/test/java/dev/talos/runtime/policy/ArtifactCanaryScanTest.java`.
+- `runtime_sanitizer_redacts_private_document_fact_canaries`: `src/test/java/dev/talos/runtime/policy/SensitiveLogRedactionTest.java`.
+- `prompt_debug_markdown_redacts_private_document_fact_canaries`: `src/test/java/dev/talos/cli/prompt/PromptDebugInspectorPrivateDocumentTest.java`.
+- `provider_body_json_redacts_private_document_fact_canaries`: `src/test/java/dev/talos/cli/prompt/PromptDebugInspectorPrivateDocumentTest.java`.
+- `privateDocumentFactCanariesAreRedactedBeforeHistoryPersistence`: `src/test/java/dev/talos/runtime/MemoryUpdateListenerTest.java`.
+- `savedSessionRedactsPrivateDocumentFactCanaries`: `src/test/java/dev/talos/runtime/JsonSessionStoreTest.java`.
+- `turnJsonlRedactsPrivateDocumentFactCanaries`: `src/test/java/dev/talos/runtime/JsonSessionStoreTest.java`.
+- `localTraceJsonRedactsPrivateDocumentFactCanaries`: `src/test/java/dev/talos/runtime/JsonSessionStoreTest.java`.
+- `writesStructuredRecordWithPrivateDocumentFactCanariesRedacted`: `src/test/java/dev/talos/runtime/JsonTurnLogAppenderTest.java`.
+- `redactsPrivateDocumentFactCanaries`: `src/test/java/dev/talos/runtime/trace/TraceRedactorTest.java`.
+- `private_mode_pdf_extraction_is_withheld_from_model_context`: `src/test/java/dev/talos/runtime/toolcall/ProtectedReadScopeIntegrationTest.java`.
+- `private_mode_xls_extraction_is_withheld_from_model_context`: `src/test/java/dev/talos/runtime/toolcall/ProtectedReadScopeIntegrationTest.java`.
+- `private_mode_withheld_document_final_answer_redacts_model_fabricated_private_fact`: `src/test/java/dev/talos/runtime/toolcall/ProtectedReadScopeIntegrationTest.java`.
+- `private_mode_document_send_to_model_opt_in_allows_model_handoff`: `src/test/java/dev/talos/runtime/toolcall/ProtectedReadScopeIntegrationTest.java`.
 
 The RAG launcher test was observed red first: it failed while `RagIndexCmd` called `Indexer` directly. It passed after routing through `RagService.reindex(...)`.
 
@@ -114,6 +143,39 @@ Targeted generated-artifact canary scan passed:
 ./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=build/reports,build/test-results" --no-daemon
 ```
 
+This pass also red-tested and then green-tested the ordinary private-document fact sink suite. The red run failed in prompt-debug, provider-body JSON, session snapshot, turn JSONL, local trace JSON, conversation memory, log sanitizer, and trace redaction before the central sanitizer patch. After the patch, this command passed:
+
+```text
+./gradlew.bat test --tests "*PromptDebugInspectorPrivateDocumentTest" --tests "*SensitiveLogRedactionTest" --tests "*MemoryUpdateListenerTest" --tests "*JsonSessionStoreTest" --tests "*JsonTurnLogAppenderTest" --tests "*TraceRedactorTest" --no-daemon
+```
+
+The wider privacy/artifact regression slice passed:
+
+```text
+./gradlew.bat test --tests "*ArtifactCanary*" --tests "*PromptDebug*" --tests "*JsonSessionStore*" --tests "*JsonTurnLogAppender*" --tests "*MemoryUpdateListener*" --tests "*TraceRedactor*" --tests "*SensitiveLog*" --tests "*ProtectedReadScope*" --tests "*IndexerPrivateDocumentPolicy*" --tests "*ConfigPrivacyDefaults*" --no-daemon
+```
+
+The full deterministic gate passed after updating stale canary expectations in extraction/indexer tests:
+
+```text
+./gradlew.bat clean check e2eTest --no-daemon
+```
+
+Post-clean artifact scans passed:
+
+```text
+./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=build/reports,build/test-results" --no-daemon
+./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=work-cycle-docs/reports,work-cycle-docs/tickets" --no-daemon
+```
+
+Debug note: the broader slice initially exposed stale positive-indexing assertions that used the configured private-document fact canary as both a leak canary and a positive RAG indexing fact. The test fixture was split: blocked/leak tests keep private-document fact canaries, while positive explicit-indexing tests now use non-canary content. This preserves both invariants.
+
+Additional model-loop provenance slice passed:
+
+```text
+./gradlew.bat test --tests "*ProtectedReadScopeIntegrationTest" --no-daemon
+```
+
 Note: running `checkRuntimeArtifactCanaries` without `-PartifactScanRoots=...` failed by design because the task requires explicit scan roots and refuses to scan stale ignored manual-audit directories accidentally.
 
 ## 7. What is working now
@@ -128,16 +190,17 @@ Note: running `checkRuntimeArtifactCanaries` without `-PartifactScanRoots=...` f
 - Privacy-config changes now invalidate old indexes; an index built while private-document RAG indexing was allowed is no longer current after that opt-in is disabled.
 - `/privacy status` exposes private-mode document-extraction opt-ins separately from protected-read scope.
 - The artifact scanner can detect configured ordinary private-document fact canaries and redact those snippets in findings.
+- Runtime sanitization now redacts the same configured ordinary private-document fact canaries before prompt-debug rendering, provider-body rendering, session snapshots, turn JSONL, local trace JSON, memory persistence, and log/trace helpers in deterministic tests.
+- Private-mode PDF, DOCX, XLS, and XLSX extraction handoff is now covered by model-loop tests.
+- A scripted model final answer that tries to restate a configured private-document fact canary after withheld extraction is redacted.
+- Private-mode document-extraction `allow_send_to_model=true` is covered with non-canary content and confirms model handoff is allowed when explicitly configured.
 
 ## 8. What is still not proven
 
-- Prompt-debug markdown/provider-body JSON redaction for ordinary private document facts.
-- Session JSON and turn JSONL redaction for ordinary private document facts.
-- Local trace redaction for ordinary private document facts.
-- Log redaction for ordinary private document facts that appear in exception paths or derived assistant text.
-- Final-answer suppression when the model tries to fabricate private facts from a withheld extraction.
-- Explicit send-to-model opt-in for extracted documents, separate from protected-path reads.
-- PDF and legacy XLS model-loop provenance tests. DOCX and XLSX are covered in this pass; the policy is generic, but the evidence is not yet complete.
+- General PII redaction for arbitrary private documents. The current deterministic private-document fact canary class is evidence instrumentation, not a broad personal-data detector.
+- End-to-end live Talos extraction artifact safety after a real model turn using PDF/DOCX/XLS/XLSX private fact fixtures.
+- General final-answer suppression for arbitrary private facts. The deterministic test proves configured canary suppression only.
+- Per-turn explicit send-to-model approval UX for extracted documents. Current evidence covers config opt-in, not an interactive approval scope.
 - Dirty historical extracted-document RAG indexes containing ordinary private facts from pre-metadata or manually corrupted stores are partially covered by stale-index rebuild tests, but still need live-audit artifact evidence.
 - Full private-document live audit using ordinary private facts rather than only token/canary-shaped secrets.
 
@@ -150,24 +213,27 @@ Allowed claim after this pass:
 - In private mode, successful DOCX/XLSX extraction results are not handed back into model context by default in the covered tests.
 - In private mode, extracted PDF/DOCX/XLSX text is not indexed when private-mode RAG is enabled but `privacy.document_extraction.allow_rag_indexing=false`, in the covered tests.
 - `/privacy status` now makes private document extraction opt-ins visible.
+- Deterministic runtime artifact sink tests now prove configured ordinary private-document fact canaries are redacted across prompt-debug/provider-body rendering, session snapshots, turn JSONL, local trace JSON, memory persistence, and log/trace sanitizer helpers.
+- Deterministic model-loop tests now cover private-mode PDF/DOCX/XLS/XLSX withholding, final-answer canary suppression after withheld extraction, and config-level document send-to-model opt-in.
 
 Forbidden claims after this pass:
 
 - safe for tax folders
 - safe for health records
 - safe for legal/family/admin folders
-- guarantees no extracted private document facts enter persisted artifacts
+- guarantees arbitrary extracted private document facts enter no persisted artifacts
 - fully private-document beta-ready
 - image/OCR beta support
 - PowerPoint beta support
 
 ## 10. Next required slice
 
-The next hard slice is provenance-aware artifact redaction:
+The next hard slice is live private-document provenance audit and remaining UX coverage:
 
-1. Add ordinary private-fact canaries to prompt-debug/provider-body/session/trace tests.
-2. Prove they fail where provenance is currently lost or assistant text persists derived content.
-3. Add a provenance-aware artifact boundary or prevent raw private document text from entering all persisted message/artifact surfaces.
-4. Run the private-document live audit and targeted runtime artifact scan over the audit output.
+1. Run a private-document live audit with ordinary private facts in PDF/DOCX/XLSX fixtures.
+2. Capture `/last trace`, `/prompt-debug last`, prompt-debug save output, provider-body JSON, session/turn JSONL, local trace JSON, diffs, logs, and targeted artifact scan roots.
+3. Confirm final answers do not fabricate private facts from withheld extraction in live model runs, not only scripted tests.
+4. Decide whether local-display-only extraction needs a separate slash command or a split local-display/model-output channel.
+5. Add trace/status assertions for config-level extracted-document send-to-model opt-in, and design a per-turn approval UX if private-document beta requires it.
 
 Do not start broad `AssistantTurnExecutor` cleanup before this artifact boundary is proven.

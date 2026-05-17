@@ -83,6 +83,33 @@ class JsonTurnLogAppenderTest {
     }
 
     @Test
+    void writesStructuredRecordWithPrivateDocumentFactCanariesRedacted(@TempDir Path dir) {
+        JsonSessionStore store = new JsonSessionStore(dir);
+        String sid = "sess-private-doc";
+        JsonTurnLogAppender appender = new JsonTurnLogAppender(store, sid);
+
+        TurnResult tr = new TurnResult(
+                new Result.Streamed("""
+                        The PDF says:
+                        Patient Name: Eleni Nikolaou
+                        Address: 42 Fictional Street, Athens
+                        """, ""),
+                null,
+                1,
+                Duration.ofMillis(100),
+                TurnAudit.empty());
+
+        appender.onTurnComplete(tr, "Read private-medical.pdf");
+
+        List<TurnRecord> loaded = store.loadTurns(sid);
+        assertEquals(1, loaded.size());
+        String stored = loaded.get(0).assistantText();
+        assertFalse(stored.contains("Eleni Nikolaou"), stored);
+        assertFalse(stored.contains("42 Fictional Street"), stored);
+        assertTrue(stored.contains("[redacted-private-document-canary]"), stored);
+    }
+
+    @Test
     void writesStandaloneProtectedAnswerAsRedactedTurnRecord(@TempDir Path dir) {
         JsonSessionStore store = new JsonSessionStore(dir);
         String sid = "sess-protected-standalone";

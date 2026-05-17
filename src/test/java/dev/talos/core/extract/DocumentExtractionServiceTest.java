@@ -89,7 +89,8 @@ class DocumentExtractionServiceTest {
                 .extract(DocumentExtractionRequest.read(docx, workspace));
 
         assertEquals(DocumentExtractionStatus.SUCCESS, result.status());
-        assertTrue(result.safeText().contains("Patient Name: Eleni Nikolaou"), result.safeText());
+        assertFalse(result.safeText().contains("Eleni Nikolaou"), result.safeText());
+        assertTrue(result.safeText().contains("[redacted-private-document-canary]"), result.safeText());
         assertFalse(result.modelHandoffAllowed(),
                 "ordinary extracted document text must default to local-display-only in private mode");
     }

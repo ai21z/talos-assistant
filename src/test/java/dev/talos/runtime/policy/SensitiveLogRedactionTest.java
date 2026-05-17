@@ -38,6 +38,24 @@ class SensitiveLogRedactionTest {
     }
 
     @Test
+    void runtime_sanitizer_redacts_private_document_fact_canaries() {
+        String redacted = ProtectedContentPolicy.sanitizeText("""
+                Patient Name: Eleni Nikolaou
+                Address: 42 Fictional Street, Athens
+                Diagnosis: fictional-condition-alpha
+                Tax ID: EL-TAX-483920
+                Invoice Total: 1837.42 EUR
+                """);
+
+        assertFalse(redacted.contains("Eleni Nikolaou"), redacted);
+        assertFalse(redacted.contains("42 Fictional Street"), redacted);
+        assertFalse(redacted.contains("fictional-condition-alpha"), redacted);
+        assertFalse(redacted.contains("EL-TAX-483920"), redacted);
+        assertFalse(redacted.contains("1837.42 EUR"), redacted);
+        assertTrue(redacted.contains("[redacted-private-document-canary]"), redacted);
+    }
+
+    @Test
     void debug_log_sanitizes_protected_paths() {
         assertTrue(ProtectedContentPolicy.looksProtectedPathString(".env"));
         assertTrue(ProtectedContentPolicy.looksProtectedPathString("secrets/private-notes.md"));

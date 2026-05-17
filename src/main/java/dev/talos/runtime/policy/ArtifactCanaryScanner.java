@@ -20,9 +20,6 @@ public final class ArtifactCanaryScanner {
     private static final long MAX_TEXT_FILE_BYTES = 2_000_000L;
     private static final Pattern EXPLICIT_TEST_SECRET = Pattern.compile(
             "(?i)\\b(?:t275-token-should-not-appear|t275-password-should-not-appear|t275-client-secret-should-not-appear)\\b");
-    private static final Pattern PRIVATE_DOCUMENT_FACT_CANARY = Pattern.compile(
-            "(?i)(?:\\bEleni\\s+Nikolaou\\b|\\b42\\s+Fictional\\s+Street,?\\s+Athens\\b|"
-                    + "\\bfictional-condition-alpha\\b|\\bEL-TAX-483920\\b|\\b1837\\.42\\s+EUR\\b)");
 
     private static final Set<String> TEXT_EXTENSIONS = Set.of(
             ".txt", ".md", ".markdown", ".json", ".jsonl", ".yaml", ".yml",
@@ -99,14 +96,12 @@ public final class ArtifactCanaryScanner {
     private static boolean containsKnownArtifactCanary(String text) {
         return ProtectedContentPolicy.containsRawCanary(text)
                 || EXPLICIT_TEST_SECRET.matcher(text).find()
-                || PRIVATE_DOCUMENT_FACT_CANARY.matcher(text).find();
+                || ProtectedContentPolicy.containsRawPrivateDocumentFactCanary(text);
     }
 
     private static String sanitizeFindingSnippet(String text) {
         String sanitized = ProtectedContentPolicy.sanitizeText(text);
-        sanitized = EXPLICIT_TEST_SECRET.matcher(sanitized).replaceAll("[redacted-test-secret]");
-        return PRIVATE_DOCUMENT_FACT_CANARY.matcher(sanitized)
-                .replaceAll("[redacted-private-document-canary]");
+        return EXPLICIT_TEST_SECRET.matcher(sanitized).replaceAll("[redacted-test-secret]");
     }
 
     private static Set<Path> normalizedAllowlist(List<Path> allowlist) {

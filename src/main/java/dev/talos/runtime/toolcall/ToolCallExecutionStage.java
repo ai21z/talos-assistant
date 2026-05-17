@@ -277,11 +277,13 @@ public final class ToolCallExecutionStage {
                                     state.ctx == null ? null : state.ctx.cfg());
             ToolResult result;
             if (successfulProtectedRead && !preserveApprovedProtectedReadResult) {
+                state.contentWithheldFromModelContext = true;
                 result = approvedProtectedReadWithheldResult(pathHint, state);
             } else if (rawResult != null
                     && rawResult.success()
                     && rawResult.contentMetadata() != null
                     && !rawResult.contentMetadata().modelHandoffAllowed()) {
+                state.contentWithheldFromModelContext = true;
                 result = privateContentWithheldResult(rawResult, state);
             } else {
                 result = preserveApprovedProtectedReadResult

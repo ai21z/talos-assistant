@@ -4,7 +4,7 @@ Status: open
 Severity: high
 Release gate: yes
 Branch: v0.9.0-beta-dev
-Created/updated: 2026-05-16
+Created/updated: 2026-05-17
 Owner: unassigned
 
 ## Problem
@@ -114,5 +114,21 @@ Remaining blockers:
 - Need checked-in protected PDF/DOCX/XLS/XLSX variants plus larger real-world fixtures.
 - Need BDD/live prompts that explicitly cover formula cached-value wording and truncated/partial extraction.
 - Image/OCR fixtures and real-OCR audit remain v1/open.
+
+## 2026-05-17 Private-document artifact sink update
+
+New deterministic sink tests now prove the configured ordinary private-document fact canary class is redacted by prompt-debug/provider-body rendering, session snapshots, turn JSONL, local trace JSON, memory persistence, and log/trace sanitizer helpers.
+
+This does not replace live audit. The next live audit must use private-document fixtures containing ordinary private facts, then run targeted artifact scanning over the generated prompt-debug, provider-body, session, trace, log, diff, and workspace artifact directories.
+
+## 2026-05-17 Model-loop provenance update
+
+Scripted model-loop tests now cover private-mode withholding for PDF, DOCX, XLS, and XLSX extraction. A scripted model answer that tries to restate a configured private-document fact canary after withheld extraction is redacted. Config-level document extraction send-to-model opt-in is covered with non-canary content.
+
+Remaining live-audit work:
+
+- Use fresh PDF/DOCX/XLSX private-fact fixtures per model.
+- Save prompt-debug, provider-body, trace, session, turn JSONL, logs, diffs, and artifact-scan output.
+- Verify the behavior with both standard local models, not only scripted tests.
 
 

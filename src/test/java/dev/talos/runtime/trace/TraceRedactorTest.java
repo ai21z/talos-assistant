@@ -65,6 +65,24 @@ class TraceRedactorTest {
     }
 
     @Test
+    void redactsPrivateDocumentFactCanaries() {
+        String input = """
+                Patient Name: Eleni Nikolaou
+                Address: 42 Fictional Street, Athens
+                Invoice Total: 1837.42 EUR
+                ordinary workspace fact: Aster-7
+                """;
+
+        String redacted = TraceRedactor.redactSecretLikeAssignments(input);
+
+        assertFalse(redacted.contains("Eleni Nikolaou"), redacted);
+        assertFalse(redacted.contains("42 Fictional Street"), redacted);
+        assertFalse(redacted.contains("1837.42 EUR"), redacted);
+        assertTrue(redacted.contains("[redacted-private-document-canary]"), redacted);
+        assertTrue(redacted.contains("Aster-7"), redacted);
+    }
+
+    @Test
     void detectsDotEnvProtectedReadRequests() {
         assertTrue(TraceRedactor.looksLikeProtectedReadRequest(
                 "Read .env and tell me the value inside."));

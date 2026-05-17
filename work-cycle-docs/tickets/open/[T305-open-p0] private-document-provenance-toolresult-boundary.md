@@ -37,6 +37,15 @@ That is not enough for private-document beta. Private document text often contai
 - `privateMode_ragEnabled_privateDocRagIndexingFalse_xlsxNotIndexed`: `src/test/java/dev/talos/core/index/IndexerPrivateDocumentPolicyTest.java`.
 - `privateDocumentRagIndexingPolicyChangeMarksOldIndexDirtyAndRebuildsWithoutPrivateChunks`: `src/test/java/dev/talos/core/index/IndexerPrivateDocumentPolicyTest.java`.
 - `artifact_scan_detects_private_document_fact_canary_and_redacts_snippet`: `src/test/java/dev/talos/runtime/policy/ArtifactCanaryScanTest.java`.
+- `runtime_sanitizer_redacts_private_document_fact_canaries`: `src/test/java/dev/talos/runtime/policy/SensitiveLogRedactionTest.java`.
+- `prompt_debug_markdown_redacts_private_document_fact_canaries`: `src/test/java/dev/talos/cli/prompt/PromptDebugInspectorPrivateDocumentTest.java`.
+- `provider_body_json_redacts_private_document_fact_canaries`: `src/test/java/dev/talos/cli/prompt/PromptDebugInspectorPrivateDocumentTest.java`.
+- `privateDocumentFactCanariesAreRedactedBeforeHistoryPersistence`: `src/test/java/dev/talos/runtime/MemoryUpdateListenerTest.java`.
+- `savedSessionRedactsPrivateDocumentFactCanaries`: `src/test/java/dev/talos/runtime/JsonSessionStoreTest.java`.
+- `turnJsonlRedactsPrivateDocumentFactCanaries`: `src/test/java/dev/talos/runtime/JsonSessionStoreTest.java`.
+- `localTraceJsonRedactsPrivateDocumentFactCanaries`: `src/test/java/dev/talos/runtime/JsonSessionStoreTest.java`.
+- `writesStructuredRecordWithPrivateDocumentFactCanariesRedacted`: `src/test/java/dev/talos/runtime/JsonTurnLogAppenderTest.java`.
+- `redactsPrivateDocumentFactCanaries`: `src/test/java/dev/talos/runtime/trace/TraceRedactorTest.java`.
 
 Focused command passed on 2026-05-17:
 
@@ -50,6 +59,16 @@ Additional verification passed on 2026-05-17:
 ./gradlew.bat test --tests "*DocumentExtraction*" --tests "*ProtectedReadScope*" --tests "*ReadFileTool*" --tests "*Rag*Dirty*" --tests "*IndexerPolicyMetadata*" --tests "*ArtifactCanary*" --no-daemon
 ./gradlew.bat clean check e2eTest --no-daemon
 ./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=build/reports,build/test-results" --no-daemon
+```
+
+Additional artifact-sink suite passed on 2026-05-17 after a failing red run:
+
+```text
+./gradlew.bat test --tests "*PromptDebugInspectorPrivateDocumentTest" --tests "*SensitiveLogRedactionTest" --tests "*MemoryUpdateListenerTest" --tests "*JsonSessionStoreTest" --tests "*JsonTurnLogAppenderTest" --tests "*TraceRedactorTest" --no-daemon
+./gradlew.bat test --tests "*ArtifactCanary*" --tests "*PromptDebug*" --tests "*JsonSessionStore*" --tests "*JsonTurnLogAppender*" --tests "*MemoryUpdateListener*" --tests "*TraceRedactor*" --tests "*SensitiveLog*" --tests "*ProtectedReadScope*" --tests "*IndexerPrivateDocumentPolicy*" --tests "*ConfigPrivacyDefaults*" --no-daemon
+./gradlew.bat clean check e2eTest --no-daemon
+./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=build/reports,build/test-results" --no-daemon
+./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=work-cycle-docs/reports,work-cycle-docs/tickets" --no-daemon
 ```
 
 ## User impact
@@ -67,6 +86,7 @@ Document extraction, read-file tool output, tool-result model-message handoff, R
 ## Non-goals
 
 - No claim that prompt-debug/session/trace redaction is fully provenance-aware yet.
+- No claim that deterministic private-document fact canary redaction is general PII detection.
 - No claim that private-document beta is ready.
 - No image/OCR or PowerPoint beta support.
 - No broad architecture cleanup in this ticket.
@@ -95,6 +115,7 @@ Keep the first implementation small:
 - Enforce `PrivateDocumentPolicy.ragIndexAllowed(...)` in `Indexer.parseIndexableText(...)`.
 - Include privacy config in index policy metadata.
 - Add deterministic private-document fact canaries to the artifact scanner.
+- Move deterministic private-document fact canary redaction into `ProtectedContentPolicy` so prompt-debug/session/trace/log helpers share the same runtime sanitizer.
 
 ## Tests
 
@@ -111,23 +132,28 @@ Implemented:
 - `privateDocumentRagIndexingPolicyChangeMarksOldIndexDirtyAndRebuildsWithoutPrivateChunks`
 - `private_document_extraction_privacy_defaults_are_explicit_and_safe`
 - `artifact_scan_detects_private_document_fact_canary_and_redacts_snippet`
-
-Still required:
-
-- `private_mode_pdf_extraction_is_withheld_from_model_context`
-- `private_mode_xls_extraction_is_withheld_from_model_context`
-- `prompt_debug_redacts_private_document_fact_canary`
+- `prompt_debug_markdown_redacts_private_document_fact_canary`
 - `provider_body_does_not_contain_private_document_fact_canary`
 - `session_turn_log_redacts_private_document_fact_canary`
 - `local_trace_redacts_private_document_fact_canary`
+- `private_mode_pdf_extraction_is_withheld_from_model_context`
+- `private_mode_xls_extraction_is_withheld_from_model_context`
+- `private_mode_withheld_document_final_answer_redacts_model_fabricated_private_fact`
+- `private_mode_document_send_to_model_opt_in_allows_model_handoff`
+
+Still required:
+
 - `artifact_scan_distinguishes_private_fact_canary_from_secret_canary`
-- `private_mode_explicit_send_to_model_for_extracted_document_requires_config_and_is_traced`
+- `private_mode_explicit_send_to_model_for_extracted_document_is_traced`
+- per-turn extracted-document send-to-model approval UX, separate from config-only opt-in
+- live-audit artifact scan over generated private-document runtime artifacts
 
 ## Acceptance criteria
 
 - No private-mode extracted document text enters model context by default.
 - RAG indexing in private mode refuses by default through both slash and top-level commands.
 - All persisted runtime artifacts are either provenance-aware redacted or verified to never receive raw private extracted text.
+- Scripted final answers do not preserve configured private-document fact canaries after runtime withheld the document result from model context.
 - Private-document live audit includes ordinary private facts, not only token-shaped canaries.
 - Full `clean check e2eTest` passes after the artifact tests are added.
 

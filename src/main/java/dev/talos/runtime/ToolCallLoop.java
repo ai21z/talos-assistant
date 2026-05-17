@@ -3,6 +3,7 @@ package dev.talos.runtime;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.util.Sanitize;
 import dev.talos.runtime.failure.FailureDecision;
+import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.runtime.toolcall.LoopState;
 import dev.talos.runtime.toolcall.ToolCallExecutionStage;
 import dev.talos.runtime.toolcall.ToolCallParseStage;
@@ -373,7 +374,10 @@ public final class ToolCallLoop {
                     + "\n\n[Tool-call limit reached. Some tool calls were not executed.]";
         }
 
-        String finalAnswer = finalizeAnswer(state.currentText, state.totalToolsInvoked);
+        String finalAnswer = finalizeAnswer(
+                state.currentText,
+                state.totalToolsInvoked,
+                state.contentWithheldFromModelContext);
 
         LOG.debug("Tool-call loop complete: {} iterations, {} tools invoked, {} failed",
                 state.iterations, state.totalToolsInvoked, state.failedCalls);
@@ -389,11 +393,14 @@ public final class ToolCallLoop {
                 state.cushionFiresE1Suggestion, state.failureDecision, List.copyOf(state.toolOutcomes));
     }
 
-    private static String finalizeAnswer(String currentText, int toolsInvoked) {
+    private static String finalizeAnswer(String currentText, int toolsInvoked, boolean contentWithheldFromModelContext) {
         if (shouldSuppressUnfinishedToolContinuation(currentText, toolsInvoked)) {
             return unresolvedContinuationFallback();
         }
-        return Sanitize.stripSuspiciousHtml(ToolCallParser.stripToolCalls(currentText));
+        String answer = Sanitize.stripSuspiciousHtml(ToolCallParser.stripToolCalls(currentText));
+        return contentWithheldFromModelContext
+                ? ProtectedContentPolicy.sanitizeText(answer)
+                : answer;
     }
 
     private static boolean shouldSuppressUnfinishedToolContinuation(String text, int toolsInvoked) {
