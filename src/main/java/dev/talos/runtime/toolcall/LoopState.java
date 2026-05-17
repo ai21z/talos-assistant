@@ -61,6 +61,7 @@ public final class LoopState {
     public final Map<String, String> successfulReadCalls = new HashMap<>();
     public final Map<String, String> successfulReadCallBodies = new HashMap<>();
     public boolean mutationSinceStart;
+    public boolean contentWithheldFromModelContext;
     public final List<String> pendingMutationSummaries = new ArrayList<>();
     private PendingActionObligation pendingActionObligation;
 

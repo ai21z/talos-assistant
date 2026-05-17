@@ -1,10 +1,10 @@
 # T277 - CI-Grade Artifact Canary Scan
 
-Status: open - JUnit scanner added, CI policy/coverage still needs expansion
+Status: open - scanner and runtime sink tests added, live-audit gate still open
 Severity: high
 Release gate: yes
 Branch: v0.9.0-beta-dev
-Created/updated: 2026-05-15
+Created/updated: 2026-05-17
 Owner: unassigned
 
 ## Problem
@@ -15,12 +15,15 @@ Manual artifact scanning is not a release gate. Talos needs deterministic tests/
 
 - `ArtifactCanaryScanner` scans text-like artifact files for explicit raw canaries and T275 secret values.
 - `ArtifactCanaryScanner.scanRuntimeArtifacts(...)` applies narrower skip behavior for targeted runtime artifact directories.
+- `ArtifactCanaryScanner` and `ProtectedContentPolicy` now share a deterministic private-document fact canary class for ordinary private fact fixtures.
 - `ArtifactCanaryScanTest` exercises detection, allowlisting, current generated roots, and targeted runtime artifact dirs.
 
 ## Evidence from tests/audits
 
 - Focused artifact scan test passed in this pass.
 - Targeted tests cover prompt-debug, provider body, session, trace, turn JSONL, command-output artifacts, generated reports, exact file/line reporting, and compiled-class skipping.
+- Additional runtime sink tests cover prompt-debug/provider-body formatting, session snapshots, turn JSONL, local trace JSON, memory persistence, and log/trace helper redaction for configured ordinary private-document fact canaries.
+- Post-clean targeted scans passed for `build/reports,build/test-results` and `work-cycle-docs/reports,work-cycle-docs/tickets`.
 
 ## User impact
 
@@ -61,6 +64,12 @@ JUnit path exists. Add a dedicated Gradle task if release engineering wants a na
 - `artifact_scan_does_not_hide_generated_reports_unless_allowlisted`
 - `artifact_scan_reports_exact_file_and_line`
 - `artifact_scan_ignores_compiled_classes_without_skipping_text_reports`
+- `artifact_scan_detects_private_document_fact_canary_and_redacts_snippet`
+- `PromptDebugInspectorPrivateDocumentTest`
+- `JsonSessionStoreTest` private-document fact persistence cases
+- `JsonTurnLogAppenderTest` private-document fact persistence case
+- `MemoryUpdateListenerTest` private-document fact persistence case
+- `TraceRedactorTest.redactsPrivateDocumentFactCanaries`
 
 ## Acceptance criteria
 
@@ -74,6 +83,7 @@ Old ignored manual audit folders are not treated as current CI artifacts by defa
 ## Open questions
 
 - Should release audits scan ignored `local/manual-testing` folders separately as a manual gate?
+- Should the release gate require a generated manifest of scanned roots plus allowlist entries?
 
 ## Related files
 

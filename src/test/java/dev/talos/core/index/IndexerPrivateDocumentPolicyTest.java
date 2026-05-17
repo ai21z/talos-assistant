@@ -30,6 +30,7 @@ class IndexerPrivateDocumentPolicyTest {
     private static final String PRIVATE_PDF_FACT = "Eleni Nikolaou lease clause";
     private static final String PRIVATE_DOCX_FACT = "Patient Name Eleni Nikolaou";
     private static final String PRIVATE_XLSX_FACT = "Family invoice total 1837.42 EUR";
+    private static final String ALLOWED_DOCX_FACT = "Clinic appointment reference Alpha Safe Index";
 
     @TempDir
     Path workspace;
@@ -90,7 +91,7 @@ class IndexerPrivateDocumentPolicyTest {
 
     @Test
     void privateMode_ragEnabled_privateDocRagIndexingTrue_docxIndexed() throws Exception {
-        writeDocx(workspace.resolve("medical-notes.docx"), PRIVATE_DOCX_FACT);
+        writeDocx(workspace.resolve("medical-notes.docx"), ALLOWED_DOCX_FACT);
         Config cfg = privateRagConfig("word", "**/*.docx", true);
         Indexer indexer = new Indexer(cfg);
         lastIndexDir = indexer.indexDirFor(workspace);
@@ -98,18 +99,18 @@ class IndexerPrivateDocumentPolicyTest {
         indexer.index(workspace, true);
 
         String indexedText = allIndexedText(indexer);
-        assertTrue(indexedText.contains(PRIVATE_DOCX_FACT), indexedText);
+        assertTrue(indexedText.contains(ALLOWED_DOCX_FACT), indexedText);
     }
 
     @Test
     void privateDocumentRagIndexingPolicyChangeMarksOldIndexDirtyAndRebuildsWithoutPrivateChunks() throws Exception {
-        writeDocx(workspace.resolve("medical-notes.docx"), PRIVATE_DOCX_FACT);
+        writeDocx(workspace.resolve("medical-notes.docx"), ALLOWED_DOCX_FACT);
         Config allowed = privateRagConfig("word", "**/*.docx", true);
         Indexer allowedIndexer = new Indexer(allowed);
         lastIndexDir = allowedIndexer.indexDirFor(workspace);
         allowedIndexer.index(workspace, true);
         assertTrue(allowedIndexer.isPolicyMetadataCurrent(workspace));
-        assertTrue(allIndexedText(allowedIndexer).contains(PRIVATE_DOCX_FACT));
+        assertTrue(allIndexedText(allowedIndexer).contains(ALLOWED_DOCX_FACT));
 
         Config blocked = privateRagConfig("word", "**/*.docx", false);
         Indexer blockedIndexer = new Indexer(blocked);
@@ -117,10 +118,10 @@ class IndexerPrivateDocumentPolicyTest {
         assertFalse(blockedIndexer.isPolicyMetadataCurrent(workspace),
                 "privacy.document_extraction.allow_rag_indexing must be part of index freshness");
 
-        RagService.Prepared prepared = new RagService(blocked).prepare(workspace, "Eleni Nikolaou", 5);
+        RagService.Prepared prepared = new RagService(blocked).prepare(workspace, "Alpha Safe Index", 5);
 
         String rendered = prepared.snippets().toString();
-        assertFalse(rendered.contains(PRIVATE_DOCX_FACT), rendered);
+        assertFalse(rendered.contains(ALLOWED_DOCX_FACT), rendered);
         assertTrue(blockedIndexer.isPolicyMetadataCurrent(workspace));
     }
 

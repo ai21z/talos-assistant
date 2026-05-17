@@ -1,10 +1,10 @@
 # T295 - Extraction Privacy and Artifact Boundary
 
-Status: open
+Status: partial implementation, open
 Severity: P0 for beta
 Release gate: yes
 Branch: v0.9.0-beta-dev
-Created/updated: 2026-05-16
+Created/updated: 2026-05-17
 Owner: unassigned
 
 ## Problem
@@ -86,6 +86,7 @@ Partial runtime boundary work landed for model-context handoff:
 - `Config.ensureDefaults()` and `default-config.yaml` now expose `privacy.document_extraction` defaults explicitly.
 - `/privacy status` now reports private document extraction opt-ins.
 - `ArtifactCanaryScanner` now includes a deterministic ordinary private-document fact canary class for test/live-audit artifact scans.
+- `ProtectedContentPolicy` now owns that deterministic private-document fact canary class centrally, so runtime artifact sinks that already call `sanitizeText(...)` redact the same fixture facts instead of relying only on scanner findings.
 
 Focused tests passed on 2026-05-17:
 
@@ -97,7 +98,34 @@ Focused tests passed on 2026-05-17:
 ./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=build/reports,build/test-results" --no-daemon
 ```
 
-This does not close the ticket. Remaining P0 work is provenance-aware artifact safety for ordinary private facts in prompt-debug/provider-body captures, session snapshots, turn JSONL, local traces, logs, final answers, and live-audit artifacts. The scanner can now detect configured ordinary private-document fact canaries, but scanner detection is not the same thing as a runtime artifact boundary.
+Additional red-green artifact-sink proof passed on 2026-05-17:
+
+```text
+./gradlew.bat test --tests "*PromptDebugInspectorPrivateDocumentTest" --tests "*SensitiveLogRedactionTest" --tests "*MemoryUpdateListenerTest" --tests "*JsonSessionStoreTest" --tests "*JsonTurnLogAppenderTest" --tests "*TraceRedactorTest" --no-daemon
+./gradlew.bat test --tests "*ArtifactCanary*" --tests "*PromptDebug*" --tests "*JsonSessionStore*" --tests "*JsonTurnLogAppender*" --tests "*MemoryUpdateListener*" --tests "*TraceRedactor*" --tests "*SensitiveLog*" --tests "*ProtectedReadScope*" --tests "*IndexerPrivateDocumentPolicy*" --tests "*ConfigPrivacyDefaults*" --no-daemon
+./gradlew.bat clean check e2eTest --no-daemon
+./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=build/reports,build/test-results" --no-daemon
+./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=work-cycle-docs/reports,work-cycle-docs/tickets" --no-daemon
+```
+
+The red run failed before the sanitizer patch in prompt-debug markdown, provider-body JSON, session snapshots, turn JSONL, local trace JSON, memory persistence, log sanitizer, and trace redaction. After the patch, the same suite passed.
+
+This still does not close the ticket. Remaining P0 work is live-audit proof using real Talos turns and ordinary private facts, final-answer suppression when a model tries to restate withheld private facts, explicit send-to-model UX/tracing for extracted documents, and broader PDF/XLS model-loop coverage. The deterministic private-document fact canary class is evidence instrumentation, not general PII detection. Positive RAG indexing tests now use non-canary content so they do not conflict with the leak-detection canary class.
+
+Follow-up model-loop provenance tests passed on 2026-05-17:
+
+```text
+./gradlew.bat test --tests "*ProtectedReadScopeIntegrationTest" --no-daemon
+```
+
+New coverage:
+
+- PDF private-mode extraction is withheld from model context.
+- XLS private-mode extraction is withheld from model context.
+- A scripted model final answer that tries to restate a configured private-document fact canary after withheld extraction is redacted.
+- Config-level `privacy.document_extraction.allow_send_to_model=true` allows document extraction handoff with non-canary content.
+
+Remaining P0 work is now live-audit proof using real Talos turns and ordinary private facts, per-turn explicit send-to-model UX/tracing for extracted documents, and a decision on local-display-only document UX. The deterministic final-answer test is not a general PII filter.
 
 ## Rollback / migration notes
 

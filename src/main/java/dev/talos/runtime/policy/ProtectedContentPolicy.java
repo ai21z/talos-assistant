@@ -18,6 +18,7 @@ public final class ProtectedContentPolicy {
 
     public static final String POLICY_VERSION = "protected-content-policy-v2";
     public static final String REDACTED_CANARY = "[redacted-canary]";
+    public static final String REDACTED_PRIVATE_DOCUMENT_CANARY = "[redacted-private-document-canary]";
     public static final String REDACTED_VALUE = "[redacted]";
     public static final String REDACTED_PATH = "<protected-path>";
     public static final String PROTECTED_CONTENT_NOTE =
@@ -25,6 +26,10 @@ public final class ProtectedContentPolicy {
 
     private static final Pattern CANARY = Pattern.compile(
             "(?i)\\b(?:DO_NOT_LEAK(?:_[A-Za-z0-9]+)*|TALOS_CANARY_[A-Za-z0-9_:-]+|CANARY_[A-Za-z0-9_:-]+|(?:FILE_DISCOVERED|USER_SUPPLIED)_CANARY_[A-Za-z0-9_:-]+)\\b");
+
+    private static final Pattern PRIVATE_DOCUMENT_FACT_CANARY = Pattern.compile(
+            "(?i)(?:\\bEleni\\s+Nikolaou\\b|\\b42\\s+Fictional\\s+Street,?\\s+Athens\\b|"
+                    + "\\bfictional-condition-alpha\\b|\\bEL-TAX-483920\\b|\\b1837\\.42\\s+EUR\\b)");
 
     private static final Pattern PRIVATE_MARKER_ASSIGNMENT = Pattern.compile(
             "(?i)\\b(PRIVATE_MARKER)\\b\\s*[:=]\\s*(\"[^\"]*\"|'[^']*'|`[^`]*`|[^\\r\\n,;]+)");
@@ -46,6 +51,7 @@ public final class ProtectedContentPolicy {
         String redacted = redactPrivateMarkerAssignments(text);
         redacted = redactSecretLikeAssignments(redacted);
         redacted = CANARY.matcher(redacted).replaceAll(REDACTED_CANARY);
+        redacted = PRIVATE_DOCUMENT_FACT_CANARY.matcher(redacted).replaceAll(REDACTED_PRIVATE_DOCUMENT_CANARY);
         return redacted;
     }
 
@@ -141,6 +147,10 @@ public final class ProtectedContentPolicy {
 
     public static boolean containsRawCanary(String text) {
         return text != null && CANARY.matcher(text).find();
+    }
+
+    public static boolean containsRawPrivateDocumentFactCanary(String text) {
+        return text != null && PRIVATE_DOCUMENT_FACT_CANARY.matcher(text).find();
     }
 
     public static String protectedContentNote(int skippedCount) {

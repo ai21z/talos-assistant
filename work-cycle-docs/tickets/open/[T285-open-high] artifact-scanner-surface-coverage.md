@@ -4,7 +4,7 @@ Status: open
 Severity: high
 Release gate: yes for private-document beta
 Branch: v0.9.0-beta-dev
-Created/updated: 2026-05-15
+Created/updated: 2026-05-17
 Owner: unassigned
 
 ## Problem
@@ -18,6 +18,15 @@ This pass adds `ArtifactCanaryScanner.scanRuntimeArtifacts(...)`, which uses nar
 ## Evidence from tests/audits
 
 `ArtifactCanaryScanTest` now checks prompt-debug, provider-body, session, trace, turn JSONL, command-output artifacts, generated reports, exact file/line reporting, and compiled-class skipping.
+
+The 2026-05-17 pass adds central runtime sanitizer coverage for configured ordinary private-document fact canaries across prompt-debug/provider-body rendering, session snapshots, turn JSONL, local trace JSON, memory persistence, and log/trace helpers. This complements scanner coverage; it does not replace targeted release scans over live-audit artifact directories.
+
+Post-clean targeted scans passed for:
+
+```text
+build/reports,build/test-results
+work-cycle-docs/reports,work-cycle-docs/tickets
+```
 
 ## User impact
 
@@ -61,6 +70,7 @@ Preserve the broad scan for current generated output and add targeted scans wher
 
 - Keep adding targeted scan roots as new runtime artifact surfaces are introduced.
 - Private-document beta still needs a larger private-paperwork live audit and targeted scan.
+- The private-document fact canary class is deterministic test instrumentation, not general PII detection.
 
 ## Open questions
 
