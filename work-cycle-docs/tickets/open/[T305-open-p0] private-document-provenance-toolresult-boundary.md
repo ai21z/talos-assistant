@@ -21,6 +21,9 @@ That is not enough for private-document beta. Private document text often contai
 - `DocumentExtractionService` now asks `PrivateDocumentPolicy` for model handoff: `src/main/java/dev/talos/core/extract/DocumentExtractionService.java:75`, `src/main/java/dev/talos/core/extract/DocumentExtractionService.java:236`.
 - `ReadFileTool` preserves extraction metadata when creating `ToolResult`: `src/main/java/dev/talos/tools/impl/ReadFileTool.java:139`, `src/main/java/dev/talos/tools/impl/ReadFileTool.java:145`.
 - `ToolCallExecutionStage` now withholds successful tool results whose metadata says model handoff is not allowed: `src/main/java/dev/talos/runtime/toolcall/ToolCallExecutionStage.java:283`, `src/main/java/dev/talos/runtime/toolcall/ToolCallExecutionStage.java:570`.
+- `Indexer` now enforces `PrivateDocumentPolicy.ragIndexAllowed(...)` before returning extracted text for indexing.
+- `Indexer` metadata now hashes privacy config, so disabling private-document RAG indexing makes prior indexes stale.
+- `/privacy status` exposes private document extraction model-context, artifact, and RAG-index opt-ins.
 
 ## Evidence from tests/audits
 
@@ -29,6 +32,11 @@ That is not enough for private-document beta. Private document text often contai
 - `private_mode_xlsx_extraction_is_withheld_from_model_context`: `src/test/java/dev/talos/runtime/toolcall/ProtectedReadScopeIntegrationTest.java:177`.
 - `privateModeDocxSendToModelStillCarriesPrivateDocumentMetadata`: `src/test/java/dev/talos/tools/impl/ReadFileToolTest.java:227`.
 - `rag_index_command_refuses_private_mode_when_rag_disabled`: `src/test/java/dev/talos/cli/launcher/RagIndexCmdPrivateModeTest.java:20`.
+- `privateMode_ragEnabled_privateDocRagIndexingFalse_pdfNotIndexed`: `src/test/java/dev/talos/core/index/IndexerPrivateDocumentPolicyTest.java`.
+- `privateMode_ragEnabled_privateDocRagIndexingFalse_docxNotIndexed`: `src/test/java/dev/talos/core/index/IndexerPrivateDocumentPolicyTest.java`.
+- `privateMode_ragEnabled_privateDocRagIndexingFalse_xlsxNotIndexed`: `src/test/java/dev/talos/core/index/IndexerPrivateDocumentPolicyTest.java`.
+- `privateDocumentRagIndexingPolicyChangeMarksOldIndexDirtyAndRebuildsWithoutPrivateChunks`: `src/test/java/dev/talos/core/index/IndexerPrivateDocumentPolicyTest.java`.
+- `artifact_scan_detects_private_document_fact_canary_and_redacts_snippet`: `src/test/java/dev/talos/runtime/policy/ArtifactCanaryScanTest.java`.
 
 Focused command passed on 2026-05-17:
 
@@ -70,6 +78,9 @@ Document extraction, read-file tool output, tool-result model-message handoff, R
 - Model-loop messages receive a truthful withheld-content placeholder when `modelHandoffAllowed=false`.
 - Top-level `rag-index` must not bypass the same private-mode RAG guard used by `/reindex`.
 - Raw private facts must not rely on secret/canary regexes for model-context protection.
+- Private-document RAG indexing must be blocked at the `Indexer` boundary, not only at command launchers.
+- Index metadata must become stale when privacy config affecting index content changes.
+- `/privacy status` must surface document extraction opt-ins explicitly.
 
 ## Proposed implementation
 
@@ -81,6 +92,9 @@ Keep the first implementation small:
 - Have `ReadFileTool` attach extraction metadata to successful document-extraction results.
 - Have `ToolCallExecutionStage` replace non-handoff tool outputs before appending tool results to model messages.
 - Route top-level `RagIndexCmd` through `RagService.reindex(...)`.
+- Enforce `PrivateDocumentPolicy.ragIndexAllowed(...)` in `Indexer.parseIndexableText(...)`.
+- Include privacy config in index policy metadata.
+- Add deterministic private-document fact canaries to the artifact scanner.
 
 ## Tests
 
@@ -91,6 +105,12 @@ Implemented:
 - `private_mode_xlsx_extraction_is_withheld_from_model_context`
 - `privateModeDocxSendToModelStillCarriesPrivateDocumentMetadata`
 - `rag_index_command_refuses_private_mode_when_rag_disabled`
+- `privateMode_ragEnabled_privateDocRagIndexingFalse_pdfNotIndexed`
+- `privateMode_ragEnabled_privateDocRagIndexingFalse_docxNotIndexed`
+- `privateMode_ragEnabled_privateDocRagIndexingFalse_xlsxNotIndexed`
+- `privateDocumentRagIndexingPolicyChangeMarksOldIndexDirtyAndRebuildsWithoutPrivateChunks`
+- `private_document_extraction_privacy_defaults_are_explicit_and_safe`
+- `artifact_scan_detects_private_document_fact_canary_and_redacts_snippet`
 
 Still required:
 

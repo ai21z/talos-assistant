@@ -310,6 +310,18 @@ public class Config {
         putIfAbsent(protectedRead, "default_scope", "SEND_TO_MODEL_CONTEXT", "privacy.protected_read.default_scope");
         putIfAbsent(protectedRead, "allow_send_to_model", Boolean.FALSE, "privacy.protected_read.allow_send_to_model");
         putIfAbsent(protectedRead, "persist_raw_artifacts", Boolean.FALSE, "privacy.protected_read.persist_raw_artifacts");
+        Map<String,Object> documentExtractionPrivacy = map(privacy.get("document_extraction"));
+        if (documentExtractionPrivacy == null) {
+            documentExtractionPrivacy = new LinkedHashMap<>();
+            privacy.put("document_extraction", documentExtractionPrivacy);
+            defaulted("privacy.document_extraction");
+        }
+        putIfAbsent(documentExtractionPrivacy, "allow_send_to_model", Boolean.FALSE,
+                "privacy.document_extraction.allow_send_to_model");
+        putIfAbsent(documentExtractionPrivacy, "persist_raw_artifacts", Boolean.FALSE,
+                "privacy.document_extraction.persist_raw_artifacts");
+        putIfAbsent(documentExtractionPrivacy, "allow_rag_indexing", Boolean.FALSE,
+                "privacy.document_extraction.allow_rag_indexing");
         Map<String,Object> privacyRag = map(privacy.get("rag"));
         if (privacyRag == null) {
             privacyRag = new LinkedHashMap<>();

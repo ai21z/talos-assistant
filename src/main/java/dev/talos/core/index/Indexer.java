@@ -18,6 +18,7 @@ import dev.talos.core.ingest.ParsedChunk;
 import dev.talos.core.ingest.ParserUtil;
 import dev.talos.core.ingest.UnsupportedDocumentFormats;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
+import dev.talos.runtime.policy.PrivateDocumentPolicy;
 import dev.talos.runtime.policy.SafeLogFormatter;
 import dev.talos.spi.Embeddings;
 import dev.talos.core.util.BuildInfo;
@@ -46,10 +47,16 @@ public class Indexer {
     private static final Logger LOG = LoggerFactory.getLogger(Indexer.class);
     private static final boolean IS_WINDOWS = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("windows");
     private static final ObjectMapper JSON = new ObjectMapper();
-    private static final int INDEX_METADATA_SCHEMA_VERSION = 1;
+    private static final int INDEX_METADATA_SCHEMA_VERSION = 2;
 
     private final Config cfg;
     private volatile IndexingStats lastRunStats;
+
+    private static final class PrivacyIndexingSkip extends IOException {
+        private PrivacyIndexingSkip(String message) {
+            super(message);
+        }
+    }
 
     public Indexer(Config cfg) {
         this.cfg = cfg;
@@ -79,7 +86,8 @@ public class Indexer {
                     && FileCapabilityPolicy.POLICY_VERSION.equals(String.valueOf(data.get("fileCapabilityPolicyVersion")))
                     && DocumentExtractionService.EXTRACTION_POLICY_VERSION.equals(String.valueOf(data.get("documentExtractionPolicyVersion")))
                     && currentRagConfigHash().equals(String.valueOf(data.get("ragConfigHash")))
-                    && currentDocumentExtractionConfigHash().equals(String.valueOf(data.get("documentExtractionConfigHash")));
+                    && currentDocumentExtractionConfigHash().equals(String.valueOf(data.get("documentExtractionConfigHash")))
+                    && currentPrivacyConfigHash().equals(String.valueOf(data.get("privacyConfigHash")));
         } catch (Exception e) {
             return false;
         }
@@ -220,12 +228,11 @@ public class Indexer {
                                 store.removeFileChunks(rel);
                             }
 
-                            stats.incrementFilesEmbedded();
-
                             // Parse with timing
                             long parseStart = System.currentTimeMillis();
                             String text = parseIndexableText(rootPath, p);
                             stats.addParseTime(System.currentTimeMillis() - parseStart);
+                            stats.incrementFilesEmbedded();
 
                             List<ParsedChunk> chunks = Chunker.chunk(rel, text, chunkChars, overlap);
 
@@ -284,6 +291,10 @@ public class Indexer {
                                     stats.addLuceneTime(System.currentTimeMillis() - luceneStart);
                                 }
                             }
+                        } catch (PrivacyIndexingSkip ex) {
+                            stats.incrementFilesSkipped();
+                            stats.incrementFilesSkippedByPrivacy();
+                            LOG.info("Skip {} : {}", SafeLogFormatter.value(p), SafeLogFormatter.throwableMessage(ex));
                         } catch (Exception ex) {
                             LOG.warn("Skip {} : {}", SafeLogFormatter.value(p), SafeLogFormatter.throwableMessage(ex));
                         } finally {
@@ -388,6 +399,7 @@ public class Indexer {
         data.put("documentExtractionPolicyVersion", DocumentExtractionService.EXTRACTION_POLICY_VERSION);
         data.put("ragConfigHash", currentRagConfigHash());
         data.put("documentExtractionConfigHash", currentDocumentExtractionConfigHash());
+        data.put("privacyConfigHash", currentPrivacyConfigHash());
         data.put("workspaceRootHash", Hash.sha1Hex(root.toAbsolutePath().normalize().toString()));
         data.put("createdAt", Instant.now().toString());
         data.put("talosVersion", BuildInfo.version());
@@ -407,6 +419,14 @@ public class Indexer {
             return Hash.sha1Hex(JSON.writeValueAsString(CfgUtil.map(cfg.data.get("document_extraction"))));
         } catch (Exception e) {
             return Hash.sha1Hex(String.valueOf(CfgUtil.map(cfg.data.get("document_extraction"))));
+        }
+    }
+
+    private String currentPrivacyConfigHash() {
+        try {
+            return Hash.sha1Hex(JSON.writeValueAsString(CfgUtil.map(cfg.data.get("privacy"))));
+        } catch (Exception e) {
+            return Hash.sha1Hex(String.valueOf(CfgUtil.map(cfg.data.get("privacy"))));
         }
     }
 
@@ -506,10 +526,14 @@ public class Indexer {
                 .describe(path, cfg)
                 .orElse(null);
         if (capability != null && capability.enabled()) {
-            DocumentExtractionResult result = new DocumentExtractionService(cfg)
-                    .extract(DocumentExtractionRequest.index(path, rootPath));
+            DocumentExtractionRequest request = DocumentExtractionRequest.index(path, rootPath);
+            DocumentExtractionResult result = new DocumentExtractionService(cfg).extract(request);
             if (result.status() == DocumentExtractionStatus.SUCCESS
                     || result.status() == DocumentExtractionStatus.PARTIAL) {
+                if (!PrivateDocumentPolicy.ragIndexAllowed(cfg, request, capability)) {
+                    throw new PrivacyIndexingSkip("Document extraction blocked by private document RAG policy: "
+                            + PrivateDocumentPolicy.decisionReason(cfg, request, capability));
+                }
                 return result.safeText();
             }
             throw new IOException("Document extraction unavailable for index status=" + result.status());

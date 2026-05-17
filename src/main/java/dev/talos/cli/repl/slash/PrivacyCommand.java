@@ -2,6 +2,7 @@ package dev.talos.cli.repl.slash;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
+import dev.talos.runtime.policy.PrivateDocumentPolicy;
 import dev.talos.runtime.policy.ProtectedReadScopePolicy;
 
 import java.nio.file.Path;
@@ -53,12 +54,18 @@ public final class PrivacyCommand implements Command {
         boolean sendToModel = ProtectedReadScopePolicy.sendApprovedProtectedReadToModel(cfg);
         boolean ragInPrivate = ProtectedReadScopePolicy.ragEnabledInPrivateMode(cfg);
         boolean persistRaw = ProtectedReadScopePolicy.persistRawArtifacts(cfg);
+        boolean privateDocModel = PrivateDocumentPolicy.privateDocumentModelHandoffOptIn(cfg);
+        boolean privateDocArtifacts = PrivateDocumentPolicy.privateDocumentRawArtifactPersistenceOptIn(cfg);
+        boolean privateDocRag = PrivateDocumentPolicy.privateDocumentRagIndexingOptIn(cfg);
 
         return "Privacy status\n"
                 + "  workspace: " + workspace.toAbsolutePath().normalize().getFileName() + "\n"
                 + "  mode: " + (privateMode ? "private" : "developer") + "\n"
                 + "  protected read default scope: " + ProtectedReadScopePolicy.defaultScope(cfg) + "\n"
                 + "  approved protected reads can enter model context: " + (sendToModel ? "yes" : "no") + "\n"
+                + "  private-mode document extraction model-context opt-in: " + (privateDocModel ? "enabled" : "disabled") + "\n"
+                + "  private-mode document extraction raw artifact persistence: " + (privateDocArtifacts ? "on" : "off") + "\n"
+                + "  private-mode document extraction RAG indexing: " + (privateDocRag ? "enabled" : "disabled") + "\n"
                 + "  RAG/retrieve in private mode: " + (ragInPrivate ? "enabled" : "disabled") + "\n"
                 + "  raw artifact persistence: " + (persistRaw ? "on" : "off") + "\n"
                 + "  persistence: current session/config state only; edit ~/.talos/config.yaml for persistent defaults\n";
@@ -67,12 +74,18 @@ public final class PrivacyCommand implements Command {
     private static String helpText() {
         return """
                 /privacy status
-                  Show current privacy mode, model-context handoff, RAG/retrieve, and artifact persistence settings.
+                  Show current privacy mode, protected-read handoff, private document extraction controls,
+                  RAG/retrieve, and artifact persistence settings.
 
                 /privacy private on
                   Switch the current session/config state to private mode. Approved protected reads default to LOCAL_DISPLAY_ONLY:
                   content is read locally after approval but withheld from model context and persisted artifacts.
                   RAG/retrieve is disabled by default in private mode.
+
+                Private document extraction
+                  In private mode, extracted PDF/DOCX/XLS/XLSX text is treated as local-display-only by default.
+                  It is not sent to model context, not persisted raw, and not indexed by RAG unless the
+                  separate privacy.document_extraction opt-ins are enabled in config.
 
                 /privacy private off
                   Restore developer/default mode for the current session/config state. Approved direct protected reads may enter model context.

@@ -1,6 +1,6 @@
 # T298 - Private Mode Reindex Policy Gate
 
-Status: open
+Status: partial implementation, open
 Severity: high / P0 for private-document beta
 Release gate: yes
 Branch: v0.9.0-beta-dev
@@ -34,6 +34,11 @@ The direct indexer call is sufficient evidence for a policy bug even before expl
 
 The test first failed while `RagIndexCmd` called `Indexer` directly, then passed after routing the command through `RagService.reindex(...)`.
 
+2026-05-17 follow-up:
+
+- `IndexerPrivateDocumentPolicyTest` now proves the indexer itself refuses extracted PDF/DOCX/XLSX text in private mode when private-mode RAG is enabled but private-document RAG indexing is not explicitly allowed.
+- Index metadata now hashes privacy config, preventing an index built under a more permissive document-extraction policy from remaining current after the opt-in is disabled.
+
 ## User impact
 
 A user can enable private mode and still trigger explicit indexing without the command enforcing the same private-mode rule.
@@ -56,7 +61,7 @@ Slash command policy, RAG index creation, private mode, sensitive workspace hand
 - `/reindex` in private mode refuses by default or requires explicit opt-in/approval.
 - Top-level `rag-index` in private mode refuses by default or requires explicit opt-in/approval.
 - The user-facing message must say private mode blocks indexing unless explicitly enabled.
-- The command must not silently index extracted document text in private mode.
+- The command and the underlying indexer must not silently index extracted document text in private mode.
 
 ## Proposed implementation
 
@@ -74,6 +79,7 @@ Move reindex policy enforcement into `RagService.reindex(...)` and make every co
 
 - No code path from `/reindex` reaches `Indexer` in private mode unless policy explicitly allows it.
 - No code path from top-level `rag-index` reaches `Indexer` in private mode unless policy explicitly allows it.
+- No direct `Indexer` path indexes extracted private documents unless `PrivateDocumentPolicy.ragIndexAllowed(...)` allows it.
 - Live audit prompt 18 becomes consistent.
 
 ## Rollback / migration notes
