@@ -187,9 +187,9 @@ This slice red-tested and fixed `/show` direct file fallback path escapes. Befor
 `ShowCommand` now normalizes the workspace and target path and rejects direct file fallback
 outside the workspace before reading.
 
-The same slice added local display for extractable DOCX documents through `/show`. This is
-not a model handoff path; the command formats extracted safe text locally and labels the
-output as `/show local display`.
+The same slice added and covered local display for extractable PDF/DOCX/XLS/XLSX documents
+through `/show`. This is not a model handoff path; the command formats extracted safe text
+locally and labels the output as `/show local display`.
 
 Note: running `checkRuntimeArtifactCanaries` without `-PartifactScanRoots=...` failed by design because the task requires explicit scan roots and refuses to scan stale ignored manual-audit directories accidentally.
 
@@ -210,7 +210,7 @@ Note: running `checkRuntimeArtifactCanaries` without `-PartifactScanRoots=...` f
 - A scripted model final answer that tries to restate a configured private-document fact canary after withheld extraction is redacted.
 - Private-mode document-extraction `allow_send_to_model=true` is covered with non-canary content and confirms model handoff is allowed when explicitly configured.
 - `/show` direct file fallback now rejects workspace escapes before reading local files.
-- `/show` can display extracted DOCX safe text locally and marks the output as not used for model context.
+- `/show` can display extracted PDF/DOCX/XLS/XLSX safe text locally and marks the output as not used for model context.
 
 ## 8. What is still not proven
 
@@ -220,7 +220,7 @@ Note: running `checkRuntimeArtifactCanaries` without `-PartifactScanRoots=...` f
 - Per-turn explicit send-to-model approval UX for extracted documents. Current evidence covers config opt-in, not an interactive approval scope.
 - Dirty historical extracted-document RAG indexes containing ordinary private facts from pre-metadata or manually corrupted stores are partially covered by stale-index rebuild tests, but still need live-audit artifact evidence.
 - Full private-document live audit using ordinary private facts rather than only token/canary-shaped secrets.
-- `/show` local-display extraction is currently covered for DOCX only. PDF/XLS/XLSX local-display command coverage still needs tests before claiming that slash-command UX is format-complete.
+- `/show` local-display extraction still needs live manual evidence with real fixture files and terminal output capture; deterministic tests cover PDF/DOCX/XLS/XLSX safe-text extraction only.
 
 ## 9. Release impact
 
@@ -234,7 +234,7 @@ Allowed claim after this pass:
 - Deterministic runtime artifact sink tests now prove configured ordinary private-document fact canaries are redacted across prompt-debug/provider-body rendering, session snapshots, turn JSONL, local trace JSON, memory persistence, and log/trace sanitizer helpers.
 - Deterministic model-loop tests now cover private-mode PDF/DOCX/XLS/XLSX withholding, final-answer canary suppression after withheld extraction, and config-level document send-to-model opt-in.
 - `/show` direct file fallback does not read outside the workspace in the covered test.
-- `/show` provides a local-display-only DOCX extraction path in the covered test.
+- `/show` provides a local-display-only PDF/DOCX/XLS/XLSX extraction path in the covered tests.
 
 Forbidden claims after this pass:
 
@@ -250,10 +250,10 @@ Forbidden claims after this pass:
 
 The next hard slice is live private-document provenance audit and remaining UX coverage:
 
-1. Extend `/show` local-display extraction coverage to PDF/XLS/XLSX or deliberately keep DOCX-only command UX documented.
-2. Run a private-document live audit with ordinary private facts in PDF/DOCX/XLSX fixtures.
-3. Capture `/last trace`, `/prompt-debug last`, prompt-debug save output, provider-body JSON, session/turn JSONL, local trace JSON, diffs, logs, and targeted artifact scan roots.
-4. Confirm final answers do not fabricate private facts from withheld extraction in live model runs, not only scripted tests.
-5. Add trace/status assertions for config-level extracted-document send-to-model opt-in, and design a per-turn approval UX if private-document beta requires it.
+1. Run a private-document live audit with ordinary private facts in PDF/DOCX/XLS/XLSX fixtures.
+2. Capture `/last trace`, `/prompt-debug last`, prompt-debug save output, provider-body JSON, session/turn JSONL, local trace JSON, diffs, logs, and targeted artifact scan roots.
+3. Confirm final answers do not fabricate private facts from withheld extraction in live model runs, not only scripted tests.
+4. Add trace/status assertions for config-level extracted-document send-to-model opt-in, and design a per-turn approval UX if private-document beta requires it.
+5. Package a manual-test runbook so a human tester can reproduce the private-document scenario without relying on Codex memory.
 
 Do not start broad `AssistantTurnExecutor` cleanup before this artifact boundary is proven.

@@ -134,10 +134,10 @@ Follow-up local-display and workspace-boundary tests passed on 2026-05-17:
 New coverage:
 
 - `/show` direct file fallback rejects `../` workspace escapes before reading local files.
-- `/show` can extract DOCX text for local display without using model context.
-- The DOCX local-display path uses the safe extracted text path and redacts configured private-document fact canaries.
+- `/show` can extract PDF/DOCX/XLS/XLSX text for local display without using model context.
+- The local-display path uses the safe extracted text path and redacts configured private-document fact canaries.
 
-Remaining P0 work is now live-audit proof using real Talos turns and ordinary private facts, per-turn explicit send-to-model UX/tracing for extracted documents, PDF/XLS/XLSX `/show` local-display coverage, and final manual-test packaging. The deterministic final-answer test is not a general PII filter.
+Remaining P0 work is now live-audit proof using real Talos turns and ordinary private facts, per-turn explicit send-to-model UX/tracing for extracted documents, and final manual-test packaging. The deterministic final-answer test is not a general PII filter.
 
 ## Rollback / migration notes
 
