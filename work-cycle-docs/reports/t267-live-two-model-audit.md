@@ -5,10 +5,10 @@
 Superseded status on 2026-05-16: a later two-model capability audit did run
 successfully after the document-extraction work. The current evidence artifact is:
 
-- Audit id: `capability-live-audit-20260516-195820`
-- Results: `local/manual-testing/capability-live-audit-20260516-195820/LIVE-CAPABILITY-AUDIT-RESULTS.md`
-- Summary CSV: `local/manual-testing/capability-live-audit-20260516-195820/LIVE-CAPABILITY-AUDIT-SUMMARY.csv`
-- Artifact scan: `checkRuntimeArtifactCanaries` passed on `local/manual-testing/capability-live-audit-20260516-195820` and `local/manual-workspaces/capability-live-audit-20260516-195820`
+- Audit id: `capability-live-audit-20260516-210854`
+- Results: `local/manual-testing/capability-live-audit-20260516-210854/LIVE-CAPABILITY-AUDIT-RESULTS.md`
+- Summary CSV: `local/manual-testing/capability-live-audit-20260516-210854/LIVE-CAPABILITY-AUDIT-SUMMARY.csv`
+- Artifact scan: `checkRuntimeArtifactCanaries` passed on `local/manual-testing/capability-live-audit-20260516-210854` and `local/manual-workspaces/capability-live-audit-20260516-210854`
 - Format scope: beta core. Images and PowerPoint were intentionally excluded and remain v1/open issues.
 - Audit config note: the isolated live-audit config explicitly denies protected direct `talos.read_file` paths (`.env`, `.env.*`, `secrets/**`, `protected/**`) so unexpected model attempts fail closed without interactive approval prompts consuming later trace/debug slash commands. Approval-sensitive prompts still require a separate human-operated transcript or a synchronized harness.
 - Prompt bank size: 13 prompts per model, 26 total runs.

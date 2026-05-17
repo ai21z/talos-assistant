@@ -113,7 +113,7 @@ Evidence:
 
 - README current status section was updated in this pass.
 - `full-talos-capability-state-and-document-extraction-audit.md` is the current superseding report.
-- Latest focused beta-core capability audit is `capability-live-audit-20260516-195820`.
+- Latest focused beta-core capability audit is `capability-live-audit-20260516-210854`.
 - Checked-in canonical PDF/DOCX/XLSX fixtures with expected-text files are covered by `DocumentExtractionCanonicalFixturesTest`.
 - Older reports may remain as dated evidence but should not be used as the current release decision.
 

@@ -8,7 +8,7 @@ Release-ready only for developer/text-project beta, not private-document beta.
 XLS/XLSX cell extraction, and extraction-aware grep/RAG plumbing are implemented
 behind runtime policy. Images and PowerPoint are frozen out of beta. A two-model
 beta-core capability audit ran against GPT-OSS and Qwen with audit id
-`capability-live-audit-20260516-195820`, and the targeted runtime artifact
+`capability-live-audit-20260516-210854`, and the targeted runtime artifact
 canary scan passed. Private-document beta remains blocked by broader
 sensitive-paperwork fixtures, adversarial document quality evidence, and the
 explicit developer/default-mode risk that approved direct protected reads may
@@ -120,15 +120,15 @@ Result:
 
 - focused artifact scanner tests passed.
 - targeted task exists and is intended for completed live-audit directories.
-- targeted task passed on `capability-live-audit-20260516-195820`.
+- targeted task passed on `capability-live-audit-20260516-210854`.
 
 ## 9. Two-model live audit status
 
 PASS for the focused capability prompt bank, still not private-document release-ready.
 
-Models/backend: managed `llama.cpp` with GPT-OSS and Qwen ran sequentially through isolated temp-home configs. The latest beta-core capability audit is `capability-live-audit-20260516-195820`.
+Models/backend: managed `llama.cpp` with GPT-OSS and Qwen ran sequentially through isolated temp-home configs. The latest beta-core capability audit is `capability-live-audit-20260516-210854`.
 
-Artifacts: `local/manual-testing/capability-live-audit-20260516-195820/LIVE-CAPABILITY-AUDIT-RESULTS.md` and `LIVE-CAPABILITY-AUDIT-SUMMARY.csv`; runtime workspaces under `local/manual-workspaces/capability-live-audit-20260516-195820`.
+Artifacts: `local/manual-testing/capability-live-audit-20260516-210854/LIVE-CAPABILITY-AUDIT-RESULTS.md` and `LIVE-CAPABILITY-AUDIT-SUMMARY.csv`; runtime workspaces under `local/manual-workspaces/capability-live-audit-20260516-210854`.
 
 Format scope: beta core. Image/OCR and PowerPoint prompts were intentionally excluded.
 
@@ -140,8 +140,8 @@ Verdict: the focused two-model capability audit passed its process/tool-artifact
 - `./gradlew.bat e2eTest --tests "*PrivateModeScriptedE2e*" --no-daemon` - passed.
 - `./gradlew.bat clean check e2eTest --no-daemon` - passed after document extraction/evidence-gate fixes.
 - `./gradlew.bat installDist --no-daemon` - passed.
-- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-capability-live-audit.ps1 -BetaCoreOnly -StopStaleServers` - passed with audit id `capability-live-audit-20260516-195820`.
-- `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/capability-live-audit-20260516-195820,local/manual-workspaces/capability-live-audit-20260516-195820" ... --no-daemon` - passed.
+- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-capability-live-audit.ps1 -BetaCoreOnly -StopStaleServers` - passed with audit id `capability-live-audit-20260516-210854`.
+- `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/capability-live-audit-20260516-210854,local/manual-workspaces/capability-live-audit-20260516-210854" ... --no-daemon` - passed.
 
 ## 11. Tests not run
 

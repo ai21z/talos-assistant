@@ -53,7 +53,7 @@ The biggest strength is not parser-related. It is Talos's existing execution har
 | Dependency/performance limits undefined | No extraction config or parser limits exist. | T300 |
 | Docs must evolve with capabilities | Current docs correctly forbid claims but some reports are stale. | T301 |
 | PPT deferred | PPT unsupported and not beta-required. | T302 |
-| Format policy lacks extractable states | `FileCapabilityPolicy` currently separates supported text from unsupported families, not extractable-but-limited formats. | T303 |
+| Format policy state machine still maturing | `FileCapabilityPolicy` now has extractable/deferred states for current beta-core formats, but dynamic outcomes such as encrypted, OCR-required, corrupt, truncated, and adapter-missing still need disciplined reporting across every tool surface. | T303 |
 | Repeated extraction can be slow/stale | No extraction cache/invalidation design exists. | T304 |
 
 ## 4. Proposed architecture

@@ -1,6 +1,6 @@
 # Final Pre-Beta Verification
 
-Supersession note, 2026-05-16: this report captures an earlier pre-document-extraction verification pass. Current document-extraction and live-audit decisions must use `work-cycle-docs/reports/full-talos-capability-state-and-document-extraction-audit.md` plus the latest beta-core capability audit `capability-live-audit-20260516-195820`.
+Supersession note, 2026-05-16: this report captures an earlier pre-document-extraction verification pass. Current document-extraction and live-audit decisions must use `work-cycle-docs/reports/full-talos-capability-state-and-document-extraction-audit.md` plus the latest beta-core capability audit `capability-live-audit-20260516-210854`.
 
 ## 1. Scope
 
@@ -134,7 +134,7 @@ Verification answers:
 
 ## 9. Live audit and reports
 
-- Later evidence supersedes this subsection for document extraction: the focused two-model beta-core capability audit `capability-live-audit-20260516-195820` ran against GPT-OSS and Qwen, with targeted artifact scan passing afterward. Images and PowerPoint were intentionally excluded from beta-core scope.
+- Later evidence supersedes this subsection for document extraction: the focused two-model beta-core capability audit `capability-live-audit-20260516-210854` ran against GPT-OSS and Qwen, with targeted artifact scan passing afterward. Images and PowerPoint were intentionally excluded from beta-core scope.
 - The broader historical T267 32-prompt bank remains a runbook/status document, not a completed private-document evidence packet.
 - Latest backend evidence: `scripts/run-t267-live-audit.ps1 -SmokeModels -StopStaleServers` produced smoke audit id `t267-live-audit-20260516-091319`, where GPT-OSS returned `GPTOSS_SMOKE_123`, Qwen returned `QWEN_SMOKE_123`, targeted artifact canary scan passed on the smoke roots, and repo-owned stale server count after the run was 0.
 - Deterministic test lifecycle evidence: tests that previously loaded the real user LLM config now use placeholder/scripted LLMs, and `./gradlew.bat clean check e2eTest --no-daemon` completed with repo-owned `llama-server.exe` process count 0.

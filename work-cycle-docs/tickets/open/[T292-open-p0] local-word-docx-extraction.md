@@ -106,7 +106,7 @@ Verification:
 
 - `DocumentExtractionAdaptersTest` passed.
 - Full `./gradlew.bat clean check e2eTest --no-daemon` passed.
-- Two-model beta-core live audit `capability-live-audit-20260516-195820` passed `06-docx-summary`.
+- Two-model beta-core live audit `capability-live-audit-20260516-210854` passed `06-docx-summary`.
 
 Remaining blockers:
 

@@ -9,13 +9,13 @@ Owner: unassigned
 
 ## Problem
 
-`FileCapabilityPolicy` currently treats PDF, Word, Excel, PowerPoint, images, archives, compiled artifacts, and binaries as unsupported. That was correct for truthfulness, but it is too blunt once some formats become extractable. Talos needs a state machine, not a boolean unsupported check.
+`FileCapabilityPolicy` now has extractable/deferred states for text-bearing PDF, DOCX, XLS, and XLSX when document extraction is enabled, while legacy `.doc`, PowerPoint, images, archives, compiled artifacts, and binaries remain unsupported/deferred. The remaining risk is not the first state-machine step; it is keeping dynamic extraction outcomes such as encrypted, OCR-required, corrupt, truncated, and adapter-missing consistent across every tool surface.
 
 ## Evidence from current code
 
-- `FileCapabilityPolicy.Capability` has broad categories such as `UNSUPPORTED_BINARY_DOCUMENT`, `UNSUPPORTED_IMAGE_OR_SCAN`, and `UNKNOWN_TEXT_ATTEMPT_ALLOWED`.
-- `UnsupportedDocumentFormats.isUnsupported(...)` is used by `ReadFileTool`, `GrepTool`, `ParserUtil`, and `Indexer` as a hard stop.
-- Default RAG config excludes all current unsupported document/image/archive formats.
+- `FileCapabilityPolicy.Capability` includes extractable and deferred states as well as `UNSUPPORTED_BINARY_DOCUMENT`, `UNSUPPORTED_IMAGE_OR_SCAN`, and `UNKNOWN_TEXT_ATTEMPT_ALLOWED`.
+- `UnsupportedDocumentFormats.isUnsupported(...)` delegates to the central capability policy instead of owning separate extension logic.
+- Default RAG config excludes deferred/unsupported document/image/archive formats and lets explicit extraction policy decide PDF/DOCX/XLS/XLSX handling.
 
 ## Evidence from source crosscheck
 

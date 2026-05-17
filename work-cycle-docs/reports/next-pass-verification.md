@@ -94,7 +94,7 @@ Answer:
 
 Evidence:
 
-- `FileCapabilityPolicy` classifies PDF, Word, Excel, PowerPoint, images/scans, archives, compiled/executable artifacts, and generic binaries as unsupported.
+- Superseding update: `FileCapabilityPolicy` now classifies text-bearing PDF, DOCX, XLS, and XLSX as extractable when document extraction is enabled; legacy `.doc`, PowerPoint, images/scans, archives, compiled/executable artifacts, and generic binaries remain unsupported/deferred.
 - `UnsupportedDocumentFormats` delegates to `FileCapabilityPolicy`.
 - `ReadFileTool` rejects unsupported formats.
 - `FileWriteTool` rejects unsupported writes.
