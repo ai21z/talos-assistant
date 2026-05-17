@@ -83,4 +83,4 @@ Follow-up ticket: T288.
 
 ## 2026-05-16 update
 
-`checkRuntimeArtifactCanaries` now requires explicit `-PartifactScanRoots=...`. Running it without roots fails fast with a usage error instead of scanning every historical ignored `local/manual-testing` and `local/manual-workspaces` tree. Targeted scan passed on beta-core audit `capability-live-audit-20260516-195820`.
+`checkRuntimeArtifactCanaries` now requires explicit `-PartifactScanRoots=...`. Running it without roots fails fast with a usage error instead of scanning every historical ignored `local/manual-testing` and `local/manual-workspaces` tree. Targeted scan passed on beta-core audit `capability-live-audit-20260516-210854`.

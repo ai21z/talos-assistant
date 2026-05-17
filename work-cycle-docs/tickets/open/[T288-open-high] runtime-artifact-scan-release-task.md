@@ -31,7 +31,7 @@ The release task also passed against the latest two-model smoke artifact roots:
 Latest focused capability audit scan:
 
 ```powershell
-./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/capability-live-audit-20260516-195820,local/manual-workspaces/capability-live-audit-20260516-195820" "-PartifactScanAllowlist=<fixture allowlist>" --no-daemon
+./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/capability-live-audit-20260516-210854,local/manual-workspaces/capability-live-audit-20260516-210854" "-PartifactScanAllowlist=<fixture allowlist>" --no-daemon
 ```
 
 The task now requires explicit `-PartifactScanRoots=...`. A no-root invocation fails fast with a usage error so historical ignored manual-audit directories are not scanned accidentally.

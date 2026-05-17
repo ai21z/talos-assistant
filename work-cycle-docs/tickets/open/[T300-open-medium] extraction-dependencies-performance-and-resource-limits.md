@@ -125,7 +125,7 @@ Runtime evidence:
 - Large workbook extraction now returns `PARTIAL` plus an `extraction-truncated` warning when the cap is hit.
 - OCR command has timeout/output bounds.
 - Full `./gradlew.bat clean check e2eTest --no-daemon` passed.
-- Beta-core live audit `capability-live-audit-20260516-195820` passed after adding the logging bridge and explicit frozen image/PPT reporting; no Log4j provider error or stale PDFBox version appeared in that audit root.
+- Beta-core live audit `capability-live-audit-20260516-210854` passed after adding the logging bridge and explicit frozen image/PPT reporting; no Log4j provider error or stale PDFBox version appeared in that audit root.
 
 Remaining blockers:
 

@@ -7,7 +7,7 @@ Release-ready only for developer/text-project beta, not private-document beta.
 2026-05-16 superseding update: Talos now has narrow local extraction for
 text-bearing PDFs, `.docx`, `.xls`, and `.xlsx`. Images and PowerPoint are frozen
 out of beta and remain v1/open issues. A two-model beta-core capability audit ran
-against GPT-OSS and Qwen with audit id `capability-live-audit-20260516-195820`,
+against GPT-OSS and Qwen with audit id `capability-live-audit-20260516-210854`,
 and the targeted runtime artifact canary scan passed on that audit root.
 Private-document beta remains blocked by broader sensitive-paperwork fixtures,
 adversarial document quality evidence, and the still-present developer/default
@@ -108,8 +108,8 @@ T267-T289 are open/updated for indirect-read safety, unsupported-format truthful
 - `./gradlew.bat e2eTest --tests "*PrivateModeScriptedE2e*" --no-daemon` - passed.
 - `./gradlew.bat clean check e2eTest --no-daemon` - passed after document extraction and evidence-gate fixes.
 - `./gradlew.bat installDist --no-daemon` - passed.
-- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-capability-live-audit.ps1 -BetaCoreOnly -StopStaleServers` - passed with audit id `capability-live-audit-20260516-195820`.
-- `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/capability-live-audit-20260516-195820,local/manual-workspaces/capability-live-audit-20260516-195820" ... --no-daemon` - passed.
+- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-capability-live-audit.ps1 -BetaCoreOnly -StopStaleServers` - passed with audit id `capability-live-audit-20260516-210854`.
+- `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/capability-live-audit-20260516-210854,local/manual-workspaces/capability-live-audit-20260516-210854" ... --no-daemon` - passed.
 
 ## 9. Tests not run
 

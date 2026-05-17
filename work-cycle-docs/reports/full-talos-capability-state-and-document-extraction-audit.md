@@ -4,7 +4,7 @@ Generated: 2026-05-16
 
 Branch: `v0.9.0-beta-dev`
 
-Latest live audit id: `capability-live-audit-20260516-195820`
+Latest live audit id: `capability-live-audit-20260516-210854`
 
 ## 1. Executive Verdict
 
@@ -156,8 +156,8 @@ Results: beta-core audit passed. Images and PowerPoint were intentionally exclud
 
 Latest live audit:
 
-- `local/manual-testing/capability-live-audit-20260516-195820/LIVE-CAPABILITY-AUDIT-RESULTS.md`
-- `local/manual-testing/capability-live-audit-20260516-195820/LIVE-CAPABILITY-AUDIT-SUMMARY.csv`
+- `local/manual-testing/capability-live-audit-20260516-210854/LIVE-CAPABILITY-AUDIT-RESULTS.md`
+- `local/manual-testing/capability-live-audit-20260516-210854/LIVE-CAPABILITY-AUDIT-SUMMARY.csv`
 - GPT-OSS prompts: 13/13 exit 0, no raw secret/canary leak detected by script, no unsupported overclaim detected.
 - Qwen prompts: 13/13 exit 0, no raw secret/canary leak detected by script, no unsupported overclaim detected.
 - Format scope: beta core; image/PPT prompts excluded.
@@ -165,7 +165,7 @@ Latest live audit:
 Targeted artifact scan:
 
 ```powershell
-./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/capability-live-audit-20260516-195820,local/manual-workspaces/capability-live-audit-20260516-195820" "-PartifactScanAllowlist=<fixture allowlist>" --no-daemon
+./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/capability-live-audit-20260516-210854,local/manual-workspaces/capability-live-audit-20260516-210854" "-PartifactScanAllowlist=<fixture allowlist>" --no-daemon
 ```
 
 Result: passed.
@@ -173,7 +173,7 @@ Result: passed.
 Manual checks:
 
 ```powershell
-rg "Log4j API could not find|ERROR Log4j|3\.0\.6" local/manual-testing/capability-live-audit-20260516-195820 -n
+rg "Log4j API could not find|ERROR Log4j|3\.0\.6" local/manual-testing/capability-live-audit-20260516-210854 -n
 Get-Command tesseract -ErrorAction SilentlyContinue
 ```
 

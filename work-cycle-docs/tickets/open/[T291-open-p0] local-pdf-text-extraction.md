@@ -108,7 +108,7 @@ Verification:
 - `DocumentExtractionAdaptersTest` passed, including no-text PDF `OCR_REQUIRED` and encrypted PDF `ENCRYPTED`.
 - `ReadFileToolTest` and `GrepToolTest` passed, including no-text PDF user-facing behavior.
 - Full `./gradlew.bat clean check e2eTest --no-daemon` passed.
-- Two-model beta-core live audit `capability-live-audit-20260516-195820` passed `05-pdf-summary`.
+- Two-model beta-core live audit `capability-live-audit-20260516-210854` passed `05-pdf-summary`.
 
 Remaining blockers:
 

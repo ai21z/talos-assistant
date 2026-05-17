@@ -39,7 +39,7 @@ Earlier audit notes recorded `ollama list` crashing with access violation `0xc00
 - Latest smoke evidence is `t267-live-audit-20260516-091319`; repo-owned stale server count after the run was 0.
 - `checkRuntimeArtifactCanaries` passed on the smoke artifact roots.
 - The focused beta-core capability live audit now runs both GPT-OSS and Qwen through `scripts/run-capability-live-audit.ps1 -BetaCoreOnly -StopStaleServers`.
-- Latest focused beta-core audit: `capability-live-audit-20260516-195820`; both models completed 13 prompts, expected PDF/DOCX/XLSX reads were satisfied, and the targeted artifact canary scan passed.
+- Latest focused beta-core audit: `capability-live-audit-20260516-210854`; both models completed 13 prompts, expected PDF/DOCX/XLSX reads were satisfied, and the targeted artifact canary scan passed.
 - The focused helper uses an isolated config with explicit protected direct-read deny rules so unexpected protected reads fail closed without interactive approval prompts consuming later trace/debug commands.
 
 ## User impact

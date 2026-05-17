@@ -101,7 +101,7 @@ Status: beta-core live audit executed; fixture quality remains open. Image/OCR e
 New evidence:
 
 - `scripts/run-capability-live-audit.ps1` creates a fresh fixture workspace per model, runs GPT-OSS and Qwen, captures prompt-debug/provider bodies/diffs, and emits a summary CSV.
-- Latest run: `capability-live-audit-20260516-195820`.
+- Latest run: `capability-live-audit-20260516-210854`.
 - The beta-core live audit passed 26/26 prompt runs by process/tool-artifact heuristics.
 - Targeted `checkRuntimeArtifactCanaries` passed on the latest live audit roots.
 - The generated audit report states that images and PowerPoint are frozen out of beta.

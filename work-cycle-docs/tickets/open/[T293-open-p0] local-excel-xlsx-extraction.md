@@ -122,7 +122,7 @@ Verification:
 - `DocumentExtractionAdaptersTest` passed, including hidden-sheet skip/warning coverage, formula/cached-value output, large-output truncation, and corrupt workbook `CORRUPT` coverage.
 - `DocumentExtractionCanonicalFixturesTest` passed against a checked-in canonical `.xlsx` fixture and neighboring expected-text file.
 - Full `./gradlew.bat clean check e2eTest --no-daemon` passed.
-- Two-model beta-core live audit `capability-live-audit-20260516-195820` passed `07-xlsx-summary` and `10-compare-xlsx-text`.
+- Two-model beta-core live audit `capability-live-audit-20260516-210854` passed `07-xlsx-summary` and `10-compare-xlsx-text`.
 
 Remaining blockers:
 
