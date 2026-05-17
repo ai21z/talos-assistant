@@ -99,7 +99,7 @@ Current allowed wording:
 - Large extracted output can be partial/truncated and must be described that way.
 - Images/OCR frozen for v1; no beta image/OCR claim.
 - `/status --verbose` reports document-extraction preflight, including Image OCR command availability.
-- `scripts/run-capability-live-audit.ps1 -BetaCoreOnly` is the current beta-core audit mode and excludes image/PPT prompts.
+- `scripts/run-capability-live-audit.ps1 -BetaCoreOnly -PrivateFolderBank` is the current focused private-folder audit mode and excludes image/PPT prompts.
 
 Current forbidden wording:
 
@@ -113,7 +113,7 @@ Evidence:
 
 - README current status section was updated in this pass.
 - `full-talos-capability-state-and-document-extraction-audit.md` is the current superseding report.
-- Latest focused beta-core capability audit is `capability-live-audit-20260516-210854`.
+- Latest focused private-folder bank audit is `capability-live-audit-20260518-004603`.
 - Checked-in canonical PDF/DOCX/XLSX fixtures with expected-text files are covered by `DocumentExtractionCanonicalFixturesTest`.
 - Older reports may remain as dated evidence but should not be used as the current release decision.
 

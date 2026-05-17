@@ -93,3 +93,31 @@ Still open:
 - UX polish for status/help outside the `/privacy` command
 
 This ticket remains a private-document release blocker.
+
+## 2026-05-18 scripted private-folder bank update
+
+Implemented evidence harness support:
+
+- `scripts/run-capability-live-audit.ps1 -BetaCoreOnly -PrivateFolderBank -StopStaleServers`
+- private-mode `/show` probes for PDF/DOCX/XLSX local display
+- private-mode `/reindex --full` refusal probe
+- private-mode retrieve-style probe
+- protected direct-read denial probe
+- generated `PRIVATE-FOLDER-MANUAL-AUDIT-RUNBOOK.md` for approval-sensitive prompts
+
+Latest run:
+
+- Audit ID: `capability-live-audit-20260518-004603`
+- Result: 44/44 scripted prompt runs passed process/tool-artifact heuristics
+- Targeted runtime artifact canary scan passed with only source fixtures allowlisted
+
+Bug found and fixed:
+
+- `/show` in private mode could use an existing index snippet after a developer-mode reindex. `ShowCommand` now skips index snippets in private mode unless private-mode RAG is explicitly enabled.
+
+Still open:
+
+- per-turn extracted-document send-to-model approval UX/tracing
+- approval grant/deny live transcript capture
+- larger real-world private-folder fixtures
+- checkpoint/mutation/restore private-folder probes

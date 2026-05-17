@@ -9,6 +9,7 @@ import dev.talos.core.extract.DocumentExtractionStatus;
 import dev.talos.core.index.LuceneStore;
 import dev.talos.core.ingest.FileCapabilityPolicy;
 import dev.talos.runtime.policy.PrivateDocumentPolicy;
+import dev.talos.runtime.policy.ProtectedReadScopePolicy;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -54,19 +55,23 @@ public final class ShowCommand implements Command {
 
         try {
             // Try to find the snippet via Lucene store
-            Path indexDir = ctx.rag().getIndexer().indexDirFor(workspace);
-            try (var store = new LuceneStore(indexDir, 0)) {
-                String snippetId = filePath + "#" + chunkId;
-                String text = store.getTextByPath(snippetId);
+            boolean canUseIndex = !ProtectedReadScopePolicy.privateMode(ctx.cfg())
+                    || ProtectedReadScopePolicy.ragEnabledInPrivateMode(ctx.cfg());
+            if (canUseIndex) {
+                Path indexDir = ctx.rag().getIndexer().indexDirFor(workspace);
+                try (var store = new LuceneStore(indexDir, 0)) {
+                    String snippetId = filePath + "#" + chunkId;
+                    String text = store.getTextByPath(snippetId);
 
-                if (text != null && !text.trim().isEmpty()) {
-                    var sb = new StringBuilder();
-                    sb.append("Snippet: ").append(snippetId).append("\n");
-                    sb.append("─".repeat(60)).append("\n");
-                    sb.append(text);
-                    if (!text.endsWith("\n")) sb.append("\n");
-                    sb.append("─".repeat(60));
-                    return new Result.Ok(sb.toString());
+                    if (text != null && !text.trim().isEmpty()) {
+                        var sb = new StringBuilder();
+                        sb.append("Snippet: ").append(snippetId).append("\n");
+                        sb.append("─".repeat(60)).append("\n");
+                        sb.append(text);
+                        if (!text.endsWith("\n")) sb.append("\n");
+                        sb.append("─".repeat(60));
+                        return new Result.Ok(sb.toString());
+                    }
                 }
             }
 

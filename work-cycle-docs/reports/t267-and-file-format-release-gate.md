@@ -4,14 +4,15 @@
 
 Release-ready only for developer/text-project beta, not private-document beta.
 
-2026-05-16 superseding update: Talos now has narrow local extraction for
+2026-05-18 superseding update: Talos now has narrow local extraction for
 text-bearing PDFs, `.docx`, `.xls`, and `.xlsx`. Images and PowerPoint are frozen
-out of beta and remain v1/open issues. A two-model beta-core capability audit ran
-against GPT-OSS and Qwen with audit id `capability-live-audit-20260516-210854`,
-and the targeted runtime artifact canary scan passed on that audit root.
-Private-document beta remains blocked by broader sensitive-paperwork fixtures,
-adversarial document quality evidence, and the still-present developer/default
-mode risk that approved direct protected reads may enter model context.
+out of beta and remain v1/open issues. The latest two-model private-folder bank
+ran against GPT-OSS and Qwen with audit id `capability-live-audit-20260518-004603`,
+and the targeted runtime artifact canary scan passed on that audit root. Private-document
+beta remains blocked by broader sensitive-paperwork fixtures, approval-sensitive
+transcript capture, explicit send-to-model UX/tracing, adversarial document quality
+evidence, and the still-present developer/default mode risk that approved direct
+protected reads may enter model context.
 
 ## 2. Source crosscheck summary
 
@@ -44,9 +45,9 @@ Fixed in this pass:
 
 Still open:
 
-- Two-model live prompt-bank audit not run in this pass. Updated preflight and smoke checks show both model files are present and both models can answer through Talos after stale repo-owned `llama-server.exe` processes are stopped.
-- Private mode now has a minimal `/privacy` REPL UX and warning-only sensitive workspace detection, but it still lacks live prompt-bank evidence.
-- Artifact scan is CI-grade for controlled generated surfaces and now has a targeted live-audit scan task, but that task has not been run on completed live-audit artifacts because the live audit has not run.
+- The broader historical T267 approval-sensitive prompt bank is not fully automated. The focused beta-core/private-folder bank has run, but approval grant/deny transcripts still require a synchronized runner or human-operated capture.
+- Private mode now has `/privacy` REPL UX, warning-only sensitive workspace detection, and focused live prompt-bank evidence. It still lacks large real-world private-folder fixture evidence.
+- Artifact scan is CI-grade for controlled generated surfaces and targeted live-audit roots, but private-document release still requires broader artifact coverage after approval-sensitive runs.
 
 ## 4. Unsupported-format status
 

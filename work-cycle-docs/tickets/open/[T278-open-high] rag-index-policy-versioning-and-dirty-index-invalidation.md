@@ -20,6 +20,8 @@ Dirty historical RAG indexes may contain protected chunks. Retrieval-time saniti
 
 - `IndexerPolicyMetadataTest`
 - `RagDirtyIndexIntegrationTest`
+- `InfraCommandsTest.Show.private_mode_show_skips_index_snippet_when_private_rag_disabled`
+- Private-folder bank audit `capability-live-audit-20260518-004603`
 
 ## User impact
 
@@ -67,6 +69,21 @@ Policy-version changes can force rebuilds and may cost time on first retrieval.
 ## Open questions
 
 - Should stale-index rebuild be automatic in all modes or refused in private mode?
+
+## 2026-05-18 private-mode `/show` stale-index update
+
+The private-folder bank exposed a stale-index display path: `/show private-report.pdf` in private mode could use an existing Lucene snippet created by an earlier developer-mode reindex. The snippet content was sanitized, but the command bypassed the explicit local-display extraction path and did not show the model-context boundary.
+
+Fix:
+
+- `ShowCommand` now skips Lucene snippet lookup in private mode unless `privacy.rag.enabled_in_private_mode=true`.
+- The command falls back to direct local-display extraction and labels output with `Model context: not used (/show local display)`.
+
+Verification:
+
+- `./gradlew.bat test --tests "*private_mode_show_skips_index_snippet_when_private_rag_disabled" --no-daemon`
+- `./gradlew.bat test --tests "dev.talos.cli.repl.slash.InfraCommandsTest$Show" --no-daemon`
+- Private-folder bank audit `capability-live-audit-20260518-004603` passed after rebuilding the installed launcher.
 
 ## Related files
 

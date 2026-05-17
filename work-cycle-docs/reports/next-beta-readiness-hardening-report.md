@@ -4,15 +4,16 @@
 
 Release-ready only for developer/text-project beta, not private-document beta.
 
-2026-05-16 superseding update: PDF text extraction, DOCX text extraction,
+2026-05-18 superseding update: PDF text extraction, DOCX text extraction,
 XLS/XLSX cell extraction, and extraction-aware grep/RAG plumbing are implemented
 behind runtime policy. Images and PowerPoint are frozen out of beta. A two-model
-beta-core capability audit ran against GPT-OSS and Qwen with audit id
-`capability-live-audit-20260516-210854`, and the targeted runtime artifact
+private-folder bank audit ran against GPT-OSS and Qwen with audit id
+`capability-live-audit-20260518-004603`, and the targeted runtime artifact
 canary scan passed. Private-document beta remains blocked by broader
-sensitive-paperwork fixtures, adversarial document quality evidence, and the
-explicit developer/default-mode risk that approved direct protected reads may
-enter model context.
+sensitive-paperwork fixtures, approval-sensitive transcript capture,
+per-turn send-to-model UX/tracing, adversarial document quality evidence, and
+the explicit developer/default-mode risk that approved direct protected reads
+may enter model context.
 
 ## 2. What changed in this pass
 
@@ -67,13 +68,13 @@ enter model context.
 
 New indexes write `talos-index-metadata.json` with schema, privacy policy version, file-capability policy version, RAG config hash, workspace root hash, creation time, and Talos version. `RagService` treats valid Lucene indexes with missing/stale metadata as dirty and rebuilds them before retrieval.
 
-Focused Lucene-backed integration now covers missing metadata, old protected chunks, config-hash changes, and private-mode retrieval disablement. Remaining risk: live prompt-bank coverage has not exercised this with local models.
+Focused Lucene-backed integration now covers missing metadata, old protected chunks, config-hash changes, and private-mode retrieval disablement. Remaining risk: larger private-folder corpora and approval-sensitive transcripts have not exercised this with local models.
 
 ## 6. Unsupported-format final-answer status
 
 Scripted model tests now cover fabricated summaries/claims across PDF, Word/DOCX, Excel/XLSX, PowerPoint/PPTX, images, archives, binaries, compare flows, skipped archive search, and unsupported PDF/DOCX write attempts. Runtime answer shaping removes unsupported-family claims and prepends a document capability note.
 
-Remaining risk: live model behavior still needs the prompt-bank audit.
+Remaining risk: broader live model behavior still needs larger private-document and approval-sensitive prompt-bank coverage.
 
 ## 7. Private-folder mode status
 
@@ -90,8 +91,8 @@ Minimal user-visible V1 exists:
 
 Missing:
 
-- broader e2e private-mode scenarios beyond the initial scripted read/grep cases
-- two-model live audit evidence
+- larger real-world private-mode scenarios beyond generated fixtures
+- approval-sensitive transcript evidence
 
 ## 8. Artifact canary scan status
 
@@ -120,19 +121,19 @@ Result:
 
 - focused artifact scanner tests passed.
 - targeted task exists and is intended for completed live-audit directories.
-- targeted task passed on `capability-live-audit-20260516-210854`.
+- targeted task passed on `capability-live-audit-20260518-004603`.
 
 ## 9. Two-model live audit status
 
-PASS for the focused capability prompt bank, still not private-document release-ready.
+PASS for the focused capability and scripted private-folder prompt banks, still not private-document release-ready.
 
-Models/backend: managed `llama.cpp` with GPT-OSS and Qwen ran sequentially through isolated temp-home configs. The latest beta-core capability audit is `capability-live-audit-20260516-210854`.
+Models/backend: managed `llama.cpp` with GPT-OSS and Qwen ran sequentially through isolated temp-home configs. The latest private-folder bank audit is `capability-live-audit-20260518-004603`.
 
-Artifacts: `local/manual-testing/capability-live-audit-20260516-210854/LIVE-CAPABILITY-AUDIT-RESULTS.md` and `LIVE-CAPABILITY-AUDIT-SUMMARY.csv`; runtime workspaces under `local/manual-workspaces/capability-live-audit-20260516-210854`.
+Artifacts: `local/manual-testing/capability-live-audit-20260518-004603/LIVE-CAPABILITY-AUDIT-RESULTS.md`, `LIVE-CAPABILITY-AUDIT-SUMMARY.csv`, and `PRIVATE-FOLDER-MANUAL-AUDIT-RUNBOOK.md`; runtime workspaces under `local/manual-workspaces/capability-live-audit-20260518-004603`.
 
 Format scope: beta core. Image/OCR and PowerPoint prompts were intentionally excluded.
 
-Verdict: the focused two-model capability audit passed its process/tool-artifact heuristics, but it is not a substitute for broader private-document correctness/quality evaluation.
+Verdict: the focused two-model capability/private-folder bank passed its process/tool-artifact heuristics, but it is not a substitute for broader private-document correctness/quality evaluation or approval-sensitive transcript evidence.
 
 ## 10. Tests run
 
@@ -140,17 +141,19 @@ Verdict: the focused two-model capability audit passed its process/tool-artifact
 - `./gradlew.bat e2eTest --tests "*PrivateModeScriptedE2e*" --no-daemon` - passed.
 - `./gradlew.bat clean check e2eTest --no-daemon` - passed after document extraction/evidence-gate fixes.
 - `./gradlew.bat installDist --no-daemon` - passed.
-- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-capability-live-audit.ps1 -BetaCoreOnly -StopStaleServers` - passed with audit id `capability-live-audit-20260516-210854`.
-- `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/capability-live-audit-20260516-210854,local/manual-workspaces/capability-live-audit-20260516-210854" ... --no-daemon` - passed.
+- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-capability-live-audit.ps1 -BetaCoreOnly -PrivateFolderBank -StopStaleServers` - passed with audit id `capability-live-audit-20260518-004603`.
+- `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/capability-live-audit-20260518-004603,local/manual-workspaces/capability-live-audit-20260518-004603" ... --no-daemon` - passed.
 
 ## 11. Tests not run
 
 - Image/OCR and PowerPoint were intentionally excluded from beta-core scope.
 - Full tax/health/legal/admin paperwork corpus audit not run.
+- Approval-sensitive live transcript not automated yet.
 
 ## 12. Remaining blockers
 
 - Broader private-mode and private-paperwork corpus evidence.
+- Synchronized or human-operated approval-sensitive transcript capture.
 - PowerPoint and legacy `.doc` remain unsupported/deferred.
 - Image/OCR remains frozen for v1.
 - Developer/default approved direct protected reads can still enter model context after approval.

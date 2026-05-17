@@ -233,6 +233,29 @@ class InfraCommandsTest {
             assertFalse(ok.text.contains("Eleni Nikolaou"), ok.text);
         }
 
+        @Test void private_mode_show_skips_index_snippet_when_private_rag_disabled() throws Exception {
+            Path pdf = ws.resolve("private-report.pdf");
+            writePdf(pdf, "Patient Name: Eleni Nikolaou");
+            Config cfg = new Config(null);
+            ProtectedReadScopePolicy.setPrivateMode(cfg, true);
+            Context privateCtx = Context.builder(cfg).build();
+            Path indexDir = privateCtx.rag().getIndexer().indexDirFor(ws);
+            Files.createDirectories(indexDir);
+            try (LuceneStore store = new LuceneStore(indexDir, 0)) {
+                store.add("private-report.pdf#0", "STALE_INDEX_SHOULD_NOT_RENDER", null);
+                store.commit();
+            }
+            var cmd = new ShowCommand(ws);
+
+            Result r = cmd.execute("private-report.pdf", privateCtx);
+
+            Result.Ok ok = assertInstanceOf(Result.Ok.class, r);
+            assertTrue(ok.text.contains("Document: private-report.pdf"), ok.text);
+            assertTrue(ok.text.contains("Model context: not used (/show local display)"), ok.text);
+            assertFalse(ok.text.contains("Snippet:"), ok.text);
+            assertFalse(ok.text.contains("STALE_INDEX_SHOULD_NOT_RENDER"), ok.text);
+        }
+
         @Test void document_fallback_extracts_xls_for_local_display_in_private_mode() throws Exception {
             Path xls = ws.resolve("private-workbook.xls");
             try (HSSFWorkbook workbook = new HSSFWorkbook()) {
