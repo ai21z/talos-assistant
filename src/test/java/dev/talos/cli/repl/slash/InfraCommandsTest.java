@@ -9,6 +9,13 @@ import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.XmlCompatTelemetry;
 import dev.talos.core.index.LuceneStore;
 import dev.talos.runtime.policy.ProtectedReadScopePolicy;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.font.PDType1Font;
+import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
+import org.apache.poi.hssf.usermodel.HSSFWorkbook;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
@@ -210,6 +217,66 @@ class InfraCommandsTest {
             assertFalse(ok.text.contains("Eleni Nikolaou"), ok.text);
         }
 
+        @Test void document_fallback_extracts_pdf_for_local_display_in_private_mode() throws Exception {
+            Path pdf = ws.resolve("private-report.pdf");
+            writePdf(pdf, "Patient Name: Eleni Nikolaou");
+            Config cfg = new Config(null);
+            ProtectedReadScopePolicy.setPrivateMode(cfg, true);
+            var cmd = new ShowCommand(ws);
+
+            Result r = cmd.execute("private-report.pdf", Context.builder(cfg).build());
+
+            Result.Ok ok = assertInstanceOf(Result.Ok.class, r);
+            assertTrue(ok.text.contains("Document: private-report.pdf"), ok.text);
+            assertTrue(ok.text.contains("local display"), ok.text);
+            assertTrue(ok.text.contains("[redacted-private-document-canary]"), ok.text);
+            assertFalse(ok.text.contains("Eleni Nikolaou"), ok.text);
+        }
+
+        @Test void document_fallback_extracts_xls_for_local_display_in_private_mode() throws Exception {
+            Path xls = ws.resolve("private-workbook.xls");
+            try (HSSFWorkbook workbook = new HSSFWorkbook()) {
+                var sheet = workbook.createSheet("Sheet1");
+                sheet.createRow(0).createCell(0).setCellValue("Patient Name: Eleni Nikolaou");
+                try (OutputStream out = Files.newOutputStream(xls)) {
+                    workbook.write(out);
+                }
+            }
+            Config cfg = new Config(null);
+            ProtectedReadScopePolicy.setPrivateMode(cfg, true);
+            var cmd = new ShowCommand(ws);
+
+            Result r = cmd.execute("private-workbook.xls", Context.builder(cfg).build());
+
+            Result.Ok ok = assertInstanceOf(Result.Ok.class, r);
+            assertTrue(ok.text.contains("Document: private-workbook.xls"), ok.text);
+            assertTrue(ok.text.contains("local display"), ok.text);
+            assertTrue(ok.text.contains("[redacted-private-document-canary]"), ok.text);
+            assertFalse(ok.text.contains("Eleni Nikolaou"), ok.text);
+        }
+
+        @Test void document_fallback_extracts_xlsx_for_local_display_in_private_mode() throws Exception {
+            Path xlsx = ws.resolve("private-workbook.xlsx");
+            try (XSSFWorkbook workbook = new XSSFWorkbook()) {
+                var sheet = workbook.createSheet("Sheet1");
+                sheet.createRow(0).createCell(0).setCellValue("Patient Name: Eleni Nikolaou");
+                try (OutputStream out = Files.newOutputStream(xlsx)) {
+                    workbook.write(out);
+                }
+            }
+            Config cfg = new Config(null);
+            ProtectedReadScopePolicy.setPrivateMode(cfg, true);
+            var cmd = new ShowCommand(ws);
+
+            Result r = cmd.execute("private-workbook.xlsx", Context.builder(cfg).build());
+
+            Result.Ok ok = assertInstanceOf(Result.Ok.class, r);
+            assertTrue(ok.text.contains("Document: private-workbook.xlsx"), ok.text);
+            assertTrue(ok.text.contains("local display"), ok.text);
+            assertTrue(ok.text.contains("[redacted-private-document-canary]"), ok.text);
+            assertFalse(ok.text.contains("Eleni Nikolaou"), ok.text);
+        }
+
         @Test void nonexistent_file_returns_error() {
             var cmd = new ShowCommand(ws);
             Result r = cmd.execute("nonexistent.java#0", ctx);
@@ -221,6 +288,21 @@ class InfraCommandsTest {
         @Test void spec_name() {
             var cmd = new ShowCommand(ws);
             assertEquals("show", cmd.spec().name());
+        }
+
+        private void writePdf(Path path, String text) throws Exception {
+            try (PDDocument doc = new PDDocument()) {
+                PDPage page = new PDPage();
+                doc.addPage(page);
+                try (PDPageContentStream stream = new PDPageContentStream(doc, page)) {
+                    stream.beginText();
+                    stream.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA), 12);
+                    stream.newLineAtOffset(40, 700);
+                    stream.showText(text);
+                    stream.endText();
+                }
+                doc.save(path.toFile());
+            }
         }
     }
 
