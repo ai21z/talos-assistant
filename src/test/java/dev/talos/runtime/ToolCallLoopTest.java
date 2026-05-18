@@ -128,6 +128,54 @@ class ToolCallLoopTest {
         }
     }
 
+    @Test
+    void writeFileOutcomeCarriesFullWriteEvidenceWhenTargetWasReadThisTurn() throws Exception {
+        Path ws = Files.createTempDirectory("talos-write-file-full-evidence-");
+        try {
+            Files.writeString(ws.resolve("README.md"), "Intro\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor);
+
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("system"),
+                    ChatMessage.user("Append exactly this line to README.md: Release gate note")));
+            var calls = List.of(
+                    new ChatMessage.NativeToolCall(
+                            "call_read",
+                            "talos.read_file",
+                            Map.of("path", "README.md")),
+                    new ChatMessage.NativeToolCall(
+                            "call_write",
+                            "talos.write_file",
+                            Map.of(
+                                    "path", "README.md",
+                                    "content", "Intro\nRelease gate note\n")));
+            Context ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of("Done.")))
+                    .nativeToolSpecs(nativeSpecs(new ReadFileTool(), new FileWriteTool()))
+                    .build();
+
+            ToolCallLoop.LoopResult result = loop.run("", calls, messages, ws, ctx);
+
+            ToolCallLoop.ToolOutcome writeOutcome = result.toolOutcomes().stream()
+                    .filter(outcome -> "talos.write_file".equals(outcome.toolName()))
+                    .findFirst()
+                    .orElseThrow();
+            assertTrue(writeOutcome.success(), writeOutcome.errorMessage());
+            assertTrue(writeOutcome.mutationEvidence().fullWriteReplacement(),
+                    "write_file after same-turn read should expose full-write evidence");
+            assertEquals("Intro\n", writeOutcome.mutationEvidence().oldString());
+            assertEquals("Intro\nRelease gate note\n", writeOutcome.mutationEvidence().newString());
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
     // ── Tool execution produces result text ─────────────────────────
 
     @Test

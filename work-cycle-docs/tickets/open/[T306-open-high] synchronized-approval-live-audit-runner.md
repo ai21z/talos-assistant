@@ -17,14 +17,32 @@ The current live-audit script intentionally avoids approval-sensitive prompts be
 - `scripts/run-capability-live-audit.ps1` now generates `PRIVATE-FOLDER-MANUAL-AUDIT-RUNBOOK.md` for approval-sensitive probes instead of pretending they are automated.
 - Private-folder bank audit `capability-live-audit-20260518-004603` passed non-interactive private-folder probes, but did not automate approval grant/deny prompts.
 - `SynchronizedApprovalAuditRunner` and `ScriptedApprovalGate` now provide a deterministic Java harness seam where approval prompts must be expected, matched, recorded, and answered.
-- The harness can now write a reviewable artifact bundle with final answer, approval transcript, model transcript, trace JSON/text, prompt-debug/provider-body files, real `JsonSessionStore` session snapshot/turn JSONL output, workspace status, and workspace diff placeholder.
+- The harness can now write a reviewable artifact bundle with final answer, approval transcript, model transcript, trace JSON/text, prompt-debug/provider-body files, real `JsonSessionStore` session snapshot/turn JSONL output, workspace status, and a redacted deterministic workspace diff.
+- The artifact bundle now includes `audit-transcript.json`, a structured metadata transcript with schema version, scenario, prompt/final-answer hashes, approval response summary, trace ID/status, verification status, checkpoint status, and tool event types.
 - Gradle task `runSynchronizedApprovalAudit` now runs the scripted approval bank by default and supports live mode with `-PapprovalAuditMode=live`.
 - Live mode now labels summaries as `Mode: LIVE`, records the active model, and writes real prompt-debug/provider-body capture files when the provider capture path supplies them.
 - `SynchronizedCliProcessDriver` and `SynchronizedCliApprovalSmokeMain` now provide a production-process smoke path that launches installed `talos run`, waits for stdout markers, and sends approval input only after the actual prompt appears.
 - Gradle task `runSynchronizedApprovalCliSmoke` runs that production-process smoke after `installDist`.
+- The generated CLI smoke summary now explicitly records `terminal mode: redirected stdin/stdout process` and `true PTY/JLine coverage: no`, preventing this smoke from being misrepresented as interactive terminal coverage.
+- Gradle task `prepareSynchronizedApprovalPtyManualAudit` now prepares a maintainer-facing manual PTY/JLine audit packet without claiming automated true-PTY coverage.
+- `SynchronizedCliPtyManualAuditMain` writes `PTY-MANUAL-AUDIT-RUNBOOK.md`, `PTY-MANUAL-AUDIT-STATUS.json`, `TRANSCRIPT-TEMPLATE.md`, an isolated fixture workspace, and an allowlist record for the fixture `.env`.
+- The generated PTY/JLine status records `MANUAL_REQUIRED`, `automatedPtyCoverage=false`, and `redirectedProcessCoverage=true`.
+- The generated artifact-scan command passes the actual fixture `.env` path to `-PartifactScanAllowlist`; the allowlist text file is evidence only, not a file-of-paths consumed by the scanner.
+- PTY/JLine blocker evidence from current code:
+  - `RunCmd.shouldUseSystemTerminal(...)` selects the JLine system terminal only when `System.console()` is present, stdin and stdout are both TTYs, and stdin has no buffered bytes.
+  - `SynchronizedCliApprovalSmokeMain` launches Talos with `ProcessBuilder` and redirected stdin/stdout pipes, so it necessarily exercises the scripted `BufferedReader` path through `ReplInput.scripted(...)`.
+  - `./gradlew.bat dependencyInsight --configuration runtimeClasspath --dependency org.jline --no-daemon` reports `org.jline:jline:3.26.3`; no dedicated PTY/ConPTY harness dependency is currently present.
 - The synchronized approval bank now includes explicit private-mode protected-read `SEND_TO_MODEL_CONTEXT` opt-in.
+- The synchronized approval bank now includes private-mode extracted DOCX/PDF/XLSX local-display-only and explicit document send-to-model opt-in probes.
+- The synchronized approval bank now includes mutation approval denial and mutation approval grant with checkpoint creation.
+- `ToolCallExecutionStage` now preserves private-document tool output for model messages when `ToolContentMetadata.modelHandoffAllowed=true`, and `MemoryUpdateListener`/`TraceRedactor` redact document-extraction answers before history persistence when raw artifact persistence is disabled.
+- `ToolCallExecutionStage` now attaches exact edit mutation evidence to successful `talos.edit_file` outcomes, and `StaticTaskVerifier` can promote exact replacement scenarios from `READBACK_ONLY` to `PASSED` when post-apply file content proves the replacement.
+- `TaskExpectationResolver` and `StaticTaskVerifier` now cover the narrow append-line EOF verifier slice, and the scripted synchronized approval bank includes `mutation-append-line-verified`.
+- `TaskExpectationResolver` and `StaticTaskVerifier` now cover narrow text/title replacement expectations, and the scripted synchronized approval bank includes `mutation-replacement-verified`.
 - Audit bundle persistence now redacts explicit send-to-model protected-read answers/model transcripts/session artifacts when raw artifact persistence is disabled.
 - Audit bundle writing now clears the scenario artifact directory before writing so stale files from previous runs cannot hide inside a passing audit root.
+- Audit workspace setup now clears each scenario workspace before fixture creation so stale mutated files cannot contaminate repeat audit runs.
+- Audit bundle workspace diffs now compare deterministic pre/post snapshots, report added/deleted/modified files, include redacted text line evidence for small text files, omit binary/large content bodies, and pass artifact canary scanning.
 
 ## Evidence from tests/audits
 
@@ -33,6 +51,11 @@ The current live-audit script intentionally avoids approval-sensitive prompts be
 - `./gradlew.bat e2eTest --tests "dev.talos.harness.SynchronizedApprovalAuditRunnerTest" --no-daemon` passed after adding the first synchronized approval harness slice.
 - The same focused e2e class now verifies that the artifact bundle is written, includes session snapshot and turn JSONL files, does not contain the raw protected test canary, and passes `ArtifactCanaryScanner.scanRuntimeArtifacts(...)`.
 - `./gradlew.bat runSynchronizedApprovalAudit "-PapprovalAuditArtifactsRoot=build/synchronized-approval-audit/artifacts" "-PapprovalAuditWorkspacesRoot=build/synchronized-approval-audit/workspaces" --no-daemon` passed and wrote `build/synchronized-approval-audit/artifacts/SYNCHRONIZED-APPROVAL-AUDIT.md`.
+- Fresh deterministic audit evidence after the workspace-diff slice:
+  - `./gradlew.bat e2eTest --tests "dev.talos.harness.SynchronizedApprovalAuditRunnerTest" --no-daemon` passed.
+  - `./gradlew.bat runSynchronizedApprovalAudit "-PapprovalAuditArtifactsRoot=build/synchronized-approval-audit/artifacts" "-PapprovalAuditWorkspacesRoot=build/synchronized-approval-audit/workspaces" --no-daemon` passed.
+  - `build/synchronized-approval-audit/artifacts/mutation-approval-granted-checkpointed/workspace/diff.txt` records `M notes.md`, `- status=old`, and `+ status=new`.
+  - `build/synchronized-approval-audit/artifacts/mutation-replacement-verified/workspace/diff.txt` records `M script.js`, `- document.querySelector('.missing-button');`, and `+ document.querySelector('#submit');`.
 - Two-model live synchronized approval slice ran on 2026-05-18:
   - GPT-OSS: `local/manual-testing/synchronized-approval-live-gptoss-20260518-0757/SYNCHRONIZED-APPROVAL-AUDIT.md`.
   - Qwen: `local/manual-testing/synchronized-approval-live-qwen-20260518-0810/SYNCHRONIZED-APPROVAL-AUDIT.md`.
@@ -54,6 +77,87 @@ The current live-audit script intentionally avoids approval-sensitive prompts be
   - Targeted artifact canary scan passed:
     `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/synchronized-approval-live-gptoss-20260518-4case,local/manual-testing/synchronized-approval-live-qwen-20260518-4case" --no-daemon`.
   - Direct raw-string sweep over the expanded live roots found no generated approval canaries, private-document fact canaries, developer-risk marker, or explicit opt-in marker.
+- Ten-case scripted synchronized approval audit ran on 2026-05-18:
+  - Scripted summary: `build/synchronized-approval-audit/artifacts/SYNCHRONIZED-APPROVAL-AUDIT.md`.
+  - Scenario count: 10.
+  - It covers protected-read denial, developer/default protected-read risk, private-mode protected-read local-display-only, private-mode protected-read explicit send-to-model opt-in, and private-mode DOCX/PDF/XLSX extraction local-display-only plus explicit document send-to-model opt-in.
+  - Targeted scan passed:
+    `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=build/synchronized-approval-audit/artifacts" --no-daemon`.
+  - Direct raw-string sweep over the scripted root found no generated protected-read canaries, private-document fact canaries, developer-risk marker, or explicit opt-in marker.
+- Ten-case two-model live synchronized approval audit ran on 2026-05-18:
+  - GPT-OSS: `local/manual-testing/synchronized-approval-live-gptoss-20260518-10case/SYNCHRONIZED-APPROVAL-AUDIT.md`.
+  - Qwen: `local/manual-testing/synchronized-approval-live-qwen-20260518-10case/SYNCHRONIZED-APPROVAL-AUDIT.md`.
+  - Scenario count: 10 per model.
+  - Targeted scan passed:
+    `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/synchronized-approval-live-gptoss-20260518-10case,local/manual-testing/synchronized-approval-live-qwen-20260518-10case" --no-daemon`.
+  - Direct raw-string sweep over both live roots found no generated protected-read canaries, private-document fact canaries, developer-risk marker, or explicit opt-in marker.
+- Twelve-case scripted synchronized approval audit ran on 2026-05-18:
+  - Scripted summary: `build/synchronized-approval-audit/artifacts/SYNCHRONIZED-APPROVAL-AUDIT.md`.
+  - Scenario count: 12.
+  - It adds mutation approval denial and mutation approval grant with checkpoint creation.
+  - Targeted scan passed:
+    `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=build/synchronized-approval-audit/artifacts" --no-daemon`.
+  - Direct raw-string sweep over the scripted root found no generated protected-read canaries, private-document fact canaries, developer-risk marker, or explicit opt-in marker.
+- Twelve-case two-model live synchronized approval audit ran on 2026-05-18:
+  - GPT-OSS: `local/manual-testing/synchronized-approval-live-gptoss-20260518-12case/SYNCHRONIZED-APPROVAL-AUDIT.md`.
+  - Qwen: `local/manual-testing/synchronized-approval-live-qwen-20260518-12case/SYNCHRONIZED-APPROVAL-AUDIT.md`.
+  - Scenario count: 12 per model.
+  - Mutation denial evidence: `notes.md` stayed `status=old` in both model workspaces.
+  - Mutation approval evidence: `notes.md` became `status=new` in both model workspaces and trace text records `APPROVAL_GRANTED` plus `CHECKPOINT_CREATED`.
+  - Targeted scan passed:
+    `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/synchronized-approval-live-gptoss-20260518-12case,local/manual-testing/synchronized-approval-live-qwen-20260518-12case" --no-daemon`.
+  - Direct raw-string sweep over both live roots found no generated protected-read canaries, private-document fact canaries, developer-risk marker, or explicit opt-in marker.
+- Thirteen-case scripted synchronized approval audit ran on 2026-05-18:
+  - Scripted summary: `build/synchronized-approval-audit/artifacts/SYNCHRONIZED-APPROVAL-AUDIT.md`.
+  - Scenario count: 13.
+  - It adds remember approval eligibility: the first safe edit is approved with `APPROVED_REMEMBER`, and the second safe edit is auto-approved through `SESSION_REMEMBER_ALLOW`.
+  - Targeted scan passed:
+    `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=build/synchronized-approval-audit/artifacts" --no-daemon`.
+  - Direct raw-string sweep over the scripted root found no generated protected-read canaries, private-document fact canaries, developer-risk marker, or explicit opt-in marker.
+- Thirteen-case GPT-OSS live synchronized approval audit initially failed before the classifier fix:
+  - Root failure summary: `local/manual-testing/synchronized-approval-live-gptoss-20260518-13case/SYNCHRONIZED-APPROVAL-AUDIT-FAILED.md`.
+  - Failure bundle: `local/manual-testing/synchronized-approval-live-gptoss-20260518-13case/mutation-remember-approval-auto-approves-second-write/FAILURE.md`.
+  - Evidence: task contract was `READ_ONLY_QA`, only `talos.read_file` was visible, no approval prompt appeared, and both files remained unchanged.
+  - Root cause: `MutationIntent` did not recognize imperative `Use talos.edit_file twice. First replace ...` wording where the mutation verb appears in the following sentence.
+- Thirteen-case two-model live synchronized approval audit passed after the classifier fix:
+  - GPT-OSS: `local/manual-testing/synchronized-approval-live-gptoss-20260518-13case/SYNCHRONIZED-APPROVAL-AUDIT.md`.
+  - Qwen: `local/manual-testing/synchronized-approval-live-qwen-20260518-13case/SYNCHRONIZED-APPROVAL-AUDIT.md`.
+  - Scenario count: 13 per model.
+  - Remember approval evidence: `notes.md` became `status=new`, `more.md` became `status2=new`, approval transcript records exactly one `APPROVED_REMEMBER`, and trace records the second edit as `SESSION_REMEMBER_ALLOW`.
+  - Targeted scans passed:
+    `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/synchronized-approval-live-gptoss-20260518-13case" --no-daemon`
+    and
+    `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/synchronized-approval-live-qwen-20260518-13case" --no-daemon`.
+  - Direct raw-string sweeps over both live roots found no generated protected-read canaries, private-document fact canaries, developer-risk marker, or explicit opt-in marker.
+- Exact-edit and replacement verifier strengthening ran after the thirteen-case work:
+  - `./gradlew.bat test --tests "dev.talos.runtime.verification.StaticTaskVerifierTest" --no-daemon` passed.
+  - `./gradlew.bat e2eTest --tests "dev.talos.harness.SynchronizedApprovalAuditRunnerTest" --no-daemon` passed.
+  - `./gradlew.bat runSynchronizedApprovalAudit "-PapprovalAuditArtifactsRoot=build/synchronized-approval-audit/artifacts" "-PapprovalAuditWorkspacesRoot=build/synchronized-approval-audit/workspaces" --no-daemon` passed.
+  - Scripted `mutation-approval-granted-checkpointed` now records `VERIFICATION_COMPLETED status=PASSED` with summary `Replacement verification passed`.
+  - Scripted `mutation-remember-approval-auto-approves-second-write` still records `VERIFICATION_COMPLETED status=PASSED` with summary `Exact edit replacement verification passed` because the multi-target request is outside the current narrow replacement-expectation extractor.
+- Structured transcript schema work:
+  - `./gradlew.bat e2eTest --tests "dev.talos.harness.SynchronizedApprovalAuditRunnerTest.writes_reviewable_audit_artifact_bundle_without_raw_protected_value" --no-daemon` passed after adding `audit-transcript.json`.
+  - The schema stores hashes and metadata rather than raw prompt/model text, keeping raw content in the already-redacted artifact files.
+- Fresh verification after structured transcript schema work:
+  - `./gradlew.bat clean check e2eTest --no-daemon` passed.
+  - `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=build/reports,build/test-results" --no-daemon` passed.
+  - `./gradlew.bat runSynchronizedApprovalAudit "-PapprovalAuditArtifactsRoot=build/synchronized-approval-audit/artifacts" "-PapprovalAuditWorkspacesRoot=build/synchronized-approval-audit/workspaces" --no-daemon` passed and regenerated deterministic audit bundles.
+  - `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=build/synchronized-approval-audit/artifacts" --no-daemon` passed.
+  - Direct raw-string sweep over regenerated audit artifacts, docs/tickets, build reports, and test results found no generated protected-read canaries, private-document fact canaries, developer-risk marker, or explicit opt-in marker.
+  - `git diff --check` passed with CRLF normalization warnings only.
+  - Example transcript evidence: `build/synchronized-approval-audit/artifacts/mutation-approval-granted-checkpointed/audit-transcript.json` records schema `talos.synchronizedApprovalAuditTranscript`, `approvalResponses=["APPROVED"]`, `traceStatus=COMPLETE`, `verificationStatus=PASSED`, `checkpointStatus=CREATED`, and `verificationSummary="Replacement verification passed."`.
+- Exact bullet-count semantic verifier slice:
+  - `./gradlew.bat test --tests "dev.talos.runtime.expectation.TaskExpectationResolverTest" --tests "dev.talos.runtime.verification.StaticTaskVerifierTest" --no-daemon` passed.
+  - `./gradlew.bat e2eTest --tests "dev.talos.harness.SynchronizedApprovalAuditRunnerTest" --no-daemon` passed after adding a 14th scripted audit bundle.
+  - Scripted `runSynchronizedApprovalAudit` now includes `mutation-exact-bullet-count-verified`.
+  - `build/synchronized-approval-audit/artifacts/mutation-exact-bullet-count-verified/audit-transcript.json` records `verificationStatus=PASSED`, `checkpointStatus=CREATED`, and `verificationSummary="Bullet count verification passed."`.
+- Append-line semantic verifier slice:
+  - `./gradlew.bat test --tests "dev.talos.runtime.expectation.TaskExpectationResolverTest" --tests "dev.talos.runtime.verification.StaticTaskVerifierTest" --tests "dev.talos.runtime.task.TaskContractResolverTest" --no-daemon` passed.
+  - `./gradlew.bat e2eTest --tests "dev.talos.harness.SynchronizedApprovalAuditRunnerTest" --no-daemon` passed after adding a 15th scripted audit bundle.
+  - Scripted `runSynchronizedApprovalAudit` now includes `mutation-append-line-verified`.
+  - `build/synchronized-approval-audit/artifacts/mutation-append-line-verified/audit-transcript.json` records `verificationStatus=PASSED`, `checkpointStatus=CREATED`, and `verificationSummary="Append line verification passed."`.
+  - The generated append-line trace now records exactly one `EXPECTATION_VERIFIED` event; internal reprompt probes use a no-trace verifier path.
+  - This is EOF-line semantic evidence, not proof that the tool used an append-only operation internally.
 - Fresh verification after the live-slice implementation:
   - `./gradlew.bat e2eTest --tests "dev.talos.harness.SynchronizedApprovalAuditRunnerTest" --no-daemon` passed.
   - `./gradlew.bat e2eTest --tests "*SynchronizedApproval*" --no-daemon` passed.
@@ -106,6 +210,7 @@ Keep the existing `-PrivateFolderBank` scripted path for non-interactive probes.
 - approval_runner_grants_local_display_read_without_model_handoff - initial deterministic e2e coverage added
 - approval_runner_fails_if_approval_prompt_missing - initial deterministic e2e coverage added
 - approval_runner_writes_reviewable_artifact_bundle_without_raw_protected_value - initial deterministic e2e coverage added
+- approval_runner_writes_structured_audit_transcript_json - folded into the reviewable artifact bundle test
 - approval_runner_artifact_scan_passes_on_generated_bundle - folded into the artifact bundle test
 - approval_runner_summary_labels_scripted_mode - covered by the deterministic entrypoint summary test
 - cli_process_driver_sends_each_line_after_expected_prompt - added
@@ -115,6 +220,15 @@ Keep the existing `-PrivateFolderBank` scripted path for non-interactive probes.
 - approval_runner_explicit_send_to_model_records_scope - added
 - artifact_bundle_redacts_explicit_send_to_model_protected_answer_when_raw_persistence_disabled - added
 - artifact_bundle_replaces_stale_files_from_prior_run - added
+- private_mode_extracted_docx_is_withheld_from_model_context_by_default - added
+- private_mode_extracted_docx_send_to_model_opt_in_allows_handoff_but_artifacts_redact - added
+- private_mode_extracted_pdf_and_xlsx_are_withheld_from_model_context_by_default - added
+- private_mode_extracted_pdf_and_xlsx_send_to_model_opt_in_allows_handoff_but_artifacts_redact - added
+- mutation_approval_denial_does_not_modify_workspace - added
+- mutation_approval_grant_records_checkpoint_and_modifies_workspace - added
+- mutation_remember_approval_auto_approves_second_safe_write_in_same_turn - added
+- missing_expected_approval_prompt_exposes_partial_result_for_failure_artifacts - added
+- deterministic_audit_entrypoint_replaces_stale_workspace_files - added
 - approval_runner_artifact_scan_fails_on_raw_private_fact
 
 ## Acceptance criteria
@@ -131,7 +245,8 @@ Keep the existing `-PrivateFolderBank` scripted path for non-interactive probes.
 - Expected approval prompts record description, detail, synthetic prompt text, and response.
 - Protected-read denial and private-mode protected-read approval are covered at the executor/runtime boundary.
 - Private-mode explicit protected-read send-to-model opt-in is covered at the executor/runtime boundary.
-- The harness writes a first artifact bundle: final answer, approvals JSONL, model transcript, trace JSON/text, prompt-debug/provider-body placeholder files, session snapshot, turn JSONL, workspace status, workspace diff placeholder, and summary index.
+- The harness writes a first artifact bundle: final answer, approvals JSONL, model transcript, trace JSON/text, prompt-debug/provider-body placeholder files, session snapshot, turn JSONL, workspace status, redacted deterministic workspace diff, and summary index.
+- The harness writes `audit-transcript.json` as a structured metadata transcript for deterministic bundle inspection without storing raw prompt/model text in that schema.
 - The harness redacts persisted protected-read answers/model transcripts/session artifacts for explicit send-to-model runs when raw artifact persistence is disabled.
 - The harness clears stale scenario artifact roots before writing fresh bundles.
 - The generated deterministic bundle is scanned with the runtime artifact canary scanner in e2e coverage.
@@ -143,20 +258,58 @@ Keep the existing `-PrivateFolderBank` scripted path for non-interactive probes.
 - The Qwen live slice passed for developer/default approved protected-read explicit risk.
 - The GPT-OSS expanded four-case live slice passed for explicit protected-read send-to-model opt-in with persisted artifact redaction.
 - The Qwen expanded four-case live slice passed for explicit protected-read send-to-model opt-in with persisted artifact redaction.
+- The scripted ten-case bank passed with DOCX/PDF/XLSX private-document extraction local-display-only and explicit send-to-model opt-in scenarios.
+- The GPT-OSS ten-case live slice passed artifact scanning and raw-value sweep for all ten scenarios.
+- The Qwen ten-case live slice passed artifact scanning and raw-value sweep for all ten scenarios.
+- The scripted twelve-case bank passed with mutation approval denial and mutation approval grant with checkpoint creation.
+- The GPT-OSS twelve-case live slice passed artifact scanning, raw-value sweep, mutation-denial final state, and mutation-grant checkpoint evidence.
+- The Qwen twelve-case live slice passed artifact scanning, raw-value sweep, mutation-denial final state, and mutation-grant checkpoint evidence.
+- The scripted thirteen-case bank passed with remember approval eligibility: first safe edit prompts and records `APPROVED_REMEMBER`; second safe edit uses `SESSION_REMEMBER_ALLOW`.
+- The scripted seventeen-case bank passed with proposal-only/no-mutation coverage, exact bullet-count verification, append-line EOF verification, and replacement verification.
+- The scripted seventeen-case bank now writes redacted deterministic workspace diffs instead of placeholders; mutation bundles show concrete file-level before/after evidence, while the proposal-only bundle records `(no file changes detected)`.
+- A GPT-OSS thirteen-case live failure exposed a runtime-owned classifier gap: `Use talos.edit_file twice. First replace ...` was classified as read-only and exposed only read tools.
+- `MutationIntent` now recognizes imperative mutation-tool requests where the mutation verb appears in a following sentence.
+- The runner now writes durable failure evidence for missing expected approval prompts.
+- The GPT-OSS thirteen-case live slice passed after the classifier fix.
+- The Qwen thirteen-case live slice passed after the classifier fix.
+- Exact edit mutations in the scripted synchronized approval bank now verify as `PASSED`, not `READBACK_ONLY`, when post-apply content proves the requested replacement.
+- Exact append-line mutations in the scripted synchronized approval bank now verify as `PASSED`, not `READBACK_ONLY`, when post-apply content proves the requested line appears exactly once at EOF.
+- Scripted replacement-expectation mutations now verify as `PASSED`, not `READBACK_ONLY`, when post-apply content proves the old literal is gone and the new literal is present.
+- Fresh verification after the thirteen-case classifier/failure-capture work passed:
+  - `./gradlew.bat test --tests "dev.talos.runtime.task.TaskContractResolverTest" --no-daemon`
+  - `./gradlew.bat e2eTest --tests "dev.talos.harness.SynchronizedApprovalAuditRunnerTest" --no-daemon`
+  - `./gradlew.bat e2eTest --tests "*SynchronizedApproval*" --no-daemon`
+  - `./gradlew.bat clean check e2eTest --no-daemon`
+  - scripted `runSynchronizedApprovalAudit`
+  - runtime artifact scans over scripted audit artifacts, both thirteen-case live roots, docs/tickets, and build reports/results
+  - `git diff --check` with CRLF normalization warnings only
+- Fresh verification after the proposal-only and workspace-diff slices passed:
+  - `./gradlew.bat clean check e2eTest --no-daemon`
+  - `./gradlew.bat runSynchronizedApprovalAudit "-PapprovalAuditArtifactsRoot=build/synchronized-approval-audit/artifacts" "-PapprovalAuditWorkspacesRoot=build/synchronized-approval-audit/workspaces" --no-daemon`
+  - `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=build/reports,build/test-results" --no-daemon`
+  - `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=build/synchronized-approval-audit/artifacts" --no-daemon`
+  - `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=work-cycle-docs/reports,work-cycle-docs/tickets" --no-daemon`
+  - direct raw-value sweep over generated audit artifacts, reports, tickets, build reports, and test results found no protected/private audit canaries
+  - `git diff --check` passed with CRLF normalization warnings only
 - Live summaries now distinguish `SCRIPTED` from `LIVE` runs and include the model string.
 - A maintainer can run the production-process CLI smoke with `./gradlew.bat runSynchronizedApprovalCliSmoke --no-daemon`, optionally setting `-PcliSmokeConfig=...`, `-PcliSmokeArtifactsRoot=...`, and `-PcliSmokeWorkspace=...`.
 - The GPT-OSS production-process CLI smoke passed for protected-read denial prompt rendering/consumption in redirected stdin mode.
 - The Qwen production-process CLI smoke passed for protected-read denial prompt rendering/consumption in redirected stdin mode.
+- The production-process CLI smoke artifact now self-labels redirected-pipe terminal mode and explicitly says true PTY/JLine coverage is absent.
+- A maintainer can prepare the manual real-terminal PTY/JLine packet with `./gradlew.bat prepareSynchronizedApprovalPtyManualAudit --no-daemon`, optionally setting `-PptyManualArtifactsRoot=...`, `-PptyManualWorkspace=...`, `-PptyManualTalosCommand=...`, and `-PptyManualConfig=...`.
+- Manual PTY/JLine packet generator evidence:
+  - `./gradlew.bat e2eTest --tests "dev.talos.harness.SynchronizedCliPtyManualAuditMainTest" --no-daemon` first failed while the generated runbook incorrectly passed `artifact-scan-allowlist.txt` to `-PartifactScanAllowlist`, proving the regression assertion caught the bug.
+  - The generator was fixed to pass the actual fixture `.env` path to `-PartifactScanAllowlist`.
+  - `./gradlew.bat e2eTest --tests "dev.talos.harness.SynchronizedCliPtyManualAuditMainTest" --no-daemon` passed after the fix.
+  - `./gradlew.bat prepareSynchronizedApprovalPtyManualAudit "-PptyManualArtifactsRoot=build/synchronized-pty-manual/artifacts" "-PptyManualWorkspace=build/synchronized-pty-manual/workspace" --no-daemon` passed and wrote the manual packet.
+  - `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=build/synchronized-pty-manual/artifacts,build/synchronized-pty-manual/workspace" "-PartifactScanAllowlist=build/synchronized-pty-manual/workspace/.env" --no-daemon` passed.
 
 ## Remaining blockers
 
-- Add true pseudo-terminal/JLine smoke coverage for fully interactive terminal rendering. The current CLI smoke covers synchronized redirected stdin/stdout, which is valuable but not a true terminal.
-- Expand the live bank beyond protected-read cases:
-  - extracted-document send-to-model disabled/enabled,
-  - mutation approval denied,
-  - mutation approval granted with checkpoint and verification,
-  - remember approval eligibility.
-- Define exact transcript schema.
+- Add true pseudo-terminal/JLine smoke coverage for fully interactive terminal rendering. The current CLI smoke covers synchronized redirected stdin/stdout, which is valuable but not a true terminal and now says so in generated evidence.
+- Decide whether the PTY layer should be implemented with a Java-compatible ConPTY/JNA dependency, an external PowerShell/Windows Terminal harness, or remain a manual release-audit packet. Current code/dependencies do not contain a true child-process PTY driver.
+- Run the generated manual PTY/JLine packet in a real terminal before treating the PTY/JLine blocker as closed.
+- Expand the live bank beyond protected/private-document read and basic mutation approval cases. Exact edit replacement, bullet-count, append-line, and narrow replacement expectations now have stronger verification, but broader semantic mutation verification remains tracked separately in T307.
 - Decide whether explicit extracted-document send-to-model should be per-turn approval, config-only, or both.
 
 ## Open questions

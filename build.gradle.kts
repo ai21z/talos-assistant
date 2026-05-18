@@ -541,6 +541,42 @@ tasks.register<JavaExec>("runSynchronizedApprovalCliSmoke") {
     })
 }
 
+tasks.register<JavaExec>("prepareSynchronizedApprovalPtyManualAudit") {
+    description = "Prepares a manual true-PTY/JLine approval audit packet with fixture workspace and runbook."
+    group = "verification"
+    dependsOn("installDist", "e2eTestClasses")
+    mainClass.set("dev.talos.harness.SynchronizedCliPtyManualAuditMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        val out = mutableListOf<String>()
+        val talos = providers.gradleProperty("ptyManualTalosCommand")
+            .orElse("")
+            .get()
+        val config = providers.gradleProperty("ptyManualConfig")
+            .orElse("")
+            .get()
+        val artifacts = providers.gradleProperty("ptyManualArtifactsRoot")
+            .orElse("")
+            .get()
+        val workspace = providers.gradleProperty("ptyManualWorkspace")
+            .orElse("")
+            .get()
+        if (talos.isNotBlank()) {
+            out.addAll(listOf("--talos", talos))
+        }
+        if (config.isNotBlank()) {
+            out.addAll(listOf("--config", config))
+        }
+        if (artifacts.isNotBlank()) {
+            out.addAll(listOf("--artifacts", artifacts))
+        }
+        if (workspace.isNotBlank()) {
+            out.addAll(listOf("--workspace", workspace))
+        }
+        out
+    })
+}
+
 tasks.register<Exec>("qodanaLocal") {
     description = "Runs optional local Qodana Community analysis using Docker with persistent Qodana/Gradle cache volumes."
     group = "verification"

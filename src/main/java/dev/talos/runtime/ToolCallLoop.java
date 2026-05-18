@@ -204,7 +204,8 @@ public final class ToolCallLoop {
             String errorMessage,
             dev.talos.tools.VerificationStatus fileVerificationStatus,
             String errorCode,
-            WorkspaceOperationPlan workspaceOperationPlan
+            WorkspaceOperationPlan workspaceOperationPlan,
+            MutationEvidence mutationEvidence
     ) {
         public ToolOutcome {
             toolName = toolName == null ? "" : toolName;
@@ -212,6 +213,23 @@ public final class ToolCallLoop {
             summary = summary == null ? "" : summary;
             errorMessage = errorMessage == null ? "" : errorMessage;
             errorCode = errorCode == null ? "" : errorCode;
+            mutationEvidence = mutationEvidence == null ? MutationEvidence.none() : mutationEvidence;
+        }
+
+        public ToolOutcome(
+                String toolName,
+                String pathHint,
+                boolean success,
+                boolean mutating,
+                boolean denied,
+                String summary,
+                String errorMessage,
+                dev.talos.tools.VerificationStatus fileVerificationStatus,
+                String errorCode,
+                WorkspaceOperationPlan workspaceOperationPlan
+        ) {
+            this(toolName, pathHint, success, mutating, denied, summary, errorMessage,
+                    fileVerificationStatus, errorCode, workspaceOperationPlan, MutationEvidence.none());
         }
 
         public ToolOutcome(
@@ -293,6 +311,30 @@ public final class ToolCallLoop {
             if (!ToolError.INVALID_PARAMS.equals(errorCode)) return false;
             String lower = errorMessage.toLowerCase(java.util.Locale.ROOT);
             return lower.contains("old_string not found");
+        }
+    }
+
+    public record MutationEvidence(
+            String kind,
+            String oldString,
+            String newString
+    ) {
+        public MutationEvidence {
+            kind = kind == null ? "" : kind;
+            oldString = oldString == null ? "" : oldString;
+            newString = newString == null ? "" : newString;
+        }
+
+        public static MutationEvidence none() {
+            return new MutationEvidence("", "", "");
+        }
+
+        public static MutationEvidence exactEdit(String oldString, String newString) {
+            return new MutationEvidence("EXACT_EDIT_REPLACEMENT", oldString, newString);
+        }
+
+        public boolean exactEditReplacement() {
+            return "EXACT_EDIT_REPLACEMENT".equals(kind);
         }
     }
 

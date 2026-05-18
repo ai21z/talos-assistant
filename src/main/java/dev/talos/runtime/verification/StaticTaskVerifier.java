@@ -6,8 +6,11 @@ import dev.talos.runtime.capability.ArtifactOperation;
 import dev.talos.runtime.capability.CapabilityProfile;
 import dev.talos.runtime.capability.CapabilityProfileRegistry;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
+import dev.talos.runtime.expectation.AppendLineExpectation;
+import dev.talos.runtime.expectation.BulletListExpectation;
 import dev.talos.runtime.expectation.ExpectationVerificationStatus;
 import dev.talos.runtime.expectation.LiteralContentExpectation;
+import dev.talos.runtime.expectation.ReplacementExpectation;
 import dev.talos.runtime.expectation.TaskExpectation;
 import dev.talos.runtime.expectation.TaskExpectationResolver;
 import dev.talos.runtime.task.TaskContract;
@@ -138,6 +141,25 @@ public final class StaticTaskVerifier {
             ToolCallLoop.LoopResult loopResult,
             int extraMutationSuccesses
     ) {
+        return verifyInternal(workspace, contract, loopResult, extraMutationSuccesses, true);
+    }
+
+    public static TaskVerificationResult verifyWithoutTraceEvents(
+            Path workspace,
+            TaskContract contract,
+            ToolCallLoop.LoopResult loopResult,
+            int extraMutationSuccesses
+    ) {
+        return verifyInternal(workspace, contract, loopResult, extraMutationSuccesses, false);
+    }
+
+    private static TaskVerificationResult verifyInternal(
+            Path workspace,
+            TaskContract contract,
+            ToolCallLoop.LoopResult loopResult,
+            int extraMutationSuccesses,
+            boolean recordExpectationTrace
+    ) {
         if (loopResult == null) {
             return TaskVerificationResult.notRun("No tool-loop result was available.");
         }
@@ -195,7 +217,19 @@ public final class StaticTaskVerifier {
 
         verifyExpectedTargets(contract, root, profile, mutatedPaths, expectedTargetExemptions,
                 workspaceOperationVerification.expectedTargetAliases(), facts, problems);
-        boolean expectationRequired = verifyTaskExpectations(contract, root, facts, problems);
+        boolean expectationRequired = verifyTaskExpectations(
+                contract,
+                root,
+                successfulMutations,
+                facts,
+                problems,
+                recordExpectationTrace);
+        boolean bulletCountExpectationRequired = hasBulletCountExpectation(contract);
+        boolean appendLineExpectationRequired = hasAppendLineExpectation(contract);
+        boolean replacementExpectationRequired = hasReplacementExpectation(contract);
+        boolean exactEditEvidenceRequired = verifyExactEditEvidence(successfulMutations, root, facts, problems);
+        boolean exactEditEvidenceCoversAllMutations =
+                exactEditEvidenceRequired && allSuccessfulMutationsHaveExactEditEvidence(successfulMutations);
         boolean sourceDerivedRequired = verifySourceDerivedArtifact(contract, root, facts, problems);
 
         if (webCoherenceRequired) {
@@ -213,6 +247,14 @@ public final class StaticTaskVerifier {
             return TaskVerificationResult.failed(
                     sourceDerivedRequired && !webCoherenceRequired
                             ? "Source-derived artifact verification failed."
+                    : exactEditEvidenceRequired && problems.stream().anyMatch(StaticTaskVerifier::isExactEditProblem)
+                            ? "Exact edit replacement verification failed."
+                    : replacementExpectationRequired && problems.stream().anyMatch(StaticTaskVerifier::isReplacementProblem)
+                            ? "Replacement verification failed."
+                    : appendLineExpectationRequired && problems.stream().anyMatch(StaticTaskVerifier::isAppendLineProblem)
+                            ? "Append line verification failed."
+                    : bulletCountExpectationRequired && problems.stream().anyMatch(StaticTaskVerifier::isBulletCountProblem)
+                            ? "Bullet count verification failed."
                     : expectationRequired && problems.stream().anyMatch(StaticTaskVerifier::isExactContentProblem)
                             ? "Exact content verification failed."
                             : firstProblemSummary(problems),
@@ -220,8 +262,28 @@ public final class StaticTaskVerifier {
                     problems);
         }
         if (expectationRequired && !webCoherenceRequired) {
+            if (replacementExpectationRequired) {
+                return TaskVerificationResult.passed(
+                        "Replacement verification passed.",
+                        facts);
+            }
+            if (appendLineExpectationRequired) {
+                return TaskVerificationResult.passed(
+                        "Append line verification passed.",
+                        facts);
+            }
+            if (bulletCountExpectationRequired) {
+                return TaskVerificationResult.passed(
+                        "Bullet count verification passed.",
+                        facts);
+            }
             return TaskVerificationResult.passed(
                     "Exact content verification passed.",
+                    facts);
+        }
+        if (exactEditEvidenceCoversAllMutations && !webCoherenceRequired) {
+            return TaskVerificationResult.passed(
+                    "Exact edit replacement verification passed.",
                     facts);
         }
         if (sourceDerivedRequired && !webCoherenceRequired) {
@@ -243,8 +305,10 @@ public final class StaticTaskVerifier {
     private static boolean verifyTaskExpectations(
             TaskContract contract,
             Path root,
+            List<ToolCallLoop.ToolOutcome> successfulMutations,
             List<String> facts,
-            List<String> problems
+            List<String> problems,
+            boolean recordExpectationTrace
     ) {
         List<TaskExpectation> expectations = TaskExpectationResolver.resolve(contract);
         if (expectations.isEmpty()) return false;
@@ -252,10 +316,40 @@ public final class StaticTaskVerifier {
         for (TaskExpectation expectation : expectations) {
             if (expectation instanceof LiteralContentExpectation literal) {
                 verifiedAny = true;
-                verifyLiteralContentExpectation(root, literal, facts, problems);
+                verifyLiteralContentExpectation(root, literal, facts, problems, recordExpectationTrace);
+            } else if (expectation instanceof ReplacementExpectation replacement) {
+                verifiedAny = true;
+                verifyReplacementExpectation(root, replacement, facts, problems, recordExpectationTrace);
+            } else if (expectation instanceof AppendLineExpectation appendLine) {
+                verifiedAny = true;
+                verifyAppendLineExpectation(
+                        root,
+                        appendLine,
+                        successfulMutations,
+                        facts,
+                        problems,
+                        recordExpectationTrace);
+            } else if (expectation instanceof BulletListExpectation bullets) {
+                verifiedAny = true;
+                verifyBulletListExpectation(root, bullets, facts, problems, recordExpectationTrace);
             }
         }
         return verifiedAny;
+    }
+
+    private static boolean hasBulletCountExpectation(TaskContract contract) {
+        return TaskExpectationResolver.resolve(contract).stream()
+                .anyMatch(BulletListExpectation.class::isInstance);
+    }
+
+    private static boolean hasAppendLineExpectation(TaskContract contract) {
+        return TaskExpectationResolver.resolve(contract).stream()
+                .anyMatch(AppendLineExpectation.class::isInstance);
+    }
+
+    private static boolean hasReplacementExpectation(TaskContract contract) {
+        return TaskExpectationResolver.resolve(contract).stream()
+                .anyMatch(ReplacementExpectation.class::isInstance);
     }
 
     private static boolean verifySourceDerivedArtifact(
@@ -404,12 +498,26 @@ public final class StaticTaskVerifier {
         if (content == null || content.isBlank()) return 0;
         int count = 0;
         for (String line : content.split("\\R")) {
-            String trimmed = line.stripLeading();
-            if (trimmed.startsWith("- ")
-                    || trimmed.startsWith("* ")
-                    || trimmed.matches("\\d+[.)]\\s+.*")) {
+            if (isBulletLine(line)) {
                 count++;
             }
+        }
+        return count;
+    }
+
+    private static boolean isBulletLine(String line) {
+        String trimmed = line == null ? "" : line.stripLeading();
+        return trimmed.startsWith("- ")
+                || trimmed.startsWith("* ")
+                || trimmed.matches("\\d+[.)]\\s+.*");
+    }
+
+    private static int nonBlankNonBulletLineCount(String content) {
+        if (content == null || content.isBlank()) return 0;
+        int count = 0;
+        for (String line : content.split("\\R")) {
+            if (line.isBlank()) continue;
+            if (!isBulletLine(line)) count++;
         }
         return count;
     }
@@ -420,11 +528,96 @@ public final class StaticTaskVerifier {
                 || problem.contains("exact content verification"));
     }
 
+    private static boolean isAppendLineProblem(String problem) {
+        return problem != null
+                && (problem.contains("appended line")
+                || problem.contains("append-only preservation"));
+    }
+
+    private static boolean isReplacementProblem(String problem) {
+        return problem != null && problem.contains("replacement ");
+    }
+
+    private static boolean isExactEditProblem(String problem) {
+        return problem != null && problem.contains("exact edit replacement");
+    }
+
+    private static boolean isBulletCountProblem(String problem) {
+        return problem != null && (problem.contains("bullet count") || problem.contains("bullet list"));
+    }
+
+    private static boolean verifyExactEditEvidence(
+            List<ToolCallLoop.ToolOutcome> outcomes,
+            Path root,
+            List<String> facts,
+            List<String> problems
+    ) {
+        if (outcomes == null || outcomes.isEmpty()) return false;
+        boolean verifiedAny = false;
+        for (ToolCallLoop.ToolOutcome outcome : outcomes) {
+            if (outcome == null
+                    || !outcome.success()
+                    || !"talos.edit_file".equals(outcome.toolName())
+                    || outcome.mutationEvidence() == null
+                    || !outcome.mutationEvidence().exactEditReplacement()) {
+                continue;
+            }
+            verifiedAny = true;
+            String pathHint = normalizePath(outcome.pathHint());
+            Path target = resolveWorkspaceFile(root, pathHint);
+            if (target == null || !Files.isRegularFile(target)) {
+                problems.add(pathHint + ": exact edit replacement target is not readable after apply.");
+                continue;
+            }
+            String content;
+            try {
+                content = Files.readString(target);
+            } catch (Exception e) {
+                problems.add(pathHint + ": exact edit replacement target could not be read after apply ("
+                        + e.getMessage() + ")");
+                continue;
+            }
+
+            ToolCallLoop.MutationEvidence evidence = outcome.mutationEvidence();
+            String oldString = evidence.oldString();
+            String newString = evidence.newString();
+            if (!newString.isEmpty() && !content.contains(newString)) {
+                problems.add(pathHint + ": exact edit replacement text was not observed after apply.");
+                continue;
+            }
+            if (!oldString.isEmpty()
+                    && (newString.isEmpty() || !newString.contains(oldString))
+                    && content.contains(oldString)) {
+                problems.add(pathHint + ": exact edit replacement old text remained after apply.");
+                continue;
+            }
+            facts.add(pathHint + ": exact edit replacement observed in post-apply file.");
+        }
+        return verifiedAny;
+    }
+
+    private static boolean allSuccessfulMutationsHaveExactEditEvidence(List<ToolCallLoop.ToolOutcome> outcomes) {
+        if (outcomes == null || outcomes.isEmpty()) return false;
+        for (ToolCallLoop.ToolOutcome outcome : outcomes) {
+            if (outcome == null || !outcome.success() || !outcome.mutating()) continue;
+            if (!hasExactEditEvidence(outcome)) return false;
+        }
+        return true;
+    }
+
+    private static boolean hasExactEditEvidence(ToolCallLoop.ToolOutcome outcome) {
+        return outcome != null
+                && "talos.edit_file".equals(outcome.toolName())
+                && outcome.mutationEvidence() != null
+                && outcome.mutationEvidence().exactEditReplacement();
+    }
+
     private static void verifyLiteralContentExpectation(
             Path root,
             LiteralContentExpectation expectation,
             List<String> facts,
-            List<String> problems
+            List<String> problems,
+            boolean recordExpectationTrace
     ) {
         String pathHint = normalizePath(expectation.targetPath());
         Path target;
@@ -432,12 +625,12 @@ public final class StaticTaskVerifier {
             target = root.resolve(pathHint).normalize();
         } catch (InvalidPathException e) {
             problems.add(pathHint + ": exact content verification could not resolve target path.");
-            recordLiteralExpectation(expectation, ExpectationVerificationStatus.FAILED, "");
+            if (recordExpectationTrace) recordLiteralExpectation(expectation, ExpectationVerificationStatus.FAILED, "");
             return;
         }
         if (!target.startsWith(root) || !Files.isRegularFile(target)) {
             problems.add(pathHint + ": exact content verification target is not a readable file.");
-            recordLiteralExpectation(expectation, ExpectationVerificationStatus.FAILED, "");
+            if (recordExpectationTrace) recordLiteralExpectation(expectation, ExpectationVerificationStatus.FAILED, "");
             return;
         }
         String observed;
@@ -445,7 +638,7 @@ public final class StaticTaskVerifier {
             observed = Files.readString(target);
         } catch (Exception e) {
             problems.add(pathHint + ": exact content verification could not read target (" + e.getMessage() + ")");
-            recordLiteralExpectation(expectation, ExpectationVerificationStatus.FAILED, "");
+            if (recordExpectationTrace) recordLiteralExpectation(expectation, ExpectationVerificationStatus.FAILED, "");
             return;
         }
 
@@ -453,7 +646,7 @@ public final class StaticTaskVerifier {
         ExpectationVerificationStatus status = matched
                 ? ExpectationVerificationStatus.PASSED
                 : ExpectationVerificationStatus.FAILED;
-        recordLiteralExpectation(expectation, status, observed);
+        if (recordExpectationTrace) recordLiteralExpectation(expectation, status, observed);
         if (matched) {
             facts.add(pathHint + ": literal content matched requested exact content.");
         } else {
@@ -484,6 +677,317 @@ public final class StaticTaskVerifier {
                 LiteralContentExpectation.byteCount(observedContent),
                 LiteralContentExpectation.charCount(observedContent),
                 LiteralContentExpectation.lineCount(observedContent));
+    }
+
+    private static void verifyReplacementExpectation(
+            Path root,
+            ReplacementExpectation expectation,
+            List<String> facts,
+            List<String> problems,
+            boolean recordExpectationTrace
+    ) {
+        String pathHint = normalizePath(expectation.targetPath());
+        Path target;
+        try {
+            target = root.resolve(pathHint).normalize();
+        } catch (InvalidPathException e) {
+            problems.add(pathHint + ": replacement verification could not resolve target path.");
+            if (recordExpectationTrace) recordReplacementExpectation(
+                    expectation,
+                    ExpectationVerificationStatus.FAILED,
+                    false,
+                    false);
+            return;
+        }
+        if (!target.startsWith(root) || !Files.isRegularFile(target)) {
+            problems.add(pathHint + ": replacement verification target is not a readable file.");
+            if (recordExpectationTrace) recordReplacementExpectation(
+                    expectation,
+                    ExpectationVerificationStatus.FAILED,
+                    false,
+                    false);
+            return;
+        }
+
+        String observed;
+        try {
+            observed = Files.readString(target);
+        } catch (Exception e) {
+            problems.add(pathHint + ": replacement verification could not read target (" + e.getMessage() + ")");
+            if (recordExpectationTrace) recordReplacementExpectation(
+                    expectation,
+                    ExpectationVerificationStatus.FAILED,
+                    false,
+                    false);
+            return;
+        }
+
+        boolean oldPresent = !expectation.oldText().isEmpty() && observed.contains(expectation.oldText());
+        boolean newPresent = !expectation.newText().isEmpty() && observed.contains(expectation.newText());
+        boolean matched = !oldPresent && newPresent;
+        if (recordExpectationTrace) {
+            recordReplacementExpectation(
+                    expectation,
+                    matched ? ExpectationVerificationStatus.PASSED : ExpectationVerificationStatus.FAILED,
+                    oldPresent,
+                    newPresent);
+        }
+        if (matched) {
+            facts.add(pathHint + ": replacement text observed and old text absent.");
+        } else {
+            if (!newPresent) {
+                problems.add(pathHint + ": replacement new text was not observed after apply.");
+            }
+            if (oldPresent) {
+                problems.add(pathHint + ": replacement old text remained after apply.");
+            }
+        }
+    }
+
+    private static void recordReplacementExpectation(
+            ReplacementExpectation expectation,
+            ExpectationVerificationStatus status,
+            boolean oldPresent,
+            boolean newPresent
+    ) {
+        String observedState = "oldPresent:" + oldPresent + ";newPresent:" + newPresent;
+        LocalTurnTraceCapture.recordExpectationVerified(
+                expectation == null ? "TEXT_REPLACEMENT" : expectation.kind(),
+                status == null ? "" : status.name(),
+                expectation == null ? "" : expectation.targetPath(),
+                expectation == null ? "" : expectation.sourcePattern(),
+                expectation == null ? "" : "old:" + expectation.oldHash() + ";new:" + expectation.newHash(),
+                expectation == null ? 0 : expectation.newBytes(),
+                expectation == null ? 0 : expectation.newChars(),
+                0,
+                LiteralContentExpectation.hash(observedState),
+                0,
+                0,
+                0);
+    }
+
+    private static void verifyAppendLineExpectation(
+            Path root,
+            AppendLineExpectation expectation,
+            List<ToolCallLoop.ToolOutcome> successfulMutations,
+            List<String> facts,
+            List<String> problems,
+            boolean recordExpectationTrace
+    ) {
+        String pathHint = normalizePath(expectation.targetPath());
+        Path target;
+        try {
+            target = root.resolve(pathHint).normalize();
+        } catch (InvalidPathException e) {
+            problems.add(pathHint + ": appended line verification could not resolve target path.");
+            if (recordExpectationTrace) recordAppendLineExpectation(expectation, ExpectationVerificationStatus.FAILED, "");
+            return;
+        }
+        if (!target.startsWith(root) || !Files.isRegularFile(target)) {
+            problems.add(pathHint + ": appended line verification target is not a readable file.");
+            if (recordExpectationTrace) recordAppendLineExpectation(expectation, ExpectationVerificationStatus.FAILED, "");
+            return;
+        }
+
+        String observed;
+        try {
+            observed = Files.readString(target);
+        } catch (Exception e) {
+            problems.add(pathHint + ": appended line verification could not read target (" + e.getMessage() + ")");
+            if (recordExpectationTrace) recordAppendLineExpectation(expectation, ExpectationVerificationStatus.FAILED, "");
+            return;
+        }
+
+        List<String> lines = logicalLines(observed);
+        String expectedLine = expectation.expectedLine();
+        long matchingLines = lines.stream().filter(expectedLine::equals).count();
+        String finalLine = lines.isEmpty() ? "" : lines.getLast();
+        boolean postStateMatched = matchingLines == 1 && expectedLine.equals(finalLine);
+        boolean appendOnlyEvidenceSatisfied = postStateMatched
+                && verifyAppendLineMutationEvidence(pathHint, expectedLine, successfulMutations, facts, problems);
+        boolean matched = postStateMatched && appendOnlyEvidenceSatisfied;
+        if (recordExpectationTrace) {
+            recordAppendLineExpectation(
+                    expectation,
+                    matched ? ExpectationVerificationStatus.PASSED : ExpectationVerificationStatus.FAILED,
+                    finalLine);
+        }
+        if (matched) {
+            facts.add(pathHint + ": appended line matched requested EOF line.");
+        } else if (matchingLines == 0) {
+            problems.add(pathHint + ": appended line missing.");
+        } else if (matchingLines > 1) {
+            problems.add(pathHint + ": appended line count mismatch (expected 1, observed "
+                    + matchingLines + ").");
+        } else if (!expectedLine.equals(finalLine)) {
+            problems.add(pathHint + ": appended line was not the final logical line.");
+        }
+    }
+
+    private static boolean verifyAppendLineMutationEvidence(
+            String pathHint,
+            String expectedLine,
+            List<ToolCallLoop.ToolOutcome> successfulMutations,
+            List<String> facts,
+            List<String> problems
+    ) {
+        if (successfulMutations == null || successfulMutations.isEmpty()) return true;
+        boolean sawRelevantExactEdit = false;
+        for (ToolCallLoop.ToolOutcome outcome : successfulMutations) {
+            if (outcome != null
+                    && outcome.success()
+                    && "talos.write_file".equals(outcome.toolName())
+                    && normalizePath(outcome.pathHint()).equals(pathHint)) {
+                problems.add(pathHint
+                        + ": talos.write_file cannot prove append-only preservation for an append-line request; "
+                        + "use exact talos.edit_file append evidence.");
+                return false;
+            }
+            if (outcome == null
+                    || !outcome.success()
+                    || !"talos.edit_file".equals(outcome.toolName())
+                    || !normalizePath(outcome.pathHint()).equals(pathHint)
+                    || outcome.mutationEvidence() == null
+                    || !outcome.mutationEvidence().exactEditReplacement()) {
+                continue;
+            }
+            sawRelevantExactEdit = true;
+            ToolCallLoop.MutationEvidence evidence = outcome.mutationEvidence();
+            if (!exactEditAppendsOnlyRequestedLine(evidence.oldString(), evidence.newString(), expectedLine)) {
+                problems.add(pathHint + ": exact edit did not preserve prior content before appended line.");
+                return false;
+            }
+        }
+        if (sawRelevantExactEdit) {
+            facts.add(pathHint + ": exact edit evidence preserved prior content before appended line.");
+        }
+        return true;
+    }
+
+    private static boolean exactEditAppendsOnlyRequestedLine(
+            String oldString,
+            String newString,
+            String expectedLine
+    ) {
+        if (oldString == null || newString == null || expectedLine == null || expectedLine.isEmpty()) {
+            return false;
+        }
+        String oldNormalized = normalizeLineEndings(oldString);
+        String newNormalized = normalizeLineEndings(newString);
+        String expectedNormalized = normalizeLineEndings(expectedLine);
+        if (!newNormalized.startsWith(oldNormalized)) {
+            return false;
+        }
+        String suffix = newNormalized.substring(oldNormalized.length());
+        return suffix.equals(expectedNormalized)
+                || suffix.equals(expectedNormalized + "\n")
+                || suffix.equals("\n" + expectedNormalized)
+                || suffix.equals("\n" + expectedNormalized + "\n");
+    }
+
+    private static String normalizeLineEndings(String value) {
+        return value == null ? "" : value.replace("\r\n", "\n").replace('\r', '\n');
+    }
+
+    private static void recordAppendLineExpectation(
+            AppendLineExpectation expectation,
+            ExpectationVerificationStatus status,
+            String observedFinalLine
+    ) {
+        String observed = observedFinalLine == null ? "" : observedFinalLine;
+        LocalTurnTraceCapture.recordExpectationVerified(
+                expectation == null ? "APPEND_LINE" : expectation.kind(),
+                status == null ? "" : status.name(),
+                expectation == null ? "" : expectation.targetPath(),
+                expectation == null ? "" : expectation.sourcePattern(),
+                expectation == null ? "" : expectation.expectedHash(),
+                expectation == null ? 0 : expectation.expectedBytes(),
+                expectation == null ? 0 : expectation.expectedChars(),
+                1,
+                LiteralContentExpectation.hash(observed),
+                LiteralContentExpectation.byteCount(observed),
+                LiteralContentExpectation.charCount(observed),
+                observed.isBlank() ? 0 : 1);
+    }
+
+    private static List<String> logicalLines(String content) {
+        if (content == null || content.isEmpty()) return List.of();
+        List<String> lines = new ArrayList<>(List.of(content.split("\\R", -1)));
+        while (!lines.isEmpty() && lines.getLast().isBlank()) {
+            lines.removeLast();
+        }
+        return List.copyOf(lines);
+    }
+
+    private static void verifyBulletListExpectation(
+            Path root,
+            BulletListExpectation expectation,
+            List<String> facts,
+            List<String> problems,
+            boolean recordExpectationTrace
+    ) {
+        String pathHint = normalizePath(expectation.targetPath());
+        Path target;
+        try {
+            target = root.resolve(pathHint).normalize();
+        } catch (InvalidPathException e) {
+            problems.add(pathHint + ": bullet count verification could not resolve target path.");
+            if (recordExpectationTrace) recordBulletListExpectation(expectation, ExpectationVerificationStatus.FAILED, 0);
+            return;
+        }
+        if (!target.startsWith(root) || !Files.isRegularFile(target)) {
+            problems.add(pathHint + ": bullet count verification target is not a readable file.");
+            if (recordExpectationTrace) recordBulletListExpectation(expectation, ExpectationVerificationStatus.FAILED, 0);
+            return;
+        }
+
+        String observed;
+        try {
+            observed = Files.readString(target);
+        } catch (Exception e) {
+            problems.add(pathHint + ": bullet count verification could not read target (" + e.getMessage() + ")");
+            if (recordExpectationTrace) recordBulletListExpectation(expectation, ExpectationVerificationStatus.FAILED, 0);
+            return;
+        }
+
+        int observedCount = bulletLineCount(observed);
+        int nonBulletLines = nonBlankNonBulletLineCount(observed);
+        boolean matched = observedCount == expectation.expectedBulletCount() && nonBulletLines == 0;
+        if (recordExpectationTrace) {
+            recordBulletListExpectation(
+                    expectation,
+                    matched ? ExpectationVerificationStatus.PASSED : ExpectationVerificationStatus.FAILED,
+                    observedCount);
+        }
+        if (matched) {
+            facts.add(pathHint + ": bullet count matched requested " + expectation.expectedBulletCount() + ".");
+        } else if (observedCount != expectation.expectedBulletCount()) {
+            problems.add(pathHint + ": bullet count mismatch (expected "
+                    + expectation.expectedBulletCount() + ", observed " + observedCount + ").");
+        } else {
+            problems.add(pathHint + ": bullet list contains non-bullet content.");
+        }
+    }
+
+    private static void recordBulletListExpectation(
+            BulletListExpectation expectation,
+            ExpectationVerificationStatus status,
+            int observedCount
+    ) {
+        int expectedCount = expectation == null ? 0 : expectation.expectedBulletCount();
+        LocalTurnTraceCapture.recordExpectationVerified(
+                expectation == null ? "BULLET_LIST_COUNT" : expectation.kind(),
+                status == null ? "" : status.name(),
+                expectation == null ? "" : expectation.targetPath(),
+                expectation == null ? "" : expectation.sourcePattern(),
+                "count:" + expectedCount,
+                0,
+                0,
+                expectedCount,
+                "count:" + Math.max(0, observedCount),
+                0,
+                0,
+                Math.max(0, observedCount));
     }
 
     private static void accumulateWorkspaceOperation(
@@ -673,7 +1177,10 @@ public final class StaticTaskVerifier {
             List<String> facts,
             List<String> problems
     ) {
-        if (contract == null || contract.expectedTargets().isEmpty()) return;
+        if (contract == null
+                || (contract.expectedTargets().isEmpty() && contract.forbiddenTargets().isEmpty())) {
+            return;
+        }
         Set<String> normalizedMutations = new LinkedHashSet<>();
         for (String path : mutatedPaths) {
             String normalized = normalizePath(path);
@@ -690,6 +1197,17 @@ public final class StaticTaskVerifier {
             if (!normalized.isBlank()) normalizedAliases.add(normalized);
         }
         boolean caseInsensitive = expectedTargetMatchingIsCaseInsensitive();
+        int problemsBeforeTargetVerification = problems.size();
+        for (String target : contract.forbiddenTargets()) {
+            String forbidden = normalizePath(target);
+            if (forbidden.isBlank()) continue;
+            boolean matched = normalizedMutations.stream()
+                    .anyMatch(mutated -> expectedTargetMatches(forbidden, mutated, caseInsensitive));
+            if (matched) {
+                problems.add(forbidden + ": forbidden mutation target was changed.");
+            }
+        }
+        String onlyTarget = singleTargetOnlyMutationTarget(contract);
         Set<String> satisfiedContextTargets = new LinkedHashSet<>();
         for (String target : contract.expectedTargets()) {
             String expected = normalizePath(target);
@@ -719,7 +1237,19 @@ public final class StaticTaskVerifier {
                 problems.add(problem);
             }
         }
-        if (problems.stream().noneMatch(p -> p.contains("expected target was not successfully mutated"))) {
+        if (!onlyTarget.isBlank()) {
+            for (String mutated : normalizedMutations) {
+                boolean matchesOnlyTarget = expectedTargetMatches(onlyTarget, mutated, caseInsensitive)
+                        || normalizedAliases.stream()
+                        .anyMatch(alias -> expectedTargetMatches(alias, mutated, caseInsensitive));
+                if (!matchesOnlyTarget) {
+                    problems.add(mutated + ": non-requested mutation target was changed under an only-target request.");
+                }
+            }
+        }
+        if (!contract.expectedTargets().isEmpty()
+                && problems.size() == problemsBeforeTargetVerification
+                && problems.stream().noneMatch(p -> p.contains("expected target was not successfully mutated"))) {
             if (satisfiedContextTargets.isEmpty()) {
                 facts.add("Expected mutation target(s) were updated: "
                         + String.join(", ", contract.expectedTargets()) + ".");
@@ -728,6 +1258,34 @@ public final class StaticTaskVerifier {
                         + String.join(", ", contract.expectedTargets()) + ".");
             }
         }
+    }
+
+    private static String singleTargetOnlyMutationTarget(TaskContract contract) {
+        if (contract == null || contract.expectedTargets().size() != 1) return "";
+        String target = firstPath(contract.expectedTargets());
+        if (target.isBlank()) return "";
+        return requestHasOnlyTargetLimiter(contract.originalUserRequest(), target) ? target : "";
+    }
+
+    private static boolean requestHasOnlyTargetLimiter(String request, String target) {
+        if (request == null || request.isBlank() || target == null || target.isBlank()) return false;
+        String quoted = Pattern.quote(target);
+        String targetBoundary = "`?" + quoted + "`?(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))";
+        String mutationVerb = "(?:change|edit|modify|update|fix|replace|write|create|append)";
+        List<Pattern> patterns = List.of(
+                Pattern.compile("(?is)\\bonly\\s+" + mutationVerb + "\\s+" + targetBoundary),
+                Pattern.compile("(?is)\\b" + mutationVerb + "\\s+only\\s+" + targetBoundary),
+                Pattern.compile("(?is)\\b" + mutationVerb + "\\b.{0,80}?" + targetBoundary + "\\s+only\\b"),
+                Pattern.compile("(?is)\\bdo\\s+not\\s+(?:edit|change|modify|touch|write|create|save|mutate)\\s+"
+                        + "(?:any\\s+)?other\\s+files?\\b"),
+                Pattern.compile("(?is)\\b(?:don't|dont)\\s+"
+                        + "(?:edit|change|modify|touch|write|create|save|mutate)\\s+"
+                        + "(?:any\\s+)?other\\s+files?\\b"),
+                Pattern.compile("(?is)\\bdo\\s+not\\s+modify\\s+anything\\s+else\\b"));
+        for (Pattern pattern : patterns) {
+            if (pattern.matcher(request).find()) return true;
+        }
+        return false;
     }
 
     private static boolean staticWebRepairContextTargetSatisfied(

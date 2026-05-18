@@ -198,6 +198,8 @@ public final class SynchronizedCliApprovalSmokeMain {
                 # Synchronized CLI Approval Smoke
 
                 Status: %s
+                terminal mode: redirected stdin/stdout process
+                true PTY/JLine coverage: no
                 Exit code: %d
                 approval prompt observed: %s
                 approval denial observed: %s

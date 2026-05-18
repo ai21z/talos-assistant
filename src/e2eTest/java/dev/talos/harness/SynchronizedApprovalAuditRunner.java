@@ -44,14 +44,19 @@ import dev.talos.tools.impl.RenamePathTool;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.TreeSet;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -96,12 +101,23 @@ public final class SynchronizedApprovalAuditRunner {
             String finalAnswer,
             List<ScriptedApprovalGate.Event> approvals,
             String modelTranscript,
-            LocalTurnTrace trace
+            LocalTurnTrace trace,
+            String workspaceDiff
     ) {
+        public Result(
+                String finalAnswer,
+                List<ScriptedApprovalGate.Event> approvals,
+                String modelTranscript,
+                LocalTurnTrace trace
+        ) {
+            this(finalAnswer, approvals, modelTranscript, trace, "");
+        }
+
         public Result {
             finalAnswer = finalAnswer == null ? "" : finalAnswer;
             approvals = approvals == null ? List.of() : List.copyOf(approvals);
             modelTranscript = modelTranscript == null ? "" : modelTranscript;
+            workspaceDiff = workspaceDiff == null ? "" : workspaceDiff;
         }
 
         public String traceText() {
@@ -117,6 +133,21 @@ public final class SynchronizedApprovalAuditRunner {
         }
     }
 
+    public static final class AuditFailure extends AssertionError {
+        private final Result partialResult;
+
+        AuditFailure(String message, Result partialResult, Throwable cause) {
+            super(message, cause);
+            this.partialResult = partialResult == null
+                    ? new Result("", List.of(), "", null)
+                    : partialResult;
+        }
+
+        public Result partialResult() {
+            return partialResult;
+        }
+    }
+
     public record ArtifactBundle(
             Path root,
             Path summary,
@@ -129,6 +160,7 @@ public final class SynchronizedApprovalAuditRunner {
             Path providerBodyJson,
             Path sessionSnapshot,
             Path turnJsonl,
+            Path transcriptJson,
             Path workspaceStatus,
             Path workspaceDiff
     ) {
@@ -143,6 +175,7 @@ public final class SynchronizedApprovalAuditRunner {
         if (llm == null) throw new IllegalArgumentException("llm is required");
 
         ScriptedApprovalGate gate = new ScriptedApprovalGate(request.approvals());
+        WorkspaceSnapshot beforeWorkspace = WorkspaceSnapshot.capture(request.workspace());
         ToolRegistry registry = standardToolRegistry();
         TurnProcessor processor = new TurnProcessor(
                 ModeController.defaultController(),
@@ -181,8 +214,19 @@ public final class SynchronizedApprovalAuditRunner {
                     "UNKNOWN",
                     "SYNCHRONIZED_APPROVAL_AUDIT");
             trace = LocalTurnTraceCapture.complete();
-            gate.assertExhausted();
-            return new Result(turnOutput.text(), gate.events(), messages.toString(), trace);
+            WorkspaceSnapshot afterWorkspace = WorkspaceSnapshot.capture(request.workspace());
+            Result result = new Result(
+                    turnOutput.text(),
+                    gate.events(),
+                    messages.toString(),
+                    trace,
+                    WorkspaceSnapshot.diff(beforeWorkspace, afterWorkspace));
+            try {
+                gate.assertExhausted();
+            } catch (AssertionError e) {
+                throw new AuditFailure(e.getMessage(), result, e);
+            }
+            return result;
         } finally {
             TurnUserRequestCapture.clear();
             LocalTurnTraceCapture.clear();
@@ -238,6 +282,7 @@ public final class SynchronizedApprovalAuditRunner {
         String sessionId = JsonSessionStore.sessionIdFor(request.workspace());
         Path sessionSnapshot = sessionDir.resolve(sessionId + ".json");
         Path turnJsonl = sessionDir.resolve(sessionId + ".turns.jsonl");
+        Path transcriptJson = root.resolve("audit-transcript.json");
         Path workspaceStatus = workspaceDir.resolve("status.txt");
         Path workspaceDiff = workspaceDir.resolve("diff.txt");
         Path summary = root.resolve("AUDIT-BUNDLE.md");
@@ -250,11 +295,12 @@ public final class SynchronizedApprovalAuditRunner {
         writeSafe(traceText, result.traceText());
         writePromptDebug(promptDebugMarkdown, providerBodyJson);
         writeSessionArtifacts(sessionDir, sessionId, request, result, finalAnswerForArtifacts);
+        writeAuditTranscript(transcriptJson, request, result, root);
         writeSafe(workspaceStatus, workspaceStatus(request.workspace()));
-        writeSafe(workspaceDiff, workspaceDiffPlaceholder(request.workspace()));
+        writeSafe(workspaceDiff, workspaceDiff(request, result));
         writeSafe(summary, summary(request, result, root, finalAnswer, approvalsJsonl, modelTranscript,
                 traceJson, traceText, promptDebugMarkdown, providerBodyJson, sessionSnapshot, turnJsonl,
-                workspaceStatus, workspaceDiff));
+                transcriptJson, workspaceStatus, workspaceDiff));
 
         return new ArtifactBundle(
                 root,
@@ -268,6 +314,7 @@ public final class SynchronizedApprovalAuditRunner {
                 providerBodyJson,
                 sessionSnapshot,
                 turnJsonl,
+                transcriptJson,
                 workspaceStatus,
                 workspaceDiff);
     }
@@ -357,6 +404,41 @@ public final class SynchronizedApprovalAuditRunner {
         }
     }
 
+    private static void writeAuditTranscript(
+            Path path,
+            Request request,
+            Result result,
+            Path root
+    ) throws IOException {
+        Map<String, Object> transcript = new LinkedHashMap<>();
+        transcript.put("schemaVersion", 1);
+        transcript.put("schemaName", "talos.synchronizedApprovalAuditTranscript");
+        transcript.put("scenario", request.name());
+        transcript.put("workspace", request.workspace().toAbsolutePath().normalize().toString());
+        transcript.put("artifactRoot", root.toAbsolutePath().normalize().toString());
+        transcript.put("userPromptHash", sha256(request.userPrompt()));
+        transcript.put("userPromptChars", request.userPrompt().length());
+        transcript.put("finalAnswerHash", sha256(result.finalAnswer()));
+        transcript.put("finalAnswerChars", result.finalAnswer().length());
+        transcript.put("approvalCount", result.approvals().size());
+        transcript.put("approvalResponses", result.approvals().stream()
+                .map(event -> event.response().name())
+                .toList());
+        transcript.put("approvalDescriptions", result.approvals().stream()
+                .map(event -> sanitize(event.description()))
+                .toList());
+        LocalTurnTrace trace = result.trace();
+        transcript.put("traceId", trace == null ? "" : trace.traceId());
+        transcript.put("traceStatus", trace == null ? "" : trace.outcome().status());
+        transcript.put("verificationStatus", trace == null ? "" : trace.verification().status());
+        transcript.put("verificationSummary", trace == null ? "" : sanitize(trace.verification().summary()));
+        transcript.put("checkpointStatus", trace == null ? "" : trace.checkpoint().status());
+        transcript.put("toolEventTypes", trace == null ? List.of() : trace.events().stream()
+                .map(event -> event.type())
+                .toList());
+        writeSafe(path, JSON.writerWithDefaultPrettyPrinter().writeValueAsString(transcript));
+    }
+
     private static List<TurnRecord.ToolCallSummary> toolCalls(LocalTurnTrace trace) {
         if (trace == null || trace.events().isEmpty()) return List.of();
         return trace.events().stream()
@@ -392,11 +474,12 @@ public final class SynchronizedApprovalAuditRunner {
         return out.toString();
     }
 
-    private static String workspaceDiffPlaceholder(Path workspace) {
+    private static String workspaceDiff(Request request, Result result) {
+        String diff = result == null ? "" : result.workspaceDiff();
+        if (diff != null && !diff.isBlank()) return diff;
+        Path workspace = request == null ? Path.of(".") : request.workspace();
         return """
-                Workspace diff capture: not available in the deterministic Java approval harness.
-                Use the CLI/PTTY live-audit runner for real git status/diff capture.
-
+                Workspace diff capture: unavailable.
                 Workspace root: %s
                 """.formatted(workspace.toAbsolutePath().normalize());
     }
@@ -414,6 +497,7 @@ public final class SynchronizedApprovalAuditRunner {
             Path providerBodyJson,
             Path sessionSnapshot,
             Path turnJsonl,
+            Path transcriptJson,
             Path workspaceStatus,
             Path workspaceDiff) {
         return """
@@ -436,6 +520,7 @@ public final class SynchronizedApprovalAuditRunner {
                 - Provider body JSON: %s
                 - Session snapshot: %s
                 - Turn JSONL: %s
+                - Audit transcript JSON: %s
                 - Workspace status: %s
                 - Workspace diff: %s
                 """.formatted(
@@ -453,6 +538,7 @@ public final class SynchronizedApprovalAuditRunner {
                 providerBodyJson,
                 sessionSnapshot,
                 turnJsonl,
+                transcriptJson,
                 workspaceStatus,
                 workspaceDiff);
     }
@@ -477,6 +563,9 @@ public final class SynchronizedApprovalAuditRunner {
 
     private static String assistantTextForArtifacts(Request request, Result result) {
         String answer = result == null ? "" : result.finalAnswer();
+        if (privateDocumentMayHaveEnteredModelContext(request, result)) {
+            return TraceRedactor.PRIVATE_DOCUMENT_ANSWER_REDACTION;
+        }
         if (rawProtectedReadMayHaveEnteredModelContext(request, result)) {
             return MemoryUpdateListener.assistantTextForPersistence(answer, request.userPrompt());
         }
@@ -485,6 +574,9 @@ public final class SynchronizedApprovalAuditRunner {
 
     private static String modelTranscriptForArtifacts(Request request, Result result) {
         String transcript = result == null ? "" : result.modelTranscript();
+        if (privateDocumentMayHaveEnteredModelContext(request, result)) {
+            return TraceRedactor.PRIVATE_DOCUMENT_ANSWER_REDACTION;
+        }
         if (rawProtectedReadMayHaveEnteredModelContext(request, result)) {
             return MemoryUpdateListener.assistantTextForPersistence(transcript, request.userPrompt());
         }
@@ -498,8 +590,33 @@ public final class SynchronizedApprovalAuditRunner {
         return TraceRedactor.looksLikeProtectedReadRequest(request.userPrompt());
     }
 
+    private static boolean privateDocumentMayHaveEnteredModelContext(Request request, Result result) {
+        if (request == null || result == null) return false;
+        return TraceRedactor.looksLikeDocumentExtractionRequest(request.userPrompt());
+    }
+
     private static String sanitize(String value) {
         return ProtectedContentPolicy.sanitizeText(Objects.toString(value, ""));
+    }
+
+    private static String sha256(String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(Objects.toString(value, "").getBytes(StandardCharsets.UTF_8));
+            return "sha256:" + HexFormat.of().formatHex(hash);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is unavailable", e);
+        }
+    }
+
+    private static String sha256(byte[] value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(value == null ? new byte[0] : value);
+            return "sha256:" + HexFormat.of().formatHex(hash);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is unavailable", e);
+        }
     }
 
     private static String safeFileName(String value) {
@@ -527,5 +644,114 @@ public final class SynchronizedApprovalAuditRunner {
         String model = llm == null ? "" : llm.getModel();
         int slash = model.indexOf('/');
         return slash > 0 ? model.substring(0, slash) : "scripted";
+    }
+
+    private record WorkspaceSnapshot(Map<String, SnapshotFile> files, String error) {
+        static WorkspaceSnapshot capture(Path workspace) {
+            if (workspace == null) {
+                return new WorkspaceSnapshot(Map.of(), "workspace is null");
+            }
+            Path root = workspace.toAbsolutePath().normalize();
+            if (!Files.exists(root)) {
+                return new WorkspaceSnapshot(Map.of(), "workspace does not exist: " + root);
+            }
+            Map<String, SnapshotFile> files = new LinkedHashMap<>();
+            try (Stream<Path> paths = Files.walk(root)) {
+                for (Path path : paths
+                        .filter(Files::isRegularFile)
+                        .sorted()
+                        .toList()) {
+                    String relative = root.relativize(path).toString().replace('\\', '/');
+                    if (relative.equals(".git") || relative.startsWith(".git/")) continue;
+                    files.put(relative, SnapshotFile.capture(path));
+                }
+                return new WorkspaceSnapshot(Map.copyOf(files), "");
+            } catch (IOException e) {
+                return new WorkspaceSnapshot(Map.copyOf(files),
+                        "workspace snapshot failed: " + sanitize(e.getMessage()));
+            }
+        }
+
+        static String diff(WorkspaceSnapshot before, WorkspaceSnapshot after) {
+            WorkspaceSnapshot safeBefore = before == null ? new WorkspaceSnapshot(Map.of(), "before snapshot missing") : before;
+            WorkspaceSnapshot safeAfter = after == null ? new WorkspaceSnapshot(Map.of(), "after snapshot missing") : after;
+            StringBuilder out = new StringBuilder();
+            out.append("Workspace diff captured by deterministic Java approval harness.\n");
+            if (!safeBefore.error().isBlank()) {
+                out.append("Before snapshot warning: ").append(sanitize(safeBefore.error())).append('\n');
+            }
+            if (!safeAfter.error().isBlank()) {
+                out.append("After snapshot warning: ").append(sanitize(safeAfter.error())).append('\n');
+            }
+            TreeSet<String> paths = new TreeSet<>();
+            paths.addAll(safeBefore.files().keySet());
+            paths.addAll(safeAfter.files().keySet());
+
+            boolean changed = false;
+            for (String path : paths) {
+                SnapshotFile left = safeBefore.files().get(path);
+                SnapshotFile right = safeAfter.files().get(path);
+                if (left == null && right == null) continue;
+                if (left == null) {
+                    changed = true;
+                    out.append("\nA ").append(path).append('\n');
+                    appendFileDiff(out, "+", right);
+                } else if (right == null) {
+                    changed = true;
+                    out.append("\nD ").append(path).append('\n');
+                    appendFileDiff(out, "-", left);
+                } else if (!left.hash().equals(right.hash())) {
+                    changed = true;
+                    out.append("\nM ").append(path).append('\n');
+                    appendFileDiff(out, "-", left);
+                    appendFileDiff(out, "+", right);
+                }
+            }
+            if (!changed) {
+                out.append("\n(no file changes detected)\n");
+            }
+            return out.toString();
+        }
+
+        private static void appendFileDiff(StringBuilder out, String prefix, SnapshotFile file) {
+            if (file == null) return;
+            if (!file.textCaptured()) {
+                out.append(prefix)
+                        .append(" [binary-or-large content omitted; ")
+                        .append(file.bytes())
+                        .append(" bytes; ")
+                        .append(file.hash())
+                        .append("]\n");
+                return;
+            }
+            String text = sanitize(file.text());
+            if (text.isEmpty()) {
+                out.append(prefix).append(" [empty file]\n");
+                return;
+            }
+            for (String line : text.split("\\R", -1)) {
+                if (line.isEmpty()) continue;
+                out.append(prefix).append(' ').append(line).append('\n');
+            }
+        }
+    }
+
+    private record SnapshotFile(long bytes, String hash, boolean textCaptured, String text) {
+        private static final int MAX_TEXT_DIFF_BYTES = 64 * 1024;
+
+        static SnapshotFile capture(Path path) throws IOException {
+            byte[] bytes = Files.readAllBytes(path);
+            boolean textCaptured = bytes.length <= MAX_TEXT_DIFF_BYTES && looksText(bytes);
+            String text = textCaptured ? new String(bytes, StandardCharsets.UTF_8) : "";
+            return new SnapshotFile(bytes.length, sha256(bytes), textCaptured, text);
+        }
+
+        private static boolean looksText(byte[] bytes) {
+            if (bytes == null) return true;
+            for (byte b : bytes) {
+                if (b == 0) return false;
+            }
+            return true;
+        }
     }
 }

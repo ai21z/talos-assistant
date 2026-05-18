@@ -226,6 +226,239 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void exactBulletCountExpectationPassesWhenGeneratedTargetHasRequestedCount() throws Exception {
+        Path notes = Files.createDirectories(workspace.resolve("notes"));
+        Files.writeString(notes.resolve("generated-summary.md"), """
+                - One
+                - Two
+                - Three
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Create notes/generated-summary.md with exactly three bullet points.",
+                loopResult(List.of(successfulWrite("notes/generated-summary.md", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status());
+        assertTrue(result.summary().contains("Bullet count verification passed"), result.summary());
+        assertTrue(result.facts().stream()
+                .anyMatch(f -> f.contains("notes/generated-summary.md: bullet count matched requested 3.")));
+    }
+
+    @Test
+    void exactBulletCountExpectationFailsWhenGeneratedTargetHasWrongCount() throws Exception {
+        Path notes = Files.createDirectories(workspace.resolve("notes"));
+        Files.writeString(notes.resolve("generated-summary.md"), """
+                - One
+                - Two
+                - Three
+                - Four
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Create notes/generated-summary.md with exactly three bullet points.",
+                loopResult(List.of(successfulWrite("notes/generated-summary.md", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.summary().contains("Bullet count verification failed"), result.summary());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("notes/generated-summary.md: bullet count mismatch")));
+    }
+
+    @Test
+    void exactBulletCountExpectationFailsWhenGeneratedTargetHasExtraProse() throws Exception {
+        Path notes = Files.createDirectories(workspace.resolve("notes"));
+        Files.writeString(notes.resolve("generated-summary.md"), """
+                Summary:
+                - One
+                - Two
+                - Three
+                Done.
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Create notes/generated-summary.md with exactly three bullet points.",
+                loopResult(List.of(successfulWrite("notes/generated-summary.md", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.summary().contains("Bullet count verification failed"), result.summary());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("notes/generated-summary.md: bullet list contains non-bullet content")));
+    }
+
+    @Test
+    void appendLineExpectationPassesWhenLineIsLastLogicalLine() throws Exception {
+        Files.writeString(workspace.resolve("README.md"), """
+                Intro
+                Release gate note
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append exactly this line to README.md: Release gate note",
+                loopResult(List.of(successfulExactEdit(
+                        "README.md",
+                        "Intro\n",
+                        "Intro\nRelease gate note\n",
+                        VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status());
+        assertTrue(result.summary().contains("Append line verification passed"), result.summary());
+        assertTrue(result.facts().stream()
+                .anyMatch(f -> f.contains("README.md: appended line matched requested EOF line.")));
+    }
+
+    @Test
+    void appendLineExpectationFailsWhenWriteFileCannotProveAppendOnlyPreservation() throws Exception {
+        Files.writeString(workspace.resolve("README.md"), """
+                Intro
+                Release gate note
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append exactly this line to README.md: Release gate note",
+                loopResult(List.of(successfulWrite("README.md", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.summary().contains("Append line verification failed"), result.summary());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("README.md: talos.write_file cannot prove append-only preservation")));
+    }
+
+    @Test
+    void appendLineExpectationPassesWhenFullWriteEvidencePreservesPriorContent() throws Exception {
+        Files.writeString(workspace.resolve("README.md"), """
+                Intro
+                Release gate note
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append exactly this line to README.md: Release gate note",
+                loopResult(List.of(successfulFullWrite(
+                        "README.md",
+                        "Intro\n",
+                        "Intro\nRelease gate note\n",
+                        VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status());
+        assertTrue(result.summary().contains("Append line verification passed"), result.summary());
+        assertTrue(result.facts().stream()
+                .anyMatch(f -> f.contains("README.md: full-write evidence preserved prior content before appended line.")));
+    }
+
+    @Test
+    void appendLineExpectationFailsWhenFullWriteEvidenceRewritesPriorContent() throws Exception {
+        Files.writeString(workspace.resolve("README.md"), """
+                Different intro
+                Release gate note
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append exactly this line to README.md: Release gate note",
+                loopResult(List.of(successfulFullWrite(
+                        "README.md",
+                        "Intro\n",
+                        "Different intro\nRelease gate note\n",
+                        VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.summary().contains("Append line verification failed"), result.summary());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("README.md: full-file write did not preserve prior content before appended line")));
+    }
+
+    @Test
+    void appendLineExpectationFailsWhenExactEditRewritesExistingContent() throws Exception {
+        Files.writeString(workspace.resolve("README.md"), """
+                Different intro
+                Release gate note
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append exactly this line to README.md: Release gate note",
+                loopResult(List.of(successfulExactEdit(
+                        "README.md",
+                        "Intro\n",
+                        "Different intro\nRelease gate note\n",
+                        VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.summary().contains("Append line verification failed"), result.summary());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("README.md: exact edit did not preserve prior content before appended line")));
+    }
+
+    @Test
+    void appendLineExpectationFailsWhenLineMissing() throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "Intro\n");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append exactly this line to README.md: Release gate note",
+                loopResult(List.of(successfulWrite("README.md", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.summary().contains("Append line verification failed"), result.summary());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("README.md: appended line missing")));
+    }
+
+    @Test
+    void appendLineExpectationFailsWhenLineDuplicated() throws Exception {
+        Files.writeString(workspace.resolve("README.md"), """
+                Intro
+                Release gate note
+                Release gate note
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append exactly this line to README.md: Release gate note",
+                loopResult(List.of(successfulWrite("README.md", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.summary().contains("Append line verification failed"), result.summary());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("README.md: appended line count mismatch")));
+    }
+
+    @Test
+    void appendLineExpectationFailsWhenLineIsNotLastLogicalLine() throws Exception {
+        Files.writeString(workspace.resolve("README.md"), """
+                Intro
+                Release gate note
+                After
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Append exactly this line to README.md: Release gate note",
+                loopResult(List.of(successfulWrite("README.md", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.summary().contains("Append line verification failed"), result.summary());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("README.md: appended line was not the final logical line")));
+    }
+
+    @Test
     void literalExpectationTraceEventIsRedacted() throws Exception {
         Files.writeString(workspace.resolve("index.html"), "<html>wrong</html>");
         LocalTurnTraceCapture.begin(
@@ -258,6 +491,91 @@ class StaticTaskVerifierTest {
             assertTrue(event.data().containsKey("observedHash"));
             assertFalse(event.data().containsValue("AFTER"),
                     "default trace must not store raw literal content");
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void appendLineExpectationTraceEventIsRedacted() throws Exception {
+        Files.writeString(workspace.resolve("README.md"), """
+                Intro
+                Release gate note
+                """);
+        LocalTurnTraceCapture.begin(
+                "trc-test-append",
+                "session-test",
+                1,
+                "2026-04-29T00:00:00Z",
+                "workspace-hash",
+                "auto",
+                "ollama",
+                "qwen2.5-coder:14b",
+                "Append exactly this line to README.md: Release gate note");
+
+        try {
+            StaticTaskVerifier.verify(
+                    workspace,
+                    "Append exactly this line to README.md: Release gate note",
+                    loopResult(List.of(successfulExactEdit(
+                            "README.md",
+                            "Intro\n",
+                            "Intro\nRelease gate note\n",
+                            VerificationStatus.PASS))),
+                    0);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            var event = trace.events().stream()
+                    .filter(e -> e.type().equals("EXPECTATION_VERIFIED"))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("APPEND_LINE", event.data().get("kind"));
+            assertEquals("PASSED", event.data().get("status"));
+            assertEquals("README.md", event.data().get("pathHint"));
+            assertTrue(event.data().containsKey("expectedHash"));
+            assertTrue(event.data().containsKey("observedHash"));
+            assertFalse(event.data().containsValue("Release gate note"),
+                    "default trace must not store raw appended-line content");
+        } finally {
+            LocalTurnTraceCapture.clear();
+        }
+    }
+
+    @Test
+    void replacementExpectationTraceEventIsRedacted() throws Exception {
+        Files.writeString(workspace.resolve("script.js"), "document.querySelector('#submit');\n");
+        LocalTurnTraceCapture.begin(
+                "trc-test-replacement",
+                "session-test",
+                1,
+                "2026-04-29T00:00:00Z",
+                "workspace-hash",
+                "auto",
+                "ollama",
+                "qwen2.5-coder:14b",
+                "Replace .missing-button with #submit in script.js.");
+
+        try {
+            StaticTaskVerifier.verify(
+                    workspace,
+                    "Replace .missing-button with #submit in script.js.",
+                    loopResult(List.of(successfulWrite("script.js", VerificationStatus.PASS))),
+                    0);
+            LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+            var event = trace.events().stream()
+                    .filter(e -> e.type().equals("EXPECTATION_VERIFIED"))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("TEXT_REPLACEMENT", event.data().get("kind"));
+            assertEquals("PASSED", event.data().get("status"));
+            assertEquals("script.js", event.data().get("pathHint"));
+            assertTrue(event.data().containsKey("expectedHash"));
+            assertTrue(event.data().containsKey("observedHash"));
+            assertFalse(event.data().containsValue(".missing-button"),
+                    "default trace must not store raw replacement old text");
+            assertFalse(event.data().containsValue("#submit"),
+                    "default trace must not store raw replacement new text");
         } finally {
             LocalTurnTraceCapture.clear();
         }
@@ -1231,6 +1549,118 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void exactEditReplacementEvidencePassesNonWebMutationVerification() throws Exception {
+        Files.writeString(workspace.resolve("notes.md"), "status=new\n");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Update notes.md.",
+                loopResult(List.of(successfulExactEdit(
+                        "notes.md",
+                        "status=old",
+                        "status=new",
+                        VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status());
+        assertTrue(result.summary().contains("Exact edit replacement verification passed"), result.summary());
+        assertTrue(result.facts().stream()
+                .anyMatch(f -> f.contains("notes.md: exact edit replacement observed")),
+                result.facts().toString());
+    }
+
+    @Test
+    void exactEditReplacementEvidenceFailsWhenReplacementMissing() throws Exception {
+        Files.writeString(workspace.resolve("notes.md"), "status=old\n");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Replace status=old with status=new in notes.md.",
+                loopResult(List.of(successfulExactEdit(
+                        "notes.md",
+                        "status=old",
+                        "status=new",
+                        VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("replacement text was not observed")),
+                result.problems().toString());
+    }
+
+    @Test
+    void replacementExpectationPassesWhenOldRemovedAndNewPresentAfterWrite() throws Exception {
+        Files.writeString(workspace.resolve("script.js"), "document.querySelector('#submit');\n");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Replace .missing-button with #submit in script.js.",
+                loopResult(List.of(successfulWrite("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status());
+        assertTrue(result.summary().contains("Replacement verification passed"), result.summary());
+        assertTrue(result.facts().stream()
+                .anyMatch(f -> f.contains("script.js: replacement text observed and old text absent.")));
+    }
+
+    @Test
+    void replacementExpectationFailsWhenOldTextRemains() throws Exception {
+        Files.writeString(workspace.resolve("script.js"), """
+                document.querySelector('.missing-button');
+                document.querySelector('#submit');
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Replace .missing-button with #submit in script.js.",
+                loopResult(List.of(successfulWrite("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.summary().contains("Replacement verification failed"), result.summary());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("script.js: replacement old text remained")));
+    }
+
+    @Test
+    void replacementExpectationFailsWhenNewTextMissing() throws Exception {
+        Files.writeString(workspace.resolve("script.js"), "document.querySelector('.other-button');\n");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Replace .missing-button with #submit in script.js.",
+                loopResult(List.of(successfulWrite("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.summary().contains("Replacement verification failed"), result.summary());
+        assertTrue(result.problems().stream()
+                .anyMatch(p -> p.contains("script.js: replacement new text was not observed")));
+    }
+
+    @Test
+    void mixedExactEditAndReadbackOnlyMutationDoesNotOverclaimPassedVerification() throws Exception {
+        Files.writeString(workspace.resolve("notes.md"), "status=new\n");
+        Files.writeString(workspace.resolve("README.md"), "# Talos\n");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Replace status=old with status=new in notes.md and update README.md.",
+                loopResult(List.of(
+                        successfulExactEdit("notes.md", "status=old", "status=new", VerificationStatus.PASS),
+                        successfulWrite("README.md", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.READBACK_ONLY, result.status());
+        assertTrue(result.summary().contains("Target/readback checks passed"), result.summary());
+        assertTrue(result.facts().stream()
+                .anyMatch(f -> f.contains("notes.md: exact edit replacement observed")),
+                result.facts().toString());
+    }
+
+    @Test
     void markdownDocumentAboutWebpageDoesNotRunStaticWebVerifier() throws Exception {
         Files.createDirectories(workspace.resolve("docs"));
         Files.writeString(workspace.resolve("index.html"), "<!doctype html><html><body></body></html>");
@@ -1424,6 +1854,50 @@ class StaticTaskVerifierTest {
                 result.facts().toString());
     }
 
+    @Test
+    void forbiddenSimilarTargetMutationFailsEvenWhenExpectedTargetMutated() throws Exception {
+        Files.writeString(workspace.resolve("script.js"), "document.querySelector('#submit');\n");
+        Files.writeString(workspace.resolve("scripts.js"), "document.querySelector('#submit');\n");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Replace .missing-button with #submit in script.js. Do not edit scripts.js.",
+                loopResult(List.of(
+                        successfulWrite("script.js", VerificationStatus.PASS),
+                        successfulWrite("scripts.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("scripts.js: forbidden mutation target was changed")),
+                result.problems().toString());
+        assertFalse(result.facts().stream()
+                        .anyMatch(f -> f.contains("Expected mutation target(s) were updated")),
+                result.facts().toString());
+    }
+
+    @Test
+    void onlyTargetRequestFailsWhenAdditionalSiblingTargetMutated() throws Exception {
+        Files.writeString(workspace.resolve("script.js"), "document.querySelector('#submit');\n");
+        Files.writeString(workspace.resolve("scripts.js"), "document.querySelector('#submit');\n");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Only change script.js.",
+                loopResult(List.of(
+                        successfulWrite("script.js", VerificationStatus.PASS),
+                        successfulWrite("scripts.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("scripts.js: non-requested mutation target was changed")),
+                result.problems().toString());
+        assertFalse(result.facts().stream()
+                        .anyMatch(f -> f.contains("Expected mutation target(s) were updated")),
+                result.facts().toString());
+    }
+
     private static boolean isWindows() {
         return System.getProperty("os.name", "").toLowerCase().contains("win");
     }
@@ -1503,6 +1977,30 @@ class StaticTaskVerifierTest {
         return new ToolCallLoop.ToolOutcome(
                 "talos.edit_file", path, true, true, false,
                 "edited " + path, "", verificationStatus);
+    }
+
+    private static ToolCallLoop.ToolOutcome successfulExactEdit(
+            String path,
+            String oldString,
+            String newString,
+            VerificationStatus verificationStatus) {
+        return new ToolCallLoop.ToolOutcome(
+                "talos.edit_file", path, true, true, false,
+                "edited " + path, "", verificationStatus, "",
+                null,
+                ToolCallLoop.MutationEvidence.exactEdit(oldString, newString));
+    }
+
+    private static ToolCallLoop.ToolOutcome successfulFullWrite(
+            String path,
+            String previousContent,
+            String newContent,
+            VerificationStatus verificationStatus) {
+        return new ToolCallLoop.ToolOutcome(
+                "talos.write_file", path, true, true, false,
+                "wrote " + path, "", verificationStatus, "",
+                null,
+                ToolCallLoop.MutationEvidence.fullWriteReplacement(previousContent, newContent));
     }
 
     private static ToolCallLoop.ToolOutcome successfulWrite(String path, VerificationStatus verificationStatus) {

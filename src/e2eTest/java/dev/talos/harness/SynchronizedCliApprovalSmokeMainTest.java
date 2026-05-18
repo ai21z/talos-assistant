@@ -46,6 +46,8 @@ class SynchronizedCliApprovalSmokeMainTest {
 
         String text = Files.readString(summary);
         assertTrue(text.contains("Status: PASS"), text);
+        assertTrue(text.contains("terminal mode: redirected stdin/stdout process"), text);
+        assertTrue(text.contains("true PTY/JLine coverage: no"), text);
         assertTrue(text.contains("approval prompt observed: yes"), text);
         assertTrue(text.contains("approval denial observed: yes"), text);
         assertFalse(text.contains("FILE_DISCOVERED_CANARY_CLI_SMOKE"), text);
