@@ -3,8 +3,11 @@ package dev.talos.runtime.policy;
 import dev.talos.core.ingest.FileCapabilityPolicy;
 
 import java.io.IOException;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -33,47 +36,34 @@ public final class SensitiveWorkspaceDetector {
             signals.add("workspace name looks sensitive");
         }
 
-        int privateDocumentCount = 0;
-        try (var stream = Files.walk(root, 2)) {
-            for (Path path : stream.toList()) {
-                if (path.equals(root)) continue;
-                Path rel = root.relativize(path);
-                String normalized = rel.toString().replace('\\', '/').toLowerCase(Locale.ROOT);
-                String fileName = path.getFileName() == null
-                        ? ""
-                        : path.getFileName().toString().toLowerCase(Locale.ROOT);
+        int[] privateDocumentCount = {0};
+        try {
+            Files.walkFileTree(root, java.util.EnumSet.noneOf(java.nio.file.FileVisitOption.class), 2,
+                    new SimpleFileVisitor<>() {
+                        @Override
+                        public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                            if (!dir.equals(root)) {
+                                inspectPath(root, dir, true, signals, privateDocumentCount);
+                            }
+                            return FileVisitResult.CONTINUE;
+                        }
 
-                if (Files.isDirectory(path)) {
-                    if (normalized.equals("secrets") || normalized.equals("protected")
-                            || normalized.endsWith("/secrets") || normalized.endsWith("/protected")) {
-                        signals.add("protected directory present");
-                    } else if (containsSensitiveFolderTerm(fileName) || containsShortTokenTerm(fileName)) {
-                        signals.add("sensitive-looking directory present");
-                    }
-                    continue;
-                }
+                        @Override
+                        public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                            inspectPath(root, file, false, signals, privateDocumentCount);
+                            return FileVisitResult.CONTINUE;
+                        }
 
-                if (fileName.equals(".env") || fileName.startsWith(".env.")) {
-                    signals.add("protected env-like file present");
-                }
-                for (String term : SENSITIVE_FILENAME_TERMS) {
-                    if (fileName.contains(term)) {
-                        signals.add("sensitive-looking filename present");
-                        break;
-                    }
-                }
-                if (containsShortTokenTerm(fileName)) {
-                    signals.add("sensitive-looking filename present");
-                }
-                if (FileCapabilityPolicy.describe(path).isPresent()) {
-                    privateDocumentCount++;
-                }
-            }
+                        @Override
+                        public FileVisitResult visitFileFailed(Path file, IOException exc) {
+                            return FileVisitResult.CONTINUE;
+                        }
+                    });
         } catch (IOException ignored) {
             return new Assessment(false, List.of(), "");
         }
 
-        if (privateDocumentCount >= 3) {
+        if (privateDocumentCount[0] >= 3) {
             signals.add("many private documents or unsupported document-like files present");
         }
 
@@ -93,6 +83,45 @@ public final class SensitiveWorkspaceDetector {
             }
         }
         return false;
+    }
+
+    private static void inspectPath(
+            Path root,
+            Path path,
+            boolean directory,
+            List<String> signals,
+            int[] privateDocumentCount) {
+        Path rel = root.relativize(path);
+        String normalized = rel.toString().replace('\\', '/').toLowerCase(Locale.ROOT);
+        String fileName = path.getFileName() == null
+                ? ""
+                : path.getFileName().toString().toLowerCase(Locale.ROOT);
+
+        if (directory) {
+            if (normalized.equals("secrets") || normalized.equals("protected")
+                    || normalized.endsWith("/secrets") || normalized.endsWith("/protected")) {
+                signals.add("protected directory present");
+            } else if (containsSensitiveFolderTerm(fileName) || containsShortTokenTerm(fileName)) {
+                signals.add("sensitive-looking directory present");
+            }
+            return;
+        }
+
+        if (fileName.equals(".env") || fileName.startsWith(".env.")) {
+            signals.add("protected env-like file present");
+        }
+        for (String term : SENSITIVE_FILENAME_TERMS) {
+            if (fileName.contains(term)) {
+                signals.add("sensitive-looking filename present");
+                break;
+            }
+        }
+        if (containsShortTokenTerm(fileName)) {
+            signals.add("sensitive-looking filename present");
+        }
+        if (FileCapabilityPolicy.describe(path).isPresent()) {
+            privateDocumentCount[0]++;
+        }
     }
 
     private static boolean containsShortTokenTerm(String value) {

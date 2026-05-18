@@ -67,7 +67,7 @@ class InfraCommandsTest {
         @Test void output_contains_status_header() {
             var cmd = new StatusCommand(ModeController.defaultController(), ws);
             String text = cmd.execute("", ctx).toString();
-            assertTrue(text.contains("Talos v"), "Should contain dashboard header");
+            assertTrue(text.contains("TALOS"), "Should contain dashboard header");
         }
 
         @Test void output_contains_mode() {
@@ -83,10 +83,12 @@ class InfraCommandsTest {
             assertTrue(text.contains("top_k_max"), "Should show top_k_max limit");
         }
 
-        @Test void non_verbose_suggests_verbose() {
+        @Test void non_verbose_uses_status_no_icon_renderer() {
             var cmd = new StatusCommand(ModeController.defaultController(), ws);
             String text = cmd.execute("", ctx).toString();
-            assertTrue(text.contains("--verbose"), "Should suggest --verbose");
+            assertTrue(text.contains("Policy"), "Should show governance status");
+            assertTrue(text.contains("Engine"), "Should show runtime engine");
+            assertFalse(text.contains("▛██████▜"), "Status should not show the startup icon");
         }
 
         @Test void verbose_flag_accepted() {

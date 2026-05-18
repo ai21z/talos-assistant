@@ -22,15 +22,15 @@ class TalosBannerTest {
         return baos.toString(StandardCharsets.UTF_8);
     }
     @Test
-    void print_uses_compact_dashboard_not_legacy_logo() {
+    void print_uses_trusted_dashboard_not_legacy_wordmark() {
         String output = capturePrint(Path.of("."), "rag");
-        assertTrue(output.contains("Talos"), "Dashboard should contain Talos brand name");
-        assertFalse(output.contains("\u2588\u2588"), "Dashboard should not print the legacy block logo");
+        assertTrue(output.contains("TALOS"), "Dashboard should contain Talos brand name");
+        assertFalse(output.contains("TAΛOS"), "Dashboard should not use the ornamental Greek variant");
     }
     @Test
     void print_contains_dashboard_identity() {
         String output = capturePrint(Path.of("."), "rag");
-        assertTrue(output.contains("Talos"), "Dashboard should contain Talos brand name");
+        assertTrue(output.contains("TALOS"), "Dashboard should contain Talos brand name");
         assertTrue(output.contains("Workspace"), "Dashboard should show workspace");
     }
     @Test
@@ -42,10 +42,10 @@ class TalosBannerTest {
     void print_contains_context_labels() {
         String output = capturePrint(Path.of("."), "rag");
         assertTrue(output.contains("Model"), "Banner should show Model label");
+        assertTrue(output.contains("Engine"), "Banner should show Engine label");
         assertTrue(output.contains("Index"), "Banner should show Index label");
         assertTrue(output.contains("Policy"), "Banner should show Policy label");
         assertTrue(output.contains("Debug"), "Banner should show Debug label");
-        assertTrue(output.contains("Next"), "Banner should show Next label");
         assertTrue(output.contains("Workspace"), "Banner should show Workspace label");
         assertTrue(output.contains("Mode"), "Banner should show Mode label");
     }
@@ -69,7 +69,7 @@ class TalosBannerTest {
     @Test
     void printCompact_contains_brand_and_version() {
         String output = captureCompact(Path.of("."), "rag");
-        assertTrue(output.contains("Talos"), "Compact banner should contain Talos");
+        assertTrue(output.contains("TALOS"), "Compact banner should contain Talos");
         assertTrue(output.contains(BuildInfo.version()), "Compact banner should contain version");
     }
     @Test
@@ -78,11 +78,10 @@ class TalosBannerTest {
         assertTrue(output.contains("auto"), "Compact banner should show the mode");
     }
     @Test
-    void printCompact_is_shorter_than_full_banner() {
-        String full = capturePrint(Path.of("."), "rag");
+    void printCompact_omits_unicode_icon() {
         String compact = captureCompact(Path.of("."), "rag");
-        assertTrue(compact.length() < full.length(),
-                "Compact banner should be shorter than full banner");
+        assertFalse(compact.contains("▛██████▜"),
+                "Compact banner should not show the startup icon");
     }
     @Test
     void print_shows_index_status_for_workspace_without_index() {
