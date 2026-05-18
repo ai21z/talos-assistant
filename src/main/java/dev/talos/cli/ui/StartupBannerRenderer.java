@@ -17,14 +17,61 @@ public final class StartupBannerRenderer {
     private static final int SPLIT_MIN_WIDTH = 70;
     private static final int PLAIN_MIN_WIDTH = 50;
     private static final int LEFT_PANEL = 25;
+    private static final int ICON_WIDTH = 10;
+    private static final int LEFT_TEXT_WIDTH = LEFT_PANEL - ICON_WIDTH - 4;
 
+    /** Talos H100 head, 10 cells x 5 rows.  Eyes on row 1.  Stem on rows 2-3. */
     private static final String[] ICON = {
-            "████████",
-            "█      █",
-            "███  ███",
-            "███  ███",
-            " ▀█  █▀ "
+            "▟███▀▀███▙",
+            "  ▶    ◀  ",
+            "████  ████",
+            " ▀██  ██▀ ",
+            "          "
     };
+
+    // Eye coordinates inside ICON[1] for the wink animation.
+    // Eye row: "  ▶    ◀  "  →  left eye at index 2, right eye at index 7.
+    static final int ICON_EYE_ROW = 1;
+    static final int ICON_LEFT_EYE_COL = 2;
+    static final int ICON_RIGHT_EYE_COL = 7;
+
+    // ─── Banner geometry (used by the wink animator in TalosBanner) ───────
+    //
+    // STARTUP_WITH_ICON line count:  top(1) + icon-rows(5) + rejoin(1)
+    //                              + gov(1) + sep(1) + hint(1) + bot(1) = 11
+    //
+    // After PrintStream.print(banner) the trailing '\n' on the bottom border
+    // moves the cursor to the line *below* the bottom border.  Distance from
+    // that line back UP to the eye row is therefore 11 - 2 = 9 lines.
+    // (Eye row is line index 2 when counting from the top border = line 0.)
+    //
+    // Right-eye screen column inside the framed left panel:
+    //   col 1 = '│',  col 2 = ' ',  cols 3..12 = ICON[1],  eye at icon idx 7
+    //   → screen column 3 + 7 = 10.
+    static final int BANNER_LINES_BELOW_EYE_ROW = 9;
+    static final int RIGHT_EYE_SCREEN_COL = 10;
+
+    // Wink frame sequence.  Sized so the closed phase ("◞ ─ ─ ─") holds
+    // 400 ms at 100 ms/frame, reading clearly as a wink, not a glitch.
+    private static final String[] WINK_FRAMES = {
+            "◀","◀","◄","◅","◞","─","─","─","◞","◅","◄","◀","◀","◀"
+    };
+    private static final long WINK_FRAME_MILLIS = 100L;
+
+    // ─── Lamps & badges (V8/V10/V12 doctrine) ────────────────────────────
+    // Each glyph carries information, never decoration.
+
+    private static final String LAMP_OK       = "●";   // ready / loaded / verified
+    private static final String LAMP_ACTIVE   = "◐";   // building / brief / partial-trust
+    private static final String LAMP_WARN     = "◌";   // stale / risk
+    private static final String LAMP_TRACE    = "◍";   // debug=trace / debug-on
+    private static final String LAMP_UNSET    = "○";   // off / read-only / no-mutation
+    private static final String LAMP_ERROR    = "●";   // error (red-colored)
+    private static final String MODE_BADGE_READ  = "○";
+    private static final String MODE_BADGE_AUTO  = "◐";
+    private static final String MODE_BADGE_DEV   = "◉";
+    private static final String MODE_BADGE_DEBUG = "◍";
+    private static final String TRUST_DIAMOND = "◇";
 
     private StartupBannerRenderer() {}
 
@@ -63,6 +110,85 @@ public final class StartupBannerRenderer {
         return renderStartupWithIcon(s, caps, w);
     }
 
+    /**
+     * Returns true when the renderer would have emitted the STARTUP_WITH_ICON
+     * variant for the given inputs.  Callers use this to decide whether the
+     * wink animation is meaningful (no icon → no wink).
+     */
+    public static boolean wouldRenderIcon(TerminalCapabilities capabilities, int width, Variant variant) {
+        TerminalCapabilities caps = capabilities == null
+                ? TerminalCapabilities.detectDefault()
+                : capabilities;
+        if (!caps.unicodeSafe()) return false;
+        if (width < SPLIT_MIN_WIDTH) return false;
+        Variant v = variant == null ? Variant.STARTUP_WITH_ICON : variant;
+        return v == Variant.STARTUP_WITH_ICON;
+    }
+
+    /**
+     * Animates a one-shot wink on the right eye of the H100 head, in place,
+     * inside the framed banner that was just printed.
+     *
+     * <p>Pre-condition: the caller printed exactly one STARTUP_WITH_ICON
+     * banner to {@code out} and nothing else since.  This method walks the
+     * cursor up to the eye row with {@code ESC[<n>A}, repaints only the two
+     * eye cells with absolute-column positioning ({@code ESC[<n>G}), then
+     * walks back down so subsequent output continues normally.
+     *
+     * <p>Animation is OPT-OUT.  It is automatically skipped when:
+     * <ul>
+     *   <li>{@code $TALOS_BANNER_NO_ANIMATION} is set (any non-empty value)</li>
+     *   <li>{@code $NO_COLOR} is set</li>
+     *   <li>the process has no console (stdout redirected / piped)</li>
+     *   <li>color or unicode are unavailable in the detected capabilities</li>
+     * </ul>
+     */
+    public static void animateStartupWink(java.io.PrintStream out, TerminalCapabilities capabilities) {
+        if (out == null) return;
+        TerminalCapabilities caps = capabilities == null
+                ? TerminalCapabilities.detectDefault()
+                : capabilities;
+        if (!shouldAnimate(caps)) return;
+
+        String bronzeOn  = "\033[38;2;167;123;58m";
+        String reset     = "\033[0m";
+        int linesUp      = BANNER_LINES_BELOW_EYE_ROW;
+        int eyeCol       = RIGHT_EYE_SCREEN_COL;
+
+        try {
+            for (String frame : WINK_FRAMES) {
+                // Up to eye row → jump to eye column → paint glyph → restore.
+                out.print("\033[" + linesUp + "A");
+                out.print("\033[" + eyeCol + "G");
+                out.print(bronzeOn);
+                out.print(frame);
+                out.print(reset);
+                out.print("\033[" + linesUp + "B");
+                out.print("\033[1G");
+                out.flush();
+                Thread.sleep(WINK_FRAME_MILLIS);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            // Restore cursor sanity if interrupted mid-animation.
+            out.print("\033[" + BANNER_LINES_BELOW_EYE_ROW + "B");
+            out.print("\033[1G");
+            out.flush();
+        }
+    }
+
+    private static boolean shouldAnimate(TerminalCapabilities caps) {
+        if (caps == null || !caps.colorEnabled() || !caps.unicodeSafe()) return false;
+        if (!caps.interactive()) return false;
+        String optOut = System.getenv("TALOS_BANNER_NO_ANIMATION");
+        if (optOut != null && !optOut.isBlank()) return false;
+        String noColor = System.getenv("NO_COLOR");
+        if (noColor != null && !noColor.isBlank()) return false;
+        // System.console() is the most reliable "is this really a TTY?" probe
+        // on Windows; capabilities.interactive() is a hint, this is the truth.
+        return System.console() != null;
+    }
+
     private static String renderStartupWithIcon(
             CliStatusDashboard.Snapshot s,
             TerminalCapabilities caps,
@@ -83,16 +209,21 @@ public final class StartupBannerRenderer {
                 {"Index", fitIndex(s.index(), rightValueWidth)}
         };
 
-        for (int i = 0; i < ICON.length; i++) {
+        int rows = Math.max(ICON.length, right.length);
+        for (int i = 0; i < rows; i++) {
+            String icon = i < ICON.length ? fitText(ICON[i], ICON_WIDTH) : repeat(" ", ICON_WIDTH);
             String leftContent = " "
-                    + style.bronze(ICON[i])
+                    + style.bronze(icon)
                     + "  "
-                    + styledPadded(left[i], 13, style.leftIdentityColor(i))
+                    + styledPadded(left[i], LEFT_TEXT_WIDTH, style.leftIdentityColor(i))
                     + " ";
+            String label = right[i][0];
+            String value = right[i][1];
+            String rightValue = styledPadded(value, rightValueWidth, style.valueColor(label, value, s.debug()));
             String rightContent = " "
-                    + styledPadded(right[i][0], 11, style::bronze)
+                    + styledPadded(label, 11, style::bronze)
                     + " "
-                    + styledPadded(right[i][1], rightValueWidth, style.valueColor(right[i][0], right[i][1], s.debug()))
+                    + rightValue
                     + " ";
 
             appendLine(out, style.frame("│") + leftContent + style.frame("│") + rightContent + style.frame("│"));
@@ -116,12 +247,12 @@ public final class StartupBannerRenderer {
         StringBuilder out = new StringBuilder();
 
         appendLine(out, style.frame("┌" + repeat("─", width - 2) + "┐"));
-        appendStatusRow(out, style, "TALOS", version(s.version()), valueWidth);
-        appendStatusRow(out, style, "Workspace", fitWorkspace(s.workspace(), valueWidth), valueWidth);
-        appendStatusRow(out, style, "Mode", fitText(s.mode(), valueWidth), valueWidth);
-        appendStatusRow(out, style, "Model", fitModel(s.model(), valueWidth), valueWidth);
-        appendStatusRow(out, style, "Engine", fitEngine(s.engine(), valueWidth), valueWidth);
-        appendStatusRow(out, style, "Index", fitIndex(s.index(), valueWidth), valueWidth);
+        appendStatusRow(out, style, "TALOS", version(s.version()), valueWidth, s);
+        appendStatusRow(out, style, "Workspace", fitWorkspace(s.workspace(), valueWidth), valueWidth, s);
+        appendStatusRow(out, style, "Mode", fitText(s.mode(), valueWidth), valueWidth, s);
+        appendStatusRow(out, style, "Model", fitModel(s.model(), valueWidth), valueWidth, s);
+        appendStatusRow(out, style, "Engine", fitEngine(s.engine(), valueWidth), valueWidth, s);
+        appendStatusRow(out, style, "Index", fitIndex(s.index(), valueWidth), valueWidth, s);
         appendLine(out, style.frame("├" + repeat("─", width - 2) + "┤"));
         appendLine(out, governanceRow(s, caps, width));
         appendLine(out, style.frame("└" + repeat("─", width - 2) + "┘"));
@@ -148,7 +279,7 @@ public final class StartupBannerRenderer {
         appendPlainBoxRow(out, style, style.body(fitText(trust, contentWidth)), fitText(trust, contentWidth), contentWidth);
         appendLine(out, style.frame("├" + repeat("─", width - 2) + "┤"));
         String hint = compactHint(s);
-        appendPlainBoxRow(out, style, styledHint(hint, style), fitText(hint, contentWidth), contentWidth);
+        appendPlainBoxRow(out, style, styledCompactHint(hint, style), fitText(hint, contentWidth), contentWidth);
         appendLine(out, style.frame("└" + repeat("─", width - 2) + "┘"));
         return out.toString();
     }
@@ -182,11 +313,13 @@ public final class StartupBannerRenderer {
         return out.toString();
     }
 
-    private static void appendStatusRow(StringBuilder out, Style style, String label, String value, int valueWidth) {
+    private static void appendStatusRow(StringBuilder out, Style style, String label, String value, int valueWidth, CliStatusDashboard.Snapshot s) {
+        String renderedValue;
+        renderedValue = styledPadded(value, valueWidth, style.valueColor(label, value, s.debug()));
         String content = " "
                 + styledPadded(label, 11, style::bronze)
                 + " "
-                + styledPadded(value, valueWidth, style.valueColor(label, value, "off"))
+                + renderedValue
                 + " ";
         appendLine(out, style.frame("│") + content + style.frame("│"));
     }
@@ -212,11 +345,31 @@ public final class StartupBannerRenderer {
         Hint hint = hint(s);
         int contentWidth = width - 4;
         String plain = fitText(hint.state() + " · " + hint.rest(), contentWidth);
-        String styled = styledHint(plain, style);
+        String styled = styledCompactHint(plain, style);
         return style.frame("│") + " " + styled + repeat(" ", Math.max(0, contentWidth - plain.length())) + " " + style.frame("│");
     }
 
-    private static String styledHint(String plain, Style style) {
+    private static String styledHintWithLamp(String lamp, String stateExpected, String plain, Style style) {
+        String prefix = lamp + " ";
+        if (!plain.startsWith(prefix)) {
+            // truncation removed lamp prefix; fall back to body styling
+            return style.body(plain);
+        }
+        String afterLamp = plain.substring(prefix.length());
+        int split = afterLamp.indexOf(" · ");
+        if (split < 0) {
+            return style.hintStateColor(stateExpected).apply(lamp) + " " + style.body(afterLamp);
+        }
+        String state = afterLamp.substring(0, split);
+        String rest = afterLamp.substring(split + 3);
+        Styler stateStyler = style.hintStateColor(state);
+        return stateStyler.apply(lamp) + " "
+                + stateStyler.apply(state)
+                + style.frame(" · ")
+                + style.body(rest);
+    }
+
+    private static String styledCompactHint(String plain, Style style) {
         int split = plain.indexOf(" · ");
         if (split < 0) {
             return style.valueColor("hint", plain, "off").apply(plain);
@@ -425,6 +578,16 @@ public final class StartupBannerRenderer {
     }
 
     private static final class Style {
+        // Talos site palette (site/src/styles.css)
+        //   --bronze #c28a4c brand              → 194,138, 76
+        //   --cyan   #43d7d2 active/affordance  →  67,215,210
+        //   --text   #f3ecdf body               → 243,236,223
+        //   --muted  #a99f91 meta/dim           → 169,159,145
+        //   --border bronze@24% on #090c0c      → 110, 84, 46  (warm dim frame)
+        // Semantic state extensions tuned to the same warm key:
+        //   green (settled-ok)  → 110,200,140
+        //   amber (warn/trace)  → 215,162, 90
+        //   red   (error)       → 217,107, 92
         private final boolean color;
 
         private Style(TerminalCapabilities caps) {
@@ -469,6 +632,27 @@ public final class StartupBannerRenderer {
             if (lower.equals("off")) return this::meta;
             if (lower.equals("brief")) return this::cyan;
             return this::amber;
+        }
+
+        Styler debugLampColor(String debug) {
+            return debugColor(debug);
+        }
+
+        Styler modeBadgeColor(String mode) {
+            String lower = lower(mode);
+            if (lower.equals("read") || lower.equals("rag") || lower.equals("ask")) return this::meta;
+            if (lower.equals("dev")) return this::amber;
+            // auto + debug both read as "live affordance"
+            return this::cyan;
+        }
+
+        Styler indexLampColor(String index) {
+            String lower = lower(index);
+            if (lower.contains("error") || lower.contains("unavailable")) return this::red;
+            if (lower.contains("stale") || lower.contains("warn")) return this::amber;
+            if (lower.contains("building")) return this::cyan;
+            if (lower.contains("none") || lower.contains("unknown") || lower.contains("unset")) return this::meta;
+            return this::green;
         }
 
         Styler hintStateColor(String state) {

@@ -194,6 +194,20 @@ class MemoryUpdateListenerTest {
         assertTrue(stored.contains("[redacted-private-document-canary]"), stored);
     }
 
+    @Test void privateDocumentReadAnswersAreRedactedBeforeHistoryPersistenceByFormatProvenance() {
+        listener.onTurnComplete(tr(new Result.Streamed("""
+                The DOCX says:
+                Patient code: docx-handoff-ok
+                Follow-up: call on Tuesday.
+                """, ""), 1), "Read medical-notes.docx and summarize it.");
+
+        assertEquals(1, cm.turnCount());
+        String stored = cm.buildHistory().get(1).content();
+        assertFalse(stored.contains("docx-handoff-ok"), stored);
+        assertFalse(stored.contains("call on Tuesday"), stored);
+        assertTrue(stored.contains("private document answer redacted"), stored);
+    }
+
     @Test void refusalStyleReplyIsNotRecordedInHistory() {
         String refusal = "I apologize for the confusion earlier. I am an AI text-based assistant and cannot directly edit files on your system.";
         listener.onTurnComplete(tr(new Result.Streamed(refusal, ""), 1), "please edit it");

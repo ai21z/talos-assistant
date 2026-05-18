@@ -1615,7 +1615,7 @@ public final class ToolCallRepromptStage {
                 state.cushionFiresE1Suggestion,
                 state.failureDecision,
                 List.copyOf(state.toolOutcomes));
-        TaskVerificationResult verification = StaticTaskVerifier.verify(
+        TaskVerificationResult verification = StaticTaskVerifier.verifyWithoutTraceEvents(
                 state.workspace,
                 contract,
                 snapshot,

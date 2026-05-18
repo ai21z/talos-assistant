@@ -18,6 +18,7 @@ import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.PathArgumentCanonicalizer;
+import dev.talos.tools.ToolContentMetadata;
 import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolProgressSink;
@@ -275,6 +276,9 @@ public final class ToolCallExecutionStage {
                     successfulProtectedRead
                             && ProtectedReadScopePolicy.sendApprovedProtectedReadToModel(
                                     state.ctx == null ? null : state.ctx.cfg());
+            boolean preservePrivateDocumentModelHandoff =
+                    !successfulProtectedRead
+                            && shouldPreservePrivateDocumentModelHandoff(rawResult);
             ToolResult result;
             if (successfulProtectedRead && !preserveApprovedProtectedReadResult) {
                 state.contentWithheldFromModelContext = true;
@@ -286,7 +290,7 @@ public final class ToolCallExecutionStage {
                 state.contentWithheldFromModelContext = true;
                 result = privateContentWithheldResult(rawResult, state);
             } else {
-                result = preserveApprovedProtectedReadResult
+                result = preserveApprovedProtectedReadResult || preservePrivateDocumentModelHandoff
                         ? rawResult
                         : ProtectedContentPolicy.sanitizeToolResult(rawResult);
             }
@@ -342,6 +346,8 @@ public final class ToolCallExecutionStage {
             if (isUserApprovalDenial(result) && ToolCallSupport.isMutatingTool(effective.toolName())) {
                 approvalDeniedThisIter = true;
             }
+            dev.talos.runtime.ToolCallLoop.MutationEvidence mutationEvidence =
+                    result.success() ? mutationEvidence(effective) : null;
             state.toolOutcomes.add(new dev.talos.runtime.ToolCallLoop.ToolOutcome(
                     effective.toolName(),
                     pathHint,
@@ -352,7 +358,8 @@ public final class ToolCallExecutionStage {
                     result.success() ? "" : result.errorMessage(),
                     result.verification(),
                     result.error() == null ? "" : result.error().code(),
-                    workspaceOperationPlan));
+                    workspaceOperationPlan,
+                    mutationEvidence));
 
             if (!result.success()) {
                 state.failedCalls++;
@@ -391,7 +398,7 @@ public final class ToolCallExecutionStage {
             String resultText = ToolCallSupport.formatToolResult(
                     effective,
                     result,
-                    preserveApprovedProtectedReadResult);
+                    preserveApprovedProtectedReadResult || preservePrivateDocumentModelHandoff);
             if (readBeforeWriteNudge != null) {
                 resultText = resultText + readBeforeWriteNudge;
             }
@@ -435,6 +442,30 @@ public final class ToolCallExecutionStage {
         }
         return value.substring(0, LIST_DIR_EVIDENCE_SUMMARY_CHARS)
                 + "\n... (tool outcome summary truncated)";
+    }
+
+    private static dev.talos.runtime.ToolCallLoop.MutationEvidence mutationEvidence(ToolCall call) {
+        if (call == null || !"talos.edit_file".equals(call.toolName())) {
+            return dev.talos.runtime.ToolCallLoop.MutationEvidence.none();
+        }
+        String oldString = firstParam(call,
+                "old_string", "oldString", "old_text", "search", "find", "original");
+        String newString = firstParam(call,
+                "new_string", "newString", "new_text", "replace", "replacement");
+        if (oldString == null || oldString.isEmpty() || newString == null) {
+            return dev.talos.runtime.ToolCallLoop.MutationEvidence.none();
+        }
+        return dev.talos.runtime.ToolCallLoop.MutationEvidence.exactEdit(oldString, newString);
+    }
+
+    private static String firstParam(ToolCall call, String... keys) {
+        if (call == null || keys == null) return null;
+        for (String key : keys) {
+            if (key == null || key.isBlank()) continue;
+            String value = call.param(key);
+            if (value != null) return value;
+        }
+        return null;
     }
 
     private static Set<String> staleRereadRequiredPaths(LoopState state) {
@@ -584,6 +615,14 @@ public final class ToolCallExecutionStage {
                 null,
                 rawResult == null ? null : rawResult.verification(),
                 rawResult == null ? null : rawResult.contentMetadata());
+    }
+
+    private static boolean shouldPreservePrivateDocumentModelHandoff(ToolResult result) {
+        if (result == null || !result.success() || result.contentMetadata() == null) return false;
+        ToolContentMetadata metadata = result.contentMetadata();
+        return metadata.modelHandoffAllowed()
+                && metadata.privacyClass() == ToolContentMetadata.ContentPrivacyClass.PRIVATE_DOCUMENT_EXTRACTED_TEXT
+                && metadata.source() == ToolContentMetadata.ContentSource.DOCUMENT_EXTRACTION;
     }
 
     private static String sourceEvidenceRequiredDiagnostic(String pathHint, List<String> missingSourceTargets) {

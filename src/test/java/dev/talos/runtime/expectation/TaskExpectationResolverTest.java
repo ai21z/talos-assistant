@@ -101,6 +101,68 @@ class TaskExpectationResolverTest {
     }
 
     @Test
+    void extractsExactBulletCountForSingleTarget() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Create notes/generated-summary.md with exactly three bullet points.");
+
+        List<TaskExpectation> expectations = TaskExpectationResolver.resolve(contract);
+
+        assertEquals(1, expectations.size());
+        BulletListExpectation bullets = (BulletListExpectation) expectations.getFirst();
+        assertEquals("notes/generated-summary.md", bullets.targetPath());
+        assertEquals(3, bullets.expectedBulletCount());
+        assertEquals("bullet-list-exact-count", bullets.sourcePattern());
+        assertTrue(contract.mutationAllowed());
+    }
+
+    @Test
+    void extractsAppendLineExpectationForSingleTarget() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Append exactly this line to README.md: Release gate note");
+
+        List<TaskExpectation> expectations = TaskExpectationResolver.resolve(contract);
+
+        assertEquals(1, expectations.size());
+        TaskExpectation expectation = expectations.getFirst();
+        assertEquals("APPEND_LINE", expectation.kind());
+        assertEquals("README.md", expectation.targetPath());
+        assertEquals("append-line-exact", expectation.sourcePattern());
+        assertTrue(contract.mutationAllowed());
+    }
+
+    @Test
+    void extractsReplacementExpectationForSingleTarget() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Replace .missing-button with #submit in script.js.");
+
+        List<TaskExpectation> expectations = TaskExpectationResolver.resolve(contract);
+
+        assertEquals(1, expectations.size());
+        ReplacementExpectation replacement = (ReplacementExpectation) expectations.getFirst();
+        assertEquals("script.js", replacement.targetPath());
+        assertEquals(".missing-button", replacement.oldText());
+        assertEquals("#submit", replacement.newText());
+        assertEquals("replacement-replace-with-in-target", replacement.sourcePattern());
+        assertTrue(contract.mutationAllowed());
+    }
+
+    @Test
+    void extractsChangeFromToReplacementExpectationForSingleTarget() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Change the page title from Old Portal to New Portal in index.html.");
+
+        List<TaskExpectation> expectations = TaskExpectationResolver.resolve(contract);
+
+        assertEquals(1, expectations.size());
+        ReplacementExpectation replacement = (ReplacementExpectation) expectations.getFirst();
+        assertEquals("index.html", replacement.targetPath());
+        assertEquals("Old Portal", replacement.oldText());
+        assertEquals("New Portal", replacement.newText());
+        assertEquals("replacement-change-from-to-in-target", replacement.sourcePattern());
+        assertTrue(contract.mutationAllowed());
+    }
+
+    @Test
     void ignoresAmbiguousPageAboutLiteralText() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Make index.html into a simple webpage that says AFTER.");

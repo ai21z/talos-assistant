@@ -1,9 +1,9 @@
 ┌─────────────────────────┬────────────────────────────────────────────────────┐
-│ ████████  TALOS         │ Workspace   ~/projects/talos-cli                   │
-│ █      █  v0.9.9-beta   │ Mode        auto                                   │
-│ ███  ███                │ Model       qwen2.5-coder:14b                      │
-│ ███  ███                │ Engine      llama.cpp (managed)                    │
-│  ▀█  █▀                 │ Index       ready · 12,418 chunks                  │
+│ ▟███▀▀███▙  TALOS       │ Workspace   ~/projects/talos-cli                   │
+│   ▶    ◀    v0.9.9-beta │ Mode        auto                                   │
+│ ████  ████              │ Model       qwen2.5-coder:14b                      │
+│  ▀██  ██▀               │ Engine      llama.cpp (managed)                    │
+│                         │ Index       ready · 12,418 chunks                  │
 ├─────────────────────────┴────────────────────────────────────────────────────┤
 │ Policy  ask before mutation                Debug  off                        │
 ├──────────────────────────────────────────────────────────────────────────────┤

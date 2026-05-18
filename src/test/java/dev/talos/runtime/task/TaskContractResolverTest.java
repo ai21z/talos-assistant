@@ -35,6 +35,18 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void appendLineRequestBecomesFileEditContract() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Append exactly this line to README.md: Release gate note");
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("README.md"), contract.expectedTargets());
+    }
+
+    @Test
     void createRequestBecomesFileCreateContract() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Create a README.md file with a short project description.");
@@ -63,6 +75,16 @@ class TaskContractResolverTest {
 
         assertFalse(contract.mutationAllowed());
         assertEquals(Set.of("index.html"), contract.expectedTargets());
+    }
+
+    @Test
+    void explicitForbiddenSiblingTargetIsCaptured() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Replace .missing-button with #submit in script.js. Do not edit scripts.js.");
+
+        assertTrue(contract.mutationAllowed());
+        assertEquals(Set.of("script.js"), contract.expectedTargets());
+        assertEquals(Set.of("scripts.js"), contract.forbiddenTargets());
     }
 
     @Test
@@ -651,6 +673,20 @@ class TaskContractResolverTest {
             assertTrue(contract.verificationRequired(), input);
             assertTrue(contract.expectedTargets().contains("notes.txt"), input);
         }
+    }
+
+    @Test
+    void explicitMutationToolImperativeWithSeparatedReplaceClauseIsMutationCapable() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Use talos.edit_file twice. First replace status=old with status=new in notes.md. "
+                        + "Then replace status2=old with status2=new in more.md.");
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertTrue(contract.expectedTargets().contains("notes.md"), contract.expectedTargets().toString());
+        assertTrue(contract.expectedTargets().contains("more.md"), contract.expectedTargets().toString());
     }
 
     @Test

@@ -5,6 +5,7 @@ import dev.talos.runtime.task.TaskContract;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -25,6 +26,10 @@ public final class TaskExpectationResolver {
                     + "first\\s+line\\s+(.+?)\\s*;\\s*"
                     + "second\\s+line\\s+(.+?)\\s*;\\s*"
                     + "no\\s+other\\s+characters\\b");
+    private static final Pattern EXACT_BULLET_COUNT = Pattern.compile(
+            "(?is)\\bexactly\\s+"
+                    + "(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|\\d{1,2})"
+                    + "\\s+(?:bullet\\s+points?|bullets?|list\\s+items?)\\b");
 
     private TaskExpectationResolver() {}
 
@@ -39,6 +44,7 @@ public final class TaskExpectationResolver {
         if (target == null || target.isBlank()) return List.of();
 
         String normalizedTarget = normalizePath(target);
+        List<TaskExpectation> structuralExpectations = resolveStructuralExpectations(request, normalizedTarget);
         List<Candidate> candidates = new ArrayList<>();
         addTargetSpecificExactCandidates(request, normalizedTarget, candidates);
         addTargetContainingExactlyCandidates(request, normalizedTarget, candidates);
@@ -48,7 +54,7 @@ public final class TaskExpectationResolver {
         addGenericCandidate(request, WHOLE_FILE_REPLACE, "literal-whole-file-replace", candidates);
         addGenericCandidate(request, WRITE_EXACT_CONTENT, "literal-write-exact-content", candidates);
 
-        if (candidates.isEmpty()) return List.of();
+        if (candidates.isEmpty()) return structuralExpectations;
 
         LinkedHashSet<String> literals = new LinkedHashSet<>();
         String firstSourcePattern = "";
@@ -60,13 +66,41 @@ public final class TaskExpectationResolver {
             literals.add(literal);
             if (firstSourcePattern.isBlank()) firstSourcePattern = candidate.sourcePattern();
         }
-        if (literals.size() != 1) return List.of();
+        if (literals.size() != 1) return structuralExpectations;
 
-        return List.of(new LiteralContentExpectation(
+        List<TaskExpectation> expectations = new ArrayList<>(structuralExpectations);
+        expectations.add(new LiteralContentExpectation(
                 normalizedTarget,
                 literals.iterator().next(),
                 LiteralContentExpectation.MatchMode.EXACT,
                 firstSourcePattern));
+        return List.copyOf(expectations);
+    }
+
+    private static List<TaskExpectation> resolveStructuralExpectations(
+            String request,
+            String normalizedTarget
+    ) {
+        if (normalizedTarget == null || normalizedTarget.isBlank()) {
+            return List.of();
+        }
+        List<TaskExpectation> expectations = new ArrayList<>();
+        ReplacementExpectation replacement = replacementExpectation(request, normalizedTarget);
+        if (replacement != null) {
+            expectations.add(replacement);
+        }
+        AppendLineExpectation appendLine = appendLineExpectation(request, normalizedTarget);
+        if (appendLine != null) {
+            expectations.add(appendLine);
+        }
+        int bulletCount = exactBulletCount(request);
+        if (bulletCount > 0) {
+            expectations.add(new BulletListExpectation(
+                    normalizedTarget,
+                    bulletCount,
+                    "bullet-list-exact-count"));
+        }
+        return List.copyOf(expectations);
     }
 
     private static List<TaskExpectation> resolveTargetSpecificExpectations(
@@ -219,6 +253,112 @@ public final class TaskExpectationResolver {
             normalized = normalized.substring(2);
         }
         return normalized;
+    }
+
+    private static int exactBulletCount(String request) {
+        if (request == null || request.isBlank()) return 0;
+        Matcher matcher = EXACT_BULLET_COUNT.matcher(request);
+        if (!matcher.find()) return 0;
+        return numberToken(matcher.group(1));
+    }
+
+    private static AppendLineExpectation appendLineExpectation(String request, String normalizedTarget) {
+        if (request == null || request.isBlank() || normalizedTarget == null || normalizedTarget.isBlank()) {
+            return null;
+        }
+        String quoted = Pattern.quote(normalizedTarget);
+        Pattern exactAppendLine = Pattern.compile(
+                "(?is)\\bappend\\s+(?:exactly\\s+this\\s+line|one\\s+line|line)"
+                        + "\\s+to\\s+`?" + quoted + "`?\\s*:\\s*(.+)");
+        Matcher matcher = exactAppendLine.matcher(request);
+        if (!matcher.find()) return null;
+        String line = normalizeAppendLine(matcher.group(1));
+        if (line.isBlank()) return null;
+        return new AppendLineExpectation(normalizedTarget, line, "append-line-exact");
+    }
+
+    private static ReplacementExpectation replacementExpectation(String request, String normalizedTarget) {
+        if (request == null || request.isBlank() || normalizedTarget == null || normalizedTarget.isBlank()) {
+            return null;
+        }
+        String quoted = Pattern.quote(normalizedTarget);
+        Pattern replaceWithInTarget = Pattern.compile(
+                "(?is)\\breplace\\s+(.+?)\\s+with\\s+(.+?)\\s+in\\s+`?"
+                        + quoted + "`?(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
+        Matcher matcher = replaceWithInTarget.matcher(request);
+        if (matcher.find()) {
+            return replacementExpectation(
+                    normalizedTarget,
+                    matcher.group(1),
+                    matcher.group(2),
+                    "replacement-replace-with-in-target");
+        }
+
+        Pattern changeFromToInTarget = Pattern.compile(
+                "(?is)\\b(?:change|update|set)\\s+(?:the\\s+)?(?:page\\s+)?"
+                        + "(?:title|text|label|string|word|phrase)\\s+from\\s+(.+?)\\s+to\\s+(.+?)\\s+in\\s+`?"
+                        + quoted + "`?(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
+        matcher = changeFromToInTarget.matcher(request);
+        if (!matcher.find()) return null;
+        return replacementExpectation(
+                normalizedTarget,
+                matcher.group(1),
+                matcher.group(2),
+                "replacement-change-from-to-in-target");
+    }
+
+    private static ReplacementExpectation replacementExpectation(
+            String normalizedTarget,
+            String rawOldText,
+            String rawNewText,
+            String sourcePattern
+    ) {
+        String oldText = normalizeReplacementText(rawOldText);
+        String newText = normalizeReplacementText(rawNewText);
+        if (oldText.isBlank() || newText.isBlank()) return null;
+        return new ReplacementExpectation(normalizedTarget, oldText, newText, sourcePattern);
+    }
+
+    private static String normalizeReplacementText(String raw) {
+        if (raw == null) return "";
+        String trimmed = raw.strip();
+        int newline = trimmed.indexOf('\n');
+        if (newline >= 0) {
+            trimmed = trimmed.substring(0, newline).strip();
+        }
+        return stripWrappingQuotes(trimmed).strip();
+    }
+
+    private static String normalizeAppendLine(String raw) {
+        if (raw == null) return "";
+        String trimmed = raw.strip();
+        int newline = trimmed.indexOf('\n');
+        if (newline >= 0) {
+            trimmed = trimmed.substring(0, newline).strip();
+        }
+        trimmed = stripWrappingQuotes(trimmed).strip();
+        return trimmed;
+    }
+
+    private static int numberToken(String raw) {
+        String token = raw == null ? "" : raw.strip().toLowerCase(Locale.ROOT);
+        if (token.isBlank()) return 0;
+        if (token.matches("\\d{1,2}")) return Integer.parseInt(token);
+        return switch (token) {
+            case "one" -> 1;
+            case "two" -> 2;
+            case "three" -> 3;
+            case "four" -> 4;
+            case "five" -> 5;
+            case "six" -> 6;
+            case "seven" -> 7;
+            case "eight" -> 8;
+            case "nine" -> 9;
+            case "ten" -> 10;
+            case "eleven" -> 11;
+            case "twelve" -> 12;
+            default -> 0;
+        };
     }
 
     private record Candidate(String literal, String sourcePattern, boolean alreadyExact) {

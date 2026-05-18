@@ -17,6 +17,8 @@ public final class TraceRedactor {
 
     public static final String PROTECTED_READ_ANSWER_REDACTION =
             "[protected read answer redacted from history]";
+    public static final String PRIVATE_DOCUMENT_ANSWER_REDACTION =
+            "[private document answer redacted from history]";
 
     private static final Pattern SECRET_LIKE_ASSIGNMENT = Pattern.compile(
             "(?i)\\b([A-Za-z0-9_.-]*(?:secret|token|api[_-]?key|password|passwd|pwd|credential|credentials|private[_-]?key)[A-Za-z0-9_.-]*)\\b\\s*[:=]\\s*(\"[^\"]*\"|'[^']*'|`[^`]*`|[^\\s,;]+)");
@@ -87,8 +89,13 @@ public final class TraceRedactor {
         String redacted = redactSecretLikeAssignments(assistantText);
         if (redacted == null || redacted.isBlank()) return redacted;
         if (containsSecretLikeAssignment(assistantText)) return redacted;
+        if (ProtectedContentPolicy.containsRawPrivateDocumentFactCanary(assistantText)) return redacted;
+        if (redacted.contains(ProtectedContentPolicy.REDACTED_PRIVATE_DOCUMENT_CANARY)) return redacted;
         if (looksLikeProtectedReadRequest(userInput) && !isProtectedReadDenial(redacted)) {
             return PROTECTED_READ_ANSWER_REDACTION;
+        }
+        if (looksLikeDocumentExtractionRequest(userInput) && !isDocumentExtractionDenial(redacted)) {
+            return PRIVATE_DOCUMENT_ANSWER_REDACTION;
         }
         return redacted;
     }
@@ -120,6 +127,36 @@ public final class TraceRedactor {
                 || lower.contains("did not read")
                 || lower.contains("cannot read")
                 || lower.contains("can't read");
+    }
+
+    public static boolean looksLikeDocumentExtractionRequest(String text) {
+        if (text == null || text.isBlank()) return false;
+        String lower = text.toLowerCase(Locale.ROOT);
+        if (!containsExtractableDocumentReference(lower)) return false;
+        return lower.contains("read")
+                || lower.contains("show")
+                || lower.contains("print")
+                || lower.contains("tell me")
+                || lower.contains("what")
+                || lower.contains("summarize")
+                || lower.contains("summary")
+                || lower.contains("extract")
+                || lower.contains("compare")
+                || lower.contains("contents")
+                || lower.contains("inside")
+                || lower.contains("open ");
+    }
+
+    public static boolean isDocumentExtractionDenial(String text) {
+        if (text == null || text.isBlank()) return false;
+        String lower = text.toLowerCase(Locale.ROOT);
+        return lower.contains("cannot extract")
+                || lower.contains("can't extract")
+                || lower.contains("extraction failed")
+                || lower.contains("unsupported")
+                || lower.contains("was withheld from model context")
+                || lower.contains("withheld from model context")
+                || lower.contains("local-display-only");
     }
 
     private static String trailingSentencePunctuation(String value) {
@@ -164,5 +201,19 @@ public final class TraceRedactor {
                 || lower.contains("don't inspect .env")
                 || lower.contains("without reading .env")
                 || lower.contains("without inspecting .env");
+    }
+
+    private static boolean containsExtractableDocumentReference(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        return lower.contains(".pdf")
+                || lower.contains(".docx")
+                || lower.contains(".xlsx")
+                || lower.contains(".xls")
+                || lower.contains("pdf ")
+                || lower.contains("word document")
+                || lower.contains("word file")
+                || lower.contains("excel workbook")
+                || lower.contains("excel file")
+                || lower.contains("spreadsheet");
     }
 }

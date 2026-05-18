@@ -26,7 +26,7 @@ public final class MutationIntent {
     private static final String CORE_MUTATION_VERBS =
             "(edit|modify|change|update|fix|repair|overwrite|rewrite|replace|redesign|"
                     + "restyle|re-style|re-design|write|create|save|"
-                    + "apply|add|remove|delete|move|copy|rename|mkdir|refactor|put|implement)";
+                    + "apply|append|add|remove|delete|move|copy|rename|mkdir|refactor|put|implement)";
 
     private static final String BUILD_ARTIFACT_VERBS =
             "(make|build|create|generate|set\\s+up|setup|scaffold)";
@@ -54,6 +54,8 @@ public final class MutationIntent {
             Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:please\\s+)?only\\s+" + CORE_MUTATION_VERBS + "\\b"),
             Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:please\\s+)?use\\s+(?:talos\\.)?"
                     + "(?:write_file|edit_file)\\s+to\\s+" + CORE_MUTATION_VERBS + "\\b"),
+            Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:please\\s+)?use\\s+(?:talos\\.)?"
+                    + "(?:write_file|edit_file)\\b.{0,180}\\b" + CORE_MUTATION_VERBS + "\\b"),
             Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:please\\s+)?" + BUILD_ARTIFACT_REQUEST),
             Pattern.compile("^" + PREFIX + "(?:now\\s+)?(?:please\\s+)?(?:can|could|would|will)\\s+you\\s+(?:please\\s+)?" + BUILD_ARTIFACT_REQUEST),
             Pattern.compile("^" + PREFIX + "i\\s+(?:want|need)\\s+you\\s+to\\s+" + BUILD_ARTIFACT_REQUEST),
@@ -96,6 +98,7 @@ public final class MutationIntent {
             "write a ", "write the ", "create a ", "create the ",
             "save it", "save the",
             "apply the", "apply these", "apply those",
+            "append ", "append exactly", "append line", "append one line",
             "add a ", "add the ", "remove the ", "delete the ",
             "refactor ",
             "darker and more minimal"
