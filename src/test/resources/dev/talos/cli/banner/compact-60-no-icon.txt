@@ -1,0 +1,8 @@
+┌──────────────────────────────────────────────────────────┐
+│ TALOS v0.9.9-beta                                        │
+│ ~/projects/talos-cli                                     │
+│ auto · qwen2.5-coder:14b · llama.cpp                     │
+│ index ready · ask before mutation · debug off            │
+├──────────────────────────────────────────────────────────┤
+│ ready · type /help · or ask a question                   │
+└──────────────────────────────────────────────────────────┘

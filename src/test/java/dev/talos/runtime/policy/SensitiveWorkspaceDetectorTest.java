@@ -6,8 +6,10 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class SensitiveWorkspaceDetectorTest {
 
@@ -115,5 +117,15 @@ class SensitiveWorkspaceDetectorTest {
         SensitiveWorkspaceDetector.Assessment assessment = SensitiveWorkspaceDetector.assess(workspace);
 
         assertTrue(assessment.sensitive(), assessment.toString());
+    }
+
+    @Test
+    void sensitive_folder_detection_skips_unreadable_windows_profile_junctions() {
+        Path home = Path.of(System.getProperty("user.home", ".")).toAbsolutePath().normalize();
+        Path applicationData = home.resolve("Application Data");
+        assumeTrue(Files.exists(applicationData),
+                "Windows profile compatibility junction is not present on this machine");
+
+        assertDoesNotThrow(() -> SensitiveWorkspaceDetector.assess(home));
     }
 }
