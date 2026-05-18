@@ -11,7 +11,6 @@ import org.apache.lucene.store.FSDirectory;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -25,6 +24,7 @@ public final class CliStatusDashboard {
             String workspace,
             String mode,
             String model,
+            String engine,
             String index,
             String policy,
             String debug,
@@ -40,44 +40,33 @@ public final class CliStatusDashboard {
             String next) {
         Config safeCfg = cfg == null ? new Config() : cfg;
         Path ws = workspace == null ? Path.of(".") : workspace.toAbsolutePath().normalize();
+        EngineRuntimeConfig runtime = EngineRuntimeConfig.from(safeCfg);
         return new Snapshot(
                 BuildInfo.version(),
                 CliUtil.shortenPath(ws),
                 blankDefault(mode, "auto"),
                 blankDefault(model, "unknown"),
+                engineState(runtime),
                 indexState(ws),
-                policyState(safeCfg),
+                trustPolicy(mode),
                 blankDefault(debug, "off"),
                 blankDefault(next, "Type a request or /help"));
     }
 
     public static String render(Snapshot snapshot) {
-        Snapshot s = snapshot == null
-                ? new Snapshot(BuildInfo.version(), ".", "auto", "unknown",
-                "unknown", "unknown", "off", "Type a request or /help")
-                : snapshot;
-        StringBuilder out = new StringBuilder();
-        out.append("Talos ").append("v").append(s.version()).append("\n\n");
-        append(out, "Workspace", s.workspace());
-        append(out, "Mode", s.mode());
-        append(out, "Model", s.model());
-        append(out, "Index", s.index());
-        append(out, "Policy", s.policy());
-        append(out, "Debug", s.debug());
-        append(out, "Next", s.next());
-        out.append("\n");
-        return out.toString();
+        return render(snapshot, TerminalCapabilities.detectDefault(), StartupBannerRenderer.DEFAULT_WIDTH);
+    }
+
+    public static String render(Snapshot snapshot, TerminalCapabilities capabilities, int width) {
+        return StartupBannerRenderer.render(
+                snapshot,
+                capabilities,
+                width,
+                StartupBannerRenderer.Variant.STATUS_NO_ICON);
     }
 
     public static String resolveModel(Config cfg) {
         return EngineRuntimeConfig.from(cfg).displayModel();
-    }
-
-    private static void append(StringBuilder out, String label, String value) {
-        out.append("  ")
-                .append(String.format("%-10s", label))
-                .append(blankDefault(value, "unknown"))
-                .append("\n");
     }
 
     private static String indexState(Path workspace) {
@@ -95,8 +84,17 @@ public final class CliStatusDashboard {
         }
     }
 
-    private static String policyState(Config cfg) {
-        return EngineRuntimeConfig.from(cfg).policyLabel();
+    private static String engineState(EngineRuntimeConfig runtime) {
+        String backend = runtime == null ? "unknown" : runtime.backend();
+        if ("llama_cpp".equals(backend)) return "llama.cpp (managed)";
+        if ("ollama".equals(backend)) return "ollama";
+        return blankDefault(backend, "unknown");
+    }
+
+    private static String trustPolicy(String mode) {
+        String normalized = Objects.toString(mode, "").trim().toLowerCase(java.util.Locale.ROOT);
+        if ("dev".equals(normalized)) return "writes require approval";
+        return "ask before mutation";
     }
 
     private static String blankDefault(String value, String fallback) {
