@@ -457,6 +457,90 @@ tasks.register<JavaExec>("checkRuntimeArtifactCanaries") {
     })
 }
 
+tasks.register<JavaExec>("runSynchronizedApprovalAudit") {
+    description = "Runs the synchronized approval audit bank in scripted or live mode and writes reviewable artifacts."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.harness.SynchronizedApprovalAuditMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        val out = mutableListOf<String>()
+        val artifactsRoot = providers.gradleProperty("approvalAuditArtifactsRoot")
+            .orElse("")
+            .get()
+        val workspacesRoot = providers.gradleProperty("approvalAuditWorkspacesRoot")
+            .orElse("")
+            .get()
+        val mode = providers.gradleProperty("approvalAuditMode")
+            .orElse("")
+            .get()
+        val config = providers.gradleProperty("approvalAuditConfig")
+            .orElse("")
+            .get()
+        val model = providers.gradleProperty("approvalAuditModel")
+            .orElse("")
+            .get()
+        if (mode.isNotBlank()) {
+            out.addAll(listOf("--mode", mode))
+        }
+        if (artifactsRoot.isNotBlank()) {
+            out.addAll(listOf("--artifacts", artifactsRoot))
+        }
+        if (workspacesRoot.isNotBlank()) {
+            out.addAll(listOf("--workspaces", workspacesRoot))
+        }
+        if (config.isNotBlank()) {
+            out.addAll(listOf("--config", config))
+        }
+        if (model.isNotBlank()) {
+            out.addAll(listOf("--model", model))
+        }
+        out
+    })
+}
+
+tasks.register<JavaExec>("runSynchronizedApprovalCliSmoke") {
+    description = "Runs a synchronized production CLI approval smoke against the installed Talos script."
+    group = "verification"
+    dependsOn("installDist", "e2eTestClasses")
+    mainClass.set("dev.talos.harness.SynchronizedCliApprovalSmokeMain")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        val out = mutableListOf<String>()
+        val talos = providers.gradleProperty("cliSmokeTalosCommand")
+            .orElse("")
+            .get()
+        val config = providers.gradleProperty("cliSmokeConfig")
+            .orElse("")
+            .get()
+        val artifacts = providers.gradleProperty("cliSmokeArtifactsRoot")
+            .orElse("")
+            .get()
+        val workspace = providers.gradleProperty("cliSmokeWorkspace")
+            .orElse("")
+            .get()
+        val timeoutMs = providers.gradleProperty("cliSmokeTimeoutMs")
+            .orElse("")
+            .get()
+        if (talos.isNotBlank()) {
+            out.addAll(listOf("--talos", talos))
+        }
+        if (config.isNotBlank()) {
+            out.addAll(listOf("--config", config))
+        }
+        if (artifacts.isNotBlank()) {
+            out.addAll(listOf("--artifacts", artifacts))
+        }
+        if (workspace.isNotBlank()) {
+            out.addAll(listOf("--workspace", workspace))
+        }
+        if (timeoutMs.isNotBlank()) {
+            out.addAll(listOf("--timeout-ms", timeoutMs))
+        }
+        out
+    })
+}
+
 tasks.register<Exec>("qodanaLocal") {
     description = "Runs optional local Qodana Community analysis using Docker with persistent Qodana/Gradle cache volumes."
     group = "verification"
