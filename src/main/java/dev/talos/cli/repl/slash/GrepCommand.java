@@ -127,7 +127,7 @@ public final class GrepCommand implements Command {
                                 hasMatches = true;
                                 fileCount++;
                             }
-                            String safeLine = safeSearchLine(lines[i], privateMode);
+                            String safeLine = safeExtractedSearchLine(lines[i], privateMode, extraction);
                             sb.append(String.format("  %d: %s\n", i + 1,
                                     safeLine.length() > 120 ? safeLine.substring(0, 120) + "..." : safeLine));
                             totalMatches++;
@@ -206,6 +206,16 @@ public final class GrepCommand implements Command {
             return "[line content withheld by private-mode search policy]";
         }
         return safeLine;
+    }
+
+    private static String safeExtractedSearchLine(
+            String line,
+            boolean privateMode,
+            DocumentExtractionResult extraction) {
+        if (privateMode && extraction != null && !extraction.modelHandoffAllowed()) {
+            return "[extracted document match withheld from model context by private-document policy]";
+        }
+        return safeSearchLine(line, privateMode);
     }
 
     private static boolean looksLikeBinary(Path file) {

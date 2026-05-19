@@ -60,6 +60,11 @@ class SensitiveLogRedactionTest {
         assertTrue(ProtectedContentPolicy.looksProtectedPathString(".env"));
         assertTrue(ProtectedContentPolicy.looksProtectedPathString("secrets/private-notes.md"));
         assertTrue(ProtectedContentPolicy.looksProtectedPathString("protected/private-notes.md"));
+        assertTrue(ProtectedContentPolicy.looksProtectedPathString(".git/config"));
+        assertTrue(ProtectedContentPolicy.looksProtectedPathString(".github/workflows/deploy.yml"));
+        assertTrue(ProtectedContentPolicy.looksProtectedPathString(".aws/credentials"));
+        assertTrue(ProtectedContentPolicy.looksProtectedPathString(".gnupg/trustdb.gpg"));
+        assertTrue(ProtectedContentPolicy.looksProtectedPathString("keys/service.pfx"));
     }
 
     @Test

@@ -2,7 +2,7 @@
 
 ## Status
 
-Open.
+Done.
 
 ## Severity
 
@@ -70,3 +70,14 @@ ArtifactCanaryScanPrivateModeSearchTest.privateModeSearchArtifactsDoNotContainSe
 
 Need to inspect native `talos.grep`, slash `/grep`, `ProtectedContentPolicy`, and any shared result formatting path to avoid fixing only one surface.
 
+## Resolution
+
+Implemented before ticket reconciliation on 2026-05-20.
+
+Evidence:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.tools.impl.GrepToolTest.privateModeCanarySearchWithholdsNeighborFields" --tests "dev.talos.cli.repl.slash.WorkspaceCommandsTest*slash_grep_private_mode_does_not_expose_neighbor_fields" --no-daemon
+```
+
+The focused regressions cover native `talos.grep` and slash `/grep` private-mode row withholding for sensitive neighbor-field leakage.

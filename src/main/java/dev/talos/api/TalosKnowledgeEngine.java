@@ -65,7 +65,7 @@ public final class TalosKnowledgeEngine {
      * Trigger (re-)indexing of the given workspace directory.
      */
     public void index(Path workspace) throws Exception {
-        ragService.getIndexer().index(workspace, false);
+        ragService.reindex(workspace);
     }
 
     /**

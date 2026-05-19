@@ -81,6 +81,17 @@ public final class ProtectedPathPolicy {
         return new ResourceDecision(rawPath, relative, true, true, false, !kind.isBlank(), kind);
     }
 
+    public static boolean looksLikeProtectedPathToken(String rawPath) {
+        if (rawPath == null || rawPath.isBlank()) return false;
+        String normalized = stripWrappingQuotes(rawPath.strip())
+                .replace('\\', '/')
+                .toLowerCase(Locale.ROOT);
+        while (normalized.startsWith("./")) {
+            normalized = normalized.substring(2);
+        }
+        return !protectedKind(normalized).isBlank();
+    }
+
     private static boolean startsWithWorkspace(Path resolved, Path workspace) {
         if (resolved.startsWith(workspace)) return true;
         String r = normalizeAbsolute(resolved);
@@ -104,6 +115,18 @@ public final class ProtectedPathPolicy {
 
     private static boolean isWindows() {
         return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+    }
+
+    private static String stripWrappingQuotes(String value) {
+        if (value == null || value.length() < 2) return value;
+        char first = value.charAt(0);
+        char last = value.charAt(value.length() - 1);
+        if ((first == '"' && last == '"')
+                || (first == '\'' && last == '\'')
+                || (first == '`' && last == '`')) {
+            return value.substring(1, value.length() - 1);
+        }
+        return value;
     }
 
     private static String protectedKind(String lowerRelative) {

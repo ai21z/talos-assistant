@@ -387,18 +387,7 @@ public final class PromptDebugInspector {
     }
 
     private static boolean looksProtectedPath(String path) {
-        if (path == null || path.isBlank()) return false;
-        String normalized = path.strip().replace('\\', '/').toLowerCase(Locale.ROOT);
-        return normalized.equals(".env")
-                || normalized.startsWith(".env.")
-                || normalized.endsWith("/.env")
-                || normalized.contains("/.env.")
-                || normalized.contains("secret")
-                || normalized.contains("token")
-                || normalized.contains("credential")
-                || normalized.contains("password")
-                || normalized.contains("private_key")
-                || normalized.contains("private-key");
+        return ProtectedContentPolicy.looksProtectedPathString(path);
     }
 
     private static boolean hasProtectedContentSignal(String content) {

@@ -100,31 +100,7 @@ public final class ProtectedContentPolicy {
     }
 
     public static boolean looksProtectedPathString(String raw) {
-        if (raw == null || raw.isBlank()) return false;
-        String normalized = raw.replace('\\', '/').strip().toLowerCase(Locale.ROOT);
-        while (normalized.startsWith("./")) normalized = normalized.substring(2);
-        if (normalized.isBlank()) return false;
-        for (String segment : normalized.split("/+")) {
-            if (segment.isBlank()) continue;
-            if (segment.equals(".env") || segment.startsWith(".env.") || segment.endsWith(".env")) return true;
-            if (segment.equals("secrets") || segment.equals("secret")) return true;
-            if (segment.equals("tokens") || segment.equals("credentials") || segment.equals("protected")) return true;
-            if (segment.equals(".ssh") || segment.equals(".aws") || segment.equals(".azure") || segment.equals(".gnupg")) return true;
-            if (segment.equals("id_rsa") || segment.equals("id_dsa") || segment.equals("id_ecdsa") || segment.equals("id_ed25519")) return true;
-            if (segment.contains("secret")
-                    || segment.contains("token")
-                    || segment.contains("credential")
-                    || segment.contains("password")
-                    || segment.contains("private_key")
-                    || segment.contains("private-key")) {
-                return true;
-            }
-        }
-        if (normalized.contains(".config/gcloud/")) return true;
-        return normalized.endsWith(".pem")
-                || normalized.endsWith(".key")
-                || normalized.endsWith(".p12")
-                || normalized.endsWith(".pfx");
+        return ProtectedPathPolicy.looksLikeProtectedPathToken(raw);
     }
 
     public static ToolResult sanitizeToolResult(ToolResult result) {

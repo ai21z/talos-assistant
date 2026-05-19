@@ -56,25 +56,11 @@ public final class TraceRedactor {
         if (path == null || path.isBlank()) return "";
         String normalized = path.strip().replace('\\', '/');
         String lower = normalized.toLowerCase(Locale.ROOT);
-        if (looksSensitivePath(lower)) return "<protected-path>";
+        if (ProtectedContentPolicy.looksProtectedPathString(lower)) return "<protected-path>";
         while (normalized.startsWith("./")) {
             normalized = normalized.substring(2);
         }
         return normalized;
-    }
-
-    static boolean looksSensitivePath(String lowerPath) {
-        return lowerPath.equals(".env")
-                || lowerPath.startsWith(".env.")
-                || lowerPath.contains("/.env")
-                || lowerPath.contains("/secrets/")
-                || lowerPath.contains("secret")
-                || lowerPath.contains("token")
-                || lowerPath.contains("credential")
-                || lowerPath.contains("id_rsa")
-                || lowerPath.contains("id_ed25519")
-                || lowerPath.contains("private_key")
-                || lowerPath.contains("private-key");
     }
 
     public static String redactSecretLikeAssignments(String text) {
@@ -104,7 +90,7 @@ public final class TraceRedactor {
         if (text == null || text.isBlank()) return false;
         String lower = text.toLowerCase(Locale.ROOT);
         if (looksLikeProtectedReadProhibition(lower)) return false;
-        if (!PROTECTED_PATH_REFERENCE.matcher(text).find()) return false;
+        if (!containsProtectedPathReference(text)) return false;
         return lower.contains("read")
                 || lower.contains("show")
                 || lower.contains("print")
@@ -115,6 +101,42 @@ public final class TraceRedactor {
                 || lower.contains("inside")
                 || lower.contains("open ")
                 || lower.contains("cat ");
+    }
+
+    private static boolean containsProtectedPathReference(String text) {
+        if (text == null || text.isBlank()) return false;
+        if (PROTECTED_PATH_REFERENCE.matcher(text).find()) return true;
+        Matcher matcher = Pattern.compile("[^\\s\"'`({\\[\\])}]+").matcher(text);
+        while (matcher.find()) {
+            String token = trimPathTokenPunctuation(matcher.group());
+            if (looksPathLike(token) && ProtectedContentPolicy.looksProtectedPathString(token)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean looksPathLike(String token) {
+        if (token == null || token.isBlank()) return false;
+        String normalized = token.replace('\\', '/').toLowerCase(Locale.ROOT);
+        return normalized.startsWith(".")
+                || normalized.contains("/")
+                || normalized.contains(".")
+                || normalized.startsWith("id_");
+    }
+
+    private static String trimPathTokenPunctuation(String token) {
+        if (token == null) return "";
+        String out = token.strip();
+        while (!out.isEmpty()) {
+            char last = out.charAt(out.length() - 1);
+            if (last == '.' || last == ',' || last == ';' || last == ':' || last == '!' || last == '?') {
+                out = out.substring(0, out.length() - 1);
+            } else {
+                break;
+            }
+        }
+        return out;
     }
 
     public static boolean isProtectedReadDenial(String text) {

@@ -141,6 +141,19 @@ class GrepToolTest {
         assertTrue(r.output().contains("Word roadmap beta"), r.output());
     }
 
+    @Test void privateModeDocxExtractionGrepWithholdsOrdinaryPrivateFacts() throws IOException {
+        writeDocx(workspace.resolve("medical-notes.docx"), "Patient name: Marina Stavrou");
+        ToolContext privateExtractionCtx = extractionCtx("word", Map.of("mode", "private"));
+
+        var r = tool.execute(new ToolCall("talos.grep", Map.of("pattern", "Marina Stavrou")), privateExtractionCtx);
+
+        assertTrue(r.success(), r.errorMessage());
+        assertTrue(r.output().contains("medical-notes.docx"), r.output());
+        assertTrue(r.output().contains("withheld from model context by private-document policy"), r.output());
+        assertFalse(r.output().contains("Marina Stavrou"), r.output());
+        assertFalse(r.output().contains("Patient name"), r.output());
+    }
+
     @Test void enabledXlsxExtractionGrepFindsKnownCellText() throws IOException {
         writeXlsx(workspace.resolve("budget.xlsx"), "Excel revenue gamma");
         ToolContext extractionCtx = extractionCtx("excel");
@@ -301,6 +314,12 @@ class GrepToolTest {
 
     private ToolContext extractionCtx(String family) {
         return new ToolContext(workspace, new Sandbox(workspace, Map.of()), extractionEnabled(family));
+    }
+
+    private ToolContext extractionCtx(String family, Map<String, Object> privacy) {
+        Config cfg = extractionEnabled(family);
+        cfg.data.put("privacy", new LinkedHashMap<>(privacy));
+        return new ToolContext(workspace, new Sandbox(workspace, Map.of()), cfg);
     }
 
     private static Config extractionEnabled(String family) {

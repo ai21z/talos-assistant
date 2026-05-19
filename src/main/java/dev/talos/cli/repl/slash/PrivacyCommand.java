@@ -86,6 +86,8 @@ public final class PrivacyCommand implements Command {
                   In private mode, extracted PDF/DOCX/XLS/XLSX text is treated as local-display-only by default.
                   It is not sent to model context, not persisted raw, and not indexed by RAG unless the
                   separate privacy.document_extraction opt-ins are enabled in config.
+                  Ordinary personal facts in normal .md/.txt/.csv files are not private by provenance unless the
+                  file path or content matches protected-policy signals.
 
                 /privacy private off
                   Restore developer/default mode for the current session/config state. Approved direct protected reads may enter model context.

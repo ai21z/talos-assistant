@@ -2,7 +2,7 @@
 
 ## Status
 
-Open.
+Done.
 
 ## Severity
 
@@ -96,3 +96,14 @@ ToolCallExecutionStageTargetProgressTest.createdRequestedFilesSatisfyActionOblig
 
 Need a code pass through task classification, expected-target extraction, and action-obligation progress tracking to identify the smallest typed-target seam.
 
+## Resolution
+
+Implemented before ticket reconciliation on 2026-05-20.
+
+Evidence:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.runtime.task.TaskContractResolverTest" --no-daemon
+```
+
+The focused regression suite covers source evidence versus mutation output target splitting for office summary, static-site-from-brief, and Python-from-problem workflows.

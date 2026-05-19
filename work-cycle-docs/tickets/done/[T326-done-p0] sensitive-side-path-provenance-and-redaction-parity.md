@@ -2,7 +2,7 @@
 
 Severity: P0 risk / High
 
-Status: Open
+Status: Done
 
 Source: Five scenario big audit and Agent 5 static audit, 2026-05-19
 
@@ -74,3 +74,21 @@ SensitivePrivateModeTextFilePolicyTest
 3. Route `TalosKnowledgeEngine.index()` through `RagService.reindex()` or the same private-mode guard.
 4. Make `/privacy help` explicit that private mode protects policy classes, not arbitrary personal facts in normal text unless a future private-folder policy is enabled.
 
+## Resolution
+
+Implemented 2026-05-20.
+
+- `ProtectedPathPolicy.looksLikeProtectedPathToken(...)` is now the shared protected path token classifier used by prompt-debug/provider-body redaction, log/tool-parameter path sanitization, trace path hints, and context item path hints.
+- `GrepTool` and slash `/grep` now withhold extracted private-document match lines in private mode when extraction metadata says model handoff is not allowed.
+- `TalosKnowledgeEngine.index(...)` now routes through `RagService.reindex(...)` instead of direct `Indexer` access, preserving the private-mode RAG disabled guard.
+- `/privacy help` now states that ordinary personal facts in normal `.md/.txt/.csv` files are not private by provenance unless path/content protected-policy signals match.
+
+Evidence:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.tools.impl.GrepToolTest" --tests "dev.talos.cli.repl.slash.WorkspaceCommandsTest*Grep" --tests "dev.talos.api.TalosKnowledgeEnginePrivacyTest" --tests "dev.talos.core.index.IndexerPrivateDocumentPolicyTest" --no-daemon
+.\gradlew.bat test --tests "dev.talos.cli.prompt.PromptDebugInspectorProtectedPathParityTest" --no-daemon
+.\gradlew.bat test --tests "dev.talos.runtime.policy.SensitiveLogRedactionTest" --tests "dev.talos.runtime.policy.ProtectedPathPolicyTest" --tests "dev.talos.cli.prompt.PromptDebugInspectorProtectedPathParityTest" --no-daemon
+.\gradlew.bat test --tests "dev.talos.runtime.trace.TraceRedactorTest" --tests "dev.talos.runtime.trace.LocalTurnTraceTest" --tests "dev.talos.runtime.context.ContextItemProtectedPathParityTest" --no-daemon
+.\gradlew.bat test --tests "dev.talos.cli.repl.slash.PrivacyCommandTest.private_mode_help_explains_model_context_and_artifacts" --no-daemon
+```
