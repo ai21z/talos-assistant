@@ -565,7 +565,7 @@ class SynchronizedApprovalAuditRunnerTest {
         SynchronizedApprovalAuditMain.RunResult run =
                 SynchronizedApprovalAuditMain.run(artifacts, workspaces);
 
-        assertEquals(17, run.bundles().size());
+        assertEquals(21, run.bundles().size());
         assertTrue(Files.exists(run.summary()), run.summary().toString());
         assertTrue(Files.readString(run.summary()).contains("Synchronized Approval Scripted Audit"));
         assertTrue(Files.readString(run.summary()).contains("Mode: SCRIPTED"));
@@ -582,17 +582,83 @@ class SynchronizedApprovalAuditRunnerTest {
         assertTrue(Files.readString(run.summary()).contains("private-mode-extracted-xlsx-send-to-model-opt-in"));
         assertTrue(Files.readString(run.summary()).contains("proposal-only-does-not-mutate"));
         assertTrue(Files.readString(run.summary()).contains("mutation-approval-denied"));
+        assertTrue(Files.readString(run.summary()).contains("mutation-denial-bypass-attempt-blocked"));
         assertTrue(Files.readString(run.summary()).contains("mutation-approval-granted-checkpointed"));
         assertTrue(Files.readString(run.summary()).contains("mutation-remember-approval-auto-approves-second-write"));
         assertTrue(Files.readString(run.summary()).contains("mutation-exact-bullet-count-verified"));
         assertTrue(Files.readString(run.summary()).contains("mutation-append-line-verified"));
+        assertTrue(Files.readString(run.summary()).contains("mutation-append-line-full-write-verified"));
         assertTrue(Files.readString(run.summary()).contains("mutation-replacement-verified"));
+        assertTrue(Files.readString(run.summary()).contains("mutation-similar-target-script-only-verified"));
+        assertTrue(Files.readString(run.summary()).contains("mutation-forbidden-sibling-target-blocked-before-approval"));
         String appendLineTrace = Files.readString(artifacts
                 .resolve("mutation-append-line-verified")
                 .resolve("traces")
                 .resolve("last-trace.json"));
         assertEquals(1, countOccurrences(appendLineTrace, "\"type\" : \"EXPECTATION_VERIFIED\""),
                 "static-verification probes must not duplicate expectation trace events");
+        String fullWriteTranscript = Files.readString(artifacts
+                .resolve("mutation-append-line-full-write-verified")
+                .resolve("audit-transcript.json"));
+        assertTrue(fullWriteTranscript.contains("\"verificationStatus\" : \"PASSED\""), fullWriteTranscript);
+        assertTrue(fullWriteTranscript.contains("\"verificationSummary\" : \"Append line verification passed.\""),
+                fullWriteTranscript);
+        String denialBypassTranscript = Files.readString(artifacts
+                .resolve("mutation-denial-bypass-attempt-blocked")
+                .resolve("audit-transcript.json"));
+        assertTrue(denialBypassTranscript.contains("\"approvalResponses\" : [ \"DENIED\" ]"),
+                denialBypassTranscript);
+        assertTrue(denialBypassTranscript.contains("\"traceStatus\" : \"BLOCKED\""), denialBypassTranscript);
+        assertTrue(denialBypassTranscript.contains("\"verificationStatus\" : \"NOT_RUN\""), denialBypassTranscript);
+        assertEquals("status=old\n",
+                Files.readString(workspaces
+                        .resolve("mutation-denial-bypass-attempt-blocked")
+                        .resolve("notes.md")));
+        String denialBypassDiff = Files.readString(artifacts
+                .resolve("mutation-denial-bypass-attempt-blocked")
+                .resolve("workspace")
+                .resolve("diff.txt"));
+        assertTrue(denialBypassDiff.contains("(no file changes detected)"), denialBypassDiff);
+        String similarTargetTranscript = Files.readString(artifacts
+                .resolve("mutation-similar-target-script-only-verified")
+                .resolve("audit-transcript.json"));
+        assertTrue(similarTargetTranscript.contains("\"verificationStatus\" : \"PASSED\""),
+                similarTargetTranscript);
+        assertEquals("document.querySelector('#submit');\n",
+                Files.readString(workspaces
+                        .resolve("mutation-similar-target-script-only-verified")
+                        .resolve("script.js")));
+        assertEquals("document.querySelector('.similar-but-forbidden');\n",
+                Files.readString(workspaces
+                        .resolve("mutation-similar-target-script-only-verified")
+                        .resolve("scripts.js")));
+        String similarTargetDiff = Files.readString(artifacts
+                .resolve("mutation-similar-target-script-only-verified")
+                .resolve("workspace")
+                .resolve("diff.txt"));
+        assertTrue(similarTargetDiff.contains("M script.js"), similarTargetDiff);
+        assertFalse(similarTargetDiff.contains("M scripts.js"), similarTargetDiff);
+        String forbiddenSiblingTranscript = Files.readString(artifacts
+                .resolve("mutation-forbidden-sibling-target-blocked-before-approval")
+                .resolve("audit-transcript.json"));
+        assertTrue(forbiddenSiblingTranscript.contains("\"approvalResponses\" : [ \"APPROVED\" ]"),
+                forbiddenSiblingTranscript);
+        assertTrue(forbiddenSiblingTranscript.contains("\"traceStatus\" : \"PARTIAL\""),
+                forbiddenSiblingTranscript);
+        assertTrue(forbiddenSiblingTranscript.contains("\"verificationStatus\" : \"PASSED\""),
+                forbiddenSiblingTranscript);
+        assertTrue(forbiddenSiblingTranscript.contains("TOOL_CALL_BLOCKED"),
+                forbiddenSiblingTranscript);
+        assertEquals("document.querySelector('.similar-but-forbidden');\n",
+                Files.readString(workspaces
+                        .resolve("mutation-forbidden-sibling-target-blocked-before-approval")
+                        .resolve("scripts.js")));
+        String forbiddenSiblingDiff = Files.readString(artifacts
+                .resolve("mutation-forbidden-sibling-target-blocked-before-approval")
+                .resolve("workspace")
+                .resolve("diff.txt"));
+        assertTrue(forbiddenSiblingDiff.contains("M script.js"), forbiddenSiblingDiff);
+        assertFalse(forbiddenSiblingDiff.contains("M scripts.js"), forbiddenSiblingDiff);
         String proposalDiff = Files.readString(artifacts
                 .resolve("proposal-only-does-not-mutate")
                 .resolve("workspace")

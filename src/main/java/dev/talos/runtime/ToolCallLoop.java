@@ -333,8 +333,16 @@ public final class ToolCallLoop {
             return new MutationEvidence("EXACT_EDIT_REPLACEMENT", oldString, newString);
         }
 
+        public static MutationEvidence fullWriteReplacement(String previousContent, String newContent) {
+            return new MutationEvidence("FULL_WRITE_REPLACEMENT", previousContent, newContent);
+        }
+
         public boolean exactEditReplacement() {
             return "EXACT_EDIT_REPLACEMENT".equals(kind);
+        }
+
+        public boolean fullWriteReplacement() {
+            return "FULL_WRITE_REPLACEMENT".equals(kind);
         }
     }
 

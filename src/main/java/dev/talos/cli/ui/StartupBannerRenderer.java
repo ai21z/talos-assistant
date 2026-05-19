@@ -3,6 +3,7 @@ package dev.talos.cli.ui;
 import dev.talos.core.util.Sanitize;
 
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -19,9 +20,19 @@ public final class StartupBannerRenderer {
     private static final int LEFT_PANEL = 25;
     private static final int ICON_WIDTH = 10;
     private static final int LEFT_TEXT_WIDTH = LEFT_PANEL - ICON_WIDTH - 4;
+    private static final String GLYPHS_ENV = "TALOS_GLYPHS";
 
-    /** Talos H100 head, 10 cells x 5 rows.  Eyes on row 1.  Stem on rows 2-3. */
-    private static final String[] ICON = {
+    /** Talos bronze sentinel mark, 10 cells x 5 rows. */
+    private static final String[] ICON_SAFE = {
+            " ███ █ ███  ",
+            "█    █    █  ",
+            "████ █ ████ ",
+            " ███   ███ ",
+            "  ██   ██  "
+    };
+
+    /** Talos bronze sentinel mark, extended-glyph variant for opt-in terminals. */
+    private static final String[] ICON_EXTENDED = {
             "▟███▀▀███▙",
             "  ▶    ◀  ",
             "████  ████",
@@ -29,7 +40,7 @@ public final class StartupBannerRenderer {
             "          "
     };
 
-    // Eye coordinates inside ICON[1] for the wink animation.
+    // Eye coordinates inside ICON_EXTENDED[1] for the wink animation.
     // Eye row: "  ▶    ◀  "  →  left eye at index 2, right eye at index 7.
     static final int ICON_EYE_ROW = 1;
     static final int ICON_LEFT_EYE_COL = 2;
@@ -75,6 +86,12 @@ public final class StartupBannerRenderer {
 
     private StartupBannerRenderer() {}
 
+    private enum GlyphMode {
+        ASCII,
+        SAFE,
+        EXTENDED
+    }
+
     public enum Variant {
         STARTUP_WITH_ICON,
         STATUS_NO_ICON,
@@ -86,14 +103,24 @@ public final class StartupBannerRenderer {
             TerminalCapabilities capabilities,
             int width,
             Variant variant) {
+        return render(snapshot, capabilities, width, variant, System.getenv());
+    }
+
+    static String render(
+            CliStatusDashboard.Snapshot snapshot,
+            TerminalCapabilities capabilities,
+            int width,
+            Variant variant,
+            Map<String, String> env) {
         TerminalCapabilities caps = capabilities == null
                 ? TerminalCapabilities.detectDefault()
                 : capabilities;
         int w = Math.max(40, width <= 0 ? DEFAULT_WIDTH : width);
-        CliStatusDashboard.Snapshot s = normalize(snapshot, caps);
         Variant v = variant == null ? Variant.STARTUP_WITH_ICON : variant;
+        GlyphMode glyphMode = glyphMode(caps, env);
+        CliStatusDashboard.Snapshot s = normalize(snapshot, glyphMode != GlyphMode.ASCII && caps.unicodeSafe());
 
-        if (!caps.unicodeSafe()) {
+        if (glyphMode == GlyphMode.ASCII) {
             return renderAscii(s, Math.max(DEFAULT_WIDTH, w));
         }
         if (w < PLAIN_MIN_WIDTH) {
@@ -107,7 +134,7 @@ public final class StartupBannerRenderer {
         if (v == Variant.COMPACT_NO_ICON || w < SPLIT_MIN_WIDTH) {
             return renderCompact(s, caps, w);
         }
-        return renderStartupWithIcon(s, caps, w);
+        return renderStartupWithIcon(s, caps, w, glyphMode);
     }
 
     /**
@@ -116,17 +143,25 @@ public final class StartupBannerRenderer {
      * wink animation is meaningful (no icon → no wink).
      */
     public static boolean wouldRenderIcon(TerminalCapabilities capabilities, int width, Variant variant) {
+        return wouldRenderIcon(capabilities, width, variant, System.getenv());
+    }
+
+    static boolean wouldRenderIcon(
+            TerminalCapabilities capabilities,
+            int width,
+            Variant variant,
+            Map<String, String> env) {
         TerminalCapabilities caps = capabilities == null
                 ? TerminalCapabilities.detectDefault()
                 : capabilities;
-        if (!caps.unicodeSafe()) return false;
+        if (glyphMode(caps, env) == GlyphMode.ASCII) return false;
         if (width < SPLIT_MIN_WIDTH) return false;
         Variant v = variant == null ? Variant.STARTUP_WITH_ICON : variant;
         return v == Variant.STARTUP_WITH_ICON;
     }
 
     /**
-     * Animates a one-shot wink on the right eye of the H100 head, in place,
+     * Animates a one-shot wink on the right eye of the bronze sentinel mark, in place,
      * inside the framed banner that was just printed.
      *
      * <p>Pre-condition: the caller printed exactly one STARTUP_WITH_ICON
@@ -135,7 +170,8 @@ public final class StartupBannerRenderer {
      * eye cells with absolute-column positioning ({@code ESC[<n>G}), then
      * walks back down so subsequent output continues normally.
      *
-     * <p>Animation is OPT-OUT.  It is automatically skipped when:
+     * <p>Animation is opt-in through {@code TALOS_GLYPHS=extended}. It is also
+     * automatically skipped when:
      * <ul>
      *   <li>{@code $TALOS_BANNER_NO_ANIMATION} is set (any non-empty value)</li>
      *   <li>{@code $NO_COLOR} is set</li>
@@ -148,7 +184,7 @@ public final class StartupBannerRenderer {
         TerminalCapabilities caps = capabilities == null
                 ? TerminalCapabilities.detectDefault()
                 : capabilities;
-        if (!shouldAnimate(caps)) return;
+        if (!shouldAnimate(caps, System.getenv(), System.console() != null)) return;
 
         String bronzeOn  = "\033[38;2;167;123;58m";
         String reset     = "\033[0m";
@@ -177,26 +213,43 @@ public final class StartupBannerRenderer {
         }
     }
 
-    private static boolean shouldAnimate(TerminalCapabilities caps) {
+    static boolean shouldAnimate(TerminalCapabilities caps, Map<String, String> env, boolean hasConsole) {
         if (caps == null || !caps.colorEnabled() || !caps.unicodeSafe()) return false;
         if (!caps.interactive()) return false;
-        String optOut = System.getenv("TALOS_BANNER_NO_ANIMATION");
+        if (glyphMode(caps, env) != GlyphMode.EXTENDED) return false;
+        Map<String, String> safeEnv = env == null ? Map.of() : env;
+        String optOut = safeEnv.get("TALOS_BANNER_NO_ANIMATION");
         if (optOut != null && !optOut.isBlank()) return false;
-        String noColor = System.getenv("NO_COLOR");
+        String noColor = safeEnv.get("NO_COLOR");
         if (noColor != null && !noColor.isBlank()) return false;
         // System.console() is the most reliable "is this really a TTY?" probe
         // on Windows; capabilities.interactive() is a hint, this is the truth.
-        return System.console() != null;
+        return hasConsole;
+    }
+
+    private static GlyphMode glyphMode(TerminalCapabilities caps, Map<String, String> env) {
+        if (caps == null || !caps.unicodeSafe()) return GlyphMode.ASCII;
+        Map<String, String> safeEnv = env == null ? Map.of() : env;
+        String requested = Objects.toString(safeEnv.get(GLYPHS_ENV), "")
+                .trim()
+                .toLowerCase(Locale.ROOT);
+        return switch (requested) {
+            case "ascii" -> GlyphMode.ASCII;
+            case "extended" -> GlyphMode.EXTENDED;
+            default -> GlyphMode.SAFE;
+        };
     }
 
     private static String renderStartupWithIcon(
             CliStatusDashboard.Snapshot s,
             TerminalCapabilities caps,
-            int width) {
+            int width,
+            GlyphMode glyphMode) {
         int rightPanel = width - LEFT_PANEL - 3;
         int rightValueWidth = Math.max(8, rightPanel - 14);
         Style style = new Style(caps);
         StringBuilder out = new StringBuilder();
+        String[] iconRows = iconRows(glyphMode);
 
         appendLine(out, style.frame("┌" + repeat("─", LEFT_PANEL) + "┬" + repeat("─", rightPanel) + "┐"));
 
@@ -209,9 +262,9 @@ public final class StartupBannerRenderer {
                 {"Index", fitIndex(s.index(), rightValueWidth)}
         };
 
-        int rows = Math.max(ICON.length, right.length);
+        int rows = Math.max(iconRows.length, right.length);
         for (int i = 0; i < rows; i++) {
-            String icon = i < ICON.length ? fitText(ICON[i], ICON_WIDTH) : repeat(" ", ICON_WIDTH);
+            String icon = i < iconRows.length ? fitText(iconRows[i], ICON_WIDTH) : repeat(" ", ICON_WIDTH);
             String leftContent = " "
                     + style.bronze(icon)
                     + "  "
@@ -235,6 +288,10 @@ public final class StartupBannerRenderer {
         appendLine(out, hintRow(s, caps, width));
         appendLine(out, style.frame("└" + repeat("─", width - 2) + "┘"));
         return out.toString();
+    }
+
+    private static String[] iconRows(GlyphMode glyphMode) {
+        return glyphMode == GlyphMode.EXTENDED ? ICON_EXTENDED : ICON_SAFE;
     }
 
     private static String renderStatusNoIcon(
@@ -518,22 +575,21 @@ public final class StartupBannerRenderer {
         return text.substring(0, width - 3) + "...";
     }
 
-    private static CliStatusDashboard.Snapshot normalize(CliStatusDashboard.Snapshot snapshot, TerminalCapabilities caps) {
+    private static CliStatusDashboard.Snapshot normalize(CliStatusDashboard.Snapshot snapshot, boolean unicodeSafe) {
         CliStatusDashboard.Snapshot s = snapshot == null
                 ? new CliStatusDashboard.Snapshot("unknown", ".", "auto", "unknown", "unknown",
                 "unknown", "unknown", "off", "ready · type /help")
                 : snapshot;
-        boolean unicode = caps != null && caps.unicodeSafe();
         return new CliStatusDashboard.Snapshot(
-                clean(s.version(), unicode),
-                clean(s.workspace(), unicode),
-                clean(s.mode(), unicode),
-                clean(s.model(), unicode),
-                clean(s.engine(), unicode),
-                clean(s.index(), unicode),
-                clean(s.policy(), unicode),
-                clean(s.debug(), unicode),
-                clean(s.next(), unicode));
+                clean(s.version(), unicodeSafe),
+                clean(s.workspace(), unicodeSafe),
+                clean(s.mode(), unicodeSafe),
+                clean(s.model(), unicodeSafe),
+                clean(s.engine(), unicodeSafe),
+                clean(s.index(), unicodeSafe),
+                clean(s.policy(), unicodeSafe),
+                clean(s.debug(), unicodeSafe),
+                clean(s.next(), unicodeSafe));
     }
 
     private static String clean(String value, boolean unicodeSafe) {

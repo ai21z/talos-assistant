@@ -147,6 +147,23 @@ class TaskExpectationResolverTest {
     }
 
     @Test
+    void extractsReplacementExpectationAfterApprovalSimilarTargetWording() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "After approval, edit only script.js, not scripts.js. "
+                        + "Replace .missing-button with #submit in script.js.");
+
+        List<TaskExpectation> expectations = TaskExpectationResolver.resolve(contract);
+
+        assertEquals(1, expectations.size());
+        ReplacementExpectation replacement = (ReplacementExpectation) expectations.getFirst();
+        assertEquals("script.js", replacement.targetPath());
+        assertEquals(".missing-button", replacement.oldText());
+        assertEquals("#submit", replacement.newText());
+        assertEquals("replacement-replace-with-in-target", replacement.sourcePattern());
+        assertTrue(contract.mutationAllowed());
+    }
+
+    @Test
     void extractsChangeFromToReplacementExpectationForSingleTarget() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Change the page title from Old Portal to New Portal in index.html.");

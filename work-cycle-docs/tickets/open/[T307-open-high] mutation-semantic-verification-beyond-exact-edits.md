@@ -22,11 +22,14 @@ That is not enough for broad beta confidence. A file can be readable after mutat
 - `StaticTaskVerifier` now counts rendered bullet/list lines in the target file and promotes exact bullet-count matches to `PASSED`; mismatched counts or non-blank non-bullet prose fail with deterministic problems instead of falling back to `READBACK_ONLY`.
 - `TaskExpectationResolver` now derives a narrow `AppendLineExpectation` for single-target requests such as "Append exactly this line to README.md: Release gate note."
 - `StaticTaskVerifier` now verifies that the requested appended line is present exactly once as the final logical line. For successful `talos.edit_file` outcomes with exact mutation evidence, it also rejects rewrites where `new_string` does not preserve `old_string` before the appended line.
-- `StaticTaskVerifier` now fails append-line requests satisfied via `talos.write_file`, because a whole-file write cannot prove append-only preservation from post-state alone. This removes a false-success path; positive append-only proof for full-file writes still requires pre-mutation state or checkpoint-derived comparison.
+- `StaticTaskVerifier` now fails append-line requests satisfied via `talos.write_file` unless the tool loop captured complete same-turn read evidence for the same target before the full-file write. This preserves the fail-closed behavior for unproven whole-file writes while allowing positive append-only proof when the runtime has prior content and the new full content appends only the requested line.
+- `ToolCallExecutionStage` now attaches `FULL_WRITE_REPLACEMENT` mutation evidence for successful `talos.write_file` calls only when a complete same-turn `talos.read_file` of the same canonical path was observed before mutation. This does not introduce a hidden pre-approval read; it reuses evidence already returned to the model in the same turn.
+- The verifier and tool-loop evidence paths now normalize accepted native-tool aliases before comparing `read_file`, `write_file`, and `edit_file`, so semantic evidence does not depend on whether the model used the `talos.*` name or an accepted local alias.
 - `TaskExpectationResolver` now derives `ReplacementExpectation` for narrow "replace X with Y in target" and "change title/text from X to Y in target" requests.
 - `StaticTaskVerifier` now verifies those replacement expectations by checking that the new literal is present and the old literal is absent in the post-apply target file.
 - `ToolCallRepromptStage` now uses `StaticTaskVerifier.verifyWithoutTraceEvents(...)` for internal static-web reprompt probes, so semantic expectation probes do not duplicate `EXPECTATION_VERIFIED` trace events.
 - `TaskContractResolver` captures explicit forbidden sibling targets such as `Do not edit scripts.js`, and `StaticTaskVerifier` now fails the mutation when a forbidden target is also changed.
+- `TaskContractResolver` now also captures comma-style direct forbidden sibling targets such as `edit only script.js, not scripts.js`, so the expected target remains `script.js` and `scripts.js` becomes a forbidden target instead of a second expected target.
 - `StaticTaskVerifier` now fails a single-target mutation when the prompt uses explicit target-only wording such as "Only change script.js" and a non-requested target is also mutated.
 - For other tasks, `StaticTaskVerifier` intentionally returns `READBACK_ONLY` with summary `Target/readback checks passed ... no task-specific static verifier was applicable.`
 
@@ -106,6 +109,45 @@ That is not enough for broad beta confidence. A file can be readable after mutat
   - Runtime artifact scans passed over `build/reports,build/test-results`, `build/synchronized-approval-audit/artifacts`, and `work-cycle-docs/reports,work-cycle-docs/tickets`.
   - Direct raw-value sweep over generated audit artifacts, reports, tickets, build reports, and test results found no protected/private audit canaries.
   - `git diff --check` passed with CRLF normalization warnings only.
+- Fresh focused verification after adding positive full-write append proof from same-turn read evidence:
+  - `./gradlew.bat test --tests "dev.talos.runtime.ToolCallLoopTest.writeFileOutcomeCarriesFullWriteEvidenceWhenWritePathHasDotSlash" --no-daemon` failed before the canonical path fix because `./README.md` write paths did not match prior `README.md` read signatures.
+  - `./gradlew.bat test --tests "dev.talos.runtime.ToolCallLoopTest.writeFileOutcomeCarriesFullWriteEvidenceWhenWritePathHasDotSlash" --no-daemon` passed after canonicalizing the write path at the read-evidence join.
+  - `./gradlew.bat test --tests "dev.talos.runtime.ToolCallLoopTest.writeFileOutcomeCarriesFullWriteEvidenceWhenModelUsesAcceptedToolAliases" --no-daemon` failed before the alias fix because accepted `read_file`/`write_file` aliases did not participate in full-write evidence matching.
+  - `./gradlew.bat test --tests "dev.talos.runtime.ToolCallLoopTest.writeFileOutcomeCarriesFullWriteEvidenceWhenModelUsesAcceptedToolAliases" --rerun-tasks --no-daemon` passed after making the full-write evidence path use `ToolAliasPolicy.localCanonicalName(...)`.
+  - `./gradlew.bat test --tests "dev.talos.runtime.verification.StaticTaskVerifierTest.exactEditReplacementEvidencePassesWhenAcceptedToolAliasUsed" --no-daemon` passed after exact-edit semantic verification was made alias-aware.
+  - `./gradlew.bat test --tests "dev.talos.runtime.verification.StaticTaskVerifierTest" --tests "dev.talos.runtime.ToolCallLoopTest" --no-daemon` passed after waiting for a separate concurrent Gradle process to release `build/test-results/test/binary/output.bin`.
+  - `./gradlew.bat test --tests "dev.talos.runtime.verification.StaticTaskVerifierTest" --tests "dev.talos.runtime.ToolCallLoopTest" --rerun-tasks --no-daemon` passed.
+  - `./gradlew.bat e2eTest --tests "dev.talos.harness.SynchronizedApprovalAuditRunnerTest.deterministic_audit_entrypoint_writes_summary_bundles_and_scan_result" --no-daemon` failed before the scripted audit bank included the full-write append scenario.
+  - `./gradlew.bat e2eTest --tests "dev.talos.harness.SynchronizedApprovalAuditRunnerTest.deterministic_audit_entrypoint_writes_summary_bundles_and_scan_result" --no-daemon` passed after adding `mutation-append-line-full-write-verified`.
+  - `./gradlew.bat e2eTest --tests "dev.talos.harness.SynchronizedApprovalAuditRunnerTest" --no-daemon` passed.
+  - `./gradlew.bat e2eTest --tests "*SynchronizedApproval*" --no-daemon` passed.
+  - `./gradlew.bat runSynchronizedApprovalAudit "-PapprovalAuditArtifactsRoot=build/synchronized-approval-audit/artifacts" "-PapprovalAuditWorkspacesRoot=build/synchronized-approval-audit/workspaces" --no-daemon` passed; the generated summary included the full-write append scenario and artifact scan PASS. Later T306 expansions raised the scripted bank to 20 scenarios.
+  - `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=build/synchronized-approval-audit/artifacts" --no-daemon` passed.
+  - `build/synchronized-approval-audit/artifacts/mutation-append-line-full-write-verified/audit-transcript.json` records `verificationStatus=PASSED`, `checkpointStatus=CREATED`, and `verificationSummary="Append line verification passed."`.
+  - Added regression coverage:
+    - `appendLineExpectationPassesWhenFullWriteEvidencePreservesPriorContent`
+    - `appendLineExpectationFailsWhenFullWriteEvidenceRewritesPriorContent`
+    - `writeFileOutcomeCarriesFullWriteEvidenceWhenTargetWasReadThisTurn`
+    - `writeFileOutcomeCarriesFullWriteEvidenceWhenWritePathHasDotSlash`
+    - `writeFileOutcomeCarriesFullWriteEvidenceWhenModelUsesAcceptedToolAliases`
+    - `exactEditReplacementEvidencePassesWhenAcceptedToolAliasUsed`
+    - `deterministic_audit_entrypoint_writes_summary_bundles_and_scan_result` now asserts the full-write append scenario is in the audit summary and records a passed transcript.
+- Fresh focused verification after comma-style similar-target wording:
+  - `./gradlew.bat test --tests "dev.talos.runtime.task.TaskContractResolverTest.commaNotSimilarTargetWordingCapturesForbiddenTarget" --tests "dev.talos.runtime.expectation.TaskExpectationResolverTest.extractsReplacementExpectationAfterApprovalSimilarTargetWording" --no-daemon` failed before the contract fix: `not scripts.js` was not captured as forbidden, and replacement expectation resolution returned no single-target expectation.
+  - The same focused resolver tests passed after adding direct `not <file>` forbidden-target extraction.
+  - `./gradlew.bat test --tests "dev.talos.runtime.task.TaskContractResolverTest" --tests "dev.talos.runtime.expectation.TaskExpectationResolverTest" --tests "dev.talos.runtime.verification.StaticTaskVerifierTest" --no-daemon` passed.
+  - `./gradlew.bat e2eTest --tests "dev.talos.harness.SynchronizedApprovalAuditRunnerTest.deterministic_audit_entrypoint_writes_summary_bundles_and_scan_result" --no-daemon` failed before the scripted bank included `mutation-similar-target-script-only-verified`.
+  - The same focused e2e test passed after adding the similar-target scenario.
+  - `./gradlew.bat e2eTest --tests "*SynchronizedApproval*" --no-daemon` passed.
+  - `./gradlew.bat runSynchronizedApprovalAudit "-PapprovalAuditArtifactsRoot=build/synchronized-approval-audit/artifacts" "-PapprovalAuditWorkspacesRoot=build/synchronized-approval-audit/workspaces" --no-daemon` passed with 20 scenarios and artifact scan PASS.
+  - `build/synchronized-approval-audit/artifacts/mutation-similar-target-script-only-verified/audit-transcript.json` records `verificationStatus=PASSED`, `verificationSummary="Replacement verification passed."`, and `checkpointStatus=CREATED`.
+  - `build/synchronized-approval-audit/artifacts/mutation-similar-target-script-only-verified/workspace/diff.txt` records only `M script.js`; `scripts.js` remains unchanged.
+- Fresh forbidden-sibling blocked-tool verification after the similar-target slice:
+  - `./gradlew.bat e2eTest --tests "dev.talos.harness.SynchronizedApprovalAuditRunnerTest.deterministic_audit_entrypoint_writes_summary_bundles_and_scan_result" --no-daemon` failed before the scripted bank included `mutation-forbidden-sibling-target-blocked-before-approval`.
+  - A deliberately wrong first hypothesis expected a second approval and verifier failure; runtime evidence showed the stronger behavior: the forbidden `scripts.js` call was blocked before approval.
+  - The focused e2e test passed after changing the scenario to assert one approved `script.js` edit, `traceStatus=PARTIAL`, `verificationStatus=PASSED` for the allowed replacement, `TOOL_CALL_BLOCKED` for the forbidden sibling, unchanged `scripts.js`, and a diff containing only `M script.js`.
+  - `./gradlew.bat e2eTest --tests "*SynchronizedApproval*" --no-daemon` passed.
+  - `./gradlew.bat runSynchronizedApprovalAudit "-PapprovalAuditArtifactsRoot=build/synchronized-approval-audit/artifacts" "-PapprovalAuditWorkspacesRoot=build/synchronized-approval-audit/workspaces" --no-daemon` passed with 21 scenarios and artifact scan PASS.
 
 ## User impact
 
@@ -137,7 +179,7 @@ Mutation verification, outcome rendering, local traces, session summaries, full 
 
 Add small verifier slices, one at a time:
 
-1. Append-line verifier: exact final-line support is implemented, exact `talos.edit_file` append evidence rejects rewrites that do not preserve prior content before the appended line, and `talos.write_file` append-line attempts now fail rather than overclaiming append-only proof. Positive full-write append-only proof still needs pre-mutation state or checkpoint-derived comparison.
+1. Append-line verifier: exact final-line support is implemented, exact `talos.edit_file` append evidence rejects rewrites that do not preserve prior content before the appended line, and `talos.write_file` append-line attempts pass only when complete same-turn read evidence proves the full-file replacement preserved prior content and appended only the requested line. Whole-file writes without that evidence still fail closed.
 2. Bullet-count verifier: prove generated Markdown contains the requested number of bullet/list items when wording says "exactly". Exact count and strict no-extra-prose support are implemented for narrow bullet/list outputs.
 3. Similar-target guard: explicit forbidden sibling-target mutation is implemented for prompts that say not to edit the sibling. Single-target "only change/edit/write this file" wording is also implemented for narrow expected-target tasks.
 4. Title/text replacement verifier: initial support is implemented through `ReplacementExpectation` for "replace X with Y in target" and narrow "change title/text from X to Y in target" wording.
@@ -147,6 +189,10 @@ Add small verifier slices, one at a time:
 
 - append_one_line_verifies_new_line_at_eof - added
 - append_one_line_with_write_file_fails_because_append_only_preservation_is_unproven - added
+- append_one_line_with_full_write_evidence_passes_when_prior_content_preserved - added
+- append_one_line_with_full_write_evidence_fails_when_prior_content_rewritten - added
+- write_file_after_same_turn_read_carries_full_write_evidence - added
+- write_file_after_same_turn_read_carries_full_write_evidence_for_dot_slash_path - added
 - append_one_line_with_exact_edit_fails_when_prior_content_rewritten - added
 - append_one_line_fails_when_line_missing - added
 - append_one_line_fails_when_line_duplicated - added
@@ -155,10 +201,14 @@ Add small verifier slices, one at a time:
 - exactly_three_bullets_passes_markdown_count - added
 - exactly_three_bullets_fails_extra_bullet_or_extra_prose - added
 - similar_target_only_requested_file_changed - added for narrow single-target "only" wording
+- comma_not_similar_target_wording_keeps_forbidden_sibling_out_of_expected_targets - added
+- replacement_expectation_survives_after_approval_similar_target_wording - added
+- synchronized_audit_similar_target_script_only_records_passed_verification - added
+- synchronized_audit_forbidden_sibling_tool_call_is_blocked_before_approval - added
 - explicit_forbidden_similar_target_fails_when_mutated - added
 - title_replacement_passes_when_old_removed_and_new_present - added through replacement expectation/verifier coverage
 - title_replacement_fails_when_old_text_remains - added through replacement expectation/verifier coverage
-- synchronized_audit_semantic_mutation_scenarios_record_passed_or_failed_not_readback - partial: positive bullet, append-line, and replacement cases are in the scripted audit bank
+- synchronized_audit_semantic_mutation_scenarios_record_passed_or_failed_not_readback - partial: positive bullet, exact append-line, full-write append-line with same-turn read evidence, replacement, similar-target, and forbidden-sibling blocked-tool cases are in the scripted audit bank
 - mixed_exact_edit_and_readback_only_mutation_does_not_overclaim_passed_verification - added
 
 ## Acceptance criteria
@@ -172,7 +222,7 @@ Add small verifier slices, one at a time:
 
 - True PTY/JLine smoke is still tracked by T306.
 - Full prompt-bank integration is still open.
-- Positive append-only/no-rewrite verification remains open for full-file writes because the current verifier only has exact prior-content evidence for `talos.edit_file`, not a general pre-mutation snapshot for every `talos.write_file`. The current behavior is fail-closed, not a false pass.
+- Positive append-only/no-rewrite verification is now implemented for full-file writes only when the same turn already performed a complete read of the same canonical target before mutation. It remains open for `talos.write_file` calls with no complete same-turn prior read, truncated reads, partial/offset reads, or broader preservation claims.
 - Broader preservation verification remains open for requests such as "change the title but preserve the rest"; current replacement verification proves old/new literal state, not whole-file minimality.
 
 ## Open questions

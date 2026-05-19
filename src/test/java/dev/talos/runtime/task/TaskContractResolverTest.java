@@ -703,6 +703,20 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void commaNotSimilarTargetWordingCapturesForbiddenTarget() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "After approval, edit only script.js, not scripts.js. "
+                        + "Replace .missing-button with #submit in script.js.");
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("script.js"), contract.expectedTargets());
+        assertEquals(Set.of("scripts.js"), contract.forbiddenTargets());
+    }
+
+    @Test
     void dontTouchNamedTargetLimiterKeepsAllowedTargetSeparate() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Edit only index.html; don't touch styles.css.");

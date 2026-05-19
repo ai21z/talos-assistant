@@ -308,6 +308,8 @@ public final class ToolCallExecutionStage {
                 state.successfulReadCalls.put(readSignature, ToolCallSupport.truncateForLog(result.output()));
                 state.successfulReadCallBodies.put(readSignature, result.output() == null ? "" : result.output());
             }
+            dev.talos.runtime.ToolCallLoop.MutationEvidence mutationEvidence =
+                    result.success() ? mutationEvidence(effective, state, pathHint) : null;
             if (ToolCallSupport.isMutatingTool(effective.toolName()) && result.success()) {
                 state.mutationSinceStart = true;
                 state.mutatingToolSuccesses++;
@@ -346,8 +348,6 @@ public final class ToolCallExecutionStage {
             if (isUserApprovalDenial(result) && ToolCallSupport.isMutatingTool(effective.toolName())) {
                 approvalDeniedThisIter = true;
             }
-            dev.talos.runtime.ToolCallLoop.MutationEvidence mutationEvidence =
-                    result.success() ? mutationEvidence(effective) : null;
             state.toolOutcomes.add(new dev.talos.runtime.ToolCallLoop.ToolOutcome(
                     effective.toolName(),
                     pathHint,
@@ -444,8 +444,24 @@ public final class ToolCallExecutionStage {
                 + "\n... (tool outcome summary truncated)";
     }
 
-    private static dev.talos.runtime.ToolCallLoop.MutationEvidence mutationEvidence(ToolCall call) {
-        if (call == null || !"talos.edit_file".equals(call.toolName())) {
+    private static dev.talos.runtime.ToolCallLoop.MutationEvidence mutationEvidence(
+            ToolCall call,
+            LoopState state,
+            String pathHint
+    ) {
+        if (call == null) {
+            return dev.talos.runtime.ToolCallLoop.MutationEvidence.none();
+        }
+        String canonicalTool = ToolAliasPolicy.localCanonicalName(call.toolName());
+        if ("write_file".equals(canonicalTool)) {
+            String content = firstParam(call, "content", "text", "body", "data", "file_content");
+            String previousContent = priorReadContentForPath(state, pathHint);
+            if (content == null || previousContent == null) {
+                return dev.talos.runtime.ToolCallLoop.MutationEvidence.none();
+            }
+            return dev.talos.runtime.ToolCallLoop.MutationEvidence.fullWriteReplacement(previousContent, content);
+        }
+        if (!"edit_file".equals(canonicalTool)) {
             return dev.talos.runtime.ToolCallLoop.MutationEvidence.none();
         }
         String oldString = firstParam(call,
@@ -456,6 +472,65 @@ public final class ToolCallExecutionStage {
             return dev.talos.runtime.ToolCallLoop.MutationEvidence.none();
         }
         return dev.talos.runtime.ToolCallLoop.MutationEvidence.exactEdit(oldString, newString);
+    }
+
+    private static String priorReadContentForPath(LoopState state, String pathHint) {
+        if (state == null || pathHint == null || pathHint.isBlank()) return null;
+        String target = ToolCallSupport.canonicalizeReadPath(pathHint);
+        if (target.isBlank() || state.successfulReadCallBodies.isEmpty()) return null;
+        String out = null;
+        for (var entry : state.successfulReadCallBodies.entrySet()) {
+            String signature = entry.getKey();
+            if (!readSignatureIsCompleteReadForPath(signature, target)) continue;
+            String parsed = parseCompleteReadFileBody(entry.getValue());
+            if (parsed != null) {
+                out = parsed;
+            }
+        }
+        return out;
+    }
+
+    private static boolean readSignatureIsCompleteReadForPath(String signature, String target) {
+        if (signature == null || target == null || target.isBlank()) return false;
+        String normalized = target.replace('\\', '/');
+        int separator = signature.indexOf(':');
+        if (separator <= 0) return false;
+        String toolName = signature.substring(0, separator);
+        return "read_file".equals(ToolAliasPolicy.localCanonicalName(toolName))
+                && signature.contains("path=" + normalized + ";")
+                && !signature.contains("offset=");
+    }
+
+    private static String parseCompleteReadFileBody(String body) {
+        if (body == null || body.isBlank()) return null;
+        if (body.contains("... (") || body.contains("output truncated") || body.startsWith("(file has")) {
+            return null;
+        }
+        String normalized = body.replace("\r\n", "\n").replace('\r', '\n');
+        String[] lines = normalized.split("\n", -1);
+        StringBuilder out = new StringBuilder(normalized.length());
+        boolean sawLine = false;
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+            if (i == lines.length - 1 && line.isEmpty()) {
+                continue;
+            }
+            int sep = line.indexOf(" | ");
+            if (sep <= 0 || !allDigits(line.substring(0, sep))) {
+                return null;
+            }
+            out.append(line.substring(sep + 3)).append('\n');
+            sawLine = true;
+        }
+        return sawLine ? out.toString() : null;
+    }
+
+    private static boolean allDigits(String value) {
+        if (value == null || value.isEmpty()) return false;
+        for (int i = 0; i < value.length(); i++) {
+            if (!Character.isDigit(value.charAt(i))) return false;
+        }
+        return true;
     }
 
     private static String firstParam(ToolCall call, String... keys) {
