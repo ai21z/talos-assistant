@@ -5,8 +5,18 @@ public record ReplacementExpectation(
         String targetPath,
         String oldText,
         String newText,
-        String sourcePattern
+        String sourcePattern,
+        boolean preserveRest
 ) implements TaskExpectation {
+
+    public ReplacementExpectation(
+            String targetPath,
+            String oldText,
+            String newText,
+            String sourcePattern
+    ) {
+        this(targetPath, oldText, newText, sourcePattern, false);
+    }
 
     public ReplacementExpectation {
         targetPath = targetPath == null ? "" : normalizePath(targetPath);

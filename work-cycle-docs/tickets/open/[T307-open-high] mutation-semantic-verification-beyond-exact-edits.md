@@ -4,7 +4,7 @@ Status: open
 Severity: high
 Release gate: yes for private-document beta
 Branch: v0.9.0-beta-dev
-Created/updated: 2026-05-18
+Created/updated: 2026-05-19
 Owner: unassigned
 
 ## Problem
@@ -27,6 +27,9 @@ That is not enough for broad beta confidence. A file can be readable after mutat
 - The verifier and tool-loop evidence paths now normalize accepted native-tool aliases before comparing `read_file`, `write_file`, and `edit_file`, so semantic evidence does not depend on whether the model used the `talos.*` name or an accepted local alias.
 - `TaskExpectationResolver` now derives `ReplacementExpectation` for narrow "replace X with Y in target" and "change title/text from X to Y in target" requests.
 - `StaticTaskVerifier` now verifies those replacement expectations by checking that the new literal is present and the old literal is absent in the post-apply target file.
+- `ReplacementExpectation` now carries a narrow `preserveRest` flag when the user explicitly says to preserve/keep/leave the rest unchanged or not change anything else.
+- `StaticTaskVerifier` now verifies preserve-rest replacement requests only when mutation evidence proves the final text equals prior text with exactly one requested old-text to new-text replacement. `talos.edit_file` must provide exact edit evidence; `talos.write_file` must provide full-write evidence from a complete same-turn prior read. Plain full writes without prior-content evidence fail closed.
+- Preserve-rest full-write verification now tolerates only a single terminal-newline difference between prior-read-derived expected content and model-written content. This is deliberate: complete-read evidence is reconstructed from numbered `read_file` output and cannot prove the original EOF newline state. Any body/content change beyond the requested old/new replacement still fails.
 - `ToolCallRepromptStage` now uses `StaticTaskVerifier.verifyWithoutTraceEvents(...)` for internal static-web reprompt probes, so semantic expectation probes do not duplicate `EXPECTATION_VERIFIED` trace events.
 - `TaskContractResolver` captures explicit forbidden sibling targets such as `Do not edit scripts.js`, and `StaticTaskVerifier` now fails the mutation when a forbidden target is also changed.
 - `TaskContractResolver` now also captures comma-style direct forbidden sibling targets such as `edit only script.js, not scripts.js`, so the expected target remains `script.js` and `scripts.js` becomes a forbidden target instead of a second expected target.
@@ -148,6 +151,30 @@ That is not enough for broad beta confidence. A file can be readable after mutat
   - The focused e2e test passed after changing the scenario to assert one approved `script.js` edit, `traceStatus=PARTIAL`, `verificationStatus=PASSED` for the allowed replacement, `TOOL_CALL_BLOCKED` for the forbidden sibling, unchanged `scripts.js`, and a diff containing only `M script.js`.
   - `./gradlew.bat e2eTest --tests "*SynchronizedApproval*" --no-daemon` passed.
   - `./gradlew.bat runSynchronizedApprovalAudit "-PapprovalAuditArtifactsRoot=build/synchronized-approval-audit/artifacts" "-PapprovalAuditWorkspacesRoot=build/synchronized-approval-audit/workspaces" --no-daemon` passed with 21 scenarios and artifact scan PASS.
+- Fresh focused verification after the preserve-rest replacement slice:
+  - `./gradlew.bat test --tests "dev.talos.runtime.expectation.TaskExpectationResolverTest.extractsPreserveRestReplacementExpectationForSingleTarget" --tests "dev.talos.runtime.verification.StaticTaskVerifierTest.replacementPreserveRestPassesWhenFullWriteEvidenceOnlyReplacesRequestedText" --tests "dev.talos.runtime.verification.StaticTaskVerifierTest.replacementPreserveRestFailsWhenFullWriteEvidenceChangesOtherContent" --tests "dev.talos.runtime.verification.StaticTaskVerifierTest.replacementPreserveRestFailsWhenWriteFileHasNoPriorContentEvidence" --tests "dev.talos.runtime.verification.StaticTaskVerifierTest.replacementPreserveRestPassesWhenExactEditEvidenceOnlyReplacesRequestedText" --tests "dev.talos.runtime.verification.StaticTaskVerifierTest.replacementPreserveRestFailsWhenExactEditEvidenceChangesOtherContent" --no-daemon` failed before production support because `ReplacementExpectation.preserveRest()` did not exist.
+  - The same focused tests passed after adding the flag, resolver phrase detection, and evidence-based preservation checks.
+  - `./gradlew.bat test --tests "dev.talos.runtime.expectation.TaskExpectationResolverTest" --tests "dev.talos.runtime.verification.StaticTaskVerifierTest" --no-daemon` passed.
+  - `./gradlew.bat e2eTest --tests "dev.talos.harness.SynchronizedApprovalAuditRunnerTest.deterministic_audit_entrypoint_writes_summary_bundles_and_scan_result" --no-daemon` passed after adding `mutation-preserve-rest-replacement-verified`.
+  - `./gradlew.bat runSynchronizedApprovalAudit "-PapprovalAuditArtifactsRoot=build/synchronized-approval-audit/artifacts" "-PapprovalAuditWorkspacesRoot=build/synchronized-approval-audit/workspaces" --no-daemon` passed with the preserve-rest scenario included.
+  - `build/synchronized-approval-audit/artifacts/mutation-preserve-rest-replacement-verified/audit-transcript.json` records `verificationStatus=PASSED`, `verificationSummary="Replacement verification passed."`, and `checkpointStatus=CREATED`.
+  - `build/synchronized-approval-audit/artifacts/mutation-preserve-rest-replacement-verified/workspace/diff.txt` shows only the title line changing from `Old Portal` to `New Portal`; the body line remains `Keep this.`.
+- Fresh two-model 19-case synchronized live verification after read-then-mutation, placeholder, and terminal-newline hardening:
+  - GPT-OSS passed:
+    `./gradlew.bat runSynchronizedApprovalAudit "-PapprovalAuditMode=live" "-PapprovalAuditConfig=$env:USERPROFILE\.talos\config.yaml" "-PapprovalAuditArtifactsRoot=local/manual-testing/synchronized-approval-live-gptoss-20260519-19case-r3" "-PapprovalAuditWorkspacesRoot=local/manual-workspaces/synchronized-approval-live-gptoss-20260519-19case-r3" --no-daemon`
+  - Qwen passed:
+    `./gradlew.bat runSynchronizedApprovalAudit "-PapprovalAuditMode=live" "-PapprovalAuditConfig=local/manual-testing/synchronized-approval-live-qwen-20260518-0810/qwen-config.yaml" "-PapprovalAuditArtifactsRoot=local/manual-testing/synchronized-approval-live-qwen-20260519-19case-r6" "-PapprovalAuditWorkspacesRoot=local/manual-workspaces/synchronized-approval-live-qwen-20260519-19case-r6" --no-daemon`
+  - Both summaries report `Scenarios: 19` and `Artifact scan: PASS`.
+  - Qwen `mutation-append-line-verified/audit-transcript.json` records `verificationStatus=PASSED`, `verificationSummary="Append line verification passed."`, and `checkpointStatus=CREATED`.
+  - Qwen `mutation-preserve-rest-replacement-verified/audit-transcript.json` records `verificationStatus=PASSED`, `verificationSummary="Replacement verification passed."`, and `checkpointStatus=CREATED`.
+  - Regression tests added:
+    - `readThenReplaceInNamedFileBecomesMutationAllowedContract`
+    - `readThenUpdateMeQuestionStaysReadOnly`
+    - `replacementPreserveRestToleratesSingleTerminalNewlineDifferenceFromReadEvidence`
+    - `leadingToolResultPlaceholderWithAppendedContentIsFlagged`
+    - `leadingBracedTemplateVariableWithAppendedContentIsFlagged`
+    - `writeFileWithLeadingToolResultPlaceholderIsRejectedBeforeApproval`
+    - `writeFileWithLeadingBracedTemplateVariableIsRejectedBeforeApproval`
 
 ## User impact
 
@@ -183,7 +210,8 @@ Add small verifier slices, one at a time:
 2. Bullet-count verifier: prove generated Markdown contains the requested number of bullet/list items when wording says "exactly". Exact count and strict no-extra-prose support are implemented for narrow bullet/list outputs.
 3. Similar-target guard: explicit forbidden sibling-target mutation is implemented for prompts that say not to edit the sibling. Single-target "only change/edit/write this file" wording is also implemented for narrow expected-target tasks.
 4. Title/text replacement verifier: initial support is implemented through `ReplacementExpectation` for "replace X with Y in target" and narrow "change title/text from X to Y in target" wording.
-5. Static web semantic verifier extensions only where the code already has a small HTML/CSS/JS surface.
+5. Preserve-rest replacement verifier: implemented for explicit preserve/keep/leave-rest wording when exact edit evidence or full-write evidence proves only the requested text changed.
+6. Static web semantic verifier extensions only where the code already has a small HTML/CSS/JS surface.
 
 ## Tests
 
@@ -208,7 +236,12 @@ Add small verifier slices, one at a time:
 - explicit_forbidden_similar_target_fails_when_mutated - added
 - title_replacement_passes_when_old_removed_and_new_present - added through replacement expectation/verifier coverage
 - title_replacement_fails_when_old_text_remains - added through replacement expectation/verifier coverage
-- synchronized_audit_semantic_mutation_scenarios_record_passed_or_failed_not_readback - partial: positive bullet, exact append-line, full-write append-line with same-turn read evidence, replacement, similar-target, and forbidden-sibling blocked-tool cases are in the scripted audit bank
+- preserve_rest_replacement_passes_with_exact_edit_evidence - added
+- preserve_rest_replacement_fails_when_exact_edit_changes_other_content - added
+- preserve_rest_replacement_passes_with_full_write_evidence - added
+- preserve_rest_replacement_fails_when_full_write_changes_other_content - added
+- preserve_rest_replacement_fails_when_write_file_has_no_prior_content_evidence - added
+- synchronized_audit_semantic_mutation_scenarios_record_passed_or_failed_not_readback - partial: positive bullet, exact append-line, full-write append-line with same-turn read evidence, replacement, preserve-rest replacement, similar-target, and forbidden-sibling blocked-tool cases are in the scripted audit bank
 - mixed_exact_edit_and_readback_only_mutation_does_not_overclaim_passed_verification - added
 
 ## Acceptance criteria
@@ -223,7 +256,7 @@ Add small verifier slices, one at a time:
 - True PTY/JLine smoke is still tracked by T306.
 - Full prompt-bank integration is still open.
 - Positive append-only/no-rewrite verification is now implemented for full-file writes only when the same turn already performed a complete read of the same canonical target before mutation. It remains open for `talos.write_file` calls with no complete same-turn prior read, truncated reads, partial/offset reads, or broader preservation claims.
-- Broader preservation verification remains open for requests such as "change the title but preserve the rest"; current replacement verification proves old/new literal state, not whole-file minimality.
+- Broader preservation verification is now implemented only for explicit old-text/new-text replacement tasks with exact mutation evidence or full-write evidence. It remains open for semantic rewrites where the requested change is not expressible as one old/new literal replacement, for truncated reads, and for broad "preserve the rest" claims after multi-step transformations. A single EOF-newline difference is no longer treated as preservation failure because current read evidence cannot prove that byte-level state.
 
 ## Open questions
 

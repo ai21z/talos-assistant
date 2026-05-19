@@ -17,6 +17,7 @@ import dev.talos.tools.*;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
 import dev.talos.tools.impl.ListDirTool;
+import dev.talos.tools.impl.MakeDirectoryTool;
 import dev.talos.tools.impl.ReadFileTool;
 import org.junit.jupiter.api.Test;
 
@@ -2835,6 +2836,355 @@ class ToolCallLoopTest {
     }
 
     @Test
+    void staticWebCreationDirectoryOnlyMutationContinuesToFileWrites() throws Exception {
+        Path ws = Files.createTempDirectory("talos-static-web-mkdir-continuation-");
+        try {
+            var registry = new ToolRegistry();
+            registry.register(new MakeDirectoryTool());
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 6);
+
+            String request = "I want to create a modern BMI calculator website to use! Can you make it?";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+
+            String mkdirOnly = """
+                    {"name":"talos.mkdir","arguments":{"path":"bmi-website"}}
+                    """;
+            String indexHtml = """
+                    <!doctype html>
+                    <html>
+                    <head>
+                      <title>BMI Calculator</title>
+                      <link rel="stylesheet" href="styles.css">
+                    </head>
+                    <body>
+                      <main class="calculator">
+                        <h1>BMI Calculator</h1>
+                        <label>Height <input id="height" type="number"></label>
+                        <label>Weight <input id="weight" type="number"></label>
+                        <button id="calculate">Calculate BMI</button>
+                        <p id="result"></p>
+                      </main>
+                      <script src="script.js"></script>
+                    </body>
+                    </html>
+                    """;
+            String stylesCss = ".calculator { max-width: 28rem; }\n";
+            String scriptJs = """
+                    document.getElementById('calculate').addEventListener('click', () => {
+                      const height = Number(document.getElementById('height').value) / 100;
+                      const weight = Number(document.getElementById('weight').value);
+                      document.getElementById('result').textContent = height > 0
+                        ? `BMI ${(weight / (height * height)).toFixed(1)}`
+                        : 'Enter height';
+                    });
+                    """;
+            String fileWrites = """
+                    {"name":"talos.write_file","arguments":{"path":"index.html","content":"%s"}}
+                    {"name":"talos.write_file","arguments":{"path":"styles.css","content":"%s"}}
+                    {"name":"talos.write_file","arguments":{"path":"script.js","content":"%s"}}
+                    """.formatted(jsonEscape(indexHtml), jsonEscape(stylesCss), jsonEscape(scriptJs));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of(fileWrites, "done")))
+                    .build();
+
+            ToolCallLoop.LoopResult result = loop.run(mkdirOnly, messages, ws, ctx);
+
+            assertTrue(Files.isDirectory(ws.resolve("bmi-website")),
+                    "The first directory mutation should still execute.");
+            assertEquals(indexHtml, Files.readString(ws.resolve("index.html")));
+            assertEquals(stylesCss, Files.readString(ws.resolve("styles.css")));
+            assertEquals(scriptJs, Files.readString(ws.resolve("script.js")));
+            assertTrue(result.iterations() > 1,
+                    "A directory-only mutation for a website request must not end the tool loop.");
+            assertTrue(result.mutatingToolSuccesses() >= 4,
+                    "The loop should continue from mkdir to actual HTML/CSS/JS file writes.");
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
+    void staticWebCreationHtmlReferencingMissingAssetsContinuesToAssetWrites() throws Exception {
+        Path ws = Files.createTempDirectory("talos-static-web-asset-continuation-");
+        try {
+            var registry = new ToolRegistry();
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 6);
+
+            String request = "I want to create a modern BMI calculator website to use! Can you make it?";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+
+            String indexHtml = """
+                    <!doctype html>
+                    <html>
+                    <head>
+                      <title>BMI Calculator</title>
+                      <link rel="stylesheet" href="styles.css">
+                    </head>
+                    <body>
+                      <main class="calculator">
+                        <h1>BMI Calculator</h1>
+                        <label>Height <input id="height" type="number"></label>
+                        <label>Weight <input id="weight" type="number"></label>
+                        <button id="calculate">Calculate BMI</button>
+                        <p id="result"></p>
+                      </main>
+                      <script src="script.js"></script>
+                    </body>
+                    </html>
+                    """;
+            String initialIndexOnly = """
+                    {"name":"talos.write_file","arguments":{"path":"index.html","content":"%s"}}
+                    """.formatted(jsonEscape(indexHtml));
+            String stylesCss = ".calculator { max-width: 28rem; }\n";
+            String scriptJs = """
+                    document.getElementById('calculate').addEventListener('click', () => {
+                      const height = Number(document.getElementById('height').value) / 100;
+                      const weight = Number(document.getElementById('weight').value);
+                      document.getElementById('result').textContent = height > 0
+                        ? `BMI ${(weight / (height * height)).toFixed(1)}`
+                        : 'Enter height';
+                    });
+                    """;
+            String assetWrites = """
+                    {"name":"talos.write_file","arguments":{"path":"styles.css","content":"%s"}}
+                    {"name":"talos.write_file","arguments":{"path":"script.js","content":"%s"}}
+                    """.formatted(jsonEscape(stylesCss), jsonEscape(scriptJs));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of(assetWrites, "done")))
+                    .build();
+
+            ToolCallLoop.LoopResult result = loop.run(initialIndexOnly, messages, ws, ctx);
+
+            assertEquals(indexHtml, Files.readString(ws.resolve("index.html")));
+            assertEquals(stylesCss, Files.readString(ws.resolve("styles.css")));
+            assertEquals(scriptJs, Files.readString(ws.resolve("script.js")));
+            assertTrue(result.iterations() > 1,
+                    "A partial static web surface must not end the tool loop before missing assets are written.");
+            assertTrue(result.mutatingToolSuccesses() >= 3,
+                    "The loop should continue from index.html to linked CSS/JS asset writes.");
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
+    void staticWebCreationMissingAssetContinuationRejectsRepeatedSatisfiedTargetRewrite() throws Exception {
+        Path ws = Files.createTempDirectory("talos-static-web-missing-asset-wrong-target-");
+        try {
+            var registry = new ToolRegistry();
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 6);
+
+            String request = "I want to create a modern BMI calculator website to use! Can you make it?";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+
+            String initialIndex = """
+                    <!doctype html>
+                    <html>
+                    <body>
+                      <button id="calculate">Calculate BMI</button>
+                      <p id="result"></p>
+                      <script src="script.js"></script>
+                    </body>
+                    </html>
+                    """;
+            String initialIndexWrite = """
+                    {"name":"talos.write_file","arguments":{"path":"index.html","content":"%s"}}
+                    """.formatted(jsonEscape(initialIndex));
+            String repeatedWrongTarget = """
+                    {"name":"talos.write_file","arguments":{"path":"index.html","content":"%s"}}
+                    """.formatted(jsonEscape(initialIndex.replace("Calculate BMI", "Calculate")));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of(repeatedWrongTarget, "should not be called")))
+                    .build();
+
+            ToolCallLoop.LoopResult result = loop.run(initialIndexWrite, messages, ws, ctx);
+
+            assertTrue(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertTrue(result.failureDecision().reason().contains("EXPECTED_TARGETS_REMAINING"),
+                    result.failureDecision().reason());
+            assertTrue(result.failureDecision().reason().contains("script.js"),
+                    result.failureDecision().reason());
+            assertEquals(initialIndex, Files.readString(ws.resolve("index.html")),
+                    "The off-target continuation rewrite must be rejected before execution.");
+            assertFalse(Files.exists(ws.resolve("script.js")),
+                    "The model never wrote the required missing asset.");
+            assertEquals(1, result.mutatingToolSuccesses(),
+                    "Only the initial index.html write should apply.");
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
+    void pendingExpectedTargetObligationRejectsWrongRememberedMutationBeforeExecution() throws Exception {
+        Path ws = Files.createTempDirectory("talos-pending-expected-remember-");
+        try {
+            Files.writeString(ws.resolve("notes.md"), "status=old\n");
+            Files.writeString(ws.resolve("more.md"), "status2=old\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileEditTool(new FileUndoStack()));
+            var approvals = new int[]{0};
+            var sessionPolicy = new SessionApprovalPolicy();
+            var processor = new TurnProcessor(
+                    ModeController.defaultController(),
+                    new ApprovalGate() {
+                        @Override
+                        public boolean approve(String description, String detail) {
+                            throw new AssertionError("binary approval path should not be used");
+                        }
+
+                        @Override
+                        public ApprovalResponse approveFull(String description, String detail) {
+                            approvals[0]++;
+                            return ApprovalResponse.APPROVED_REMEMBER;
+                        }
+                    },
+                    registry,
+                    sessionPolicy);
+            var loop = new ToolCallLoop(processor, 6);
+
+            String request = "Use talos.edit_file twice. First replace status=old with status=new in notes.md. "
+                    + "Then replace status2=old with status2=new in more.md.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+            String firstEdit = """
+                    {"name":"talos.edit_file","arguments":{"path":"notes.md","old_string":"status=old","new_string":"status=new"}}
+                    """;
+            String wrongSecondEdit = """
+                    {"name":"talos.edit_file","arguments":{"path":"notes.md","old_string":"status2=old","new_string":"status2=new"}}
+                    """;
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of(wrongSecondEdit, "should not be reached")))
+                    .build();
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            LocalTurnTraceCapture.begin("trc-pending-expected-remember", "session", 1,
+                    "2026-05-19T00:00:00Z", "ws", "test", "llama_cpp", "gpt-oss", request);
+            ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
+            try {
+                result = loop.run(firstEdit, messages, ws, ctx);
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+                LocalTurnTraceCapture.clear();
+            }
+
+            assertEquals(1, approvals[0],
+                    "Only the first approved mutation should reach the approval gate.");
+            assertTrue(sessionPolicy.rememberInWorkspaceWritesEnabled(),
+                    "The first approval should enable session remember, reproducing the live audit path.");
+            assertTrue(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertTrue(result.failureDecision().reason().contains("EXPECTED_TARGETS_REMAINING"),
+                    result.failureDecision().reason());
+            assertTrue(result.failureDecision().reason().contains("more.md"),
+                    result.failureDecision().reason());
+            assertEquals("status=new\n", Files.readString(ws.resolve("notes.md")));
+            assertEquals("status2=old\n", Files.readString(ws.resolve("more.md")));
+            assertEquals(1, result.mutatingToolSuccesses());
+            assertEquals(1, result.toolOutcomes().stream()
+                            .filter(ToolCallLoop.ToolOutcome::mutating)
+                            .count(),
+                    "The wrong second mutation must not execute as a remembered approval.");
+            assertTrue(trace.events().stream()
+                            .anyMatch(event -> "PENDING_ACTION_OBLIGATION_BREACHED".equals(event.type())
+                                    && "EXPECTED_TARGETS_REMAINING".equals(event.data().get("kind"))),
+                    "Trace should record that the remaining expected-target obligation was breached.");
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
+    void appendLineFullWriteThatDoesNotPreserveReadbackIsRejectedBeforeApproval() throws Exception {
+        Path ws = Files.createTempDirectory("talos-append-line-preapproval-");
+        try {
+            Files.writeString(ws.resolve("README.md"), "# Demo\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileWriteTool());
+            var approvals = new int[]{0};
+            var processor = new TurnProcessor(
+                    ModeController.defaultController(),
+                    new ApprovalGate() {
+                        @Override
+                        public boolean approve(String description, String detail) {
+                            throw new AssertionError("binary approval path should not be used");
+                        }
+
+                        @Override
+                        public ApprovalResponse approveFull(String description, String detail) {
+                            approvals[0]++;
+                            return ApprovalResponse.APPROVED;
+                        }
+                    },
+                    registry);
+            var loop = new ToolCallLoop(processor, 4);
+
+            String request = "Read README.md, then append exactly this line to README.md: Release gate note";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+            String badWrite = """
+                    {"name":"talos.read_file","arguments":{"path":"README.md"}}
+                    {"name":"talos.write_file","arguments":{"path":"README.md","content":"Existing content from README.md\\n\\nRelease gate note"}}
+                    """;
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of("should not need a retry")))
+                    .build();
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            LocalTurnTraceCapture.begin("trc-append-line-preapproval", "session", 1,
+                    "2026-05-19T00:00:00Z", "ws", "test", "llama_cpp", "qwen", request);
+            ToolCallLoop.LoopResult result;
+            try {
+                result = loop.run(badWrite, messages, ws, ctx);
+                LocalTurnTraceCapture.complete();
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+                LocalTurnTraceCapture.clear();
+            }
+
+            assertEquals(0, approvals[0],
+                    "Invalid append-line full write must be rejected before approval.");
+            assertEquals("# Demo\n", Files.readString(ws.resolve("README.md")),
+                    "Invalid append-line full write must not mutate the file.");
+            assertTrue(result.toolOutcomes().stream()
+                            .anyMatch(outcome -> outcome.mutating()
+                                    && !outcome.success()
+                                    && outcome.errorMessage().contains("append-line")),
+                    result.toolOutcomes().toString());
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
     void repairReadOnlyBudgetCountsSuppressedRedundantReadsBeforeAnotherContinuation() throws Exception {
         Path ws = Files.createTempDirectory("talos-repair-redundant-read-budget-");
         try {
@@ -2896,6 +3246,103 @@ class ToolCallLoopTest {
                             .anyMatch(event -> "ACTION_OBLIGATION_EVALUATED".equals(event.type())
                                     && "REPAIR_INSPECTION_ONLY".equals(event.data().get("failureKind"))),
                     "Trace should record deterministic repair inspection-only failure.");
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
+    void readOnlyDuplicateReadLoopStopsBeforeGenericIterationLimit() throws Exception {
+        Path ws = Files.createTempDirectory("talos-read-only-duplicate-read-budget-");
+        try {
+            Files.writeString(ws.resolve("index.html"), "<button id=\"submit\">Submit</button>\n");
+            Files.writeString(ws.resolve("script.js"), "document.querySelector('.missing-button');\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 5);
+
+            String request = "Propose a fix for the .missing-button bug. Do not edit files.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of(
+                            readFileCall("script.js", 200),
+                            readFileCall("script.js", 200),
+                            readFileCall("index.html", 200),
+                            readFileCall("script.js", 200),
+                            readFileCall("index.html", 200))))
+                    .build();
+
+            ToolCallLoop.LoopResult result = loop.run(readFileCall("index.html", 200), messages, ws, ctx);
+
+            assertTrue(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertTrue(result.failureDecision().reason().contains("no-progress"), result.failureDecision().reason());
+            assertFalse(result.hitIterLimit(), "duplicate read-only no-progress should stop before generic loop cap");
+            assertEquals(0, result.mutatingToolSuccesses());
+            assertTrue(result.finalAnswer().contains("failure policy stopped"), result.finalAnswer());
+            assertTrue(result.finalAnswer().contains("Runtime context:"), result.finalAnswer());
+            assertTrue(result.finalAnswer().contains("task contract: READ_ONLY_QA"), result.finalAnswer());
+            assertTrue(result.finalAnswer().contains("mutationAllowed=false"), result.finalAnswer());
+            assertFalse(result.finalAnswer().contains("Tool-call limit"), result.finalAnswer());
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
+    void singleTargetMutationReadOnlyOverInspectionUsesCompactMutationContinuation() throws Exception {
+        Path ws = Files.createTempDirectory("talos-read-only-mutation-budget-");
+        try {
+            Files.writeString(ws.resolve("script.js"),
+                    "document.querySelector('.missing-button');\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileEditTool());
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 8);
+
+            Config cfg = new Config();
+            var compactAware = ScriptedNativeLlmClient.compactMutationContinuationAware(
+                    List.of(
+                            readNative("normal_read_1", "script.js", 500),
+                            readNative("normal_read_2", "script.js", 700),
+                            readNative("normal_read_3", "script.js", 900),
+                            readNative("normal_read_4", "script.js", 1100),
+                            readNative("normal_read_5", "script.js", 1300),
+                            readNative("normal_read_6", "script.js", 1500),
+                            readNative("normal_read_7", "script.js", 1700)),
+                    new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                            "compact_edit",
+                            "talos.edit_file",
+                            Map.of(
+                                    "path", "script.js",
+                                    "old_string", ".missing-button",
+                                    "new_string", ".cta-button")))));
+            var ctx = Context.builder(cfg)
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(compactAware.client())
+                    .nativeToolSpecs(nativeSpecs(new ReadFileTool(), new FileEditTool(), new FileWriteTool()))
+                    .build();
+
+            String request = "Read script.js, then fix the selector bug by changing .missing-button to .cta-button.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+
+            ToolCallLoop.LoopResult result = loop.run(readFileCall("script.js", 200), messages, ws, ctx);
+
+            assertFalse(result.hitIterLimit(), "compact mutation continuation should avoid generic loop cap");
+            assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertEquals(1, result.mutatingToolSuccesses());
+            assertTrue(compactAware.compactContinuations().get() > 0,
+                    "loop should use compact mutation continuation");
+            assertEquals("document.querySelector('.cta-button');\n", Files.readString(ws.resolve("script.js")));
         } finally {
             deleteRecursive(ws);
         }
@@ -3607,6 +4054,13 @@ class ToolCallLoopTest {
     private static String readFileCall(String path, int maxLines) {
         return "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"" + path
                 + "\",\"max_lines\":" + maxLines + "}}";
+    }
+
+    private static LlmClient.StreamResult readNative(String id, String path, int maxLines) {
+        return new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                id,
+                "talos.read_file",
+                Map.of("path", path, "max_lines", maxLines))));
     }
 
     private static String jsonEscape(String value) {

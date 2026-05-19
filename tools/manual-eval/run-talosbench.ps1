@@ -5,6 +5,7 @@ param(
     [switch]$ValidateOnly,
     [switch]$SelfTest,
     [switch]$IncludeManualRequired,
+    [switch]$AllowPipedApprovalInputs,
     [string]$TalosPath = "",
     [string]$WorkspaceRoot = "local/manual-workspaces/talosbench",
     [string]$TranscriptRoot = "local/manual-testing/talosbench"
@@ -107,6 +108,112 @@ function Test-Substrings {
     }
 }
 
+function Test-ExpectedFinalFiles {
+    param($Case, [string]$Workspace)
+
+    if (-not ($Case.PSObject.Properties.Name -contains "expectedFinalFiles")) {
+        return @()
+    }
+    $workspaceFull = [System.IO.Path]::GetFullPath($Workspace)
+    $failures = @()
+    foreach ($name in Get-NotePropertyNames $Case.expectedFinalFiles) {
+        $target = [System.IO.Path]::GetFullPath((Join-Path $workspaceFull $name))
+        if (-not $target.StartsWith($workspaceFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $failures += "expected final file path escapes workspace: $name"
+            continue
+        }
+        if (-not (Test-Path -LiteralPath $target -PathType Leaf)) {
+            $failures += "expected final file missing: $name"
+            continue
+        }
+        $actual = [System.IO.File]::ReadAllText($target)
+        $expected = [string]$Case.expectedFinalFiles.$name
+        if ($actual -ne $expected) {
+            $failures += "expected final file content mismatch: $name"
+        }
+    }
+    return @($failures)
+}
+
+function Get-CaseApprovalInputs {
+    param($Case)
+
+    $inputs = New-Object System.Collections.Generic.List[string]
+    if ($Case.PSObject.Properties.Name -contains "approvalInputsByPrompt") {
+        foreach ($entry in @($Case.approvalInputsByPrompt)) {
+            foreach ($approval in @($entry)) {
+                if (-not [string]::IsNullOrWhiteSpace($approval)) {
+                    [void]$inputs.Add(([string]$approval).Trim())
+                }
+            }
+        }
+    }
+    if ($Case.PSObject.Properties.Name -contains "approvalInputs") {
+        foreach ($approval in @($Case.approvalInputs)) {
+            if (-not [string]::IsNullOrWhiteSpace($approval)) {
+                [void]$inputs.Add(([string]$approval).Trim())
+            }
+        }
+    }
+    return @($inputs | Select-Object -Unique)
+}
+
+function Get-TalosBenchManualExecutionGate {
+    param(
+        $Case,
+        [bool]$IncludeManualRequiredFlag,
+        [bool]$AllowPipedApprovalInputsFlag
+    )
+
+    $manualRequired = $Case.manualRequired -eq $true
+    if (-not $manualRequired) {
+        return [pscustomobject]@{
+            Status = "RUN"
+            Notes = ""
+        }
+    }
+
+    if (-not $IncludeManualRequiredFlag) {
+        return [pscustomobject]@{
+            Status = "MANUAL_REQUIRED"
+            Notes = "Skipped approval-sensitive case. Re-run with -IncludeManualRequired and a synchronized runner, or explicitly opt into piped approval input for exploratory evidence."
+        }
+    }
+
+    $approvalInputs = @(Get-CaseApprovalInputs -Case $Case)
+    if ($approvalInputs.Count -gt 0 -and -not $AllowPipedApprovalInputsFlag) {
+        return [pscustomobject]@{
+            Status = "SYNC_REQUIRED"
+            Notes = "Refusing to pre-feed approval input through redirected stdin. Use the synchronized approval runner for release evidence, or pass -AllowPipedApprovalInputs only for exploratory non-synchronized runs."
+        }
+    }
+
+    return [pscustomobject]@{
+        Status = "RUN"
+        Notes = ""
+    }
+}
+
+function Test-ApprovalInputDrift {
+    param($Case, [string]$Transcript)
+
+    $approvalInputs = @(Get-CaseApprovalInputs -Case $Case)
+    if ($approvalInputs.Count -eq 0) {
+        return @()
+    }
+
+    $failures = @()
+    $clean = Remove-AnsiSequences -Text $Transcript
+    foreach ($approval in $approvalInputs) {
+        $escaped = [regex]::Escape($approval)
+        $pattern = "(?m)^\s*User Request\s*\r?\n\s+$escaped\s*$"
+        if ([regex]::IsMatch($clean, $pattern)) {
+            $failures += "scripted approval input '$approval' was consumed as a user turn; approval prompt likely did not appear before the runner sent input"
+        }
+    }
+    return @($failures)
+}
+
 function Get-LastRegexValue {
     param([string]$Text, [string]$Pattern, [switch]$CaseSensitive)
     $options = if ($CaseSensitive) {
@@ -117,6 +224,16 @@ function Get-LastRegexValue {
     $matches = [regex]::Matches($Text, $Pattern, $options)
     if ($matches.Count -eq 0) { return "" }
     return $matches[$matches.Count - 1].Groups[1].Value.Trim()
+}
+
+function Get-CheckpointIdFromText {
+    param([string]$Text)
+    $clean = Remove-AnsiSequences -Text $Text
+    $matches = [regex]::Matches(
+        $clean,
+        "chk-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+    if ($matches.Count -eq 0) { return "" }
+    return $matches[$matches.Count - 1].Value
 }
 
 function Remove-AnsiSequences {
@@ -433,17 +550,32 @@ function Get-LastNaturalTurnBlock {
 }
 
 function New-TalosBenchInputLines {
-    param($Case)
+    param(
+        $Case,
+        [int]$StartPromptIndex = 0,
+        [int]$EndPromptIndex = -1,
+        [hashtable]$Replacements = @{},
+        [bool]$IncludeSessionClear = $true,
+        [bool]$IncludeLastTrace = $true
+    )
 
     $inputLines = New-Object System.Collections.Generic.List[string]
-    $inputLines.Add("/session clear")
+    if ($IncludeSessionClear) {
+        $inputLines.Add("/session clear")
+    }
     $inputLines.Add("/debug trace")
     $prompts = @($Case.prompts)
     $hasPromptApprovals = $Case.PSObject.Properties.Name -contains "approvalInputsByPrompt"
     $promptApprovals = if ($hasPromptApprovals) { @($Case.approvalInputsByPrompt) } else { @() }
-    for ($promptIndex = 0; $promptIndex -lt $prompts.Count; $promptIndex++) {
-        $prompt = $prompts[$promptIndex]
-        $inputLines.Add([string]$prompt)
+    if ($EndPromptIndex -lt 0 -or $EndPromptIndex -ge $prompts.Count) {
+        $EndPromptIndex = $prompts.Count - 1
+    }
+    for ($promptIndex = $StartPromptIndex; $promptIndex -le $EndPromptIndex; $promptIndex++) {
+        $prompt = [string]$prompts[$promptIndex]
+        foreach ($key in $Replacements.Keys) {
+            $prompt = $prompt.Replace([string]$key, [string]$Replacements[$key])
+        }
+        $inputLines.Add($prompt)
         $approvals = if ($hasPromptApprovals) {
             if ($promptIndex -lt $promptApprovals.Count) {
                 @($promptApprovals[$promptIndex])
@@ -459,9 +591,11 @@ function New-TalosBenchInputLines {
             }
         }
     }
-    $inputLines.Add("/last trace")
-    $inputLines.Add("/last trace")
-    $inputLines.Add("/last trace")
+    if ($IncludeLastTrace) {
+        $inputLines.Add("/last trace")
+        $inputLines.Add("/last trace")
+        $inputLines.Add("/last trace")
+    }
     $inputLines.Add("/q")
     return @($inputLines)
 }
@@ -571,6 +705,57 @@ Local Trace
     Assert-TalosBenchContains -Name "legacy outcome prefers local trace" -Text $failedFacts.Outcome -Needle "FAILED"
     Assert-TalosBenchContains -Name "failed local trace outcome" -Text $failedFacts.LocalTraceOutcome -Needle "FAILED"
 
+    $approvalDriftCase = [pscustomobject]@{
+        prompts = @("Create a folder named audit-output using talos.mkdir.")
+        approvalInputsByPrompt = @(@("a"))
+    }
+    $approvalDriftTranscript = @"
+talos [auto] > [Truth check: the model produced an invalid tool-call payload, so no action was taken.]
+
+talos [auto] > The input seems incomplete. Could you please provide more details or clarify your request?
+
+Current Turn Trace
+  Contract: READ_ONLY_QA mutationAllowed=false verificationRequired=false
+
+talos [auto] > Last Turn
+
+User Request
+  a
+"@
+    $approvalDriftFailures = @(Test-ApprovalInputDrift -Case $approvalDriftCase -Transcript $approvalDriftTranscript)
+    Assert-TalosBenchEqual -Name "approval drift failure count" -Expected 1 -Actual $approvalDriftFailures.Count
+    Assert-TalosBenchContains -Name "approval drift failure text" -Text $approvalDriftFailures[0] -Needle "consumed as a user turn"
+
+    $approvalManualCase = [pscustomobject]@{
+        id = "approval-sensitive-selftest"
+        manualRequired = $true
+        approvalInputsByPrompt = @(@("a"))
+    }
+    $skippedManualGate = Get-TalosBenchManualExecutionGate `
+        -Case $approvalManualCase `
+        -IncludeManualRequiredFlag:$false `
+        -AllowPipedApprovalInputsFlag:$false
+    Assert-TalosBenchEqual -Name "manual approval case skipped without include" `
+        -Expected "MANUAL_REQUIRED" `
+        -Actual $skippedManualGate.Status
+    $blockedApprovalGate = Get-TalosBenchManualExecutionGate `
+        -Case $approvalManualCase `
+        -IncludeManualRequiredFlag:$true `
+        -AllowPipedApprovalInputsFlag:$false
+    Assert-TalosBenchEqual -Name "manual approval case requires synchronized runner by default" `
+        -Expected "SYNC_REQUIRED" `
+        -Actual $blockedApprovalGate.Status
+    Assert-TalosBenchContains -Name "sync required explains piped approval risk" `
+        -Text $blockedApprovalGate.Notes `
+        -Needle "refusing to pre-feed approval input"
+    $explicitPipedApprovalGate = Get-TalosBenchManualExecutionGate `
+        -Case $approvalManualCase `
+        -IncludeManualRequiredFlag:$true `
+        -AllowPipedApprovalInputsFlag:$true
+    Assert-TalosBenchEqual -Name "manual approval case can explicitly opt into piped approvals" `
+        -Expected "RUN" `
+        -Actual $explicitPipedApprovalGate.Status
+
     $multiTurnFixture = @"
 talos [auto] > First response mentions talos.write_file as a future option.
 
@@ -619,6 +804,71 @@ talos [auto] > Last Turn
     Assert-TalosBenchEqual -Name "input line last" -Expected "/q" -Actual $lines[$lines.Count - 1]
     Assert-TalosBenchLiteralPromptTransport
 
+    $checkpointId = "chk-11111111-2222-3333-4444-555555555555"
+    $checkpointText = "Checkpoints:`n  $checkpointId"
+    Assert-TalosBenchEqual -Name "checkpoint id extraction" -Expected $checkpointId `
+        -Actual (Get-CheckpointIdFromText -Text $checkpointText)
+
+    $checkpointCase = [pscustomobject]@{
+        prompts = @(
+            "Overwrite index.html with exactly AFTER. Use talos.write_file.",
+            "/checkpoint list",
+            "/checkpoint restore <checkpoint-id>"
+        )
+        approvalInputsByPrompt = @(
+            @("y"),
+            @(),
+            @("y")
+        )
+    }
+    $firstPhase = @(New-TalosBenchInputLines -Case $checkpointCase -EndPromptIndex 1)
+    Assert-TalosBenchEqual -Name "checkpoint phase one includes first approval" -Expected "y" `
+        -Actual $firstPhase[3]
+    if (($firstPhase -join "`n").Contains("<checkpoint-id>")) {
+        throw "Self-test failed: checkpoint phase one included unresolved restore placeholder."
+    }
+
+    $secondPhase = @(New-TalosBenchInputLines -Case $checkpointCase `
+            -StartPromptIndex 2 `
+            -EndPromptIndex 2 `
+            -IncludeSessionClear:$false `
+            -IncludeLastTrace:$false `
+            -Replacements @{"<checkpoint-id>" = $checkpointId})
+    Assert-TalosBenchEqual -Name "checkpoint phase two starts debug" -Expected "/debug trace" `
+        -Actual $secondPhase[0]
+    Assert-TalosBenchContains -Name "checkpoint phase two substitutes id" `
+        -Text ($secondPhase -join "`n") `
+        -Needle "/checkpoint restore $checkpointId"
+    if (($secondPhase -join "`n").Contains("<checkpoint-id>")) {
+        throw "Self-test failed: checkpoint phase two kept unresolved restore placeholder."
+    }
+    if (($secondPhase | Where-Object { $_ -eq "/last trace" }).Count -ne 0) {
+        throw "Self-test failed: checkpoint phase two should not append /last trace."
+    }
+
+    $expectedFilesRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("talosbench-selftest-" + [guid]::NewGuid())
+    New-Item -ItemType Directory -Force -Path $expectedFilesRoot | Out-Null
+    try {
+        Set-Content -LiteralPath (Join-Path $expectedFilesRoot "README.md") -Value "expected" -NoNewline
+        $expectedFileCase = [pscustomobject]@{
+            expectedFinalFiles = [pscustomobject]@{
+                "README.md" = "expected"
+            }
+        }
+        $fileFailures = @(Test-ExpectedFinalFiles -Case $expectedFileCase -Workspace $expectedFilesRoot)
+        Assert-TalosBenchEqual -Name "expected final file success count" -Expected 0 -Actual $fileFailures.Count
+
+        $wrongFileCase = [pscustomobject]@{
+            expectedFinalFiles = [pscustomobject]@{
+                "README.md" = "wrong"
+            }
+        }
+        $wrongFailures = @(Test-ExpectedFinalFiles -Case $wrongFileCase -Workspace $expectedFilesRoot)
+        Assert-TalosBenchEqual -Name "expected final file failure count" -Expected 1 -Actual $wrongFailures.Count
+    } finally {
+        Remove-Item -LiteralPath $expectedFilesRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
     Write-Output "TalosBench self-test passed."
 }
 
@@ -640,6 +890,63 @@ function Get-TalosPath {
     throw "Could not find installed Talos. Set -TalosPath or TALOS_PATH."
 }
 
+function Invoke-TalosProcess {
+    param([string[]]$InputLines, [string]$Workspace)
+
+    $inputText = ($InputLines -join [Environment]::NewLine) + [Environment]::NewLine
+    Push-Location $Workspace
+    try {
+        $output = $inputText | & $script:TalosExe 2>&1
+    } finally {
+        Pop-Location
+    }
+    return ($output | Out-String)
+}
+
+function Get-CheckpointPlaceholderPromptIndex {
+    param($Case)
+
+    $prompts = @($Case.prompts)
+    for ($i = 0; $i -lt $prompts.Count; $i++) {
+        if (([string]$prompts[$i]).Contains("<checkpoint-id>")) {
+            return $i
+        }
+    }
+    return -1
+}
+
+function Invoke-TalosCaseTranscript {
+    param($Case, [string]$Workspace)
+
+    $checkpointPromptIndex = Get-CheckpointPlaceholderPromptIndex -Case $Case
+    if ($checkpointPromptIndex -lt 0) {
+        return Invoke-TalosProcess -InputLines @(New-TalosBenchInputLines -Case $Case) -Workspace $Workspace
+    }
+    if ($checkpointPromptIndex -eq 0) {
+        throw "Case '$($Case.id)' cannot resolve <checkpoint-id> in the first prompt."
+    }
+
+    $firstPhase = @(New-TalosBenchInputLines `
+            -Case $Case `
+            -EndPromptIndex ($checkpointPromptIndex - 1) `
+            -IncludeLastTrace:$true)
+    $firstText = Invoke-TalosProcess -InputLines $firstPhase -Workspace $Workspace
+    $checkpointId = Get-CheckpointIdFromText -Text $firstText
+    if ([string]::IsNullOrWhiteSpace($checkpointId)) {
+        return $firstText + [Environment]::NewLine + "[TalosBench] Dynamic checkpoint id was not found in prior output."
+    }
+
+    $secondPhase = @(New-TalosBenchInputLines `
+            -Case $Case `
+            -StartPromptIndex $checkpointPromptIndex `
+            -EndPromptIndex $checkpointPromptIndex `
+            -IncludeSessionClear:$false `
+            -IncludeLastTrace:$false `
+            -Replacements @{"<checkpoint-id>" = $checkpointId})
+    $secondText = Invoke-TalosProcess -InputLines $secondPhase -Workspace $Workspace
+    return $firstText + [Environment]::NewLine + $secondText
+}
+
 function Invoke-TalosCase {
     param($Case, [string]$RunRoot)
 
@@ -653,26 +960,22 @@ function Invoke-TalosCase {
         $relativeTranscript = $transcript
     }
 
-    if ($manualRequired -and -not $IncludeManualRequired) {
+    $executionGate = Get-TalosBenchManualExecutionGate `
+        -Case $Case `
+        -IncludeManualRequiredFlag:$IncludeManualRequired `
+        -AllowPipedApprovalInputsFlag:$AllowPipedApprovalInputs
+    if ($executionGate.Status -ne "RUN") {
         return [pscustomobject]@{
             Id = $Case.id
             Category = $Case.category
-            Status = "MANUAL_REQUIRED"
+            Status = $executionGate.Status
             Blocker = "no"
             Transcript = ""
-            Notes = "Skipped approval-sensitive case. Re-run with -IncludeManualRequired or follow README manual steps."
+            Notes = $executionGate.Notes
         }
     }
 
-    $inputLines = @(New-TalosBenchInputLines -Case $Case)
-    $inputText = ($inputLines -join [Environment]::NewLine) + [Environment]::NewLine
-    Push-Location $workspace
-    try {
-        $output = $inputText | & $script:TalosExe 2>&1
-    } finally {
-        Pop-Location
-    }
-    $text = ($output | Out-String)
+    $text = Invoke-TalosCaseTranscript -Case $Case -Workspace $workspace
     Set-Content -LiteralPath $transcript -Value $text -Encoding UTF8
 
     $required = @($Case.requiredOutputSubstrings | ForEach-Object { [string]$_ })
@@ -702,6 +1005,8 @@ function Invoke-TalosCase {
             $traceFailures = @(Test-TraceAssertions -Text $text -Assertions $Case.traceAssertions)
         }
     }
+    $approvalDriftFailures = @(Test-ApprovalInputDrift -Case $Case -Transcript $text)
+    $fileFailures = @(Test-ExpectedFinalFiles -Case $Case -Workspace $workspace)
 
     $status = "PASS"
     $blocker = "no"
@@ -731,6 +1036,18 @@ function Invoke-TalosCase {
             $status = "FAIL"
         }
         $notes += "Trace assertion failed: " + ($traceFailures -join "; ")
+    }
+    if ($approvalDriftFailures.Count -gt 0) {
+        if ($status -ne "BLOCKER") {
+            $status = "FAIL"
+        }
+        $notes += "Approval synchronization failed: " + ($approvalDriftFailures -join "; ")
+    }
+    if ($fileFailures.Count -gt 0) {
+        if ($status -ne "BLOCKER") {
+            $status = "FAIL"
+        }
+        $notes += "Final file assertion failed: " + ($fileFailures -join "; ")
     }
     if ($notes.Count -eq 0) {
         $notes += $Case.notes
@@ -872,6 +1189,7 @@ $lines.Add("- Talos path: $script:TalosExe")
 $lines.Add("- Cases file: $casesFullPath")
 $lines.Add("- Workspace root: $script:WorkspaceRootFull")
 $lines.Add("- Transcript root: $runRoot")
+$lines.Add("- Piped approval inputs allowed: $($AllowPipedApprovalInputs.IsPresent)")
 $lines.Add("")
 $lines.Add("| Case id | Status | Category | Blocker? | Transcript | Notes |")
 $lines.Add("| --- | --- | --- | --- | --- | --- |")
@@ -885,6 +1203,9 @@ Write-Output "Summary: $summary"
 
 if ($results | Where-Object { $_.Status -eq "BLOCKER" }) {
     exit 2
+}
+if ($results | Where-Object { $_.Status -eq "SYNC_REQUIRED" }) {
+    exit 1
 }
 if ($results | Where-Object { $_.Status -eq "FAIL" }) {
     exit 1

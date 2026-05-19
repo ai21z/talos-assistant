@@ -43,6 +43,7 @@ Required current native tool probes:
 - talos.copy_path
 - talos.move_path
 - talos.rename_path
+- talos.delete_path
 - talos.apply_workspace_batch
 - talos.run_command, using only approved bounded profiles
 

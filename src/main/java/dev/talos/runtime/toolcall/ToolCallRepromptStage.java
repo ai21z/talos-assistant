@@ -32,6 +32,8 @@ import dev.talos.spi.types.ToolSpec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
@@ -49,6 +51,7 @@ public final class ToolCallRepromptStage {
     private static final int COMPACT_MUTATION_READBACK_MAX_CHARS = 4_000;
 
     private record OldStringMissRepair(String path, String reason, String readback) {}
+    private record StaticWebContinuation(TaskVerificationResult verification, List<String> missingTargets) {}
 
     public boolean reprompt(LoopState state, ToolCallExecutionStage.IterationOutcome outcome) {
         if (outcome.approvalDeniedThisIteration()) {
@@ -67,7 +70,7 @@ public final class ToolCallRepromptStage {
 
         if (outcome.pathPolicyBlockedThisIteration()) {
             state.currentText = state.failureDecision.shouldStop()
-                    ? failurePolicyStopMessage(state.failureDecision)
+                    ? failurePolicyStopMessage(state, state.failureDecision)
                     : "[Tool loop stopped because a mutating path was blocked by workspace policy before approval.]";
             state.currentNativeCalls = List.of();
             LOG.debug("Stopping tool-call loop after pre-approval path policy block; not re-prompting.");
@@ -81,7 +84,7 @@ public final class ToolCallRepromptStage {
                             + state.staleEditRereadIgnoredPath
                             + "` before rereading the file after a same-turn mutation changed it. "
                             + "No approval was requested for the stale retry and no additional file change was made.");
-            state.currentText = failurePolicyStopMessage(state.failureDecision);
+            state.currentText = failurePolicyStopMessage(state, state.failureDecision);
             state.currentNativeCalls = List.of();
             LOG.debug("Stopping tool-call loop after stale edit retry ignored reread requirement for {}",
                     SafeLogFormatter.value(state.staleEditRereadIgnoredPath));
@@ -143,6 +146,18 @@ public final class ToolCallRepromptStage {
             List<String> remainingRepairTargets = remainingFullRewriteRepairTargets(state);
             List<String> remainingExpectedTargets = remainingExpectedMutationTargets(state);
             if (remainingRepairTargets.isEmpty() && remainingExpectedTargets.isEmpty()) {
+                if (shouldContinueStaticWebCreationAfterDirectoryOnlyMutation(state)) {
+                    LOG.debug("Continuing static web creation after directory-only mutation.");
+                    return continueStaticWebCreationAfterDirectoryOnlyMutation(state);
+                }
+                Optional<StaticWebContinuation> staticWebContinuation = staticWebVerificationContinuation(state);
+                if (staticWebContinuation.isPresent()) {
+                    LOG.debug("Continuing static web creation after verification found missing target(s): {}",
+                            staticWebContinuation.get().missingTargets());
+                    return continueStaticWebCreationAfterVerificationFailure(state, staticWebContinuation.get());
+                }
+            }
+            if (remainingRepairTargets.isEmpty() && remainingExpectedTargets.isEmpty()) {
                 state.currentText = String.join("\n", outcome.mutationSummaries());
                 state.currentNativeCalls = List.of();
                 LOG.debug("P0: skipping re-prompt after {} successful mutation(s) this iteration",
@@ -198,11 +213,28 @@ public final class ToolCallRepromptStage {
             return false;
         }
 
+        if (mutationReadOnlyBudgetExceeded(state)) {
+            CompactMutationContinuationOutcome compactMutation =
+                    tryCompactMutationContinuation(
+                            state,
+                            "read-only mutation evidence budget",
+                            "read-only mutation evidence budget was exhausted after "
+                                    + readOnlyInspectionAttemptCount(state)
+                                    + " read-only/no-progress inspection attempt(s)");
+            if (compactMutation == CompactMutationContinuationOutcome.CONTINUE_LOOP) {
+                LOG.info("Continuing mutation task with compact continuation after read-only inspection budget.");
+                return true;
+            }
+            if (compactMutation == CompactMutationContinuationOutcome.STOP_TURN) {
+                return false;
+            }
+        }
+
         FailureDecision failureDecision = FailurePolicy.defaults(state.maxIterations)
                 .afterIteration(state, outcome);
         if (failureDecision.shouldStop()) {
             state.failureDecision = failureDecision;
-            state.currentText = failurePolicyStopMessage(failureDecision);
+            state.currentText = failurePolicyStopMessage(state, failureDecision);
             state.currentNativeCalls = List.of();
             LOG.debug("Stopping tool-call loop by failure policy: {}", failureDecision.reason());
             return false;
@@ -419,7 +451,11 @@ public final class ToolCallRepromptStage {
             return false;
         }
         CompactMutationContinuationOutcome compactMutation =
-                tryCompactMutationContinuation(state, retryName, budget);
+                tryCompactMutationContinuation(
+                        state,
+                        retryName,
+                        "exceeded context budget: "
+                                + ResponseObligationVerifier.contextBudgetRetrySkippedDetail(budget));
         if (compactMutation == CompactMutationContinuationOutcome.CONTINUE_LOOP) {
             LOG.info("Continuing {} with compact mutation continuation after context budget overflow.",
                     retryName);
@@ -454,7 +490,7 @@ public final class ToolCallRepromptStage {
     private static CompactMutationContinuationOutcome tryCompactMutationContinuation(
             LoopState state,
             String retryName,
-            EngineException.ContextBudgetExceeded originalBudget
+            String reason
     ) {
         Optional<CompactMutationContinuation> continuation =
                 compactMutationContinuationForContextBudget(state, retryName);
@@ -473,8 +509,8 @@ public final class ToolCallRepromptStage {
             LocalTurnTraceCapture.warning(
                     "COMPACT_MUTATION_CONTINUATION",
                     "used compact mutation continuation after " + retryName
-                            + " exceeded context budget: "
-                            + ResponseObligationVerifier.contextBudgetRetrySkippedDetail(originalBudget));
+                            + ": "
+                            + (reason == null || reason.isBlank() ? "compact retry requested" : reason));
             LocalTurnTraceCapture.recordActionObligation(
                     ActionObligation.MUTATING_TOOL_REQUIRED.name(),
                     "RETRIED_COMPACT_CONTEXT",
@@ -1060,6 +1096,365 @@ public final class ToolCallRepromptStage {
         return narrowed.isEmpty() ? base : narrowed;
     }
 
+    private static boolean continueStaticWebCreationAfterDirectoryOnlyMutation(LoopState state) {
+        List<ToolSpec> base = currentNativeToolSpecs(state);
+        List<ToolSpec> narrowed = filterTools(base, List.of("talos.write_file"));
+        if (narrowed.isEmpty()) {
+            narrowed = filterTools(base, List.of("talos.write_file", "talos.edit_file"));
+        }
+        List<ToolSpec> tools = narrowed.isEmpty() ? base : narrowed;
+        if (tools == null) tools = List.of();
+        List<ChatMessage> messages = staticWebCreationContinuationMessages(state);
+        ChatRequestControls controls = staticWebCreationContinuationControls(state, tools);
+        return chatReprompt(
+                state,
+                messages,
+                tools,
+                controls,
+                "static-web-directory-only-continuation");
+    }
+
+    private static boolean continueStaticWebCreationAfterVerificationFailure(
+            LoopState state,
+            StaticWebContinuation continuation
+    ) {
+        List<ToolSpec> base = currentNativeToolSpecs(state);
+        List<ToolSpec> narrowed = filterTools(base, List.of("talos.write_file", "talos.edit_file"));
+        List<ToolSpec> tools = narrowed.isEmpty() ? base : narrowed;
+        if (tools == null) tools = List.of();
+        if (continuation != null && !continuation.missingTargets().isEmpty()) {
+            state.setPendingActionObligation(PendingActionObligation.expectedTargets(
+                    continuation.missingTargets(),
+                    staticWebVerificationFailureContext(continuation.verification())));
+        }
+        List<ChatMessage> messages = staticWebVerificationContinuationMessages(state, continuation);
+        ChatRequestControls controls = staticWebCreationContinuationControls(state, tools);
+        return chatReprompt(
+                state,
+                messages,
+                tools,
+                controls,
+                "static-web-verification-continuation");
+    }
+
+    private static List<ChatMessage> staticWebCreationContinuationMessages(LoopState state) {
+        String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
+        if (userTask == null || userTask.isBlank()) {
+            TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+            userTask = contract == null ? "Create the requested static web artifact." : contract.originalUserRequest();
+        }
+        String directorySummary = successfulDirectoryMutationSummary(state);
+        StringBuilder frame = new StringBuilder();
+        frame.append("[StaticWebCreationContinuation]\n")
+                .append("A directory mutation succeeded, but a website/app creation request is not complete ")
+                .append("until actual static web files are written.\n")
+                .append("Do not answer in prose instead of calling a file mutation tool.\n")
+                .append("Write the HTML/CSS/JavaScript surface now. Prefer index.html, styles.css, and script.js ")
+                .append("unless the user requested different names.\n")
+                .append("Do not claim completion until tool-backed file writes have executed and static verification can run.");
+        if (!directorySummary.isBlank()) {
+            frame.append("\nSuccessful directory mutation: ").append(directorySummary);
+        }
+        return List.of(
+                ChatMessage.system("""
+                        You are Talos, a local-first workspace assistant.
+                        This is a bounded static-web creation continuation after a directory-only mutation.
+                        Directory creation alone does not satisfy a website/app creation request.
+                        Use the visible write-file tool now to create the actual web files.
+                        """),
+                ChatMessage.system(frame.toString()),
+                ChatMessage.user("Current user request:\n"
+                        + (userTask == null ? "" : userTask.strip())
+                        + "\n\nCall talos.write_file now for the actual static web files."));
+    }
+
+    private static List<ChatMessage> staticWebVerificationContinuationMessages(
+            LoopState state,
+            StaticWebContinuation continuation
+    ) {
+        String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
+        if (userTask == null || userTask.isBlank()) {
+            TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+            userTask = contract == null ? "Create the requested static web artifact." : contract.originalUserRequest();
+        }
+        TaskVerificationResult verification = continuation == null ? null : continuation.verification();
+        List<String> problems = verification == null ? List.of() : verification.problems();
+        List<String> targets = continuation == null ? List.of() : continuation.missingTargets();
+        StringBuilder frame = new StringBuilder();
+        frame.append("[StaticWebVerificationContinuation]\n")
+                .append("Static verification found the current web artifact incomplete after a successful mutation.\n")
+                .append("Continue the same user request with file mutation tools. Do not answer in prose.\n");
+        if (!targets.isEmpty()) {
+            frame.append("Missing or unmutated target files: ")
+                    .append(String.join(", ", targets))
+                    .append('\n');
+        }
+        if (!problems.isEmpty()) {
+            frame.append("Verification problems:\n");
+            for (String problem : problems) {
+                if (problem == null || problem.isBlank()) continue;
+                frame.append("- ").append(problem.strip()).append('\n');
+            }
+        }
+        frame.append("Write or repair the missing static web assets now. ")
+                .append("For linked CSS/JavaScript files, create the exact linked filenames.");
+        return List.of(
+                ChatMessage.system("""
+                        You are Talos, a local-first workspace assistant.
+                        This is a bounded static-web verification continuation.
+                        The prior mutation wrote part of the requested web artifact, but static verification found missing linked assets or structural web files.
+                        Use the visible write/edit tools now. Do not claim completion until tool-backed changes have executed.
+                        """),
+                ChatMessage.system(frame.toString().stripTrailing()),
+                ChatMessage.user("Current user request:\n"
+                        + (userTask == null ? "" : userTask.strip())
+                        + "\n\nCall talos.write_file or talos.edit_file now for the missing static web target files."));
+    }
+
+    private static String staticWebVerificationFailureContext(TaskVerificationResult verification) {
+        if (verification == null || verification.status() != TaskVerificationStatus.FAILED) return "";
+        String summary = verification.summary() == null || verification.summary().isBlank()
+                ? "Static verification failed."
+                : verification.summary().strip();
+        StringBuilder out = new StringBuilder();
+        out.append("[Task incomplete: Static verification failed - ")
+                .append(summary)
+                .append("]");
+        List<String> problems = verification.problems();
+        if (problems != null && !problems.isEmpty()) {
+            out.append("\n\nUnresolved static verification problems:");
+            for (String problem : problems) {
+                if (problem == null || problem.isBlank()) continue;
+                out.append("\n- ").append(problem.strip());
+            }
+        }
+        out.append("\n\nThe requested task is not verified complete.");
+        return out.toString();
+    }
+
+    private static ChatRequestControls staticWebCreationContinuationControls(
+            LoopState state,
+            List<ToolSpec> tools
+    ) {
+        boolean required = state != null
+                && state.ctx != null
+                && state.ctx.llm() != null
+                && state.ctx.llm().supportsRequiredToolChoice()
+                && hasMutatingTool(tools);
+        return new ChatRequestControls(
+                required ? ToolChoiceMode.REQUIRED : ToolChoiceMode.AUTO,
+                "",
+                ResponseFormatMode.TEXT,
+                "",
+                List.of("static-web-directory-only-continuation"));
+    }
+
+    private static String successfulDirectoryMutationSummary(LoopState state) {
+        if (state == null || state.toolOutcomes == null || state.toolOutcomes.isEmpty()) return "";
+        for (int i = state.toolOutcomes.size() - 1; i >= 0; i--) {
+            ToolCallLoop.ToolOutcome outcome = state.toolOutcomes.get(i);
+            if (!successfulDirectoryMutation(outcome)) continue;
+            String summary = outcome.summary() == null ? "" : outcome.summary().strip();
+            if (!summary.isBlank()) return summary;
+            return outcome.pathHint() == null ? "" : outcome.pathHint().strip();
+        }
+        return "";
+    }
+
+    private static Optional<StaticWebContinuation> staticWebVerificationContinuation(LoopState state) {
+        if (state == null || state.workspace == null) return Optional.empty();
+        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        if (contract == null || !contract.mutationAllowed() || !contract.mutationRequested()) {
+            return Optional.empty();
+        }
+        if (!StaticWebCapabilityProfile.looksFunctionalWebTask(contract)) return Optional.empty();
+        if (!hasSuccessfulSmallWebFileMutation(state)) return Optional.empty();
+        TaskVerificationResult verification = staticWebVerification(state);
+        if (verification.status() != TaskVerificationStatus.FAILED) return Optional.empty();
+        List<String> missingTargets = missingStaticWebTargets(verification, state);
+        if (missingTargets.isEmpty()) return Optional.empty();
+        return Optional.of(new StaticWebContinuation(verification, missingTargets));
+    }
+
+    private static List<String> missingStaticWebTargets(TaskVerificationResult verification, LoopState state) {
+        if (verification == null || verification.problems().isEmpty()) return List.of();
+        Set<String> satisfied = successfulSmallWebMutationKeys(state);
+        LinkedHashSet<String> targets = new LinkedHashSet<>();
+        for (String problem : verification.problems()) {
+            if (problem == null || problem.isBlank()) continue;
+            String lower = problem.toLowerCase(Locale.ROOT);
+            addBacktickStaticWebTargets(problem, targets);
+            if (lower.contains("css file") || lower.contains("css target")) {
+                targets.add("styles.css");
+            }
+            if (lower.contains("javascript file") || lower.contains("js file")
+                    || lower.contains("javascript target") || lower.contains("js target")) {
+                targets.add("script.js");
+            }
+            if (lower.contains("html file") || lower.contains("html target")) {
+                targets.add("index.html");
+            }
+        }
+        addLinkedMissingStaticWebAssetsFromMutatedHtml(state, targets);
+        return targets.stream()
+                .map(ToolCallSupport::normalizePath)
+                .filter(target -> !target.isBlank())
+                .filter(StaticWebCapabilityProfile::isSmallWebFile)
+                .filter(target -> !satisfied.contains(normalizeExpectedTargetKey(target)))
+                .sorted()
+                .toList();
+    }
+
+    private static void addLinkedMissingStaticWebAssetsFromMutatedHtml(LoopState state, Set<String> targets) {
+        if (state == null || state.workspace == null || state.toolOutcomes == null || targets == null) return;
+        Path root = state.workspace.toAbsolutePath().normalize();
+        for (ToolCallLoop.ToolOutcome outcome : state.toolOutcomes) {
+            if (!mutatedSmallWebFile(outcome)) continue;
+            String htmlPath = ToolCallSupport.normalizePath(outcome.pathHint());
+            if (!(htmlPath.endsWith(".html") || htmlPath.endsWith(".htm"))) continue;
+            try {
+                Path resolved = root.resolve(htmlPath).toAbsolutePath().normalize();
+                if (!resolved.startsWith(root) || !Files.isRegularFile(resolved)) continue;
+                String html = Files.readString(resolved);
+                for (String linked : linkedStaticWebAssets(html)) {
+                    String target = resolveLinkedAssetAgainstHtmlPath(htmlPath, linked);
+                    if (target.isBlank()) continue;
+                    Path linkedPath = root.resolve(target).toAbsolutePath().normalize();
+                    if (!linkedPath.startsWith(root) || Files.isRegularFile(linkedPath)) continue;
+                    targets.add(target);
+                }
+            } catch (Exception ignored) {
+                // Verification already reports the failure; missing target inference is best effort.
+            }
+        }
+    }
+
+    private static List<String> linkedStaticWebAssets(String html) {
+        if (html == null || html.isBlank()) return List.of();
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        for (String href : htmlAttributeValues(html, "href")) {
+            String normalized = normalLinkedAssetCandidate(href);
+            if (normalized.endsWith(".css")) out.add(normalized);
+        }
+        for (String src : htmlAttributeValues(html, "src")) {
+            String normalized = normalLinkedAssetCandidate(src);
+            if (normalized.endsWith(".js")) out.add(normalized);
+        }
+        return out.stream().toList();
+    }
+
+    private static List<String> htmlAttributeValues(String html, String attribute) {
+        if (html == null || html.isBlank() || attribute == null || attribute.isBlank()) return List.of();
+        String lower = html.toLowerCase(Locale.ROOT);
+        String needle = attribute.toLowerCase(Locale.ROOT) + "=";
+        List<String> out = new ArrayList<>();
+        int start = 0;
+        while (start < lower.length()) {
+            int index = lower.indexOf(needle, start);
+            if (index < 0) break;
+            int valueStart = index + needle.length();
+            while (valueStart < html.length() && Character.isWhitespace(html.charAt(valueStart))) {
+                valueStart++;
+            }
+            if (valueStart >= html.length()) break;
+            char quote = html.charAt(valueStart);
+            if (quote == '"' || quote == '\'') {
+                int valueEnd = html.indexOf(quote, valueStart + 1);
+                if (valueEnd < 0) break;
+                out.add(html.substring(valueStart + 1, valueEnd));
+                start = valueEnd + 1;
+            } else {
+                int valueEnd = valueStart;
+                while (valueEnd < html.length()
+                        && !Character.isWhitespace(html.charAt(valueEnd))
+                        && html.charAt(valueEnd) != '>') {
+                    valueEnd++;
+                }
+                if (valueEnd > valueStart) {
+                    out.add(html.substring(valueStart, valueEnd));
+                }
+                start = Math.max(valueEnd, valueStart + 1);
+            }
+        }
+        return out;
+    }
+
+    private static String normalLinkedAssetCandidate(String value) {
+        if (value == null || value.isBlank()) return "";
+        String stripped = value.strip();
+        int query = stripped.indexOf('?');
+        if (query >= 0) stripped = stripped.substring(0, query);
+        int fragment = stripped.indexOf('#');
+        if (fragment >= 0) stripped = stripped.substring(0, fragment);
+        String lower = stripped.toLowerCase(Locale.ROOT);
+        if (lower.isBlank()
+                || lower.startsWith("http://")
+                || lower.startsWith("https://")
+                || lower.startsWith("//")
+                || lower.startsWith("data:")
+                || lower.startsWith("#")
+                || lower.startsWith("/")) {
+            return "";
+        }
+        return ToolCallSupport.normalizePath(stripped);
+    }
+
+    private static String resolveLinkedAssetAgainstHtmlPath(String htmlPath, String linked) {
+        String normalizedHtml = ToolCallSupport.normalizePath(htmlPath);
+        String normalizedLinked = ToolCallSupport.normalizePath(linked);
+        if (normalizedHtml.isBlank() || normalizedLinked.isBlank()) return "";
+        int slash = normalizedHtml.lastIndexOf('/');
+        if (slash < 0) return normalizedLinked;
+        return ToolCallSupport.normalizePath(normalizedHtml.substring(0, slash + 1) + normalizedLinked);
+    }
+
+    private static void addBacktickStaticWebTargets(String text, Set<String> targets) {
+        if (text == null || text.isBlank() || targets == null) return;
+        int start = 0;
+        while (start < text.length()) {
+            int open = text.indexOf('`', start);
+            if (open < 0) return;
+            int close = text.indexOf('`', open + 1);
+            if (close < 0) return;
+            String candidate = ToolCallSupport.normalizePath(text.substring(open + 1, close).strip());
+            if (StaticWebCapabilityProfile.isSmallWebFile(candidate)) {
+                targets.add(candidate);
+            }
+            start = close + 1;
+        }
+    }
+
+    private static boolean hasSuccessfulSmallWebFileMutation(LoopState state) {
+        if (state == null || state.toolOutcomes == null) return false;
+        for (ToolCallLoop.ToolOutcome outcome : state.toolOutcomes) {
+            if (mutatedSmallWebFile(outcome)) return true;
+        }
+        return false;
+    }
+
+    private static Set<String> successfulSmallWebMutationKeys(LoopState state) {
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        if (state == null || state.toolOutcomes == null) return out;
+        for (ToolCallLoop.ToolOutcome outcome : state.toolOutcomes) {
+            if (!mutatedSmallWebFile(outcome)) continue;
+            addSmallWebMutationKey(out, outcome.pathHint());
+            WorkspaceOperationPlan plan = outcome.workspaceOperationPlan();
+            if (plan == null) continue;
+            for (WorkspaceOperationPlan.PathEffect effect : plan.pathEffects()) {
+                if (effect != null) {
+                    addSmallWebMutationKey(out, effect.path());
+                }
+            }
+        }
+        return out;
+    }
+
+    private static void addSmallWebMutationKey(Set<String> out, String path) {
+        if (out == null || path == null || path.isBlank()) return;
+        if (!StaticWebCapabilityProfile.isSmallWebFile(path)) return;
+        out.add(normalizeExpectedTargetKey(path));
+    }
+
     private static List<ChatMessage> oldStringMissRepairMessages(
             OldStringMissRepair repair,
             String userTask
@@ -1246,6 +1641,18 @@ public final class ToolCallRepromptStage {
         return readOnlyCalls + Math.max(0, state.cushionFiresRedundantRead) >= REPAIR_READ_ONLY_TOOL_BUDGET;
     }
 
+    private static boolean mutationReadOnlyBudgetExceeded(LoopState state) {
+        if (state == null || state.toolNames.isEmpty()) return false;
+        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        if (contract == null || !contract.mutationAllowed() || !contract.mutationRequested()) return false;
+        if (WorkspaceOperationIntent.detect(contract).isPresent()) return false;
+        if (state.mutationSinceStart || state.mutatingToolSuccesses > 0) return false;
+        if (state.failedCalls > 0) return false;
+        if (!readOnlyProgressOnly(state)) return false;
+        if (compactMutationTargets(state, contract).isEmpty()) return false;
+        return readOnlyInspectionAttemptCount(state) >= REPAIR_READ_ONLY_TOOL_BUDGET;
+    }
+
     private static int readOnlyInspectionAttemptCount(LoopState state) {
         if (state == null) return 0;
         return Math.max(0, state.toolNames.size()) + Math.max(0, state.cushionFiresRedundantRead);
@@ -1268,13 +1675,85 @@ public final class ToolCallRepromptStage {
         return state != null && !RepairPolicy.fullRewriteTargetsFromRepairContext(state.messages).isEmpty();
     }
 
-    private static String failurePolicyStopMessage(FailureDecision decision) {
+    private static boolean shouldContinueStaticWebCreationAfterDirectoryOnlyMutation(LoopState state) {
+        if (state == null || state.toolOutcomes == null || state.toolOutcomes.isEmpty()) return false;
+        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        if (contract == null || !contract.mutationAllowed() || !contract.mutationRequested()) return false;
+        if (!StaticWebCapabilityProfile.looksFunctionalWebTask(contract)) return false;
+        if (staticWebVerificationAlreadyPasses(state)) return false;
+        boolean hasDirectoryMutation = false;
+        for (ToolCallLoop.ToolOutcome outcome : state.toolOutcomes) {
+            if (outcome == null || !outcome.success() || !outcome.mutating()) continue;
+            if (mutatedSmallWebFile(outcome)) {
+                return false;
+            }
+            if (successfulDirectoryMutation(outcome)) {
+                hasDirectoryMutation = true;
+            }
+        }
+        return hasDirectoryMutation;
+    }
+
+    private static boolean successfulDirectoryMutation(ToolCallLoop.ToolOutcome outcome) {
+        if (outcome == null || !outcome.success() || !outcome.mutating()) return false;
+        String toolName = canonicalToolName(outcome.toolName());
+        if ("talos.mkdir".equals(toolName)) return true;
+        WorkspaceOperationPlan plan = outcome.workspaceOperationPlan();
+        if (plan == null) return false;
+        if (plan.operationKind() == WorkspaceOperationPlan.OperationKind.CREATE_DIRECTORY) return true;
+        for (WorkspaceOperationPlan.PathEffect effect : plan.pathEffects()) {
+            if (effect != null
+                    && effect.operationKind() == WorkspaceOperationPlan.OperationKind.CREATE_DIRECTORY) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean mutatedSmallWebFile(ToolCallLoop.ToolOutcome outcome) {
+        if (outcome == null || !outcome.success() || !outcome.mutating()) return false;
+        String toolName = canonicalToolName(outcome.toolName());
+        if (("talos.write_file".equals(toolName) || "talos.edit_file".equals(toolName))
+                && StaticWebCapabilityProfile.isSmallWebFile(outcome.pathHint())) {
+            return true;
+        }
+        WorkspaceOperationPlan plan = outcome.workspaceOperationPlan();
+        if (plan == null || plan.pathEffects().isEmpty()) return false;
+        for (WorkspaceOperationPlan.PathEffect effect : plan.pathEffects()) {
+            if (effect != null && StaticWebCapabilityProfile.isSmallWebFile(effect.path())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String failurePolicyStopMessage(LoopState state, FailureDecision decision) {
         String reason = decision == null || decision.reason().isBlank()
                 ? "repeated tool failures"
                 : decision.reason();
-        return "[Tool loop stopped by failure policy: "
+        String message = "[Tool loop stopped by failure policy: "
                 + reason
                 + " Review the latest tool errors before retrying.]";
+        String context = failurePolicyRuntimeContext(state, reason);
+        if (context.isBlank()) return message;
+        return message + "\n\n" + context;
+    }
+
+    private static String failurePolicyRuntimeContext(LoopState state, String reason) {
+        if (state == null || reason == null || !reason.toLowerCase(java.util.Locale.ROOT).contains("no-progress")) {
+            return "";
+        }
+        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        if (contract == null || contract.type() == TaskType.UNKNOWN) return "";
+        StringBuilder out = new StringBuilder("Runtime context:\n");
+        out.append("- task contract: ").append(contract.type()).append('\n');
+        out.append("- mutationAllowed=").append(contract.mutationAllowed()).append('\n');
+        out.append("- successful mutations: ").append(state.mutatingToolSuccesses).append('\n');
+        if (!contract.mutationAllowed()) {
+            out.append("- mutating tools were not available for this turn's contract; ")
+                    .append("use an explicit create/edit/fix request if you intend a workspace change.\n");
+        }
+        return out.toString().stripTrailing();
     }
 
     private static String responseOnlyAfterDeniedMutation(LoopState state) {
@@ -1592,12 +2071,19 @@ public final class ToolCallRepromptStage {
     }
 
     private static boolean staticWebVerificationAlreadyPasses(LoopState state) {
-        if (state == null || state.workspace == null) return false;
+        TaskVerificationResult verification = staticWebVerification(state);
+        if (verification.status() != TaskVerificationStatus.PASSED) return false;
+        String summary = verification.summary() == null ? "" : verification.summary();
+        return summary.contains("Static web coherence checks passed");
+    }
+
+    private static TaskVerificationResult staticWebVerification(LoopState state) {
+        if (state == null || state.workspace == null) return TaskVerificationResult.notRun("");
         TaskContract contract = TaskContractResolver.fromMessages(state.messages);
         if (contract == null || !contract.mutationAllowed() || !contract.verificationRequired()) {
-            return false;
+            return TaskVerificationResult.notRun("");
         }
-        if (state.mutatingToolSuccesses <= 0) return false;
+        if (state.mutatingToolSuccesses <= 0) return TaskVerificationResult.notRun("");
         ToolCallLoop.LoopResult snapshot = new ToolCallLoop.LoopResult(
                 state.currentText,
                 state.iterations,
@@ -1615,13 +2101,10 @@ public final class ToolCallRepromptStage {
                 state.cushionFiresE1Suggestion,
                 state.failureDecision,
                 List.copyOf(state.toolOutcomes));
-        TaskVerificationResult verification = StaticTaskVerifier.verifyWithoutTraceEvents(
+        return StaticTaskVerifier.verifyWithoutTraceEvents(
                 state.workspace,
                 contract,
                 snapshot,
                 0);
-        if (verification.status() != TaskVerificationStatus.PASSED) return false;
-        String summary = verification.summary() == null ? "" : verification.summary();
-        return summary.contains("Static web coherence checks passed");
     }
 }

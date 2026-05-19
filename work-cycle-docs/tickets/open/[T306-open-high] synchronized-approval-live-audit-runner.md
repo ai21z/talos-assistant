@@ -4,7 +4,7 @@ Status: open
 Severity: high / P0 for private-document beta
 Release gate: yes
 Branch: v0.9.0-beta-dev
-Created/updated: 2026-05-18
+Created/updated: 2026-05-19
 Owner: unassigned
 
 ## Problem
@@ -42,10 +42,33 @@ The current live-audit script intentionally avoids approval-sensitive prompts be
 - `ToolCallExecutionStage` now attaches exact edit mutation evidence to successful `talos.edit_file` outcomes, and `StaticTaskVerifier` can promote exact replacement scenarios from `READBACK_ONLY` to `PASSED` when post-apply file content proves the replacement.
 - `TaskExpectationResolver` and `StaticTaskVerifier` now cover the narrow append-line EOF verifier slice, and the scripted synchronized approval bank includes `mutation-append-line-verified`.
 - `TaskExpectationResolver` and `StaticTaskVerifier` now cover narrow text/title replacement expectations, and the scripted synchronized approval bank includes `mutation-replacement-verified`.
+- `TaskExpectationResolver` and `StaticTaskVerifier` now cover explicit preserve-rest replacement expectations when exact edit or same-turn full-write evidence proves only the requested old/new text changed, and the scripted synchronized approval bank includes `mutation-preserve-rest-replacement-verified`.
+- The scripted synchronized approval bank now includes `static-web-selector-script-only-verified`, mirroring the T297 live failure shape: read `script.js`, replace `.missing-button` with `.cta-button`, leave `scripts.js` unchanged, and require static web verification.
+- Live synchronized approval mode now includes `static-web-selector-script-only-verified`; both GPT-OSS and Qwen passed the 15-case live bank on 2026-05-19 with static web verification passing and artifact scans clean.
+- Live synchronized approval mode now includes exact bullet-count, append-line, replacement, and preserve-rest replacement probes; GPT-OSS passed the 19-case live bank at `local/manual-testing/synchronized-approval-live-gptoss-20260519-19case-r3`, and Qwen passed the 19-case live bank at `local/manual-testing/synchronized-approval-live-qwen-20260519-19case-r6`.
+- Live synchronized approval mode now includes 22 scenarios: the 19-case bank plus denial-bypass-after-refusal, similar-target `script.js` versus `scripts.js`, and forbidden-sibling blocked-tool behavior.
+- GPT-OSS 22-case rerun `local/manual-testing/synchronized-approval-live-gptoss-20260519-22case-r1` exposed a proposal-only read-only loop-cap warning. `FailurePolicy` now counts suppressed duplicate read-only iterations as no-progress, and `ToolCallLoopTest.readOnlyDuplicateReadLoopStopsBeforeGenericIterationLimit` proves the loop stops before the generic iteration-limit path.
+- GPT-OSS 22-case rerun `local/manual-testing/synchronized-approval-live-gptoss-20260519-22case-r2` confirmed `proposal-only-does-not-mutate` completed in three iterations with zero approvals and no workspace diff, but failed later because the live model asked for optional `talos.mkdir notes` before writing `notes/generated-summary.md`. `ScriptedApprovalGate` now supports optional expected approval steps for that live harness shape.
+- GPT-OSS 22-case rerun `local/manual-testing/synchronized-approval-live-gptoss-20260519-22case-r3` got past the proposal-only and exact-bullet blockers, then failed at `static-web-selector-script-only-verified`. Runtime blocked a wrong-target `script_fixed.js` write before approval, leaving no workspace changes. This is tracked in T308 as a live model/tool-loop convergence blocker, not an approval-boundary failure.
+- The 19-case expansion found and fixed three runtime/audit blockers before the final pass evidence:
+  - read-then-replace prompts were misclassified as read-only;
+  - preserve-rest full-write evidence could fail solely on an EOF-newline distinction that numbered `read_file` evidence cannot prove;
+  - leading tool-result/braced content placeholders could reach mutation approval.
+- `TemplatePlaceholderGuard` now rejects leading `<content from talos.read_file>...` and `{previous_content}...` mutation payloads before approval, preventing the Qwen same-message read/write placeholder failure from reaching the approval gate.
 - Audit bundle persistence now redacts explicit send-to-model protected-read answers/model transcripts/session artifacts when raw artifact persistence is disabled.
 - Audit bundle writing now clears the scenario artifact directory before writing so stale files from previous runs cannot hide inside a passing audit root.
 - Audit workspace setup now clears each scenario workspace before fixture creation so stale mutated files cannot contaminate repeat audit runs.
 - Audit bundle workspace diffs now compare deterministic pre/post snapshots, report added/deleted/modified files, include redacted text line evidence for small text files, omit binary/large content bodies, and pass artifact canary scanning.
+- Full TalosBench redirected-stdin audit on 2026-05-19 exposed a separate evidence-integrity failure shape:
+  - Qwen run `local/manual-testing/talosbench-full-qwen-20260519-r1/20260519-163138/full-audit-mkdir-tool-probe.txt` had a correct first-turn `FILE_CREATE` contract and `talos.mkdir` tool surface, but the model produced an invalid tool-call payload and no approval prompt.
+  - The pre-fed approval input `a` became a second user request, so `/last trace` described `User Request: a` rather than the audited mkdir prompt.
+  - A focused Qwen rerun of the same case passed at `local/manual-testing/talosbench-qwen-mkdir-20260519-r1/20260519-163730/summary.md`, and the subsequent full Qwen run passed 40/40 at `local/manual-testing/talosbench-full-qwen-20260519-r2/20260519-163747/summary.md`.
+  - `tools/manual-eval/run-talosbench.ps1` now detects this contamination by failing a case when a configured approval input is later recorded as a traced `User Request`.
+  - Fresh runner checks passed: `pwsh .\tools\manual-eval\run-talosbench.ps1 -SelfTest` and `pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly`.
+- Follow-up hardening now makes that redirected TalosBench path fail closed by default:
+  - `tools/manual-eval/run-talosbench.ps1` added `-AllowPipedApprovalInputs` as an explicit exploratory opt-in.
+  - Approval-sensitive cases with configured approval input now return `SYNC_REQUIRED` when `-IncludeManualRequired` is present without `-AllowPipedApprovalInputs`.
+  - Fresh evidence: `pwsh .\tools\manual-eval\run-talosbench.ps1 -SelfTest` passed, `pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly` passed, and the focused `full-audit-mkdir-tool-probe` run returned `SYNC_REQUIRED` with exit code `1`.
 
 ## Evidence from tests/audits
 
@@ -184,6 +207,30 @@ The current live-audit script intentionally avoids approval-sensitive prompts be
   - The focused e2e test now asserts one approved `script.js` edit, `traceStatus=PARTIAL`, `verificationStatus=PASSED`, `TOOL_CALL_BLOCKED`, unchanged `scripts.js`, and a workspace diff containing only `M script.js`.
   - `./gradlew.bat e2eTest --tests "*SynchronizedApproval*" --no-daemon` passed.
   - `./gradlew.bat runSynchronizedApprovalAudit "-PapprovalAuditArtifactsRoot=build/synchronized-approval-audit/artifacts" "-PapprovalAuditWorkspacesRoot=build/synchronized-approval-audit/workspaces" --no-daemon` passed with 21 scripted scenarios and artifact scan PASS.
+- Preserve-rest replacement scenario:
+  - `./gradlew.bat test --tests "dev.talos.runtime.expectation.TaskExpectationResolverTest" --tests "dev.talos.runtime.verification.StaticTaskVerifierTest" --no-daemon` passed after adding preserve-rest expectation and verifier coverage.
+  - `./gradlew.bat e2eTest --tests "dev.talos.harness.SynchronizedApprovalAuditRunnerTest.deterministic_audit_entrypoint_writes_summary_bundles_and_scan_result" --no-daemon` passed after adding `mutation-preserve-rest-replacement-verified`.
+  - `./gradlew.bat runSynchronizedApprovalAudit "-PapprovalAuditArtifactsRoot=build/synchronized-approval-audit/artifacts" "-PapprovalAuditWorkspacesRoot=build/synchronized-approval-audit/workspaces" --no-daemon` passed with the preserve-rest scenario included.
+  - `build/synchronized-approval-audit/artifacts/mutation-preserve-rest-replacement-verified/audit-transcript.json` records `verificationStatus=PASSED`, `verificationSummary="Replacement verification passed."`, and `checkpointStatus=CREATED`.
+  - `build/synchronized-approval-audit/artifacts/mutation-preserve-rest-replacement-verified/workspace/diff.txt` shows only the title line changing from `Old Portal` to `New Portal`; the body line remains `Keep this.`.
+- Static web selector script-only scenario:
+  - `./gradlew.bat e2eTest --tests "dev.talos.harness.SynchronizedApprovalAuditRunnerTest.deterministic_audit_entrypoint_writes_summary_bundles_and_scan_result" --no-daemon` failed before the scripted bank included `static-web-selector-script-only-verified`.
+  - The same focused e2e test passed after adding the scenario.
+  - `./gradlew.bat runSynchronizedApprovalAudit "-PapprovalAuditArtifactsRoot=build/synchronized-approval-audit/artifacts" "-PapprovalAuditWorkspacesRoot=build/synchronized-approval-audit/workspaces" --no-daemon` passed with 23 scripted scenarios and artifact scan PASS.
+- Workspace-operation synchronized scripted bank follow-up:
+  - Added synchronized scripted approval scenarios for `talos.mkdir`, `talos.copy_path`, `talos.move_path`, `talos.rename_path`, `talos.delete_path`, and `talos.apply_workspace_batch`.
+  - `./gradlew.bat e2eTest --tests "dev.talos.harness.SynchronizedApprovalAuditRunnerTest.deterministic_audit_entrypoint_writes_summary_bundles_and_scan_result" --no-daemon` first failed while those scenarios were absent, then passed after adding them.
+  - `./gradlew.bat e2eTest --tests "dev.talos.harness.SynchronizedApprovalAuditRunnerTest" --no-daemon` passed.
+  - `./gradlew.bat runSynchronizedApprovalAudit "-PapprovalAuditArtifactsRoot=build/synchronized-approval-audit/artifacts" "-PapprovalAuditWorkspacesRoot=build/synchronized-approval-audit/workspaces" --no-daemon` passed with 29 scripted scenarios and artifact scan PASS.
+  - `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=build/synchronized-approval-audit/artifacts" --no-daemon` passed.
+  - The scenario asserts `script.js` changes `.missing-button` to `.cta-button`, `scripts.js` remains unchanged, and the audit transcript records `verificationStatus=PASSED` with static web coherence verification.
+- Fifteen-case two-model live synchronized approval slice:
+  - `./gradlew.bat runSynchronizedApprovalAudit "-PapprovalAuditMode=live" "-PapprovalAuditConfig=$env:USERPROFILE\.talos\config.yaml" "-PapprovalAuditArtifactsRoot=local/manual-testing/synchronized-approval-live-gptoss-20260519-15case" "-PapprovalAuditWorkspacesRoot=local/manual-workspaces/synchronized-approval-live-gptoss-20260519-15case" --no-daemon` passed.
+  - `./gradlew.bat runSynchronizedApprovalAudit "-PapprovalAuditMode=live" "-PapprovalAuditConfig=local/manual-testing/synchronized-approval-live-qwen-20260518-0810/qwen-config.yaml" "-PapprovalAuditArtifactsRoot=local/manual-testing/synchronized-approval-live-qwen-20260519-15case" "-PapprovalAuditWorkspacesRoot=local/manual-workspaces/synchronized-approval-live-qwen-20260519-15case" --no-daemon` passed.
+  - Both summaries report `Scenarios: 15` and `Artifact scan: PASS`.
+  - Both static-web transcripts record one approved `talos.edit_file`, `checkpointStatus=CREATED`, `verificationStatus=PASSED`, and `verificationSummary="Static web coherence checks passed for 1 mutated target(s)."`.
+  - `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/synchronized-approval-live-gptoss-20260519-15case,local/manual-testing/synchronized-approval-live-qwen-20260519-15case" --no-daemon` passed.
+  - Qwen emitted one sanitized malformed tool-call JSON parser warning during the run, but the audit completed with all scenario bundles written. Treat this as protocol-brittleness evidence to watch in broader prompt-bank audit, not as a failed synchronized approval scenario.
 - Fresh verification after the live-slice implementation:
   - `./gradlew.bat e2eTest --tests "dev.talos.harness.SynchronizedApprovalAuditRunnerTest" --no-daemon` passed.
   - `./gradlew.bat e2eTest --tests "*SynchronizedApproval*" --no-daemon` passed.
@@ -281,6 +328,7 @@ Keep the existing `-PrivateFolderBank` scripted path for non-interactive probes.
 - The generated deterministic bundle is scanned with the runtime artifact canary scanner in e2e coverage.
 - A maintainer can run the deterministic bank with `./gradlew.bat runSynchronizedApprovalAudit --no-daemon`, optionally setting `-PapprovalAuditArtifactsRoot=...` and `-PapprovalAuditWorkspacesRoot=...`.
 - A maintainer can run the live bank with `-PapprovalAuditMode=live`, `-PapprovalAuditConfig=...`, `-PapprovalAuditArtifactsRoot=...`, and `-PapprovalAuditWorkspacesRoot=...`.
+- A maintainer cannot accidentally turn approval-sensitive TalosBench cases into release evidence by adding only `-IncludeManualRequired`; those cases now return `SYNC_REQUIRED` unless the operator explicitly opts into exploratory piped approval input.
 - The GPT-OSS live slice passed for protected-read denial and private-mode approved local-display read.
 - The GPT-OSS live slice passed for developer/default approved protected-read explicit risk.
 - The Qwen live slice passed for protected-read denial and private-mode approved local-display read; the private-mode answer required runtime repair after model refusal.
@@ -294,6 +342,9 @@ Keep the existing `-PrivateFolderBank` scripted path for non-interactive probes.
 - The scripted nineteen-case bank passed with mutation denial-bypass blocking: one denied approval stops the turn at the runtime boundary, no second mutation path is executed, and the workspace remains unchanged.
 - The scripted twenty-case bank passed with similar-target handling: `script.js` changed, `scripts.js` stayed unchanged, and the transcript records `verificationStatus=PASSED`.
 - The scripted twenty-one-case bank passed with negative forbidden-sibling handling: `scripts.js` mutation was blocked before approval, the turn remained `PARTIAL`, and only `script.js` changed.
+- The scripted twenty-two-case bank passed with preserve-rest replacement verification: `index.html` changed `Old Portal` to `New Portal`, kept the body line unchanged, recorded `verificationStatus=PASSED`, and created a checkpoint.
+- The scripted twenty-three-case bank passed with static web selector verification: `script.js` was corrected, `scripts.js` stayed unchanged, and static web verification passed.
+- The scripted twenty-nine-case bank passed after adding workspace-operation approval probes for mkdir, copy, move, rename, delete, and batch apply.
 - The GPT-OSS twelve-case live slice passed artifact scanning, raw-value sweep, mutation-denial final state, and mutation-grant checkpoint evidence.
 - The Qwen twelve-case live slice passed artifact scanning, raw-value sweep, mutation-denial final state, and mutation-grant checkpoint evidence.
 - The scripted thirteen-case bank passed with remember approval eligibility: first safe edit prompts and records `APPROVED_REMEMBER`; second safe edit uses `SESSION_REMEMBER_ALLOW`.
@@ -304,6 +355,40 @@ Keep the existing `-PrivateFolderBank` scripted path for non-interactive probes.
 - The runner now writes durable failure evidence for missing expected approval prompts.
 - The GPT-OSS thirteen-case live slice passed after the classifier fix.
 - The Qwen thirteen-case live slice passed after the classifier fix.
+- The GPT-OSS fifteen-case live slice passed with static web selector verification.
+- The Qwen fifteen-case live slice passed with static web selector verification.
+- A GPT-OSS 19-case live attempt initially failed because `Read script.js, then replace .missing-button with #submit in script.js.` resolved to `READ_ONLY_QA`; `MutationIntent` now classifies explicit read-then-mutation wording as apply-capable while preserving source-to-target artifact classification.
+- Qwen 19-case live attempts exposed placeholder writes such as `<content from talos.read_file>Release gate note` and `{previous_content}\nRelease gate note`; both are now blocked before approval by `TemplatePlaceholderGuard`.
+- Qwen 19-case live evidence also exposed an EOF-newline limitation in preserve-rest full-write verification; the verifier now ignores only a single terminal newline difference because the complete-read evidence channel reconstructs numbered file output and cannot prove the original EOF-newline state.
+- The GPT-OSS 19-case live slice passed after the classifier fix:
+  - `local/manual-testing/synchronized-approval-live-gptoss-20260519-19case-r3/SYNCHRONIZED-APPROVAL-AUDIT.md`
+  - summary records `Scenarios: 19` and `Artifact scan: PASS`.
+- The Qwen 19-case live slice passed after placeholder and terminal-newline hardening:
+  - `local/manual-testing/synchronized-approval-live-qwen-20260519-19case-r6/SYNCHRONIZED-APPROVAL-AUDIT.md`
+  - summary records `Scenarios: 19` and `Artifact scan: PASS`.
+- GPT-OSS 22-case rerun `local/manual-testing/synchronized-approval-live-gptoss-20260519-22case-r4` exposed a remembered-approval remaining-target boundary bug:
+  - first `talos.edit_file notes.md` received `APPROVED_REMEMBER`;
+  - the runtime raised `EXPECTED_TARGETS_REMAINING` for unresolved target `more.md`;
+  - the model then attempted a second `talos.edit_file notes.md` using the `more.md` old string;
+  - permission trace used `SESSION_REMEMBER_ALLOW`;
+  - the wrong second mutation reached execution and failed with `old_string not found`;
+  - `more.md` remained unchanged.
+- T309 now tracks this boundary as `pending-expected-target-obligation-remember-approval-boundary`.
+- `LoopState` now rejects wrong-target mutating calls while an `EXPECTED_TARGETS_REMAINING` obligation is pending, before remembered approval reuse and tool execution.
+- Focused regression evidence:
+  - `./gradlew.bat test --tests "dev.talos.runtime.ToolCallLoopTest.pendingExpectedTargetObligationRejectsWrongRememberedMutationBeforeExecution" --no-daemon`
+  - `./gradlew.bat test --tests "dev.talos.runtime.ToolCallLoopTest" --no-daemon`
+- GPT-OSS 22-case r5 passed after T309:
+  - `local/manual-testing/synchronized-approval-live-gptoss-20260519-22case-r5/SYNCHRONIZED-APPROVAL-AUDIT.md`
+  - summary records `Scenarios: 22` and `Artifact scan: PASS`.
+- Qwen 22-case r1 exposed static-web verifier false success, tracked as T310. The verifier now derives selector-change replacement expectations and requires preservation evidence for that prompt shape.
+- Qwen 22-case r2/r3/r4 exposed append-line full-write preapproval gaps, tracked as T311. The runtime now blocks placeholder append writes and invented-prior-content append writes before approval.
+- Qwen 22-case r5 passed after T310/T311:
+  - `local/manual-testing/synchronized-approval-live-qwen-20260519-22case-r5/SYNCHRONIZED-APPROVAL-AUDIT.md`
+  - summary records `Scenarios: 22` and `Artifact scan: PASS`.
+- Fresh targeted live artifact scans passed:
+  - `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/synchronized-approval-live-gptoss-20260519-22case-r5" --no-daemon`
+  - `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/synchronized-approval-live-qwen-20260519-22case-r5" --no-daemon`
 - Exact edit mutations in the scripted synchronized approval bank now verify as `PASSED`, not `READBACK_ONLY`, when post-apply content proves the requested replacement.
 - Exact append-line mutations in the scripted synchronized approval bank now verify as `PASSED`, not `READBACK_ONLY`, when post-apply content proves the requested line appears exactly once at EOF.
 - Scripted replacement-expectation mutations now verify as `PASSED`, not `READBACK_ONLY`, when post-apply content proves the old literal is gone and the new literal is present.
@@ -341,8 +426,10 @@ Keep the existing `-PrivateFolderBank` scripted path for non-interactive probes.
 - Add true pseudo-terminal/JLine smoke coverage for fully interactive terminal rendering. The current CLI smoke covers synchronized redirected stdin/stdout, which is valuable but not a true terminal and now says so in generated evidence.
 - Decide whether the PTY layer should be implemented with a Java-compatible ConPTY/JNA dependency, an external PowerShell/Windows Terminal harness, or remain a manual release-audit packet. Current code/dependencies do not contain a true child-process PTY driver.
 - Run the generated manual PTY/JLine packet in a real terminal before treating the PTY/JLine blocker as closed.
-- Expand the live bank beyond protected/private-document read and basic mutation approval cases. Exact edit replacement, bullet-count, append-line, and narrow replacement expectations now have stronger verification, but broader semantic mutation verification remains tracked separately in T307.
+- Expand the synchronized live bank or synchronized process driver beyond the current approval scenarios into the full prompt-bank audit. Static web selector repair, exact bullet count, append line, narrow replacement, and explicit preserve-rest replacement now have two-model synchronized live evidence, but the full prompt-bank audit still needs broader task/capability coverage under a synchronized approval channel.
 - Decide whether explicit extracted-document send-to-model should be per-turn approval, config-only, or both.
+- Full `clean check e2eTest` still needs to be rerun after the complete T309/T310/T311 blocker batch.
+- Run the full prompt-bank audit after this expanded synchronized approval slice remains stable.
 
 ## Open questions
 

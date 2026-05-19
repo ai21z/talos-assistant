@@ -69,6 +69,18 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void explicitDeleteToolRequestWithTmpTargetBecomesMutationAllowedContract() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Use talos.delete_path to delete delete-me.tmp. Perform only that workspace operation.");
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("delete-me.tmp"), contract.expectedTargets());
+    }
+
+    @Test
     void staticWebImportChoiceQuestionTargetsIndexNotCandidateScripts() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Which file does index.html import for the BMI script, script.js or scripts.js?");
@@ -85,6 +97,29 @@ class TaskContractResolverTest {
         assertTrue(contract.mutationAllowed());
         assertEquals(Set.of("script.js"), contract.expectedTargets());
         assertEquals(Set.of("scripts.js"), contract.forbiddenTargets());
+    }
+
+    @Test
+    void readThenReplaceInNamedFileBecomesMutationAllowedContract() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Read script.js, then replace .missing-button with #submit in script.js.");
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("script.js"), contract.expectedTargets());
+        assertEquals("explicit-read-then-mutation-request", contract.classificationReason());
+    }
+
+    @Test
+    void readThenUpdateMeQuestionStaysReadOnly() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Read README.md and update me on what it says.");
+
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
+        assertEquals(Set.of("README.md"), contract.expectedTargets());
     }
 
     @Test
@@ -108,6 +143,43 @@ class TaskContractResolverTest {
         assertTrue(contract.mutationRequested());
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
+    }
+
+    @Test
+    void createSummaryFromMultipleSourceDocumentsTargetsOnlyMarkdownOutput() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Create office-summary.md summarizing board-brief.pdf, client-notes.docx, and revenue.xlsx.");
+
+        assertEquals(TaskType.FILE_CREATE, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertEquals(Set.of("office-summary.md"), contract.expectedTargets());
+        assertEquals(Set.of("board-brief.pdf", "client-notes.docx", "revenue.xlsx"),
+                contract.sourceEvidenceTargets());
+    }
+
+    @Test
+    void createStaticSiteAccordingToBriefDoesNotRequireBriefMutation() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Create exactly index.html, style.css, and script.js according to site_brief.md.");
+
+        assertEquals(TaskType.FILE_CREATE, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertEquals(Set.of("index.html", "style.css", "script.js"), contract.expectedTargets());
+        assertEquals(Set.of("site_brief.md"), contract.sourceEvidenceTargets());
+    }
+
+    @Test
+    void createPythonFilesAccordingToProblemTargetsPythonOutputsOnly() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Create dijkstra.py and test_dijkstra.py according to problem.md.");
+
+        assertEquals(TaskType.FILE_CREATE, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertEquals(Set.of("dijkstra.py", "test_dijkstra.py"), contract.expectedTargets());
+        assertEquals(Set.of("problem.md"), contract.sourceEvidenceTargets());
     }
 
     @Test
@@ -1080,6 +1152,62 @@ class TaskContractResolverTest {
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
         assertEquals(Set.of("index.html", "styles.css", "scripts.js"), contract.expectedTargets());
+    }
+
+    @Test
+    void createThatSiteFollowUpAfterSourceFileCreationBecomesApplyCapable() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.user(
+                "Okay can you create a txt file that talks about how to build a synthwave band's web page?"));
+        messages.add(ChatMessage.assistant("""
+                [File write/readback passed. No task-specific verifier was applicable.]
+
+                Created synthwave_band_website.txt.
+                """));
+        messages.add(ChatMessage.user("Great! now can you create that site?"));
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        assertEquals(TaskType.FILE_CREATE, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+    }
+
+    @Test
+    void missingStylingCorrectionAfterSiteMutationInheritsApplyCapableContract() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.user(
+                "make the rest files please according to txt. I need a good modern synthwave style"));
+        messages.add(ChatMessage.assistant("""
+                [File write/readback passed. No task-specific verifier was applicable.]
+
+                Updated index.html.
+                """));
+        messages.add(ChatMessage.user("But you just changed the index and reduced it. You never put any style in the index"));
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals("correction-follow-up-inherits-previous-mutation-contract", contract.classificationReason());
+    }
+
+    @Test
+    void readOnlyQuestionAboutTxtAfterSiteDiscussionStaysReadOnly() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.user(
+                "Okay can you create a txt file that talks about how to build a synthwave band's web page?"));
+        messages.add(ChatMessage.assistant("Created synthwave_band_website.txt."));
+        messages.add(ChatMessage.user("what is the txt talking about?"));
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        assertEquals(TaskType.READ_ONLY_QA, contract.type());
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
     }
 
     @Test

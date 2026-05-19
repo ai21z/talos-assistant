@@ -5,7 +5,7 @@ import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import java.util.List;
 import java.util.Objects;
 
-public record PendingActionObligation(Kind kind, List<String> targets) {
+public record PendingActionObligation(Kind kind, List<String> targets, String failureContext) {
 
     public enum Kind {
         EXPECTED_TARGETS_REMAINING("expected target progress"),
@@ -29,10 +29,19 @@ public record PendingActionObligation(Kind kind, List<String> targets) {
                         .filter(path -> !path.isBlank())
                         .distinct()
                         .toList();
+        failureContext = failureContext == null ? "" : failureContext.strip();
+    }
+
+    public PendingActionObligation(Kind kind, List<String> targets) {
+        this(kind, targets, "");
     }
 
     public static PendingActionObligation expectedTargets(List<String> targets) {
         return new PendingActionObligation(Kind.EXPECTED_TARGETS_REMAINING, targets);
+    }
+
+    public static PendingActionObligation expectedTargets(List<String> targets, String failureContext) {
+        return new PendingActionObligation(Kind.EXPECTED_TARGETS_REMAINING, targets, failureContext);
     }
 
     public static PendingActionObligation staticRepairTargets(List<String> targets) {
@@ -66,7 +75,9 @@ public record PendingActionObligation(Kind kind, List<String> targets) {
         String suffix = detail == null || detail.isBlank()
                 ? "The model did not provide the required write/edit tool call."
                 : detail.strip();
-        return "[Action obligation failed: pending " + kind.label + " was not satisfied.]\n\n"
+        String prefix = failureContext.isBlank() ? "" : failureContext + "\n\n";
+        return prefix
+                + "[Action obligation failed: pending " + kind.label + " was not satisfied.]\n\n"
                 + "Remaining target(s): " + targetList() + ".\n"
                 + suffix + "\n"
                 + "Talos stopped this turn deterministically.";

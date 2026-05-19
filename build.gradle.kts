@@ -577,6 +577,30 @@ tasks.register<JavaExec>("prepareSynchronizedApprovalPtyManualAudit") {
     })
 }
 
+tasks.register<JavaExec>("validateSynchronizedApprovalPtyManualAudit") {
+    description = "Validates completed manual true-PTY/JLine approval audit evidence without claiming automated PTY coverage."
+    group = "verification"
+    dependsOn("e2eTestClasses")
+    mainClass.set("dev.talos.harness.SynchronizedCliPtyManualAuditValidator")
+    classpath = e2eTestSourceSet.runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        val out = mutableListOf<String>()
+        val artifacts = providers.gradleProperty("ptyManualArtifactsRoot")
+            .orElse("")
+            .get()
+        val workspace = providers.gradleProperty("ptyManualWorkspace")
+            .orElse("")
+            .get()
+        if (artifacts.isNotBlank()) {
+            out.addAll(listOf("--artifacts", artifacts))
+        }
+        if (workspace.isNotBlank()) {
+            out.addAll(listOf("--workspace", workspace))
+        }
+        out
+    })
+}
+
 tasks.register<Exec>("qodanaLocal") {
     description = "Runs optional local Qodana Community analysis using Docker with persistent Qodana/Gradle cache volumes."
     group = "verification"

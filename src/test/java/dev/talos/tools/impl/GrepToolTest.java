@@ -234,6 +234,23 @@ class GrepToolTest {
         assertFalse(r.output().contains("DO_NOT_LEAK_T267_PRIVATE_MARKER"));
     }
 
+    @Test void privateModeGrepDoesNotExposeNeighborFieldsAroundCanaryMatches() throws IOException {
+        Files.writeString(workspace.resolve("bank.csv"),
+                "account,balance,marker\nchecking,4812.44,DO_NOT_LEAK_PRIVATE_ROW\n");
+        Config cfg = new Config();
+        cfg.data.put("privacy", new LinkedHashMap<>(Map.of("mode", "private")));
+        ToolContext privateCtx = new ToolContext(workspace, new Sandbox(workspace, Map.of()), cfg);
+
+        var r = tool.execute(new ToolCall("talos.grep", Map.of("pattern", "DO_NOT_LEAK_PRIVATE_ROW")), privateCtx);
+
+        assertTrue(r.success(), r.errorMessage());
+        assertTrue(r.output().contains("bank.csv"), r.output());
+        assertFalse(r.output().contains("DO_NOT_LEAK_PRIVATE_ROW"), r.output());
+        assertFalse(r.output().contains("4812.44"), r.output());
+        assertFalse(r.output().contains("checking"), r.output());
+        assertTrue(r.output().contains("withheld by private-mode search policy"), r.output());
+    }
+
     @Test void unsupported_binary_grep_skips_and_reports_without_include_glob() throws IOException {
         Files.writeString(workspace.resolve("report.docx"), "budget canary in fake docx payload\n");
 

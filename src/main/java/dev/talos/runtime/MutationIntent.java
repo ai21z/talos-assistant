@@ -21,7 +21,8 @@ public final class MutationIntent {
 
     private static final String PREFIX =
             "(?:(?:ah|oh|ok(?:ay)?|right|alright|so|well|sure|yeah|yep|yup|"
-                    + "cool|hey|hi|hello|hmm+),?\\s+)*";
+                    + "cool|great|nice|thanks|thank\\s+you|hey|hi|hello|hmm+)"
+                    + "(?:[,.!?:;]\\s*|\\s+))*";
 
     private static final String CORE_MUTATION_VERBS =
             "(edit|modify|change|update|fix|repair|overwrite|rewrite|replace|redesign|"
@@ -118,13 +119,13 @@ public final class MutationIntent {
     private static final Pattern NAMED_FILE_TARGET = Pattern.compile(
             "(?i)(?<![A-Za-z0-9_./\\\\-])([A-Za-z0-9_.\\\\/-]+\\."
                     + "(?:html|htm|css|js|jsx|ts|tsx|java|md|txt|json|yaml|yml|xml|"
-                    + "properties|gradle|kts|toml|ini|env|csv))"
+                    + "properties|gradle|kts|toml|ini|env|csv|tmp))"
                     + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
 
     private static final String EXPLICIT_FILE_TARGET =
             "(?:`?(?:(?:[a-z0-9_.\\\\/-]+\\."
                     + "(?:html|htm|css|js|jsx|ts|tsx|java|md|txt|json|yaml|yml|xml|"
-                    + "properties|gradle|kts|toml|ini|env|csv|pdf|doc|docx|xls|xlsx|ppt|pptx))"
+                    + "properties|gradle|kts|toml|ini|env|csv|tmp|pdf|doc|docx|xls|xlsx|ppt|pptx))"
                     + "|(?:(?:[a-z0-9_.\\\\/-]+/)?"
                     + "(?:readme|license|notice|changelog|contributing|authors|makefile|dockerfile))"
                     + "|(?:(?:[a-z0-9_.\\\\/-]+/)?\\.env(?:\\.[a-z0-9_.-]+)?))`?)";
@@ -132,14 +133,14 @@ public final class MutationIntent {
     private static final String CAPTURED_FILE_TARGET =
             "`?((?:(?:[a-z0-9_.\\\\/-]+\\."
                     + "(?:html|htm|css|js|jsx|ts|tsx|java|md|txt|json|yaml|yml|xml|"
-                    + "properties|gradle|kts|toml|ini|env|csv|pdf|doc|docx|xls|xlsx|ppt|pptx))"
+                    + "properties|gradle|kts|toml|ini|env|csv|tmp|pdf|doc|docx|xls|xlsx|ppt|pptx))"
                     + "|(?:(?:[a-z0-9_.\\\\/-]+/)?"
                     + "(?:readme|license|notice|changelog|contributing|authors|makefile|dockerfile))"
                     + "|(?:(?:[a-z0-9_.\\\\/-]+/)?\\.env(?:\\.[a-z0-9_.-]+)?)))`?";
 
     private static final Pattern MUTATION_VERB_WITH_FILE_TARGET = Pattern.compile(
             "\\b" + CORE_MUTATION_VERBS + "\\s+(?:only\\s+)?" + EXPLICIT_FILE_TARGET
-                    + "(?=$|\\s|[`'\"),;:!?\\]])");
+                    + "(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
 
     private static final Pattern SUMMARIZE_SOURCE_TO_TARGET = Pattern.compile(
             "\\b(?:summarize|summarise|condense|"
@@ -193,6 +194,10 @@ public final class MutationIntent {
             "\\b(?:review|inspect|check|diagnose|look\\s+at)\\b.{0,160}"
                     + "\\b(?:and|then)\\s+(?:please\\s+)?" + CORE_MUTATION_VERBS + "\\b");
 
+    private static final Pattern READ_THEN_MUTATION_REQUEST = Pattern.compile(
+            "\\b(?:read|open)\\b.{0,160}"
+                    + "\\b(?:and|then)\\s+(?:please\\s+)?" + CORE_MUTATION_VERBS + "\\b");
+
     private static final Pattern EXPLICIT_BATCH_WORKSPACE_APPLY_REQUEST = Pattern.compile(
             "\\b(?:use\\s+)?(?:talos\\.)?apply_workspace_batch\\b.{0,160}\\bapply\\b"
                     + "|\\b(?:use\\s+)?(?:talos\\.)?apply_workspace_batch\\b.{0,160}\\b(?:create|copy|move|rename|mkdir)\\b"
@@ -236,6 +241,7 @@ public final class MutationIntent {
         if (looksReviewThenMutationRequest(lower)) return "explicit-review-and-fix-request";
         if (looksExplicitBatchWorkspaceApplyRequest(lower)) return "explicit-batch-workspace-apply-request";
         if (sourceToTargetArtifact(userRequest).isPresent()) return "explicit-source-to-target-artifact-request";
+        if (looksReadThenMutationRequest(lower)) return "explicit-read-then-mutation-request";
         for (Pattern pattern : REQUEST_PATTERNS) {
             if (pattern.matcher(lower).find()) return "explicit-request-pattern";
         }
@@ -386,6 +392,22 @@ public final class MutationIntent {
 
     private static boolean looksReviewThenMutationRequest(String lower) {
         return lower != null && REVIEW_THEN_MUTATION_REQUEST.matcher(lower).find();
+    }
+
+    private static boolean looksReadThenMutationRequest(String lower) {
+        if (lower == null) return false;
+        Matcher matcher = READ_THEN_MUTATION_REQUEST.matcher(lower);
+        while (matcher.find()) {
+            String verb = matcher.group(1);
+            String tail = lower.substring(matcher.end()).stripLeading();
+            if ("update".equals(verb) && (tail.startsWith("me ") || tail.startsWith("me.")
+                    || tail.startsWith("me,") || tail.startsWith("us ") || tail.startsWith("us.")
+                    || tail.startsWith("us,"))) {
+                continue;
+            }
+            return true;
+        }
+        return false;
     }
 
     private static boolean looksExplicitBatchWorkspaceApplyRequest(String lower) {

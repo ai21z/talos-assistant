@@ -180,6 +180,41 @@ class TaskExpectationResolverTest {
     }
 
     @Test
+    void extractsChangingLiteralToLiteralReplacementExpectationForExpectedTarget() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Read script.js, then fix the selector bug by changing .missing-button to .cta-button. "
+                        + "Do not edit scripts.js.");
+
+        List<TaskExpectation> expectations = TaskExpectationResolver.resolve(contract);
+
+        assertEquals(1, expectations.size());
+        ReplacementExpectation replacement = (ReplacementExpectation) expectations.getFirst();
+        assertEquals("script.js", replacement.targetPath());
+        assertEquals(".missing-button", replacement.oldText());
+        assertEquals(".cta-button", replacement.newText());
+        assertTrue(replacement.preserveRest());
+        assertEquals("replacement-changing-to-expected-target", replacement.sourcePattern());
+        assertTrue(contract.mutationAllowed());
+    }
+
+    @Test
+    void extractsPreserveRestReplacementExpectationForSingleTarget() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Change the page title from Old Portal to New Portal in index.html and preserve the rest.");
+
+        List<TaskExpectation> expectations = TaskExpectationResolver.resolve(contract);
+
+        assertEquals(1, expectations.size());
+        ReplacementExpectation replacement = (ReplacementExpectation) expectations.getFirst();
+        assertEquals("index.html", replacement.targetPath());
+        assertEquals("Old Portal", replacement.oldText());
+        assertEquals("New Portal", replacement.newText());
+        assertTrue(replacement.preserveRest());
+        assertEquals("replacement-change-from-to-in-target", replacement.sourcePattern());
+        assertTrue(contract.mutationAllowed());
+    }
+
+    @Test
     void ignoresAmbiguousPageAboutLiteralText() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Make index.html into a simple webpage that says AFTER.");

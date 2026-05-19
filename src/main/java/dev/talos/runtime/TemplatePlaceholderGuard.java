@@ -50,6 +50,24 @@ public final class TemplatePlaceholderGuard {
     private static final Pattern PLACEHOLDER_ONLY = Pattern.compile(
             "^\\s*<\\s*[A-Za-z][A-Za-z0-9_\\-]*\\s*>\\s*$");
 
+    private static final Pattern TOOL_RESULT_PLACEHOLDER_PREFIX = Pattern.compile(
+            "^\\s*<\\s*(?:(?:content|output|result|text|file\\s+content)\\s+from\\s+"
+                    + "(?:talos\\.)?[A-Za-z][A-Za-z0-9_.\\-]*"
+                    + "|content\\s+of\\s+[^>]{1,120})\\s*>",
+            Pattern.CASE_INSENSITIVE);
+
+    private static final Pattern ANGLE_CONTENT_PLACEHOLDER_PREFIX = Pattern.compile(
+            "^\\s*<\\s*[A-Za-z0-9_\\-]*"
+                    + "(?:content|previous|current|existing|original|read_file|talos)"
+                    + "[A-Za-z0-9_\\-]*\\s*>",
+            Pattern.CASE_INSENSITIVE);
+
+    private static final Pattern BRACED_CONTENT_PLACEHOLDER_PREFIX = Pattern.compile(
+            "^\\s*\\{\\s*[A-Za-z0-9_\\-]*"
+                    + "(?:content|previous|current|existing|original|read_file|talos)"
+                    + "[A-Za-z0-9_\\-]*\\s*\\}",
+            Pattern.CASE_INSENSITIVE);
+
     /**
      * True iff {@code content} is a bare template-placeholder token with
      * no real structure (transcript-observed shape).
@@ -68,6 +86,9 @@ public final class TemplatePlaceholderGuard {
         if (content == null) return false;
         String trimmed = content.strip();
         if (trimmed.isEmpty()) return false;
+        if (TOOL_RESULT_PLACEHOLDER_PREFIX.matcher(trimmed).find()) return true;
+        if (ANGLE_CONTENT_PLACEHOLDER_PREFIX.matcher(trimmed).find()) return true;
+        if (BRACED_CONTENT_PLACEHOLDER_PREFIX.matcher(trimmed).find()) return true;
         if (trimmed.length() > 120) return false;
         if (trimmed.indexOf('\n') >= 0) return false;
         if (trimmed.contains("</")) return false;

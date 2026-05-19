@@ -4,6 +4,8 @@ import dev.talos.runtime.TurnPolicyTrace;
 import dev.talos.runtime.command.CommandPlan;
 import dev.talos.runtime.command.CommandResult;
 import dev.talos.runtime.command.CommandToolPlanner;
+import dev.talos.runtime.context.ContextLedgerCapture;
+import dev.talos.runtime.context.ContextLedgerSnapshot;
 import dev.talos.runtime.toolcall.ToolAliasPolicy;
 import dev.talos.tools.ToolCall;
 
@@ -56,6 +58,7 @@ public final class LocalTurnTraceCapture {
                         "turnNumber", turnNumber,
                         "redactionMode", TraceRedactionMode.DEFAULT.name())));
         HOLDER.set(new Bag(builder, traceId, turnNumber));
+        ContextLedgerCapture.begin(traceId, turnNumber);
     }
 
     public static boolean isActive() {
@@ -520,12 +523,15 @@ public final class LocalTurnTraceCapture {
         Bag bag = HOLDER.get();
         HOLDER.remove();
         if (bag == null) return null;
+        ContextLedgerSnapshot ledger = ContextLedgerCapture.complete();
+        bag.builder.contextLedgerSummary(ledger.summary());
         bag.builder.event(TurnTraceEvent.simple("TRACE_COMPLETED", now(), Map.of()));
         return bag.builder.build();
     }
 
     public static void clear() {
         HOLDER.remove();
+        ContextLedgerCapture.clear();
     }
 
     private static String now() {

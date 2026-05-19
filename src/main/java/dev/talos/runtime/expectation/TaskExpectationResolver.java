@@ -30,6 +30,17 @@ public final class TaskExpectationResolver {
             "(?is)\\bexactly\\s+"
                     + "(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|\\d{1,2})"
                     + "\\s+(?:bullet\\s+points?|bullets?|list\\s+items?)\\b");
+    private static final Pattern PRESERVE_REST = Pattern.compile(
+            "(?is)\\b(?:preserve|keep|leave)\\s+(?:the\\s+)?"
+                    + "(?:rest|remainder|remaining\\s+content|everything\\s+else|other\\s+content)\\b"
+                    + "|\\bdo\\s+not\\s+change\\s+"
+                    + "(?:anything\\s+else|the\\s+rest|everything\\s+else|other\\s+content)\\b"
+                    + "|\\bwithout\\s+changing\\s+"
+                    + "(?:anything\\s+else|the\\s+rest|everything\\s+else|other\\s+content)\\b");
+    private static final Pattern SELECTOR_CHANGE_TO = Pattern.compile(
+            "(?is)\\b(?:change|changing|update|updating)\\s+"
+                    + "([#.][A-Za-z_][A-Za-z0-9_-]*)\\s+to\\s+"
+                    + "([#.][A-Za-z_][A-Za-z0-9_-]*)\\b");
 
     private TaskExpectationResolver() {}
 
@@ -282,6 +293,7 @@ public final class TaskExpectationResolver {
             return null;
         }
         String quoted = Pattern.quote(normalizedTarget);
+        boolean preserveRest = preserveRestRequested(request);
         Pattern replaceWithInTarget = Pattern.compile(
                 "(?is)\\breplace\\s+(.+?)\\s+with\\s+(.+?)\\s+in\\s+`?"
                         + quoted + "`?(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
@@ -291,7 +303,8 @@ public final class TaskExpectationResolver {
                     normalizedTarget,
                     matcher.group(1),
                     matcher.group(2),
-                    "replacement-replace-with-in-target");
+                    "replacement-replace-with-in-target",
+                    preserveRest);
         }
 
         Pattern changeFromToInTarget = Pattern.compile(
@@ -299,24 +312,40 @@ public final class TaskExpectationResolver {
                         + "(?:title|text|label|string|word|phrase)\\s+from\\s+(.+?)\\s+to\\s+(.+?)\\s+in\\s+`?"
                         + quoted + "`?(?=$|\\s|[`'\"),;:!?\\]]|\\.(?:$|\\s))");
         matcher = changeFromToInTarget.matcher(request);
+        if (matcher.find()) {
+            return replacementExpectation(
+                    normalizedTarget,
+                    matcher.group(1),
+                    matcher.group(2),
+                    "replacement-change-from-to-in-target",
+                    preserveRest);
+        }
+
+        matcher = SELECTOR_CHANGE_TO.matcher(request);
         if (!matcher.find()) return null;
         return replacementExpectation(
                 normalizedTarget,
                 matcher.group(1),
                 matcher.group(2),
-                "replacement-change-from-to-in-target");
+                "replacement-changing-to-expected-target",
+                true);
     }
 
     private static ReplacementExpectation replacementExpectation(
             String normalizedTarget,
             String rawOldText,
             String rawNewText,
-            String sourcePattern
+            String sourcePattern,
+            boolean preserveRest
     ) {
         String oldText = normalizeReplacementText(rawOldText);
         String newText = normalizeReplacementText(rawNewText);
         if (oldText.isBlank() || newText.isBlank()) return null;
-        return new ReplacementExpectation(normalizedTarget, oldText, newText, sourcePattern);
+        return new ReplacementExpectation(normalizedTarget, oldText, newText, sourcePattern, preserveRest);
+    }
+
+    private static boolean preserveRestRequested(String request) {
+        return request != null && PRESERVE_REST.matcher(request).find();
     }
 
     private static String normalizeReplacementText(String raw) {

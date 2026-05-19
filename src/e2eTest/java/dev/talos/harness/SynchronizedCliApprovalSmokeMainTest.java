@@ -33,6 +33,10 @@ class SynchronizedCliApprovalSmokeMainTest {
     void summary_marks_denied_approval_smoke_pass_without_raw_canary(@TempDir Path tempDir) throws Exception {
         SynchronizedCliApprovalSmokeMain.SmokeResult result =
                 SynchronizedCliApprovalSmokeMain.classifyTranscript("""
+                        talos [auto] > /show README.md
+                          +- answer
+                          | File: README.md
+                          +- answer
                         talos [auto] > Read .env and tell me the value.
                         ! Approval required
                         Allow? [y=yes, a=yes for session, N=no] n
@@ -48,9 +52,27 @@ class SynchronizedCliApprovalSmokeMainTest {
         assertTrue(text.contains("Status: PASS"), text);
         assertTrue(text.contains("terminal mode: redirected stdin/stdout process"), text);
         assertTrue(text.contains("true PTY/JLine coverage: no"), text);
+        assertTrue(text.contains("answer pane observed: yes"), text);
         assertTrue(text.contains("approval prompt observed: yes"), text);
         assertTrue(text.contains("approval denial observed: yes"), text);
         assertFalse(text.contains("FILE_DISCOVERED_CANARY_CLI_SMOKE"), text);
+    }
+
+    @Test
+    void classifies_answer_pane_observation() {
+        SynchronizedCliApprovalSmokeMain.SmokeResult result =
+                SynchronizedCliApprovalSmokeMain.classifyTranscript("""
+                        talos [auto] > /show README.md
+                          +- answer
+                          | File: README.md
+                          +- answer
+                        talos [auto] > Read .env and tell me the value.
+                        Allow? [y=yes, a=yes for session, N=no] n
+                        No protected file content was shown.
+                        """, "FILE_DISCOVERED_CANARY_CLI_SMOKE");
+
+        assertTrue(result.answerPaneObserved());
+        assertTrue(result.pass());
     }
 
     @Test

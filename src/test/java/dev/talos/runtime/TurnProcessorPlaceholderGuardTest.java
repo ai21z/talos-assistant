@@ -72,6 +72,82 @@ class TurnProcessorPlaceholderGuardTest {
     }
 
     @Test
+    void writeFileWithLeadingToolResultPlaceholderIsRejectedBeforeApproval() {
+        TurnProcessor tp = processorWithWriteTool(unreachableGate());
+        Session s = new Session(WS, new Config());
+        Context ctx = Context.builder(new Config()).build();
+
+        ToolCall call = new ToolCall("test.write", Map.of(
+                "path", "README.md",
+                "content", "<content from talos.read_file>Release gate note"));
+        ToolResult r = tp.executeTool(s, call, ctx);
+
+        assertFalse(r.success(), "tool-result placeholder content must produce a failed tool result");
+        String err = r.errorMessage() == null ? "" : r.errorMessage();
+        assertTrue(err.toLowerCase().contains("placeholder"),
+                "error must identify the problem as a placeholder: " + err);
+        assertTrue(err.contains("<content from talos.read_file>"),
+                "error should echo the offending placeholder so the model sees it: " + err);
+    }
+
+    @Test
+    void writeFileWithLeadingContentOfFilePlaceholderIsRejectedBeforeApproval() {
+        TurnProcessor tp = processorWithWriteTool(unreachableGate());
+        Session s = new Session(WS, new Config());
+        Context ctx = Context.builder(new Config()).build();
+
+        ToolCall call = new ToolCall("test.write", Map.of(
+                "path", "README.md",
+                "content", "<content of README.md>Release gate note"));
+        ToolResult r = tp.executeTool(s, call, ctx);
+
+        assertFalse(r.success(), "content-of-file placeholder must produce a failed tool result");
+        String err = r.errorMessage() == null ? "" : r.errorMessage();
+        assertTrue(err.toLowerCase().contains("placeholder"),
+                "error must identify the problem as a placeholder: " + err);
+        assertTrue(err.contains("<content of README.md>"),
+                "error should echo the offending placeholder so the model sees it: " + err);
+    }
+
+    @Test
+    void writeFileWithLeadingReadFileContentPlaceholderIsRejectedBeforeApproval() {
+        TurnProcessor tp = processorWithWriteTool(unreachableGate());
+        Session s = new Session(WS, new Config());
+        Context ctx = Context.builder(new Config()).build();
+
+        ToolCall call = new ToolCall("test.write", Map.of(
+                "path", "README.md",
+                "content", "<read_file_content>\nRelease gate note"));
+        ToolResult r = tp.executeTool(s, call, ctx);
+
+        assertFalse(r.success(), "read-file-content placeholder must produce a failed tool result");
+        String err = r.errorMessage() == null ? "" : r.errorMessage();
+        assertTrue(err.toLowerCase().contains("placeholder"),
+                "error must identify the problem as a placeholder: " + err);
+        assertTrue(err.contains("<read_file_content>"),
+                "error should echo the offending placeholder so the model sees it: " + err);
+    }
+
+    @Test
+    void writeFileWithLeadingBracedTemplateVariableIsRejectedBeforeApproval() {
+        TurnProcessor tp = processorWithWriteTool(unreachableGate());
+        Session s = new Session(WS, new Config());
+        Context ctx = Context.builder(new Config()).build();
+
+        ToolCall call = new ToolCall("test.write", Map.of(
+                "path", "README.md",
+                "content", "{previous_content}\nRelease gate note"));
+        ToolResult r = tp.executeTool(s, call, ctx);
+
+        assertFalse(r.success(), "braced template-variable content must produce a failed tool result");
+        String err = r.errorMessage() == null ? "" : r.errorMessage();
+        assertTrue(err.toLowerCase().contains("placeholder"),
+                "error must identify the problem as a placeholder: " + err);
+        assertTrue(err.contains("{previous_content}"),
+                "error should echo the offending placeholder so the model sees it: " + err);
+    }
+
+    @Test
     void editFileWithPlaceholderNewStringIsRejected() {
         TurnProcessor tp = processorWithWriteTool(unreachableGate());
         Session s = new Session(WS, new Config());

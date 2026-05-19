@@ -1,5 +1,8 @@
 package dev.talos.runtime;
 
+import dev.talos.cli.ui.ApprovalPromptRenderer;
+import dev.talos.cli.ui.CliTheme;
+
 import java.io.InputStream;
 import java.io.PrintStream;
 import java.util.Scanner;
@@ -97,17 +100,10 @@ public final class CliApprovalGate implements ApprovalGate {
             try { prePromptHook.run(); } catch (Exception ignored) { }
         }
 
+        String risk = inferRisk(description, detail);
         out.println();
-        out.println("  ! Approval required");
-        out.println("    Action: " + (description != null ? description : "unknown operation"));
-        out.println("    Risk:   " + inferRisk(description, detail));
-        if (detail != null && !detail.isBlank()) {
-            out.println("    Details:");
-            for (String line : detail.lines().toList()) {
-                out.println("      " + line);
-            }
-        }
-        out.println("    Choices: y=yes, a=yes for this session, Enter/no=deny");
+        out.print(new ApprovalPromptRenderer(CliTheme.current(), 80)
+                .render(description, detail, risk));
         out.flush();
 
         String response;

@@ -33,6 +33,13 @@ public final class ScriptedNativeLlmClient {
 
     public record RecordedClient(LlmClient client, List<ChatRequest> requests) {}
 
+    public record CompactAwareClient(
+            LlmClient client,
+            List<ChatRequest> requests,
+            AtomicInteger normalContinuations,
+            AtomicInteger compactContinuations
+    ) {}
+
     public static RecordedClient recordingWithContextWindow(
             List<LlmClient.StreamResult> responses,
             int contextWindowTokens) {
@@ -46,6 +53,31 @@ public final class ScriptedNativeLlmClient {
         }
         RecordingResolver resolver = new RecordingResolver(responses, contextWindowTokens);
         return new RecordedClient(new LlmClient(config, resolver), resolver.requests());
+    }
+
+    public static CompactAwareClient compactMutationContinuationAware(
+            LlmClient.StreamResult normalResponse,
+            LlmClient.StreamResult compactResponse) {
+        return compactMutationContinuationAware(List.of(normalResponse), compactResponse);
+    }
+
+    public static CompactAwareClient compactMutationContinuationAware(
+            List<LlmClient.StreamResult> normalResponses,
+            LlmClient.StreamResult compactResponse) {
+        Config config = new Config();
+        Object llmBlock = config.data.computeIfAbsent("llm", ignored -> new java.util.LinkedHashMap<String, Object>());
+        if (llmBlock instanceof Map<?, ?> map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> llm = (Map<String, Object>) map;
+            llm.put("transport", "engine");
+            llm.put("default_backend", "llama_cpp");
+        }
+        CompactAwareResolver resolver = new CompactAwareResolver(normalResponses, compactResponse);
+        return new CompactAwareClient(
+                new LlmClient(config, resolver),
+                resolver.requests(),
+                resolver.normalContinuations(),
+                resolver.compactContinuations());
     }
 
     public static LlmClient compatMalformedStreamThenNonStreamingRecovery(
@@ -135,6 +167,70 @@ public final class ScriptedNativeLlmClient {
             requests.add(request);
             int index = Math.min(cursor.getAndIncrement(), responses.size() - 1);
             return chunks(responses.get(index));
+        }
+
+        @Override
+        public void close() {
+        }
+    }
+
+    private static final class CompactAwareResolver implements LlmEngineResolver {
+        private final List<LlmClient.StreamResult> normalResponses;
+        private final LlmClient.StreamResult compactResponse;
+        private final List<ChatRequest> requests = Collections.synchronizedList(new ArrayList<>());
+        private final AtomicInteger normalContinuations = new AtomicInteger();
+        private final AtomicInteger compactContinuations = new AtomicInteger();
+
+        private CompactAwareResolver(
+                List<LlmClient.StreamResult> normalResponses,
+                LlmClient.StreamResult compactResponse) {
+            this.normalResponses = normalResponses == null || normalResponses.isEmpty()
+                    ? List.of(new LlmClient.StreamResult("", List.of()))
+                    : List.copyOf(normalResponses);
+            this.compactResponse = compactResponse == null
+                    ? new LlmClient.StreamResult("", List.of())
+                    : compactResponse;
+        }
+
+        private List<ChatRequest> requests() {
+            return requests;
+        }
+
+        private AtomicInteger normalContinuations() {
+            return normalContinuations;
+        }
+
+        private AtomicInteger compactContinuations() {
+            return compactContinuations;
+        }
+
+        @Override
+        public void select(String backend, String model) {
+        }
+
+        @Override
+        public Capabilities capabilities() {
+            return Capabilities.of(
+                    true, true, false, 16_384,
+                    true, true, true,
+                    false, false, false, true);
+        }
+
+        @Override
+        public Stream<TokenChunk> chatStream(ChatRequest request) {
+            requests.add(request);
+            String joined = request.messages == null
+                    ? ""
+                    : request.messages.stream()
+                    .map(message -> message == null ? "" : message.content())
+                    .filter(java.util.Objects::nonNull)
+                    .reduce("", (left, right) -> left + "\n" + right);
+            if (joined.contains("[CompactMutationContinuation]")) {
+                compactContinuations.incrementAndGet();
+                return chunks(compactResponse);
+            }
+            int index = normalContinuations.getAndIncrement();
+            return chunks(normalResponses.get(Math.min(index, normalResponses.size() - 1)));
         }
 
         @Override

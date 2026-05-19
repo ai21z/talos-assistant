@@ -57,10 +57,10 @@ test("terminal tabs switch content on click and keyboard", async ({ page }) => {
   await expect(output).toContainText("approval required");
 
   await page.getByRole("tab", { name: "Approve" }).press("ArrowRight");
-  await expect(page.getByRole("tab", { name: "Check" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: "Verify" })).toHaveAttribute("aria-selected", "true");
   await expect(output).toContainText("talos.run_command");
 
-  await page.getByRole("tab", { name: "Check" }).press("ArrowLeft");
+  await page.getByRole("tab", { name: "Verify" }).press("ArrowLeft");
   await expect(page.getByRole("tab", { name: "Approve" })).toHaveAttribute("aria-selected", "true");
 
   await page.getByRole("tab", { name: "Approve" }).press("End");
@@ -90,14 +90,14 @@ test("copy buttons are visible, focusable, and uniquely labelled", async ({ page
   expect(labels.every((label) => /^Copy .+ command$/.test(label ?? ""))).toBe(true);
 });
 
-test("placeholder beta CTA reports placeholder status without fake artifact navigation", async ({ page }) => {
+test("hero CTAs are real links, not placeholder beta actions", async ({ page }) => {
   await page.goto("/");
-  const originalUrl = page.url();
-  await page.getByRole("button", { name: "Get beta build" }).first().click();
-  await expect(page.locator(".toast")).toContainText(
-    "Beta download placeholder. Build artifacts will be added later.",
+  await expect(page.getByRole("link", { name: "View on GitHub" })).toHaveAttribute(
+    "href",
+    "https://github.com/ai21z/talos-cli",
   );
-  expect(page.url()).toBe(originalUrl);
+  await expect(page.getByRole("link", { name: "Read the execution contract" })).toHaveAttribute("href", "#contract");
+  await expect(page.getByRole("button", { name: "Get beta build" })).toHaveCount(0);
 });
 
 test("mobile header and nav remain usable", async ({ page }) => {
@@ -106,9 +106,39 @@ test("mobile header and nav remain usable", async ({ page }) => {
   const primaryNav = page.getByRole("navigation", { name: "Primary navigation" });
   await expect(primaryNav).toBeVisible();
   await expect(primaryNav.getByRole("link", { name: "Product" })).toBeVisible();
-  await expect(primaryNav.getByRole("link", { name: "Beta" })).toBeVisible();
-  await primaryNav.getByRole("link", { name: "Beta" }).click();
-  await expect(page.locator("#beta")).toBeInViewport();
+  await expect(primaryNav.getByRole("link", { name: "Docs" })).toBeVisible();
+  await primaryNav.getByRole("link", { name: "Docs" }).click();
+  await expect(page.locator("#docs")).toBeInViewport();
+});
+
+test("hero startup terminal image loads", async ({ page }) => {
+  await page.goto("/");
+  const image = page.locator(".startup-terminal-image");
+  await expect(image).toHaveAttribute("src", /(?:\/assets\/img-[^/]+\.png|\.\/design\/img\.png)$/);
+  await expect(image).toHaveAttribute("alt", /Talos startup terminal screen/);
+  const loaded = await image.evaluate((node) => node instanceof HTMLImageElement && node.complete && node.naturalWidth > 0);
+  expect(loaded).toBe(true);
+});
+
+test("mobile hero content fits without masked clipping", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.goto("/");
+  const overflow = await page.evaluate(() => {
+    const shell = document.querySelector(".page-shell");
+    return {
+      hiddenShell: getComputedStyle(shell).overflow === "hidden",
+      scrollOverflow: document.documentElement.scrollWidth - window.innerWidth,
+    };
+  });
+  expect(overflow.hiddenShell).toBe(false);
+  expect(overflow.scrollOverflow).toBeLessThanOrEqual(1);
+
+  for (const selector of ["h1", ".hero-actions", ".status-row", ".machine-note", ".hero-visual"]) {
+    const box = await page.locator(selector).boundingBox();
+    expect(box, `${selector} should render`).not.toBeNull();
+    expect(box.x, `${selector} left edge`).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width, `${selector} right edge`).toBeLessThanOrEqual(390);
+  }
 });
 
 test("reduced-motion mode leaves content visible without reveal animations", async ({ page }) => {

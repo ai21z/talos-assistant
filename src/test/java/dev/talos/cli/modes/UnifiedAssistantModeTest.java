@@ -105,6 +105,30 @@ class UnifiedAssistantModeTest {
     }
 
     @Test
+    void explicitNoWorkspaceGeneralKnowledgePromptDoesNotInjectWorkspaceManifest(@TempDir Path workspace)
+            throws Exception {
+        Files.writeString(workspace.resolve("README.md"),
+                "# Chat fixture\nHidden fact: CHAT_WORKSPACE_CANARY_19\n");
+        LastPromptCapture.clear();
+        var mode = new UnifiedAssistantMode();
+
+        var result = mode.handle(
+                "Explain photosynthesis in two sentences. Do not inspect this workspace.",
+                workspace,
+                context("Photosynthesis turns light, water, and carbon dioxide into sugars and oxygen."));
+
+        assertTrue(result.isPresent());
+        var render = LastPromptCapture.latest().orElseThrow();
+
+        assertEquals("SMALL_TALK", render.taskType());
+        assertTrue(render.tools().isEmpty(), render.tools().toString());
+        assertFalse(render.systemPrompt().contains("README (excerpt):"), render.systemPrompt());
+        assertFalse(render.systemPrompt().contains("File structure:"), render.systemPrompt());
+        assertFalse(render.systemPrompt().contains("CHAT_WORKSPACE_CANARY_19"), render.systemPrompt());
+        assertFalse(render.systemPrompt().contains("Available Tools"), render.systemPrompt());
+    }
+
+    @Test
     void expandedCapabilityPromptUsesDeterministicNoToolAnswer() throws Exception {
         LastPromptCapture.clear();
         var mode = new UnifiedAssistantMode();

@@ -11,6 +11,7 @@ import dev.talos.core.ingest.FileWalker;
 import dev.talos.core.ingest.FileCapabilityPolicy;
 import dev.talos.core.ingest.UnsupportedDocumentFormats;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
+import dev.talos.runtime.policy.ProtectedReadScopePolicy;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -57,6 +58,7 @@ public final class GrepCommand implements Command {
             int fileCount = 0;
             int skippedProtected = 0;
             java.util.ArrayList<String> skippedUnsupported = new java.util.ArrayList<>();
+            boolean privateMode = ProtectedReadScopePolicy.privateMode(cfg(ctx));
 
             // Get files using broader filtering that includes scripts, configs, and markup
             var fs = workspace.getFileSystem();
@@ -125,7 +127,7 @@ public final class GrepCommand implements Command {
                                 hasMatches = true;
                                 fileCount++;
                             }
-                            String safeLine = ProtectedContentPolicy.sanitizeSearchLine(lines[i]);
+                            String safeLine = safeSearchLine(lines[i], privateMode);
                             sb.append(String.format("  %d: %s\n", i + 1,
                                     safeLine.length() > 120 ? safeLine.substring(0, 120) + "..." : safeLine));
                             totalMatches++;
@@ -152,7 +154,7 @@ public final class GrepCommand implements Command {
                             hasMatches = true;
                             fileCount++;
                         }
-                        String safeLine = ProtectedContentPolicy.sanitizeSearchLine(lines[i]);
+                        String safeLine = safeSearchLine(lines[i], privateMode);
                         sb.append(String.format("  %d: %s\n", i + 1,
                             safeLine.length() > 120 ? safeLine.substring(0, 120) + "..." : safeLine));
                         totalMatches++;
@@ -196,6 +198,14 @@ public final class GrepCommand implements Command {
 
     private static Config cfg(Context ctx) {
         return ctx == null || ctx.cfg() == null ? new Config(null) : ctx.cfg();
+    }
+
+    private static String safeSearchLine(String line, boolean privateMode) {
+        String safeLine = ProtectedContentPolicy.sanitizeSearchLine(line);
+        if (privateMode && !safeLine.equals(line)) {
+            return "[line content withheld by private-mode search policy]";
+        }
+        return safeLine;
     }
 
     private static boolean looksLikeBinary(Path file) {

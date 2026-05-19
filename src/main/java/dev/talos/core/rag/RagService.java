@@ -17,11 +17,17 @@ import dev.talos.core.context.TokenBudget;
 import dev.talos.core.rerank.ScoreThresholdReranker;
 import dev.talos.core.retrieval.*;
 import dev.talos.core.retrieval.stages.*;
+import dev.talos.runtime.context.ContextDecision;
+import dev.talos.runtime.context.ContextItem;
+import dev.talos.runtime.context.ContextItemSource;
+import dev.talos.runtime.context.ContextLedgerCapture;
+import dev.talos.runtime.context.ExecutionBoundary;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.runtime.policy.ProtectedReadScopePolicy;
 import dev.talos.runtime.policy.SafeLogFormatter;
 import dev.talos.spi.CorpusStore;
+import dev.talos.tools.ToolContentMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -132,6 +138,15 @@ public class RagService {
     public Prepared prepare(Path ws, String query, Integer topKOverride) {
         if (ProtectedReadScopePolicy.privateMode(cfg)
                 && !ProtectedReadScopePolicy.ragEnabledInPrivateMode(cfg)) {
+            ContextLedgerCapture.record(
+                    ContextItem.fromText(
+                            ContextItemSource.RAG_SNIPPET,
+                            ExecutionBoundary.RAG_INDEX,
+                            ToolContentMetadata.ContentPrivacyClass.NORMAL,
+                            "",
+                            "",
+                            0),
+                    ContextDecision.excludedByPrivacyOrTrustPolicy("PRIVATE_MODE_RAG_DISABLED"));
             return new Prepared(
                     List.of(),
                     List.of(),
@@ -198,7 +213,17 @@ public class RagService {
                 if (ProtectedContentPolicy.isProtectedPath(ws, snippetPath)) {
                     continue;
                 }
-                snippets.add(new ContextResult.Snippet(c.path(), ProtectedContentPolicy.sanitizeText(text), c.metadata()));
+                String sanitized = ProtectedContentPolicy.sanitizeText(text);
+                snippets.add(new ContextResult.Snippet(c.path(), sanitized, c.metadata()));
+                ContextLedgerCapture.record(
+                        ContextItem.fromText(
+                                ContextItemSource.RAG_SNIPPET,
+                                ExecutionBoundary.RAG_INDEX,
+                                ToolContentMetadata.ContentPrivacyClass.NORMAL,
+                                c.path(),
+                                sanitized,
+                                0),
+                        ContextDecision.includedInModel("RAG_RETRIEVAL_RESULT_AVAILABLE"));
             }
             // Build rich citations using the same metadata-aware formatting as ContextPacker
             citations.addAll(ContextPacker.buildCitations(snippets));

@@ -146,6 +146,21 @@ class WorkspaceCommandsTest {
         }
 
         @Test
+        void slash_grep_private_mode_does_not_expose_neighbor_fields() throws IOException {
+            Files.writeString(ws.resolve("health-notes.md"),
+                    "Patient: Mira Stone\nCondition marker: DO_NOT_LEAK_PRIVATE_ROW\n");
+            var cmd = new GrepCommand(ws);
+
+            Result r = cmd.execute("DO_NOT_LEAK_PRIVATE_ROW", privateModeContext());
+
+            assertInstanceOf(Result.Ok.class, r);
+            assertTrue(r.toString().contains("health-notes.md"), r.toString());
+            assertFalse(r.toString().contains("DO_NOT_LEAK_PRIVATE_ROW"), r.toString());
+            assertFalse(r.toString().contains("Mira Stone"), r.toString());
+            assertTrue(r.toString().contains("withheld by private-mode search policy"), r.toString());
+        }
+
+        @Test
         void slash_grep_unsupported_binary_skips_and_reports() throws IOException {
             Files.writeString(ws.resolve("report.docx"), "budget canary in fake docx payload\n");
             var cmd = new GrepCommand(ws);
@@ -298,6 +313,12 @@ class WorkspaceCommandsTest {
         familyCfg.put("enabled", Boolean.TRUE);
         documentExtraction.put(family, familyCfg);
         cfg.data.put("document_extraction", documentExtraction);
+        return Context.builder(cfg).build();
+    }
+
+    private static Context privateModeContext() {
+        Config cfg = new Config(null);
+        cfg.data.put("privacy", new LinkedHashMap<>(Map.of("mode", "private")));
         return Context.builder(cfg).build();
     }
 

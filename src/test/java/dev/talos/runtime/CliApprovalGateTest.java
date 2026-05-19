@@ -92,14 +92,16 @@ class CliApprovalGateTest {
             String output = bout.toString(StandardCharsets.UTF_8);
             assertTrue(output.contains("write to database"),
                     "Output should include the operation description");
-            assertTrue(output.contains("Action:"),
+            assertTrue(output.contains("Action"),
                     "Output should label the action");
-            assertTrue(output.contains("Risk:"),
+            assertTrue(output.contains("Risk"),
                     "Output should label the inferred risk");
-            assertTrue(output.contains("Choices:"),
+            assertTrue(output.contains("approve once"),
                     "Output should show choices");
             assertTrue(output.contains("Allow?"),
                     "Output should include the approval prompt");
+            assertTrue(output.contains("approval required"),
+                    "Output should use the semantic approval trust window");
         }
 
         @Test
@@ -114,8 +116,8 @@ class CliApprovalGateTest {
             String output = bout.toString(StandardCharsets.UTF_8);
             assertTrue(output.contains("src/main/Main.java"),
                     "Output should include the detail");
-            assertTrue(output.contains("Details:"),
-                    "Output should label detail lines");
+            assertTrue(output.contains("target: src/main/Main.java"),
+                    "Output should render detail lines");
         }
 
         @Test
@@ -128,7 +130,7 @@ class CliApprovalGateTest {
             gate.approve("write file", "target: src/main/Main.java");
 
             String output = bout.toString(StandardCharsets.UTF_8);
-            assertTrue(output.contains("! Approval required"));
+            assertTrue(output.toLowerCase(java.util.Locale.ROOT).contains("approval required"));
             assertFalse(output.contains("⚠"));
         }
 

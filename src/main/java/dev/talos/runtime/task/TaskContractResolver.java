@@ -20,8 +20,8 @@ public final class TaskContractResolver {
 
     private static final Pattern TARGET_FILE = Pattern.compile(
             "(?i)(?<![A-Za-z0-9_./\\\\-])((?:[A-Za-z0-9_.\\\\/-]+\\."
-                    + "(?:html|htm|css|js|jsx|ts|tsx|java|md|txt|json|yaml|yml|xml|"
-                    + "properties|gradle|kts|toml|ini|env|csv|pdf|doc|docx|xls|xlsx|ppt|pptx|"
+                    + "(?:html|htm|css|js|jsx|ts|tsx|java|py|md|txt|json|yaml|yml|xml|"
+                    + "properties|gradle|kts|toml|ini|env|csv|tmp|pdf|doc|docx|xls|xlsx|ppt|pptx|"
                     + "png|jpg|jpeg|gif|bmp|webp|tif|tiff|zip|tar|gz|tgz|7z|rar|"
                     + "exe|dll|so|dylib|class|jar|war|ear|bin|dat)"
                     + ")|(?:(?:[A-Za-z0-9_.\\\\/-]+/)?\\.env(?:\\.[A-Za-z0-9_.-]+)?))"
@@ -172,6 +172,27 @@ public final class TaskContractResolver {
     );
 
     private static final Set<String> NO_INSPECTION_MARKERS = Set.of(
+            "do not inspect this workspace",
+            "do not inspect the workspace",
+            "do not inspect workspace",
+            "don't inspect this workspace",
+            "don't inspect the workspace",
+            "don't inspect workspace",
+            "dont inspect this workspace",
+            "dont inspect the workspace",
+            "dont inspect workspace",
+            "do not read this workspace",
+            "do not read the workspace",
+            "do not read workspace",
+            "don't read this workspace",
+            "don't read the workspace",
+            "don't read workspace",
+            "do not check this workspace",
+            "do not check the workspace",
+            "do not check workspace",
+            "do not inspect my files",
+            "don't inspect my files",
+            "dont inspect my files",
             "without inspecting the workspace",
             "without inspecting workspace",
             "without checking the workspace",
@@ -203,6 +224,9 @@ public final class TaskContractResolver {
             "methodology",
             "general approach"
     );
+
+    private static final Pattern SOURCE_EVIDENCE_SPAN = Pattern.compile(
+            "(?i)\\b(according\\s+to|based\\s+on|summari[sz]ing|summary\\s+of|from|using)\\b\\s+(.{1,320})");
 
     private static final Set<String> CHAT_ONLY_HINTS = Set.of(
             "answer briefly",
@@ -247,6 +271,10 @@ public final class TaskContractResolver {
         }
         if (looksLikeRepairFollowUp(latest)) {
             TaskContract inherited = inheritedRepairContract(messages, latest, current);
+            if (inherited != null) return inherited;
+        }
+        if (!current.mutationRequested() && looksLikeCorrectionFollowUp(latest)) {
+            TaskContract inherited = inheritedCorrectionContract(messages, latest);
             if (inherited != null) return inherited;
         }
         if (looksLikeDeicticFollowUp(latest) && !current.mutationRequested()) {
@@ -346,6 +374,15 @@ public final class TaskContractResolver {
                 expectedTargets = Set.copyOf(merged);
             }
         }
+        if (mutationAllowed) {
+            Set<String> lexicalSourceTargets = extractLexicalSourceEvidenceTargets(original);
+            if (!lexicalSourceTargets.isEmpty()) {
+                LinkedHashSet<String> mergedSources = new LinkedHashSet<>(sourceEvidenceTargets);
+                mergedSources.addAll(lexicalSourceTargets);
+                sourceEvidenceTargets = Set.copyOf(mergedSources);
+                expectedTargets = withoutForbiddenTargets(expectedTargets, sourceEvidenceTargets);
+            }
+        }
         if (!mutationRequested && StaticWebImportIntent.matches(original)) {
             expectedTargets = StaticWebImportIntent.evidenceTargets(original, expectedTargets);
         }
@@ -397,6 +434,64 @@ public final class TaskContractResolver {
             if (looksLikeDirectoryTarget(target)) out.add(target);
         }
         return Set.copyOf(out);
+    }
+
+    private static Set<String> extractLexicalSourceEvidenceTargets(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return Set.of();
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        Matcher spanMatcher = SOURCE_EVIDENCE_SPAN.matcher(userRequest);
+        while (spanMatcher.find()) {
+            String marker = spanMatcher.group(1);
+            String span = sourceEvidenceFragment(marker, spanMatcher.group(2));
+            if (span.isBlank()) continue;
+            Matcher targetMatcher = TARGET_FILE.matcher(span);
+            while (targetMatcher.find()) {
+                String target = normalizeTarget(targetMatcher.group(1));
+                if (!target.isBlank()) out.add(target);
+            }
+            Matcher extensionlessMatcher = EXTENSIONLESS_TEXT_TARGET.matcher(span);
+            while (extensionlessMatcher.find()) {
+                String target = normalizeTarget(extensionlessMatcher.group(1));
+                if (!target.isBlank()) out.add(target);
+            }
+        }
+        return Set.copyOf(out);
+    }
+
+    private static String sourceEvidenceFragment(String marker, String span) {
+        if (span == null || span.isBlank()) return "";
+        String fragment = firstSentenceFragment(span);
+        String lowerMarker = marker == null ? "" : marker.toLowerCase(Locale.ROOT).strip();
+        String lowerFragment = fragment.toLowerCase(Locale.ROOT).stripLeading();
+        if ("using".equals(lowerMarker)) {
+            if (lowerFragment.startsWith("exactly ")) {
+                return "";
+            }
+            Matcher firstTarget = TARGET_FILE.matcher(fragment);
+            if (firstTarget.find()) {
+                int colon = fragment.indexOf(':');
+                if (colon >= 0 && colon < firstTarget.start()) {
+                    return "";
+                }
+            }
+            if (lowerFragment.startsWith("workspace operation tool")
+                    || lowerFragment.startsWith("workspace tool")
+                    || lowerFragment.startsWith("file tool")
+                    || lowerFragment.startsWith("tool ")
+                    || lowerFragment.startsWith("tools ")) {
+                return "";
+            }
+        }
+        if ("from".equals(lowerMarker)) {
+            int end = fragment.length();
+            Matcher delimiter = Pattern.compile("(?i)\\b(?:with|use|using|as|to|into|in)\\b")
+                    .matcher(fragment);
+            if (delimiter.find()) {
+                end = delimiter.start();
+            }
+            return fragment.substring(0, end);
+        }
+        return fragment;
     }
 
     private static Set<String> extractBatchWorkspaceExpectedTargets(String userRequest) {
@@ -735,7 +830,7 @@ public final class TaskContractResolver {
                 || lower.contains("what files")) {
             return false;
         }
-        return containsAny(lower, NO_INSPECTION_DIRECT_ANSWER_MARKERS);
+        return true;
     }
 
     private static boolean looksConversationalGreetingRequest(String lower) {
@@ -795,6 +890,38 @@ public final class TaskContractResolver {
                 || lower.contains("incomplete");
     }
 
+    private static boolean looksLikeCorrectionFollowUp(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return false;
+        String lower = userRequest.strip().toLowerCase(Locale.ROOT)
+                .replaceAll("\\s+", " ")
+                .replaceAll("[.!?]+$", "");
+        boolean correctionLanguage = lower.startsWith("but ")
+                || lower.startsWith("no,")
+                || lower.startsWith("no ")
+                || lower.contains("you just ")
+                || lower.contains("you only ")
+                || lower.contains("you never ")
+                || lower.contains("it still ")
+                || lower.contains("there is no ")
+                || lower.contains("there isn't ")
+                || lower.contains("missing ");
+        if (!correctionLanguage) return false;
+        return lower.contains("no styling")
+                || lower.contains("no style")
+                || lower.contains("no css")
+                || lower.contains("without styling")
+                || lower.contains("without style")
+                || lower.contains("without css")
+                || lower.contains("missing styling")
+                || lower.contains("missing style")
+                || lower.contains("missing css")
+                || lower.contains("never put any style")
+                || lower.contains("never added style")
+                || lower.contains("never added css")
+                || lower.contains("reduced it")
+                || lower.contains("changed the index");
+    }
+
     private static TaskContract inheritedRepairContract(
             List<ChatMessage> messages,
             String latestUserRequest,
@@ -820,6 +947,27 @@ public final class TaskContractResolver {
                 prior.forbiddenTargets(),
                 inheritedRepairOriginalRequest(previousUser, latestUserRequest),
                 "repair-follow-up-inherits-previous-mutation-contract");
+    }
+
+    private static TaskContract inheritedCorrectionContract(
+            List<ChatMessage> messages,
+            String latestUserRequest
+    ) {
+        String previousUser = previousUserRequest(messages, latestUserRequest);
+        if (previousUser == null || previousUser.isBlank()) return null;
+
+        TaskContract prior = fromUserRequest(previousUser);
+        if (!prior.mutationRequested() || !prior.mutationAllowed()) return null;
+        return new TaskContract(
+                prior.type(),
+                true,
+                true,
+                true,
+                prior.expectedTargets(),
+                prior.sourceEvidenceTargets(),
+                prior.forbiddenTargets(),
+                inheritedRepairOriginalRequest(previousUser, latestUserRequest),
+                "correction-follow-up-inherits-previous-mutation-contract");
     }
 
     private static String inheritedRepairOriginalRequest(String previousUser, String latestUserRequest) {

@@ -36,6 +36,15 @@ class WorkspaceOperationIntentTest {
     }
 
     @Test
+    void explicitDeleteToolRequestWithTmpTargetDetectsDeleteIntent() {
+        var intent = WorkspaceOperationIntent.detect(TaskContractResolver.fromUserRequest(
+                "Use talos.delete_path to delete delete-me.tmp. Perform only that workspace operation."));
+
+        assertTrue(intent.isPresent());
+        assertEquals(WorkspaceOperationIntent.Kind.DELETE_PATH, intent.get().kind());
+    }
+
+    @Test
     void ambiguousDeleteWithoutConcreteTargetDoesNotNarrowToDeleteTool() {
         var intent = WorkspaceOperationIntent.detect(
                 TaskContractResolver.fromUserRequest("Delete the old one please."));

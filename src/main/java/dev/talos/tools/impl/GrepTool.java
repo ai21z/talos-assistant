@@ -7,6 +7,7 @@ import dev.talos.core.extract.DocumentExtractionStatus;
 import dev.talos.core.ingest.FileCapabilityPolicy;
 import dev.talos.core.ingest.UnsupportedDocumentFormats;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
+import dev.talos.runtime.policy.ProtectedReadScopePolicy;
 import dev.talos.tools.*;
 
 import java.io.IOException;
@@ -103,6 +104,7 @@ public final class GrepTool implements TalosTool {
         }
 
         Path root = ctx.workspace();
+        boolean privateMode = ProtectedReadScopePolicy.privateMode(ctx.config());
         List<String> matches = new ArrayList<>();
         List<String> skippedUnsupportedDocuments = new ArrayList<>();
         int[] skippedProtected = {0};
@@ -164,7 +166,7 @@ public final class GrepTool implements TalosTool {
                         return FileVisitResult.CONTINUE;
                     }
 
-                    searchFile(file, root, pattern, matches, maxResults);
+                    searchFile(file, root, pattern, matches, maxResults, privateMode);
                     return matches.size() >= maxResults
                             ? FileVisitResult.TERMINATE
                             : FileVisitResult.CONTINUE;
@@ -229,14 +231,14 @@ public final class GrepTool implements TalosTool {
     }
 
     private static void searchFile(Path file, Path root, Pattern pattern,
-                                   List<String> matches, int maxResults) {
+                                   List<String> matches, int maxResults, boolean privateMode) {
         try {
             String relPath = root.relativize(file).toString().replace('\\', '/');
             List<String> lines = Files.readAllLines(file);
             for (int i = 0; i < lines.size() && matches.size() < maxResults; i++) {
                 String line = lines.get(i);
                 if (pattern.matcher(line).find()) {
-                    String safeLine = ProtectedContentPolicy.sanitizeSearchLine(line.stripTrailing());
+                    String safeLine = safeSearchLine(line.stripTrailing(), privateMode);
                     matches.add(relPath + ":" + (i + 1) + " | " + truncate(safeLine, 200));
                 }
             }
@@ -254,6 +256,7 @@ public final class GrepTool implements TalosTool {
             int maxResults,
             List<String> skippedUnsupportedDocuments) {
         String relPath = root.relativize(file).toString().replace('\\', '/');
+        boolean privateMode = ProtectedReadScopePolicy.privateMode(ctx.config());
         DocumentExtractionResult extraction = new DocumentExtractionService(ctx.config())
                 .extract(DocumentExtractionRequest.search(file, root));
         if (extraction.status() != DocumentExtractionStatus.SUCCESS
@@ -265,7 +268,7 @@ public final class GrepTool implements TalosTool {
         for (int i = 0; i < lines.length && matches.size() < maxResults; i++) {
             String line = lines[i];
             if (pattern.matcher(line).find()) {
-                String safeLine = ProtectedContentPolicy.sanitizeSearchLine(line.stripTrailing());
+                String safeLine = safeSearchLine(line.stripTrailing(), privateMode);
                 matches.add(relPath + ":" + (i + 1) + " | " + truncate(safeLine, 200));
             }
         }
@@ -286,6 +289,14 @@ public final class GrepTool implements TalosTool {
 
     private static String truncate(String s, int max) {
         return s.length() <= max ? s : s.substring(0, max) + "…";
+    }
+
+    private static String safeSearchLine(String line, boolean privateMode) {
+        String safeLine = ProtectedContentPolicy.sanitizeSearchLine(line);
+        if (privateMode && !safeLine.equals(line)) {
+            return "[line content withheld by private-mode search policy]";
+        }
+        return safeLine;
     }
 
     private static int parseIntParam(ToolCall call, String key, int defaultValue) {

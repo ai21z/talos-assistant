@@ -18,15 +18,23 @@ import java.util.Locale;
  */
 public final class ScriptedApprovalGate implements ApprovalGate {
 
-    public record Step(String descriptionContains, String detailContains, ApprovalResponse response) {
+    public record Step(String descriptionContains, String detailContains, ApprovalResponse response, boolean optional) {
         public Step {
             descriptionContains = normalize(descriptionContains);
             detailContains = normalize(detailContains);
             response = response == null ? ApprovalResponse.DENIED : response;
         }
 
+        public Step(String descriptionContains, String detailContains, ApprovalResponse response) {
+            this(descriptionContains, detailContains, response, false);
+        }
+
         public static Step approve(String descriptionContains, String detailContains) {
             return new Step(descriptionContains, detailContains, ApprovalResponse.APPROVED);
+        }
+
+        public static Step optionalApprove(String descriptionContains, String detailContains) {
+            return new Step(descriptionContains, detailContains, ApprovalResponse.APPROVED, true);
         }
 
         public static Step deny(String descriptionContains, String detailContains) {
@@ -67,9 +75,9 @@ public final class ScriptedApprovalGate implements ApprovalGate {
         if (cursor >= steps.size()) {
             throw new AssertionError("Unexpected approval prompt: " + safe(description));
         }
-        Step expected = steps.get(cursor++);
-        assertContains("approval description", safe(description), expected.descriptionContains());
-        assertContains("approval detail", safe(detail), expected.detailContains());
+        String safeDescription = safe(description);
+        String safeDetail = safe(detail);
+        Step expected = nextMatchingStep(safeDescription, safeDetail);
         Event event = new Event(description, detail, SYNTHETIC_PROMPT, expected.response());
         events.add(event);
         return event.response();
@@ -80,18 +88,43 @@ public final class ScriptedApprovalGate implements ApprovalGate {
     }
 
     public void assertExhausted() {
+        while (cursor < steps.size() && steps.get(cursor).optional()) {
+            cursor++;
+        }
         if (cursor != steps.size()) {
             throw new AssertionError("Expected " + steps.size() + " approval prompt(s), observed " + cursor + ".");
         }
     }
 
+    private Step nextMatchingStep(String description, String detail) {
+        while (cursor < steps.size()) {
+            Step expected = steps.get(cursor);
+            if (contains(description, expected.descriptionContains())
+                    && contains(detail, expected.detailContains())) {
+                cursor++;
+                return expected;
+            }
+            if (expected.optional()) {
+                cursor++;
+                continue;
+            }
+            assertContains("approval description", description, expected.descriptionContains());
+            assertContains("approval detail", detail, expected.detailContains());
+        }
+        throw new AssertionError("Unexpected approval prompt: " + description);
+    }
+
     private static void assertContains(String label, String actual, String expected) {
-        if (expected.isBlank()) return;
-        String actualLower = actual.toLowerCase(Locale.ROOT);
-        String expectedLower = expected.toLowerCase(Locale.ROOT);
-        if (!actualLower.contains(expectedLower)) {
+        if (!contains(actual, expected)) {
             throw new AssertionError("Expected " + label + " to contain [" + expected + "], actual: " + actual);
         }
+    }
+
+    private static boolean contains(String actual, String expected) {
+        if (expected.isBlank()) return true;
+        String actualLower = actual.toLowerCase(Locale.ROOT);
+        String expectedLower = expected.toLowerCase(Locale.ROOT);
+        return actualLower.contains(expectedLower);
     }
 
     private static String safe(String value) {

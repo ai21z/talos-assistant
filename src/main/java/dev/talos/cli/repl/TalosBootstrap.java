@@ -297,8 +297,7 @@ public final class TalosBootstrap {
         final RenderEngine renderRef = render;
         final java.io.PrintWriter termWriter =
                 (lineReader != null) ? lineReader.getTerminal().writer() : null;
-        java.util.function.Consumer<String> rawSink = chunk -> {
-            renderRef.stopSpinner();
+        java.util.function.Consumer<String> terminalSink = chunk -> {
             if (termWriter != null) {
                 termWriter.print(chunk);
                 termWriter.flush();
@@ -307,7 +306,8 @@ public final class TalosBootstrap {
                 stdout.flush();
             }
         };
-        java.util.function.Consumer<String> streamSink = new ToolCallStreamFilter(rawSink);
+        java.util.function.Consumer<String> streamSink =
+                new ToolCallStreamFilter(renderRef.answerStreamSink(terminalSink));
 
         // ── Context (dependency bag for modes and commands) ──────────────
         Context ctx = Context.builder(cfg)

@@ -2,58 +2,66 @@ import "./styles.css";
 
 document.documentElement.classList.add("js");
 
+// Terminal turn examples — semantic lane grammar.
+// Glyphs match src/main/java/dev/talos/cli/ui/SemanticGlyphSet.java safe Unicode:
+//   bullet •  arrow →  success ✓  warning !  error x  rail │  dot ·
+// Prompt matches src/main/java/dev/talos/cli/ui/PromptRenderer.java: "talos [auto] >".
 const terminalStates = {
-  inspect: `talos [auto] > what does this workspace do?
+  inspect: [
+    '<span class="t-prompt-name">talos</span> <span class="t-prompt-mode">[auto]</span> &gt; what does this workspace do?',
+    "",
+    '<span class="t-cyan">•</span> route   <span class="t-muted">ask · read-only · workspace bounded</span>',
+    '<span class="t-cyan">→</span> inspect <span class="t-muted">README.md, src/, docs/</span>',
+    '<span class="t-green">✓</span> read    <span class="t-muted">4 files · 38 ms</span>',
+    "",
+    '<span class="t-rail">┌─ answer ───────────────────────────────────────────</span>',
+    '<span class="t-rail">│</span> Local-first CLI workspace operator. Java 21 sources',
+    '<span class="t-rail">│</span> under <span class="t-cyan">src/</span>; architecture notes under <span class="t-cyan">docs/</span>.',
+    '<span class="t-rail">└─ turn 1 · 1.2 s · <span class="t-muted">/last trace</span></span>',
+  ].join("\n"),
 
-runtime:
-  classify request
-  expose read-only tools
-  inspect local files inside the workspace
+  approve: [
+    '<span class="t-prompt-name">talos</span> <span class="t-prompt-mode">[auto]</span> &gt; create docs/summary.md from this repo',
+    "",
+    '<span class="t-cyan">•</span> route   <span class="t-muted">edit · workspace bounded</span>',
+    '<span class="t-cyan">→</span> inspect <span class="t-muted">README.md, build.gradle.kts</span>',
+    '<span class="t-green">✓</span> read    <span class="t-muted">2 files · 22 ms</span>',
+    "",
+    '<span class="t-amber">┌─ approval required ────────────────────────────────</span>',
+    '<span class="t-amber">│</span> action  <span class="t-body">write file</span>',
+    '<span class="t-amber">│</span> target  <span class="t-body">docs/summary.md</span>',
+    '<span class="t-amber">│</span> risk    <span class="t-body">creates one workspace file</span>',
+    '<span class="t-amber">│</span> allow?  <span class="t-body">[y = yes · a = yes for session · N = no]</span> _',
+    '<span class="t-amber">└────────────────────────────────────────────────────</span>',
+  ].join("\n"),
 
-allowed tools:
-  talos.list_dir, talos.read_file, talos.grep, talos.retrieve
+  verify: [
+    '<span class="t-prompt-name">talos</span> <span class="t-prompt-mode">[auto]</span> &gt; run the approved gradle test command',
+    "",
+    '<span class="t-cyan">•</span> route   <span class="t-muted">command · profile gradle_test</span>',
+    '<span class="t-cyan">→</span> exec    <span class="t-muted">talos.run_command · bounded</span>',
+    '<span class="t-green">✓</span> command <span class="t-muted">exit 0 · 4.6 s</span>',
+    '<span class="t-green">✓</span> verify  <span class="t-muted">12 tests passed · 0 failed</span>',
+    "",
+    '<span class="t-rail">┌─ answer ───────────────────────────────────────────</span>',
+    '<span class="t-rail">│</span> Gradle test profile passed. Twelve tests ran, none failed.',
+    '<span class="t-rail">│</span> Verification grounded in command output, not model claim.',
+    '<span class="t-rail">└─ turn 7 · 5.1 s · <span class="t-muted">/last trace</span></span>',
+  ].join("\n"),
 
-write status:
-  no mutation tools exposed`,
-  approve: `talos [auto] > create docs/summary.md from this repo
-
-contract:
-  target: docs/summary.md
-  expected action: talos.write_file
-
-approval required:
-  action: write operation
-  risk: mutates one workspace file
-  preview: docs/summary.md
-
-choice:
-  allow? [y=yes, a=yes for session, N=no] _`,
-  check: `talos [auto] > run the approved Gradle test command profile
-
-command profile:
-  gradle_test
-
-tool:
-  talos.run_command
-
-checks:
-  runtime command result
-  bounded profile output
-  pass/fail status from process evidence
-
-result:
-  runtime-owned outcome report`,
-  trace: `talos [auto] > /last trace
-
-trace:
-  prompt frame
-  tool surface
-  approvals
-  tool calls
-  verification results
-
-debug:
-  prompt-debug evidence available when enabled`,
+  trace: [
+    '<span class="t-prompt-name">talos</span> <span class="t-prompt-mode">[auto]</span> &gt; /last trace',
+    "",
+    '<span class="t-bronze">trace</span>',
+    '<span class="t-muted">  prompt frame      auto · workspace bounded</span>',
+    '<span class="t-muted">  tool surface      list_dir, read_file, grep, retrieve, write_file</span>',
+    '<span class="t-muted">  tool calls        read_file × 2 · write_file × 1</span>',
+    '<span class="t-amber">  approvals         write docs/summary.md · accepted</span>',
+    '<span class="t-green">  verification      readback ok · expected target matched</span>',
+    "",
+    '<span class="t-bronze">debug</span>',
+    '<span class="t-muted">  prompt-debug      available · use /prompt-debug last</span>',
+  ].join("\n"),
 };
 
 const toast = document.querySelector(".toast");
@@ -70,18 +78,18 @@ function showToast(message) {
 }
 
 function setTerminalState(nextState) {
-  const output = document.querySelector("#terminal-output code");
   const panel = document.querySelector("#terminal-output");
   const status = document.querySelector("#terminal-status");
   const tabs = Array.from(document.querySelectorAll("[data-terminal-state]"));
   const activeTab = tabs.find((tab) => tab.dataset.terminalState === nextState);
 
-  if (!output || !panel || !activeTab || !terminalStates[nextState]) return;
+  if (!panel || !activeTab || !terminalStates[nextState]) return;
 
-  output.textContent = terminalStates[nextState];
+  // innerHTML is safe here: all source strings are hard-coded constants above.
+  panel.innerHTML = terminalStates[nextState];
   panel.setAttribute("aria-labelledby", activeTab.id);
   if (status) {
-    status.textContent = `${activeTab.textContent.trim()} terminal example selected.`;
+    status.textContent = `${activeTab.textContent.trim()} turn selected.`;
   }
 
   tabs.forEach((tab) => {
@@ -114,6 +122,11 @@ tabs.forEach((tab) => {
   tab.addEventListener("keydown", (event) => handleTabKey(event, tabs));
 });
 
+// Render the initial Inspect turn so the static markup does not have to embed colored HTML.
+if (tabs.length) {
+  setTerminalState("inspect");
+}
+
 document.querySelectorAll("[data-copy]").forEach((button) => {
   button.addEventListener("click", async () => {
     const command = button.dataset.copy;
@@ -125,12 +138,6 @@ document.querySelectorAll("[data-copy]").forEach((button) => {
     } catch {
       showToast("Copy unavailable in this browser.");
     }
-  });
-});
-
-document.querySelectorAll("[data-beta-placeholder]").forEach((button) => {
-  button.addEventListener("click", () => {
-    showToast("Beta download placeholder. Build artifacts will be added later.");
   });
 });
 

@@ -71,6 +71,27 @@ class SynchronizedCliProcessDriverTest {
     }
 
     @Test
+    void repeated_marker_must_appear_again_for_later_step() throws Exception {
+        PipedInputStream stdout = new PipedInputStream();
+        PipedOutputStream fakeProcessOut = new PipedOutputStream(stdout);
+        ByteArrayOutputStream stdin = new ByteArrayOutputStream();
+        SynchronizedCliProcessDriver driver = SynchronizedCliProcessDriver.start(stdout, stdin);
+        fakeProcessOut.write("talos [auto] > ".getBytes(StandardCharsets.UTF_8));
+        fakeProcessOut.flush();
+
+        IOException error = assertThrows(IOException.class, () ->
+                driver.runSteps(List.of(
+                        new SynchronizedCliProcessDriver.Step("talos [auto] > ", "first"),
+                        new SynchronizedCliProcessDriver.Step("talos [auto] > ", "second")
+                ), Duration.ofMillis(150)));
+
+        assertTrue(error.getMessage().contains("talos [auto] > "), error.getMessage());
+        assertEquals("first" + System.lineSeparator(), stdin.toString(StandardCharsets.UTF_8));
+        fakeProcessOut.close();
+        driver.close();
+    }
+
+    @Test
     void stopped_process_fails_before_sending_late_input() throws Exception {
         PipedInputStream stdout = new PipedInputStream();
         ByteArrayOutputStream stdin = new ByteArrayOutputStream();
