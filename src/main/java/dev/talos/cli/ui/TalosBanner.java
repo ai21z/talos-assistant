@@ -41,13 +41,6 @@ public final class TalosBanner {
                 caps,
                 width,
                 StartupBannerRenderer.Variant.STARTUP_WITH_ICON));
-        // Wink the right eye in place inside the framed banner.  Default ON;
-        // skipped automatically when the rendered variant has no icon, when
-        // stdout is redirected, or when TALOS_BANNER_NO_ANIMATION / NO_COLOR
-        // are set.  See StartupBannerRenderer#animateStartupWink.
-        if (StartupBannerRenderer.wouldRenderIcon(caps, width, StartupBannerRenderer.Variant.STARTUP_WITH_ICON)) {
-            StartupBannerRenderer.animateStartupWink(out, caps);
-        }
     }
 
     /**

@@ -17,12 +17,12 @@ public final class StartupBannerRenderer {
     static final int DEFAULT_WIDTH = 80;
     private static final int SPLIT_MIN_WIDTH = 70;
     private static final int PLAIN_MIN_WIDTH = 50;
-    private static final int LEFT_PANEL = 25;
-    private static final int ICON_WIDTH = 10;
+    private static final int LEFT_PANEL = 26;
+    private static final int ICON_WIDTH = 11;
     private static final int LEFT_TEXT_WIDTH = LEFT_PANEL - ICON_WIDTH - 4;
     private static final String GLYPHS_ENV = "TALOS_GLYPHS";
 
-    /** Talos bronze sentinel mark, 10 cells x 5 rows. */
+    /** Talos bronze sentinel mark, 11 cells x 5 rows. */
     private static final String[] ICON_SAFE = {
             " ███ █ ███  ",
             "█    █    █  ",
@@ -31,65 +31,11 @@ public final class StartupBannerRenderer {
             "  ██   ██  "
     };
 
-    /** Talos bronze sentinel mark, extended-glyph variant for opt-in terminals. */
-    private static final String[] ICON_EXTENDED = {
-            "▟███▀▀███▙",
-            "  ▶    ◀  ",
-            "████  ████",
-            " ▀██  ██▀ ",
-            "          "
-    };
-
-    // Eye coordinates inside ICON_EXTENDED[1] for the wink animation.
-    // Eye row: "  ▶    ◀  "  →  left eye at index 2, right eye at index 7.
-    static final int ICON_EYE_ROW = 1;
-    static final int ICON_LEFT_EYE_COL = 2;
-    static final int ICON_RIGHT_EYE_COL = 7;
-
-    // ─── Banner geometry (used by the wink animator in TalosBanner) ───────
-    //
-    // STARTUP_WITH_ICON line count:  top(1) + icon-rows(5) + rejoin(1)
-    //                              + gov(1) + sep(1) + hint(1) + bot(1) = 11
-    //
-    // After PrintStream.print(banner) the trailing '\n' on the bottom border
-    // moves the cursor to the line *below* the bottom border.  Distance from
-    // that line back UP to the eye row is therefore 11 - 2 = 9 lines.
-    // (Eye row is line index 2 when counting from the top border = line 0.)
-    //
-    // Right-eye screen column inside the framed left panel:
-    //   col 1 = '│',  col 2 = ' ',  cols 3..12 = ICON[1],  eye at icon idx 7
-    //   → screen column 3 + 7 = 10.
-    static final int BANNER_LINES_BELOW_EYE_ROW = 9;
-    static final int RIGHT_EYE_SCREEN_COL = 10;
-
-    // Wink frame sequence.  Sized so the closed phase ("◞ ─ ─ ─") holds
-    // 400 ms at 100 ms/frame, reading clearly as a wink, not a glitch.
-    private static final String[] WINK_FRAMES = {
-            "◀","◀","◄","◅","◞","─","─","─","◞","◅","◄","◀","◀","◀"
-    };
-    private static final long WINK_FRAME_MILLIS = 100L;
-
-    // ─── Lamps & badges (V8/V10/V12 doctrine) ────────────────────────────
-    // Each glyph carries information, never decoration.
-
-    private static final String LAMP_OK       = "●";   // ready / loaded / verified
-    private static final String LAMP_ACTIVE   = "◐";   // building / brief / partial-trust
-    private static final String LAMP_WARN     = "◌";   // stale / risk
-    private static final String LAMP_TRACE    = "◍";   // debug=trace / debug-on
-    private static final String LAMP_UNSET    = "○";   // off / read-only / no-mutation
-    private static final String LAMP_ERROR    = "●";   // error (red-colored)
-    private static final String MODE_BADGE_READ  = "○";
-    private static final String MODE_BADGE_AUTO  = "◐";
-    private static final String MODE_BADGE_DEV   = "◉";
-    private static final String MODE_BADGE_DEBUG = "◍";
-    private static final String TRUST_DIAMOND = "◇";
-
     private StartupBannerRenderer() {}
 
     private enum GlyphMode {
         ASCII,
-        SAFE,
-        EXTENDED
+        SAFE
     }
 
     public enum Variant {
@@ -118,7 +64,7 @@ public final class StartupBannerRenderer {
         int w = Math.max(40, width <= 0 ? DEFAULT_WIDTH : width);
         Variant v = variant == null ? Variant.STARTUP_WITH_ICON : variant;
         GlyphMode glyphMode = glyphMode(caps, env);
-        CliStatusDashboard.Snapshot s = normalize(snapshot, glyphMode != GlyphMode.ASCII && caps.unicodeSafe());
+        CliStatusDashboard.Snapshot s = normalize(snapshot, glyphMode == GlyphMode.SAFE && caps.unicodeSafe());
 
         if (glyphMode == GlyphMode.ASCII) {
             return renderAscii(s, Math.max(DEFAULT_WIDTH, w));
@@ -134,13 +80,12 @@ public final class StartupBannerRenderer {
         if (v == Variant.COMPACT_NO_ICON || w < SPLIT_MIN_WIDTH) {
             return renderCompact(s, caps, w);
         }
-        return renderStartupWithIcon(s, caps, w, glyphMode);
+        return renderStartupWithIcon(s, caps, w);
     }
 
     /**
      * Returns true when the renderer would have emitted the STARTUP_WITH_ICON
-     * variant for the given inputs.  Callers use this to decide whether the
-     * wink animation is meaningful (no icon → no wink).
+     * variant for the given inputs.
      */
     public static boolean wouldRenderIcon(TerminalCapabilities capabilities, int width, Variant variant) {
         return wouldRenderIcon(capabilities, width, variant, System.getenv());
@@ -160,96 +105,25 @@ public final class StartupBannerRenderer {
         return v == Variant.STARTUP_WITH_ICON;
     }
 
-    /**
-     * Animates a one-shot wink on the right eye of the bronze sentinel mark, in place,
-     * inside the framed banner that was just printed.
-     *
-     * <p>Pre-condition: the caller printed exactly one STARTUP_WITH_ICON
-     * banner to {@code out} and nothing else since.  This method walks the
-     * cursor up to the eye row with {@code ESC[<n>A}, repaints only the two
-     * eye cells with absolute-column positioning ({@code ESC[<n>G}), then
-     * walks back down so subsequent output continues normally.
-     *
-     * <p>Animation is opt-in through {@code TALOS_GLYPHS=extended}. It is also
-     * automatically skipped when:
-     * <ul>
-     *   <li>{@code $TALOS_BANNER_NO_ANIMATION} is set (any non-empty value)</li>
-     *   <li>{@code $NO_COLOR} is set</li>
-     *   <li>the process has no console (stdout redirected / piped)</li>
-     *   <li>color or unicode are unavailable in the detected capabilities</li>
-     * </ul>
-     */
-    public static void animateStartupWink(java.io.PrintStream out, TerminalCapabilities capabilities) {
-        if (out == null) return;
-        TerminalCapabilities caps = capabilities == null
-                ? TerminalCapabilities.detectDefault()
-                : capabilities;
-        if (!shouldAnimate(caps, System.getenv(), System.console() != null)) return;
-
-        String bronzeOn  = "\033[38;2;167;123;58m";
-        String reset     = "\033[0m";
-        int linesUp      = BANNER_LINES_BELOW_EYE_ROW;
-        int eyeCol       = RIGHT_EYE_SCREEN_COL;
-
-        try {
-            for (String frame : WINK_FRAMES) {
-                // Up to eye row → jump to eye column → paint glyph → restore.
-                out.print("\033[" + linesUp + "A");
-                out.print("\033[" + eyeCol + "G");
-                out.print(bronzeOn);
-                out.print(frame);
-                out.print(reset);
-                out.print("\033[" + linesUp + "B");
-                out.print("\033[1G");
-                out.flush();
-                Thread.sleep(WINK_FRAME_MILLIS);
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            // Restore cursor sanity if interrupted mid-animation.
-            out.print("\033[" + BANNER_LINES_BELOW_EYE_ROW + "B");
-            out.print("\033[1G");
-            out.flush();
-        }
-    }
-
-    static boolean shouldAnimate(TerminalCapabilities caps, Map<String, String> env, boolean hasConsole) {
-        if (caps == null || !caps.colorEnabled() || !caps.unicodeSafe()) return false;
-        if (!caps.interactive()) return false;
-        if (glyphMode(caps, env) != GlyphMode.EXTENDED) return false;
-        Map<String, String> safeEnv = env == null ? Map.of() : env;
-        String optOut = safeEnv.get("TALOS_BANNER_NO_ANIMATION");
-        if (optOut != null && !optOut.isBlank()) return false;
-        String noColor = safeEnv.get("NO_COLOR");
-        if (noColor != null && !noColor.isBlank()) return false;
-        // System.console() is the most reliable "is this really a TTY?" probe
-        // on Windows; capabilities.interactive() is a hint, this is the truth.
-        return hasConsole;
-    }
-
     private static GlyphMode glyphMode(TerminalCapabilities caps, Map<String, String> env) {
         if (caps == null || !caps.unicodeSafe()) return GlyphMode.ASCII;
         Map<String, String> safeEnv = env == null ? Map.of() : env;
         String requested = Objects.toString(safeEnv.get(GLYPHS_ENV), "")
                 .trim()
                 .toLowerCase(Locale.ROOT);
-        return switch (requested) {
-            case "ascii" -> GlyphMode.ASCII;
-            case "extended" -> GlyphMode.EXTENDED;
-            default -> GlyphMode.SAFE;
-        };
+        if ("ascii".equals(requested)) return GlyphMode.ASCII;
+        return GlyphMode.SAFE;
     }
 
     private static String renderStartupWithIcon(
             CliStatusDashboard.Snapshot s,
             TerminalCapabilities caps,
-            int width,
-            GlyphMode glyphMode) {
+            int width) {
         int rightPanel = width - LEFT_PANEL - 3;
         int rightValueWidth = Math.max(8, rightPanel - 14);
         Style style = new Style(caps);
         StringBuilder out = new StringBuilder();
-        String[] iconRows = iconRows(glyphMode);
+        String[] iconRows = ICON_SAFE;
 
         appendLine(out, style.frame("┌" + repeat("─", LEFT_PANEL) + "┬" + repeat("─", rightPanel) + "┐"));
 
@@ -264,7 +138,7 @@ public final class StartupBannerRenderer {
 
         int rows = Math.max(iconRows.length, right.length);
         for (int i = 0; i < rows; i++) {
-            String icon = i < iconRows.length ? fitText(iconRows[i], ICON_WIDTH) : repeat(" ", ICON_WIDTH);
+            String icon = i < iconRows.length ? clipIconRow(iconRows[i], ICON_WIDTH) : repeat(" ", ICON_WIDTH);
             String leftContent = " "
                     + style.bronze(icon)
                     + "  "
@@ -290,9 +164,6 @@ public final class StartupBannerRenderer {
         return out.toString();
     }
 
-    private static String[] iconRows(GlyphMode glyphMode) {
-        return glyphMode == GlyphMode.EXTENDED ? ICON_EXTENDED : ICON_SAFE;
-    }
 
     private static String renderStatusNoIcon(
             CliStatusDashboard.Snapshot s,
@@ -573,6 +444,15 @@ public final class StartupBannerRenderer {
         if (text.length() <= width) return text;
         if (width <= 3) return ".".repeat(width);
         return text.substring(0, width - 3) + "...";
+    }
+
+    /** Pad/clip an icon row to exactly {@code width} cells, without ellipsis. */
+    private static String clipIconRow(String value, int width) {
+        String text = Objects.toString(value, "").stripTrailing();
+        if (width <= 0) return "";
+        if (text.length() == width) return text;
+        if (text.length() > width) return text.substring(0, width);
+        return text + repeat(" ", width - text.length());
     }
 
     private static CliStatusDashboard.Snapshot normalize(CliStatusDashboard.Snapshot snapshot, boolean unicodeSafe) {
