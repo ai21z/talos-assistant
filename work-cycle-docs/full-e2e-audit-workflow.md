@@ -135,6 +135,7 @@ tool. Current required coverage:
 | `talos.copy_path` | Copy a safe fixture file or directory. |
 | `talos.move_path` | Move a safe fixture path to a new location. |
 | `talos.rename_path` | Rename a safe fixture path within its parent. |
+| `talos.delete_path` | Delete a safe disposable fixture path after approval; protected or unrelated deletion remains out of scope. |
 | `talos.apply_workspace_batch` | Apply a small batch of non-destructive workspace operations. |
 | `talos.run_command` | Run or intentionally reject an approved bounded command profile and verify the final answer matches the actual result. |
 

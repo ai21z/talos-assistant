@@ -1,6 +1,8 @@
 package dev.talos.cli.repl;
 
 import dev.talos.cli.ui.CliTheme;
+import dev.talos.cli.ui.AnswerPaneRenderer;
+import dev.talos.cli.ui.ProgressLineRenderer;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
 import dev.talos.core.security.Redactor;
@@ -12,6 +14,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.Consumer;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -25,6 +28,8 @@ public final class RenderEngine {
     private final Redactor redactor;
     private final PrintStream out;
     private final CliTheme theme;
+    private final ProgressLineRenderer progressRenderer;
+    private final AnswerPaneRenderer answerRenderer;
     private final String statusLabel;
     private final boolean showStatusDuringAnswer;
     private final boolean showTimingAfterAnswer;
@@ -36,6 +41,8 @@ public final class RenderEngine {
     private final Object spinnerMonitor = new Object();
     private Thread spinnerThread;
     private Instant spinnerStartTime;
+    private AnswerPaneRenderer.Stream activeAnswerStream;
+    private Consumer<String> activeAnswerStreamWriter;
 
     // Braille spinner for Unicode-capable terminals, classic for others
     private static final String[] SPINNER_UNICODE = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
@@ -62,6 +69,8 @@ public final class RenderEngine {
         this.out = (out == null ? System.out : out);
         this.interactive = interactive;
         this.theme = theme == null ? CliTheme.current() : theme;
+        this.progressRenderer = new ProgressLineRenderer(this.theme);
+        this.answerRenderer = new AnswerPaneRenderer(this.theme, 96);
 
         // UI config
         Map<String, Object> ui = CfgUtil.map(this.cfg.data.get("ui"));
@@ -90,7 +99,7 @@ public final class RenderEngine {
     public void printRouteHint(String routeLabel) {
         if (!interactive) return;
         if (routeLabel == null || routeLabel.isBlank()) return;
-        out.println(theme.muted("  [auto -> " + routeLabel + "]"));
+        out.println(progressRenderer.route(terminalText(routeLabel), ""));
         out.flush();
     }
 
@@ -110,24 +119,7 @@ public final class RenderEngine {
         if (!showTimingAfterAnswer) return;
         if (!interactive) return;
 
-        StringBuilder sb = new StringBuilder();
-        sb.append("  ").append(theme.sgr("38;5;240"));
-        sb.append("[Turn ").append(turnNumber);
-
-        // Elapsed time
-        if (elapsedMs < 1000) {
-            sb.append(" | ").append(elapsedMs).append("ms");
-        } else {
-            sb.append(String.format(Locale.ROOT, " | %.1fs", elapsedMs / 1000.0));
-        }
-
-        // Response size
-        if (responseLen > 0) {
-            sb.append(" | ~").append(responseLen).append(" chars");
-        }
-
-        sb.append("]").append(theme.reset());
-        out.println(sb.toString());
+        out.println(progressRenderer.turnStats(turnNumber, elapsedMs, responseLen));
         out.flush();
     }
 
@@ -185,6 +177,22 @@ public final class RenderEngine {
         }
     }
 
+    /**
+     * Build a JLine-safe display sink for user-visible streamed assistant text.
+     * Tool protocol filtering must wrap this sink, so only natural-language
+     * chunks receive answer-pane chrome.
+     */
+    public Consumer<String> answerStreamSink(Consumer<String> trustedOutput) {
+        Consumer<String> writer = trustedOutput == null ? this::print : trustedOutput;
+        return chunk -> {
+            stopSpinner();
+            String rendered = streamChunk(sroInline(chunk), writer);
+            if (!rendered.isEmpty()) {
+                writer.accept(rendered);
+            }
+        };
+    }
+
     public void render(Result r) {
         stopSpinner();
 
@@ -224,15 +232,16 @@ public final class RenderEngine {
         }
         if (r instanceof Result.StreamChunk chunk) {
             stopSpinner();
-            print(sroInline(chunk.text));
+            print(streamChunk(sroInline(chunk.text), null));
             return;
         }
         if (r instanceof Result.StreamEnd) {
-            println("");
+            closeAnswerStream("answer");
             return;
         }
         if (r instanceof Result.Streamed streamed) {
             // Body was already printed during streaming; only render the suffix
+            closeAnswerStream("answer");
             if (!streamed.suffix.isEmpty()) {
                 printResponseSuffix(sro(streamed.suffix));
             }
@@ -247,7 +256,31 @@ public final class RenderEngine {
         println(sro(r.toString()));
     }
 
-    // ── Response rendering (left-border style) ────────────────────────────
+    private String streamChunk(String chunk, Consumer<String> writer) {
+        if (chunk == null || chunk.isEmpty()) return "";
+        if (activeAnswerStream == null) {
+            activeAnswerStream = answerRenderer.openStream("answer");
+            activeAnswerStreamWriter = writer;
+        } else if (activeAnswerStreamWriter == null && writer != null) {
+            activeAnswerStreamWriter = writer;
+        }
+        return activeAnswerStream.accept(chunk);
+    }
+
+    private void closeAnswerStream(String footer) {
+        if (activeAnswerStream == null) return;
+        String rendered = activeAnswerStream.close(footer);
+        Consumer<String> writer = activeAnswerStreamWriter;
+        activeAnswerStream = null;
+        activeAnswerStreamWriter = null;
+        if (writer != null) {
+            writer.accept(rendered);
+        } else {
+            print(rendered);
+        }
+    }
+
+    // ── Response rendering (semantic answer pane) ─────────────────────────
 
     /**
      * Print a tool progress status line directly (outside the render pipeline).
@@ -256,36 +289,14 @@ public final class RenderEngine {
      */
     public void printToolProgress(String toolName, String action, String detail) {
         if (!interactive) return;
-        boolean warning = "warning".equals(action);
-        String icon = warning ? theme.warning("!") : theme.active(">");
-
-        StringBuilder sb = new StringBuilder();
-        sb.append("  ").append(icon).append(" ");
-        if (warning) sb.append(theme.sgr("38;5;214"));
-        else sb.append(theme.sgr("38;5;240"));
-        sb.append(sroInline(formatToolAction(action, toolName)));
-        if (detail != null && !detail.isBlank()) {
-            sb.append(": ").append(sroInline(detail));
-        }
-        sb.append(theme.reset());
-        println(sb.toString());
+        println(progressRenderer.tool(
+                terminalText(toolName),
+                terminalText(action),
+                detail == null ? null : sroInline(detail)));
     }
 
     private void renderToolProgress(Result.ToolProgress tp) {
         printToolProgress(tp.toolName, tp.action, tp.detail);
-    }
-
-    /** Format the action + tool name for display. */
-    private static String formatToolAction(String action, String toolName) {
-        // Strip the "talos." prefix for cleaner display
-        String safeToolName = toolName == null ? "" : toolName;
-        String shortName = safeToolName.startsWith("talos.") ? safeToolName.substring(6) : safeToolName;
-        return switch (action) {
-            case "executing" -> "Using " + shortName;
-            case "completed" -> shortName + " done";
-            case "warning"   -> "Verification warning";
-            default          -> action + " " + shortName;
-        };
     }
 
     private void printResponse(String content) {
@@ -297,21 +308,9 @@ public final class RenderEngine {
         ResponseParts parts = splitSources(content);
         String body = parts.body();
 
-        final int MAX_WIDTH = 96;
-        String border = theme.active("|");
-        String[] lines = body.split("\n");
-
         println("");  // breathing room before response
         if (!body.isBlank()) {
-            for (String line : lines) {
-                if (line.length() <= MAX_WIDTH) {
-                    println("  " + border + " " + line);
-                } else {
-                    for (String wl : wrapLine(line, MAX_WIDTH)) {
-                        println("  " + border + " " + wl);
-                    }
-                }
-            }
+            print(answerRenderer.renderBlock(body, "answer"));
         }
         if (!parts.sources().isEmpty()) {
             if (!body.isBlank()) println("");
@@ -366,30 +365,6 @@ public final class RenderEngine {
 
     private static String stripTrailingBlankLines(String text) {
         return text == null ? "" : text.replaceFirst("\\s+$", "");
-    }
-
-    private List<String> wrapLine(String line, int maxWidth) {
-        List<String> result = new java.util.ArrayList<>();
-        String[] words = line.split("\\s+");
-        StringBuilder current = new StringBuilder();
-
-        for (String word : words) {
-            if (current.length() + word.length() + 1 > maxWidth) {
-                if (!current.isEmpty()) {
-                    result.add(current.toString());
-                    current = new StringBuilder();
-                }
-                if (word.length() > maxWidth) {
-                    result.add(word.substring(0, maxWidth));
-                    word = word.substring(maxWidth);
-                }
-            }
-            if (!current.isEmpty()) current.append(" ");
-            current.append(word);
-        }
-        if (!current.isEmpty()) result.add(current.toString());
-
-        return result.isEmpty() ? List.of("") : result;
     }
 
     // ── Table rendering ───────────────────────────────────────────────────

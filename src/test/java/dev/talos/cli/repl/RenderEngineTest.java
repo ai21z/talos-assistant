@@ -2,6 +2,9 @@ package dev.talos.cli.repl;
 
 import dev.talos.core.Config;
 import dev.talos.core.security.Redactor;
+import dev.talos.cli.ui.CliTheme;
+import dev.talos.cli.ui.ColorPolicy;
+import dev.talos.cli.ui.TerminalCapabilities;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -30,6 +33,11 @@ class RenderEngineTest {
 
     private RenderEngine engine(boolean interactive) {
         return new RenderEngine(new Config(), new Redactor(), out, interactive);
+    }
+
+    private RenderEngine semanticEngine(boolean interactive) {
+        var caps = new TerminalCapabilities(ColorPolicy.NEVER, interactive, false, true, false);
+        return new RenderEngine(new Config(), new Redactor(), out, interactive, CliTheme.forCapabilities(caps));
     }
 
     private String output() {
@@ -109,10 +117,11 @@ class RenderEngineTest {
 
         @Test
         void showsRouteLabel() {
-            var re = engine(true);
+            var re = semanticEngine(true);
             re.printRouteHint("rag");
 
-            assertTrue(output().contains("rag"), "Should include route label");
+            assertTrue(output().contains("  • route rag"), "Should include semantic route line");
+            assertFalse(output().contains("[auto ->"), "Route hint should not use old bracket debug style");
         }
 
         @Test
@@ -147,10 +156,11 @@ class RenderEngineTest {
 
         @Test
         void rendersOkResult() {
-            var re = engine(false);
+            var re = semanticEngine(false);
             re.render(new Result.Ok("hello world"));
 
             assertTrue(output().contains("hello world"), "Should render Ok text");
+            assertTrue(output().contains("┌─ answer"), "Ok answers should render in the answer pane");
         }
 
         @Test
@@ -180,7 +190,7 @@ class RenderEngineTest {
 
         @Test
         void rendersSourcesAsSeparateSectionForOkResult() {
-            var re = engine(false);
+            var re = semanticEngine(false);
             re.render(new Result.Ok("Answer body\n\n[Sources]\n - src/App.java#0\n - README.md#1\n"));
 
             String text = output();
@@ -192,7 +202,7 @@ class RenderEngineTest {
 
         @Test
         void rendersSourcesAsSeparateSectionForStreamedSuffix() {
-            var re = engine(false);
+            var re = semanticEngine(false);
             re.render(new Result.Streamed("Answer body\n\n[Sources]\n - src/App.java#0\n",
                     "\n\n[Sources]\n - src/App.java#0\n"));
 
@@ -200,6 +210,42 @@ class RenderEngineTest {
             assertTrue(text.contains("Sources"));
             assertTrue(text.contains("src/App.java#0"));
             assertFalse(text.contains("[Sources]"), "Streamed source suffix should be normalized");
+        }
+
+        @Test
+        void streamedChunksUseSameAnswerRailAsOkResults() {
+            var re = semanticEngine(true);
+
+            re.render(new Result.StreamChunk("hello\nwor"));
+            re.render(new Result.StreamChunk("ld"));
+            re.render(new Result.StreamEnd());
+
+            String text = output();
+            assertTrue(text.contains("┌─ answer"));
+            assertTrue(text.contains("│ hello"));
+            assertTrue(text.contains("│ world"));
+            assertTrue(text.contains("└─ answer"));
+        }
+    }
+
+    @Nested
+    class ToolProgress {
+
+        @Test
+        void rendersSemanticToolProgressLines() {
+            var re = semanticEngine(true);
+
+            re.printToolProgress("talos.read_file", "executing", "src/App.java");
+            re.printToolProgress("talos.read_file", "completed", null);
+            re.printToolProgress("talos.write_file", "warning", "no focused test");
+            re.printToolProgress("talos.run_command", "error", "command rejected");
+
+            String text = output();
+            assertTrue(text.contains("  → read src/App.java"));
+            assertTrue(text.contains("  ✓ read_file done"));
+            assertTrue(text.contains("  ! verification warning no focused test"));
+            assertTrue(text.contains("  x run_command failed command rejected"));
+            assertFalse(text.contains("> Using"));
         }
     }
 }

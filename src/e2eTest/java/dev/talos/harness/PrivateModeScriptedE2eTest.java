@@ -19,6 +19,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -54,6 +55,26 @@ class PrivateModeScriptedE2eTest {
         String combined = result.finalAnswer() + "\n" + result.summary();
         assertFalse(combined.contains("FILE_DISCOVERED_CANARY_E2E_GREP"), combined);
         assertTrue(combined.contains("protected content") || combined.contains("protected"), combined);
+    }
+
+    @Test
+    void private_mode_grep_canary_match_withholds_neighbor_fields() throws Exception {
+        Files.writeString(
+                workspace.resolve("bank.csv"),
+                "account,balance,note\nchecking,4812.44,FILE_DISCOVERED_CANARY_E2E_GREP_ROW\n");
+
+        ToolCallLoop.LoopResult result = runPrivateTurn(
+                "{\"name\":\"talos.grep\",\"arguments\":{\"pattern\":\"FILE_DISCOVERED_CANARY_E2E_GREP_ROW\"}}",
+                List.of("No raw private row was returned."));
+
+        String toolResultMessages = result.messages().stream()
+                .map(ChatMessage::content)
+                .filter(content -> content != null && content.contains("[tool_result"))
+                .collect(Collectors.joining("\n"));
+        assertFalse(toolResultMessages.contains("FILE_DISCOVERED_CANARY_E2E_GREP_ROW"), toolResultMessages);
+        assertFalse(toolResultMessages.contains("4812.44"), toolResultMessages);
+        assertFalse(toolResultMessages.contains("checking"), toolResultMessages);
+        assertTrue(toolResultMessages.contains("withheld by private-mode search policy"), toolResultMessages);
     }
 
     private ToolCallLoop.LoopResult runPrivateTurn(String scriptedToolCall, List<String> followUps) throws Exception {

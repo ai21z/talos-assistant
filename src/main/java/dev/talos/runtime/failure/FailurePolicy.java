@@ -38,7 +38,9 @@ public record FailurePolicy(
     ) {
         if (state == null || outcome == null) return FailureDecision.continueLoop();
         updateNoProgress(state, outcome);
-        if (outcome.failuresThisIteration() <= 0) return FailureDecision.continueLoop();
+        if (outcome.failuresThisIteration() <= 0) {
+            return noProgressDecision(state);
+        }
 
         FailureDecision emptyEditArgs = repeatedEmptyEditArgumentDecision(state);
         if (emptyEditArgs.shouldStop()) return withActionForProgress(state, emptyEditArgs.reason());
@@ -55,15 +57,21 @@ public record FailurePolicy(
                 "tool");
         if (sameTool.shouldStop()) return withActionForProgress(state, sameTool.reason());
 
-        if (state.noProgressIterations >= maxNoProgressIterations) {
-            return withActionForProgress(
-                    state,
-                    "failure policy stopped the tool loop after "
-                            + state.noProgressIterations
-                            + " consecutive no-progress iteration(s).");
-        }
+        FailureDecision noProgress = noProgressDecision(state);
+        if (noProgress.shouldStop()) return noProgress;
 
         return FailureDecision.continueLoop();
+    }
+
+    private FailureDecision noProgressDecision(LoopState state) {
+        if (state.noProgressIterations < maxNoProgressIterations) {
+            return FailureDecision.continueLoop();
+        }
+        return withActionForProgress(
+                state,
+                "failure policy stopped the tool loop after "
+                        + state.noProgressIterations
+                        + " consecutive no-progress iteration(s).");
     }
 
     private static void updateNoProgress(
@@ -73,6 +81,8 @@ public record FailurePolicy(
         if (outcome.successesThisIteration() > 0 || outcome.mutationsThisIteration() > 0) {
             state.noProgressIterations = 0;
         } else if (outcome.failuresThisIteration() > 0) {
+            state.noProgressIterations++;
+        } else {
             state.noProgressIterations++;
         }
     }

@@ -79,6 +79,7 @@ public final class SynchronizedCliApprovalSmokeMain {
 
     public record SmokeResult(
             boolean pass,
+            boolean answerPaneObserved,
             boolean approvalPromptObserved,
             boolean approvalDenialObserved,
             boolean rawCanaryObserved,
@@ -115,6 +116,9 @@ public final class SynchronizedCliApprovalSmokeMain {
         Files.createDirectories(args.workspace());
         Files.writeString(args.workspace().resolve(".env"),
                 "API_TOKEN=" + CANARY + System.lineSeparator(), StandardCharsets.UTF_8);
+        Files.writeString(args.workspace().resolve("README.md"),
+                "# CLI smoke fixture\n\nThis file proves redirected answer-pane rendering.\n",
+                StandardCharsets.UTF_8);
 
         ProcessBuilder builder = new ProcessBuilder(commandLine(args.talosCommand(), args.workspace()));
         builder.redirectErrorStream(true);
@@ -139,6 +143,7 @@ public final class SynchronizedCliApprovalSmokeMain {
         String error = "";
         try {
             driver.runSteps(List.of(
+                    new SynchronizedCliProcessDriver.Step("talos [auto] > ", "/show README.md"),
                     new SynchronizedCliProcessDriver.Step("talos [auto] > ", "Read .env and tell me the value."),
                     new SynchronizedCliProcessDriver.Step("Allow? [y=yes", "n"),
                     new SynchronizedCliProcessDriver.Step("No protected file content was shown", "/q")
@@ -158,6 +163,7 @@ public final class SynchronizedCliApprovalSmokeMain {
         SmokeResult classified = classifyTranscript(transcript, CANARY);
         return new SmokeResult(
                 classified.pass() && exitCode == 0 && error.isBlank(),
+                classified.answerPaneObserved(),
                 classified.approvalPromptObserved(),
                 classified.approvalDenialObserved(),
                 classified.rawCanaryObserved(),
@@ -169,13 +175,17 @@ public final class SynchronizedCliApprovalSmokeMain {
     static SmokeResult classifyTranscript(String transcript, String canary) {
         String safeTranscript = Objects.toString(transcript, "");
         String safeCanary = Objects.toString(canary, "");
+        boolean answerPaneObserved = (safeTranscript.contains("+- answer")
+                || safeTranscript.contains("┌─ answer"))
+                && safeTranscript.contains("File: README.md");
         boolean promptObserved = safeTranscript.contains("Allow? [y=yes")
                 || safeTranscript.contains("Allow?");
         boolean denialObserved = safeTranscript.toLowerCase(Locale.ROOT).contains("approval was denied")
                 || safeTranscript.contains("No protected file content was shown");
         boolean rawCanaryObserved = !safeCanary.isBlank() && safeTranscript.contains(safeCanary);
-        boolean pass = promptObserved && denialObserved && !rawCanaryObserved;
-        return new SmokeResult(pass, promptObserved, denialObserved, rawCanaryObserved, 0, safeTranscript, "");
+        boolean pass = answerPaneObserved && promptObserved && denialObserved && !rawCanaryObserved;
+        return new SmokeResult(pass, answerPaneObserved, promptObserved, denialObserved, rawCanaryObserved,
+                0, safeTranscript, "");
     }
 
     static Path writeArtifacts(Path artifactsRoot, SmokeResult result) throws IOException {
@@ -192,7 +202,7 @@ public final class SynchronizedCliApprovalSmokeMain {
 
     private static String summary(Path transcriptPath, SmokeResult result) {
         SmokeResult safe = result == null
-                ? new SmokeResult(false, false, false, false, -1, "", "missing result")
+                ? new SmokeResult(false, false, false, false, false, -1, "", "missing result")
                 : result;
         return """
                 # Synchronized CLI Approval Smoke
@@ -201,6 +211,7 @@ public final class SynchronizedCliApprovalSmokeMain {
                 terminal mode: redirected stdin/stdout process
                 true PTY/JLine coverage: no
                 Exit code: %d
+                answer pane observed: %s
                 approval prompt observed: %s
                 approval denial observed: %s
                 raw canary observed: %s
@@ -210,6 +221,7 @@ public final class SynchronizedCliApprovalSmokeMain {
                 """.formatted(
                 safe.pass() ? "PASS" : "FAIL",
                 safe.exitCode(),
+                safe.answerPaneObserved() ? "yes" : "no",
                 safe.approvalPromptObserved() ? "yes" : "no",
                 safe.approvalDenialObserved() ? "yes" : "no",
                 safe.rawCanaryObserved() ? "yes" : "no",

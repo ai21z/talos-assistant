@@ -88,6 +88,8 @@ public final class StaticTaskVerifier {
             "<script\\b[^>]*\\bsrc\\s*=\\s*(['\"])(.*?)\\1", Pattern.CASE_INSENSITIVE);
     private static final Pattern HTML_INLINE_SCRIPT = Pattern.compile(
             "(?is)<script\\b(?![^>]*\\bsrc\\s*=)[^>]*>(.*?)</script>");
+    private static final Pattern HTML_INLINE_STYLE = Pattern.compile(
+            "(?is)<style\\b[^>]*>(.*?)</style>");
     private static final Pattern CSS_CLASS_SELECTOR = Pattern.compile("\\.([A-Za-z_][A-Za-z0-9_-]*)");
     private static final Pattern CSS_ID_SELECTOR = Pattern.compile("#([A-Za-z_][A-Za-z0-9_-]*)");
     private static final Pattern CSS_SELECTOR_PRELUDE = Pattern.compile("(?s)([^{}]+)\\{");
@@ -320,7 +322,13 @@ public final class StaticTaskVerifier {
                 verifyLiteralContentExpectation(root, literal, facts, problems, recordExpectationTrace);
             } else if (expectation instanceof ReplacementExpectation replacement) {
                 verifiedAny = true;
-                verifyReplacementExpectation(root, replacement, facts, problems, recordExpectationTrace);
+                verifyReplacementExpectation(
+                        root,
+                        replacement,
+                        successfulMutations,
+                        facts,
+                        problems,
+                        recordExpectationTrace);
             } else if (expectation instanceof AppendLineExpectation appendLine) {
                 verifiedAny = true;
                 verifyAppendLineExpectation(
@@ -683,6 +691,7 @@ public final class StaticTaskVerifier {
     private static void verifyReplacementExpectation(
             Path root,
             ReplacementExpectation expectation,
+            List<ToolCallLoop.ToolOutcome> successfulMutations,
             List<String> facts,
             List<String> problems,
             boolean recordExpectationTrace
@@ -726,6 +735,14 @@ public final class StaticTaskVerifier {
         boolean oldPresent = !expectation.oldText().isEmpty() && observed.contains(expectation.oldText());
         boolean newPresent = !expectation.newText().isEmpty() && observed.contains(expectation.newText());
         boolean matched = !oldPresent && newPresent;
+        if (matched && expectation.preserveRest()) {
+            matched = verifyReplacementPreservation(
+                    expectation,
+                    pathHint,
+                    successfulMutations,
+                    facts,
+                    problems);
+        }
         if (recordExpectationTrace) {
             recordReplacementExpectation(
                     expectation,
@@ -743,6 +760,100 @@ public final class StaticTaskVerifier {
                 problems.add(pathHint + ": replacement old text remained after apply.");
             }
         }
+    }
+
+    private static boolean verifyReplacementPreservation(
+            ReplacementExpectation expectation,
+            String pathHint,
+            List<ToolCallLoop.ToolOutcome> successfulMutations,
+            List<String> facts,
+            List<String> problems
+    ) {
+        if (successfulMutations == null || successfulMutations.isEmpty()) {
+            problems.add(pathHint + ": replacement preservation had no mutation evidence.");
+            return false;
+        }
+        boolean sawRelevantMutation = false;
+        for (ToolCallLoop.ToolOutcome outcome : successfulMutations) {
+            if (outcome == null
+                    || !outcome.success()
+                    || !normalizePath(outcome.pathHint()).equals(pathHint)) {
+                continue;
+            }
+            sawRelevantMutation = true;
+            String canonicalTool = ToolAliasPolicy.localCanonicalName(outcome.toolName());
+            ToolCallLoop.MutationEvidence evidence = outcome.mutationEvidence();
+            if ("edit_file".equals(canonicalTool)) {
+                if (evidence == null || !evidence.exactEditReplacement()) {
+                    problems.add(pathHint + ": talos.edit_file cannot prove preserve-rest replacement "
+                            + "without exact edit evidence.");
+                    return false;
+                }
+                if (!replacementOnlyChangesRequestedText(
+                        evidence.oldString(),
+                        evidence.newString(),
+                        expectation.oldText(),
+                        expectation.newText())) {
+                    problems.add(pathHint
+                            + ": replacement preservation exact edit changed content beyond the requested text.");
+                    return false;
+                }
+                facts.add(pathHint + ": exact edit evidence preserved content beyond requested replacement.");
+                continue;
+            }
+            if ("write_file".equals(canonicalTool)) {
+                if (evidence == null || !evidence.fullWriteReplacement()) {
+                    problems.add(pathHint + ": talos.write_file cannot prove preserve-rest replacement "
+                            + "without complete same-turn read evidence.");
+                    return false;
+                }
+                if (!replacementOnlyChangesRequestedText(
+                        evidence.oldString(),
+                        evidence.newString(),
+                        expectation.oldText(),
+                        expectation.newText())) {
+                    problems.add(pathHint + ": replacement preservation changed content beyond the requested text.");
+                    return false;
+                }
+                facts.add(pathHint + ": replacement preservation matched prior content.");
+                continue;
+            }
+            problems.add(pathHint + ": mutation tool cannot prove preserve-rest replacement.");
+            return false;
+        }
+        if (!sawRelevantMutation) {
+            problems.add(pathHint + ": replacement preservation had no matching mutation evidence.");
+            return false;
+        }
+        return true;
+    }
+
+    private static boolean replacementOnlyChangesRequestedText(
+            String previousContent,
+            String newContent,
+            String oldText,
+            String newText
+    ) {
+        if (previousContent == null || newContent == null
+                || oldText == null || oldText.isBlank()
+                || newText == null || newText.isBlank()) {
+            return false;
+        }
+        String previousNormalized = normalizeLineEndings(previousContent);
+        String newNormalized = normalizeLineEndings(newContent);
+        String oldNormalized = normalizeLineEndings(oldText);
+        String replacementNormalized = normalizeLineEndings(newText);
+        if (countOccurrences(previousNormalized, oldNormalized) != 1) {
+            return false;
+        }
+        String expected = previousNormalized.replace(oldNormalized, replacementNormalized);
+        return expected.equals(newNormalized)
+                || stripSingleTerminalNewline(expected).equals(stripSingleTerminalNewline(newNormalized));
+    }
+
+    private static String stripSingleTerminalNewline(String value) {
+        if (value == null || value.isEmpty()) return value;
+        return value.endsWith("\n") ? value.substring(0, value.length() - 1) : value;
     }
 
     private static void recordReplacementExpectation(
@@ -903,6 +1014,19 @@ public final class StaticTaskVerifier {
 
     private static String normalizeLineEndings(String value) {
         return value == null ? "" : value.replace("\r\n", "\n").replace('\r', '\n');
+    }
+
+    private static int countOccurrences(String haystack, String needle) {
+        if (haystack == null || haystack.isEmpty() || needle == null || needle.isEmpty()) {
+            return 0;
+        }
+        int count = 0;
+        int idx = 0;
+        while ((idx = haystack.indexOf(needle, idx)) >= 0) {
+            count++;
+            idx += needle.length();
+        }
+        return count;
     }
 
     private static void recordAppendLineExpectation(
@@ -1412,6 +1536,14 @@ public final class StaticTaskVerifier {
         if (primary.size() < 3) {
             if (!primary.isEmpty()
                     && profile.targetSurface().allowsFunctionalPartial()
+                    && StaticWebCapabilityProfile.looksStyledWebTask(contract, mutatedPaths)) {
+                verifyPartialStyledWebWorkspace(root, primary, facts, problems);
+                if (!problems.isEmpty()) return;
+                facts.add("Styled web checks passed for " + String.join(", ", primary) + ".");
+                return;
+            }
+            if (!primary.isEmpty()
+                    && profile.targetSurface().allowsFunctionalPartial()
                     && StaticWebCapabilityProfile.looksFunctionalWebTask(contract)) {
                 verifyPartialFunctionalWebWorkspace(root, contract, primary, facts, problems);
                 if (!problems.isEmpty()) return;
@@ -1884,6 +2016,53 @@ public final class StaticTaskVerifier {
                 && pickPrimary(files, ".js") != null;
     }
 
+    private static void verifyPartialStyledWebWorkspace(
+            Path root,
+            List<String> primaryFiles,
+            List<String> facts,
+            List<String> problems
+    ) {
+        if (root == null || primaryFiles == null || primaryFiles.isEmpty()) return;
+        String htmlFile = pickPrimary(primaryFiles, ".html", ".htm");
+        if (htmlFile == null) {
+            problems.add("Styled web task is missing a primary HTML file.");
+            return;
+        }
+
+        String html;
+        try {
+            html = Files.readString(root.resolve(htmlFile));
+        } catch (Exception e) {
+            problems.add(htmlFile + ": could not be read for styled web verification.");
+            return;
+        }
+
+        problems.addAll(htmlStructureProblems(htmlFile, html));
+
+        String cssFile = pickPrimary(primaryFiles, ".css");
+        List<String> linkedCssOccurrences = extractLinkedAssetOccurrences(html, HTML_LINK_HREF, ".css");
+        Set<String> linkedCssFiles = new LinkedHashSet<>(linkedCssOccurrences);
+        Set<String> existingFileNames = existingFileNames(root);
+        boolean hasInlineStyle = hasNonBlankInlineStyle(html);
+        if (linkedCssFiles.isEmpty()) {
+            if (cssFile != null) {
+                problems.add("HTML does not link CSS file: `" + cssFile + "`");
+            } else if (!hasInlineStyle) {
+                problems.add("Styled web task is missing CSS styling: no stylesheet link, CSS file, or inline <style> was found.");
+            }
+        }
+        for (String linked : linkedCssFiles) {
+            if (!existingFileNames.contains(linked)) {
+                problems.add("HTML references missing CSS file: `" + linked + "`");
+            }
+        }
+        if (hasInlineStyle) {
+            facts.add(htmlFile + ": inline CSS styling is present.");
+        } else if (!linkedCssFiles.isEmpty()) {
+            facts.add(htmlFile + ": linked CSS stylesheet is present.");
+        }
+    }
+
     private static void verifyPartialFunctionalWebWorkspace(
             Path root,
             TaskContract contract,
@@ -2266,6 +2445,16 @@ public final class StaticTaskVerifier {
     private static boolean hasNonBlankInlineScript(String html) {
         if (html == null || html.isBlank()) return false;
         Matcher matcher = HTML_INLINE_SCRIPT.matcher(html);
+        while (matcher.find()) {
+            String content = matcher.group(1);
+            if (content != null && !content.strip().isBlank()) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasNonBlankInlineStyle(String html) {
+        if (html == null || html.isBlank()) return false;
+        Matcher matcher = HTML_INLINE_STYLE.matcher(html);
         while (matcher.find()) {
             String content = matcher.group(1);
             if (content != null && !content.strip().isBlank()) return true;

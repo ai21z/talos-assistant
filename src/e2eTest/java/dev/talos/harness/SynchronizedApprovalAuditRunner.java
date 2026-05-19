@@ -7,6 +7,7 @@ import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
+import dev.talos.core.rag.RagService;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.SessionApprovalPolicy;
 import dev.talos.runtime.JsonSessionStore;
@@ -41,6 +42,8 @@ import dev.talos.tools.impl.MakeDirectoryTool;
 import dev.talos.tools.impl.MovePathTool;
 import dev.talos.tools.impl.ReadFileTool;
 import dev.talos.tools.impl.RenamePathTool;
+import dev.talos.tools.impl.RetrieveTool;
+import dev.talos.tools.impl.RunCommandTool;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -176,7 +179,7 @@ public final class SynchronizedApprovalAuditRunner {
 
         ScriptedApprovalGate gate = new ScriptedApprovalGate(request.approvals());
         WorkspaceSnapshot beforeWorkspace = WorkspaceSnapshot.capture(request.workspace());
-        ToolRegistry registry = standardToolRegistry();
+        ToolRegistry registry = standardToolRegistry(request.config());
         TurnProcessor processor = new TurnProcessor(
                 ModeController.defaultController(),
                 gate,
@@ -236,7 +239,7 @@ public final class SynchronizedApprovalAuditRunner {
         }
     }
 
-    private static ToolRegistry standardToolRegistry() {
+    private static ToolRegistry standardToolRegistry(Config cfg) {
         FileUndoStack undoStack = new FileUndoStack();
         ToolRegistry registry = new ToolRegistry(false);
         registry.register(new ReadFileTool());
@@ -250,6 +253,8 @@ public final class SynchronizedApprovalAuditRunner {
         registry.register(new DeletePathTool());
         registry.register(new GrepTool());
         registry.register(new ListDirTool());
+        registry.register(new RetrieveTool(new RagService(cfg == null ? new Config(null) : cfg)));
+        registry.register(new RunCommandTool());
         return registry;
     }
 

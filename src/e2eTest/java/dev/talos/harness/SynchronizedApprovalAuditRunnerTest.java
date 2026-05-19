@@ -231,6 +231,50 @@ class SynchronizedApprovalAuditRunnerTest {
     }
 
     @Test
+    void run_command_tool_is_available_to_synchronized_audit_and_rejects_missing_gradle_wrapper_before_approval()
+            throws Exception {
+        SynchronizedApprovalAuditRunner.Result result = SynchronizedApprovalAuditRunner.runScripted(
+                new SynchronizedApprovalAuditRunner.Request(
+                        "run command missing wrapper boundary",
+                        workspace,
+                        new Config(null),
+                        "Use talos.run_command with profile gradle_test.",
+                        List.of(
+                                "{\"name\":\"talos.run_command\",\"arguments\":{\"profile\":\"gradle_test\"}}",
+                                "The command was not run because the Gradle wrapper is missing."),
+                        List.of()));
+
+        assertTrue(result.approvals().isEmpty(), result.approvals().toString());
+        assertTrue(result.modelTranscript().contains("Invalid talos.run_command call"),
+                result.modelTranscript());
+        assertTrue(result.modelTranscript().contains("Gradle command profiles require a Gradle wrapper"),
+                result.modelTranscript());
+        assertTrue(result.finalAnswer().contains("Invalid talos.run_command call"), result.finalAnswer());
+        assertTrue(result.finalAnswer().contains("Gradle command profiles require a Gradle wrapper"),
+                result.finalAnswer());
+    }
+
+    @Test
+    void retrieve_tool_is_available_to_synchronized_audit() throws Exception {
+        SynchronizedApprovalAuditRunner.Result result = SynchronizedApprovalAuditRunner.runScripted(
+                new SynchronizedApprovalAuditRunner.Request(
+                        "retrieve no results boundary",
+                        workspace,
+                        new Config(null),
+                        "Retrieve context for PROJECT_PUBLIC_FACT using talos.retrieve.",
+                        List.of(
+                                "{\"name\":\"talos.retrieve\",\"arguments\":{\"query\":\"PROJECT_PUBLIC_FACT\"}}",
+                                "Retrieval returned no results."),
+                        List.of()));
+
+        assertTrue(result.approvals().isEmpty(), result.approvals().toString());
+        assertTrue(result.modelTranscript().contains("[tool_result: talos.retrieve]"), result.modelTranscript());
+        assertTrue(result.modelTranscript().contains("No results found for: PROJECT_PUBLIC_FACT"),
+                result.modelTranscript());
+        assertTrue(result.finalAnswer().contains("Retrieval returned no results"), result.finalAnswer());
+    }
+
+    @Test
     void mutation_approval_denial_does_not_modify_workspace() throws Exception {
         Files.writeString(workspace.resolve("notes.md"), "status=old\n");
 
@@ -565,7 +609,7 @@ class SynchronizedApprovalAuditRunnerTest {
         SynchronizedApprovalAuditMain.RunResult run =
                 SynchronizedApprovalAuditMain.run(artifacts, workspaces);
 
-        assertEquals(21, run.bundles().size());
+        assertEquals(29, run.bundles().size());
         assertTrue(Files.exists(run.summary()), run.summary().toString());
         assertTrue(Files.readString(run.summary()).contains("Synchronized Approval Scripted Audit"));
         assertTrue(Files.readString(run.summary()).contains("Mode: SCRIPTED"));
@@ -589,8 +633,16 @@ class SynchronizedApprovalAuditRunnerTest {
         assertTrue(Files.readString(run.summary()).contains("mutation-append-line-verified"));
         assertTrue(Files.readString(run.summary()).contains("mutation-append-line-full-write-verified"));
         assertTrue(Files.readString(run.summary()).contains("mutation-replacement-verified"));
+        assertTrue(Files.readString(run.summary()).contains("mutation-preserve-rest-replacement-verified"));
+        assertTrue(Files.readString(run.summary()).contains("static-web-selector-script-only-verified"));
         assertTrue(Files.readString(run.summary()).contains("mutation-similar-target-script-only-verified"));
         assertTrue(Files.readString(run.summary()).contains("mutation-forbidden-sibling-target-blocked-before-approval"));
+        assertTrue(Files.readString(run.summary()).contains("workspace-mkdir-approved"));
+        assertTrue(Files.readString(run.summary()).contains("workspace-copy-path-approved"));
+        assertTrue(Files.readString(run.summary()).contains("workspace-move-path-approved"));
+        assertTrue(Files.readString(run.summary()).contains("workspace-rename-path-approved"));
+        assertTrue(Files.readString(run.summary()).contains("workspace-delete-path-approved"));
+        assertTrue(Files.readString(run.summary()).contains("workspace-batch-apply-approved"));
         String appendLineTrace = Files.readString(artifacts
                 .resolve("mutation-append-line-verified")
                 .resolve("traces")
@@ -603,6 +655,20 @@ class SynchronizedApprovalAuditRunnerTest {
         assertTrue(fullWriteTranscript.contains("\"verificationStatus\" : \"PASSED\""), fullWriteTranscript);
         assertTrue(fullWriteTranscript.contains("\"verificationSummary\" : \"Append line verification passed.\""),
                 fullWriteTranscript);
+        String preserveRestTranscript = Files.readString(artifacts
+                .resolve("mutation-preserve-rest-replacement-verified")
+                .resolve("audit-transcript.json"));
+        assertTrue(preserveRestTranscript.contains("\"verificationStatus\" : \"PASSED\""),
+                preserveRestTranscript);
+        assertTrue(preserveRestTranscript.contains("\"verificationSummary\" : \"Replacement verification passed.\""),
+                preserveRestTranscript);
+        String staticWebTranscript = Files.readString(artifacts
+                .resolve("static-web-selector-script-only-verified")
+                .resolve("audit-transcript.json"));
+        assertTrue(staticWebTranscript.contains("\"verificationStatus\" : \"PASSED\""),
+                staticWebTranscript);
+        assertTrue(staticWebTranscript.contains("Static web coherence checks passed"),
+                staticWebTranscript);
         String denialBypassTranscript = Files.readString(artifacts
                 .resolve("mutation-denial-bypass-attempt-blocked")
                 .resolve("audit-transcript.json"));
@@ -664,6 +730,35 @@ class SynchronizedApprovalAuditRunnerTest {
                 .resolve("workspace")
                 .resolve("diff.txt"));
         assertTrue(proposalDiff.contains("(no file changes detected)"), proposalDiff);
+        assertTrue(Files.isDirectory(workspaces
+                .resolve("workspace-mkdir-approved")
+                .resolve("docs")
+                .resolve("reports")));
+        assertEquals("copy source\n",
+                Files.readString(workspaces
+                        .resolve("workspace-copy-path-approved")
+                        .resolve("source-copy.md")));
+        assertFalse(Files.exists(workspaces
+                .resolve("workspace-move-path-approved")
+                .resolve("move-me.md")));
+        assertEquals("move source\n",
+                Files.readString(workspaces
+                        .resolve("workspace-move-path-approved")
+                        .resolve("moved.md")));
+        assertFalse(Files.exists(workspaces
+                .resolve("workspace-rename-path-approved")
+                .resolve("rename-me.md")));
+        assertEquals("rename source\n",
+                Files.readString(workspaces
+                        .resolve("workspace-rename-path-approved")
+                        .resolve("renamed.md")));
+        assertFalse(Files.exists(workspaces
+                .resolve("workspace-delete-path-approved")
+                .resolve("delete-me.tmp")));
+        assertEquals("batch source\n",
+                Files.readString(workspaces
+                        .resolve("workspace-batch-apply-approved")
+                        .resolve("source-copy.md")));
         assertTrue(run.findings().isEmpty(), run.findings().toString());
         for (SynchronizedApprovalAuditRunner.ArtifactBundle bundle : run.bundles()) {
             assertTrue(Files.exists(bundle.summary()), bundle.summary().toString());

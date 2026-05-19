@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.talos.core.security.Redactor;
+import dev.talos.runtime.context.ContextLedgerCapture;
+import dev.talos.runtime.context.ContextLedgerSnapshot;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.runtime.trace.TraceRedactor;
 import dev.talos.runtime.task.TaskContract;
@@ -74,6 +76,7 @@ public final class PromptDebugInspector {
         out.append("- ").append(targetLabel(contract)).append(": ").append(joinOrNone(contract)).append('\n');
         out.append("- ").append(targetCoverageLabel(contract)).append(": ").append(expectedCoverage).append('\n');
         out.append("- Exact-literal coverage: ").append(exactCoverage).append("\n\n");
+        appendContextLedger(out);
 
         if ("OLLAMA_HTTP_BODY".equals(snapshot.stage())) {
             out.append("> Provider shape: Ollama merges system messages into one top-level `system` field. ")
@@ -101,6 +104,20 @@ public final class PromptDebugInspector {
         }
 
         return out.toString();
+    }
+
+    private static void appendContextLedger(StringBuilder out) {
+        ContextLedgerSnapshot ledger = ContextLedgerCapture.snapshot();
+        if (ledger == null || ledger.summary().totalItems() <= 0) {
+            return;
+        }
+        out.append("## Context Ledger\n\n");
+        out.append("- Items: ").append(ledger.summary().totalItems()).append('\n');
+        out.append("- Sources: ").append(ledger.summary().bySource()).append('\n');
+        out.append("- Execution boundaries: ").append(ledger.summary().byBoundary()).append('\n');
+        out.append("- Privacy classes: ").append(ledger.summary().byPrivacyClass()).append('\n');
+        out.append("- Decisions: ").append(ledger.summary().byDecision()).append('\n');
+        out.append("- Reasons: ").append(ledger.summary().byReason()).append("\n\n");
     }
 
     public static String redactedProviderBodyJson(PromptDebugSnapshot snapshot) {

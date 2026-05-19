@@ -225,7 +225,8 @@ When designing or modifying Talos, prioritize:
 15. Good error recovery.
 16. Auditability and logs.
 17. Clear CLI/REPL UX.
-18. Regression tests for discovered failures.
+18. Terminal UI evidence for prompts, answer panes, approval windows, progress lines, and ASCII/Unicode fallback.
+19. Regression tests for discovered failures.
 
 Do not optimize for demo magic. Optimize for trust.
 
@@ -366,6 +367,7 @@ Examples:
 ```powershell
 .\gradlew.bat test --tests "dev.talos.runtime.ToolCallLoopTest"
 .\gradlew.bat test --tests "dev.talos.tools.impl.FileEditToolTest"
+.\gradlew.bat test --tests "dev.talos.cli.ui.*" --tests "dev.talos.cli.repl.RenderEngineTest"
 .\gradlew.bat e2eTest --tests "dev.talos.harness.Phase0ScenariosTest"
 ```
 
@@ -702,6 +704,8 @@ Preferred Windows command:
 
 Then run the repository's normal TalosBench, scenario, smoke, privacy, mutation, status, trace, approval-gate, and command-profile packs if they exist on the branch. Do not invent task names. Inspect Gradle tasks, scripts, docs, or existing CI configuration before naming commands.
 
+Do not treat redirected-stdin TalosBench approval input as synchronized approval evidence. Approval-sensitive TalosBench cases that require configured approval responses should be run through the synchronized approval harness or a manual/PTY transcript. The PowerShell TalosBench runner may allow explicit exploratory piped approval input, but that output is not release-gate synchronized approval evidence.
+
 For release-relevant capability/privacy audits, run the targeted runtime artifact canary scan after the live audit when artifact directories exist:
 
 ```powershell
@@ -808,6 +812,7 @@ It must cover:
 * command support boundaries
 * workspace organization tools
 * session/model/help/tools/workspace/status/debug/trace/prompt-debug commands
+* CLI UI rendering: banner/compact banner, prompt, answer panes, streaming output, approval prompts, progress lines, root help, ASCII fallback, Unicode rendering, redirected stdin/stdout mode, and true PTY/JLine mode
 * prompt construction and current-turn capability frame
 * tool-surface narrowing
 * model answer truthfulness and evidence grounding

@@ -1,0 +1,58 @@
+package dev.talos.cli.prompt;
+
+import dev.talos.runtime.context.ContextDecision;
+import dev.talos.runtime.context.ContextItem;
+import dev.talos.runtime.context.ContextItemSource;
+import dev.talos.runtime.context.ContextLedgerCapture;
+import dev.talos.runtime.context.ExecutionBoundary;
+import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.PromptDebugSnapshot;
+import dev.talos.tools.ToolContentMetadata;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+
+import java.time.Instant;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+class PromptDebugInspectorContextLedgerTest {
+
+    @AfterEach
+    void clear() {
+        ContextLedgerCapture.clear();
+    }
+
+    @Test
+    void promptDebugShowsContextLedgerBoundaryMetadataWithoutRawPrivateText() {
+        ContextLedgerCapture.begin("trc-prompt-ledger", 11);
+        ContextLedgerCapture.record(
+                ContextItem.fromText(
+                        ContextItemSource.TOOL_RESULT,
+                        ExecutionBoundary.LOCAL_WORKSPACE,
+                        ToolContentMetadata.ContentPrivacyClass.PRIVATE_DOCUMENT_EXTRACTED_TEXT,
+                        "docs/private-report.pdf",
+                        "Patient Name: Eleni Nikolaou",
+                        64),
+                ContextDecision.withheldFromModel("PRIVATE_DOCUMENT_LOCAL_DISPLAY_ONLY"));
+
+        PromptDebugSnapshot snapshot = new PromptDebugSnapshot(
+                "CHAT_REQUEST",
+                "scripted",
+                "model",
+                false,
+                Instant.parse("2026-05-19T12:00:00Z"),
+                List.of(ChatMessage.system("sys"), ChatMessage.user("read docs/private-report.pdf")),
+                List.of(),
+                null,
+                "");
+
+        String formatted = PromptDebugInspector.format(snapshot);
+
+        assertTrue(formatted.contains("## Context Ledger"));
+        assertTrue(formatted.contains("LOCAL_WORKSPACE"));
+        assertTrue(formatted.contains("WITHHELD_FROM_MODEL"));
+        assertTrue(formatted.contains("PRIVATE_DOCUMENT_EXTRACTED_TEXT"));
+        assertFalse(formatted.contains("Eleni Nikolaou"), formatted);
+    }
+}

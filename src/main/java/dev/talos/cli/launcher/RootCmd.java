@@ -7,7 +7,7 @@ import picocli.CommandLine;
         name = "talos",
         mixinStandardHelpOptions = true,
         versionProvider = ManifestVersionProvider.class,
-        description = "Talos - Local Knowledge Engine",
+        description = "Talos - local-first workspace operator",
         subcommands = {
                 SetupCmd.class, RagIndexCmd.class, RagAskCmd.class, RunCmd.class,
                 NetCmd.class, TopLevelStatusCmd.class, VersionCmd.class, DiagnoseCmd.class,
@@ -15,6 +15,9 @@ import picocli.CommandLine;
         }
 )
 public class RootCmd implements Runnable {
+
+    @CommandLine.Option(names = {"-h", "--help"}, usageHelp = true, description = "Show this help message and exit")
+    boolean helpRequested;
 
     @CommandLine.Option(names = {"-v", "--version"}, versionHelp = true, description = "Show version information")
     boolean versionRequested;

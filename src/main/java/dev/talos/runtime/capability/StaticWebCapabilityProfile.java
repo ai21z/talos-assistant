@@ -28,7 +28,11 @@ public final class StaticWebCapabilityProfile {
         if (contract == null) return false;
         if (hasOnlyExplicitNonWebMutationTargets(contract)) return false;
         String request = contract.originalUserRequest();
-        if (shouldCheckSelectorCoherence(request) || looksBroadWebTask(contract)) return true;
+        if (shouldCheckSelectorCoherence(request)
+                || looksBroadWebTask(contract)
+                || looksStyledWebTask(contract, mutatedPaths)) {
+            return true;
+        }
         return looksGenericMutationFollowUp(request) && mutatesSmallWebSurface(workspace, mutatedPaths);
     }
 
@@ -68,6 +72,15 @@ public final class StaticWebCapabilityProfile {
                 || lower.contains("interactive")
                 || lower.contains("functioning")
                 || lower.contains("functional");
+    }
+
+    public static boolean looksStyledWebTask(TaskContract contract, Set<String> mutatedPaths) {
+        if (contract == null || !contract.mutationRequested()) return false;
+        String request = contract.originalUserRequest();
+        if (request == null || request.isBlank()) return false;
+        String lower = request.toLowerCase(Locale.ROOT);
+        if (!mentionsVisualDesignIntent(lower)) return false;
+        return mentionsWebSurface(lower) || mutatesHtmlSurface(mutatedPaths);
     }
 
     public static boolean isSmallWebFile(String target) {
@@ -250,16 +263,7 @@ public final class StaticWebCapabilityProfile {
         if (request == null || request.isBlank()) return false;
         String lower = request.toLowerCase(Locale.ROOT);
         boolean mutatingTask = contract.mutationRequested();
-        boolean mentionsWebSurface = lower.contains("website")
-                || lower.contains("web app")
-                || lower.contains("webpage")
-                || lower.contains("web page")
-                || lower.contains("index.html")
-                || lower.contains(".html")
-                || lower.contains(" html")
-                || lower.startsWith("html")
-                || lower.contains(" site")
-                || lower.contains(" page");
+        boolean mentionsWebSurface = mentionsWebSurface(lower);
         boolean mentionsStyle = lower.contains("css")
                 || lower.contains(".css")
                 || lower.contains("stylesheet")
@@ -287,6 +291,40 @@ public final class StaticWebCapabilityProfile {
                 || mentionsForm(lower);
         return mutatingTask && mentionsWebSurface
                 && ((mentionsStyle && mentionsScript) || asksFunctional);
+    }
+
+    private static boolean mentionsWebSurface(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        return lower.contains("website")
+                || lower.contains("web app")
+                || lower.contains("webpage")
+                || lower.contains("web page")
+                || lower.contains("index.html")
+                || lower.contains(".html")
+                || lower.contains(" html")
+                || lower.startsWith("html")
+                || lower.contains(" site")
+                || lower.contains(" page");
+    }
+
+    private static boolean mentionsVisualDesignIntent(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        return lower.contains("styling")
+                || lower.contains("stylesheet")
+                || lower.contains("modern")
+                || lower.contains("visual")
+                || lower.contains("design")
+                || lower.contains("synthwave")
+                || lower.contains("neon")
+                || lower.contains("theme")
+                || lower.contains("polished")
+                || lower.contains("good looking")
+                || lower.contains("cool looking")
+                || containsWholeWord(lower, "style");
+    }
+
+    private static boolean mutatesHtmlSurface(Set<String> mutatedPaths) {
+        return mutatedPaths != null && mutatedPaths.stream().anyMatch(path -> hasExtension(path, ".html", ".htm"));
     }
 
     private static boolean hasOnlyExplicitNonWebMutationTargets(TaskContract contract) {

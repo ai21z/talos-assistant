@@ -35,6 +35,26 @@ class TemplatePlaceholderGuardTest {
     }
 
     @Test
+    void leadingToolResultPlaceholderWithAppendedContentIsFlagged() {
+        assertTrue(TemplatePlaceholderGuard.looksLikeTemplatePlaceholder(
+                "<content from talos.read_file>Release gate note"));
+        assertTrue(TemplatePlaceholderGuard.looksLikeTemplatePlaceholder(
+                "<content from read_file>\nRelease gate note"));
+        assertTrue(TemplatePlaceholderGuard.looksLikeTemplatePlaceholder(
+                "<content of README.md>Release gate note"));
+        assertTrue(TemplatePlaceholderGuard.looksLikeTemplatePlaceholder(
+                "<read_file_content>\nRelease gate note"));
+    }
+
+    @Test
+    void leadingBracedTemplateVariableWithAppendedContentIsFlagged() {
+        assertTrue(TemplatePlaceholderGuard.looksLikeTemplatePlaceholder(
+                "{previous_content}\nRelease gate note"));
+        assertTrue(TemplatePlaceholderGuard.looksLikeTemplatePlaceholder(
+                "{current_file_content}Release gate note"));
+    }
+
+    @Test
     void realFileContentIsNotFlagged() {
         // Tiny but real stubs — the guard must not false-positive these.
         assertFalse(TemplatePlaceholderGuard.looksLikeTemplatePlaceholder("<html></html>"),
@@ -50,6 +70,12 @@ class TemplatePlaceholderGuardTest {
                 "multi-line content must pass through");
         assertFalse(TemplatePlaceholderGuard.looksLikeTemplatePlaceholder("Hello <name>, welcome."),
                 "placeholder inside prose — not a bare placeholder");
+        assertFalse(TemplatePlaceholderGuard.looksLikeTemplatePlaceholder("<p>content from talos.read_file</p>"),
+                "real tagged content must not be treated as a placeholder");
+        assertFalse(TemplatePlaceholderGuard.looksLikeTemplatePlaceholder("{\"name\":\"Talos\"}"),
+                "JSON object content must not be treated as a placeholder");
+        assertFalse(TemplatePlaceholderGuard.looksLikeTemplatePlaceholder("{ color: red; }"),
+                "CSS block content must not be treated as a placeholder");
     }
 
     @Test

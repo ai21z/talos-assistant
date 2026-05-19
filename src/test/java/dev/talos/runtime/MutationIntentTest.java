@@ -25,6 +25,7 @@ class MutationIntentTest {
                 "Can you make me a simple BMI calculator webpage here?",
                 "I am not technical, I just want a page I can open and use. Can you make it?",
                 "Can you fix the files in this folder for me?",
+                "Great! now can you create that site?",
                 "Move public.txt to archive/public.txt.",
                 "Copy docs/plan.md to docs/archive/plan.md.",
                 "Rename old.txt to new.txt.",

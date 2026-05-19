@@ -31,10 +31,12 @@ class SynchronizedCliPtyManualAuditMainTest {
         Path status = packet.statusJson();
         Path transcript = packet.transcriptTemplate();
         Path allowlist = packet.allowlist();
+        Path resultTemplate = artifacts.resolve("PTY-MANUAL-AUDIT-RESULT-TEMPLATE.json");
 
         assertTrue(Files.isRegularFile(runbook), runbook.toString());
         assertTrue(Files.isRegularFile(status), status.toString());
         assertTrue(Files.isRegularFile(transcript), transcript.toString());
+        assertTrue(Files.isRegularFile(resultTemplate), resultTemplate.toString());
         assertTrue(Files.isRegularFile(workspace.resolve(".env")), "fixture .env should exist");
 
         String runbookText = Files.readString(runbook);
@@ -42,6 +44,10 @@ class SynchronizedCliPtyManualAuditMainTest {
         assertTrue(runbookText.contains("true PTY/JLine coverage: manual-required"), runbookText);
         assertTrue(runbookText.contains("Do not run this through Gradle redirected stdin"), runbookText);
         assertTrue(runbookText.contains("talos run --no-logo --root"), runbookText);
+        assertTrue(runbookText.contains("/show README.md"), runbookText);
+        assertTrue(runbookText.contains("answer pane"), runbookText);
+        assertTrue(runbookText.contains("approval trust window"), runbookText);
+        assertTrue(runbookText.contains("route/progress line"), runbookText);
         assertTrue(runbookText.contains("/last trace"), runbookText);
         assertTrue(runbookText.contains("/prompt-debug save"), runbookText);
         assertTrue(runbookText.contains("-PartifactScanAllowlist=" + workspace.resolve(".env").toAbsolutePath().normalize()),
@@ -54,6 +60,18 @@ class SynchronizedCliPtyManualAuditMainTest {
         assertTrue(statusText.contains("\"status\" : \"MANUAL_REQUIRED\""), statusText);
         assertTrue(statusText.contains("\"automatedPtyCoverage\" : false"), statusText);
         assertFalse(statusText.contains("FILE_DISCOVERED_CANARY_PTY_MANUAL"), statusText);
+
+        String templateText = Files.readString(transcript);
+        assertTrue(templateText.contains("Prompt rendered cleanly"), templateText);
+        assertTrue(templateText.contains("Answer pane rendered cleanly"), templateText);
+        assertTrue(templateText.contains("Approval trust window rendered cleanly"), templateText);
+        assertTrue(templateText.contains("Route/progress line rendered cleanly"), templateText);
+
+        String resultTemplateText = Files.readString(resultTemplate);
+        assertTrue(resultTemplateText.contains("\"status\" : \"NOT_RUN\""), resultTemplateText);
+        assertTrue(resultTemplateText.contains("\"realInteractiveTerminal\" : false"), resultTemplateText);
+        assertTrue(resultTemplateText.contains("\"redirectedOrIdePipe\" : true"), resultTemplateText);
+        assertFalse(resultTemplateText.contains("FILE_DISCOVERED_CANARY_PTY_MANUAL"), resultTemplateText);
 
         List<Path> allowlisted = List.of(Path.of(Files.readString(allowlist).strip()));
         assertTrue(ArtifactCanaryScanner.scanRuntimeArtifacts(List.of(artifacts), List.of()).isEmpty());

@@ -1034,7 +1034,11 @@ class StaticTaskVerifierTest {
         TaskVerificationResult result = StaticTaskVerifier.verify(
                 workspace,
                 "Make script.js fix the selector bug by changing .missing-button to .cta-button.",
-                loopResult(List.of(successfulEdit("script.js", VerificationStatus.PASS))),
+                loopResult(List.of(successfulExactEdit(
+                        "script.js",
+                        ".missing-button",
+                        ".cta-button",
+                        VerificationStatus.PASS))),
                 0);
 
         assertEquals(TaskVerificationStatus.PASSED, result.status(), result.problems().toString());
@@ -1065,7 +1069,11 @@ class StaticTaskVerifierTest {
         TaskVerificationResult result = StaticTaskVerifier.verify(
                 workspace,
                 "Make script.js fix the selector bug by changing .missing-button to .cta-button.",
-                loopResult(List.of(successfulEdit("script.js", VerificationStatus.PASS))),
+                loopResult(List.of(successfulExactEdit(
+                        "script.js",
+                        ".missing-button",
+                        ".cta-button",
+                        VerificationStatus.PASS))),
                 0);
 
         assertEquals(TaskVerificationStatus.PASSED, result.status(), result.problems().toString());
@@ -1097,6 +1105,51 @@ class StaticTaskVerifierTest {
                 result.problems().toString());
         assertTrue(result.facts().stream()
                 .anyMatch(f -> f.contains("HTML/CSS/JS selector coherence passed")), result.facts().toString());
+    }
+
+    @Test
+    void staticWebSelectorReplacementFailsWhenFullWriteCorruptsReadbackBody() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                <head><link rel="stylesheet" href="styles.css"></head>
+                <body>
+                  <button class="cta-button">Run</button>
+                  <p id="result">Waiting</p>
+                  <script src="script.js"></script>
+                </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), ".cta-button { color: red; }\n");
+        String previous = """
+                document.querySelector('.missing-button').addEventListener('click', () => {
+                  document.querySelector('#result').textContent = 'Clicked';
+                });
+                """;
+        String corrupted = """
+                document.querySelector('.cta-button').addEventListener('click', () => {
+                  document.querySelector('#result').textC;
+                });
+                """;
+        Files.writeString(workspace.resolve("script.js"), corrupted);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Read script.js, then fix the selector bug by changing .missing-button to .cta-button. "
+                        + "Do not edit scripts.js.",
+                loopResult(List.of(successfulFullWrite(
+                        "script.js",
+                        previous,
+                        corrupted,
+                        VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.facts().toString());
+        assertTrue(result.summary().contains("Replacement verification failed"), result.summary());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("script.js")
+                                && p.contains("replacement preservation changed content beyond the requested text")),
+                result.problems().toString());
     }
 
     @Test
@@ -1148,6 +1201,92 @@ class StaticTaskVerifierTest {
         assertEquals(TaskVerificationStatus.PASSED, result.status(), result.problems().toString());
         assertFalse(result.problems().stream()
                         .anyMatch(p -> p.contains("rough-brief.txt: expected target was not successfully mutated")),
+                result.problems().toString());
+    }
+
+    @Test
+    void styledWebpageRequestFailsWhenHtmlHasNoInlineOrLinkedStyle() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html lang="en">
+                  <head>
+                    <meta charset="utf-8">
+                    <title>Neon Harbor</title>
+                  </head>
+                  <body>
+                    <main>
+                      <h1>Neon Harbor</h1>
+                      <p>Tour dates and mailing list signup.</p>
+                    </main>
+                  </body>
+                </html>
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Create a good modern synthwave style webpage in index.html.",
+                loopResult(List.of(successfulWrite("index.html", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.facts().toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("Styled web task is missing CSS styling")),
+                result.problems().toString());
+    }
+
+    @Test
+    void styledWebpageRequestPassesWhenHtmlHasInlineStyle() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html lang="en">
+                  <head>
+                    <meta charset="utf-8">
+                    <title>Neon Harbor</title>
+                    <style>
+                      body { background: #12002a; color: #f8f8ff; }
+                      main { max-width: 48rem; margin: 4rem auto; }
+                    </style>
+                  </head>
+                  <body>
+                    <main>
+                      <h1>Neon Harbor</h1>
+                      <p>Tour dates and mailing list signup.</p>
+                    </main>
+                  </body>
+                </html>
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Create a good modern synthwave style webpage in index.html.",
+                loopResult(List.of(successfulWrite("index.html", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.problems().toString());
+        assertTrue(result.facts().stream()
+                        .anyMatch(f -> f.contains("Styled web checks passed")),
+                result.facts().toString());
+    }
+
+    @Test
+    void transcriptStyleFollowUpFailsWhenOnlyHtmlWithoutStylingWasMutated() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head><title>Synthwave Band</title></head>
+                  <body><main><h1>Synthwave Band</h1></main></body>
+                </html>
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "make the rest files please according to txt. I need a good modern synthwave style",
+                loopResult(List.of(successfulWrite("index.html", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.facts().toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("Styled web task is missing CSS styling")),
                 result.problems().toString());
     }
 
@@ -1657,6 +1796,161 @@ class StaticTaskVerifierTest {
         assertTrue(result.summary().contains("Replacement verification failed"), result.summary());
         assertTrue(result.problems().stream()
                 .anyMatch(p -> p.contains("script.js: replacement new text was not observed")));
+    }
+
+    @Test
+    void replacementPreserveRestPassesWhenFullWriteEvidenceOnlyReplacesRequestedText() throws Exception {
+        String previous = """
+                <html>
+                <head><title>Old Portal</title></head>
+                <body><p>Keep this.</p></body>
+                </html>
+                """;
+        String updated = previous.replace("Old Portal", "New Portal");
+        Files.writeString(workspace.resolve("index.html"), updated);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Change the page title from Old Portal to New Portal in index.html and preserve the rest.",
+                loopResult(List.of(successfulFullWrite(
+                        "index.html",
+                        previous,
+                        updated,
+                        VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status());
+        assertTrue(result.summary().contains("Replacement verification passed"), result.summary());
+        assertTrue(result.facts().stream()
+                .anyMatch(f -> f.contains("index.html: replacement preservation matched prior content")));
+    }
+
+    @Test
+    void replacementPreserveRestToleratesSingleTerminalNewlineDifferenceFromReadEvidence() throws Exception {
+        String previous = """
+                <html>
+                <head><title>Old Portal</title></head>
+                <body><p>Keep this.</p></body>
+                </html>
+                """;
+        String updated = previous.replace("Old Portal", "New Portal");
+        String updatedWithoutTerminalNewline = updated.substring(0, updated.length() - 1);
+        Files.writeString(workspace.resolve("index.html"), updatedWithoutTerminalNewline);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Change the page title from Old Portal to New Portal in index.html and preserve the rest.",
+                loopResult(List.of(successfulFullWrite(
+                        "index.html",
+                        previous,
+                        updatedWithoutTerminalNewline,
+                        VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status());
+        assertTrue(result.summary().contains("Replacement verification passed"), result.summary());
+        assertTrue(result.facts().stream()
+                .anyMatch(f -> f.contains("index.html: replacement preservation matched prior content")));
+    }
+
+    @Test
+    void replacementPreserveRestFailsWhenFullWriteEvidenceChangesOtherContent() throws Exception {
+        String previous = """
+                <html>
+                <head><title>Old Portal</title></head>
+                <body><p>Keep this.</p></body>
+                </html>
+                """;
+        String updated = """
+                <html>
+                <head><title>New Portal</title></head>
+                <body><p>Changed.</p></body>
+                </html>
+                """;
+        Files.writeString(workspace.resolve("index.html"), updated);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Change the page title from Old Portal to New Portal in index.html and preserve the rest.",
+                loopResult(List.of(successfulFullWrite(
+                        "index.html",
+                        previous,
+                        updated,
+                        VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.summary().contains("Replacement verification failed"), result.summary());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("index.html: replacement preservation changed content beyond the requested text")),
+                result.problems().toString());
+    }
+
+    @Test
+    void replacementPreserveRestFailsWhenWriteFileHasNoPriorContentEvidence() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <html>
+                <head><title>New Portal</title></head>
+                <body><p>Keep this.</p></body>
+                </html>
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Change the page title from Old Portal to New Portal in index.html and preserve the rest.",
+                loopResult(List.of(successfulWrite("index.html", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.summary().contains("Replacement verification failed"), result.summary());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("index.html: talos.write_file cannot prove preserve-rest replacement")),
+                result.problems().toString());
+    }
+
+    @Test
+    void replacementPreserveRestPassesWhenExactEditEvidenceOnlyReplacesRequestedText() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <head><title>New Portal</title></head>
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Change the page title from Old Portal to New Portal in index.html and preserve the rest.",
+                loopResult(List.of(successfulExactEdit(
+                        "index.html",
+                        "<head><title>Old Portal</title></head>",
+                        "<head><title>New Portal</title></head>",
+                        VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status());
+        assertTrue(result.summary().contains("Replacement verification passed"), result.summary());
+        assertTrue(result.facts().stream()
+                .anyMatch(f -> f.contains("index.html: exact edit evidence preserved content beyond requested replacement")));
+    }
+
+    @Test
+    void replacementPreserveRestFailsWhenExactEditEvidenceChangesOtherContent() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <head data-extra="changed"><title>New Portal</title></head>
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Change the page title from Old Portal to New Portal in index.html and preserve the rest.",
+                loopResult(List.of(successfulExactEdit(
+                        "index.html",
+                        "<head><title>Old Portal</title></head>",
+                        "<head data-extra=\"changed\"><title>New Portal</title></head>",
+                        VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.summary().contains("Replacement verification failed"), result.summary());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("index.html: replacement preservation exact edit changed content beyond the requested text")),
+                result.problems().toString());
     }
 
     @Test

@@ -100,6 +100,22 @@ public final class LoopState {
         }
         if (calls == null || calls.isEmpty()) return false;
         if (pendingActionObligation.kind()
+                == PendingActionObligation.Kind.EXPECTED_TARGETS_REMAINING) {
+            String detail = invalidExpectedTargetMutationDetail(calls, pendingActionObligation.targets());
+            if (detail == null) {
+                return false;
+            }
+            PendingActionObligation obligation = pendingActionObligation;
+            pendingActionObligation = null;
+            obligation.recordBreached(detail);
+            failureDecision = dev.talos.runtime.failure.FailureDecision.stop(
+                    FailureAction.ASK_USER,
+                    obligation.failureReason(detail));
+            currentText = obligation.failureAnswer(detail);
+            currentNativeCalls = List.of();
+            return true;
+        }
+        if (pendingActionObligation.kind()
                 == PendingActionObligation.Kind.OLD_STRING_MISS_TARGET_REPAIR) {
             if (containsMutatingCallForPendingTarget(calls, pendingActionObligation.targets())) {
                 return false;
@@ -178,6 +194,55 @@ public final class LoopState {
                     reason,
                     "STATIC_SELECTOR_REPAIR_PRESERVED_MISSING_SELECTOR");
             return true;
+        }
+        return false;
+    }
+
+    private static String invalidExpectedTargetMutationDetail(
+            List<ToolCall> calls,
+            List<String> targets
+    ) {
+        Set<String> normalizedTargets = normalizedExpectedProgressTargets(targets);
+        if (normalizedTargets.isEmpty() || calls == null || calls.isEmpty()) {
+            return null;
+        }
+        List<String> rejectedMutations = new ArrayList<>();
+        for (ToolCall call : calls) {
+            if (call == null || !ToolCallSupport.isMutatingTool(call.toolName())) continue;
+            String path = ToolCallSupport.normalizePath(ToolCallSupport.resolvePathHint(call));
+            if (!path.isBlank() && matchesPendingExpectedTarget(call.toolName(), path, normalizedTargets)) {
+                continue;
+            }
+            String name = call.toolName() == null || call.toolName().isBlank()
+                    ? "(unknown mutating tool)"
+                    : call.toolName();
+            rejectedMutations.add(path.isBlank() ? name : name + "(" + path + ")");
+        }
+        if (rejectedMutations.isEmpty()) {
+            return null;
+        }
+        String targetList = targets == null || targets.isEmpty()
+                ? "(unknown)"
+                : String.join(", ", targets);
+        return "expected-target progress required mutation of remaining target(s): "
+                + targetList + ", but the model attempted: "
+                + String.join(", ", rejectedMutations)
+                + ". No approval was requested and no additional file was changed.";
+    }
+
+    private static boolean matchesPendingExpectedTarget(
+            String toolName,
+            String candidatePath,
+            Set<String> normalizedTargets
+    ) {
+        String candidate = normalizeScopedTarget(candidatePath);
+        if (candidate.isBlank()) return false;
+        if (normalizedTargets.contains(candidate)) return true;
+        if (!isMkdirTool(toolName)) return false;
+        for (String target : normalizedTargets) {
+            if (target.startsWith(candidate + "/")) {
+                return true;
+            }
         }
         return false;
     }
@@ -358,6 +423,39 @@ public final class LoopState {
             if (!path.isBlank()) normalized.add(path);
         }
         return normalized;
+    }
+
+    private static Set<String> normalizedExpectedProgressTargets(List<String> targets) {
+        if (targets == null || targets.isEmpty()) return Set.of();
+        Set<String> normalized = new HashSet<>();
+        for (String target : targets) {
+            String path = normalizeScopedTarget(target);
+            if (!path.isBlank()) normalized.add(path);
+        }
+        return normalized;
+    }
+
+    private static String normalizeScopedTarget(String path) {
+        if (path == null) return "";
+        String normalized = ToolCallSupport.normalizePath(path)
+                .strip()
+                .replaceAll("[`'\"),.;:!?\\]]+$", "");
+        while (normalized.startsWith("./")) {
+            normalized = normalized.substring(2);
+        }
+        while (normalized.length() > 1 && normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        return normalized.toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private static boolean isMkdirTool(String toolName) {
+        String normalized = ToolAliasPolicy.localCanonicalName(toolName);
+        return "mkdir".equals(normalized)
+                || "make_dir".equals(normalized)
+                || "make_directory".equals(normalized)
+                || "create_dir".equals(normalized)
+                || "create_directory".equals(normalized);
     }
 
     private static String firstPresentParam(ToolCall call, String... keys) {

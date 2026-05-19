@@ -78,19 +78,39 @@ question list:
 pwsh .\tools\manual-eval\new-t67-audit-workspace.ps1
 ```
 
-Run approval-sensitive cases only when you intentionally want to pipe the
-configured approval inputs:
+Approval-sensitive cases are not piped by default, even when
+`-IncludeManualRequired` is present. A case with configured approval inputs is
+reported as `SYNC_REQUIRED` unless it is run through a synchronized approval
+runner or the operator explicitly opts into the old redirected-stdin behavior.
+
+For release evidence, use the synchronized approval harness instead of piping
+approval input:
+
+```powershell
+./gradlew.bat runSynchronizedApprovalAudit `
+  "-PapprovalAuditMode=live" `
+  "-PapprovalAuditConfig=<config.yaml>" `
+  "-PapprovalAuditArtifactsRoot=local/manual-testing/<audit-id>" `
+  "-PapprovalAuditWorkspacesRoot=local/manual-workspaces/<audit-id>" `
+  --no-daemon
+```
+
+Use redirected approval input only for exploratory debugging, and label the
+evidence as non-synchronized:
 
 ```powershell
 pwsh .\tools\manual-eval\run-talosbench.ps1 `
   -CaseId mutation-create-bmi,literal-exact-write `
-  -IncludeManualRequired
+  -IncludeManualRequired `
+  -AllowPipedApprovalInputs
 ```
 
 Approval-sensitive cases are marked `MANUAL_REQUIRED` by default because CLI
-approval prompts can be fragile when fully scripted. For critical candidate
-evidence, prefer manual runs where a human watches the approval prompt and
-records the exact choice.
+approval prompts can be fragile when fully scripted. With
+`-IncludeManualRequired` but without `-AllowPipedApprovalInputs`, they become
+`SYNC_REQUIRED` and the script exits non-zero. For critical candidate evidence,
+prefer synchronized Java harness runs or manual runs where a human watches the
+approval prompt and records the exact choice.
 
 Use `approvalInputsByPrompt` for multi-turn cases where only specific prompts
 need scripted approval input. The runner appends repeated `/last trace` commands
@@ -141,8 +161,8 @@ The summary table includes:
 case id | status | category | blocker? | transcript path | notes
 ```
 
-`BLOCKER` exits with code `2`. `FAIL` exits with code `1`. `PASS`,
-`PASS_WITH_FOLLOWUP`, and `MANUAL_REQUIRED` do not fail the script.
+`BLOCKER` exits with code `2`. `FAIL` and `SYNC_REQUIRED` exit with code `1`.
+`PASS`, `PASS_WITH_FOLLOWUP`, and `MANUAL_REQUIRED` do not fail the script.
 
 ## Case Schema
 

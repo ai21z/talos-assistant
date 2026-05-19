@@ -7,6 +7,8 @@ import dev.talos.cli.repl.SessionState;
 import dev.talos.cli.repl.SlashCommandCompleter;
 import dev.talos.cli.repl.TalosBootstrap;
 import dev.talos.cli.ui.AnsiColor;
+import dev.talos.cli.ui.CliTheme;
+import dev.talos.cli.ui.PromptRenderer;
 import dev.talos.cli.ui.TalosBanner;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
@@ -222,12 +224,7 @@ public class RunCmd implements Runnable, SessionState {
     /* ===== UI ===== */
 
     private static String buildPrompt(String mode, boolean styled) {
-        if (!styled) {
-            return "talos [" + mode + "] > ";
-        }
-        return AnsiColor.VIOLET + "talos " + AnsiColor.DIM + "["
-                + AnsiColor.BLUE + mode + AnsiColor.DIM + "]"
-                + AnsiColor.RESET + " > ";
+        return PromptRenderer.render(mode, styled, CliTheme.current());
     }
 
     static Terminal buildTerminal(boolean interactiveConsole) throws IOException {

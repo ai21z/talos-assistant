@@ -10,6 +10,13 @@ const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const publicFiles = ["index.html", "src/main.js", "src/styles.css"];
 const publicText = () => publicFiles.map(read).join("\n");
 
+function currentTalosVersion() {
+  const props = readFileSync(join(root, "..", "gradle.properties"), "utf8");
+  const match = props.match(/^talosVersion=(.+)$/m);
+  assert.ok(match, "gradle.properties must define talosVersion");
+  return match[1].trim();
+}
+
 function walkFiles(dir) {
   if (!existsSync(dir)) return [];
   return readdirSync(dir).flatMap((entry) => {
@@ -44,7 +51,7 @@ describe("Talos landing page static contract", () => {
     assert.deepEqual(mapFiles, []);
   });
 
-  it("has one descriptive h1 and keeps Talos as product, not just ceremony", () => {
+  it("uses one descriptive h1 grounded in local-first workspace identity", () => {
     const html = read("index.html");
     const h1Matches = Array.from(html.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi));
     assert.equal(h1Matches.length, 1);
@@ -54,27 +61,117 @@ describe("Talos landing page static contract", () => {
     assert.notEqual(h1Text.toUpperCase(), "TALOS");
   });
 
-  it("uses concrete hero copy and beta CTA hierarchy", () => {
+  it("uses concrete hero copy and honest CTAs", () => {
     const html = read("index.html").replace(/\s+/g, " ");
-    const hero = html.slice(html.indexOf('id="product"'), html.indexOf('id="workflow"'));
+    const hero = html.slice(html.indexOf('id="product"'), html.indexOf('id="contract"'));
 
     for (const copy of [
-      "reads the workspace",
-      "proposes bounded changes",
-      "asks before mutation",
-      "checks the result",
+      "Inspects before acting",
+      "Asks before mutation",
+      "Verifies before claiming success",
+      "Approved writes only",
       "leaves a trace",
       "No hosted workspace handoff",
-      "Get beta build",
+      "View on GitHub",
+      "Read the execution contract",
     ]) {
       assert.match(hero, new RegExp(escapeRegExp(copy), "i"));
     }
 
-    assert.doesNotMatch(hero, />\s*Setup models\s*</i);
-    assert.doesNotMatch(hero, /runtime-owned outcomes/i);
-    assert.doesNotMatch(hero, /tool surface/i);
-    assert.doesNotMatch(hero, /contract defines intent/i);
-    assert.doesNotMatch(hero, /prompt-debug evidence/i);
+    // Honest CTA: no placeholder-beta button must remain.
+    assert.doesNotMatch(hero, /Get beta build/i);
+    assert.doesNotMatch(hero, /data-beta-placeholder/i);
+  });
+
+  it("uses the locked Talos icon artifact, not the old inline SVG mark", () => {
+    const html = read("index.html");
+    assert.ok(existsSync(join(root, "design", "talos-icon.png")), "talos-icon.png missing");
+    assert.match(html, /design\/talos-icon\.png/);
+    assert.doesNotMatch(html, /data:image\/svg\+xml/i);
+    assert.doesNotMatch(html, /<svg\b/i);
+  });
+
+  it("uses the locked startup terminal screenshot in the hero", () => {
+    const html = read("index.html");
+    assert.ok(existsSync(join(root, "design", "img.png")), "img.png missing");
+    const hero = html.slice(html.indexOf('id="product"'), html.indexOf('id="contract"'));
+    const heroText = hero.replace(/\s+/g, " ");
+    assert.match(hero, /<img\b[^>]*class="startup-terminal-image"[^>]*src="\.\/design\/img\.png"/);
+    assert.match(hero, /alt="[^"]*Talos startup terminal screen/i);
+    assert.doesNotMatch(hero, /<pre\b[^>]*class="banner"/i);
+
+    // The screenshot's textual content must remain represented for accessibility and review.
+    for (const copy of [
+      "TALOS",
+      `v${currentTalosVersion()}`,
+      "llama_cpp/gpt-oss-20b",
+      "llama.cpp (managed)",
+      "ready (5 chunks)",
+      "ask before mutation",
+    ]) {
+      assert.match(heroText, new RegExp(escapeRegExp(copy)));
+    }
+  });
+
+  it("ships the directional execution contract, not circular diagrams", () => {
+    const html = read("index.html");
+    const css = read("src/styles.css");
+
+    // Directional contract section exists with all six steps in order.
+    const contract = html.slice(html.indexOf('id="contract"'), html.indexOf('id="cli"'));
+    const stepOrder = ["Classify", "Inspect", "Approve", "Mutate", "Verify", "Trace"];
+    let cursor = 0;
+    for (const step of stepOrder) {
+      const idx = contract.indexOf(`>${step}<`, cursor);
+      assert.ok(idx >= 0, `contract step "${step}" missing or out of order`);
+      cursor = idx;
+    }
+
+    // The orbit/sentinel/medallion vocabulary must not return.
+    for (const banned of [
+      "cycle-diagram",
+      "process-orbits",
+      "cycle-node",
+      "cycle-core",
+      "sentinel-frame",
+      "sentinel-emblem",
+      "radial-grid",
+      "footer-medallion",
+      "greek-key",
+    ]) {
+      assert.doesNotMatch(html, new RegExp(escapeRegExp(banned), "i"), `removed class ${banned} reappeared in html`);
+      assert.doesNotMatch(css, new RegExp(escapeRegExp(banned), "i"), `removed class ${banned} reappeared in css`);
+    }
+  });
+
+  it("declares the trust table with allow/ask/deny state tokens", () => {
+    const html = read("index.html");
+    const trust = html.slice(html.indexOf('id="trust"'), html.indexOf('id="use-cases"'));
+    assert.match(trust, /state--allow/);
+    assert.match(trust, /state--ask/);
+    assert.match(trust, /state--deny/);
+    for (const surface of [
+      "Workspace files (read)",
+      "Protected paths (read)",
+      "File writes / edits",
+      "Workspace ops",
+      "Command execution",
+      "Private mode",
+      "Unsupported binary documents",
+      "Trace and prompt-debug",
+    ]) {
+      assert.match(trust, new RegExp(escapeRegExp(surface)));
+    }
+  });
+
+  it("publishes a docs gateway with at least seven repo-linked cards", () => {
+    const html = read("index.html");
+    const docs = html.slice(html.indexOf('id="docs"'));
+    const docCards = Array.from(docs.matchAll(/<a\s+class="doc-card[^"]*"[^>]*href="([^"]+)"/g));
+    assert.ok(docCards.length >= 7, `expected ≥7 doc cards, found ${docCards.length}`);
+    for (const [, href] of docCards) {
+      assert.match(href, /^https:\/\/github\.com\/ai21z\/talos-cli/, `doc card href ${href} not in canonical repo`);
+    }
   });
 
   it("keeps real command examples and canonical runtime tool names", () => {
@@ -87,6 +184,7 @@ describe("Talos landing page static contract", () => {
       "/models",
       "/workspace",
       "/last trace",
+      "/prompt-debug",
       "talos.list_dir",
       "talos.read_file",
       "talos.grep",
@@ -99,11 +197,18 @@ describe("Talos landing page static contract", () => {
     }
   });
 
-  it("does not introduce fake downloads, external runtime assets, or hype claims", () => {
+  it("does not introduce fake downloads or unsupported claims", () => {
     const text = publicText();
-    assert.doesNotMatch(text, /https?:\/\//i);
+
+    // No download attributes, no archive/install hrefs.
     assert.doesNotMatch(text, /href="[^"]*\.(?:zip|msi|exe|dmg|pkg|tar\.gz)"/i);
-    assert.doesNotMatch(text, /download\s*=/i);
+    assert.doesNotMatch(text, /\sdownload\s*=/i);
+
+    // External hrefs must only target the canonical Talos repo.
+    const externalHrefs = Array.from(text.matchAll(/href="(https?:\/\/[^"]+)"/g), (m) => m[1]);
+    for (const href of externalHrefs) {
+      assert.match(href, /^https:\/\/github\.com\/ai21z\/talos-cli/, `unexpected external href: ${href}`);
+    }
 
     for (const misleading of [
       "swarm",
@@ -111,12 +216,15 @@ describe("Talos landing page static contract", () => {
       "autonomous workforce",
       "replaces developers",
       "one-click cloud agent",
-      "retrieve_context",
-      "gradle-test",
+      "AI-powered",
+      "agentic",
+      "browse the web",
       "Every action is verified",
       "verified write + /last trace",
       "--local-only",
       "No telemetry",
+      "Get beta build",
+      "Beta download placeholder",
     ]) {
       assert.doesNotMatch(text, new RegExp(escapeRegExp(misleading), "i"));
     }
@@ -133,7 +241,7 @@ describe("Talos landing page static contract", () => {
   it("labels all copy buttons uniquely and accessibly", () => {
     const html = read("index.html");
     const copyButtons = Array.from(html.matchAll(/<button\b[^>]*class="[^"]*\bcopy-button\b[^"]*"[^>]*>/g));
-    assert.ok(copyButtons.length >= 6);
+    assert.ok(copyButtons.length >= 5);
 
     const labels = copyButtons.map((match) => {
       const attr = match[0].match(/\saria-label="([^"]+)"/);
@@ -144,10 +252,11 @@ describe("Talos landing page static contract", () => {
     assert.ok(labels.every((label) => /^Copy .+ command$/i.test(label)), labels.join(", "));
   });
 
-  it("uses accessible terminal and decorative art semantics", () => {
+  it("uses accessible terminal semantics", () => {
     const html = read("index.html");
     assert.doesNotMatch(html, /<pre[^>]*aria-live=/i);
     assert.match(html, /id="terminal-status"[\s\S]*aria-live="polite"/i);
+    // No SVG inside aria-hidden parents should claim role="img" or aria-label.
     assert.doesNotMatch(html, /aria-hidden="true"[\s\S]{0,500}<svg[^>]*(?:role="img"|aria-label=)/i);
   });
 
@@ -159,9 +268,28 @@ describe("Talos landing page static contract", () => {
     assert.match(css, /transition(?:-duration)?:\s*none\s*!important|transition-duration:\s*0\.01ms\s*!important/);
     assert.match(css, /animation(?:-duration)?:\s*none\s*!important|animation-duration:\s*0\.01ms\s*!important/);
     assert.match(css, /\.js\s+\.reveal[\s\S]*opacity:\s*1/);
+    assert.doesNotMatch(css, /\.js\s+\.reveal\s*\{[\s\S]*?opacity:\s*0/);
   });
 
-  it("keeps vanilla JavaScript behavior for tabs, copy, and beta placeholder CTA", () => {
+  it("uses semantic lane glyphs that match SemanticGlyphSet.java safe Unicode", () => {
+    const js = read("src/main.js");
+    // glyphs: bullet, arrow, success, warning, error, rail
+    for (const glyph of ["•", "→", "✓", "!", "│"]) {
+      assert.ok(js.includes(glyph), `lane glyph ${glyph} missing from main.js`);
+    }
+    for (const glyph of ["┌", "└"]) {
+      assert.ok(js.includes(glyph), `answer/approval pane glyph ${glyph} missing from main.js`);
+    }
+    // companion-only glyph that current code does not ship
+    assert.ok(!js.includes("◐"), "main.js uses ◐ which is not part of SemanticGlyphSet");
+    assert.ok(!js.includes("╭"), "main.js uses rounded answer pane glyphs not shipped by SemanticGlyphSet");
+    assert.ok(!js.includes("╰"), "main.js uses rounded answer pane glyphs not shipped by SemanticGlyphSet");
+    assert.match(js, /approval required/);
+    // canonical prompt
+    assert.match(js, /talos.*\[auto\]\s*&gt;|talos.*\[auto\]\s*>/);
+  });
+
+  it("keeps vanilla JavaScript behavior for tabs and clipboard", () => {
     const js = read("src/main.js");
     assert.match(js, /terminalStates/);
     assert.match(js, /ArrowRight/);
@@ -169,8 +297,9 @@ describe("Talos landing page static contract", () => {
     assert.match(js, /Home/);
     assert.match(js, /End/);
     assert.match(js, /navigator\.clipboard\.writeText/);
-    assert.match(js, /data-beta-placeholder/);
-    assert.match(js, /Beta download placeholder\. Build artifacts will be added later\./);
+    // Placeholder beta toast must be gone.
+    assert.doesNotMatch(js, /data-beta-placeholder/);
+    assert.doesNotMatch(js, /Beta download placeholder/);
     assert.doesNotMatch(js, /React|Vue|createApp|tailwind/i);
   });
 });

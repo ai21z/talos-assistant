@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<!-- saved from url=(0023)http://127.0.0.1:17872/ -->
+<html lang="en"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Talos semantic terminal UI companion</title>
+<style>
+  :root { --bg:#090c0d; --panel:#0d1214; --line:#5a5a5a; --muted:#8b8f91; --text:#e4e0d7; --bronze:#a77b3a; --cyan:#5fafcf; --green:#75b879; --amber:#d7af5f; --red:#d75f5f; --violet:#a78bfa; }
+  *{box-sizing:border-box} body{margin:0;background:radial-gradient(circle at top left,#11191b 0,var(--bg) 46%);color:var(--text);font:15px/1.45 ui-monospace,SFMono-Regular,Consolas,"Cascadia Mono","Cascadia Code",monospace} main{max-width:1180px;margin:0 auto;padding:28px} h1{margin:0 0 8px;color:var(--bronze);font-size:24px;letter-spacing:0}.sub{margin:0 0 22px;color:var(--muted);max-width:980px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}.card{border:1px solid var(--line);background:color-mix(in srgb,var(--panel) 92%,black);border-radius:6px;overflow:hidden}.card h2{margin:0;padding:10px 14px;font-size:14px;color:var(--bronze);border-bottom:1px solid var(--line);background:#0b0f10}pre{margin:0;padding:14px 16px;white-space:pre-wrap;overflow-wrap:anywhere}.note{padding:12px 14px;color:var(--muted);border-top:1px solid #303638;font-size:13px}.term{background:#050606;min-height:360px}.bronze{color:var(--bronze)}.cyan{color:var(--cyan)}.green{color:var(--green)}.amber{color:var(--amber)}.red{color:var(--red)}.muted{color:var(--muted)}.violet{color:var(--violet)}.wide{grid-column:1/-1}.legend{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin-top:18px}.pill{border:1px solid #343b3d;border-radius:5px;padding:8px 10px;background:#0c1113;color:var(--muted)}.sw{display:inline-block;width:10px;height:10px;margin-right:6px;border-radius:50%;vertical-align:-1px}@media(max-width:900px){.grid{grid-template-columns:1fr}.legend{grid-template-columns:repeat(2,minmax(0,1fr))}}
+</style>
+</head>
+<body cz-shortcut-listen="true">
+<main>
+  <h1>Talos semantic line-based terminal UI</h1>
+  <p class="sub">Visual companion for the first planning decision: stop styling by mode/rendering path and instead style by semantic lane: user input, progress, trust decision, answer, and outcome evidence.</p>
+  <section class="grid">
+    <article class="card"><h2>Current failure mode: visual behavior leaks from implementation path</h2><pre class="term"><span class="violet">talos</span> <span class="cyan">[auto]</span> &gt; fix the failing test
+
+<span class="muted">[auto -&gt; edit]</span>
+<span class="cyan">⠋ Thinking</span>
+<span class="cyan">&gt;</span> Using read_file <span class="muted">src/test/ExampleTest.java</span>
+<span class="green">&gt;</span> read_file done
+<span class="amber">!</span> Verification warning <span class="muted">no focused test selected</span>
+
+<span class="cyan">  |</span> I found the failing assertion and updated the expected value.
+<span class="cyan">  |</span> Run the focused test to verify.
+
+<span class="violet">talos</span> <span class="cyan">[ask]</span> &gt; explain the same issue
+This answer streams without the same answer rail, so the user reads a mode/render-path difference instead of a semantic difference.</pre><div class="note">The bug is not “not enough symbols.” It is that the rendering layer does not own one consistent turn grammar.</div></article>
+    <article class="card"><h2>Target: one turn grammar, independent of mode</h2><pre class="term"><span class="violet">talos</span> <span class="cyan">[auto]</span> &gt; fix the failing test
+
+<span class="cyan">◐</span> route <span class="muted">edit · workspace bounded</span>
+<span class="cyan">→</span> inspect <span class="muted">src/test/ExampleTest.java</span>
+<span class="green">✓</span> read <span class="muted">1 file · 42 ms</span>
+<span class="amber">!</span> approval <span class="muted">write src/test/ExampleTest.java</span>
+<span class="green">✓</span> verify <span class="muted">ExampleTest passed · 1.8 s</span>
+
+<span class="bronze">╭─ answer ─────────────────────────────────────────────</span>
+<span class="bronze">│</span> Fixed the failing assertion in <span class="cyan">ExampleTest</span> and verified it with
+<span class="bronze">│</span> the focused Gradle test. No other files were changed.
+<span class="bronze">╰─ turn 12 · 8.4 s · /last trace</span>
+
+<span class="violet">talos</span> <span class="cyan">[ask]</span> &gt; explain the same issue
+
+<span class="bronze">╭─ answer ─────────────────────────────────────────────</span>
+<span class="bronze">│</span> The failure came from stale expected output, not runtime behavior.
+<span class="bronze">╰─ turn 13 · 2.1 s · /last trace</span></pre><div class="note">Mode can still exist in the prompt/status, but it must not control whether the answer looks like an answer.</div></article>
+    <article class="card wide"><h2>Candidate discipline: semantic lanes and tokens</h2><pre class="term"><span class="muted">lane</span>             <span class="muted">meaning</span>                         <span class="muted">visual contract</span>
+<span class="violet">prompt</span>           user input affordance           lowercase talos, stable, no box
+<span class="cyan">progress</span>         active work / routing / tools      short one-line events, collapsible later
+<span class="amber">trust</span>            approval / risk / denial          boxed modal, explicit action/target/risk
+<span class="bronze">answer</span>           model/user-facing result          consistent pane/rail in all modes
+<span class="green">evidence</span>         verification / trace / timing      compact footer, never theatrical
+<span class="red">failure</span>          blocked / failed / unsupported     distinct, honest, no success phrasing
+
+<span class="muted">default glyph policy</span>: safe Unicode + ASCII fallback. Rich glyph sets can be opt-in after PTY/font testing.</pre></article>
+  </section>
+  <section class="legend"><div class="pill"><span class="sw" style="background:var(--bronze)"></span>brand/title</div><div class="pill"><span class="sw" style="background:var(--cyan)"></span>active work</div><div class="pill"><span class="sw" style="background:var(--green)"></span>success</div><div class="pill"><span class="sw" style="background:var(--amber)"></span>approval/risk</div><div class="pill"><span class="sw" style="background:var(--red)"></span>failure</div><div class="pill"><span class="sw" style="background:var(--muted)"></span>metadata</div></section>
+</main>
+
+</body></html>

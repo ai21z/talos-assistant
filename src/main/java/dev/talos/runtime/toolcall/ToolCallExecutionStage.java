@@ -4,6 +4,11 @@ import dev.talos.runtime.TurnProcessor;
 import dev.talos.runtime.TurnSourceEvidenceCapture;
 import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
+import dev.talos.runtime.context.ContextDecision;
+import dev.talos.runtime.context.ContextItem;
+import dev.talos.runtime.context.ContextLedgerCapture;
+import dev.talos.runtime.expectation.AppendLineExpectation;
+import dev.talos.runtime.expectation.TaskExpectationResolver;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.runtime.policy.ProtectedPathAliasNormalizer;
 import dev.talos.runtime.policy.ProtectedPathPolicy;
@@ -260,6 +265,42 @@ public final class ToolCallExecutionStage {
                 continue;
             }
 
+            String appendLineDiagnostic = appendLinePreApprovalDiagnostic(
+                    effective,
+                    state,
+                    currentTaskContract,
+                    pathHint);
+            if (appendLineDiagnostic != null) {
+                state.failedCalls++;
+                failuresThisIter++;
+                recordFailure(state, effective.toolName(), pathHint);
+                ToolResult result = ToolResult.fail(ToolError.invalidParams(appendLineDiagnostic));
+                emitToolResult(effective.toolName(), result);
+                LocalTurnTraceCapture.recordActionObligation(
+                        "APPEND_LINE_WRITE_PRESERVATION",
+                        "FAILED",
+                        appendLineDiagnostic,
+                        "APPEND_LINE_WRITE_BEFORE_VALID_PRESERVATION");
+                state.toolOutcomes.add(new dev.talos.runtime.ToolCallLoop.ToolOutcome(
+                        effective.toolName(),
+                        pathHint,
+                        false,
+                        true,
+                        false,
+                        "",
+                        appendLineDiagnostic,
+                        null,
+                        ToolError.INVALID_PARAMS,
+                        workspaceOperationPlan));
+                appendResultMessage(state, parsed.useNativePath(), i,
+                        ToolCallSupport.formatToolResult(effective, result));
+                LOG.debug("Blocked append-line {} for {} before approval: {}",
+                        effective.toolName(),
+                        SafeLogFormatter.value(pathHint),
+                        SafeLogFormatter.text(appendLineDiagnostic));
+                continue;
+            }
+
             String readBeforeWriteNudge = null;
             if (!strict && "talos.edit_file".equals(effective.toolName()) && pathHint != null) {
                 if (!state.pathsReadThisTurn.contains(ToolCallSupport.normalizePath(pathHint))) {
@@ -294,6 +335,13 @@ public final class ToolCallExecutionStage {
                         ? rawResult
                         : ProtectedContentPolicy.sanitizeToolResult(rawResult);
             }
+            recordContextLedgerDecision(
+                    effective.toolName(),
+                    pathHint,
+                    rawResult,
+                    result,
+                    successfulProtectedRead,
+                    preserveApprovedProtectedReadResult);
             emitToolResult(effective.toolName(), result);
             if (result.success()) {
                 successesThisIter++;
@@ -432,6 +480,31 @@ public final class ToolCallExecutionStage {
         }
     }
 
+    private static void recordContextLedgerDecision(
+            String toolName,
+            String pathHint,
+            ToolResult rawResult,
+            ToolResult modelResult,
+            boolean successfulProtectedRead,
+            boolean preserveApprovedProtectedReadResult
+    ) {
+        if (rawResult == null) return;
+        ContextDecision decision;
+        if (!rawResult.success()) {
+            decision = ContextDecision.excludedByPrivacyOrTrustPolicy("TOOL_RESULT_ERROR");
+        } else if (successfulProtectedRead && !preserveApprovedProtectedReadResult) {
+            decision = ContextDecision.withheldFromModel("APPROVED_PROTECTED_READ_LOCAL_DISPLAY_ONLY");
+        } else if (rawResult.contentMetadata() != null
+                && !rawResult.contentMetadata().modelHandoffAllowed()) {
+            decision = ContextDecision.withheldFromModel(rawResult.contentMetadata().decisionReason());
+        } else if (modelResult != null && modelResult.success()) {
+            decision = ContextDecision.includedInModel("TOOL_RESULT_MODEL_HANDOFF");
+        } else {
+            decision = ContextDecision.excludedByPrivacyOrTrustPolicy("TOOL_RESULT_NOT_INCLUDED");
+        }
+        ContextLedgerCapture.record(ContextItem.fromToolResult(toolName, pathHint, rawResult), decision);
+    }
+
     private static String toolOutcomeSummary(String toolName, String output) {
         if (!"talos.list_dir".equals(toolName)) {
             return ToolCallSupport.firstSentenceSummary(output);
@@ -442,6 +515,71 @@ public final class ToolCallExecutionStage {
         }
         return value.substring(0, LIST_DIR_EVIDENCE_SUMMARY_CHARS)
                 + "\n... (tool outcome summary truncated)";
+    }
+
+    private static String appendLinePreApprovalDiagnostic(
+            ToolCall call,
+            LoopState state,
+            TaskContract contract,
+            String pathHint
+    ) {
+        if (call == null || contract == null || pathHint == null || pathHint.isBlank()) return null;
+        String canonicalTool = ToolAliasPolicy.localCanonicalName(call.toolName());
+        if (!"write_file".equals(canonicalTool)) return null;
+        AppendLineExpectation expectation = appendLineExpectationForPath(contract, pathHint);
+        if (expectation == null) return null;
+        String content = firstParam(call, "content", "text", "body", "data", "file_content");
+        if (content == null) return null;
+        String previousContent = priorReadContentForPath(state, pathHint);
+        if (previousContent == null) {
+            return "append-line write_file for " + pathHint
+                    + " requires complete same-turn read evidence before approval.";
+        }
+        if (appendLineContentPreservesReadback(previousContent, content, expectation.expectedLine())) {
+            return null;
+        }
+        return "append-line write_file for " + pathHint
+                + " does not preserve the complete same-turn readback and append exactly `"
+                + expectation.expectedLine() + "`.";
+    }
+
+    private static AppendLineExpectation appendLineExpectationForPath(TaskContract contract, String pathHint) {
+        if (contract == null || pathHint == null || pathHint.isBlank()) return null;
+        String target = normalizePath(pathHint);
+        for (var expectation : TaskExpectationResolver.resolve(contract)) {
+            if (expectation instanceof AppendLineExpectation appendLine
+                    && normalizePath(appendLine.targetPath()).equals(target)) {
+                return appendLine;
+            }
+        }
+        return null;
+    }
+
+    private static boolean appendLineContentPreservesReadback(
+            String previousContent,
+            String content,
+            String appendedLine
+    ) {
+        if (previousContent == null || content == null || appendedLine == null || appendedLine.isBlank()) {
+            return false;
+        }
+        String previous = normalizeLineEndings(previousContent);
+        String actual = normalizeLineEndings(content);
+        String line = normalizeLineEndings(appendedLine).strip();
+        if (line.isBlank() || line.contains("\n")) return false;
+        String separator = previous.endsWith("\n") || previous.isEmpty() ? "" : "\n";
+        String expected = previous + separator + line + "\n";
+        String expectedWithoutTerminalNewline = stripSingleTerminalNewline(expected);
+        return actual.equals(expected) || actual.equals(expectedWithoutTerminalNewline);
+    }
+
+    private static String normalizeLineEndings(String value) {
+        return value == null ? "" : value.replace("\r\n", "\n").replace('\r', '\n');
+    }
+
+    private static String stripSingleTerminalNewline(String value) {
+        if (value == null || value.isEmpty()) return value;
+        return value.endsWith("\n") ? value.substring(0, value.length() - 1) : value;
     }
 
     private static dev.talos.runtime.ToolCallLoop.MutationEvidence mutationEvidence(

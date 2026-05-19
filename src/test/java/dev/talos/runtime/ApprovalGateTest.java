@@ -46,9 +46,9 @@ class ApprovalGateTest {
                         + "    target: .env");
 
         String text = out.toString(StandardCharsets.UTF_8);
-        assertTrue(text.contains("Action: protected read: talos.read_file"), text);
-        assertTrue(text.contains("Risk:   sensitive read"), text);
-        assertFalse(text.contains("Risk:   write"), text);
+        assertTrue(text.contains("Action  protected read: talos.read_file"), text);
+        assertTrue(text.contains("Risk    sensitive read"), text);
+        assertFalse(text.contains("Risk    write"), text);
     }
 }
 

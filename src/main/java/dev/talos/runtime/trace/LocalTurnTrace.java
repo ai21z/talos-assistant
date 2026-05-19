@@ -1,6 +1,7 @@
 package dev.talos.runtime.trace;
 
 import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.context.ContextLedgerSummary;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -31,6 +32,7 @@ public record LocalTurnTrace(
         CheckpointSummary checkpoint,
         OutcomeSummary outcome,
         List<WarningSummary> warnings,
+        ContextLedgerSummary contextLedgerSummary,
         RedactionSummary redaction
 ) {
     public LocalTurnTrace {
@@ -51,6 +53,7 @@ public record LocalTurnTrace(
         checkpoint = checkpoint == null ? CheckpointSummary.empty() : checkpoint;
         outcome = outcome == null ? OutcomeSummary.empty() : outcome;
         warnings = warnings == null ? List.of() : List.copyOf(warnings);
+        contextLedgerSummary = contextLedgerSummary == null ? ContextLedgerSummary.empty() : contextLedgerSummary;
         redaction = redaction == null ? RedactionSummary.defaultMode() : redaction;
     }
 
@@ -266,6 +269,7 @@ public record LocalTurnTrace(
         private CheckpointSummary checkpoint = CheckpointSummary.empty();
         private OutcomeSummary outcome = OutcomeSummary.empty();
         private final List<WarningSummary> warnings = new ArrayList<>();
+        private ContextLedgerSummary contextLedgerSummary = ContextLedgerSummary.empty();
         private TextSummary prompt = TextSummary.empty();
         private TextSummary assistant = TextSummary.empty();
         private TraceRedactionMode redactionMode = TraceRedactionMode.DEFAULT;
@@ -364,6 +368,11 @@ public record LocalTurnTrace(
             return this;
         }
 
+        public Builder contextLedgerSummary(ContextLedgerSummary summary) {
+            this.contextLedgerSummary = summary == null ? ContextLedgerSummary.empty() : summary;
+            return this;
+        }
+
         public Builder redactionMode(TraceRedactionMode mode) {
             this.redactionMode = mode == null ? TraceRedactionMode.DEFAULT : mode;
             return this;
@@ -389,6 +398,7 @@ public record LocalTurnTrace(
                     checkpoint,
                     outcome,
                     warnings,
+                    contextLedgerSummary,
                     new RedactionSummary(
                             redactionMode,
                             false,

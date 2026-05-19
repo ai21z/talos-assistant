@@ -39,6 +39,7 @@ final class SynchronizedCliProcessDriver implements AutoCloseable {
     private final AtomicReference<IOException> readFailure = new AtomicReference<>();
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private final Thread readerThread;
+    private int searchStart;
 
     private SynchronizedCliProcessDriver(InputStream stdout, OutputStream stdin, BooleanSupplier processAlive) {
         this.stdout = Objects.requireNonNull(stdout, "stdout");
@@ -78,13 +79,13 @@ final class SynchronizedCliProcessDriver implements AutoCloseable {
     private void await(String marker, Duration timeout) throws IOException {
         long deadline = System.nanoTime() + Math.max(1L, timeout.toNanos());
         while (System.nanoTime() < deadline) {
-            if (contains(marker)) return;
+            if (advancePastNext(marker)) return;
             if (!processAlive.getAsBoolean()) {
                 throw new IOException("Expected output marker before process exited: " + marker
                         + "\nTranscript tail:\n" + transcriptTail());
             }
             IOException failure = readFailure.get();
-            if (failure != null && !contains(marker)) {
+            if (failure != null && !hasNext(marker)) {
                 throw new IOException("Output reader failed while waiting for marker: " + marker
                         + "\nTranscript tail:\n" + transcriptTail(), failure);
             }
@@ -99,9 +100,18 @@ final class SynchronizedCliProcessDriver implements AutoCloseable {
                 + "\nTranscript tail:\n" + transcriptTail());
     }
 
-    private boolean contains(String marker) {
+    private boolean advancePastNext(String marker) {
         synchronized (transcript) {
-            return transcript.indexOf(marker) >= 0;
+            int index = transcript.indexOf(marker, searchStart);
+            if (index < 0) return false;
+            searchStart = index + marker.length();
+            return true;
+        }
+    }
+
+    private boolean hasNext(String marker) {
+        synchronized (transcript) {
+            return transcript.indexOf(marker, searchStart) >= 0;
         }
     }
 
