@@ -15,6 +15,7 @@ import dev.talos.runtime.expectation.TaskExpectation;
 import dev.talos.runtime.expectation.TaskExpectationResolver;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.toolcall.ToolAliasPolicy;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.tools.VerificationStatus;
@@ -557,7 +558,7 @@ public final class StaticTaskVerifier {
         for (ToolCallLoop.ToolOutcome outcome : outcomes) {
             if (outcome == null
                     || !outcome.success()
-                    || !"talos.edit_file".equals(outcome.toolName())
+                    || !"edit_file".equals(ToolAliasPolicy.localCanonicalName(outcome.toolName()))
                     || outcome.mutationEvidence() == null
                     || !outcome.mutationEvidence().exactEditReplacement()) {
                 continue;
@@ -607,7 +608,7 @@ public final class StaticTaskVerifier {
 
     private static boolean hasExactEditEvidence(ToolCallLoop.ToolOutcome outcome) {
         return outcome != null
-                && "talos.edit_file".equals(outcome.toolName())
+                && "edit_file".equals(ToolAliasPolicy.localCanonicalName(outcome.toolName()))
                 && outcome.mutationEvidence() != null
                 && outcome.mutationEvidence().exactEditReplacement();
     }
@@ -833,11 +834,23 @@ public final class StaticTaskVerifier {
     ) {
         if (successfulMutations == null || successfulMutations.isEmpty()) return true;
         boolean sawRelevantExactEdit = false;
+        boolean sawRelevantFullWrite = false;
         for (ToolCallLoop.ToolOutcome outcome : successfulMutations) {
             if (outcome != null
                     && outcome.success()
-                    && "talos.write_file".equals(outcome.toolName())
+                    && "write_file".equals(ToolAliasPolicy.localCanonicalName(outcome.toolName()))
                     && normalizePath(outcome.pathHint()).equals(pathHint)) {
+                if (outcome.mutationEvidence() != null
+                        && outcome.mutationEvidence().fullWriteReplacement()) {
+                    sawRelevantFullWrite = true;
+                    ToolCallLoop.MutationEvidence evidence = outcome.mutationEvidence();
+                    if (!exactEditAppendsOnlyRequestedLine(evidence.oldString(), evidence.newString(), expectedLine)) {
+                        problems.add(pathHint
+                                + ": full-file write did not preserve prior content before appended line.");
+                        return false;
+                    }
+                    continue;
+                }
                 problems.add(pathHint
                         + ": talos.write_file cannot prove append-only preservation for an append-line request; "
                         + "use exact talos.edit_file append evidence.");
@@ -845,7 +858,7 @@ public final class StaticTaskVerifier {
             }
             if (outcome == null
                     || !outcome.success()
-                    || !"talos.edit_file".equals(outcome.toolName())
+                    || !"edit_file".equals(ToolAliasPolicy.localCanonicalName(outcome.toolName()))
                     || !normalizePath(outcome.pathHint()).equals(pathHint)
                     || outcome.mutationEvidence() == null
                     || !outcome.mutationEvidence().exactEditReplacement()) {
@@ -860,6 +873,9 @@ public final class StaticTaskVerifier {
         }
         if (sawRelevantExactEdit) {
             facts.add(pathHint + ": exact edit evidence preserved prior content before appended line.");
+        }
+        if (sawRelevantFullWrite) {
+            facts.add(pathHint + ": full-write evidence preserved prior content before appended line.");
         }
         return true;
     }

@@ -37,6 +37,8 @@ public final class TaskContractResolver {
 
     private static final Pattern LEAVE_TARGET_ALONE_SPAN = Pattern.compile(
             "(?i)\\bleave\\s+(.{0,120}?)\\s+alone\\b");
+    private static final Pattern DIRECT_NOT_TARGET_PREFIX = Pattern.compile(
+            "(?is)(?:^|[\\s,;])not\\s+$");
 
     private static final Pattern EXTENSIONLESS_TEXT_TARGET = Pattern.compile(
             "(?i)\\b(?:edit|overwrite|replace|update|write|create|set)\\s+`?"
@@ -468,7 +470,22 @@ public final class TaskContractResolver {
         addTargetsFromSpanMatches(out, NEGATED_TARGET_SPAN.matcher(userRequest));
         addTargetsFromSpanMatches(out, AVOID_TARGET_SPAN.matcher(userRequest));
         addTargetsFromSpanMatches(out, LEAVE_TARGET_ALONE_SPAN.matcher(userRequest));
+        addDirectNotTargets(out, userRequest);
         return Set.copyOf(out);
+    }
+
+    private static void addDirectNotTargets(Set<String> out, String userRequest) {
+        Matcher targetMatcher = TARGET_FILE.matcher(userRequest);
+        while (targetMatcher.find()) {
+            int start = targetMatcher.start(1);
+            String prefix = userRequest.substring(Math.max(0, start - 24), start)
+                    .toLowerCase(Locale.ROOT)
+                    .replaceAll("[`'\"]+$", "");
+            if (DIRECT_NOT_TARGET_PREFIX.matcher(prefix).find()) {
+                String target = normalizeTarget(targetMatcher.group(1));
+                if (!target.isBlank()) out.add(target);
+            }
+        }
     }
 
     private static void addTargetsFromSpanMatches(Set<String> out, Matcher spanMatcher) {

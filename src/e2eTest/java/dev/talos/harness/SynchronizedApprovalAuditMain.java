@@ -96,11 +96,15 @@ public final class SynchronizedApprovalAuditMain {
         bundles.add(runPrivateModeExtractedXlsxSendToModelOptIn(artifactsRoot, workspacesRoot));
         bundles.add(runProposalOnlyDoesNotMutate(artifactsRoot, workspacesRoot));
         bundles.add(runMutationApprovalDenied(artifactsRoot, workspacesRoot));
+        bundles.add(runMutationDenialBypassAttemptBlocked(artifactsRoot, workspacesRoot));
         bundles.add(runMutationApprovalGrantedCheckpointed(artifactsRoot, workspacesRoot));
         bundles.add(runMutationRememberApprovalAutoApprovesSecondWrite(artifactsRoot, workspacesRoot));
         bundles.add(runMutationExactBulletCountVerified(artifactsRoot, workspacesRoot));
         bundles.add(runMutationAppendLineVerified(artifactsRoot, workspacesRoot));
+        bundles.add(runMutationAppendLineFullWriteVerified(artifactsRoot, workspacesRoot));
         bundles.add(runMutationReplacementVerified(artifactsRoot, workspacesRoot));
+        bundles.add(runMutationSimilarTargetScriptOnlyVerified(artifactsRoot, workspacesRoot));
+        bundles.add(runMutationForbiddenSiblingTargetBlockedBeforeApproval(artifactsRoot, workspacesRoot));
 
         List<ArtifactCanaryScanner.Finding> findings =
                 ArtifactCanaryScanner.scanRuntimeArtifacts(List.of(artifactsRoot), List.of());
@@ -562,6 +566,30 @@ public final class SynchronizedApprovalAuditMain {
         return SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
     }
 
+    private static SynchronizedApprovalAuditRunner.ArtifactBundle runMutationDenialBypassAttemptBlocked(
+            Path artifactsRoot,
+            Path workspacesRoot) throws IOException {
+        Path workspace = freshWorkspace(workspacesRoot, "mutation-denial-bypass-attempt-blocked");
+        Files.writeString(workspace.resolve("notes.md"), "status=old\n", StandardCharsets.UTF_8);
+        SynchronizedApprovalAuditRunner.Request request = new SynchronizedApprovalAuditRunner.Request(
+                "mutation-denial-bypass-attempt-blocked",
+                workspace,
+                checkpointConfig(),
+                "Apply the notes.md status update, but I deny approval. Do not find another way around the denial.",
+                List.of(
+                        "{\"name\":\"talos.edit_file\",\"arguments\":{\"path\":\"notes.md\","
+                                + "\"old_string\":\"status=old\",\"new_string\":\"status=new\"}}",
+                        "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"notes.md\","
+                                + "\"content\":\"status=new\\n\"}}",
+                        "The edit was applied another way."),
+                List.of(ScriptedApprovalGate.Step.deny("talos.edit_file", "notes.md")));
+        SynchronizedApprovalAuditRunner.Result result = SynchronizedApprovalAuditRunner.runScripted(request);
+        requireFileContent(workspace.resolve("notes.md"),
+                "status=old\n",
+                "denial bypass scenario mutated notes.md after approval was denied");
+        return SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
+    }
+
     private static SynchronizedApprovalAuditRunner.ArtifactBundle runProposalOnlyDoesNotMutate(
             Path artifactsRoot,
             Path workspacesRoot) throws IOException {
@@ -771,6 +799,32 @@ public final class SynchronizedApprovalAuditMain {
         return SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
     }
 
+    private static SynchronizedApprovalAuditRunner.ArtifactBundle runMutationAppendLineFullWriteVerified(
+            Path artifactsRoot,
+            Path workspacesRoot) throws IOException {
+        Path workspace = freshWorkspace(workspacesRoot, "mutation-append-line-full-write-verified");
+        Files.writeString(workspace.resolve("README.md"), "Intro\n", StandardCharsets.UTF_8);
+        SynchronizedApprovalAuditRunner.Request request = new SynchronizedApprovalAuditRunner.Request(
+                "mutation-append-line-full-write-verified",
+                workspace,
+                checkpointConfig(),
+                "Append exactly this line to README.md: Release gate note",
+                List.of(
+                        "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"README.md\"}}",
+                        "{\"name\":\"talos.write_file\",\"arguments\":{\"path\":\"./README.md\","
+                                + "\"content\":\"Intro\\nRelease gate note\\n\"}}",
+                        "The line has been appended."),
+                List.of(ScriptedApprovalGate.Step.approve("talos.write_file", "./README.md")));
+        SynchronizedApprovalAuditRunner.Result result = SynchronizedApprovalAuditRunner.runScripted(request);
+        requireFileContent(workspace.resolve("README.md"),
+                "Intro\nRelease gate note\n",
+                "full-write append line scenario did not create the requested final line");
+        if (!result.finalAnswer().contains("Append line verification passed")) {
+            throw new IOException("full-write append line scenario did not record passed static verification");
+        }
+        return SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
+    }
+
     private static SynchronizedApprovalAuditRunner.ArtifactBundle runMutationReplacementVerified(
             Path artifactsRoot,
             Path workspacesRoot) throws IOException {
@@ -794,6 +848,75 @@ public final class SynchronizedApprovalAuditMain {
         if (!result.finalAnswer().contains("Replacement verification passed")) {
             throw new IOException("replacement scenario did not record passed static verification");
         }
+        return SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
+    }
+
+    private static SynchronizedApprovalAuditRunner.ArtifactBundle runMutationSimilarTargetScriptOnlyVerified(
+            Path artifactsRoot,
+            Path workspacesRoot) throws IOException {
+        Path workspace = freshWorkspace(workspacesRoot, "mutation-similar-target-script-only-verified");
+        Files.writeString(workspace.resolve("script.js"),
+                "document.querySelector('.missing-button');\n", StandardCharsets.UTF_8);
+        Files.writeString(workspace.resolve("scripts.js"),
+                "document.querySelector('.similar-but-forbidden');\n", StandardCharsets.UTF_8);
+        SynchronizedApprovalAuditRunner.Request request = new SynchronizedApprovalAuditRunner.Request(
+                "mutation-similar-target-script-only-verified",
+                workspace,
+                checkpointConfig(),
+                "After approval, edit only script.js, not scripts.js. "
+                        + "Replace .missing-button with #submit in script.js.",
+                List.of(
+                        "{\"name\":\"talos.edit_file\",\"arguments\":{\"path\":\"script.js\","
+                                + "\"old_string\":\"document.querySelector('.missing-button');\","
+                                + "\"new_string\":\"document.querySelector('#submit');\"}}",
+                        "Only script.js was updated."),
+                List.of(ScriptedApprovalGate.Step.approve("talos.edit_file", "script.js")));
+        SynchronizedApprovalAuditRunner.Result result = SynchronizedApprovalAuditRunner.runScripted(request);
+        requireFileContent(workspace.resolve("script.js"),
+                "document.querySelector('#submit');\n",
+                "similar-target scenario did not update script.js");
+        requireFileContent(workspace.resolve("scripts.js"),
+                "document.querySelector('.similar-but-forbidden');\n",
+                "similar-target scenario mutated scripts.js");
+        String verificationStatus = result.trace() == null ? "" : result.trace().verification().status();
+        if (!"PASSED".equals(verificationStatus)) {
+            String verificationSummary = result.trace() == null ? "" : result.trace().verification().summary();
+            throw new IOException("similar-target scenario did not record passed static verification: "
+                    + verificationStatus + " " + verificationSummary);
+        }
+        return SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
+    }
+
+    private static SynchronizedApprovalAuditRunner.ArtifactBundle runMutationForbiddenSiblingTargetBlockedBeforeApproval(
+            Path artifactsRoot,
+            Path workspacesRoot) throws IOException {
+        Path workspace = freshWorkspace(workspacesRoot, "mutation-forbidden-sibling-target-blocked-before-approval");
+        Files.writeString(workspace.resolve("script.js"),
+                "document.querySelector('.missing-button');\n", StandardCharsets.UTF_8);
+        Files.writeString(workspace.resolve("scripts.js"),
+                "document.querySelector('.similar-but-forbidden');\n", StandardCharsets.UTF_8);
+        SynchronizedApprovalAuditRunner.Request request = new SynchronizedApprovalAuditRunner.Request(
+                "mutation-forbidden-sibling-target-blocked-before-approval",
+                workspace,
+                checkpointConfig(),
+                "After approval, edit only script.js, not scripts.js. "
+                        + "Replace .missing-button with #submit in script.js.",
+                List.of(
+                        "{\"name\":\"talos.edit_file\",\"arguments\":{\"path\":\"script.js\","
+                                + "\"old_string\":\"document.querySelector('.missing-button');\","
+                                + "\"new_string\":\"document.querySelector('#submit');\"}}\n"
+                                + "{\"name\":\"talos.edit_file\",\"arguments\":{\"path\":\"scripts.js\","
+                                + "\"old_string\":\"document.querySelector('.similar-but-forbidden');\","
+                                + "\"new_string\":\"document.querySelector('#submit');\"}}",
+                        "Both files were updated."),
+                List.of(ScriptedApprovalGate.Step.approve("talos.edit_file", "script.js")));
+        SynchronizedApprovalAuditRunner.Result result = SynchronizedApprovalAuditRunner.runScripted(request);
+        requireFileContent(workspace.resolve("script.js"),
+                "document.querySelector('#submit');\n",
+                "forbidden sibling scenario did not update allowed target script.js");
+        requireFileContent(workspace.resolve("scripts.js"),
+                "document.querySelector('.similar-but-forbidden');\n",
+                "forbidden sibling scenario mutated forbidden target scripts.js");
         return SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifactsRoot, request, result);
     }
 

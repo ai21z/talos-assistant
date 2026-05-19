@@ -1570,6 +1570,25 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void exactEditReplacementEvidencePassesWhenAcceptedToolAliasUsed() throws Exception {
+        Files.writeString(workspace.resolve("notes.md"), "status=new\n");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Update notes.md.",
+                loopResult(List.of(successfulExactEditWithToolName(
+                        "edit_file",
+                        "notes.md",
+                        "status=old",
+                        "status=new",
+                        VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status());
+        assertTrue(result.summary().contains("Exact edit replacement verification passed"), result.summary());
+    }
+
+    @Test
     void exactEditReplacementEvidenceFailsWhenReplacementMissing() throws Exception {
         Files.writeString(workspace.resolve("notes.md"), "status=old\n");
 
@@ -1984,8 +2003,22 @@ class StaticTaskVerifierTest {
             String oldString,
             String newString,
             VerificationStatus verificationStatus) {
+        return successfulExactEditWithToolName(
+                "talos.edit_file",
+                path,
+                oldString,
+                newString,
+                verificationStatus);
+    }
+
+    private static ToolCallLoop.ToolOutcome successfulExactEditWithToolName(
+            String toolName,
+            String path,
+            String oldString,
+            String newString,
+            VerificationStatus verificationStatus) {
         return new ToolCallLoop.ToolOutcome(
-                "talos.edit_file", path, true, true, false,
+                toolName, path, true, true, false,
                 "edited " + path, "", verificationStatus, "",
                 null,
                 ToolCallLoop.MutationEvidence.exactEdit(oldString, newString));

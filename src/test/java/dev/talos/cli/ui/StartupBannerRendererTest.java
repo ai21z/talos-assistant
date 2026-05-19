@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -20,6 +21,81 @@ class StartupBannerRendererTest {
         assertEquals(
                 golden("startup-80-unicode.txt"),
                 StartupBannerRenderer.render(sample(), UNICODE_NO_COLOR, 80, StartupBannerRenderer.Variant.STARTUP_WITH_ICON));
+    }
+
+    @Test
+    void unicodeSafeDefaultUsesSafeIconWithoutExtendedGlyphs() {
+        String rendered = StartupBannerRenderer.render(
+                sample(),
+                UNICODE_NO_COLOR,
+                80,
+                StartupBannerRenderer.Variant.STARTUP_WITH_ICON,
+                Map.of());
+
+        assertTrue(rendered.contains("│ ████████    TALOS"));
+        assertFalse(rendered.matches("(?s).*[▟▙◞◄◅▶◀].*"), rendered);
+    }
+
+    @Test
+    void unicodeSafeExtendedOverrideUsesExtendedIcon() {
+        String rendered = StartupBannerRenderer.render(
+                sample(),
+                UNICODE_NO_COLOR,
+                80,
+                StartupBannerRenderer.Variant.STARTUP_WITH_ICON,
+                Map.of("TALOS_GLYPHS", "extended"));
+
+        assertTrue(rendered.contains("▟███▀▀███▙"));
+        assertTrue(rendered.contains("  ▶    ◀  "));
+    }
+
+    @Test
+    void unicodeSafeAsciiOverrideUsesAsciiRenderer() {
+        String rendered = StartupBannerRenderer.render(
+                sample(),
+                UNICODE_NO_COLOR,
+                80,
+                StartupBannerRenderer.Variant.STARTUP_WITH_ICON,
+                Map.of("TALOS_GLYPHS", "ascii"));
+
+        assertTrue(rendered.startsWith("+------------------------------------------------------------------------------+\n"));
+        assertTrue(rendered.contains("| TALOS  v0.9.9-beta"));
+        assertFalse(rendered.contains("┌"));
+        assertFalse(rendered.contains("████████"));
+    }
+
+    @Test
+    void nonUnicodeSafeUsesAsciiRendererEvenWhenExtendedRequested() {
+        String rendered = StartupBannerRenderer.render(
+                sample(),
+                ASCII_NO_COLOR,
+                80,
+                StartupBannerRenderer.Variant.STARTUP_WITH_ICON,
+                Map.of("TALOS_GLYPHS", "extended"));
+
+        assertTrue(rendered.startsWith("+------------------------------------------------------------------------------+\n"));
+        assertFalse(rendered.contains("▟███▀▀███▙"));
+        assertFalse(rendered.contains("████████"));
+    }
+
+    @Test
+    void winkAnimationIsDisabledUnlessExtendedGlyphModeIsExplicit() {
+        assertFalse(StartupBannerRenderer.shouldAnimate(UNICODE_COLOR, Map.of(), true));
+        assertFalse(StartupBannerRenderer.shouldAnimate(UNICODE_COLOR, Map.of("TALOS_GLYPHS", "safe"), true));
+        assertTrue(StartupBannerRenderer.shouldAnimate(UNICODE_COLOR, Map.of("TALOS_GLYPHS", "extended"), true));
+        assertFalse(StartupBannerRenderer.shouldAnimate(UNICODE_COLOR, Map.of("TALOS_GLYPHS", "extended"), false));
+    }
+
+    @Test
+    void wouldRenderIconTracksGlyphModeAndWidth() {
+        assertTrue(StartupBannerRenderer.wouldRenderIcon(
+                UNICODE_NO_COLOR, 80, StartupBannerRenderer.Variant.STARTUP_WITH_ICON, Map.of()));
+        assertTrue(StartupBannerRenderer.wouldRenderIcon(
+                UNICODE_NO_COLOR, 80, StartupBannerRenderer.Variant.STARTUP_WITH_ICON, Map.of("TALOS_GLYPHS", "extended")));
+        assertFalse(StartupBannerRenderer.wouldRenderIcon(
+                UNICODE_NO_COLOR, 80, StartupBannerRenderer.Variant.STARTUP_WITH_ICON, Map.of("TALOS_GLYPHS", "ascii")));
+        assertFalse(StartupBannerRenderer.wouldRenderIcon(
+                UNICODE_NO_COLOR, 69, StartupBannerRenderer.Variant.STARTUP_WITH_ICON, Map.of()));
     }
 
     @Test
@@ -98,7 +174,7 @@ class StartupBannerRendererTest {
     void colorCapabilitiesUseLockedBronzeAndFrameGrey() {
         String rendered = StartupBannerRenderer.render(sample(), UNICODE_COLOR, 80, StartupBannerRenderer.Variant.STARTUP_WITH_ICON);
 
-        assertTrue(rendered.contains("\033[38;2;167;123;58m▟███▀▀███▙\033[0m"));
+        assertTrue(rendered.contains("\033[38;2;167;123;58m████████  \033[0m"));
         assertTrue(rendered.contains("\033[38;2;167;123;58mTALOS\033[0m"));
         assertTrue(rendered.contains("\033[38;2;90;90;90m┌"));
     }
@@ -120,7 +196,7 @@ class StartupBannerRendererTest {
         String rendered = StartupBannerRenderer.render(sample(), UNICODE_NO_COLOR, 69, StartupBannerRenderer.Variant.STARTUP_WITH_ICON);
 
         assertFalse(rendered.contains("┬"));
-        assertFalse(rendered.contains("▟███▀▀███▙"));
+        assertFalse(rendered.contains("████████"));
         assertTrue(rendered.contains("TALOS v0.9.9-beta"));
     }
 
@@ -221,7 +297,7 @@ class StartupBannerRendererTest {
     void cliStatusDashboardRenderCanUseStatusNoIconRenderer() {
         String rendered = CliStatusDashboard.render(sample(), UNICODE_NO_COLOR, 80);
 
-        assertFalse(rendered.contains("▟███▀▀███▙"));
+        assertFalse(rendered.contains("████████"));
         assertTrue(rendered.contains("TALOS"));
         assertTrue(rendered.contains("Policy  ask before mutation"));
     }
@@ -241,7 +317,7 @@ class StartupBannerRendererTest {
 
         String rendered = StartupBannerRenderer.render(snapshot, UNICODE_NO_COLOR, 80, StartupBannerRenderer.Variant.STARTUP_WITH_ICON);
 
-        assertFalse(rendered.matches("(?s).*[╭╮╰╯▛▜—…].*"), rendered);
+        assertFalse(rendered.matches("(?s).*[╭╮╰╯▛▜—…▟▙◞◄◅].*"), rendered);
     }
 
     private static CliStatusDashboard.Snapshot sample() {
