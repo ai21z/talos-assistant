@@ -97,6 +97,7 @@ class PrivacyCommandTest {
         assertTrue(info.text.contains("session"), info.text);
         assertTrue(info.text.contains("Private document extraction"), info.text);
         assertTrue(info.text.contains("PDF/DOCX/XLS/XLSX"), info.text);
+        assertTrue(info.text.contains("normal .md/.txt/.csv files are not private by provenance"), info.text);
         assertTrue(info.text.contains("/privacy private on"), info.text);
     }
 

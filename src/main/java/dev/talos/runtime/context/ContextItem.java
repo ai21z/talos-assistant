@@ -2,11 +2,11 @@ package dev.talos.runtime.context;
 
 import dev.talos.tools.ToolContentMetadata;
 import dev.talos.tools.ToolResult;
+import dev.talos.runtime.policy.ProtectedContentPolicy;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HexFormat;
-import java.util.Locale;
 import java.util.Objects;
 
 /** A redacted, typed unit of context considered by the runtime. */
@@ -117,23 +117,8 @@ public record ContextItem(
         while (normalized.startsWith("./")) {
             normalized = normalized.substring(2);
         }
-        String lower = normalized.toLowerCase(Locale.ROOT);
-        if (looksSensitivePath(lower)) return "<protected-path>";
+        if (ProtectedContentPolicy.looksProtectedPathString(normalized)) return "<protected-path>";
         return normalized;
-    }
-
-    private static boolean looksSensitivePath(String lowerPath) {
-        return lowerPath.equals(".env")
-                || lowerPath.startsWith(".env.")
-                || lowerPath.contains("/.env")
-                || lowerPath.contains("/secrets/")
-                || lowerPath.contains("secret")
-                || lowerPath.contains("token")
-                || lowerPath.contains("credential")
-                || lowerPath.contains("id_rsa")
-                || lowerPath.contains("id_ed25519")
-                || lowerPath.contains("private_key")
-                || lowerPath.contains("private-key");
     }
 
     private static boolean blank(String value) {

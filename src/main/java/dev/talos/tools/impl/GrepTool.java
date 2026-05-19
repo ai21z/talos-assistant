@@ -268,7 +268,7 @@ public final class GrepTool implements TalosTool {
         for (int i = 0; i < lines.length && matches.size() < maxResults; i++) {
             String line = lines[i];
             if (pattern.matcher(line).find()) {
-                String safeLine = safeSearchLine(line.stripTrailing(), privateMode);
+                String safeLine = safeExtractedSearchLine(line.stripTrailing(), privateMode, extraction);
                 matches.add(relPath + ":" + (i + 1) + " | " + truncate(safeLine, 200));
             }
         }
@@ -297,6 +297,16 @@ public final class GrepTool implements TalosTool {
             return "[line content withheld by private-mode search policy]";
         }
         return safeLine;
+    }
+
+    private static String safeExtractedSearchLine(
+            String line,
+            boolean privateMode,
+            DocumentExtractionResult extraction) {
+        if (privateMode && extraction != null && !extraction.modelHandoffAllowed()) {
+            return "[extracted document match withheld from model context by private-document policy]";
+        }
+        return safeSearchLine(line, privateMode);
     }
 
     private static int parseIntParam(ToolCall call, String key, int defaultValue) {

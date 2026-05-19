@@ -198,6 +198,20 @@ class WorkspaceCommandsTest {
         }
 
         @Test
+        void slash_grep_private_mode_docx_extraction_withholds_ordinary_private_facts() throws IOException {
+            writeDocx(ws.resolve("medical-notes.docx"), "Patient name: Marina Stavrou");
+            var cmd = new GrepCommand(ws);
+
+            Result r = cmd.execute("Marina Stavrou", privateExtractionContext("word"));
+
+            assertInstanceOf(Result.Ok.class, r);
+            assertTrue(r.toString().contains("medical-notes.docx"), r.toString());
+            assertTrue(r.toString().contains("withheld from model context by private-document policy"), r.toString());
+            assertFalse(r.toString().contains("Marina Stavrou"), r.toString());
+            assertFalse(r.toString().contains("Patient name"), r.toString());
+        }
+
+        @Test
         void slash_grep_enabled_xlsx_extraction_finds_known_text() throws IOException {
             writeXlsx(ws.resolve("budget.xlsx"), "Slash Excel revenue gamma");
             var cmd = new GrepCommand(ws);
@@ -318,6 +332,18 @@ class WorkspaceCommandsTest {
 
     private static Context privateModeContext() {
         Config cfg = new Config(null);
+        cfg.data.put("privacy", new LinkedHashMap<>(Map.of("mode", "private")));
+        return Context.builder(cfg).build();
+    }
+
+    private static Context privateExtractionContext(String family) {
+        Config cfg = new Config(null);
+        Map<String, Object> documentExtraction = new LinkedHashMap<>();
+        documentExtraction.put("enabled", Boolean.TRUE);
+        Map<String, Object> familyCfg = new LinkedHashMap<>();
+        familyCfg.put("enabled", Boolean.TRUE);
+        documentExtraction.put(family, familyCfg);
+        cfg.data.put("document_extraction", documentExtraction);
         cfg.data.put("privacy", new LinkedHashMap<>(Map.of("mode", "private")));
         return Context.builder(cfg).build();
     }

@@ -2,7 +2,7 @@
 
 ## Status
 
-Open.
+Done.
 
 ## Severity
 
@@ -72,3 +72,14 @@ Fixtures should include a README canary and assert:
 
 Need to locate the prompt assembly path that injects workspace file structure/README excerpt independently of tool calls.
 
+## Resolution
+
+Implemented before ticket reconciliation on 2026-05-20.
+
+Evidence:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.cli.modes.UnifiedAssistantModeTest.explicitNoWorkspaceGeneralKnowledgePromptDoesNotInjectWorkspaceManifest" --tests "dev.talos.core.llm.SystemPromptBuilderWorkspaceManifestTest.noWorkspaceNoManifest" --no-daemon
+```
+
+The focused regression confirms explicit no-workspace/general prompts avoid workspace manifest injection.

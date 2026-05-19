@@ -118,4 +118,24 @@ class LocalTurnTraceTest {
         assertTrue(event.data().containsKey("contentHash"));
         assertFalse(event.data().containsValue("TOKEN=ALPHA-742"));
     }
+
+    @Test
+    void redactsPolicyProtectedPathsToProtectedPathHint() {
+        ToolCall readProtected = new ToolCall("talos.read_file", Map.of(
+                "path", "protected/private-notes.md"));
+        ToolCall editWorkflow = new ToolCall("talos.read_file", Map.of(
+                "path", ".github/workflows/deploy.yml"));
+
+        TurnTraceEvent protectedEvent = TurnTraceEvent.toolCallParsed(
+                "2026-04-28T12:00:02Z",
+                "INSPECT",
+                readProtected);
+        TurnTraceEvent workflowEvent = TurnTraceEvent.toolCallParsed(
+                "2026-04-28T12:00:03Z",
+                "INSPECT",
+                editWorkflow);
+
+        assertEquals("<protected-path>", protectedEvent.data().get("pathHint"));
+        assertEquals("<protected-path>", workflowEvent.data().get("pathHint"));
+    }
 }

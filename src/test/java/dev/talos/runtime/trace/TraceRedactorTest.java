@@ -89,6 +89,14 @@ class TraceRedactorTest {
     }
 
     @Test
+    void detectsPolicyProtectedPathReadRequests() {
+        assertTrue(TraceRedactor.looksLikeProtectedReadRequest(
+                "Read protected/private-notes.md and summarize it."));
+        assertTrue(TraceRedactor.looksLikeProtectedReadRequest(
+                "Show .github/workflows/deploy.yml."));
+    }
+
+    @Test
     void normalReadmeQuestionsAboutSecretsAreNotProtectedReads() {
         assertFalse(TraceRedactor.looksLikeProtectedReadRequest(
                 "Read README.md and tell me how it describes secret handling."));
