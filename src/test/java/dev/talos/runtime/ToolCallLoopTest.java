@@ -3185,6 +3185,211 @@ class ToolCallLoopTest {
     }
 
     @Test
+    void appendLinePreapprovalFailureUsesCompactRepairWithReadbackBeforeApproval() throws Exception {
+        Path ws = Files.createTempDirectory("talos-append-line-compact-repair-");
+        try {
+            Files.writeString(ws.resolve("README.md"), "# Demo\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileEditTool());
+            registry.register(new FileWriteTool());
+            var approvals = new int[]{0};
+            var processor = new TurnProcessor(
+                    ModeController.defaultController(),
+                    new ApprovalGate() {
+                        @Override
+                        public boolean approve(String description, String detail) {
+                            return approveFull(description, detail).isApproved();
+                        }
+
+                        @Override
+                        public ApprovalResponse approveFull(String description, String detail) {
+                            approvals[0]++;
+                            return ApprovalResponse.APPROVED;
+                        }
+                    },
+                    registry);
+            var loop = new ToolCallLoop(processor, 5);
+
+            String repaired = "# Demo\nRelease gate note\n";
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                    List.of(new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                            "call_repair_write",
+                            "talos.write_file",
+                            Map.of("path", "README.md", "content", repaired))))),
+                    2048);
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(recorded.client())
+                    .nativeToolSpecs(nativeSpecs(
+                            new ReadFileTool(),
+                            new FileEditTool(),
+                            new FileWriteTool()))
+                    .build();
+
+            String request = "Read README.md, then append exactly this line to README.md: Release gate note";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys " + "large-system-token ".repeat(700)),
+                    ChatMessage.user("Earlier unrelated request that must not dominate the repair."),
+                    ChatMessage.assistant("Stale prior answer."),
+                    ChatMessage.user(request)));
+            var initialCalls = List.of(
+                    new ChatMessage.NativeToolCall(
+                            "call_read",
+                            "talos.read_file",
+                            Map.of("path", "README.md")),
+                    new ChatMessage.NativeToolCall(
+                            "call_bad_write",
+                            "talos.write_file",
+                            Map.of(
+                                    "path", "README.md",
+                                    "content", "# Demo\n\nRelease gate note")));
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            ToolCallLoop.LoopResult result;
+            try {
+                result = loop.run("", initialCalls, messages, ws, ctx);
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertEquals(repaired, Files.readString(ws.resolve("README.md")));
+            assertEquals(1, approvals[0], "valid compact append repair should reach mutation approval once");
+            assertTrue(result.mutatingToolSuccesses() > 0, "compact repair should execute a write_file mutation");
+            assertEquals(1, recorded.requests().size(), "append-line repair should use one compact reprompt");
+
+            String compactPrompt = recorded.requests().getFirst().messages.stream()
+                    .map(ChatMessage::content)
+                    .reduce("", (left, right) -> left + "\n" + right);
+            assertTrue(compactPrompt.contains("[AppendLineRepair]"), compactPrompt);
+            assertTrue(compactPrompt.contains("Read README.md, then append exactly this line"), compactPrompt);
+            assertTrue(compactPrompt.contains("Current readback for README.md"), compactPrompt);
+            assertTrue(compactPrompt.contains("1 | # Demo"), compactPrompt);
+            assertTrue(compactPrompt.contains("Release gate note"), compactPrompt);
+            assertFalse(compactPrompt.contains("large-system-token"), compactPrompt);
+            assertFalse(compactPrompt.contains("Earlier unrelated request"), compactPrompt);
+            assertFalse(compactPrompt.contains("Stale prior answer"), compactPrompt);
+            assertEquals(List.of("talos.edit_file", "talos.write_file"),
+                    recorded.requests().getFirst().tools.stream().map(ToolSpec::name).toList());
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
+    void expectedTargetScopeBlockUsesCompactRepairWithExpectedTargetReadback() throws Exception {
+        Path ws = Files.createTempDirectory("talos-expected-target-compact-repair-");
+        try {
+            String scriptOriginal = """
+                    document.querySelector('.missing-button').addEventListener('click', () => {
+                      document.querySelector('#result').textContent = 'Clicked';
+                    });
+                    """;
+            String indexOriginal = """
+                    <!doctype html>
+                    <html>
+                    <body>
+                      <button class="cta-button">Run</button>
+                      <script src="script.js"></script>
+                    </body>
+                    </html>
+                    """;
+            Files.writeString(ws.resolve("script.js"), scriptOriginal);
+            Files.writeString(ws.resolve("scripts.js"), "console.log('do not edit');\n");
+            Files.writeString(ws.resolve("index.html"), indexOriginal);
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileEditTool());
+            registry.register(new FileWriteTool());
+            var approvals = new int[]{0};
+            var processor = new TurnProcessor(
+                    ModeController.defaultController(),
+                    new ApprovalGate() {
+                        @Override
+                        public boolean approve(String description, String detail) {
+                            return approveFull(description, detail).isApproved();
+                        }
+
+                        @Override
+                        public ApprovalResponse approveFull(String description, String detail) {
+                            approvals[0]++;
+                            return ApprovalResponse.APPROVED;
+                        }
+                    },
+                    registry);
+            var loop = new ToolCallLoop(processor, 5);
+
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                    List.of(new LlmClient.StreamResult("", List.of(new ChatMessage.NativeToolCall(
+                            "call_repair_edit",
+                            "talos.edit_file",
+                            Map.of(
+                                    "path", "script.js",
+                                    "old_string", ".missing-button",
+                                    "new_string", ".cta-button"))))),
+                    2048);
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(recorded.client())
+                    .nativeToolSpecs(nativeSpecs(
+                            new ReadFileTool(),
+                            new FileEditTool(),
+                            new FileWriteTool()))
+                    .build();
+
+            String request = "Read script.js, then fix the selector bug by changing .missing-button to .cta-button. Do not edit scripts.js.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys " + "stale-web-context ".repeat(700)),
+                    ChatMessage.user("Earlier stale static web request."),
+                    ChatMessage.assistant("Old stale proposal."),
+                    ChatMessage.user(request)));
+            var initialCalls = List.of(
+                    new ChatMessage.NativeToolCall(
+                            "call_read_script",
+                            "talos.read_file",
+                            Map.of("path", "script.js")),
+                    new ChatMessage.NativeToolCall(
+                            "call_read_index",
+                            "talos.read_file",
+                            Map.of("path", "index.html")),
+                    new ChatMessage.NativeToolCall(
+                            "call_wrong_target_edit",
+                            "talos.edit_file",
+                            Map.of(
+                                    "path", "index.html",
+                                    "old_string", "<button class=\"cta-button\">Run</button>",
+                                    "new_string", "<button class=\"cta-button missing-button\">Run</button>")));
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            ToolCallLoop.LoopResult result;
+            try {
+                result = loop.run("", initialCalls, messages, ws, ctx);
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertEquals(1, approvals[0], "valid expected-target repair should reach mutation approval once");
+            assertTrue(result.mutatingToolSuccesses() > 0, "compact repair should execute a script.js mutation");
+            assertTrue(Files.readString(ws.resolve("script.js")).contains(".cta-button"));
+            assertFalse(Files.readString(ws.resolve("script.js")).contains(".missing-button"));
+            assertEquals(indexOriginal, Files.readString(ws.resolve("index.html")));
+            assertEquals("console.log('do not edit');\n", Files.readString(ws.resolve("scripts.js")));
+            assertEquals(0, recorded.requests().size(),
+                    "exact expected-target replacement repair should be runtime-owned, not model-reprompted");
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
     void repairReadOnlyBudgetCountsSuppressedRedundantReadsBeforeAnotherContinuation() throws Exception {
         Path ws = Files.createTempDirectory("talos-repair-redundant-read-budget-");
         try {

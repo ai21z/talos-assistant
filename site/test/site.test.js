@@ -70,7 +70,7 @@ describe("Talos landing page static contract", () => {
       "Asks before mutation",
       "Verifies before claiming success",
       "Approved writes only",
-      "leaves a trace",
+      "Interactive turns leave local trace evidence",
       "No hosted workspace handoff",
       "View on GitHub",
       "Read the execution contract",
@@ -157,10 +157,33 @@ describe("Talos landing page static contract", () => {
       "Workspace ops",
       "Command execution",
       "Private mode",
-      "Unsupported binary documents",
+      "Unsupported or unreadable documents",
       "Trace and prompt-debug",
     ]) {
       assert.match(trust, new RegExp(escapeRegExp(surface)));
+    }
+  });
+
+  it("keeps content claims precise about traces, lanes, trust, and install state", () => {
+    const text = publicText().replace(/\s+/g, " ");
+
+    for (const required of [
+      "Interactive turns leave local trace evidence",
+      "Normal assistant turns render through the same semantic lanes",
+      "Runtime policy owns approval, tool exposure, result checks, protected reads, and unsupported-file honesty",
+      "Public install is not final yet",
+      "planned public beta target is a one-line Windows install",
+      "Current developer setup remains in the repository docs",
+    ]) {
+      assert.match(text, new RegExp(escapeRegExp(required), "i"));
+    }
+
+    for (const tooAbsolute of [
+      "Every turn leaves a trace",
+      "Every Talos turn runs the same six lanes",
+      "The model cannot bypass them by rewording the request",
+    ]) {
+      assert.doesNotMatch(text, new RegExp(escapeRegExp(tooAbsolute), "i"));
     }
   });
 
@@ -177,8 +200,6 @@ describe("Talos landing page static contract", () => {
   it("keeps real command examples and canonical runtime tool names", () => {
     const text = publicText();
     for (const command of [
-      "talos setup models --profile qwen2.5-coder-14b --server-path C:/path/to/llama-server.exe --write",
-      "talos setup models --profile gpt-oss-20b --server-path C:/path/to/llama-server.exe --write",
       "talos status --verbose",
       "/tools",
       "/models",
@@ -195,6 +216,9 @@ describe("Talos landing page static contract", () => {
     ]) {
       assert.match(text, new RegExp(escapeRegExp(command), "i"));
     }
+
+    assert.doesNotMatch(text, /--server-path\s+C:\/path\/to\/llama-server\.exe/i);
+    assert.doesNotMatch(text, /data-copy="[^"]*(?:winget|curl|irm|iwr)[^"]*"/i);
   });
 
   it("does not introduce fake downloads or unsupported claims", () => {
@@ -241,7 +265,7 @@ describe("Talos landing page static contract", () => {
   it("labels all copy buttons uniquely and accessibly", () => {
     const html = read("index.html");
     const copyButtons = Array.from(html.matchAll(/<button\b[^>]*class="[^"]*\bcopy-button\b[^"]*"[^>]*>/g));
-    assert.ok(copyButtons.length >= 5);
+    assert.ok(copyButtons.length >= 4);
 
     const labels = copyButtons.map((match) => {
       const attr = match[0].match(/\saria-label="([^"]+)"/);
@@ -294,6 +318,10 @@ describe("Talos landing page static contract", () => {
     assert.match(js, /function\s+smoothStep/);
     assert.match(js, /style\.setProperty\("--story-opacity"/);
     assert.match(js, /style\.setProperty\("--story-shift"/);
+    assert.match(js, /event\.preventDefault\(\)/);
+    assert.match(js, /scrollToStorySection/);
+    assert.match(js, /window\.scrollTo\(\{\s*top:[\s\S]*?behavior/);
+    assert.match(css, /transition:\s*opacity[\s\S]*?transform[\s\S]*?filter/);
     assert.match(css, /prefers-reduced-motion:\s*reduce[\s\S]*?animation:\s*none\s*!important/);
 
     // Native scrolling only: no hijacking wheel/touch events or forcing mandatory snapping.

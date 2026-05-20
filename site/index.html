@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="Talos is a local-first CLI workspace operator. Inspects before acting, asks before mutation, verifies before claiming success, and leaves a local trace."
+      content="Talos is a local-first CLI workspace operator. Inspects before acting, asks before mutation, verifies before claiming success, and records local trace evidence for interactive turns."
     />
     <link
       rel="icon"
@@ -50,7 +50,7 @@
               </p>
               <p class="hero-proof">
                 Runs locally against the selected workspace. Approved writes only.
-                Every turn leaves a trace.
+                Interactive turns leave local trace evidence.
               </p>
               <div class="hero-actions" aria-label="Primary actions">
                 <a class="button button--primary" href="https://github.com/ai21z/talos-cli" rel="noopener">
@@ -103,7 +103,7 @@
               <p class="eyebrow">Execution contract</p>
               <h2 id="contract-heading">One ordered flow. No skipped steps.</h2>
               <p class="section-lede">
-                Every Talos turn runs the same six lanes in the same order.
+                Normal assistant turns render through the same semantic lanes.
                 Approval gates mutation. Verification gates success claims.
               </p>
             </div>
@@ -161,9 +161,10 @@
               <p class="eyebrow">CLI experience</p>
               <h2 id="cli-heading">Six semantic lanes. Every turn.</h2>
               <p>
-                The terminal grammar is runtime-owned, not model-authored. The
-                same lanes appear regardless of mode, so users read a semantic
-                difference, not a rendering-path difference.
+                The terminal grammar is runtime-owned, not model-authored.
+                Normal assistant turns render through the same semantic lanes,
+                so users read a semantic difference, not a rendering-path
+                difference.
               </p>
               <ul class="lane-legend" role="list">
                 <li><span class="lane-glyph muted">talos</span> prompt</li>
@@ -202,9 +203,9 @@
               <p class="eyebrow">Trust model</p>
               <h2 id="trust-heading">Boundaries are declared, not implied.</h2>
               <p class="section-lede">
-                Approval, tool exposure, result checks, protected reads, and
-                unsupported-file honesty are runtime-owned. The model cannot
-                bypass them by rewording the request.
+                Runtime policy owns approval, tool exposure, result checks,
+                protected reads, and unsupported-file honesty. Model wording is
+                not the authority boundary.
               </p>
             </div>
 
@@ -245,8 +246,8 @@
                 <span role="cell">scope must be explicitly enabled</span>
               </div>
               <div class="trust-row" role="row">
-                <span role="cell">Unsupported binary documents</span>
-                <span role="cell"><span class="state state--deny">refuse</span></span>
+                <span role="cell">Unsupported or unreadable documents</span>
+                <span role="cell"><span class="state state--deny">refuse</span> or report limits</span>
                 <span role="cell">no fabricated extraction</span>
               </div>
               <div class="trust-row" role="row">
@@ -278,8 +279,9 @@
               <li class="use-case reveal"><span class="use-case-tag">06</span><h3>Run approved commands</h3><p>Test, build, and verification commands routed through configured profiles.</p></li>
             </ul>
             <p class="use-case-caveat">
-              Image-only PDFs, scanned documents, slides, and sensitive personal
-              records are out of beta scope.
+              Scanned PDFs, image-only files, PowerPoint, corrupt or encrypted
+              documents, and sensitive personal paperwork remain out of beta
+              positioning.
             </p>
           </div>
         </section>
@@ -289,24 +291,27 @@
           <div class="container two-column">
             <div class="section-copy reveal">
               <p class="eyebrow">Install &amp; models</p>
-              <h2 id="install-heading">Managed llama.cpp is the supported path.</h2>
+              <h2 id="install-heading">Public install is not final yet.</h2>
               <p>
-                Windows-first beta. A Unix/Linux/macOS installer exists, but
-                Windows is the primary supported path today. Managed
-                <code>llama.cpp</code> is the recommended engine; Ollama remains
-                a legacy backend.
+                Talos is still tested from source and local beta builds. The
+                planned public beta target is a one-line Windows install, using
+                <code>winget</code> or a signed PowerShell bootstrap, followed
+                by guided local model setup.
               </p>
               <p>
-                After first start, configure a model profile. Hugging Face GGUF
-                files can sit under <code>~/.talos/models/huggingface</code>,
-                or use a user-owned path.
+                Current developer setup remains in the repository docs: build
+                with Gradle, install locally, then configure managed
+                <code>llama.cpp</code> model profiles. Those commands are real,
+                but they are not the release install experience. Unix/macOS
+                should get a curl-style path later, not a copied local build
+                script as the product story.
               </p>
             </div>
 
-            <div class="model-command-stack reveal" aria-label="Install and setup commands">
+            <div class="model-command-stack reveal" aria-label="Install status and runtime commands">
               <article class="code-card">
                 <div class="code-card-header">
-                  <h3>First run</h3>
+                  <h3>Local smoke check</h3>
                   <button class="copy-button" type="button" aria-label="Copy first run command" data-copy="talos&#10;/status --verbose">Copy</button>
                 </div>
                 <pre><code>talos
@@ -314,17 +319,19 @@
               </article>
               <article class="code-card">
                 <div class="code-card-header">
-                  <h3>Configured example · Qwen coder profile</h3>
-                  <button class="copy-button" type="button" aria-label="Copy Qwen setup command" data-copy="talos setup models --profile qwen2.5-coder-14b --server-path C:/path/to/llama-server.exe --write">Copy</button>
+                  <h3>Public beta install target</h3>
                 </div>
-                <pre><code>talos setup models --profile qwen2.5-coder-14b --server-path C:/path/to/llama-server.exe --write</code></pre>
+                <pre><code>planned: one-line Windows install
+planned: signed artifact + checksum
+planned: guided managed llama.cpp setup</code></pre>
               </article>
               <article class="code-card">
                 <div class="code-card-header">
-                  <h3>Configured example · GPT-OSS profile</h3>
-                  <button class="copy-button" type="button" aria-label="Copy GPT-OSS setup command" data-copy="talos setup models --profile gpt-oss-20b --server-path C:/path/to/llama-server.exe --write">Copy</button>
+                  <h3>Developer setup source</h3>
                 </div>
-                <pre><code>talos setup models --profile gpt-oss-20b --server-path C:/path/to/llama-server.exe --write</code></pre>
+                <pre><code>README.md · Quick Start
+docs/setup-managed-models.md
+tools/install-windows.ps1</code></pre>
               </article>
               <article class="code-card">
                 <div class="code-card-header">
@@ -349,6 +356,13 @@
 /models
 /workspace</code></pre>
               </article>
+              <article class="code-card">
+                <div class="code-card-header">
+                  <h3>Prompt-debug evidence</h3>
+                  <button class="copy-button" type="button" aria-label="Copy prompt debug command" data-copy="/prompt-debug last">Copy</button>
+                </div>
+                <pre><code>/prompt-debug last</code></pre>
+              </article>
             </div>
           </div>
         </section>
@@ -369,13 +383,13 @@
               <a class="doc-card reveal" href="https://github.com/ai21z/talos-cli#quick-start" rel="noopener">
                 <span class="doc-tag">01</span>
                 <h3>Quickstart</h3>
-                <p>Get Talos running locally in a workspace.</p>
+                <p>Current source/developer setup for local beta runs.</p>
                 <code>README.md · Quick Start</code>
               </a>
-              <a class="doc-card reveal" href="https://github.com/ai21z/talos-cli#install-on-windows" rel="noopener">
+              <a class="doc-card reveal" href="https://github.com/ai21z/talos-cli/blob/v0.9.0-beta-dev/tools/install-windows.ps1" rel="noopener">
                 <span class="doc-tag">02</span>
                 <h3>Windows install</h3>
-                <p>Primary supported path. Unix/macOS installer also exists.</p>
+                <p>Current source installer. Public one-line install is planned.</p>
                 <code>tools/install-windows.ps1</code>
               </a>
               <a class="doc-card reveal" href="https://github.com/ai21z/talos-cli/blob/v0.9.0-beta-dev/docs/setup-managed-models.md" rel="noopener">

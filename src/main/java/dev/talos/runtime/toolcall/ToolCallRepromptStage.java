@@ -1,6 +1,9 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.core.llm.LlmClient;
+import dev.talos.runtime.expectation.AppendLineExpectation;
+import dev.talos.runtime.expectation.ReplacementExpectation;
+import dev.talos.runtime.expectation.TaskExpectationResolver;
 import dev.talos.runtime.failure.FailureAction;
 import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.failure.FailurePolicy;
@@ -51,6 +54,15 @@ public final class ToolCallRepromptStage {
     private static final int COMPACT_MUTATION_READBACK_MAX_CHARS = 4_000;
 
     private record OldStringMissRepair(String path, String reason, String readback) {}
+    private record AppendLineRepair(String path, String expectedLine, String reason, String readback) {}
+    private record ExpectedTargetRepair(
+            List<String> expectedTargets,
+            String failedTarget,
+            String reason,
+            String readbackFrame,
+            String replacementOldText,
+            String replacementNewText
+    ) {}
     private record StaticWebContinuation(TaskVerificationResult verification, List<String> missingTargets) {}
 
     public boolean reprompt(LoopState state, ToolCallExecutionStage.IterationOutcome outcome) {
@@ -69,6 +81,33 @@ public final class ToolCallRepromptStage {
         }
 
         if (outcome.pathPolicyBlockedThisIteration()) {
+            Optional<ExpectedTargetRepair> expectedTargetRepair = nextExpectedTargetScopeRepair(state);
+            if (expectedTargetRepair.isPresent()) {
+                ExpectedTargetRepair repair = expectedTargetRepair.get();
+                state.failureDecision = FailureDecision.continueLoop();
+                state.setPendingActionObligation(
+                        PendingActionObligation.expectedTargetScopeTargets(repair.expectedTargets()));
+                state.expectedTargetScopeRepairPromptedKeys.add(expectedTargetRepairKey(repair));
+                ChatMessage.NativeToolCall exactReplacementRepair =
+                        exactExpectedTargetReplacementRepairCall(repair);
+                if (exactReplacementRepair != null) {
+                    LocalTurnTraceCapture.recordRepair(
+                            "PLANNED",
+                            "expected-target-scope exact replacement target="
+                                    + repair.expectedTargets().getFirst()
+                                    + " after wrong-target block=" + repair.failedTarget());
+                    state.currentText = "";
+                    state.currentNativeCalls = List.of(exactReplacementRepair);
+                    return true;
+                }
+                List<ToolSpec> repairToolSpecs = oldStringMissRepairToolSpecs(state);
+                List<ChatMessage> requestMessages = expectedTargetRepairMessages(
+                        repair,
+                        ToolCallSupport.latestUserRequestIn(state.messages));
+                return chatReprompt(state, requestMessages, repairToolSpecs,
+                        repromptControls(state, "expected-target-scope-compact-repair"),
+                        "expected-target scope compact repair");
+            }
             state.currentText = state.failureDecision.shouldStop()
                     ? failurePolicyStopMessage(state, state.failureDecision)
                     : "[Tool loop stopped because a mutating path was blocked by workspace policy before approval.]";
@@ -245,6 +284,19 @@ public final class ToolCallRepromptStage {
         }
 
         String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
+        Optional<AppendLineRepair> appendLineRepair = nextAppendLineCompactRepair(state);
+        if (appendLineRepair.isPresent()) {
+            AppendLineRepair repair = appendLineRepair.get();
+            state.setPendingActionObligation(
+                    PendingActionObligation.appendLineTargets(List.of(repair.path())));
+            state.appendLineRepairPromptedPaths.add(normalizeExpectedTargetKey(repair.path()));
+            List<ToolSpec> repairToolSpecs = oldStringMissRepairToolSpecs(state);
+            List<ChatMessage> requestMessages = appendLineRepairMessages(repair, userTask);
+            return chatReprompt(state, requestMessages, repairToolSpecs,
+                    repromptControls(state, "append-line-compact-repair"),
+                    "append-line compact repair");
+        }
+
         Optional<OldStringMissRepair> oldStringMissRepair = nextOldStringMissCompactRepair(state);
         if (oldStringMissRepair.isPresent()) {
             OldStringMissRepair repair = oldStringMissRepair.get();
@@ -999,6 +1051,235 @@ public final class ToolCallRepromptStage {
         return true;
     }
 
+    private static Optional<ExpectedTargetRepair> nextExpectedTargetScopeRepair(LoopState state) {
+        if (state == null || state.toolOutcomes == null || state.toolOutcomes.isEmpty()) {
+            return Optional.empty();
+        }
+        String failureReason = state.failureDecision == null ? "" : state.failureDecision.reason();
+        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        List<String> remainingExpectedTargets = expectedMutationTargetsForScopeRepair(state);
+        if (remainingExpectedTargets.isEmpty() && looksLikeExpectedTargetScopeFailure(failureReason)) {
+            remainingExpectedTargets = expectedTargetsFromScopeFailureReason(failureReason);
+        }
+        if (remainingExpectedTargets.isEmpty()) return Optional.empty();
+        for (int i = state.toolOutcomes.size() - 1; i >= 0; i--) {
+            ToolCallLoop.ToolOutcome outcome = state.toolOutcomes.get(i);
+            if (outcome == null || !outcome.expectedTargetScopeFailure()) continue;
+            String failedTarget = ToolCallSupport.normalizePath(outcome.pathHint());
+            if (failedTarget.isBlank()) failedTarget = "(unknown)";
+            ExpectedTargetRepair repair = expectedTargetRepair(
+                    remainingExpectedTargets,
+                    failedTarget,
+                    outcome.errorMessage(),
+                    contract,
+                    state);
+            if (repair == null) continue;
+            if (state.expectedTargetScopeRepairPromptedKeys.contains(expectedTargetRepairKey(repair))) {
+                continue;
+            }
+            return Optional.of(repair);
+        }
+        if (looksLikeExpectedTargetScopeFailure(failureReason)) {
+            String failedTarget = firstBacktickValue(failureReason);
+            if (failedTarget.isBlank()) failedTarget = "(unknown)";
+            ExpectedTargetRepair repair = expectedTargetRepair(
+                    remainingExpectedTargets,
+                    failedTarget,
+                    failureReason,
+                    contract,
+                    state);
+            if (repair != null
+                    && !state.expectedTargetScopeRepairPromptedKeys.contains(expectedTargetRepairKey(repair))) {
+                return Optional.of(repair);
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static List<String> expectedTargetsFromScopeFailureReason(String reason) {
+        if (reason == null || reason.isBlank()) return List.of();
+        String marker = "current expected target set:";
+        String lower = reason.toLowerCase(Locale.ROOT);
+        int start = lower.indexOf(marker);
+        if (start < 0) return List.of();
+        String tail = reason.substring(start + marker.length()).strip();
+        int end = tail.indexOf(". Similar filenames");
+        if (end >= 0) {
+            tail = tail.substring(0, end);
+        } else {
+            int period = tail.indexOf('.');
+            if (period >= 0) tail = tail.substring(0, period);
+        }
+        if (tail.isBlank()) return List.of();
+        return java.util.Arrays.stream(tail.split(","))
+                .map(ToolCallSupport::normalizePath)
+                .filter(path -> !path.isBlank())
+                .distinct()
+                .sorted()
+                .toList();
+    }
+
+    private static boolean looksLikeExpectedTargetScopeFailure(String reason) {
+        return reason != null
+                && reason.toLowerCase(Locale.ROOT)
+                .contains("target outside expected targets before approval");
+    }
+
+    private static String firstBacktickValue(String value) {
+        if (value == null || value.isBlank()) return "";
+        int start = value.indexOf('`');
+        if (start < 0) return "";
+        int end = value.indexOf('`', start + 1);
+        if (end <= start) return "";
+        return ToolCallSupport.normalizePath(value.substring(start + 1, end));
+    }
+
+    private static List<String> expectedMutationTargetsForScopeRepair(LoopState state) {
+        if (state == null || state.messages == null) return List.of();
+        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        if (contract == null || !contract.mutationAllowed()) return List.of();
+        Set<String> expectedTargets = contract.expectedTargets().isEmpty()
+                ? TaskContractResolver.extractExpectedTargets(ToolCallSupport.latestUserRequestIn(state.messages))
+                : contract.expectedTargets();
+        if (expectedTargets == null || expectedTargets.isEmpty()) return List.of();
+        Set<String> successfullyMutated = new java.util.HashSet<>();
+        for (ToolCallLoop.ToolOutcome outcome : state.toolOutcomes) {
+            if (outcome == null || !outcome.success() || !outcome.mutating()) continue;
+            addSatisfiedExpectedTargetKeys(successfullyMutated, outcome);
+        }
+        return expectedTargets.stream()
+                .map(ToolCallSupport::normalizePath)
+                .filter(path -> !path.isBlank())
+                .distinct()
+                .filter(path -> !successfullyMutated.contains(normalizeExpectedTargetKey(path)))
+                .sorted()
+                .toList();
+    }
+
+    private static ExpectedTargetRepair expectedTargetRepair(
+            List<String> expectedTargets,
+            String failedTarget,
+            String reason,
+            TaskContract contract,
+            LoopState state
+    ) {
+        if (expectedTargets == null || expectedTargets.isEmpty() || state == null) return null;
+        StringBuilder readbacks = new StringBuilder();
+        for (String target : expectedTargets) {
+            String path = ToolCallSupport.normalizePath(target);
+            if (path.isBlank() || isSensitiveReadbackPath(path)) continue;
+            if (!successfulReadbackForPath(state, path)) continue;
+            String readback = latestSuccessfulReadbackForPath(state, path);
+            if (readback == null || readback.isBlank()) continue;
+            readbacks.append("Current readback for ")
+                    .append(path)
+                    .append(":\n")
+                    .append(truncateForCompactRepair(readback))
+                    .append("\n---\n");
+        }
+        if (readbacks.isEmpty()) return null;
+        List<String> normalizedTargets = expectedTargets.stream()
+                        .map(ToolCallSupport::normalizePath)
+                        .filter(path -> !path.isBlank())
+                        .distinct()
+                        .sorted()
+                        .toList();
+        ReplacementExpectation replacement = replacementExpectationForTargets(contract, normalizedTargets);
+        return new ExpectedTargetRepair(
+                normalizedTargets,
+                failedTarget,
+                reason,
+                readbacks.toString().strip(),
+                replacement == null ? "" : replacement.oldText(),
+                replacement == null ? "" : replacement.newText());
+    }
+
+    private static ReplacementExpectation replacementExpectationForTargets(
+            TaskContract contract,
+            List<String> targets
+    ) {
+        if (contract == null || targets == null || targets.size() != 1) return null;
+        String target = targets.getFirst();
+        for (var expectation : TaskExpectationResolver.resolve(contract)) {
+            if (expectation instanceof ReplacementExpectation replacement
+                    && ToolCallSupport.normalizePath(replacement.targetPath()).equals(target)) {
+                return replacement;
+            }
+        }
+        return null;
+    }
+
+    private static String expectedTargetRepairKey(ExpectedTargetRepair repair) {
+        if (repair == null) return "";
+        return ToolCallSupport.normalizePath(repair.failedTarget())
+                + "->"
+                + String.join(",", repair.expectedTargets());
+    }
+
+    private static ChatMessage.NativeToolCall exactExpectedTargetReplacementRepairCall(
+            ExpectedTargetRepair repair
+    ) {
+        if (repair == null || repair.expectedTargets().size() != 1) return null;
+        if (repair.replacementOldText().isBlank() || repair.replacementNewText().isBlank()) {
+            return null;
+        }
+        return new ChatMessage.NativeToolCall(
+                "runtime_expected_target_repair",
+                "talos.edit_file",
+                Map.of(
+                        "path", repair.expectedTargets().getFirst(),
+                        "old_string", repair.replacementOldText(),
+                        "new_string", repair.replacementNewText()));
+    }
+
+    private static Optional<AppendLineRepair> nextAppendLineCompactRepair(LoopState state) {
+        if (state == null || state.toolOutcomes == null || state.toolOutcomes.isEmpty()) {
+            return Optional.empty();
+        }
+        List<String> remainingExpectedTargets = remainingExpectedMutationTargets(state);
+        if (remainingExpectedTargets.isEmpty()) return Optional.empty();
+        Set<String> remaining = remainingExpectedTargets.stream()
+                .map(ToolCallRepromptStage::normalizeExpectedTargetKey)
+                .collect(java.util.stream.Collectors.toSet());
+        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        for (int i = state.toolOutcomes.size() - 1; i >= 0; i--) {
+            ToolCallLoop.ToolOutcome outcome = state.toolOutcomes.get(i);
+            if (outcome == null || !outcome.appendLinePreservationFailure()) continue;
+            String pathKey = normalizeExpectedTargetKey(outcome.pathHint());
+            if (pathKey.isBlank() || !remaining.contains(pathKey)) continue;
+            if (state.appendLineRepairPromptedPaths.contains(pathKey)) continue;
+            String path = displayExpectedTargetForKey(remainingExpectedTargets, pathKey);
+            if (path.isBlank()) {
+                path = ToolCallSupport.normalizePath(outcome.pathHint());
+            }
+            if (isSensitiveReadbackPath(path) || !successfulReadbackForPath(state, path)) continue;
+            AppendLineExpectation expectation = appendLineExpectationForPath(contract, path);
+            if (expectation == null || expectation.expectedLine().isBlank()) continue;
+            String readback = latestSuccessfulReadbackForPath(state, path);
+            if (readback == null || readback.isBlank()) continue;
+            return Optional.of(new AppendLineRepair(
+                    path,
+                    expectation.expectedLine(),
+                    outcome.errorMessage(),
+                    truncateForCompactRepair(readback)));
+        }
+        return Optional.empty();
+    }
+
+    private static AppendLineExpectation appendLineExpectationForPath(TaskContract contract, String path) {
+        if (contract == null || path == null || path.isBlank()) return null;
+        String target = ToolCallSupport.normalizePath(path).toLowerCase(Locale.ROOT);
+        for (var expectation : TaskExpectationResolver.resolve(contract)) {
+            if (expectation instanceof AppendLineExpectation appendLine
+                    && ToolCallSupport.normalizePath(appendLine.targetPath())
+                    .toLowerCase(Locale.ROOT)
+                    .equals(target)) {
+                return appendLine;
+            }
+        }
+        return null;
+    }
+
     private static Optional<OldStringMissRepair> nextOldStringMissCompactRepair(LoopState state) {
         if (state == null || state.toolOutcomes == null || state.toolOutcomes.isEmpty()) {
             return Optional.empty();
@@ -1483,8 +1764,90 @@ public final class ToolCallRepromptStage {
                                 + " using talos.write_file or talos.edit_file now."));
     }
 
+    private static List<ChatMessage> appendLineRepairMessages(
+            AppendLineRepair repair,
+            String userTask
+    ) {
+        String currentTask = userTask == null || userTask.isBlank()
+                ? "Append the requested line to the target file."
+                : userTask.strip();
+        return List.of(
+                ChatMessage.system("""
+                        You are Talos, a local-first workspace assistant.
+                        This is a compact target-only repair after talos.write_file was blocked before approval because it did not preserve the same-turn readback for an append-line task.
+                        Use the provided current file readback as the only file-content source.
+                        Prefer talos.write_file with complete target content equal to the readback plus exactly the required appended line as the final logical line.
+                        Do not answer in prose instead of calling a write/edit tool.
+                        """),
+                ChatMessage.system(
+                        "[AppendLineRepair] Target: " + repair.path() + "\n"
+                                + "Required appended line: " + repair.expectedLine() + "\n"
+                                + "Failed reason: " + safeAppendLineRepairReason(repair.reason()) + "\n"
+                                + "Only mutate this target. Ignore stale prior history outside this compact repair frame."),
+                ChatMessage.user(
+                        "Current user request:\n"
+                                + currentTask
+                                + "\n\nCurrent readback for " + repair.path() + ":\n"
+                                + repair.readback()
+                                + "\n\nAppend exactly this line as the final logical line:\n"
+                                + repair.expectedLine()
+                                + "\n\nCall talos.write_file or talos.edit_file now."));
+    }
+
+    private static List<ChatMessage> expectedTargetRepairMessages(
+            ExpectedTargetRepair repair,
+            String userTask
+    ) {
+        String currentTask = userTask == null || userTask.isBlank()
+                ? "Apply the requested file change to the expected target."
+                : userTask.strip();
+        return List.of(
+                ChatMessage.system("""
+                        You are Talos, a local-first workspace assistant.
+                        This is a compact target-only repair after a mutation was blocked before approval because it targeted a file outside the expected target set.
+                        Use the provided current expected-target readback as the only file-content source.
+                        Only mutate the expected target path(s). Do not mutate the failed attempted target unless it is also explicitly listed as expected.
+                        Do not answer in prose instead of calling a write/edit tool.
+                        """),
+                ChatMessage.system(
+                        "[ExpectedTargetRepair]\n"
+                                + "Expected target(s): " + String.join(", ", repair.expectedTargets()) + "\n"
+                                + "Failed attempted target: " + repair.failedTarget() + "\n"
+                                + expectedTargetRepairReplacementFrame(repair)
+                                + "Failed reason: " + safeExpectedTargetRepairReason(repair.reason()) + "\n"
+                                + "Only mutate the expected target path(s). Ignore stale prior history outside this compact repair frame."),
+                ChatMessage.user(
+                        "Current user request:\n"
+                                + currentTask
+                                + "\n\n"
+                                + repair.readbackFrame()
+                                + "\n\nCall talos.write_file or talos.edit_file for the expected target now."));
+    }
+
+    private static String expectedTargetRepairReplacementFrame(ExpectedTargetRepair repair) {
+        if (repair == null || repair.replacementOldText().isBlank() || repair.replacementNewText().isBlank()) {
+            return "";
+        }
+        return "Exact replacement: old_string=`" + repair.replacementOldText()
+                + "` new_string=`" + repair.replacementNewText() + "`\n";
+    }
+
     private static String safeRepairReason(String reason) {
         if (reason == null || reason.isBlank()) return "old_string not found";
+        return reason.strip();
+    }
+
+    private static String safeAppendLineRepairReason(String reason) {
+        if (reason == null || reason.isBlank()) {
+            return "append-line write_file did not preserve same-turn readback";
+        }
+        return reason.strip();
+    }
+
+    private static String safeExpectedTargetRepairReason(String reason) {
+        if (reason == null || reason.isBlank()) {
+            return "mutation targeted a file outside the expected target set";
+        }
         return reason.strip();
     }
 

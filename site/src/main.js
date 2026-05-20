@@ -131,7 +131,9 @@ const sectionNavLinks = Array.from(document.querySelectorAll("[data-section-nav]
 const storySections = Array.from(document.querySelectorAll(".story-section[id]"));
 const sectionIds = new Set(storySections.map((section) => section.id));
 const storyMotionQuery = window.matchMedia("(min-width: 761px) and (prefers-reduced-motion: no-preference)");
+const storyFlowTops = new Map();
 let activeSectionFrame = 0;
+let requestStorySectionSync = () => {};
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -140,6 +142,27 @@ function clamp(value, min, max) {
 function smoothStep(value) {
   const t = clamp(value, 0, 1);
   return t * t * (3 - 2 * t);
+}
+
+function smootherStep(value) {
+  const t = clamp(value, 0, 1);
+  return t * t * t * (t * (t * 6 - 15) + 10);
+}
+
+function storyTopOffset() {
+  const value = window.getComputedStyle(document.documentElement).getPropertyValue("--story-top");
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 72;
+}
+
+function storyScrollTop(section) {
+  const flowTop = storyFlowTops.get(section.id) ?? section.offsetTop;
+  const maxScrollTop = document.documentElement.scrollHeight - window.innerHeight;
+  return clamp(flowTop - storyTopOffset(), 0, Math.max(0, maxScrollTop));
+}
+
+function storyScrollBehavior() {
+  return storyMotionQuery.matches ? "smooth" : "auto";
 }
 
 function resetStorySectionBlend() {
@@ -151,6 +174,13 @@ function resetStorySectionBlend() {
   });
 }
 
+function measureStoryFlowTops() {
+  storyFlowTops.clear();
+  storySections.forEach((section) => {
+    storyFlowTops.set(section.id, section.offsetTop);
+  });
+}
+
 function syncStorySectionBlend() {
   if (!storyMotionQuery.matches) {
     resetStorySectionBlend();
@@ -158,10 +188,10 @@ function syncStorySectionBlend() {
   }
 
   const viewportHeight = window.innerHeight || 1;
-  const fadeInStart = viewportHeight * 1.02;
-  const fadeInEnd = viewportHeight * 0.72;
-  const outgoingStart = viewportHeight * 0.92;
-  const outgoingEnd = viewportHeight * 0.76;
+  const fadeInStart = viewportHeight * 1.04;
+  const fadeInEnd = viewportHeight * 0.66;
+  const outgoingStart = viewportHeight * 0.94;
+  const outgoingEnd = viewportHeight * 0.7;
   const sectionRects = storySections.map((section) => {
     const primaryContent = section.querySelector(".container > *");
     return {
@@ -172,20 +202,36 @@ function syncStorySectionBlend() {
   storySections.forEach((section, index) => {
     const rect = sectionRects[index];
     const nextRect = sectionRects[index + 1];
-    const incoming = smoothStep((fadeInStart - rect.contentTop) / (fadeInStart - fadeInEnd));
+    const incoming = smootherStep((fadeInStart - rect.contentTop) / (fadeInStart - fadeInEnd));
     const outgoing = nextRect
-      ? smoothStep((outgoingStart - nextRect.contentTop) / (outgoingStart - outgoingEnd))
+      ? smootherStep((outgoingStart - nextRect.contentTop) / (outgoingStart - outgoingEnd))
       : 0;
     const opacity = incoming * (1 - outgoing);
-    const shift = (1 - incoming) * 34 - outgoing * 24;
-    const scale = 0.992 + incoming * 0.008 - outgoing * 0.004;
-    const saturation = 0.82 + incoming * 0.18 - outgoing * 0.1;
+    const shift = (1 - incoming) * 24 - outgoing * 18;
+    const scale = 0.995 + incoming * 0.005 - outgoing * 0.003;
+    const saturation = 0.88 + incoming * 0.12 - outgoing * 0.07;
 
     section.style.setProperty("--story-opacity", opacity.toFixed(3));
     section.style.setProperty("--story-shift", `${shift.toFixed(1)}px`);
     section.style.setProperty("--story-scale", scale.toFixed(3));
     section.style.setProperty("--story-saturation", saturation.toFixed(3));
   });
+}
+
+function scrollToStorySection(sectionId, behavior = storyScrollBehavior(), updateHash = true) {
+  if (!sectionIds.has(sectionId)) return;
+
+  const section = document.getElementById(sectionId);
+  if (!section) return;
+
+  setActiveSection(sectionId);
+  window.scrollTo({ top: storyScrollTop(section), behavior });
+
+  if (updateHash && window.location.hash !== `#${sectionId}`) {
+    window.history.pushState(null, "", `#${sectionId}`);
+  }
+
+  requestStorySectionSync();
 }
 
 function setActiveSection(sectionId) {
@@ -209,12 +255,17 @@ if (storySections.length) {
   const initialSection = sectionIds.has(window.location.hash.slice(1))
     ? window.location.hash.slice(1)
     : storySections[0].id;
+  if (window.location.hash && window.scrollY > 0) {
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }
+  measureStoryFlowTops();
   setActiveSection(initialSection);
 
   sectionNavLinks.forEach((link) => {
-    link.addEventListener("click", () => {
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
       const targetId = link.getAttribute("href")?.slice(1);
-      setActiveSection(targetId);
+      scrollToStorySection(targetId);
     });
   });
 
@@ -232,6 +283,7 @@ if (storySections.length) {
     if (activeSectionFrame) return;
     activeSectionFrame = window.requestAnimationFrame(syncActiveSectionFromScroll);
   };
+  requestStorySectionSync = scheduleActiveSectionSync;
 
   window.addEventListener("scroll", scheduleActiveSectionSync, { passive: true });
   window.addEventListener("resize", scheduleActiveSectionSync);
@@ -239,16 +291,25 @@ if (storySections.length) {
   window.addEventListener("hashchange", () => {
     const targetId = window.location.hash.slice(1);
     if (sectionIds.has(targetId)) {
-      setActiveSection(targetId);
+      scrollToStorySection(targetId, storyScrollBehavior(), false);
     } else {
       scheduleActiveSectionSync();
     }
   });
 
+  const syncInitialStorySection = () => {
+    const targetId = window.location.hash.slice(1);
+    if (sectionIds.has(targetId)) {
+      scrollToStorySection(targetId, "auto", false);
+    } else {
+      syncActiveSectionFromScroll();
+    }
+  };
+
   if (document.readyState === "complete") {
-    syncActiveSectionFromScroll();
+    syncInitialStorySection();
   } else {
-    window.addEventListener("load", syncActiveSectionFromScroll, { once: true });
+    window.addEventListener("load", syncInitialStorySection, { once: true });
   }
 }
 

@@ -52,6 +52,8 @@ public final class LoopState {
     public final Map<String, Integer> emptyEditArgumentFailuresByPath = new HashMap<>();
     public final Set<String> emptyEditRepairPromptedPaths = new HashSet<>();
     public final Set<String> oldStringMissRepairPromptedPaths = new HashSet<>();
+    public final Set<String> appendLineRepairPromptedPaths = new HashSet<>();
+    public final Set<String> expectedTargetScopeRepairPromptedKeys = new HashSet<>();
     public final Set<String> pathsMutatedSinceRead = new HashSet<>();
     public final Map<String, Integer> staleEditFailuresByPath = new HashMap<>();
     public final Set<String> staleEditRepairPromptedPaths = new HashSet<>();
@@ -116,11 +118,23 @@ public final class LoopState {
             return true;
         }
         if (pendingActionObligation.kind()
-                == PendingActionObligation.Kind.OLD_STRING_MISS_TARGET_REPAIR) {
+                == PendingActionObligation.Kind.OLD_STRING_MISS_TARGET_REPAIR
+                || pendingActionObligation.kind()
+                == PendingActionObligation.Kind.APPEND_LINE_TARGET_REPAIR
+                || pendingActionObligation.kind()
+                == PendingActionObligation.Kind.EXPECTED_TARGET_SCOPE_REPAIR) {
             if (containsMutatingCallForPendingTarget(calls, pendingActionObligation.targets())) {
                 return false;
             }
-            String detail = oldStringMissRepairInvalidToolDetail(calls, pendingActionObligation.targets());
+            String repairName = switch (pendingActionObligation.kind()) {
+                case APPEND_LINE_TARGET_REPAIR -> "append-line compact repair";
+                case EXPECTED_TARGET_SCOPE_REPAIR -> "expected-target scope compact repair";
+                default -> "old-string miss compact repair";
+            };
+            String detail = targetRepairInvalidToolDetail(
+                    repairName,
+                    calls,
+                    pendingActionObligation.targets());
             PendingActionObligation obligation = pendingActionObligation;
             pendingActionObligation = null;
             obligation.recordBreached(detail);
@@ -265,10 +279,14 @@ public final class LoopState {
         return false;
     }
 
-    private static String oldStringMissRepairInvalidToolDetail(
+    private static String targetRepairInvalidToolDetail(
+            String repairName,
             List<ToolCall> calls,
             List<String> targets
     ) {
+        String safeRepairName = repairName == null || repairName.isBlank()
+                ? "target compact repair"
+                : repairName.strip();
         String targetList = targets == null || targets.isEmpty()
                 ? "(unknown)"
                 : String.join(", ", targets);
@@ -284,7 +302,7 @@ public final class LoopState {
             }
         }
         String seenCalls = seen.isEmpty() ? "(none)" : String.join(", ", seen);
-        return "old-string miss compact repair required talos.write_file or talos.edit_file "
+        return safeRepairName + " required talos.write_file or talos.edit_file "
                 + "for target(s): " + targetList + ", but the model returned: " + seenCalls
                 + ". No approval was requested and no file was changed.";
     }

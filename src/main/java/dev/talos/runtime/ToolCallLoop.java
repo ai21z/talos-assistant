@@ -312,6 +312,21 @@ public final class ToolCallLoop {
             String lower = errorMessage.toLowerCase(java.util.Locale.ROOT);
             return lower.contains("old_string not found");
         }
+
+        public boolean appendLinePreservationFailure() {
+            if (!"talos.write_file".equals(toolName)) return false;
+            if (!mutating || success || denied) return false;
+            if (!ToolError.INVALID_PARAMS.equals(errorCode)) return false;
+            String lower = errorMessage.toLowerCase(java.util.Locale.ROOT);
+            return lower.contains("append-line write_file");
+        }
+
+        public boolean expectedTargetScopeFailure() {
+            if (!mutating || success || denied) return false;
+            if (!ToolError.INVALID_PARAMS.equals(errorCode)) return false;
+            String lower = errorMessage.toLowerCase(java.util.Locale.ROOT);
+            return lower.contains("target outside expected targets before approval");
+        }
     }
 
     public record MutationEvidence(
