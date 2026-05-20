@@ -69,9 +69,8 @@ public final class StaticWebCapabilityProfile {
                 || lower.contains("bmi")
                 || mentionsForm(lower)
                 || lower.contains("input")
-                || lower.contains("interactive")
-                || lower.contains("functioning")
-                || lower.contains("functional");
+                || lower.contains("submit")
+                || lower.contains("calculate");
     }
 
     public static boolean looksStyledWebTask(TaskContract contract, Set<String> mutatedPaths) {
