@@ -701,6 +701,93 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void embeddedStaticVerificationFailureInBlockedToolLoopIsRecordedInOutcomeAndTrace() throws Exception {
+        Path ws = Files.createTempDirectory("talos-embedded-static-failure-");
+        try {
+            Files.writeString(ws.resolve("index.html"), """
+                    <!doctype html>
+                    <html>
+                      <head><link rel="stylesheet" href="style.css"></head>
+                      <body><script src="script.js"></script></body>
+                    </html>
+                    """);
+            Files.writeString(ws.resolve("style.css"), "body { background: #100020; }\n");
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "But make sure there is a real modern synthwave style and JavaScript interaction. Fix the files if needed."));
+
+            String answer = """
+                    [Task incomplete: Static verification failed - HTML references missing JavaScript file: `script.js`]
+
+                    Unresolved static verification problems:
+                    - HTML references missing JavaScript file: `script.js`
+
+                    The requested task is not verified complete.
+
+                    [Action obligation failed: pending expected target progress was not satisfied.]
+
+                    Remaining target(s): script.js.
+                    """;
+            var loopResult = new ToolCallLoop.LoopResult(
+                    answer,
+                    4,
+                    3,
+                    List.of("talos.read_file", "talos.list_dir", "talos.write_file"),
+                    List.of(),
+                    0,
+                    0,
+                    false,
+                    1,
+                    List.of("index.html"),
+                    0,
+                    0,
+                    0,
+                    0,
+                    FailureDecision.stop(
+                            FailureAction.ASK_USER,
+                            "Pending action obligation EXPECTED_TARGET_PROGRESS was ignored."),
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.write_file", "style.css", true, true, false,
+                            "wrote style.css", "", dev.talos.tools.VerificationStatus.PASS)));
+
+            LocalTurnTraceCapture.begin(
+                    "trc-embedded-static-failure",
+                    "sid",
+                    1,
+                    "2026-05-20T12:00:00Z",
+                    "workspace-hash",
+                    "auto",
+                    "test",
+                    "model",
+                    messages.get(1).content());
+            try {
+                ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                        loopResult.finalAnswer(), messages, loopResult, ws, 0);
+
+                LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+                assertEquals(ExecutionOutcome.CompletionStatus.BLOCKED, outcome.completionStatus());
+                assertEquals(TaskCompletionStatus.BLOCKED_BY_POLICY, outcome.taskOutcome().completionStatus());
+                assertEquals(ExecutionOutcome.VerificationStatus.FAILED, outcome.verificationStatus());
+                assertTrue(outcome.finalAnswer().contains("Static verification failed"), outcome.finalAnswer());
+                assertNotNull(trace);
+                assertNotNull(trace.outcome());
+                assertEquals("FAILED", trace.outcome().verificationStatus());
+                assertEquals("BLOCKED_BY_POLICY", trace.outcome().classification());
+            } finally {
+                LocalTurnTraceCapture.clear();
+            }
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void planContractKeepsDeniedMutationClassificationAfterRetryMessagesAppend() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));

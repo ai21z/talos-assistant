@@ -334,6 +334,8 @@ record ExecutionOutcome(
             current = missingEvidencePrefix(current);
         }
 
+        TaskVerificationResult embeddedVerification = embeddedStaticVerificationFailure(current);
+        boolean usingEmbeddedVerification = embeddedVerification.status() != TaskVerificationStatus.NOT_RUN;
         TaskVerificationResult taskVerification = workspace != null && shouldVerifyPostApply(
                 contract, completionStatus, loopResult, extraMutationSuccesses)
                 ? StaticTaskVerifier.verify(
@@ -341,10 +343,16 @@ record ExecutionOutcome(
                         contract,
                         loopResult,
                         extraMutationSuccesses)
+                : usingEmbeddedVerification
+                ? embeddedVerification
                 : TaskVerificationResult.notRun("Post-apply verification was not applicable.");
         VerificationStatus verificationStatus = mapVerificationStatus(taskVerification.status());
         if (verificationStatus == VerificationStatus.FAILED) {
-            if (completionStatus == CompletionStatus.PARTIAL) {
+            if (usingEmbeddedVerification) {
+                // The tool loop already rendered the static-verification failure alongside
+                // the dominant action-obligation failure. Keep that precise answer intact
+                // while still recording FAILED verification in outcome/trace evidence.
+            } else if (completionStatus == CompletionStatus.PARTIAL) {
                 current = partialStaticVerificationFailedAnnotation(taskVerification) + current;
             } else {
                 current = staticVerificationFailedReplacement(taskVerification, loopResult);
@@ -629,6 +637,51 @@ record ExecutionOutcome(
         if (loopResult == null) return false;
         if (contract == null || !contract.verificationRequired()) return false;
         return loopResult.mutatingToolSuccesses() + Math.max(0, extraMutationSuccesses) > 0;
+    }
+
+    private static TaskVerificationResult embeddedStaticVerificationFailure(String answer) {
+        if (answer == null || answer.isBlank()) {
+            return TaskVerificationResult.notRun("Post-apply verification was not applicable.");
+        }
+        String marker = "[Task incomplete: Static verification failed - ";
+        int markerStart = answer.indexOf(marker);
+        if (markerStart < 0) {
+            return TaskVerificationResult.notRun("Post-apply verification was not applicable.");
+        }
+        int summaryStart = markerStart + marker.length();
+        int summaryEnd = answer.indexOf(']', summaryStart);
+        if (summaryEnd < 0) {
+            int lineEnd = answer.indexOf('\n', summaryStart);
+            summaryEnd = lineEnd < 0 ? answer.length() : lineEnd;
+        }
+        String summary = answer.substring(summaryStart, Math.max(summaryStart, summaryEnd)).strip();
+        if (summary.isBlank()) summary = "Static verification failed.";
+
+        List<String> problems = embeddedStaticVerificationProblems(answer);
+        if (problems.isEmpty()) {
+            problems = List.of(summary);
+        }
+        return TaskVerificationResult.failed(summary, List.of(), problems);
+    }
+
+    private static List<String> embeddedStaticVerificationProblems(String answer) {
+        String marker = "Unresolved static verification problems:";
+        int start = answer.indexOf(marker);
+        if (start < 0) return List.of();
+        String tail = answer.substring(start + marker.length());
+        List<String> problems = new ArrayList<>();
+        boolean started = false;
+        for (String line : tail.split("\\R")) {
+            String trimmed = line == null ? "" : line.strip();
+            if (trimmed.startsWith("- ")) {
+                started = true;
+                String problem = trimmed.substring(2).strip();
+                if (!problem.isBlank()) problems.add(problem);
+            } else if (started && !trimmed.isBlank()) {
+                break;
+            }
+        }
+        return List.copyOf(problems);
     }
 
     private static boolean readOnlyToolLimitWithoutRuntimeAnswer(

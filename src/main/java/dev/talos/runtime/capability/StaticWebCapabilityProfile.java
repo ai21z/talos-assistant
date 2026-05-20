@@ -28,8 +28,10 @@ public final class StaticWebCapabilityProfile {
         if (contract == null) return false;
         if (hasOnlyExplicitNonWebMutationTargets(contract)) return false;
         String request = contract.originalUserRequest();
+        if (looksWebGuideDocumentTask(request)) return false;
         if (shouldCheckSelectorCoherence(request)
                 || looksBroadWebTask(contract)
+                || looksFunctionalWebTask(contract)
                 || looksStyledWebTask(contract, mutatedPaths)) {
             return true;
         }
@@ -43,14 +45,15 @@ public final class StaticWebCapabilityProfile {
     }
 
     public static boolean looksFunctionalWebTask(TaskContract contract) {
-        if (!looksBroadWebTask(contract)) return false;
         String request = contract.originalUserRequest();
         if (request == null || request.isBlank()) return false;
         String lower = request.toLowerCase(Locale.ROOT);
+        if (!looksBroadWebTask(contract) && !looksWebAssetInteractionTask(lower)) return false;
         return lower.contains("functioning")
                 || lower.contains("functional")
                 || lower.contains("working")
                 || lower.contains("interactive")
+                || lower.contains("interaction")
                 || lower.contains("calculator")
                 || lower.contains("bmi")
                 || lower.contains("make it work")
@@ -320,6 +323,40 @@ public final class StaticWebCapabilityProfile {
                 || lower.contains("good looking")
                 || lower.contains("cool looking")
                 || containsWholeWord(lower, "style");
+    }
+
+    private static boolean looksWebAssetInteractionTask(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        boolean mentionsStyle = lower.contains("css")
+                || lower.contains(".css")
+                || lower.contains("stylesheet")
+                || lower.contains("style.css")
+                || lower.contains("styles.css")
+                || mentionsVisualDesignIntent(lower);
+        boolean mentionsScript = lower.contains("javascript")
+                || lower.contains(".js")
+                || lower.contains("script.js")
+                || lower.contains("scripts.js")
+                || lower.contains("scripting")
+                || lower.contains("interaction")
+                || lower.contains("interactive");
+        return mentionsStyle && mentionsScript;
+    }
+
+    private static boolean looksWebGuideDocumentTask(String request) {
+        if (request == null || request.isBlank()) return false;
+        String lower = request.toLowerCase(Locale.ROOT);
+        boolean explicitTextOutput = lower.contains("txt file")
+                || lower.contains("text file")
+                || lower.contains(".txt")
+                || lower.contains("markdown file")
+                || lower.contains(".md");
+        boolean explanatoryDocument = lower.contains("talks about")
+                || lower.contains("how to build")
+                || lower.contains("how to create")
+                || lower.contains("guide")
+                || lower.contains("instructions");
+        return explicitTextOutput && explanatoryDocument && mentionsWebSurface(lower);
     }
 
     private static boolean mutatesHtmlSurface(Set<String> mutatedPaths) {

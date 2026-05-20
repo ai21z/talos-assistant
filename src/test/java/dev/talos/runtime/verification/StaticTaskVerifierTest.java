@@ -21,6 +21,7 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -1477,6 +1478,64 @@ class StaticTaskVerifierTest {
         assertEquals(TaskVerificationStatus.FAILED, result.status(), result.facts().toString());
         assertTrue(result.problems().stream()
                         .anyMatch(p -> p.contains("Styled web task is missing CSS styling")),
+                result.problems().toString());
+    }
+
+    @Test
+    void textGuideAboutBuildingWebPageDoesNotTriggerStaticWebVerification() throws Exception {
+        Files.writeString(workspace.resolve("synthwave_webpage_guide.txt"), """
+                # Synthwave Band Web Page Guide
+
+                - Plan the brand palette.
+                - Create HTML, CSS, and JavaScript source files later.
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Okay can you create a txt file that talks about how to build a synthwave band's web page?",
+                loopResult(List.of(successfulWrite("synthwave_webpage_guide.txt", VerificationStatus.PASS))),
+                0);
+
+        assertNotEquals(TaskVerificationStatus.FAILED, result.status(), result.problems().toString());
+        assertFalse(result.problems().stream()
+                        .anyMatch(p -> p.contains("web coherence could not be checked")),
+                result.problems().toString());
+    }
+
+    @Test
+    void styleAndJavascriptInteractionFollowUpVerifiesMissingScriptReference() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html lang="en">
+                  <head>
+                    <meta charset="utf-8">
+                    <title>Synthwave Band</title>
+                    <link rel="stylesheet" href="style.css">
+                  </head>
+                  <body>
+                    <main class="hero">
+                      <h1>Synthwave Band</h1>
+                      <button class="cta-button" type="button">Play</button>
+                    </main>
+                    <script src="script.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("style.css"), """
+                body { background: #100020; color: #f8f8ff; }
+                .hero { padding: 6rem 2rem; }
+                .cta-button { border: 1px solid #ff4fd8; }
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "But make sure there is a real modern synthwave style and JavaScript interaction. Fix the files if needed.",
+                loopResult(List.of(successfulWrite("style.css", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.facts().toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("HTML references missing JavaScript file: `script.js`")),
                 result.problems().toString());
     }
 
