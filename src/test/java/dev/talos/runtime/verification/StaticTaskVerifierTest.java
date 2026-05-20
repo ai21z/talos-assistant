@@ -1413,6 +1413,52 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void interactiveStyledBandSiteDoesNotRequireCalculatorFormResultElements() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html lang="en">
+                  <head>
+                    <meta charset="utf-8">
+                    <title>Neon Harbor</title>
+                    <link rel="stylesheet" href="style.css">
+                  </head>
+                  <body>
+                    <main class="hero">
+                      <h1>Neon Harbor</h1>
+                      <p class="tagline">Late-night synthwave shows and new releases.</p>
+                      <button class="cta-button" type="button">Play teaser</button>
+                    </main>
+                    <script src="script.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("style.css"), """
+                body { background: #100020; color: #f8f8ff; }
+                .hero { max-width: 56rem; margin: 0 auto; padding: 6rem 2rem; }
+                .tagline { color: #38f6ff; }
+                .cta-button { border: 1px solid #ff4fd8; }
+                """);
+        Files.writeString(workspace.resolve("script.js"), """
+                document.querySelector('.cta-button').addEventListener('click', () => {
+                  document.body.dataset.teaser = 'ready';
+                });
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Create an interactive synthwave band website with exactly index.html, style.css, and script.js.",
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("style.css", VerificationStatus.PASS),
+                        successfulWrite("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.problems().toString());
+        assertFalse(result.problems().stream().anyMatch(p -> p.contains("Calculator/form task")),
+                result.problems().toString());
+    }
+
+    @Test
     void transcriptStyleFollowUpFailsWhenOnlyHtmlWithoutStylingWasMutated() throws Exception {
         Files.writeString(workspace.resolve("index.html"), """
                 <!doctype html>
