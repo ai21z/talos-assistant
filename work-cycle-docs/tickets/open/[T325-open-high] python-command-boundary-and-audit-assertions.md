@@ -43,6 +43,21 @@ Fresh focused implementation evidence from 2026-05-20:
   - `pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly` passed and validated 41 TalosBench cases.
   - `pwsh .\tools\manual-eval\run-talosbench.ps1 -CaseId t325-python-command-boundary -IncludeManualRequired` returned the expected `SYNC_REQUIRED` status, proving the case is wired while still refusing redirected approval evidence by default.
 
+Follow-up prompt-surface evidence from 2026-05-20:
+
+- Prompt-debug comparison audit `prompt-debug-comparison-20260520-r1` found that a Python-boundary turn could expose only `talos.read_file` in the native tool array while the textual system prompt still described `talos.run_command`.
+- Root cause: `UnifiedAssistantMode` built the human-readable tool section from coarse read-only/verification flags before aligning it with the final per-turn `NativeToolSpecPolicy` plan.
+- Fixed by adding exact visible-tool-name filtering to `SystemPromptBuilder` and wiring `UnifiedAssistantMode`/`PromptInspector` to pass the planned per-turn native tool names into the textual prompt section.
+- Regression evidence:
+  - `.\gradlew.bat test --tests "dev.talos.cli.modes.UnifiedAssistantModeTest.pythonReadOnlyTargetPromptDoesNotDescribeHiddenCommandTool" --no-daemon` failed before the fix, then passed after the prompt-builder alignment patch.
+  - `.\gradlew.bat test --tests "dev.talos.cli.modes.UnifiedAssistantModeTest" --no-daemon` passed serially after a parallel Gradle invocation hit a Windows test-output lock.
+  - `.\gradlew.bat test --tests "dev.talos.cli.prompt.PromptInspectorTest" --no-daemon` passed.
+- Installed-product smoke evidence:
+  - Audit id: `prompt-debug-python-tool-surface-fix-20260520-r1`
+  - Transcript: `local/manual-testing/prompt-debug-python-tool-surface-fix-20260520-r1/artifacts/TRANSCRIPT.txt`
+  - Saved provider body copy: `local/manual-testing/prompt-debug-python-tool-surface-fix-20260520-r1/artifacts/prompt-debug/prompt-debug-20260520-154017.provider-body.json`
+  - Result: prompt audit reports `nativeTools: talos.read_file` and `promptTools: talos.read_file`; provider-body scan found `0` occurrences of `talos.run_command`.
+
 ## Expected Behavior
 
 Talos may create/edit `.py` files after approval, but must not claim:

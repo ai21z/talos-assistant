@@ -593,7 +593,8 @@ class TaskContractResolverTest {
                 "just chat with me, no workspace",
                 "please don't search my files",
                 "just answer, no workspace",
-                "without checking files, say hi")) {
+                "without checking files, say hi",
+                "Without inspecting or using this workspace, explain what entropy means in thermodynamics.")) {
             TaskContract contract = TaskContractResolver.fromUserRequest(input);
 
             assertEquals(TaskType.SMALL_TALK, contract.type(), input);

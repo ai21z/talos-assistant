@@ -13,6 +13,7 @@ import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.spi.types.ToolSpec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -95,6 +96,9 @@ public final class UnifiedAssistantMode implements Mode {
         boolean smallTalk = taskContract.type() == TaskType.SMALL_TALK;
         boolean directoryListing = taskContract.type() == TaskType.DIRECTORY_LISTING;
         ExecutionPhase initialPhase = CurrentTurnPlan.defaultPhaseFor(taskContract);
+        List<ToolSpec> plannedNativeToolSpecs =
+                NativeToolSpecPolicy.select(taskContract, initialPhase, ctx.toolRegistry());
+        List<String> plannedNativeToolNames = NativeToolSpecPolicy.names(plannedNativeToolSpecs);
         SystemPromptBuilder promptBuilder = SystemPromptBuilder.forUnified()
                 .withNativeTools(nativeTools)
                 .withHistory(hasHistory)
@@ -102,6 +106,7 @@ public final class UnifiedAssistantMode implements Mode {
         if (!smallTalk) {
             promptBuilder
                     .withTools(ctx.toolRegistry())
+                    .withVisibleToolNames(plannedNativeToolNames)
                     .withWorkspace(workspace)
                     .withReadOnlyToolMode(!taskContract.mutationAllowed())
                     .withCommandToolMode(initialPhase == ExecutionPhase.VERIFY);
@@ -110,8 +115,7 @@ public final class UnifiedAssistantMode implements Mode {
 
         // Build structured conversation messages: system + history + user
         List<ChatMessage> messages = buildMessages(system, rawLine, history);
-        Context turnCtx = ctx.withNativeToolSpecs(
-                NativeToolSpecPolicy.select(taskContract, initialPhase, ctx.toolRegistry()));
+        Context turnCtx = ctx.withNativeToolSpecs(plannedNativeToolSpecs);
         AssistantTurnExecutor.injectTaskContractInstruction(
                 messages,
                 taskContract,

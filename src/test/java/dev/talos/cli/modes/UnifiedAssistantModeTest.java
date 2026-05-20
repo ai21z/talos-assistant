@@ -14,6 +14,7 @@ import dev.talos.tools.impl.GrepTool;
 import dev.talos.tools.impl.ListDirTool;
 import dev.talos.tools.impl.ReadFileTool;
 import dev.talos.tools.impl.RetrieveTool;
+import dev.talos.tools.impl.RunCommandTool;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -126,6 +127,55 @@ class UnifiedAssistantModeTest {
         assertFalse(render.systemPrompt().contains("File structure:"), render.systemPrompt());
         assertFalse(render.systemPrompt().contains("CHAT_WORKSPACE_CANARY_19"), render.systemPrompt());
         assertFalse(render.systemPrompt().contains("Available Tools"), render.systemPrompt());
+    }
+
+    @Test
+    void explicitNoWorkspaceOrUsingWorkspacePromptDoesNotExposeTools(@TempDir Path workspace)
+            throws Exception {
+        Files.writeString(workspace.resolve("README.md"),
+                "# Chat fixture\nHidden fact: CHAT_WORKSPACE_CANARY_27\n");
+        LastPromptCapture.clear();
+        var mode = new UnifiedAssistantMode();
+
+        var result = mode.handle(
+                "Without inspecting or using this workspace, explain entropy in thermodynamics in two sentences.",
+                workspace,
+                context("Entropy measures unavailable energy and the number of possible microscopic states."));
+
+        assertTrue(result.isPresent());
+        var render = LastPromptCapture.latest().orElseThrow();
+
+        assertEquals("SMALL_TALK", render.taskType());
+        assertTrue(render.tools().isEmpty(), render.tools().toString());
+        assertFalse(render.systemPrompt().contains("File structure:"), render.systemPrompt());
+        assertFalse(render.systemPrompt().contains("CHAT_WORKSPACE_CANARY_27"), render.systemPrompt());
+        assertFalse(render.systemPrompt().contains("Available Tools"), render.systemPrompt());
+    }
+
+    @Test
+    void pythonReadOnlyTargetPromptDoesNotDescribeHiddenCommandTool(@TempDir Path workspace)
+            throws Exception {
+        Files.writeString(workspace.resolve("problem.md"), """
+                # Dijkstra exercise
+
+                Implement Dijkstra's algorithm in dijkstra.py and tests in test_dijkstra.py.
+                """);
+        LastPromptCapture.clear();
+        var mode = new UnifiedAssistantMode();
+
+        var result = mode.handle(
+                "Read problem.md, then tell me whether you can both create dijkstra.py "
+                        + "and verify it by running Python tests in this current tool surface. Do not write files.",
+                workspace,
+                contextWithCommandTool("Talos can read problem.md, but cannot run Python tests in this turn."));
+
+        assertTrue(result.isPresent());
+        var render = LastPromptCapture.latest().orElseThrow();
+
+        assertEquals("VERIFY_ONLY", render.taskType());
+        assertTrue(render.tools().contains("talos.read_file"), render.tools().toString());
+        assertFalse(render.tools().contains("talos.run_command"), render.tools().toString());
+        assertFalse(render.systemPrompt().contains("talos.run_command"), render.systemPrompt());
     }
 
     @Test
@@ -512,6 +562,24 @@ class UnifiedAssistantModeTest {
         registry.register(new FileEditTool(undoStack));
         return Context.builder(new Config())
                 .memory(memory)
+                .toolRegistry(registry)
+                .llm(LlmClient.scripted(java.util.List.of(response)))
+                .build();
+    }
+
+    private static Context contextWithCommandTool(String response) {
+        ToolRegistry registry = new ToolRegistry();
+        FileUndoStack undoStack = new FileUndoStack();
+        registry.register(new ReadFileTool());
+        registry.register(new ListDirTool());
+        registry.register(new GrepTool());
+        registry.register(new RetrieveTool(null));
+        registry.register(new FileWriteTool(undoStack));
+        registry.register(new FileEditTool(undoStack));
+        registry.register(new RunCommandTool(plan -> new dev.talos.runtime.command.CommandResult(
+                plan, 0, 1, false, false, "", "", false, false, false, "")));
+        return Context.builder(new Config())
+                .memory(new SessionMemory())
                 .toolRegistry(registry)
                 .llm(LlmClient.scripted(java.util.List.of(response)))
                 .build();

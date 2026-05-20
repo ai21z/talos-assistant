@@ -80,7 +80,13 @@ public final class ConversationBoundaryPolicy {
             "without reading files",
             "without checking files",
             "without searching files",
-            "without inspecting files"
+            "without inspecting files",
+            "without using this workspace",
+            "without using the workspace",
+            "without using workspace",
+            "without inspecting or using this workspace",
+            "without inspecting or using the workspace",
+            "without inspecting or using workspace"
     );
 
     private static final Pattern POSITIVE_FILE_ACTION = Pattern.compile(
