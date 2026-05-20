@@ -84,6 +84,24 @@ class ProcessCommandRunnerTest {
         assertFalse(result.stdout().contains("abc123"), result.stdout());
     }
 
+    @Test
+    void internalFailureRedactsProtectedExecutablePath(@TempDir Path workspace) {
+        Path protectedExecutable = workspace.resolve("protected").resolve("FILE_DISCOVERED_CANARY_CMD_EXEC.exe");
+
+        CommandResult result = new ProcessCommandRunner().run(plan(
+                protectedExecutable.toString(),
+                List.of(),
+                workspace,
+                20_000,
+                CommandOutputLimits.defaults()));
+
+        assertFalse(result.success());
+        assertFalse(result.errorMessage().contains("FILE_DISCOVERED_CANARY_CMD_EXEC"), result.errorMessage());
+        assertFalse(result.errorMessage().contains("\\protected\\"), result.errorMessage());
+        assertFalse(result.errorMessage().contains("/protected/"), result.errorMessage());
+        assertTrue(result.errorMessage().contains("<protected-path>"), result.errorMessage());
+    }
+
     private static CommandPlan plan(
             String executable,
             List<String> argv,

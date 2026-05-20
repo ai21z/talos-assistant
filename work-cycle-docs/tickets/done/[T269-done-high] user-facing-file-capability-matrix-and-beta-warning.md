@@ -1,10 +1,10 @@
 # T269 - User-Facing File Capability Matrix and Beta Warning
 
-Status: still-open - user-facing capability matrix and beta warning remain release-copy blockers
+Status: done - README now has an explicit beta capability matrix and regression coverage
 Severity: high
 Release gate: yes - product copy and beta positioning
 Branch: v0.9.0-beta-dev
-Created/updated: 2026-05-15
+Created/updated: 2026-05-15 / 2026-05-20
 Owner: unassigned
 
 ## Problem
@@ -60,6 +60,20 @@ Documentation review plus release-gate report checklist.
 - Capability matrix exists.
 - Sensitive-paperwork warning exists.
 - Forbidden claims are absent.
+
+## Closure Evidence
+
+Implemented on 2026-05-20:
+
+- README now includes `#### Capability Matrix`.
+- Matrix separates developer/text workspaces, PDF extraction, DOCX extraction, Excel extraction, static web, Image/OCR, PowerPoint, and private-paperwork claims.
+- README explicitly states that Talos cannot create valid PDF/DOCX/XLS/XLSX files with the current local text-file tool surface.
+- README explicitly keeps tax, health, legal, family, and admin folders outside approved beta product claims.
+- Regression coverage:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.docs.ReadmePrivacyCopyTest" --no-daemon
+```
 
 ## Rollback / migration notes
 

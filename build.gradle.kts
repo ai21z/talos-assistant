@@ -1,4 +1,6 @@
-﻿plugins {
+import java.security.MessageDigest
+
+plugins {
     application
     jacoco
 }
@@ -326,7 +328,22 @@ tasks.jar {
     archiveVersion.set("") // stable name: talos.jar (referenced by installDist + jpackage)
 }
 
-/* ---------- jpackage (MSI) ---------- */
+/* ---------- Windows public beta release packaging ---------- */
+
+val windowsReleaseDir = layout.buildDirectory.dir("release/windows")
+val publicMsiArtifactName = "Talos-${version}-windows-x64.msi"
+val publicAppZipArtifactName = "talos-${version}-windows-x64-app.zip"
+
+fun appendJpackageResources(args: MutableList<String>) {
+    val resDir = file("src/main/jpackage")
+    if (resDir.exists()) {
+        args.addAll(listOf("--resource-dir", resDir.absolutePath))
+    }
+    val iconFile = file("src/main/jpackage/icon.ico")
+    if (iconFile.exists()) {
+        args.addAll(listOf("--icon", iconFile.absolutePath))
+    }
+}
 
 tasks.register<Exec>("jpackageApp") {
     dependsOn(tasks.installDist)
@@ -343,34 +360,134 @@ tasks.register<Exec>("jpackageApp") {
 
     // Build command line at execution time to allow optional resources
     doFirst {
+        val staleMsiFiles = destDir.get().asFile
+            .listFiles { file -> file.isFile && file.name.endsWith(".msi", ignoreCase = true) }
+            ?.toList()
+            ?: emptyList()
+        project.delete(staleMsiFiles)
         val args = mutableListOf(
             jpackageExe.get(),
             "--type", "msi",
             "--name", "Talos",
             "--app-version", appVer.get(),
-            "--vendor", "Talos Project",
+            "--vendor", "Vissarion Zounarakis",
             "--dest", destDir.get().asFile.absolutePath,
             "--input", inputDir.get().asFile.absolutePath,
             "--main-jar", "talos.jar",
             "--main-class", "dev.talos.app.Main",
-            // class-path wildcard so the launcher sees all libs in /lib
-            "--class-path", "*"
+            "--win-console",
+            "--win-per-user-install",
+            "--install-dir", "Talos"
         )
         // Keep launcher startup quiet; Lucene falls back when the optional
         // incubator Vector module is not enabled at application launch.
 
-        // Optional extras if present
-        val resDir = file("src/main/jpackage")
-        if (resDir.exists()) {
-            args.addAll(listOf("--resource-dir", resDir.absolutePath))
-        }
-        val iconFile = file("src/main/jpackage/icon.ico")
-        if (iconFile.exists()) {
-            args.addAll(listOf("--icon", iconFile.absolutePath))
-        }
+        appendJpackageResources(args)
 
         commandLine(args)
     }
+}
+
+tasks.register<Exec>("jpackageAppImage") {
+    dependsOn(tasks.installDist)
+
+    val jpackageExe = providers.environmentVariable("JAVA_HOME")
+        .map { file("$it/bin/jpackage.exe").absolutePath }
+        .orElse("jpackage")
+
+    val appDir = layout.buildDirectory.dir("install/talos")
+    val inputDir = appDir.map { it.dir("lib") }
+    val destDir = layout.buildDirectory.dir("dist/windows-app-image")
+    val appVer = providers.provider { version.toString() }
+
+    doFirst {
+        project.delete(destDir.get().dir("Talos"))
+        val args = mutableListOf(
+            jpackageExe.get(),
+            "--type", "app-image",
+            "--name", "Talos",
+            "--app-version", appVer.get(),
+            "--vendor", "Vissarion Zounarakis",
+            "--dest", destDir.get().asFile.absolutePath,
+            "--input", inputDir.get().asFile.absolutePath,
+            "--main-jar", "talos.jar",
+            "--main-class", "dev.talos.app.Main",
+            "--win-console"
+        )
+        appendJpackageResources(args)
+
+        commandLine(args)
+    }
+}
+
+tasks.register<Copy>("windowsReleaseMsi") {
+    dependsOn("jpackageApp")
+    from(layout.buildDirectory.dir("dist")) {
+        include("*.msi")
+        rename { publicMsiArtifactName }
+    }
+    into(windowsReleaseDir)
+}
+
+tasks.register<Zip>("windowsReleaseAppZip") {
+    dependsOn("jpackageAppImage")
+    from(layout.buildDirectory.dir("dist/windows-app-image"))
+    destinationDirectory.set(windowsReleaseDir)
+    archiveFileName.set(publicAppZipArtifactName)
+}
+
+tasks.register<Copy>("copyWindowsReleaseBootstrap") {
+    from("tools/install-talos.ps1")
+    into(windowsReleaseDir)
+}
+
+tasks.register("windowsReleaseChecksums") {
+    dependsOn("windowsReleaseMsi", "windowsReleaseAppZip", "copyWindowsReleaseBootstrap")
+
+    val checksumFile = windowsReleaseDir.map { it.file("checksums.txt") }
+    outputs.file(checksumFile)
+
+    doLast {
+        val releaseDir = windowsReleaseDir.get().asFile
+        releaseDir.mkdirs()
+
+        fun sha256Hex(file: java.io.File): String {
+            val digest = MessageDigest.getInstance("SHA-256")
+            file.inputStream().use { input ->
+                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    digest.update(buffer, 0, read)
+                }
+            }
+            return digest.digest().joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
+        }
+
+        val artifactNames = listOf(
+            publicMsiArtifactName,
+            publicAppZipArtifactName,
+            "install-talos.ps1"
+        )
+        val lines = artifactNames.map { name ->
+            val artifact = releaseDir.resolve(name)
+            if (!artifact.isFile) {
+                throw GradleException("Missing Windows release artifact: ${artifact.absolutePath}")
+            }
+            "${sha256Hex(artifact)}  $name"
+        }
+
+        checksumFile.get().asFile.writeText(
+            lines.joinToString(System.lineSeparator()) + System.lineSeparator(),
+            Charsets.UTF_8
+        )
+    }
+}
+
+tasks.register("windowsReleaseArtifacts") {
+    dependsOn("windowsReleaseChecksums")
+    group = "distribution"
+    description = "Builds Windows x64 public beta artifacts and checksums."
 }
 
 /* ---------- JaCoCo code coverage ---------- */
@@ -417,9 +534,24 @@ tasks.jacocoTestCoverageVerification {
     }
 }
 
-// Hard local gate: unit tests, deterministic E2E tests, and coverage baseline.
+val checkGeneratedArtifactCanaries by tasks.registering(JavaExec::class) {
+    description = "Scans generated local verification reports for raw privacy canaries."
+    group = "verification"
+    dependsOn(tasks.test, e2eTest, tasks.jacocoTestReport)
+    mainClass.set("dev.talos.runtime.policy.ArtifactCanaryScanCli")
+    classpath = sourceSets["main"].runtimeClasspath
+    argumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+        listOf(
+            "--runtime",
+            "--root", layout.buildDirectory.dir("reports").get().asFile.absolutePath,
+            "--root", layout.buildDirectory.dir("test-results").get().asFile.absolutePath
+        )
+    })
+}
+
+// Hard local gate: unit tests, deterministic E2E tests, coverage baseline, and generated-artifact canary scan.
 tasks.check {
-    dependsOn(tasks.test, e2eTest, tasks.jacocoTestCoverageVerification)
+    dependsOn(tasks.test, e2eTest, tasks.jacocoTestCoverageVerification, checkGeneratedArtifactCanaries)
 }
 
 tasks.register<JavaExec>("checkRuntimeArtifactCanaries") {
@@ -480,6 +612,9 @@ tasks.register<JavaExec>("runSynchronizedApprovalAudit") {
         val model = providers.gradleProperty("approvalAuditModel")
             .orElse("")
             .get()
+        val scenario = providers.gradleProperty("approvalAuditScenario")
+            .orElse("")
+            .get()
         if (mode.isNotBlank()) {
             out.addAll(listOf("--mode", mode))
         }
@@ -494,6 +629,9 @@ tasks.register<JavaExec>("runSynchronizedApprovalAudit") {
         }
         if (model.isNotBlank()) {
             out.addAll(listOf("--model", model))
+        }
+        if (scenario.isNotBlank()) {
+            out.addAll(listOf("--scenario", scenario))
         }
         out
     })

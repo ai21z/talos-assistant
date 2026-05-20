@@ -3,8 +3,7 @@ package dev.talos.spi;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HexFormat;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.Locale;
 
 /**
  * Sealed exception hierarchy for model-engine errors.
@@ -25,8 +24,6 @@ public sealed class EngineException extends RuntimeException
 
     private final int httpStatus;
     private final String guidance;
-    private static final Pattern SECRET_LIKE_ASSIGNMENT = Pattern.compile(
-            "(?i)\\b(secret|token|api[_-]?key|password|credential|credentials)\\b\\s*=\\s*(\"[^\"]*\"|'[^']*'|`[^`]*`|[^\\s,;]+)");
 
     protected EngineException(String message, Throwable cause, int httpStatus, String guidance) {
         super(message, cause);
@@ -126,15 +123,31 @@ public sealed class EngineException extends RuntimeException
 
     /** Catch-all for non-2xx responses that don't fit the above categories. */
     public static final class ResponseError extends EngineException {
+        private final String bodyHash;
+        private final int bodyChars;
+        private final boolean bodyLooksContextBudgetExceeded;
+
         public ResponseError(int httpStatus, String body) {
-            super("Engine error (HTTP " + httpStatus + ")" + (body != null ? ": " + truncate(body, 200) : ""),
+            super(responseErrorMessage(httpStatus, body),
                     null, httpStatus, "");
+            this.bodyHash = diagnosticHash(body);
+            this.bodyChars = body == null ? 0 : body.length();
+            this.bodyLooksContextBudgetExceeded = looksContextBudgetExceeded(body);
         }
 
         public ResponseError(int httpStatus, String body, Throwable cause) {
-            super("Engine error (HTTP " + httpStatus + ")" + (body != null ? ": " + truncate(body, 200) : ""),
+            super(responseErrorMessage(httpStatus, body),
                     cause, httpStatus, "");
+            this.bodyHash = diagnosticHash(body);
+            this.bodyChars = body == null ? 0 : body.length();
+            this.bodyLooksContextBudgetExceeded = looksContextBudgetExceeded(body);
         }
+
+        public String bodyHash() { return bodyHash; }
+
+        public int bodyChars() { return bodyChars; }
+
+        public boolean bodyLooksContextBudgetExceeded() { return bodyLooksContextBudgetExceeded; }
     }
 
     /** Backend returned HTTP success with a response shape the engine cannot use. */
@@ -147,12 +160,12 @@ public sealed class EngineException extends RuntimeException
         public MalformedResponse(String context, String body) {
             super("Malformed engine response"
                     + (context == null || context.isBlank() ? "" : " for " + context)
-                    + (body != null ? ": " + truncate(body, 200) : ""),
+                    + diagnosticSuffix(body),
                     null,
                     0,
                     "The local model server returned an unsupported response shape.");
             this.context = safe(context);
-            this.bodyPreview = diagnosticPreview(body);
+            this.bodyPreview = "";
             this.bodyHash = diagnosticHash(body);
             this.bodyChars = body == null ? 0 : body.length();
         }
@@ -160,12 +173,12 @@ public sealed class EngineException extends RuntimeException
         public MalformedResponse(String context, String body, Throwable cause) {
             super("Malformed engine response"
                     + (context == null || context.isBlank() ? "" : " for " + context)
-                    + (body != null ? ": " + truncate(body, 200) : ""),
+                    + diagnosticSuffix(body),
                     cause,
                     0,
                     "The local model server returned an unsupported response shape.");
             this.context = safe(context);
-            this.bodyPreview = diagnosticPreview(body);
+            this.bodyPreview = "";
             this.bodyHash = diagnosticHash(body);
             this.bodyChars = body == null ? 0 : body.length();
         }
@@ -185,14 +198,13 @@ public sealed class EngineException extends RuntimeException
         return s == null ? "" : s.strip();
     }
 
-    private static String truncate(String s, int max) {
-        if (s == null) return "";
-        return s.length() <= max ? s : s.substring(0, max) + "…";
+    private static String responseErrorMessage(int httpStatus, String body) {
+        return "Engine error (HTTP " + httpStatus + ")" + diagnosticSuffix(body);
     }
 
-    private static String diagnosticPreview(String body) {
-        if (body == null || body.isBlank()) return "";
-        return truncate(redactSecretLikeAssignments(body.strip()), 500);
+    private static String diagnosticSuffix(String body) {
+        if (body == null) return "";
+        return ": bodyHash=" + diagnosticHash(body) + " bodyChars=" + body.length();
     }
 
     private static String diagnosticHash(String body) {
@@ -206,16 +218,14 @@ public sealed class EngineException extends RuntimeException
         }
     }
 
-    private static String redactSecretLikeAssignments(String text) {
-        if (text == null || text.isBlank()) return text;
-        Matcher matcher = SECRET_LIKE_ASSIGNMENT.matcher(text);
-        StringBuilder out = new StringBuilder();
-        while (matcher.find()) {
-            String key = matcher.group(1);
-            matcher.appendReplacement(out, Matcher.quoteReplacement(key + "=[redacted]"));
-        }
-        matcher.appendTail(out);
-        return out.toString();
+    private static boolean looksContextBudgetExceeded(String body) {
+        String lower = body == null ? "" : body.toLowerCase(Locale.ROOT);
+        return lower.contains("exceeds")
+                && (lower.contains("available context size")
+                || lower.contains("context size")
+                || lower.contains("context window")
+                || lower.contains("context budget"));
     }
+
 }
 

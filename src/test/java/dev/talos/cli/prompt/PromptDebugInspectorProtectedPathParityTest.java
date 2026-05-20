@@ -84,4 +84,38 @@ class PromptDebugInspectorProtectedPathParityTest {
         assertFalse(rendered.contains("Marina Stavrou"), rendered);
         assertFalse(rendered.contains("Patient note"), rendered);
     }
+
+    @Test
+    void providerBodyJsonRedactsPrivateDocumentFactCanariesOutsideProtectedToolBlocks() {
+        PromptDebugSnapshot snapshot = new PromptDebugSnapshot(
+                "COMPAT_CHAT_HTTP_BODY",
+                "llama_cpp",
+                "gpt-oss:20b",
+                false,
+                Instant.parse("2026-05-20T10:00:00Z"),
+                List.of(),
+                List.of(new ToolSpec("talos.read_file", "Read", "{}")),
+                ChatRequestControls.defaults(),
+                """
+                        {
+                          "messages": [
+                            {
+                              "role": "user",
+                              "content": "Summarize private-report.pdf"
+                            },
+                            {
+                              "role": "tool",
+                              "tool_call_id": "call-private-doc",
+                              "content": "Patient: Eleni Nikolaou; address 42 Fictional Street, Athens"
+                            }
+                          ]
+                        }
+                        """);
+
+        String rendered = PromptDebugInspector.redactedProviderBodyJson(snapshot);
+
+        assertFalse(rendered.contains("Eleni Nikolaou"), rendered);
+        assertFalse(rendered.contains("42 Fictional Street"), rendered);
+        assertTrue(rendered.contains("[redacted-private-document-canary]"), rendered);
+    }
 }

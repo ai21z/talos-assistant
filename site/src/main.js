@@ -1,3 +1,4 @@
+import "@fontsource/gfs-neohellenic/greek-700.css";
 import "./styles.css";
 
 document.documentElement.classList.add("js");
@@ -58,24 +59,8 @@ const terminalStates = {
     '<span class="t-muted">  tool calls        read_file × 2 · write_file × 1</span>',
     '<span class="t-amber">  approvals         write docs/summary.md · accepted</span>',
     '<span class="t-green">  verification      readback ok · expected target matched</span>',
-    "",
-    '<span class="t-bronze">debug</span>',
-    '<span class="t-muted">  prompt-debug      available · use /prompt-debug last</span>',
   ].join("\n"),
 };
-
-const toast = document.querySelector(".toast");
-let toastTimer;
-
-function showToast(message) {
-  if (!toast) return;
-  toast.textContent = message;
-  toast.classList.add("toast--visible");
-  clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => {
-    toast.classList.remove("toast--visible");
-  }, 3000);
-}
 
 function setTerminalState(nextState) {
   const panel = document.querySelector("#terminal-output");
@@ -312,20 +297,6 @@ if (storySections.length) {
     window.addEventListener("load", syncInitialStorySection, { once: true });
   }
 }
-
-document.querySelectorAll("[data-copy]").forEach((button) => {
-  button.addEventListener("click", async () => {
-    const command = button.dataset.copy;
-    if (!command) return;
-
-    try {
-      await navigator.clipboard.writeText(command);
-      showToast("Command copied.");
-    } catch {
-      showToast("Copy unavailable in this browser.");
-    }
-  });
-});
 
 const revealTargets = document.querySelectorAll(".reveal");
 if ("IntersectionObserver" in window) {

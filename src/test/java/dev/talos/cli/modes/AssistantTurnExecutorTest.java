@@ -4158,6 +4158,26 @@ class AssistantTurnExecutorTest {
         }
 
         @Test
+        void markdownSummaryFromOfficeDocumentSourcesDoesNotTriggerUnsupportedBinaryCreationAnswer(
+                @TempDir Path workspace) {
+            var ctx = Context.builder(new Config())
+                    .llm(LlmClient.scripted("No tool call from provider."))
+                    .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
+                    .build();
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Create office-summary.md summarizing board-brief.pdf, client-notes.docx, and revenue.xlsx."));
+
+            AssistantTurnExecutor.TurnOutput out = AssistantTurnExecutor.execute(
+                    messages, workspace, ctx, new AssistantTurnExecutor.Options());
+
+            assertFalse(out.text().contains("cannot create valid PDF files"), out.text());
+            assertFalse(out.text().contains("cannot create valid Microsoft Word .docx files"), out.text());
+            assertFalse(out.text().contains("cannot create valid Microsoft Excel .xlsx files"), out.text());
+        }
+
+        @Test
         void unsupportedPdfCreationFollowUpReturnsCapabilityAnswerWithoutProviderOrFallbackFile(
                 @TempDir Path workspace) throws Exception {
             var ctx = Context.builder(new Config())
@@ -4315,7 +4335,9 @@ class AssistantTurnExecutorTest {
                 throws Exception {
             Path script = workspace.resolve("scripts.js");
             Files.writeString(script, "console.log('old');\n");
-            String malformedPayload = "{\"path\":\"scripts.js\",\"content\":\"SHOULD_NOT_APPEAR\"";
+            String malformedPayload = """
+                    {"path":"scripts.js","content":"SHOULD_NOT_APPEAR","patient":"Eleni Nikolaou"
+                    """;
             var ctx = Context.builder(new Config())
                     .llm(LlmClient.scriptedFailure(new EngineException.MalformedResponse(
                             "compat chat stream tool arguments",
@@ -4354,6 +4376,11 @@ class AssistantTurnExecutorTest {
                 assertEquals("compat chat stream tool arguments", malformedEvent.data().get("context"));
                 assertEquals(malformedPayload.length(), malformedEvent.data().get("bodyChars"));
                 assertTrue(String.valueOf(malformedEvent.data().get("bodyHash")).startsWith("sha256:"));
+                assertFalse(malformedEvent.data().containsKey("bodyPreview"), malformedEvent.data().toString());
+                assertFalse(malformedEvent.data().toString().contains("SHOULD_NOT_APPEAR"),
+                        malformedEvent.data().toString());
+                assertFalse(malformedEvent.data().toString().contains("Eleni Nikolaou"),
+                        malformedEvent.data().toString());
             } finally {
                 LocalTurnTraceCapture.clear();
             }

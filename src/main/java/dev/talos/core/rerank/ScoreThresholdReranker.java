@@ -1,6 +1,7 @@
 package dev.talos.core.rerank;
 
 import dev.talos.core.retrieval.RetrievalCandidate;
+import dev.talos.runtime.policy.SafeLogFormatter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -93,7 +94,7 @@ public final class ScoreThresholdReranker implements Reranker {
             if (result.size() >= maxResults) break;
             if (c.score() < threshold) {
                 LOG.debug("Rerank: dropping '{}' (score {}, below threshold {})",
-                        c.path(), c.score(), threshold);
+                        SafeLogFormatter.value(c.path()), c.score(), threshold);
                 continue;
             }
             // Normalize score to [0, 1] and re-tag

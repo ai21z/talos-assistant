@@ -1,6 +1,7 @@
 package dev.talos.tools.impl;
 
 import dev.talos.core.capability.CapabilityKind;
+import dev.talos.runtime.policy.SafeLogFormatter;
 import dev.talos.tools.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -96,7 +97,7 @@ public final class FileEditTool implements TalosTool {
         String sanitizedNew = ContentSanitizer.sanitize(newString, pathParam);
         if (sanitizedNew.length() < newString.length()) {
             LOG.debug("Stripped {} chars of trailing markdown commentary from edit_file new_string for {}",
-                    newString.length() - sanitizedNew.length(), pathParam);
+                    newString.length() - sanitizedNew.length(), SafeLogFormatter.value(pathParam));
             newString = sanitizedNew;
         }
 

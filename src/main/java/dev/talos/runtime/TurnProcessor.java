@@ -28,6 +28,7 @@ import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.toolcall.ToolAliasPolicy;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.workspace.WorkspaceBatchPlanParser;
+import dev.talos.runtime.workspace.WorkspaceOperationIntent;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
 import dev.talos.spi.types.ToolSpec;
@@ -787,6 +788,12 @@ public final class TurnProcessor {
             return forbiddenTargetValidation;
         }
 
+        ToolResult workspaceOrganizationValidation =
+                validateWorkspaceOrganizationToolBeforeApproval(call, taskContract);
+        if (workspaceOrganizationValidation != null) {
+            return workspaceOrganizationValidation;
+        }
+
         ToolResult expectedTargetValidation = validateExpectedTargetBeforeApproval(call, taskContract);
         if (expectedTargetValidation != null) {
             return expectedTargetValidation;
@@ -872,6 +879,27 @@ public final class TurnProcessor {
         } catch (RuntimeException ignored) {
             return null;
         }
+    }
+
+    private static ToolResult validateWorkspaceOrganizationToolBeforeApproval(
+            ToolCall call,
+            TaskContract taskContract) {
+        if (call == null
+                || taskContract == null
+                || taskContract.type() != TaskType.FILE_EDIT
+                || taskContract.expectedTargets().isEmpty()
+                || !isWorkspaceOrganizationTool(call.toolName())) {
+            return null;
+        }
+        if (WorkspaceOperationIntent.detect(taskContract).isPresent()) {
+            return null;
+        }
+        return ToolResult.fail(ToolError.invalidParams(
+                "Workspace organization tool `" + call.toolName()
+                        + "` is not allowed for this narrow file-edit task. "
+                        + "Use talos.edit_file or talos.write_file for the expected target(s): "
+                        + String.join(", ", orderedExpectedTargets(taskContract))
+                        + ". No approval was requested and no file was changed."));
     }
 
     private static ToolResult validateExpectedTargetBeforeApproval(ToolCall call, TaskContract taskContract) {
@@ -1124,6 +1152,13 @@ public final class TurnProcessor {
                 || "make_directory".equals(normalized)
                 || "create_dir".equals(normalized)
                 || "create_directory".equals(normalized);
+    }
+
+    private static boolean isWorkspaceOrganizationTool(String toolName) {
+        return switch (normalizeToolName(toolName)) {
+            case "apply_workspace_batch", "copy_path", "move_path", "rename_path", "delete_path" -> true;
+            default -> false;
+        };
     }
 
     private static String normalizeToolName(String toolName) {

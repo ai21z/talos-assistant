@@ -105,6 +105,9 @@ public final class StaticTaskVerifier {
             "getElementById\\s*\\(\\s*['\"]([A-Za-z_][A-Za-z0-9_-]*)['\"]\\s*\\)");
     private static final Pattern JS_GET_BY_CLASS = Pattern.compile(
             "getElementsByClassName\\s*\\(\\s*['\"]([A-Za-z_][A-Za-z0-9_-]*)['\"]\\s*\\)");
+    private static final Pattern JS_CLASSLIST_DYNAMIC_CLASS = Pattern.compile(
+            "classList\\s*\\.\\s*(?:add|toggle)\\s*\\(\\s*['\"]([A-Za-z_][A-Za-z0-9_-]*)['\"]\\s*\\)",
+            Pattern.CASE_INSENSITIVE);
     private static final Pattern STATIC_SELECTOR_LITERAL = Pattern.compile(
             "(?<![A-Za-z0-9_-])([.#][A-Za-z_][A-Za-z0-9_-]*)(?![A-Za-z0-9_-])");
     private static final Pattern WORD_TOKEN = Pattern.compile("[A-Za-z][A-Za-z0-9_-]{3,}");
@@ -130,6 +133,11 @@ public final class StaticTaskVerifier {
             "read", "record", "records", "says", "secret", "secrets", "short",
             "source", "summarize", "summary", "target", "text", "that", "their",
             "them", "this", "under", "with", "write");
+    private static final Set<String> SOURCE_DERIVED_ALLOWED_OUTPUT_TERMS = Set.of(
+            "based", "brief", "client", "coverage", "data", "derived", "document",
+            "evidence", "exact", "extracted", "file", "includes", "notes", "output",
+            "phrase", "phrases", "report", "source", "sources", "spreadsheet",
+            "summary", "workbook");
 
     public static TaskVerificationResult verify(
             Path workspace,
@@ -376,7 +384,7 @@ public final class StaticTaskVerifier {
         if (contract == null || root == null) return false;
         if (contract.sourceEvidenceTargets().isEmpty() || contract.expectedTargets().isEmpty()) return false;
         String request = contract.originalUserRequest() == null ? "" : contract.originalUserRequest();
-        if (!request.toLowerCase(Locale.ROOT).contains("summarize")) return false;
+        if (!request.toLowerCase(Locale.ROOT).contains("summariz")) return false;
 
         String targetPath = firstPath(contract.expectedTargets());
         if (targetPath.isBlank()) return false;
@@ -405,6 +413,7 @@ public final class StaticTaskVerifier {
 
         Set<String> requestTerms = distinctiveTerms(request);
         Set<String> targetTerms = distinctiveTerms(targetContent);
+        Set<String> aggregateSourceTerms = new LinkedHashSet<>();
         int problemsBeforeDerivedChecks = problems.size();
 
         if (looksLikeInstructionEcho(targetContent, request, contract.sourceEvidenceTargets())) {
@@ -412,11 +421,21 @@ public final class StaticTaskVerifier {
         }
         for (SourceEvidence source : sourceEvidence) {
             Set<String> sourceTerms = distinctiveTerms(source.content());
+            aggregateSourceTerms.addAll(sourceTerms);
             sourceTerms.removeAll(requestTerms);
             if (!sourceTerms.isEmpty() && sourceTerms.stream().noneMatch(targetTerms::contains)) {
                 problems.add(source.path()
                         + ": source-derived summary does not include distinctive evidence from this readable source.");
             }
+        }
+        List<String> unsupportedTerms = unsupportedSourceDerivedTerms(
+                targetTerms,
+                requestTerms,
+                aggregateSourceTerms);
+        if (unsupportedTerms.size() >= 8) {
+            problems.add(targetPath
+                    + ": source-derived summary includes unsupported distinctive terms not found in source evidence: "
+                    + String.join(", ", unsupportedTerms.stream().limit(12).toList()) + ".");
         }
         if (bulletLimitRequested(request) && bulletLineCount(targetContent) > 8) {
             problems.add(targetPath + ": source-derived summary exceeds the requested bullet limit.");
@@ -429,6 +448,19 @@ public final class StaticTaskVerifier {
     }
 
     private record SourceEvidence(String path, String content) {}
+
+    private static List<String> unsupportedSourceDerivedTerms(
+            Set<String> targetTerms,
+            Set<String> requestTerms,
+            Set<String> sourceTerms
+    ) {
+        if (targetTerms == null || targetTerms.isEmpty()) return List.of();
+        LinkedHashSet<String> unsupported = new LinkedHashSet<>(targetTerms);
+        if (requestTerms != null) unsupported.removeAll(requestTerms);
+        if (sourceTerms != null) unsupported.removeAll(sourceTerms);
+        unsupported.removeAll(SOURCE_DERIVED_ALLOWED_OUTPUT_TERMS);
+        return unsupported.stream().sorted().toList();
+    }
 
     private static String firstPath(Collection<String> paths) {
         if (paths == null || paths.isEmpty()) return "";
@@ -2195,6 +2227,7 @@ public final class StaticTaskVerifier {
                     extractCssSelectors(css, CSS_ID_SELECTOR),
                     extractBareClassSelectors(css, htmlClasses),
                     extractJsClasses(js),
+                    extractJsDynamicClasses(js),
                     extractJsIds(js),
                     linkedCssFiles,
                     linkedJsFiles,
@@ -2220,6 +2253,7 @@ public final class StaticTaskVerifier {
             Set<String> cssIds,
             Set<String> cssBareClassSelectors,
             Set<String> jsClasses,
+            Set<String> jsDynamicClasses,
             Set<String> jsIds,
             Set<String> linkedCssFiles,
             Set<String> linkedJsFiles,
@@ -2251,6 +2285,7 @@ public final class StaticTaskVerifier {
             }
             Set<String> cssMissingClasses = new LinkedHashSet<>(cssClasses);
             cssMissingClasses.removeAll(htmlClasses);
+            cssMissingClasses.removeAll(jsDynamicClasses);
             Set<String> jsMissingClasses = new LinkedHashSet<>(jsClasses);
             jsMissingClasses.removeAll(htmlClasses);
             Set<String> cssMissingIds = new LinkedHashSet<>(cssIds);
@@ -2595,6 +2630,17 @@ public final class StaticTaskVerifier {
         Matcher gcn = JS_GET_BY_CLASS.matcher(js);
         while (gcn.find()) {
             String cls = gcn.group(1);
+            if (cls != null && !cls.isBlank()) out.add(cls);
+        }
+        return out;
+    }
+
+    private static Set<String> extractJsDynamicClasses(String js) {
+        Set<String> out = new LinkedHashSet<>();
+        if (js == null || js.isBlank()) return out;
+        Matcher matcher = JS_CLASSLIST_DYNAMIC_CLASS.matcher(js);
+        while (matcher.find()) {
+            String cls = matcher.group(1);
             if (cls != null && !cls.isBlank()) out.add(cls);
         }
         return out;

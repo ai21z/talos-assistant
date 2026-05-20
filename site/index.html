@@ -7,11 +7,7 @@
       name="description"
       content="Talos is a local-first CLI workspace operator. Inspects before acting, asks before mutation, verifies before claiming success, and records local trace evidence for interactive turns."
     />
-    <link
-      rel="icon"
-      type="image/png"
-      href="./design/talos-icon.png"
-    />
+    <link rel="icon" type="image/png" href="./design/talos-icon.png" />
     <title>Talos | Local-first CLI workspace operator</title>
   </head>
   <body>
@@ -19,28 +15,26 @@
     <div class="page-shell">
       <header class="site-header">
         <div class="container header-inner">
-          <a class="wordmark" href="#product" aria-label="Talos home">
+          <a class="wordmark" href="#overview" aria-label="Talos home">
             <span class="brand-mark wordmark-mark" aria-hidden="true">
-              <img src="./design/talos-icon.png" alt="" width="32" height="32" decoding="async" />
+              <img src="./design/talos-icon.png" alt="" width="44" height="44" decoding="async" />
             </span>
             <span class="wordmark-name">Talos</span>
           </a>
-          <nav class="site-nav" aria-label="Primary navigation">
-            <a href="#product" data-section-nav aria-current="page">Product</a>
-            <a href="#contract" data-section-nav>Contract</a>
-            <a href="#cli" data-section-nav>CLI</a>
-            <a href="#trust" data-section-nav>Trust</a>
-            <a href="#use-cases" data-section-nav>Use cases</a>
-            <a href="#install" data-section-nav>Install</a>
+          <nav id="primary-navigation" class="site-nav" aria-label="Primary navigation">
+            <a href="#overview" data-section-nav aria-current="page">Overview</a>
+            <a href="#execution" data-section-nav>Execution</a>
+            <a href="#turn-ui" data-section-nav>Turn UI</a>
+            <a href="#local-boundaries" data-section-nav>Local Boundaries</a>
+            <a href="#good-fits" data-section-nav>Good Fits</a>
             <a href="#docs" data-section-nav>Docs</a>
           </nav>
-          <a class="button button--ghost header-cta" href="#docs">Read the docs</a>
+          <a class="button button--ghost header-cta" href="#docs">Read docs</a>
         </div>
       </header>
 
       <main id="main">
-        <!-- 1. HERO -->
-        <section id="product" class="section story-section hero-section">
+        <section id="overview" class="section story-section hero-section">
           <div class="container hero-grid">
             <div class="hero-copy reveal">
               <p class="eyebrow">TALOS / Local CLI workspace operator</p>
@@ -56,14 +50,33 @@
                 <a class="button button--primary" href="https://github.com/ai21z/talos-cli" rel="noopener">
                   View on GitHub
                 </a>
-                <a class="button button--ghost" href="#contract">Read the execution contract</a>
+                <a class="button button--ghost" href="#docs">Read docs</a>
               </div>
-              <ul class="status-row" aria-label="Talos operating principles">
-                <li class="status-chip">Java 21</li>
-                <li class="status-chip">Windows-first</li>
-                <li class="status-chip">Approved writes</li>
-                <li class="status-chip">Traceable turns</li>
+              <ul class="evidence-row" aria-label="Talos runtime facts">
+                <li class="evidence-tag">java_21</li>
+                <li class="evidence-tag">windows_first</li>
+                <li class="evidence-tag">approved_writes</li>
+                <li class="evidence-tag">local_trace</li>
               </ul>
+              <div class="setup-strip" aria-label="Talos setup status">
+                <p class="setup-kicker">planned public beta</p>
+                <pre><code>winget install talos-cli
+talos setup models
+talos status --verbose
+talos</code></pre>
+                <p>
+                  Exact future ID: <code>TalosProject.TalosCLI</code>.
+                  Publisher: <code>Vissarion Zounarakis</code>. The installer
+                  uses a bundled Java runtime and does not bundle a llama.cpp
+                  server or model weights.
+                </p>
+                <p>
+                  Source setup remains documented in the
+                  <a class="inline-link" href="https://github.com/ai21z/talos-cli/blob/v0.9.0-beta-dev/docs/public-installation.md" rel="noopener">
+                    installation docs
+                  </a>.
+                </p>
+              </div>
               <p class="machine-note">
                 <span aria-hidden="true">&gt;_</span>
                 Workspace-bounded. Local engine. No hosted workspace handoff.
@@ -71,6 +84,9 @@
             </div>
 
             <div class="hero-visual reveal">
+              <div class="greek-hero-inscription" lang="el" aria-hidden="true">
+                ΤΑΛΩΣ
+              </div>
               <figure class="startup-terminal-frame">
                 <img
                   class="startup-terminal-image"
@@ -96,15 +112,14 @@
           </div>
         </section>
 
-        <!-- 2. EXECUTION CONTRACT -->
-        <section id="contract" class="section story-section contract-section" aria-labelledby="contract-heading">
+        <section id="execution" class="section story-section execution-section" aria-labelledby="execution-heading">
           <div class="container">
             <div class="section-header reveal">
               <p class="eyebrow">Execution contract</p>
-              <h2 id="contract-heading">One ordered flow. No skipped steps.</h2>
+              <h2 id="execution-heading">One ordered flow. No skipped steps.</h2>
               <p class="section-lede">
-                Normal assistant turns render through the same semantic lanes.
-                Approval gates mutation. Verification gates success claims.
+                Talos narrows the request, inspects evidence, gates mutation,
+                checks outcomes, and keeps the result inspectable.
               </p>
             </div>
 
@@ -113,58 +128,64 @@
                 <span class="contract-index">01</span>
                 <h3>Classify</h3>
                 <p>Resolve the request into a bounded task contract and expected target.</p>
-                <code class="contract-verb">task contract</code>
               </li>
               <li class="contract-arrow" aria-hidden="true">→</li>
               <li class="contract-step contract-step--inspect reveal">
                 <span class="contract-index">02</span>
                 <h3>Inspect</h3>
-                <p>Expose read-only tools and gather workspace evidence first.</p>
-                <code class="contract-verb">talos.list_dir · talos.read_file · talos.grep · talos.retrieve</code>
+                <p>Gather read-only workspace evidence before proposing action.</p>
               </li>
               <li class="contract-arrow" aria-hidden="true">→</li>
               <li class="contract-step contract-step--approve reveal">
                 <span class="contract-index">03</span>
                 <h3>Approve</h3>
-                <p>Show mutation intent, target path, and risk before any local write.</p>
-                <code class="contract-verb">! approval · [y / a / N]</code>
+                <p>Show mutation intent, target path, and risk before local writes.</p>
               </li>
               <li class="contract-arrow" aria-hidden="true">→</li>
               <li class="contract-step contract-step--mutate reveal">
                 <span class="contract-index">04</span>
                 <h3>Mutate</h3>
                 <p>Run only the approved file, workspace, or command operation.</p>
-                <code class="contract-verb">talos.write_file · talos.run_command</code>
               </li>
               <li class="contract-arrow" aria-hidden="true">→</li>
               <li class="contract-step contract-step--verify reveal">
                 <span class="contract-index">05</span>
                 <h3>Verify</h3>
-                <p>Read back files or check command output before reporting success.</p>
-                <code class="contract-verb">readback · gradle_test · exit codes</code>
+                <p>Read back files or inspect command output before reporting success.</p>
               </li>
               <li class="contract-arrow" aria-hidden="true">→</li>
               <li class="contract-step contract-step--trace reveal">
                 <span class="contract-index">06</span>
                 <h3>Trace</h3>
-                <p>Keep prompt, tool calls, approvals, and outcomes inspectable.</p>
-                <code class="contract-verb">/last trace</code>
+                <p>Keep prompts, tool calls, approvals, and outcomes inspectable.</p>
               </li>
             </ol>
+
+            <div class="execution-tool-strip reveal" aria-label="Execution evidence examples">
+              <code>talos.list_dir</code>
+              <code>talos.read_file</code>
+              <code>talos.write_file</code>
+              <code>talos.run_command</code>
+              <code>/last trace</code>
+            </div>
           </div>
         </section>
 
-        <!-- 3. CLI EXPERIENCE -->
-        <section id="cli" class="section story-section cli-section" aria-labelledby="cli-heading">
+        <section id="turn-ui" class="section story-section turn-ui-section" aria-labelledby="turn-ui-heading">
           <div class="container two-column">
             <div class="section-copy reveal">
-              <p class="eyebrow">CLI experience</p>
-              <h2 id="cli-heading">Six semantic lanes. Every turn.</h2>
+              <p class="eyebrow">Turn UI</p>
+              <h2 id="turn-ui-heading">A consistent turn grammar.</h2>
               <p>
+                Normal assistant turns render through the same semantic lanes
+                when Talos has progress, approval, answer, or evidence to show.
                 The terminal grammar is runtime-owned, not model-authored.
-                Normal assistant turns render through the same semantic lanes,
-                so users read a semantic difference, not a rendering-path
-                difference.
+              </p>
+              <p class="command-strip" aria-label="Core Talos slash commands">
+                <code>/tools</code>
+                <code>/models</code>
+                <code>/workspace</code>
+                <code>/last trace</code>
               </p>
               <ul class="lane-legend" role="list">
                 <li><span class="lane-glyph muted">talos</span> prompt</li>
@@ -196,12 +217,11 @@
           </div>
         </section>
 
-        <!-- 4. TRUST MODEL -->
-        <section id="trust" class="section story-section trust-section" aria-labelledby="trust-heading">
+        <section id="local-boundaries" class="section story-section boundaries-section" aria-labelledby="boundaries-heading">
           <div class="container">
             <div class="section-header reveal">
-              <p class="eyebrow">Trust model</p>
-              <h2 id="trust-heading">Boundaries are declared, not implied.</h2>
+              <p class="eyebrow">Local boundaries</p>
+              <h2 id="boundaries-heading">Policy is visible at the edge.</h2>
               <p class="section-lede">
                 Runtime policy owns approval, tool exposure, result checks,
                 protected reads, and unsupported-file honesty. Model wording is
@@ -209,52 +229,25 @@
               </p>
             </div>
 
-            <div class="trust-table reveal" role="table" aria-label="Talos default trust posture">
-              <div class="trust-row trust-row--head" role="row">
-                <span role="columnheader">Surface</span>
-                <span role="columnheader">Default</span>
-                <span role="columnheader">Override</span>
-              </div>
-              <div class="trust-row" role="row">
-                <span role="cell">Workspace files (read)</span>
-                <span role="cell"><span class="state state--allow">allow</span> inside workspace</span>
-                <span role="cell">denied outside workspace</span>
-              </div>
-              <div class="trust-row" role="row">
-                <span role="cell">Protected paths (read)</span>
-                <span role="cell"><span class="state state--ask">ask</span></span>
-                <span role="cell">denied unless explicitly approved</span>
-              </div>
-              <div class="trust-row" role="row">
-                <span role="cell">File writes / edits</span>
-                <span role="cell"><span class="state state--ask">ask</span></span>
-                <span role="cell">denied outside workspace</span>
-              </div>
-              <div class="trust-row" role="row">
-                <span role="cell">Workspace ops (mkdir, copy, move, rename, delete)</span>
-                <span role="cell"><span class="state state--ask">ask</span></span>
-                <span role="cell">denied for protected paths</span>
-              </div>
-              <div class="trust-row" role="row">
-                <span role="cell">Command execution</span>
-                <span role="cell"><span class="state state--ask">ask</span>, bounded by profile</span>
-                <span role="cell">denied outside configured profile</span>
-              </div>
-              <div class="trust-row" role="row">
-                <span role="cell">Private mode</span>
-                <span role="cell"><span class="state state--allow">local-display</span> for protected reads</span>
-                <span role="cell">scope must be explicitly enabled</span>
-              </div>
-              <div class="trust-row" role="row">
-                <span role="cell">Unsupported or unreadable documents</span>
-                <span role="cell"><span class="state state--deny">refuse</span> or report limits</span>
-                <span role="cell">no fabricated extraction</span>
-              </div>
-              <div class="trust-row" role="row">
-                <span role="cell">Trace and prompt-debug</span>
-                <span role="cell"><span class="state state--allow">written locally</span></span>
-                <span role="cell">redacted per policy</span>
-              </div>
+            <div class="boundary-grid reveal" aria-label="Talos default boundary posture">
+              <article class="boundary-band">
+                <h3>Reads</h3>
+                <p><span class="state state--allow">allow</span> Workspace files inside the selected workspace.</p>
+                <p><span class="state state--ask">ask</span> Protected paths require explicit approval.</p>
+                <p><span class="state state--deny">refuse</span> Unsupported documents are reported honestly.</p>
+              </article>
+              <article class="boundary-band">
+                <h3>Mutations</h3>
+                <p><span class="state state--ask">ask</span> File writes and workspace operations need approval.</p>
+                <p><span class="state state--ask">ask</span> Command execution is bounded by configured profiles.</p>
+                <p><span class="state state--deny">deny</span> Workspace escape and protected mutation fail closed.</p>
+              </article>
+              <article class="boundary-band">
+                <h3>Evidence</h3>
+                <p><span class="state state--allow">local</span> Interactive turns leave trace records.</p>
+                <p><span class="state state--allow">show</span> Use <code>/last trace</code> to inspect the previous turn.</p>
+                <p><span class="state state--ask">scope</span> Private-mode handoff must be explicit.</p>
+              </article>
             </div>
             <p class="trust-posture">
               <span aria-hidden="true">&gt;_</span>
@@ -263,12 +256,11 @@
           </div>
         </section>
 
-        <!-- 5. USE CASES -->
-        <section id="use-cases" class="section story-section use-cases-section" aria-labelledby="use-cases-heading">
+        <section id="good-fits" class="section story-section good-fits-section" aria-labelledby="good-fits-heading">
           <div class="container">
             <div class="section-header reveal">
-              <p class="eyebrow">Use cases</p>
-              <h2 id="use-cases-heading">Bounded developer work. Narrow claims.</h2>
+              <p class="eyebrow">Good Fits</p>
+              <h2 id="good-fits-heading">Bounded developer work. Narrow claims.</h2>
             </div>
             <ul class="use-case-grid" role="list">
               <li class="use-case reveal"><span class="use-case-tag">01</span><h3>Understand a codebase</h3><p>Inspect structure and read files before touching anything.</p></li>
@@ -286,97 +278,14 @@
           </div>
         </section>
 
-        <!-- 6. INSTALL & MODELS -->
-        <section id="install" class="section story-section install-section" aria-labelledby="install-heading">
-          <div class="container two-column">
-            <div class="section-copy reveal">
-              <p class="eyebrow">Install &amp; models</p>
-              <h2 id="install-heading">Public install is not final yet.</h2>
-              <p>
-                Talos is still tested from source and local beta builds. The
-                planned public beta target is a one-line Windows install, using
-                <code>winget</code> or a signed PowerShell bootstrap, followed
-                by guided local model setup.
-              </p>
-              <p>
-                Current developer setup remains in the repository docs: build
-                with Gradle, install locally, then configure managed
-                <code>llama.cpp</code> model profiles. Those commands are real,
-                but they are not the release install experience. Unix/macOS
-                should get a curl-style path later, not a copied local build
-                script as the product story.
-              </p>
-            </div>
-
-            <div class="model-command-stack reveal" aria-label="Install status and runtime commands">
-              <article class="code-card">
-                <div class="code-card-header">
-                  <h3>Local smoke check</h3>
-                  <button class="copy-button" type="button" aria-label="Copy first run command" data-copy="talos&#10;/status --verbose">Copy</button>
-                </div>
-                <pre><code>talos
-/status --verbose</code></pre>
-              </article>
-              <article class="code-card">
-                <div class="code-card-header">
-                  <h3>Public beta install target</h3>
-                </div>
-                <pre><code>planned: one-line Windows install
-planned: signed artifact + checksum
-planned: guided managed llama.cpp setup</code></pre>
-              </article>
-              <article class="code-card">
-                <div class="code-card-header">
-                  <h3>Developer setup source</h3>
-                </div>
-                <pre><code>README.md · Quick Start
-docs/setup-managed-models.md
-tools/install-windows.ps1</code></pre>
-              </article>
-              <article class="code-card">
-                <div class="code-card-header">
-                  <h3>Status check</h3>
-                  <button class="copy-button" type="button" aria-label="Copy status command" data-copy="talos status --verbose">Copy</button>
-                </div>
-                <pre><code>talos status --verbose</code></pre>
-              </article>
-              <article class="code-card">
-                <div class="code-card-header">
-                  <h3>Review last trace</h3>
-                  <button class="copy-button" type="button" aria-label="Copy last trace command" data-copy="/last trace">Copy</button>
-                </div>
-                <pre><code>/last trace</code></pre>
-              </article>
-              <article class="code-card">
-                <div class="code-card-header">
-                  <h3>Inspect runtime surface</h3>
-                  <button class="copy-button" type="button" aria-label="Copy runtime inspection command" data-copy="/tools&#10;/models&#10;/workspace">Copy</button>
-                </div>
-                <pre><code>/tools
-/models
-/workspace</code></pre>
-              </article>
-              <article class="code-card">
-                <div class="code-card-header">
-                  <h3>Prompt-debug evidence</h3>
-                  <button class="copy-button" type="button" aria-label="Copy prompt debug command" data-copy="/prompt-debug last">Copy</button>
-                </div>
-                <pre><code>/prompt-debug last</code></pre>
-              </article>
-            </div>
-          </div>
-        </section>
-
-        <!-- 7. DOCS GATEWAY -->
         <section id="docs" class="section story-section docs-section" aria-labelledby="docs-heading">
           <div class="container">
             <div class="section-header reveal">
               <p class="eyebrow">Docs</p>
-              <h2 id="docs-heading">Read the contract, not the marketing.</h2>
+              <h2 id="docs-heading">Source-backed docs, curated for the first run.</h2>
               <p class="section-lede">
-                Docs live in the repository. Trust, traces, command execution,
-                and audit workflow each have an architecture document; CLI
-                commands are defined in source.
+                The landing page stays narrow. Setup, permissions, local models,
+                and trace details live in the repository docs.
               </p>
             </div>
             <div class="docs-grid">
@@ -386,47 +295,23 @@ tools/install-windows.ps1</code></pre>
                 <p>Current source/developer setup for local beta runs.</p>
                 <code>README.md · Quick Start</code>
               </a>
-              <a class="doc-card reveal" href="https://github.com/ai21z/talos-cli/blob/v0.9.0-beta-dev/tools/install-windows.ps1" rel="noopener">
-                <span class="doc-tag">02</span>
-                <h3>Windows install</h3>
-                <p>Current source installer. Public one-line install is planned.</p>
-                <code>tools/install-windows.ps1</code>
-              </a>
               <a class="doc-card reveal" href="https://github.com/ai21z/talos-cli/blob/v0.9.0-beta-dev/docs/setup-managed-models.md" rel="noopener">
-                <span class="doc-tag">03</span>
-                <h3>Configure models</h3>
+                <span class="doc-tag">02</span>
+                <h3>Model Setup</h3>
                 <p>Managed <code>llama.cpp</code> setup and model profiles.</p>
                 <code>docs/setup-managed-models.md</code>
               </a>
-              <a class="doc-card reveal" href="https://github.com/ai21z/talos-cli#common-commands" rel="noopener">
-                <span class="doc-tag">04</span>
-                <h3>CLI commands</h3>
-                <p>Slash commands and runtime tool surface.</p>
-                <code>/help · /status · /tools · /workspace · /last trace · /prompt-debug</code>
-              </a>
               <a class="doc-card reveal" href="https://github.com/ai21z/talos-cli/blob/v0.9.0-beta-dev/docs/architecture/04-declarative-allow-ask-deny-permissions.md" rel="noopener">
-                <span class="doc-tag">05</span>
-                <h3>Trust and approvals</h3>
-                <p>Declarative allow / ask / deny permissions.</p>
+                <span class="doc-tag">03</span>
+                <h3>Permissions</h3>
+                <p>Declarative allow / ask / deny boundaries.</p>
                 <code>docs/architecture/04-declarative-allow-ask-deny-permissions.md</code>
               </a>
               <a class="doc-card reveal" href="https://github.com/ai21z/talos-cli/blob/v0.9.0-beta-dev/docs/architecture/03-local-turn-trace-model-v1.md" rel="noopener">
-                <span class="doc-tag">06</span>
-                <h3>Local traces &amp; artifacts</h3>
-                <p>Trace model, prompt-debug, local artifact handling.</p>
+                <span class="doc-tag">04</span>
+                <h3>Trace / Audit</h3>
+                <p>Local turn trace model and audit evidence.</p>
                 <code>docs/architecture/03-local-turn-trace-model-v1.md</code>
-              </a>
-              <a class="doc-card reveal" href="https://github.com/ai21z/talos-cli/blob/v0.9.0-beta-dev/docs/architecture/10-command-execution-architecture-design.md" rel="noopener">
-                <span class="doc-tag">07</span>
-                <h3>Command execution</h3>
-                <p>Bounded command profiles and execution architecture.</p>
-                <code>docs/architecture/10-command-execution-architecture-design.md</code>
-              </a>
-              <a class="doc-card reveal" href="https://github.com/ai21z/talos-cli/blob/v0.9.0-beta-dev/work-cycle-docs/full-e2e-audit-workflow.md" rel="noopener">
-                <span class="doc-tag">08</span>
-                <h3>Audit workflow</h3>
-                <p>Milestone and full E2E audit procedures.</p>
-                <code>work-cycle-docs/full-e2e-audit-workflow.md</code>
               </a>
             </div>
           </div>
@@ -436,9 +321,9 @@ tools/install-windows.ps1</code></pre>
       <footer class="site-footer">
         <div class="container footer-inner">
           <div class="footer-brand">
-            <a class="wordmark wordmark--footer" href="#product" aria-label="Talos home">
+            <a class="wordmark wordmark--footer" href="#overview" aria-label="Talos home">
               <span class="brand-mark wordmark-mark" aria-hidden="true">
-                <img src="./design/talos-icon.png" alt="" width="32" height="32" decoding="async" />
+                <img src="./design/talos-icon.png" alt="" width="36" height="36" decoding="async" />
               </span>
               <span>Talos</span>
             </a>
@@ -448,14 +333,13 @@ tools/install-windows.ps1</code></pre>
           </div>
           <nav class="footer-nav" aria-label="Footer navigation">
             <a href="https://github.com/ai21z/talos-cli" rel="noopener">GitHub</a>
-            <a href="#contract">Contract</a>
-            <a href="#trust">Trust</a>
+            <a href="#execution">Execution</a>
+            <a href="#local-boundaries">Boundaries</a>
             <a href="#docs">Docs</a>
           </nav>
         </div>
       </footer>
     </div>
-    <div class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

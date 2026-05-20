@@ -217,9 +217,9 @@ class CompatChatClientTest {
                     () -> client.chatStream(requestForStream()).toList());
 
             assertEquals("compat chat stream tool arguments", error.context());
-            assertTrue(error.bodyPreview().contains("\"not\""), error.bodyPreview());
+            assertEquals("", error.bodyPreview());
             assertTrue(error.bodyHash().startsWith("sha256:"), error.bodyHash());
-            assertFalse(error.bodyPreview().contains("complete"));
+            assertTrue(error.bodyChars() > 0);
         } finally {
             server.stop(0);
         }
@@ -243,9 +243,8 @@ class CompatChatClientTest {
 
             assertEquals("compat chat stream tool arguments", error.context());
             assertEquals(malformedArguments.length(), error.bodyChars());
-            assertTrue(error.bodyPreview().contains("\"path\":\"scripts.js\""), error.bodyPreview());
+            assertEquals("", error.bodyPreview());
             assertTrue(error.bodyHash().startsWith("sha256:"), error.bodyHash());
-            assertFalse(error.bodyPreview().contains("complete"));
         } finally {
             server.stop(0);
         }

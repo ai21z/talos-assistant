@@ -143,12 +143,53 @@ class TaskContractResolverTest {
         assertTrue(contract.mutationRequested());
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
+        assertEquals(Set.of(), contract.expectedTargets());
+    }
+
+    @Test
+    void naturalStyledInteractiveWebCreateInfersConventionalStaticTargets() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Create a modern synthwave website here with CSS styling and JavaScript interaction.");
+
+        assertEquals(TaskType.FILE_CREATE, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("index.html", "style.css", "script.js"), contract.expectedTargets());
+    }
+
+    @Test
+    void documentGuideAboutWebPageDoesNotInferStaticWebOutputTargets() {
+        for (String input : List.of(
+                "Create a PDF file that talks about how to build a synthwave band's web page.",
+                "Create a txt file that talks about how to build a synthwave band's web page.",
+                "Create a markdown guide about how to build a band's web page.")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertFalse(contract.expectedTargets().contains("index.html"), input);
+            assertFalse(contract.expectedTargets().contains("style.css"), input);
+            assertFalse(contract.expectedTargets().contains("script.js"), input);
+        }
     }
 
     @Test
     void createSummaryFromMultipleSourceDocumentsTargetsOnlyMarkdownOutput() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "Create office-summary.md summarizing board-brief.pdf, client-notes.docx, and revenue.xlsx.");
+
+        assertEquals(TaskType.FILE_CREATE, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertEquals(Set.of("office-summary.md"), contract.expectedTargets());
+        assertEquals(Set.of("board-brief.pdf", "client-notes.docx", "revenue.xlsx"),
+                contract.sourceEvidenceTargets());
+    }
+
+    @Test
+    void createSummaryFromMultipleSourceDocumentsKeepsSourcesWhenPromptAddsCoverageInstruction() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Create office-summary.md summarizing board-brief.pdf, client-notes.docx, and revenue.xlsx. "
+                        + "Include one distinctive exact evidence phrase from each source so I can audit source coverage.");
 
         assertEquals(TaskType.FILE_CREATE, contract.type());
         assertTrue(contract.mutationRequested());
@@ -1192,6 +1233,7 @@ class TaskContractResolverTest {
         assertTrue(contract.mutationRequested());
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("index.html", "style.css", "script.js"), contract.expectedTargets());
     }
 
     @Test
@@ -1208,11 +1250,71 @@ class TaskContractResolverTest {
 
         TaskContract contract = TaskContractResolver.fromMessages(messages);
 
-        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertEquals(TaskType.FILE_CREATE, contract.type());
         assertTrue(contract.mutationRequested());
         assertTrue(contract.mutationAllowed());
         assertTrue(contract.verificationRequired());
         assertEquals("correction-follow-up-inherits-previous-mutation-contract", contract.classificationReason());
+    }
+
+    @Test
+    void contextualRestFilesPromptAfterWebGuideInfersConventionalStaticTargets() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.user(
+                "Okay can you create a txt file that talks about how to build a synthwave band's web page?"));
+        messages.add(ChatMessage.assistant("Created synthwave_band_website.txt."));
+        messages.add(ChatMessage.user("what is the txt talking about?"));
+        messages.add(ChatMessage.assistant(
+                "The txt is about building a synthwave-style band website with styling and interaction."));
+        messages.add(ChatMessage.user(
+                "make the rest files please according to txt. I need a good modern synthwave style"));
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        assertEquals(TaskType.FILE_CREATE, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("index.html", "style.css", "script.js"), contract.expectedTargets());
+    }
+
+    @Test
+    void contextualStyleAndJavascriptFixAfterSiteCreationInfersConventionalStaticTargets() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.user("Great! now can you create that site?"));
+        messages.add(ChatMessage.assistant("Created index.html."));
+        messages.add(ChatMessage.user(
+                "But make sure there is a real modern synthwave style and JavaScript interaction. Fix the files if needed."));
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("index.html", "style.css", "script.js"), contract.expectedTargets());
+    }
+
+    @Test
+    void currentTurnAssistantToolOutputDoesNotCreateContextualStaticWebTargets() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user(
+                "Can you build a small BMI calculator website here with separate CSS and JavaScript files? "
+                        + "Use the file tools if you can; do not just show code."));
+        messages.add(ChatMessage.assistant("""
+                {"name":"talos.write_file","parameters":{"path":"index.html","content":"<link rel=\\"stylesheet\\" href=\\"styles.css\\">"}}
+                {"name":"talos.write_file","parameters":{"path":"styles.css","content":"body{}"}}
+                {"name":"talos.write_file","parameters":{"path":"script.js","content":"console.log('ready')"}}
+                """));
+
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        assertEquals(TaskType.FILE_CREATE, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of(), contract.expectedTargets());
     }
 
     @Test

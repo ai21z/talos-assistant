@@ -1,10 +1,10 @@
 # T320 - PDF/Office Extraction And Generation Claims Must Stay Separate
 
-Status: still-open - document extraction versus binary generation claim split remains release-copy work
+Status: done - README now explicitly separates extraction support from binary document generation
 Severity: high
 Release gate: yes for document capability claims
 Branch: v0.9.0-beta-dev
-Created/updated: 2026-05-19
+Created/updated: 2026-05-19 / 2026-05-20
 Owner: unassigned
 
 ## Problem
@@ -39,3 +39,19 @@ Talos must keep these claims separate:
 - T293 local Excel extraction
 - T295 private document provenance boundary
 - T305 private document provenance ToolResult boundary
+
+## Closure Evidence
+
+Implemented on 2026-05-20:
+
+- README capability matrix states:
+  - PDF: text extraction for text-bearing PDFs, not PDF creation, scanned-PDF OCR, visual layout review, or guaranteed reading order.
+  - Word: text extraction for `.docx`, not `.doc`, embedded-object/layout fidelity, or valid Word document generation.
+  - Excel: visible-cell extraction for `.xls`/`.xlsx`, not formula recalculation, macro execution, hidden-sheet guarantees, chart interpretation, or valid workbook generation.
+  - Image/OCR and PowerPoint remain frozen out of beta product claims.
+- README explicitly states that Talos cannot create valid PDF/DOCX/XLS/XLSX files with the current local text-file tool surface.
+- Regression coverage:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.docs.ReadmePrivacyCopyTest" --no-daemon
+```

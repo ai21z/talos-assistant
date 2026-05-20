@@ -1319,8 +1319,48 @@ class StaticTaskVerifierTest {
                         .anyMatch(f -> f.contains("office-summary.md: source-derived artifact includes evidence from")
                                 && f.contains("report.pdf")
                                 && f.contains("report.docx")
-                                && f.contains("budget.xlsx")),
+                        && f.contains("budget.xlsx")),
                 result.facts().toString());
+    }
+
+    @Test
+    void sourceDerivedOfficeDocumentSummaryFailsWhenExactMarkersMaskUnsupportedProse() throws Exception {
+        copyDocumentFixture("canonical-text.pdf", "board-brief.pdf");
+        copyDocumentFixture("canonical-report.docx", "client-notes.docx");
+        copyDocumentFixture("canonical-workbook.xlsx", "revenue.xlsx");
+        Files.writeString(workspace.resolve("office-summary.md"), """
+                # Office Summary
+
+                ## Board Brief
+                The board brief outlines the strategic objectives for the upcoming fiscal year,
+                highlighting key initiatives in product development, market expansion, and cost optimization.
+                **Evidence**: CANONICAL_PDF_TEXT_ALPHA PDF fixture for Talos extraction evidence
+
+                ## Client Notes
+                Client notes capture feedback from recent stakeholder meetings, focusing on service delivery
+                improvements, pricing discussions, and contract renewal timelines.
+                **Evidence**: CANONICAL_DOCX_TEXT_BETA
+
+                ## Revenue Report
+                The revenue spreadsheet provides monthly sales figures, regional performance, year-over-year growth,
+                and North American market opportunities.
+                **Evidence**: A1: CANONICAL_XLSX_TEXT_GAMMA
+                """);
+
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Create office-summary.md summarizing board-brief.pdf, client-notes.docx, and revenue.xlsx. "
+                        + "Include one distinctive exact evidence phrase from each source so I can audit source coverage.");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                contract,
+                loopResult(List.of(successfulWrite("office-summary.md", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.summary());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("unsupported distinctive terms not found in source evidence")),
+                result.problems().toString());
     }
 
     @Test
@@ -1346,6 +1386,50 @@ class StaticTaskVerifierTest {
                                 && p.contains("source-derived summary does not include distinctive evidence")),
                 result.problems().toString());
         assertFalse(result.problems().stream().anyMatch(p -> p.contains("CANONICAL_XLSX_TEXT_GAMMA")),
+                result.problems().toString());
+    }
+
+    @Test
+    void sourceDerivedOfficeDocumentSummaryFailsForSummarizingPromptWithHallucinatedEvidence() throws Exception {
+        copyDocumentFixture("canonical-text.pdf", "board-brief.pdf");
+        copyDocumentFixture("canonical-report.docx", "client-notes.docx");
+        copyDocumentFixture("canonical-workbook.xlsx", "revenue.xlsx");
+        Files.writeString(workspace.resolve("office-summary.md"), """
+                # Office Summary
+
+                ## 1. Board Brief
+                - Evidence Phrase: "Strategic Vision: Expand into new markets"
+
+                ## 2. Client Notes
+                - Evidence Phrase: "Client feedback indicates a strong preference for faster support response times"
+
+                ## 3. Revenue Data
+                - Evidence Phrase: "Total revenue for Q1 2026 reached $4.2 million"
+                """);
+
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Create office-summary.md summarizing board-brief.pdf, client-notes.docx, and revenue.xlsx. "
+                        + "Include one distinctive exact evidence phrase from each source so I can audit source coverage.");
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                contract,
+                loopResult(List.of(successfulWrite("office-summary.md", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.summary());
+        assertTrue(result.summary().contains("Source-derived artifact verification failed"), result.summary());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("board-brief.pdf")
+                                && p.contains("source-derived summary does not include distinctive evidence")),
+                result.problems().toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("client-notes.docx")
+                                && p.contains("source-derived summary does not include distinctive evidence")),
+                result.problems().toString());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("revenue.xlsx")
+                                && p.contains("source-derived summary does not include distinctive evidence")),
                 result.problems().toString());
     }
 
@@ -1867,6 +1951,52 @@ class StaticTaskVerifierTest {
                 0);
 
         assertEquals(TaskVerificationStatus.PASSED, result.status());
+    }
+
+    @Test
+    void cssCompoundClassSelectorMayBeSatisfiedByJavascriptDynamicClass() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!DOCTYPE html>
+                <html lang="en">
+                  <head>
+                    <link rel="stylesheet" href="style.css">
+                  </head>
+                  <body>
+                    <button id="toggle">Toggle Neon</button>
+                    <div class="neon-box" id="box">Neon Box</div>
+                    <script src="script.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("style.css"), """
+                .neon-box {
+                  filter: brightness(1);
+                }
+                .neon-box.off {
+                  filter: brightness(0.2);
+                }
+                """);
+        Files.writeString(workspace.resolve("script.js"), """
+                const toggleBtn = document.getElementById('toggle');
+                const neonBox = document.getElementById('box');
+                toggleBtn.addEventListener('click', () => {
+                  neonBox.classList.add('off');
+                });
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Create the full synthwave frontend now with exactly index.html, style.css, and script.js.",
+                loopResult(List.of(
+                        successfulWrite("index.html", VerificationStatus.PASS),
+                        successfulWrite("style.css", VerificationStatus.PASS),
+                        successfulWrite("script.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.problems().toString());
+        assertFalse(result.problems().stream()
+                        .anyMatch(p -> p.contains("CSS references missing class selectors: `.off`")),
+                result.problems().toString());
     }
 
     @Test

@@ -145,6 +145,63 @@ class SensitiveLogRedactionTest {
         }
     }
 
+    @Test
+    void high_risk_user_controlled_log_values_use_safe_formatter() throws Exception {
+        String registry = source("src/main/java/dev/talos/tools/ToolRegistry.java");
+        String editTool = source("src/main/java/dev/talos/tools/impl/FileEditTool.java");
+        String writeTool = source("src/main/java/dev/talos/tools/impl/FileWriteTool.java");
+        String reranker = source("src/main/java/dev/talos/core/rerank/ScoreThresholdReranker.java");
+
+        assertTrue(registry.contains("SafeLogFormatter.value(name)"), registry);
+        assertFalse(registry.contains("name, tool.name()"), registry);
+        assertFalse(registry.contains("name, decision.canonicalToolName()"), registry);
+
+        assertTrue(editTool.contains("SafeLogFormatter.value(pathParam)"), editTool);
+        assertFalse(editTool.contains("new_string for {}\",\n                    newString.length() - sanitizedNew.length(), pathParam"),
+                editTool);
+
+        assertTrue(writeTool.contains("SafeLogFormatter.value(pathParam)"), writeTool);
+        assertFalse(writeTool.contains("content for {}\",\n                    content.length() - sanitized.length(), pathParam"),
+                writeTool);
+
+        assertTrue(reranker.contains("SafeLogFormatter.value(c.path())"), reranker);
+        assertFalse(reranker.contains("c.path(), c.score(), threshold"), reranker);
+    }
+
+    @Test
+    void broader_runtime_diagnostics_safe_format_paths_models_and_endpoint_values() throws Exception {
+        String firstRun = source("src/main/java/dev/talos/app/ui/TerminalFirstRun.java");
+        String embeddings = source("src/main/java/dev/talos/core/embed/EmbeddingsClient.java");
+        String lucene = source("src/main/java/dev/talos/core/index/LuceneStore.java");
+        String executor = source("src/main/java/dev/talos/cli/modes/AssistantTurnExecutor.java");
+        String reprompt = source("src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java");
+        String support = source("src/main/java/dev/talos/runtime/toolcall/ToolCallSupport.java");
+
+        assertTrue(firstRun.contains("SafeLogFormatter.value(SENTINEL)"), firstRun);
+        assertFalse(firstRun.contains("SENTINEL, ex"), firstRun);
+
+        assertTrue(embeddings.contains("SafeLogFormatter.value(this.host)"), embeddings);
+        assertFalse(embeddings.contains("services.\", this.host"), embeddings);
+        assertFalse(embeddings.contains("from {} {} — skipping\", ep.path, ep.param"), embeddings);
+        assertFalse(embeddings.contains("Empty embedding from {} {} (continuing to next attempt)\", ep.path, ep.param"),
+                embeddings);
+        assertFalse(embeddings.contains("Batch embedding size mismatch from {} {} (expected {}, got {})\",\n                            ep.path, ep.param"),
+                embeddings);
+
+        assertTrue(lucene.contains("SafeLogFormatter.value(path)"), lucene);
+        assertFalse(lucene.contains("Skip vector for {} (have={}, expected={})\", path"), lucene);
+
+        assertTrue(executor.contains("SafeLogFormatter.value(mnf.model())"), executor);
+        assertFalse(executor.contains("LOG.warn(\"Model not found: {}\", mnf.model())"), executor);
+
+        assertTrue(reprompt.contains("SafeLogFormatter.value(mnf.model())"), reprompt);
+        assertFalse(reprompt.contains("state.iterations, mnf.model()"), reprompt);
+        assertFalse(reprompt.contains("retryName, mnf.model()"), reprompt);
+
+        assertTrue(support.contains("SafeLogFormatter.value(call.toolName())"), support);
+        assertFalse(support.contains("call.toolName());"), support);
+    }
+
     private static String source(String path) throws Exception {
         return Files.readString(Path.of(path));
     }

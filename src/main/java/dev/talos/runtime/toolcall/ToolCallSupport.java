@@ -3,6 +3,7 @@ package dev.talos.runtime.toolcall;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatMessage.NativeToolCall;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
+import dev.talos.runtime.policy.SafeLogFormatter;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolResult;
 import org.slf4j.Logger;
@@ -297,7 +298,8 @@ public final class ToolCallSupport {
         }
         LOG.warn("{} call is missing required 'path' parameter. "
                 + "Returning call as-is so the tool produces an error. "
-                + "The model must provide the target file path explicitly.", call.toolName());
+                + "The model must provide the target file path explicitly.",
+                SafeLogFormatter.value(call.toolName()));
         return call;
     }
 

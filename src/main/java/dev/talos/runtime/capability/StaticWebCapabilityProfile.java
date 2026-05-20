@@ -29,7 +29,8 @@ public final class StaticWebCapabilityProfile {
         if (hasOnlyExplicitNonWebMutationTargets(contract)) return false;
         String request = contract.originalUserRequest();
         if (looksWebGuideDocumentTask(request)) return false;
-        if (shouldCheckSelectorCoherence(request)
+        if (hasExactHtmlCssJsExpectedTargets(contract)
+                || shouldCheckSelectorCoherence(request)
                 || looksBroadWebTask(contract)
                 || looksFunctionalWebTask(contract)
                 || looksStyledWebTask(contract, mutatedPaths)) {
@@ -223,6 +224,7 @@ public final class StaticWebCapabilityProfile {
     }
 
     private static boolean requiresSeparateAssetMutations(TaskContract contract) {
+        if (hasExactHtmlCssJsExpectedTargets(contract)) return true;
         if (!looksBroadWebTask(contract)) return false;
         String lower = contract.originalUserRequest().toLowerCase(Locale.ROOT);
         boolean createLike = contract.type() == TaskType.FILE_CREATE
@@ -239,6 +241,21 @@ public final class StaticWebCapabilityProfile {
                 && (lower.contains("styles.css") || lower.contains("style.css") || lower.contains(".css"))
                 && (lower.contains("scripts.js") || lower.contains("script.js") || lower.contains(".js"));
         return createLike && (separateAssets || explicitThreeFileSurface);
+    }
+
+    private static boolean hasExactHtmlCssJsExpectedTargets(TaskContract contract) {
+        if (contract == null || contract.expectedTargets().isEmpty()) return false;
+        boolean html = false;
+        boolean css = false;
+        boolean js = false;
+        for (String target : contract.expectedTargets()) {
+            String lower = target == null ? "" : target.toLowerCase(Locale.ROOT);
+            html = html || lower.endsWith(".html") || lower.endsWith(".htm");
+            css = css || lower.endsWith(".css");
+            js = js || lower.endsWith(".js") || lower.endsWith(".jsx")
+                    || lower.endsWith(".ts") || lower.endsWith(".tsx");
+        }
+        return html && css && js;
     }
 
     private static boolean shouldCheckSelectorCoherence(String userRequest) {

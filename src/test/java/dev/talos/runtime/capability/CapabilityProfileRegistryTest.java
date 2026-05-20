@@ -2,7 +2,11 @@ package dev.talos.runtime.capability;
 
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.spi.types.ChatMessage;
 import org.junit.jupiter.api.Test;
+
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -64,5 +68,22 @@ class CapabilityProfileRegistryTest {
         assertFalse(profile.staticWeb());
         assertEquals(VerifierProfile.NONE, profile.verifierProfile());
         assertEquals(RepairProfile.NONE, profile.repairProfile());
+    }
+
+    @Test
+    void deicticSiteCreationWithInferredExactTargetsSelectsStaticWebProfile() {
+        var messages = new ArrayList<>(List.of(
+                ChatMessage.system("sys"),
+                ChatMessage.user("Create a txt file about how to build a synthwave band's web page."),
+                ChatMessage.assistant("[ok] Created synthwave_webpage_tutorial.txt"),
+                ChatMessage.user("Great! now can you create that site?")));
+        TaskContract contract = TaskContractResolver.fromMessages(messages);
+
+        CapabilityProfile profile = CapabilityProfileRegistry.select(contract);
+
+        assertEquals(java.util.Set.of("index.html", "style.css", "script.js"), contract.expectedTargets());
+        assertTrue(profile.staticWeb());
+        assertEquals(TargetSurface.HTML_CSS_JS, profile.targetSurface());
+        assertEquals(VerifierProfile.STATIC_WEB, profile.verifierProfile());
     }
 }

@@ -215,6 +215,7 @@ class CurrentTurnCapabilityFrameTest {
         assertTrue(frame.contains("You must write or edit these exact target paths"), frame);
         assertTrue(frame.contains("Similar filenames are not substitutes"), frame);
         assertTrue(frame.contains("script.js and scripts.js are different target paths"), frame);
+        assertTrue(frame.contains("Do not put required root files inside css/, js/, assets/, site/, or other subdirectories"), frame);
         assertTrue(frame.contains("Available mutating tools: talos.write_file, talos.edit_file."), frame);
     }
 

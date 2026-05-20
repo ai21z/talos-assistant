@@ -163,7 +163,7 @@ class NativeToolSpecPolicyTest {
     }
 
     @Test
-    void scopedTargetLimiterContractInApplyIncludesWriteAndEditNativeSpecs() {
+    void scopedTargetLimiterContractInApplyExcludesWorkspaceOrganizationNativeSpecs() {
         var contract = TaskContractResolver.fromUserRequest(
                 "Fix only styles.css. Do not change index.html or scripts.js.");
 
@@ -173,11 +173,12 @@ class NativeToolSpecPolicyTest {
         assertTrue(names.contains("talos.read_file"));
         assertTrue(names.contains("talos.write_file"));
         assertTrue(names.contains("talos.edit_file"));
-        assertTrue(names.contains("talos.apply_workspace_batch"));
-        assertTrue(names.contains("talos.mkdir"));
-        assertTrue(names.contains("talos.move_path"));
-        assertTrue(names.contains("talos.copy_path"));
-        assertTrue(names.contains("talos.rename_path"));
+        assertFalse(names.contains("talos.apply_workspace_batch"));
+        assertFalse(names.contains("talos.mkdir"));
+        assertFalse(names.contains("talos.move_path"));
+        assertFalse(names.contains("talos.copy_path"));
+        assertFalse(names.contains("talos.rename_path"));
+        assertFalse(names.contains("talos.delete_path"));
     }
 
     @Test

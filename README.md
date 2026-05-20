@@ -40,6 +40,24 @@ Talos can inspect and edit supported text-oriented files such as `.md`,
 `.config`, shell scripts, PowerShell scripts, Gradle files, Dockerfiles,
 README files, LICENSE files, and similar project text files.
 
+#### Capability Matrix
+
+| Area | Beta claim | Boundary |
+|---|---|---|
+| Developer/text workspaces | Inspect, edit, diff, approve, checkpoint, and verify supported text files | Not arbitrary shell/browser/cloud automation |
+| PDF | Text extraction for text-bearing PDFs | Not PDF creation, scanned-PDF OCR, visual layout review, or guaranteed reading order |
+| Word | Text extraction for `.docx` | Not `.doc`, comments/tracked-changes fidelity, embedded objects, or valid Word document generation |
+| Excel | Visible-cell extraction for `.xls`/`.xlsx` | No formula recalculation, macro execution, hidden-sheet guarantees, chart interpretation, or valid workbook generation |
+| Static web | HTML/CSS/JS source editing and static coherence checks | Not browser rendering proof unless a separate browser audit is run |
+| Image/OCR | Frozen out of beta product claims | Experimental OCR plumbing is not beta readiness evidence |
+| PowerPoint | Frozen out of beta product claims | No PPT/PPTX reader, writer, or slide-layout understanding claim |
+| Private paperwork | Not an approved beta product claim | Do not position Talos as safe for tax, health, legal, family, or admin folders until all privacy release gates pass |
+
+Talos cannot create valid PDF/DOCX/XLS/XLSX files with the current local
+text-file tool surface. It may create supported text source artifacts such as
+Markdown, plain text, HTML, CSV, or JSON that a dedicated document tool can
+convert later.
+
 Talos now has narrow local extraction for text-bearing PDFs, `.docx` Word
 documents, and `.xls`/`.xlsx` Excel workbooks. These are text extraction paths,
 not layout-perfect document review. PDF visual order, scanned/image-only PDFs,
@@ -285,7 +303,31 @@ runtime policy keeps each turn bounded.
 
 ## Quick Start
 
-### 1. Install prerequisites
+### Public beta install target
+
+The first public beta install target is Windows x64 only:
+
+```powershell
+winget install --id TalosProject.TalosCLI -e
+talos setup models
+talos status --verbose
+talos
+```
+
+This public path is not live until a signed GitHub Release asset and winget
+manifest are published. The winget package name and moniker should be
+`talos-cli`, with `TalosProject.TalosCLI` as the exact package ID and
+`Vissarion Zounarakis` as publisher. The public installer will include a
+bundled Java runtime, so public users should not need to install Java manually. It
+installs Talos only; it does not bundle a llama.cpp server or model weights.
+Model setup remains an explicit post-install command through
+`talos setup models`.
+
+Until the public release exists, use the source/developer path below.
+`tools/install-unix.sh is source/developer-only` and is not a supported
+Linux/macOS public beta installer.
+
+### 1. Install source/developer prerequisites
 
 Current practical setup:
 

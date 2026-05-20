@@ -13,7 +13,7 @@ test.beforeEach(async ({ page }) => {
   page.browserIssues = browserIssues;
 });
 
-test("page renders without browser console errors and has one product h1", async ({ page }) => {
+test("page renders without browser console errors and has one landing h1", async ({ page }) => {
   await page.goto("/");
   await expect(page).toHaveTitle(/Talos/);
   await expect(page.locator("h1")).toHaveCount(1);
@@ -71,23 +71,13 @@ test("terminal tabs switch content on click and keyboard", async ({ page }) => {
   await expect(page.getByRole("tab", { name: "Inspect" })).toHaveAttribute("aria-selected", "true");
 });
 
-test("copy buttons are visible, focusable, and uniquely labelled", async ({ page }) => {
+test("planned install surface has no fake copy affordance", async ({ page }) => {
   await page.goto("/");
-  const buttons = page.locator(".copy-button");
-  const count = await buttons.count();
-  expect(count).toBeGreaterThanOrEqual(5);
-
-  const labels = [];
-  for (let index = 0; index < count; index += 1) {
-    const button = buttons.nth(index);
-    await expect(button).toBeVisible();
-    await button.focus();
-    await expect(button).toBeFocused();
-    labels.push(await button.getAttribute("aria-label"));
-  }
-
-  expect(new Set(labels).size).toBe(labels.length);
-  expect(labels.every((label) => /^Copy .+ command$/.test(label ?? ""))).toBe(true);
+  const setup = page.locator(".setup-strip");
+  await expect(setup).toContainText("planned public beta");
+  await expect(setup).toContainText("winget install talos-cli");
+  await expect(setup).toContainText("TalosProject.TalosCLI");
+  await expect(page.locator("[data-copy]")).toHaveCount(0);
 });
 
 test("hero CTAs are real links, not placeholder beta actions", async ({ page }) => {
@@ -96,7 +86,7 @@ test("hero CTAs are real links, not placeholder beta actions", async ({ page }) 
     "href",
     "https://github.com/ai21z/talos-cli",
   );
-  await expect(page.getByRole("link", { name: "Read the execution contract" })).toHaveAttribute("href", "#contract");
+  await expect(page.getByRole("link", { name: "Read docs" }).first()).toHaveAttribute("href", "#docs");
   await expect(page.getByRole("button", { name: "Get beta build" })).toHaveCount(0);
 });
 
@@ -105,7 +95,7 @@ test("mobile header and nav remain usable", async ({ page }) => {
   await page.goto("/");
   const primaryNav = page.getByRole("navigation", { name: "Primary navigation" });
   await expect(primaryNav).toBeVisible();
-  await expect(primaryNav.getByRole("link", { name: "Product" })).toBeVisible();
+  await expect(primaryNav.getByRole("link", { name: "Overview" })).toBeVisible();
   await expect(primaryNav.getByRole("link", { name: "Docs" })).toBeVisible();
   await primaryNav.getByRole("link", { name: "Docs" }).click();
   await expect(page.locator("#docs")).toBeInViewport();
@@ -115,23 +105,23 @@ test("scroll story sections keep active nav state without hijacking native scrol
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
   const primaryNav = page.getByRole("navigation", { name: "Primary navigation" });
-  await expect(page.locator('.site-nav a[aria-current="page"]')).toHaveText("Product");
+  await expect(page.locator('.site-nav a[aria-current="page"]')).toHaveText("Overview");
 
-  await primaryNav.getByRole("link", { name: "Trust" }).click();
-  await expect(page).toHaveURL(/#trust$/);
-  await expect(page.locator("#trust")).toBeInViewport();
-  await expect(page.locator('.site-nav a[aria-current="page"]')).toHaveText("Trust");
+  await primaryNav.getByRole("link", { name: "Local Boundaries" }).click();
+  await expect(page).toHaveURL(/#local-boundaries$/);
+  await expect(page.locator("#local-boundaries")).toBeInViewport();
+  await expect(page.locator('.site-nav a[aria-current="page"]')).toHaveText("Local Boundaries");
 
   const scrollState = await page.evaluate(() => ({
     overflowY: getComputedStyle(document.documentElement).overflowY,
     snapped: getComputedStyle(document.documentElement).scrollSnapType,
-    contractMinHeight: getComputedStyle(document.querySelector("#contract")).minHeight,
+    executionMinHeight: getComputedStyle(document.querySelector("#execution")).minHeight,
     expectedStoryHeight: `${window.innerHeight - 72}px`,
   }));
 
   expect(scrollState.overflowY).not.toBe("hidden");
   expect(scrollState.snapped).not.toMatch(/mandatory/i);
-  expect(scrollState.contractMinHeight).toBe(scrollState.expectedStoryHeight);
+  expect(scrollState.executionMinHeight).toBe(scrollState.expectedStoryHeight);
 
   await page.locator("#docs").scrollIntoViewIfNeeded();
   await expect(page.locator("#docs")).toBeInViewport();
@@ -146,28 +136,28 @@ test("desktop story handoff overlaps adjacent screens during scroll", async ({ p
     window.scrollTo({ top: 700, behavior: "instant" });
   });
   const handoffHandle = await page.waitForFunction(() => {
-    const productNode = document.querySelector("#product > .container");
-    const contractNode = document.querySelector("#contract > .container");
-    const product = productNode.getBoundingClientRect();
-    const contract = contractNode.getBoundingClientRect();
+    const overviewNode = document.querySelector("#overview > .container");
+    const executionNode = document.querySelector("#execution > .container");
+    const overview = overviewNode.getBoundingClientRect();
+    const execution = executionNode.getBoundingClientRect();
     const handoff = {
-      productBottom: product.bottom,
-      contractTop: contract.top,
-      productOpacity: Number(getComputedStyle(productNode).opacity),
-      contractOpacity: Number(getComputedStyle(contractNode).opacity),
-      contractSectionBackground: getComputedStyle(document.querySelector("#contract")).backgroundImage,
-      contractBeforeDisplay: getComputedStyle(document.querySelector("#contract"), "::before").display,
+      overviewBottom: overview.bottom,
+      executionTop: execution.top,
+      overviewOpacity: Number(getComputedStyle(overviewNode).opacity),
+      executionOpacity: Number(getComputedStyle(executionNode).opacity),
+      executionSectionBackground: getComputedStyle(document.querySelector("#execution")).backgroundImage,
+      executionBeforeDisplay: getComputedStyle(document.querySelector("#execution"), "::before").display,
     };
-    return handoff.productOpacity < 0.25 && handoff.contractOpacity > 0.65 ? handoff : false;
+    return handoff.overviewOpacity < 0.25 && handoff.executionOpacity > 0.65 ? handoff : false;
   });
   const handoff = await handoffHandle.jsonValue();
 
-  expect(handoff.productBottom).toBeGreaterThan(220);
-  expect(handoff.contractTop).toBeLessThan(460);
-  expect(handoff.contractOpacity).toBeGreaterThan(0.65);
-  expect(handoff.productOpacity).toBeLessThan(0.25);
-  expect(handoff.contractSectionBackground).toBe("none");
-  expect(handoff.contractBeforeDisplay).toBe("none");
+  expect(handoff.overviewBottom).toBeGreaterThan(220);
+  expect(handoff.executionTop).toBeLessThan(460);
+  expect(handoff.executionOpacity).toBeGreaterThan(0.65);
+  expect(handoff.overviewOpacity).toBeLessThan(0.25);
+  expect(handoff.executionSectionBackground).toBe("none");
+  expect(handoff.executionBeforeDisplay).toBe("none");
 });
 
 test("desktop story screens keep primary content centered across viewport heights", async ({ page }) => {
@@ -184,7 +174,7 @@ test("desktop story screens keep primary content centered across viewport height
       document.documentElement.style.scrollBehavior = "auto";
     });
 
-    for (const sectionId of ["product", "contract", "cli"]) {
+    for (const sectionId of ["overview", "execution", "turn-ui"]) {
       await page.evaluate((targetId) => {
         const section = document.getElementById(targetId);
         window.scrollTo({ top: section.offsetTop - 72, behavior: "instant" });
@@ -229,12 +219,12 @@ test("primary story nav lands on the requested centered screen", async ({ page }
   const primaryNav = page.getByRole("navigation", { name: "Primary navigation" });
 
   for (const target of [
-    { label: "Contract", id: "contract" },
-    { label: "CLI", id: "cli" },
-    { label: "Trust", id: "trust" },
-    { label: "CLI", id: "cli" },
-    { label: "Contract", id: "contract" },
-    { label: "Product", id: "product" },
+    { label: "Execution", id: "execution" },
+    { label: "Turn UI", id: "turn-ui" },
+    { label: "Local Boundaries", id: "local-boundaries" },
+    { label: "Turn UI", id: "turn-ui" },
+    { label: "Execution", id: "execution" },
+    { label: "Overview", id: "overview" },
   ]) {
     await primaryNav.getByRole("link", { name: target.label }).click();
     await expect(page).toHaveURL(new RegExp(`#${target.id}$`));
@@ -279,6 +269,43 @@ test("hero startup terminal image loads", async ({ page }) => {
   expect(loaded).toBe(true);
 });
 
+test("Greek hero inscription stays bronze, contained, and secondary to the terminal proof", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+
+  const inscription = page.locator(".greek-hero-inscription");
+  const image = page.locator(".startup-terminal-image");
+
+  await expect(inscription).toHaveText("ΤΑΛΩΣ");
+  await expect(inscription).toBeVisible();
+  await expect(image).toBeVisible();
+
+  const visualOrder = await page.evaluate(() => {
+    const inscriptionNode = document.querySelector(".greek-hero-inscription");
+    const imageNode = document.querySelector(".startup-terminal-image");
+    const inscription = inscriptionNode.getBoundingClientRect();
+    const image = imageNode.getBoundingClientRect();
+    const styles = window.getComputedStyle(inscriptionNode);
+    return {
+      inscriptionTop: inscription.top,
+      inscriptionLeft: inscription.left,
+      inscriptionRight: inscription.right,
+      inscriptionHeight: inscription.height,
+      imageTop: image.top,
+      imageHeight: image.height,
+      color: styles.color,
+      fontFamily: styles.fontFamily,
+    };
+  });
+
+  expect(visualOrder.inscriptionTop).toBeLessThan(visualOrder.imageTop);
+  expect(visualOrder.inscriptionHeight).toBeLessThan(visualOrder.imageHeight);
+  expect(visualOrder.inscriptionLeft).toBeGreaterThanOrEqual(0);
+  expect(visualOrder.inscriptionRight).toBeLessThanOrEqual(1440);
+  expect(visualOrder.color).toBe("rgb(194, 138, 76)");
+  expect(visualOrder.fontFamily).toContain("GFS Neohellenic");
+});
+
 test("mobile hero content fits without masked clipping", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 900 });
   await page.goto("/");
@@ -292,7 +319,15 @@ test("mobile hero content fits without masked clipping", async ({ page }) => {
   expect(overflow.hiddenShell).toBe(false);
   expect(overflow.scrollOverflow).toBeLessThanOrEqual(1);
 
-  for (const selector of ["h1", ".hero-actions", ".status-row", ".machine-note", ".hero-visual"]) {
+  for (const selector of [
+    "h1",
+    ".hero-actions",
+    ".evidence-row",
+    ".setup-strip",
+    ".machine-note",
+    ".hero-visual",
+    ".greek-hero-inscription",
+  ]) {
     const box = await page.locator(selector).boundingBox();
     expect(box, `${selector} should render`).not.toBeNull();
     expect(box.x, `${selector} left edge`).toBeGreaterThanOrEqual(0);

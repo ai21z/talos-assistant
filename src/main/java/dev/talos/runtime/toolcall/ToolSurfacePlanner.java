@@ -2,6 +2,7 @@ package dev.talos.runtime.toolcall;
 
 import dev.talos.core.capability.CapabilityKind;
 import dev.talos.runtime.expectation.TaskExpectationResolver;
+import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskType;
@@ -76,6 +77,18 @@ public final class ToolSurfacePlanner {
                         descriptor -> intent.toolNames().contains(descriptor.name()),
                         intent.surfaceReason());
             }
+            if (fileEditTargets(contract)) {
+                return select(
+                        registry,
+                        ToolSurfacePlanner::isFileTargetApplyOperation,
+                        "file edit target apply surface");
+            }
+            if (exactStaticWebFileTargets(contract)) {
+                return select(
+                        registry,
+                        ToolSurfacePlanner::isFileTargetApplyOperation,
+                        "static web file target apply surface");
+            }
             return select(registry, ToolSurfacePlanner::isApplyOperation, "mutation apply surface");
         }
         if (explicitCommandVerificationSurface(contract, phase)) {
@@ -100,6 +113,14 @@ public final class ToolSurfacePlanner {
             var workspaceOperation = WorkspaceOperationIntent.detect(contract);
             if (workspaceOperation.isPresent() && !requiresFileWriteForExactExpectation(contract)) {
                 return workspaceOperation.get().toolNames();
+            }
+            if (fileEditTargets(contract)) {
+                return List.of("talos.edit_file", "talos.grep", "talos.list_dir",
+                        "talos.read_file", "talos.retrieve", "talos.write_file");
+            }
+            if (exactStaticWebFileTargets(contract)) {
+                return List.of("talos.edit_file", "talos.grep", "talos.list_dir",
+                        "talos.read_file", "talos.retrieve", "talos.write_file");
             }
             return List.of(
                     "talos.apply_workspace_batch",
@@ -135,6 +156,31 @@ public final class ToolSurfacePlanner {
         return contract != null && !TaskExpectationResolver.resolve(contract).isEmpty();
     }
 
+    private static boolean fileEditTargets(TaskContract contract) {
+        if (contract == null || contract.type() != TaskType.FILE_EDIT || contract.expectedTargets().isEmpty()) {
+            return false;
+        }
+        for (String target : contract.expectedTargets()) {
+            if (target == null || !FILE_EXTENSION.matcher(target).matches()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean exactStaticWebFileTargets(TaskContract contract) {
+        if (contract == null || contract.expectedTargets().isEmpty()) return false;
+        boolean hasHtml = false;
+        for (String target : contract.expectedTargets()) {
+            if (!StaticWebCapabilityProfile.isSmallWebFile(target)) return false;
+            String lower = target == null ? "" : target.toLowerCase(Locale.ROOT);
+            if (lower.endsWith(".html") || lower.endsWith(".htm")) {
+                hasHtml = true;
+            }
+        }
+        return hasHtml;
+    }
+
     private static Plan select(ToolRegistry registry, java.util.function.Predicate<ToolDescriptor> predicate,
                                String reason) {
         List<ToolSpec> specs = registry.descriptors().stream()
@@ -160,6 +206,12 @@ public final class ToolSurfacePlanner {
         return metadata.mutatesWorkspace()
                 && !metadata.destructive()
                 && metadata.riskLevel() == ToolRiskLevel.WRITE;
+    }
+
+    private static boolean isFileTargetApplyOperation(ToolDescriptor descriptor) {
+        if (isReadOnlyOperation(descriptor)) return true;
+        String name = descriptor == null ? "" : descriptor.name();
+        return "talos.write_file".equals(name) || "talos.edit_file".equals(name);
     }
 
     private static boolean isVerificationOperation(ToolDescriptor descriptor) {
