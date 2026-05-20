@@ -8,6 +8,7 @@ import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
+import org.apache.poi.hssf.usermodel.HSSFWorkbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.jupiter.api.Test;
@@ -201,6 +202,82 @@ class SynchronizedApprovalAuditRunnerTest {
         }
         assertFalse(allArtifacts.contains("Eleni Nikolaou"), allArtifacts);
         assertTrue(allArtifacts.contains("private document answer redacted"), allArtifacts);
+        assertTrue(ArtifactCanaryScanner.scanRuntimeArtifacts(List.of(bundle.root()), List.of()).isEmpty());
+    }
+
+    @Test
+    void private_mode_extracted_docx_per_turn_approval_allows_handoff_and_records_prompt(
+            @TempDir Path artifacts) throws Exception {
+        writeDocx(workspace.resolve("medical-notes.docx"), "Patient name: Eleni Nikolaou");
+
+        SynchronizedApprovalAuditRunner.Request request = new SynchronizedApprovalAuditRunner.Request(
+                "private extracted docx per turn handoff approved",
+                workspace,
+                privateDocumentConfig(false),
+                "Read medical-notes.docx and tell me the patient name.",
+                List.of(
+                        "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"medical-notes.docx\"}}",
+                        "The extracted patient name is [redacted-private-document-canary]."),
+                List.of(ScriptedApprovalGate.Step.approve(
+                        "private document model handoff",
+                        "medical-notes.docx")));
+        SynchronizedApprovalAuditRunner.Result result = SynchronizedApprovalAuditRunner.runScripted(request);
+
+        assertEquals(1, result.approvals().size(), result.approvals().toString());
+        assertEquals(ApprovalResponse.APPROVED, result.approvals().getFirst().response());
+        assertTrue(result.approvals().getFirst().prompt().contains("Allow? [y=yes, N=no]"),
+                result.approvals().getFirst().prompt());
+        assertTrue(result.traceText().contains("PRIVATE_DOCUMENT_MODEL_HANDOFF_APPROVAL_GRANTED"),
+                result.traceText());
+        assertTrue(result.trace().contextLedgerSummary().byReason()
+                        .containsKey("PRIVATE_DOCUMENT_PER_TURN_SEND_TO_MODEL_APPROVED"),
+                result.trace().contextLedgerSummary().toString());
+        assertFalse(result.modelTranscript().contains("Eleni Nikolaou"), result.modelTranscript());
+        assertTrue(result.modelTranscript().contains("[redacted-private-document-canary]"), result.modelTranscript());
+
+        SynchronizedApprovalAuditRunner.ArtifactBundle bundle =
+                SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifacts, request, result);
+        assertTrue(ArtifactCanaryScanner.scanRuntimeArtifacts(List.of(bundle.root()), List.of()).isEmpty());
+    }
+
+    @Test
+    void private_mode_large_private_document_corpus_is_withheld_with_trace_evidence(
+            @TempDir Path artifacts) throws Exception {
+        writeLargePrivateDocumentCorpus(workspace);
+
+        SynchronizedApprovalAuditRunner.Request request = new SynchronizedApprovalAuditRunner.Request(
+                "private large document corpus withheld",
+                workspace,
+                privateDocumentConfig(false),
+                "Read the private document corpus and summarize only whether the contents were withheld.",
+                List.of(
+                        "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"health-summary.pdf\"}}",
+                        "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"bank-statement.docx\"}}",
+                        "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"tax-workbook.xlsx\"}}",
+                        "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"family-ledger.xls\"}}",
+                        "The private document corpus was read locally, but extracted text was withheld from model context."),
+                List.of(
+                        ScriptedApprovalGate.Step.deny("private document model handoff", "health-summary.pdf"),
+                        ScriptedApprovalGate.Step.deny("private document model handoff", "bank-statement.docx"),
+                        ScriptedApprovalGate.Step.deny("private document model handoff", "tax-workbook.xlsx"),
+                        ScriptedApprovalGate.Step.deny("private document model handoff", "family-ledger.xls")));
+
+        SynchronizedApprovalAuditRunner.Result result = SynchronizedApprovalAuditRunner.runScripted(request);
+
+        assertEquals(4, result.approvals().size(), result.approvals().toString());
+        assertFalse(result.modelTranscript().contains("Eleni Nikolaou"), result.modelTranscript());
+        assertFalse(result.modelTranscript().contains("fictional-condition-alpha"), result.modelTranscript());
+        assertFalse(result.modelTranscript().contains("Aster Family Reserve"), result.modelTranscript());
+        assertFalse(result.modelTranscript().contains("1837.42 EUR"), result.modelTranscript());
+        assertFalse(result.modelTranscript().contains("EL-TAX-483920"), result.modelTranscript());
+        assertFalse(result.modelTranscript().contains("Nikos Fictional"), result.modelTranscript());
+        assertTrue(result.modelTranscript().contains("Private document content was read locally but withheld"),
+                result.modelTranscript());
+        assertTrue(result.traceText().contains("PRIVATE_DOCUMENT_MODEL_HANDOFF_APPROVAL_DENIED"),
+                result.traceText());
+
+        SynchronizedApprovalAuditRunner.ArtifactBundle bundle =
+                SynchronizedApprovalAuditRunner.writeAuditArtifacts(artifacts, request, result);
         assertTrue(ArtifactCanaryScanner.scanRuntimeArtifacts(List.of(bundle.root()), List.of()).isEmpty());
     }
 
@@ -614,7 +691,7 @@ class SynchronizedApprovalAuditRunnerTest {
         SynchronizedApprovalAuditMain.RunResult run =
                 SynchronizedApprovalAuditMain.run(artifacts, workspaces);
 
-        assertEquals(29, run.bundles().size());
+        assertEquals(31, run.bundles().size());
         assertTrue(Files.exists(run.summary()), run.summary().toString());
         assertTrue(Files.readString(run.summary()).contains("Synchronized Approval Scripted Audit"));
         assertTrue(Files.readString(run.summary()).contains("Mode: SCRIPTED"));
@@ -624,11 +701,13 @@ class SynchronizedApprovalAuditRunnerTest {
         assertTrue(Files.readString(run.summary()).contains("private-mode-approved-protected-read"));
         assertTrue(Files.readString(run.summary()).contains("private-mode-protected-read-send-to-model-opt-in"));
         assertTrue(Files.readString(run.summary()).contains("private-mode-extracted-docx-local-display-only"));
+        assertTrue(Files.readString(run.summary()).contains("private-mode-extracted-docx-per-turn-send-to-model-approved"));
         assertTrue(Files.readString(run.summary()).contains("private-mode-extracted-docx-send-to-model-opt-in"));
         assertTrue(Files.readString(run.summary()).contains("private-mode-extracted-pdf-local-display-only"));
         assertTrue(Files.readString(run.summary()).contains("private-mode-extracted-pdf-send-to-model-opt-in"));
         assertTrue(Files.readString(run.summary()).contains("private-mode-extracted-xlsx-local-display-only"));
         assertTrue(Files.readString(run.summary()).contains("private-mode-extracted-xlsx-send-to-model-opt-in"));
+        assertTrue(Files.readString(run.summary()).contains("private-mode-large-document-corpus-withheld"));
         assertTrue(Files.readString(run.summary()).contains("proposal-only-does-not-mutate"));
         assertTrue(Files.readString(run.summary()).contains("mutation-approval-denied"));
         assertTrue(Files.readString(run.summary()).contains("mutation-denial-bypass-attempt-blocked"));
@@ -962,6 +1041,27 @@ class SynchronizedApprovalAuditRunnerTest {
                 workbook.write(out);
             }
         }
+    }
+
+    private static void writeXls(Path path, String header, String value) throws IOException {
+        try (HSSFWorkbook workbook = new HSSFWorkbook()) {
+            var sheet = workbook.createSheet("Private");
+            var row = sheet.createRow(0);
+            row.createCell(0).setCellValue(header);
+            row.createCell(1).setCellValue(value);
+            try (var out = Files.newOutputStream(path)) {
+                workbook.write(out);
+            }
+        }
+    }
+
+    private static void writeLargePrivateDocumentCorpus(Path workspace) throws IOException {
+        writePdf(workspace.resolve("health-summary.pdf"),
+                "Patient name: Eleni Nikolaou; Diagnosis: fictional-condition-alpha");
+        writeDocx(workspace.resolve("bank-statement.docx"),
+                "Account alias: Aster Family Reserve; Balance: 1837.42 EUR");
+        writeXlsx(workspace.resolve("tax-workbook.xlsx"), "Tax ID", "EL-TAX-483920");
+        writeXls(workspace.resolve("family-ledger.xls"), "Child name", "Nikos Fictional");
     }
 
     @FunctionalInterface

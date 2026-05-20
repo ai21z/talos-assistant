@@ -234,6 +234,64 @@ Current remaining blockers:
 - Run a larger private-document fixture corpus beyond the small generated audit fixtures.
 - Keep T295 open as the private-document release gate until that live/corpus evidence is attached.
 
+## 2026-05-20 deterministic evidence expansion
+
+Added deterministic synchronized-approval evidence for the two remaining T295 proof gaps.
+
+New audit scenarios:
+
+- `private-mode-extracted-docx-per-turn-send-to-model-approved`
+  - private mode remains enabled
+  - `privacy.document_extraction.allow_send_to_model=false`
+  - DOCX extraction triggers the per-turn `private document model handoff` approval prompt
+  - scripted approval response is `APPROVED`
+  - approval transcript records `Allow? [y=yes, N=no]`
+  - trace records `PRIVATE_DOCUMENT_MODEL_HANDOFF_APPROVAL_GRANTED`
+  - context ledger records `PRIVATE_DOCUMENT_PER_TURN_SEND_TO_MODEL_APPROVED`
+  - artifact bundle scan passes without the raw private-document fact
+
+- `private-mode-large-document-corpus-withheld`
+  - private corpus spans PDF, DOCX, XLSX, and XLS
+  - fixture facts include ordinary private-document values across health, bank, tax, and family-style documents
+  - all four extracted-document model-handoff prompts are denied
+  - model transcript receives withheld notices instead of raw private facts
+  - trace records private-document handoff denials
+  - artifact bundle scan passes without raw private-document fixture facts
+
+Evidence generated:
+
+```text
+.\gradlew.bat e2eTest --tests "dev.talos.harness.SynchronizedApprovalAuditRunnerTest" --tests "dev.talos.harness.ScriptedApprovalGateTest" --no-daemon
+.\gradlew.bat runSynchronizedApprovalAudit "-PapprovalAuditArtifactsRoot=build/synchronized-approval-audit/artifacts" "-PapprovalAuditWorkspacesRoot=build/synchronized-approval-audit/workspaces" --no-daemon
+.\gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=build/synchronized-approval-audit/artifacts" --no-daemon
+```
+
+Generated packet:
+
+```text
+build/synchronized-approval-audit/artifacts/SYNCHRONIZED-APPROVAL-AUDIT.md
+build/synchronized-approval-audit/artifacts/private-mode-extracted-docx-per-turn-send-to-model-approved/
+build/synchronized-approval-audit/artifacts/private-mode-large-document-corpus-withheld/
+```
+
+Direct raw-value sweep over `build/synchronized-approval-audit/artifacts` found no raw matches for the controlled
+private-document fixture classes:
+
+```text
+private person name
+private diagnosis note
+private bank account alias
+private bank amount
+private tax identifier
+private family note
+```
+
+This strengthens T295 materially, but it does not fully close the release gate. Remaining release evidence:
+
+- true terminal or live model transcript evidence for per-turn private-document approval/denial
+- a broader maintained fixture corpus or corpus generator that is not only embedded in the synchronized approval harness
+- maintainer review of generated prompt-debug/provider-body/trace packets for the next named candidate
+
 ## Rollback / migration notes
 
 If any artifact leak appears, keep the relevant extractor disabled and revert that format to honest unsupported behavior.
