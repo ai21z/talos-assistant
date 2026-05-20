@@ -1,6 +1,6 @@
 # T319 - Blended Manual Audit Scenario Bank
 
-Status: first scenario bank added; open for automation and live-model expansion
+Status: still-open - first scenario bank exists; automation and live-model expansion remain open
 Severity: high
 Release gate: yes for broad manual beta confidence
 Branch: v0.9.0-beta-dev

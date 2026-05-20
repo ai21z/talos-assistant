@@ -1,6 +1,6 @@
 # T320 - PDF/Office Extraction And Generation Claims Must Stay Separate
 
-Status: open
+Status: still-open - document extraction versus binary generation claim split remains release-copy work
 Severity: high
 Release gate: yes for document capability claims
 Branch: v0.9.0-beta-dev
@@ -39,4 +39,3 @@ Talos must keep these claims separate:
 - T293 local Excel extraction
 - T295 private document provenance boundary
 - T305 private document provenance ToolResult boundary
-

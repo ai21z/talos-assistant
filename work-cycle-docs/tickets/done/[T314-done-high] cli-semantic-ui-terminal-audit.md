@@ -1,6 +1,6 @@
 # T314 - CLI Semantic UI Terminal Audit
 
-Status: fixed in working tree / manual PTY evidence validated; pending candidate packet
+Status: done - CLI semantic UI terminal evidence validated; candidate packet preservation remains release-process work
 Severity: high
 Release gate: yes for finalizing the new CLI UI layer
 Branch: v0.9.0-beta-dev

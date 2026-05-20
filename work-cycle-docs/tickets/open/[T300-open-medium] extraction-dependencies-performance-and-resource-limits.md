@@ -1,6 +1,6 @@
 # T300 - Extraction Dependencies, Performance, and Resource Limits
 
-Status: open
+Status: still-open - beta-core limits exist; realistic Windows performance/resource benchmarks remain open
 Severity: medium / high if extraction is enabled by default
 Release gate: yes for beta-core PDF/DOCX/XLS/XLSX extraction; image/OCR is v1/open
 Branch: v0.9.0-beta-dev
@@ -108,7 +108,7 @@ Keep extraction disabled by default until performance tests are stable on Window
 
 ## 2026-05-16 Implementation update
 
-Status: baseline dependencies, limits, and OCR command-resolution preflight implemented; beta-core performance hardening remains open. Image/OCR is frozen for v1.
+Evidence note: baseline dependencies, limits, and OCR command-resolution preflight implemented; beta-core performance hardening remains open. Image/OCR is frozen for v1.
 
 Dependency evidence:
 

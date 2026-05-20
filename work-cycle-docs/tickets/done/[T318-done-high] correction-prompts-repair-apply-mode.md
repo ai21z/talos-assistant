@@ -1,6 +1,6 @@
 # T318 - Correction Prompts Should Enter Apply Mode After Incomplete User-Observed Mutation
 
-Status: fixed in working tree for narrow styling complaints; broader repair prompts remain open
+Status: done - narrow styling correction repair mode fixed; broader repair prompt expansion requires new failing examples
 Severity: high
 Release gate: yes for iterative workspace editing
 Branch: v0.9.0-beta-dev
@@ -43,4 +43,3 @@ Result: passed.
 ## Remaining Work
 
 Broaden correction handling carefully only with new failing examples. Do not turn ordinary complaints, questions, or status checks into mutation-capable turns unless previous mutation context and correction language are both present.
-

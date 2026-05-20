@@ -2,7 +2,7 @@
 
 Severity: High
 
-Status: Open
+Status: done - superseded and closed by T328 typed source-evidence versus output-target evidence
 
 Source: Five scenario big audit, 2026-05-19
 
@@ -54,4 +54,3 @@ multiOutputCodeGenerationAllowsImplementationAndTestFiles
 ## Fix Direction
 
 Review `MutationIntent` and `TaskContractResolver` source-to-target parsing. Extend it to represent source evidence and output target sets separately wherever possible.
-

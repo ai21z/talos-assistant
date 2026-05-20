@@ -1,6 +1,6 @@
 # T271 - Prompt-Debug, Trace, Provider-Body, Session, and Logs Redaction Release Gate
 
-Status: open
+Status: done - prompt-debug/trace/session redaction gate closed for current private-document and canary surfaces; broad log audit remains T276/T283
 Severity: high
 Release gate: yes
 Branch: v0.9.0-beta-dev

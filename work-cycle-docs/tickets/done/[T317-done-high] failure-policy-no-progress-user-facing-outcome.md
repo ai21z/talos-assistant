@@ -1,6 +1,6 @@
 # T317 - Failure Policy No-Progress Outcome Is Too Opaque
 
-Status: fixed in working tree for no-progress runtime context; broader outcome polish remains open
+Status: done - no-progress runtime context surfaced; future wording polish requires fresh evidence
 Severity: high
 Release gate: yes for live audit clarity
 Branch: v0.9.0-beta-dev

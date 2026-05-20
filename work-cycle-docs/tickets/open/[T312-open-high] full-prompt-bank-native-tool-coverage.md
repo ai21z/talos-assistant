@@ -1,6 +1,6 @@
 # [T312-open-high] Full Prompt-Bank Native Tool Coverage
 
-Status: fixed in working tree / pending candidate gate
+Status: implemented-awaiting-evidence - native-tool prompt-bank coverage added; current stabilized head still needs full prompt-bank/candidate evidence
 Severity: high
 Release gate: private-document beta / full E2E release evidence
 Branch: v0.9.0-beta-dev

@@ -1,6 +1,6 @@
 # T315 - Follow-Up Site Creation Classified Read-Only
 
-Status: fixed in working tree; pending wider regression evidence
+Status: done - natural follow-up site creation classification fixed and covered
 Severity: high
 Release gate: yes for developer/simple-user beta
 Branch: v0.9.0-beta-dev
@@ -45,4 +45,3 @@ Result: passed.
 - `Great! now can you create that site?` is mutation-capable.
 - Pure read-only follow-ups remain read-only.
 - No advisory or instructional mutation questions become apply-capable.
-

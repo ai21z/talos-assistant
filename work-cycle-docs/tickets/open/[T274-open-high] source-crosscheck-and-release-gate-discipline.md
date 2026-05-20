@@ -1,6 +1,6 @@
 # T274 - Source-Crosscheck and Release-Gate Discipline
 
-Status: open
+Status: still-open - release-gate source-crosscheck discipline remains process work
 Severity: high
 Release gate: yes for security/privacy/harness changes
 Branch: v0.9.0-beta-dev

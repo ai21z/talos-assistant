@@ -1,6 +1,6 @@
 # T311 - Append-Line Full-Write Preapproval Preservation
 
-Status: fixed in working tree / pending full gate
+Status: done - append-line full-write preapproval preservation guard implemented and covered by synchronized/live evidence
 Severity: high
 Release gate: yes for developer/code beta
 Branch: v0.9.0-beta-dev

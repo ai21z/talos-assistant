@@ -1,6 +1,6 @@
 # T281 - Private Mode User-Facing UX and Sensitive Folder Warning
 
-Status: open
+Status: implemented-awaiting-evidence - private-mode UX exists; broader sensitive-folder user-facing proof remains open
 Severity: high / P0 for private-document beta
 Release gate: yes for private-document beta
 Branch: v0.9.0-beta-dev

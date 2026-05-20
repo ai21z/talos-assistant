@@ -1,6 +1,6 @@
 # T307 - Mutation Semantic Verification Beyond Exact Edits
 
-Status: open
+Status: still-open - next implementation blocker for semantic mutation verification beyond exact edits
 Severity: high
 Release gate: yes for private-document beta
 Branch: v0.9.0-beta-dev

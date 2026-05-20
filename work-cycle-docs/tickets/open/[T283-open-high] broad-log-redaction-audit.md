@@ -1,6 +1,6 @@
 # T283 - Broad Log Redaction Audit
 
-Status: open
+Status: still-open - broad runtime log redaction audit remains required
 Severity: high / P0 for sensitive beta
 Release gate: yes for private-document beta
 Branch: v0.9.0-beta-dev

@@ -1,6 +1,6 @@
 # T289 - Private Mode Scripted E2E Scenarios
 
-Status: open - initial scripted e2e coverage added, live audit still required
+Status: done - private-mode scripted/live approval evidence absorbed by T295/T306; future private-folder product scope remains outside this ticket
 Severity: high
 Release gate: yes for private-document beta
 Branch: v0.9.0-beta-dev

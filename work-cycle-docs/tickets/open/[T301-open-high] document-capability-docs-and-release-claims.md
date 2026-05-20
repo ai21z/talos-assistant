@@ -1,6 +1,6 @@
 # T301 - Document Capability Docs and Release Claims
 
-Status: open
+Status: still-open - capability docs exist but release-claim drift prevention remains open
 Severity: high
 Release gate: yes
 Branch: v0.9.0-beta-dev
@@ -89,7 +89,7 @@ If an extractor is disabled after a regression, docs must immediately return tha
 
 ## 2026-05-16 Implementation update
 
-Status: README and current release reports updated; keep open for drift prevention.
+Evidence note: README and current release reports updated; keep open for drift prevention.
 
 Current allowed wording:
 

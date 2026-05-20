@@ -1,6 +1,6 @@
 # T288 - Runtime Artifact Scan Release Task
 
-Status: open - implemented and used on focused capability audit roots
+Status: done - runtime artifact scan release task implemented and used on focused/live evidence roots
 Severity: high
 Release gate: yes for private-document beta
 Branch: v0.9.0-beta-dev

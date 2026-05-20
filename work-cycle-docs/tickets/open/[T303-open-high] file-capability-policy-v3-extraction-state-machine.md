@@ -1,6 +1,6 @@
 # T303 - File Capability Policy V3 Extraction State Machine
 
-Status: open
+Status: implemented-awaiting-evidence - core capability state machine exists; dynamic encrypted/corrupt/limit outcome expansion remains open
 Severity: high
 Release gate: yes for document beta
 Branch: v0.9.0-beta-dev
@@ -122,7 +122,7 @@ Keep `UnsupportedDocumentFormats` as a compatibility facade until all callers mo
 
 ## 2026-05-16 Implementation update
 
-Status: core state machine implemented for the current beta extraction formats; keep open for dynamic outcome expansion.
+Evidence note: core state machine implemented for the current beta extraction formats; keep open for dynamic outcome expansion.
 
 Implemented states include:
 

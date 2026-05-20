@@ -1,6 +1,6 @@
 # T316 - Static Site Artifact Completeness Verifier
 
-Status: fixed in working tree for styled HTML false-success blocking; broader artifact generation still open
+Status: done - styled HTML false-success blocking implemented; broader exact three-file generation/convergence remains T322
 Severity: high
 Release gate: yes for static website beta claims
 Branch: v0.9.0-beta-dev

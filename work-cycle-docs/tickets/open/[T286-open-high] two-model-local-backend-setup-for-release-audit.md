@@ -1,6 +1,6 @@
 # T286 - Two-Model Local Backend Setup For Release Audit
 
-Status: open
+Status: implemented-awaiting-evidence - backend setup/smoke works; full prompt bank still needs execution
 Severity: high / release gate
 Release gate: yes - private-document beta and broad beta evidence
 Branch: v0.9.0-beta-dev

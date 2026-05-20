@@ -2,7 +2,7 @@
 
 Severity: High
 
-Status: Open
+Status: still-open - office document multi-source report verification remains a current blocker
 
 Source: Five scenario big audit, 2026-05-19
 
@@ -65,4 +65,3 @@ Implementation order:
 2. Make source-derived verification document-aware through `DocumentExtractionService` or the same capability parser path as `read_file`.
 3. Change source-derived verification from aggregate overlap to per-source coverage.
 4. Add private-mode artifact scan tests for document-source reports.
-

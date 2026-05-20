@@ -1,6 +1,6 @@
 # T287 - Sensitive Workspace Detector Tokenization
 
-Status: open - implemented in this pass, pending full gate
+Status: done - sensitive workspace tokenization implemented and covered
 Severity: high
 Release gate: yes for private-document beta
 Branch: v0.9.0-beta-dev

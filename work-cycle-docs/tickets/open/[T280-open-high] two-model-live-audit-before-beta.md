@@ -1,6 +1,6 @@
 # T280 - Two-Model Live Audit Before Beta
 
-Status: open
+Status: still-open - full two-model live prompt-bank audit remains unrun for the current stabilized head
 Severity: high / release gate
 Release gate: yes
 Branch: v0.9.0-beta-dev

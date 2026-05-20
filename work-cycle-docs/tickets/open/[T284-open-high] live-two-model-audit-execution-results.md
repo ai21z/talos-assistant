@@ -1,6 +1,6 @@
 # T284 - Live Two-Model Audit Execution Results
 
-Status: open
+Status: still-open - full two-model prompt-bank execution results are still missing for the current stabilized head
 Severity: high / release gate
 Release gate: yes
 Branch: v0.9.0-beta-dev

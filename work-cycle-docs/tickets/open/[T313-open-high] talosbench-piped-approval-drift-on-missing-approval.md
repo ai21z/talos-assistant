@@ -1,6 +1,6 @@
 # T313 - TalosBench Piped Approval Drift On Missing Approval Prompt
 
-Status: open - default piped approval execution now fails closed
+Status: implemented-awaiting-evidence - default piped approval execution fails closed; synchronized full prompt-bank path remains open
 Severity: high
 Release gate: yes for full live-audit evidence
 Branch: v0.9.0-beta-dev

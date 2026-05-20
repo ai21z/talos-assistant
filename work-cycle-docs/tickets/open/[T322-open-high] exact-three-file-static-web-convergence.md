@@ -2,7 +2,7 @@
 
 Severity: High
 
-Status: Open
+Status: still-open - exact three-file static web convergence remains a current blocker
 
 Source: Five scenario big audit, 2026-05-19
 
@@ -79,4 +79,3 @@ Separate verifier profiles more explicitly:
 - generic static page
 
 Repair target discovery must preserve explicit user target names over default plural conventions.
-

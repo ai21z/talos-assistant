@@ -1,6 +1,6 @@
 # T270 - RAG Index Protected and Unsupported Format Safety
 
-Status: open
+Status: done - protected/unsupported RAG safety closed; extraction-specific RAG provenance remains tracked by T296
 Severity: high
 Release gate: yes
 Branch: v0.9.0-beta-dev
