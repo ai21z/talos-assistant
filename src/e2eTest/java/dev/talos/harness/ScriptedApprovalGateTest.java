@@ -74,4 +74,27 @@ class ScriptedApprovalGateTest {
         gate.assertExhausted();
         assertEquals(1, gate.events().size());
     }
+
+    @Test
+    void repeatableOptionalDenyStepCanHandleLiveModelRepeatedPrivateDocumentPrompts() {
+        ScriptedApprovalGate gate = new ScriptedApprovalGate(List.of(
+                ScriptedApprovalGate.Step.repeatableOptionalDeny("private document model handoff", ""),
+                ScriptedApprovalGate.Step.approve("talos.write_file", "notes.md")));
+
+        ApprovalResponse first = gate.approveOnce(
+                "private document model handoff: talos.read_file",
+                "target: health-summary.pdf");
+        ApprovalResponse second = gate.approveOnce(
+                "private document model handoff: talos.read_file",
+                "target: bank-statement.docx");
+        ApprovalResponse write = gate.approveFull(
+                "Permission policy requires approval before running talos.write_file.",
+                "target: notes.md");
+
+        assertEquals(ApprovalResponse.DENIED, first);
+        assertEquals(ApprovalResponse.DENIED, second);
+        assertEquals(ApprovalResponse.APPROVED, write);
+        gate.assertExhausted();
+        assertEquals(3, gate.events().size());
+    }
 }

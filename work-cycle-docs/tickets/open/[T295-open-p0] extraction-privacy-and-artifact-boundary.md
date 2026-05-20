@@ -292,6 +292,84 @@ This strengthens T295 materially, but it does not fully close the release gate. 
 - a broader maintained fixture corpus or corpus generator that is not only embedded in the synchronized approval harness
 - maintainer review of generated prompt-debug/provider-body/trace packets for the next named candidate
 
+## 2026-05-20 live-model and manual-PTY evidence update
+
+The T295 evidence boundary is now sharper:
+
+- live-model synchronized evidence exists for private-document denial, per-turn approval, and larger corpus withholding
+- true terminal/JLine evidence is prepared and validator-gated, but not completed
+- a separate live mutation blocker prevents claiming the full synchronized live bank passes
+
+Manual PTY/JLine packet update:
+
+```text
+.\gradlew.bat e2eTest --tests "dev.talos.harness.SynchronizedCliPtyManualAudit*" --no-daemon
+.\gradlew.bat prepareSynchronizedApprovalPtyManualAudit "-PptyManualArtifactsRoot=build/synchronized-pty-manual-t295/artifacts" "-PptyManualWorkspace=build/synchronized-pty-manual-t295/workspace" --no-daemon
+.\gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=build/synchronized-pty-manual-t295/artifacts,build/synchronized-pty-manual-t295/workspace" "-PartifactScanAllowlist=build/synchronized-pty-manual-t295/workspace/.env" --no-daemon
+```
+
+Generated packet:
+
+```text
+build/synchronized-pty-manual-t295/artifacts/PTY-MANUAL-AUDIT-RUNBOOK.md
+build/synchronized-pty-manual-t295/artifacts/PTY-MANUAL-AUDIT-RESULT-TEMPLATE.json
+build/synchronized-pty-manual-t295/artifacts/TRANSCRIPT-TEMPLATE.md
+build/synchronized-pty-manual-t295/workspace/medical-notes.docx
+```
+
+The manual packet now requires:
+
+- real interactive terminal execution
+- protected `.env` denial evidence
+- `/privacy private on`
+- private DOCX denial prompt visible before `n`
+- private DOCX denial withheld evidence
+- private DOCX per-turn approval prompt visible before `y`
+- `/last trace` evidence that per-turn private-document handoff was approved
+- artifact scan evidence with no raw protected/private-document canary in generated artifacts
+
+The validator still fails closed until a completed human/terminal transcript exists:
+
+```text
+.\gradlew.bat validateSynchronizedApprovalPtyManualAudit "-PptyManualArtifactsRoot=build/synchronized-pty-manual-t295/artifacts" "-PptyManualWorkspace=build/synchronized-pty-manual-t295/workspace" --no-daemon
+```
+
+Expected current result:
+
+```text
+Status: FAIL
+PTY-MANUAL-AUDIT-RESULT.json is required; prepared packets are not completed PTY/JLine evidence.
+```
+
+Live GPT-OSS synchronized evidence:
+
+```text
+.\gradlew.bat runSynchronizedApprovalAudit "-PapprovalAuditMode=live" "-PapprovalAuditConfig=$env:USERPROFILE\.talos\config.yaml" "-PapprovalAuditArtifactsRoot=local/manual-testing/synchronized-approval-live-gptoss-t295-20260520-r2" "-PapprovalAuditWorkspacesRoot=local/manual-workspaces/synchronized-approval-live-gptoss-t295-20260520-r2" --no-daemon
+```
+
+The full live run failed later at `mutation-append-line-verified`, tracked separately in T330. The T295-relevant scenarios completed before that failure:
+
+```text
+local/manual-testing/synchronized-approval-live-gptoss-t295-20260520-r2/private-mode-extracted-docx-local-display-only/audit-transcript.json
+local/manual-testing/synchronized-approval-live-gptoss-t295-20260520-r2/private-mode-extracted-docx-per-turn-send-to-model-approved/audit-transcript.json
+local/manual-testing/synchronized-approval-live-gptoss-t295-20260520-r2/private-mode-large-document-corpus-withheld/audit-transcript.json
+```
+
+Observed live-model T295 facts:
+
+- DOCX local-display/private-mode scenario recorded one `DENIED` `private document model handoff` approval and trace event `PRIVATE_DOCUMENT_MODEL_HANDOFF_APPROVAL_DENIED`.
+- DOCX per-turn approval scenario recorded one `APPROVED` `private document model handoff` approval and trace event `PRIVATE_DOCUMENT_MODEL_HANDOFF_APPROVAL_GRANTED`.
+- Larger private corpus scenario recorded six denied private-document handoff prompts, proving the live model retried but the runtime kept the approval boundary intact.
+- Final-answer artifacts for the private-document scenarios were redacted from history.
+
+Targeted T295 live artifact scan passed:
+
+```text
+.\gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/synchronized-approval-live-gptoss-t295-20260520-r2/private-mode-extracted-docx-local-display-only,local/manual-testing/synchronized-approval-live-gptoss-t295-20260520-r2/private-mode-extracted-docx-per-turn-send-to-model-approved,local/manual-testing/synchronized-approval-live-gptoss-t295-20260520-r2/private-mode-large-document-corpus-withheld" --no-daemon
+```
+
+T295 remains open because the true terminal/JLine transcript is not completed yet. The evidence is materially stronger, but a prepared manual packet is not the same thing as a real terminal/live-model transcript.
+
 ## Rollback / migration notes
 
 If any artifact leak appears, keep the relevant extractor disabled and revert that format to honest unsupported behavior.

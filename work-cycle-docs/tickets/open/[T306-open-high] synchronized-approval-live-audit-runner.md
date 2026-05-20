@@ -69,6 +69,8 @@ The current live-audit script intentionally avoids approval-sensitive prompts be
   - `tools/manual-eval/run-talosbench.ps1` added `-AllowPipedApprovalInputs` as an explicit exploratory opt-in.
   - Approval-sensitive cases with configured approval input now return `SYNC_REQUIRED` when `-IncludeManualRequired` is present without `-AllowPipedApprovalInputs`.
   - Fresh evidence: `pwsh .\tools\manual-eval\run-talosbench.ps1 -SelfTest` passed, `pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly` passed, and the focused `full-audit-mkdir-tool-probe` run returned `SYNC_REQUIRED` with exit code `1`.
+- 2026-05-20 T295 rerun expanded the manual PTY/JLine packet to cover private-document per-turn denial and approval. The packet remains `MANUAL_REQUIRED` until a completed true-terminal transcript is supplied and validated.
+- 2026-05-20 GPT-OSS live synchronized rerun completed the T295 private-document scenarios before failing later at `mutation-append-line-verified`. The live-runner now supports repeatable optional denial steps for private-document handoff prompts so live-model retries do not falsely fail the large-corpus denial scenario. The later append-line live failure is tracked in T330.
 
 ## Evidence from tests/audits
 
