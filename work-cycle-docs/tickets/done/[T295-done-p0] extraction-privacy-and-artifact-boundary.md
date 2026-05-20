@@ -1,6 +1,6 @@
 # T295 - Extraction Privacy and Artifact Boundary
 
-Status: open - private-document release gate; per-turn handoff approval implemented, larger corpus/live evidence still pending
+Status: done - private-document release gate evidence packet completed with deterministic, live-model, and true ConPTY/JLine transcript coverage
 Severity: P0 for private-document/personal-paperwork release claim
 Release gate: yes
 Branch: v0.9.0-beta-dev
@@ -410,13 +410,80 @@ BUILD SUCCESSFUL
 Artifact canary scan passed.
 ```
 
-This closes the synchronized live-bank evidence gap for T295. T295 remains open only for the true terminal/JLine transcript gate and maintainer review of the candidate evidence packet. The current Codex/shell execution path is redirected process execution, not a real interactive terminal, so it must not be described as completed PTY/JLine coverage.
+This closed the synchronized live-bank evidence gap for T295. At that point, T295 remained open only for the true terminal/JLine transcript gate and maintainer review of the candidate evidence packet. The Codex/shell execution path used for that earlier evidence was redirected process execution, not a real interactive terminal, so it was not described as completed PTY/JLine coverage.
+
+## 2026-05-20 true ConPTY/JLine transcript packet
+
+The remaining terminal/JLine gate was completed with a Windows ConPTY run driven by `pywinpty`, not redirected process stdin/stdout. This is automated true-PTY evidence, not a human-typed Windows Terminal transcript, so reports must describe it precisely.
+
+Evidence packet:
+
+```text
+local/manual-testing/t295-pty-conpty-20260520-r1/artifacts/TRANSCRIPT.md
+local/manual-testing/t295-pty-conpty-20260520-r1/artifacts/CONPTY-RAW-TRANSCRIPT.txt
+local/manual-testing/t295-pty-conpty-20260520-r1/artifacts/PTY-MANUAL-AUDIT-RESULT.json
+local/manual-testing/t295-pty-conpty-20260520-r1/artifacts/PTY-MANUAL-AUDIT-VALIDATION.md
+local/manual-testing/t295-pty-conpty-20260520-r1/artifacts/CONPTY-AUDIT-SUMMARY.md
+local/manual-testing/t295-pty-conpty-20260520-r1/artifacts/traces/
+local/manual-testing/t295-pty-conpty-20260520-r1/artifacts/prompt-debug/
+```
+
+Terminal path:
+
+```text
+Windows ConPTY via pywinpty 3.0.3
+build/install/talos/bin/talos.bat run --no-logo --root local/manual-workspaces/t295-pty-conpty-20260520-r1/workspace
+```
+
+The transcript packet covers:
+
+- `/session clear`
+- `/debug prompt on`
+- `/show README.md`
+- protected `.env` denial
+- `/last trace` for the denied protected read
+- `/privacy private on`
+- private DOCX handoff denial with `n`
+- `/last trace` for the denied private-document handoff
+- private DOCX handoff approval with `y`
+- `/last trace` for the approved private-document handoff
+- `/prompt-debug save`
+
+Trace evidence:
+
+- Denial trace: `000002-trc-63777936-199f-494c-b25d-bdfeda056181.json`
+- Denial event: `PRIVATE_DOCUMENT_MODEL_HANDOFF_APPROVAL_DENIED`
+- Denial ledger decision: `WITHHELD_FROM_MODEL`
+- Approval trace: `000003-trc-ed43ef02-0e07-4043-ae80-1c1ecea44b3e.json`
+- Approval event: `PRIVATE_DOCUMENT_MODEL_HANDOFF_APPROVAL_GRANTED`
+- Approval ledger decision: `INCLUDED_IN_MODEL_PROMPT`
+- Approval ledger reason: `PRIVATE_DOCUMENT_PER_TURN_SEND_TO_MODEL_APPROVED`
+
+Targeted artifact scan passed:
+
+```text
+.\gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/t295-pty-conpty-20260520-r1/artifacts,local/manual-workspaces/t295-pty-conpty-20260520-r1/workspace" "-PartifactScanAllowlist=local/manual-workspaces/t295-pty-conpty-20260520-r1/workspace/.env" --no-daemon
+BUILD SUCCESSFUL
+Artifact canary scan passed.
+```
+
+The manual-packet validator now passes:
+
+```text
+.\gradlew.bat validateSynchronizedApprovalPtyManualAudit "-PptyManualArtifactsRoot=local/manual-testing/t295-pty-conpty-20260520-r1/artifacts" "-PptyManualWorkspace=local/manual-workspaces/t295-pty-conpty-20260520-r1/workspace" --no-daemon
+BUILD SUCCESSFUL
+Status: PASS
+```
+
+Raw protected/private fixture values did not appear in the terminal transcript, prompt-debug render, provider-body JSON, copied traces, or packet artifacts. The approved private-document turn only answered whether the document contained a patient name; it did not print the controlled private fact.
+
+T295 is closed as a release gate. Remaining hardening, such as making raw extraction payloads structurally non-serializable by default, should be tracked as separate non-blocking architecture work rather than keeping this P0 open.
 
 ## Rollback / migration notes
 
 If any artifact leak appears, keep the relevant extractor disabled and revert that format to honest unsupported behavior.
 
-## Open questions
+## Non-blocking follow-up
 
 - Do we need an in-memory raw extraction type that cannot accidentally serialize through Jackson?
 
