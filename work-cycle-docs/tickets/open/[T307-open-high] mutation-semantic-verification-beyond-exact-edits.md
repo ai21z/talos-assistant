@@ -1,6 +1,6 @@
 # T307 - Mutation Semantic Verification Beyond Exact Edits
 
-Status: still-open - next implementation blocker for semantic mutation verification beyond exact edits
+Status: still-open - text-only per-source source-derived verifier slice implemented; broader semantic mutation verification remains open
 Severity: high
 Release gate: yes for private-document beta
 Branch: v0.9.0-beta-dev
@@ -31,6 +31,7 @@ That is not enough for broad beta confidence. A file can be readable after mutat
 - `StaticTaskVerifier` now verifies preserve-rest replacement requests only when mutation evidence proves the final text equals prior text with exactly one requested old-text to new-text replacement. `talos.edit_file` must provide exact edit evidence; `talos.write_file` must provide full-write evidence from a complete same-turn prior read. Plain full writes without prior-content evidence fail closed.
 - Preserve-rest full-write verification now tolerates only a single terminal-newline difference between prior-read-derived expected content and model-written content. This is deliberate: complete-read evidence is reconstructed from numbered `read_file` output and cannot prove the original EOF newline state. Any body/content change beyond the requested old/new replacement still fails.
 - `ToolCallRepromptStage` now uses `StaticTaskVerifier.verifyWithoutTraceEvents(...)` for internal static-web reprompt probes, so semantic expectation probes do not duplicate `EXPECTATION_VERIFIED` trace events.
+- `StaticTaskVerifier` now checks source-derived text summaries per readable source instead of using aggregate overlap across all sources. A generated report can no longer pass the text-only source-derived verifier merely because it copied distinctive facts from one source while omitting another readable source.
 - `TaskContractResolver` captures explicit forbidden sibling targets such as `Do not edit scripts.js`, and `StaticTaskVerifier` now fails the mutation when a forbidden target is also changed.
 - `TaskContractResolver` now also captures comma-style direct forbidden sibling targets such as `edit only script.js, not scripts.js`, so the expected target remains `script.js` and `scripts.js` becomes a forbidden target instead of a second expected target.
 - `StaticTaskVerifier` now fails a single-target mutation when the prompt uses explicit target-only wording such as "Only change script.js" and a non-requested target is also mutated.
@@ -175,6 +176,12 @@ That is not enough for broad beta confidence. A file can be readable after mutat
     - `leadingBracedTemplateVariableWithAppendedContentIsFlagged`
     - `writeFileWithLeadingToolResultPlaceholderIsRejectedBeforeApproval`
     - `writeFileWithLeadingBracedTemplateVariableIsRejectedBeforeApproval`
+- Fresh focused verification after the text-only per-source source-derived verifier slice:
+  - `./gradlew.bat test --tests "dev.talos.runtime.verification.StaticTaskVerifierTest" --no-daemon` passed.
+  - Added regression coverage:
+    - `sourceDerivedMultiSourceSummaryFailsWhenOneReadableSourceOmitted`
+    - `sourceDerivedMultiSourceSummaryPassesWhenEachReadableSourceContributesDistinctiveFact`
+    - `sourceDerivedVerifierDoesNotUseAggregateOverlapToMaskMissingSource`
 
 ## User impact
 
@@ -211,7 +218,8 @@ Add small verifier slices, one at a time:
 3. Similar-target guard: explicit forbidden sibling-target mutation is implemented for prompts that say not to edit the sibling. Single-target "only change/edit/write this file" wording is also implemented for narrow expected-target tasks.
 4. Title/text replacement verifier: initial support is implemented through `ReplacementExpectation` for "replace X with Y in target" and narrow "change title/text from X to Y in target" wording.
 5. Preserve-rest replacement verifier: implemented for explicit preserve/keep/leave-rest wording when exact edit evidence or full-write evidence proves only the requested text changed.
-6. Static web semantic verifier extensions only where the code already has a small HTML/CSS/JS surface.
+6. Text-only per-source source-derived verification: implemented for readable text sources. This does not yet make document extraction/source verification fully document-aware.
+7. Static web semantic verifier extensions only where the code already has a small HTML/CSS/JS surface.
 
 ## Tests
 
@@ -243,6 +251,9 @@ Add small verifier slices, one at a time:
 - preserve_rest_replacement_fails_when_write_file_has_no_prior_content_evidence - added
 - synchronized_audit_semantic_mutation_scenarios_record_passed_or_failed_not_readback - partial: positive bullet, exact append-line, full-write append-line with same-turn read evidence, replacement, preserve-rest replacement, similar-target, and forbidden-sibling blocked-tool cases are in the scripted audit bank
 - mixed_exact_edit_and_readback_only_mutation_does_not_overclaim_passed_verification - added
+- source_derived_multi_source_summary_fails_when_one_readable_source_omitted - added
+- source_derived_multi_source_summary_passes_when_each_readable_source_contributes_distinctive_fact - added
+- source_derived_verifier_does_not_use_aggregate_overlap_to_mask_missing_source - added
 
 ## Acceptance criteria
 
@@ -257,6 +268,7 @@ Add small verifier slices, one at a time:
 - Full prompt-bank integration is still open.
 - Positive append-only/no-rewrite verification is now implemented for full-file writes only when the same turn already performed a complete read of the same canonical target before mutation. It remains open for `talos.write_file` calls with no complete same-turn prior read, truncated reads, partial/offset reads, or broader preservation claims.
 - Broader preservation verification is now implemented only for explicit old-text/new-text replacement tasks with exact mutation evidence or full-write evidence. It remains open for semantic rewrites where the requested change is not expressible as one old/new literal replacement, for truncated reads, and for broad "preserve the rest" claims after multi-step transformations. A single EOF-newline difference is no longer treated as preservation failure because current read evidence cannot prove that byte-level state.
+- Source-derived per-source coverage is now implemented only for readable text sources. Document-aware multi-source verification for PDF/DOCX/XLS/XLSX remains tracked by T323, and broader semantic mutation families remain open under this ticket.
 
 ## Open questions
 

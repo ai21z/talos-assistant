@@ -1,8 +1,10 @@
 package dev.talos.runtime.verification;
 
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.tools.VerificationStatus;
 import org.junit.jupiter.api.Test;
@@ -11,6 +13,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -1205,6 +1208,91 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void sourceDerivedMultiSourceSummaryFailsWhenOneReadableSourceOmitted() throws Exception {
+        Files.writeString(workspace.resolve("alpha.txt"), """
+                Alpha source says orbital zinc inventory depends on cobalt ledger entries.
+                """);
+        Files.writeString(workspace.resolve("beta.txt"), """
+                Beta source says amber kelp forecast depends on violet turbine output.
+                """);
+        Files.writeString(workspace.resolve("summary.md"), """
+                - Orbital zinc inventory depends on cobalt ledger entries.
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                multiSourceSummaryContract(),
+                loopResult(List.of(successfulWrite("summary.md", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.summary().contains("Source-derived artifact verification failed"), result.summary());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("beta.txt")
+                                && p.contains("source-derived summary does not include distinctive evidence")),
+                result.problems().toString());
+        assertFalse(result.problems().stream().anyMatch(p -> p.contains("amber kelp")), result.problems().toString());
+        assertFalse(result.problems().stream().anyMatch(p -> p.contains("violet turbine")), result.problems().toString());
+    }
+
+    @Test
+    void sourceDerivedMultiSourceSummaryPassesWhenEachReadableSourceContributesDistinctiveFact() throws Exception {
+        Files.writeString(workspace.resolve("alpha.txt"), """
+                Alpha source says orbital zinc inventory depends on cobalt ledger entries.
+                """);
+        Files.writeString(workspace.resolve("beta.txt"), """
+                Beta source says amber kelp forecast depends on violet turbine output.
+                """);
+        Files.writeString(workspace.resolve("summary.md"), """
+                - Orbital zinc inventory depends on cobalt ledger entries.
+                - Amber kelp forecast depends on violet turbine output.
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                multiSourceSummaryContract(),
+                loopResult(List.of(successfulWrite("summary.md", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.problems().toString());
+        assertTrue(result.summary().contains("Source-derived artifact verification passed"), result.summary());
+        assertTrue(result.facts().stream()
+                        .anyMatch(f -> f.contains("summary.md: source-derived artifact includes evidence from")
+                                && f.contains("alpha.txt")
+                                && f.contains("beta.txt")),
+                result.facts().toString());
+    }
+
+    @Test
+    void sourceDerivedVerifierDoesNotUseAggregateOverlapToMaskMissingSource() throws Exception {
+        Files.writeString(workspace.resolve("alpha.txt"), """
+                Alpha source records glacier matrix routing, cobalt ledger entries,
+                orbital zinc inventory, and quartz relay capacity.
+                """);
+        Files.writeString(workspace.resolve("beta.txt"), """
+                Beta source records amber kelp forecast and violet turbine output.
+                """);
+        Files.writeString(workspace.resolve("summary.md"), """
+                - Glacier matrix routing, cobalt ledger entries, orbital zinc inventory,
+                  and quartz relay capacity are all covered.
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                multiSourceSummaryContract(),
+                loopResult(List.of(successfulWrite("summary.md", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("beta.txt")
+                                && p.contains("source-derived summary does not include distinctive evidence")),
+                result.problems().toString());
+        assertFalse(result.problems().stream().anyMatch(p -> p.contains("amber kelp")), result.problems().toString());
+        assertFalse(result.problems().stream().anyMatch(p -> p.contains("violet turbine")), result.problems().toString());
+    }
+
+    @Test
     void styledWebpageRequestFailsWhenHtmlHasNoInlineOrLinkedStyle() throws Exception {
         Files.writeString(workspace.resolve("index.html"), """
                 <!doctype html>
@@ -2213,6 +2301,19 @@ class StaticTaskVerifierTest {
 
     private static boolean isWindows() {
         return System.getProperty("os.name", "").toLowerCase().contains("win");
+    }
+
+    private static TaskContract multiSourceSummaryContract() {
+        return new TaskContract(
+                TaskType.FILE_CREATE,
+                true,
+                true,
+                true,
+                Set.of("summary.md"),
+                Set.of("alpha.txt", "beta.txt"),
+                Set.of(),
+                "Summarize alpha.txt and beta.txt into summary.md.",
+                "test-multi-source-summary");
     }
 
     private void writeWebFiles(String html) throws Exception {
