@@ -2,7 +2,7 @@
 
 Severity: High
 
-Status: still-open - deterministic Python command boundary slice implemented; audit-runner expected-file assertion remains
+Status: implemented-awaiting-evidence - deterministic Python command boundary and TalosBench expected-file-path assertion implemented; fresh live/synchronized mini-audit remains
 
 Source: Five scenario big audit and Agent 4 static audit, 2026-05-19
 
@@ -35,6 +35,13 @@ Fresh focused implementation evidence from 2026-05-20:
   - `./gradlew.bat test --tests "dev.talos.runtime.task.TaskContractResolverTest" --no-daemon`
   - `./gradlew.bat test --tests "dev.talos.runtime.toolcall.ToolSurfacePlannerTest" --no-daemon`
   - `./gradlew.bat test --tests "dev.talos.cli.modes.ExecutionOutcomeTest" --no-daemon`
+- TalosBench audit assertion support now includes `expectedFinalFilePaths`, which fails a case when expected generated files are missing without requiring byte-exact live-model output content.
+- The prompt bank now includes `t325-python-command-boundary`, an approval-sensitive case that requires `dijkstra.py` and `test_dijkstra.py` to exist after the run and forbids unsupported `pytest passed` / `tests passed` / `algorithm is verified` claims.
+- Fresh focused assertion evidence from 2026-05-20:
+  - `./gradlew.bat test --tests "dev.talos.audit.FullAuditCoverageDocumentationTest.talosbenchPythonCaseRequiresExpectedOutputFiles" --no-daemon` failed before the prompt-bank case existed, then passed after adding the case and `expectedFinalFilePaths`.
+  - `pwsh .\tools\manual-eval\run-talosbench.ps1 -SelfTest` failed before `Test-ExpectedFinalFilePaths` existed, then passed after adding the existence-only assertion.
+  - `pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly` passed and validated 41 TalosBench cases.
+  - `pwsh .\tools\manual-eval\run-talosbench.ps1 -CaseId t325-python-command-boundary -IncludeManualRequired` returned the expected `SYNC_REQUIRED` status, proving the case is wired while still refusing redirected approval evidence by default.
 
 ## Expected Behavior
 
@@ -58,16 +65,15 @@ pythonExecutionRequestsExposeNoCommandTool - added
 unsupportedPythonCommandGetsDeterministicDirectAnswer - added
 createPythonAndRunTestsDoesNotClaimExecution - added
 pythonReadbackOnlyDoesNotClaimAlgorithmVerified - added
-talosbenchCaseFailsWhenExpectedPythonFilesAreMissing
+talosbenchCaseFailsWhenExpectedPythonFilesAreMissing - added through `t325-python-command-boundary` plus `expectedFinalFilePaths` and runner self-test coverage
 ```
 
 ## Fix Direction
 
 1. Add unsupported natural-command detection for Python execution/test prompts.
 2. Strengthen final-answer suppression for Python readback-only mutations.
-3. Add audit runner assertions for expected final files where the scenario requires file creation.
+3. Add audit runner assertions for expected final files where the scenario requires file creation. Implemented through existence-only `expectedFinalFilePaths`.
 
 ## Remaining Blockers
 
-- Add the audit/TalosBench expected-file assertion so a Python scenario cannot pass when `dijkstra.py` or `test_dijkstra.py` was not actually created.
-- Run a focused mini-audit after that assertion exists. Deterministic unit coverage is stronger now, but there is not yet fresh live/audit evidence for this ticket after the 2026-05-20 command-boundary slice.
+- Run a focused synchronized/manual mini-audit for `t325-python-command-boundary` with real approval evidence. The default TalosBench runner correctly reports `SYNC_REQUIRED`; release evidence must come from a synchronized approval path or true manual transcript, not unsafe redirected approval input.

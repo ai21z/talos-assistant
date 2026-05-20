@@ -187,6 +187,8 @@ Additional fields used by the runner:
 - `requiredFinalTurnSubstrings`
 - `forbiddenFinalTurnSubstrings`
 - `traceAssertions`
+- `expectedFinalFiles`
+- `expectedFinalFilePaths`
 
 `approvalInputsByPrompt` must have the same number of entries as `prompts`.
 Each entry is an array of approval input lines to send after that prompt.
@@ -197,6 +199,12 @@ facts, and runtime failure text. `requiredFinalTurnSubstrings` and
 `forbiddenFinalTurnSubstrings` apply only to the final natural Talos turn, which
 is useful for multi-prompt cases where an earlier setup answer may legitimately
 mention text that the follow-up turn must not contain.
+
+Use `expectedFinalFilePaths` when the audit only needs to prove named files
+exist after the run. This is intentionally weaker than `expectedFinalFiles`,
+which checks exact file content. It is useful for live model cases where the
+exact generated implementation may vary but missing output files must still fail
+the audit.
 
 ## Trace Assertions
 
