@@ -228,6 +228,13 @@ public final class TaskContractResolver {
     private static final Pattern SOURCE_EVIDENCE_SPAN = Pattern.compile(
             "(?i)\\b(according\\s+to|based\\s+on|summari[sz]ing|summary\\s+of|from|using)\\b\\s+(.{1,320})");
 
+    private static final Pattern PYTHON_COMMAND_EXECUTION = Pattern.compile(
+            "(?i)(?:\\b(?:run|execute|try|probe|verify|check|test)\\s+"
+                    + "(?:(?:python3?|py)\\b|pytest\\b|(?:this|the)\\s+python\\s+file\\b|"
+                    + "(?:[A-Za-z0-9_.\\\\/-]+\\.py)\\b)"
+                    + "|\\b(?:python3?|py)\\s+-m\\s+pytest\\b"
+                    + "|\\b(?:python3?|py)\\s+(?:[A-Za-z0-9_.\\\\/-]+\\.py)\\b)");
+
     private static final Set<String> CHAT_ONLY_HINTS = Set.of(
             "answer briefly",
             "just say hello",
@@ -707,12 +714,32 @@ public final class TaskContractResolver {
 
     private static boolean looksUnsupportedNaturalCommandVerificationRequest(String lower) {
         if (lower == null || lower.isBlank()) return false;
+        if (looksUnsupportedPythonCommandExecutionRequest(lower)) return true;
         if (!containsAny(lower, COMMAND_EXECUTION_ACTION_MARKERS)) return false;
         if (!lower.contains("command")) return false;
         return lower.contains("if it can't run")
                 || lower.contains("if it cannot run")
                 || lower.contains("safe command")
                 || lower.contains("command check");
+    }
+
+    public static boolean looksUnsupportedPythonCommandExecutionRequest(String request) {
+        if (request == null || request.isBlank()) return false;
+        String lower = request.toLowerCase(Locale.ROOT);
+        if (PYTHON_COMMAND_EXECUTION.matcher(lower).find()) return true;
+        if (!containsAny(lower, COMMAND_EXECUTION_ACTION_MARKERS)) return false;
+        boolean pythonSurface = lower.contains("python")
+                || lower.contains("pytest")
+                || lower.contains(".py");
+        if (!pythonSurface) return false;
+        return lower.contains("run tests")
+                || lower.contains("run the tests")
+                || lower.contains("execute tests")
+                || lower.contains("execute the tests")
+                || lower.contains("verify tests")
+                || lower.contains("verify the tests")
+                || lower.contains("check tests")
+                || lower.contains("check the tests");
     }
 
     private static boolean looksLikeSessionMetaEvidenceQuestion(String lower) {

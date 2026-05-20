@@ -2,7 +2,7 @@
 
 Severity: High
 
-Status: still-open - Python command boundary and audit assertions remain current blockers
+Status: still-open - deterministic Python command boundary slice implemented; audit-runner expected-file assertion remains
 
 Source: Five scenario big audit and Agent 4 static audit, 2026-05-19
 
@@ -23,8 +23,18 @@ local/manual-testing/five-scenario-audit-20260519-221645/20260519-221949/five-py
 Static audit found:
 
 - `talos.run_command` is Gradle-profile bounded, not arbitrary shell.
-- natural prompts like `run pytest` may not always become deterministic unsupported-command contracts.
+- natural prompts like `run pytest` did not always become deterministic unsupported-command contracts. This is now covered for Python/pytest/.py execution prompts by deterministic classifier and outcome tests.
 - Python file verification is readback-only, not syntax or semantic verification.
+
+Fresh focused implementation evidence from 2026-05-20:
+
+- `TaskContractResolver.looksUnsupportedPythonCommandExecutionRequest(...)` detects standalone Python/pytest/.py execution requests and routes non-mutating execution prompts to `unsupported-command-verification-request`.
+- `ToolSurfacePlanner` exposes no command tool for those unsupported Python command contracts.
+- `ExecutionOutcome` replaces unsupported Python execution/test success prose when no command result exists, including mixed turns where Python files were created but requested Python/pytest execution did not run.
+- Focused verification passed:
+  - `./gradlew.bat test --tests "dev.talos.runtime.task.TaskContractResolverTest" --no-daemon`
+  - `./gradlew.bat test --tests "dev.talos.runtime.toolcall.ToolSurfacePlannerTest" --no-daemon`
+  - `./gradlew.bat test --tests "dev.talos.cli.modes.ExecutionOutcomeTest" --no-daemon`
 
 ## Expected Behavior
 
@@ -43,9 +53,11 @@ unless command-profile evidence or a deterministic verifier proves it.
 Add:
 
 ```text
-pythonExecutionRequestsBecomeUnsupportedCommandContract
-createPythonAndRunTestsDoesNotClaimExecution
-pythonReadbackOnlyDoesNotClaimAlgorithmVerified
+pythonExecutionRequestsBecomeUnsupportedCommandContract - added
+pythonExecutionRequestsExposeNoCommandTool - added
+unsupportedPythonCommandGetsDeterministicDirectAnswer - added
+createPythonAndRunTestsDoesNotClaimExecution - added
+pythonReadbackOnlyDoesNotClaimAlgorithmVerified - added
 talosbenchCaseFailsWhenExpectedPythonFilesAreMissing
 ```
 
@@ -54,3 +66,8 @@ talosbenchCaseFailsWhenExpectedPythonFilesAreMissing
 1. Add unsupported natural-command detection for Python execution/test prompts.
 2. Strengthen final-answer suppression for Python readback-only mutations.
 3. Add audit runner assertions for expected final files where the scenario requires file creation.
+
+## Remaining Blockers
+
+- Add the audit/TalosBench expected-file assertion so a Python scenario cannot pass when `dijkstra.py` or `test_dijkstra.py` was not actually created.
+- Run a focused mini-audit after that assertion exists. Deterministic unit coverage is stronger now, but there is not yet fresh live/audit evidence for this ticket after the 2026-05-20 command-boundary slice.

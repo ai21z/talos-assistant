@@ -193,6 +193,10 @@ record ExecutionOutcome(
                 && !commandSucceeded
                 && !commandFailed
                 && !commandDenied;
+        boolean unsupportedPythonCommandRequiredButNotRun = unsupportedPythonCommandExecutionRequest(contract)
+                && !commandSucceeded
+                && !commandFailed
+                && !commandDenied;
         boolean failedAnyActionObligation = failedMutationObligation || commandRequiredButNotRun;
 
         String shaped = AssistantTurnExecutor.overrideUnsupportedDocumentClaimsIfNeeded(
@@ -265,6 +269,8 @@ record ExecutionOutcome(
             current = commandSuccessReplacement(commandConclusion);
         } else if (commandRequiredButNotRun) {
             current = commandRequiredButNotRunReplacement();
+        } else if (unsupportedPythonCommandRequiredButNotRun) {
+            current = unsupportedCommandNotAvailableReplacement();
         }
 
         EvidenceObligation evidenceObligation = evidenceObligation(safePlan);
@@ -503,10 +509,13 @@ record ExecutionOutcome(
         TaskContract contract = safePlan.taskContract();
         boolean mutationRequested = contract.mutationRequested();
         boolean commandRequiredButNotRun = explicitCommandVerificationRequired(contract);
+        boolean unsupportedCommandNotAvailable = unsupportedCommandVerificationRequest(contract);
         if (commandRequiredButNotRun) {
             shaped = commandRequiredButNotRunReplacement();
+        } else if (unsupportedCommandNotAvailable) {
+            shaped = unsupportedCommandNotAvailableReplacement();
         }
-        boolean blocked = noToolMutationReplaced || commandRequiredButNotRun;
+        boolean blocked = noToolMutationReplaced || commandRequiredButNotRun || unsupportedCommandNotAvailable;
         boolean ungrounded = shaped != null
                 && (shaped.startsWith(AssistantTurnExecutor.UNGROUNDED_ANNOTATION)
                 || localAccessCapabilityCorrected);
@@ -517,7 +526,7 @@ record ExecutionOutcome(
         boolean protectedReadApprovalMissing = protectedReadApprovalMissing(
                 evidenceObligation,
                 evidenceResult);
-        if (missingEvidence && !commandRequiredButNotRun) {
+        if (missingEvidence && !commandRequiredButNotRun && !unsupportedCommandNotAvailable) {
             shaped = suppressDerivedContentForMissingEvidence(
                     shaped,
                     safePlan,
@@ -535,7 +544,7 @@ record ExecutionOutcome(
                 false,
                 malformedProtocolDebrisReplaced,
                 noToolMutationReplaced,
-                failedActionObligation || commandRequiredButNotRun,
+                failedActionObligation || commandRequiredButNotRun || unsupportedCommandNotAvailable,
                 false,
                 false,
                 false,
@@ -558,7 +567,7 @@ record ExecutionOutcome(
         TaskVerificationResult verification = TaskVerificationResult.notRun("Post-apply verification was not applicable.");
         List<TruthWarning> warnings = noToolWarnings(
                 noToolMutationReplaced,
-                failedActionObligation || commandRequiredButNotRun,
+                failedActionObligation || commandRequiredButNotRun || unsupportedCommandNotAvailable,
                 ungrounded,
                 malformedProtocolDebrisReplaced,
                 localAccessCapabilityCorrected,
@@ -944,6 +953,11 @@ record ExecutionOutcome(
                 + "No command result is available because the model did not call talos.run_command.";
     }
 
+    private static String unsupportedCommandNotAvailableReplacement() {
+        return "[Command not run: Python execution is outside the current bounded command profile.]\n\n"
+                + "No Python, pytest, or .py command result is available in this beta turn.";
+    }
+
     private static boolean commandSatisfiesVerifyOnlyRequest(TaskContract contract) {
         return contract != null
                 && contract.type() == TaskType.VERIFY_ONLY
@@ -954,6 +968,16 @@ record ExecutionOutcome(
     private static boolean explicitCommandVerificationRequired(TaskContract contract) {
         return contract != null
                 && "explicit-command-verification-request".equals(contract.classificationReason());
+    }
+
+    private static boolean unsupportedCommandVerificationRequest(TaskContract contract) {
+        return contract != null
+                && "unsupported-command-verification-request".equals(contract.classificationReason());
+    }
+
+    private static boolean unsupportedPythonCommandExecutionRequest(TaskContract contract) {
+        return contract != null
+                && TaskContractResolver.looksUnsupportedPythonCommandExecutionRequest(contract.originalUserRequest());
     }
 
     private static boolean hasDeniedMutation(ToolCallLoop.LoopResult loopResult) {
