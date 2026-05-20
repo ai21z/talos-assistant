@@ -1,6 +1,6 @@
 # T273 - Local Document Extraction Roadmap for PDF, Office, and Images
 
-Status: open - superseded by detailed T290-T304 architecture tickets
+Status: done - superseded by detailed extraction/document tickets T294 and T299-T304
 Severity: high
 Release gate: yes for document-capability claims; images and PowerPoint are v1/open issues, not beta gates
 Branch: v0.9.0-beta-dev

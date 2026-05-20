@@ -1,6 +1,6 @@
 # T277 - CI-Grade Artifact Canary Scan
 
-Status: open - scanner and runtime sink tests added, live-audit gate still open
+Status: still-open - scanner/runtime sink tests exist; decide CI/check integration versus explicit release-gate task
 Severity: high
 Release gate: yes
 Branch: v0.9.0-beta-dev

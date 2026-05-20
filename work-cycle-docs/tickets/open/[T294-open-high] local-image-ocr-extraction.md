@@ -1,6 +1,6 @@
 # T294 - Local Image OCR Extraction
 
-Status: open - deferred beyond beta, v1 image/OCR candidate
+Status: deferred-beyond-beta - v1 image/OCR candidate, not current beta scope
 Severity: High
 Release gate: no for beta; yes for any v1 image/OCR claim
 Branch: v0.9.0-beta-dev
@@ -93,7 +93,7 @@ OCR can remain disabled by default until installers/configuration are stable. If
 
 ## 2026-05-16 Implementation update
 
-Status: OCR command adapter and preflight visibility implemented; image/OCR is frozen out of beta and remains a v1 issue.
+Evidence note: OCR command adapter and preflight visibility implemented; image/OCR is frozen out of beta and remains a v1 issue.
 
 Code evidence:
 

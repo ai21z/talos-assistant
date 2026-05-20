@@ -1,6 +1,6 @@
 # T278 - RAG Index Policy Versioning and Dirty Index Invalidation
 
-Status: open - metadata V1 implemented, focused dirty-index integration added; live audit still needed
+Status: done - metadata V1, dirty-index invalidation, private-mode stale-index handling, and live artifact evidence completed; richer extraction citation provenance remains T296
 Severity: high
 Release gate: yes
 Branch: v0.9.0-beta-dev

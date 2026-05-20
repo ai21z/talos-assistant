@@ -1,6 +1,6 @@
 # T285 - Artifact Scanner Surface Coverage
 
-Status: open
+Status: done - runtime artifact scanner surface coverage implemented; release-facing task is T288
 Severity: high
 Release gate: yes for private-document beta
 Branch: v0.9.0-beta-dev

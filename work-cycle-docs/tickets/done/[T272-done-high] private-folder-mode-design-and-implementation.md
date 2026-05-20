@@ -1,6 +1,6 @@
 # T272 - Private Folder Mode Design and Implementation
 
-Status: open
+Status: done - private mode V1 implemented and release-gate evidence closed by T295/T326; broad sensitive-paperwork product claim remains deferred beyond beta
 Severity: high
 Release gate: yes for sensitive-document beta
 Branch: v0.9.0-beta-dev

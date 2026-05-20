@@ -1,6 +1,6 @@
 # T302 - PowerPoint Extraction Deferred to Full Release
 
-Status: open
+Status: deferred-beyond-beta - PowerPoint extraction remains intentionally unsupported for current beta
 Severity: medium
 Release gate: no for beta if docs remain explicit; yes for full document-reader release
 Branch: v0.9.0-beta-dev

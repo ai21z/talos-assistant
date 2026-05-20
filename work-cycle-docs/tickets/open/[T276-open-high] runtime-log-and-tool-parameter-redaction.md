@@ -1,6 +1,6 @@
 # T276 - Runtime Log and Tool Parameter Redaction
 
-Status: open - focused implementation complete, broader log audit still required
+Status: still-open - focused implementation complete; broader runtime log audit remains required
 Severity: high / P0 for sensitive beta
 Release gate: yes
 Branch: v0.9.0-beta-dev

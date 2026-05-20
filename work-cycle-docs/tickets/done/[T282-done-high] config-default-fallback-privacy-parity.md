@@ -1,6 +1,6 @@
 # T282 - Config Default Fallback Privacy Parity
 
-Status: open
+Status: done - config fallback/default privacy parity covered by ConfigPrivacyDefaultsTest
 Severity: high
 Release gate: yes for sensitive/private-document beta
 Branch: v0.9.0-beta-dev
@@ -66,4 +66,3 @@ Keep `ConfigPrivacyDefaultsTest` as the regression guard; consider deriving fall
 - `src/main/java/dev/talos/core/Config.java`
 - `src/main/resources/config/default-config.yaml`
 - `src/test/java/dev/talos/core/ConfigPrivacyDefaultsTest.java`
-

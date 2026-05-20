@@ -2,7 +2,7 @@
 
 Severity: High
 
-Status: Open
+Status: still-open - Python command boundary and audit assertions remain current blockers
 
 Source: Five scenario big audit and Agent 4 static audit, 2026-05-19
 
@@ -54,4 +54,3 @@ talosbenchCaseFailsWhenExpectedPythonFilesAreMissing
 1. Add unsupported natural-command detection for Python execution/test prompts.
 2. Strengthen final-answer suppression for Python readback-only mutations.
 3. Add audit runner assertions for expected final files where the scenario requires file creation.
-

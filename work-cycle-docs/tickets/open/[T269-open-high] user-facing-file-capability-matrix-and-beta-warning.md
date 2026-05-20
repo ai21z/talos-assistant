@@ -1,6 +1,6 @@
 # T269 - User-Facing File Capability Matrix and Beta Warning
 
-Status: open
+Status: still-open - user-facing capability matrix and beta warning remain release-copy blockers
 Severity: high
 Release gate: yes - product copy and beta positioning
 Branch: v0.9.0-beta-dev

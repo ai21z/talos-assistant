@@ -1,6 +1,6 @@
 # T308 - Live Static-Web Mutation Convergence For GPT-OSS
 
-Status: fixed in working tree / pending full gate
+Status: done - static-web GPT-OSS live convergence closed by T331 and fresh synchronized live-bank evidence
 Severity: high
 Release gate: yes for developer/code beta
 Branch: v0.9.0-beta-dev

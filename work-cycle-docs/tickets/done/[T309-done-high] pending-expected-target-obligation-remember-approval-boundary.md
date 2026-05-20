@@ -1,6 +1,6 @@
 # T309 - Pending Expected-Target Obligation Remember Approval Boundary
 
-Status: fixed in working tree / pending full gate
+Status: done - pending expected-target remembered-approval boundary implemented and verified
 Severity: high
 Release gate: yes for developer/code beta
 Branch: v0.9.0-beta-dev

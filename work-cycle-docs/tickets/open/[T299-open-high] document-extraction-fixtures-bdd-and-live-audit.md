@@ -1,6 +1,6 @@
 # T299 - Document Extraction Fixtures, BDD, and Live Audit
 
-Status: open
+Status: still-open - generated fixture/live evidence exists; larger maintained document corpus remains open
 Severity: high
 Release gate: yes
 Branch: v0.9.0-beta-dev
@@ -96,7 +96,7 @@ If a fixture exposes a library instability, keep that format disabled until the 
 
 ## 2026-05-16 Implementation update
 
-Status: beta-core live audit executed; fixture quality remains open. Image/OCR evidence is v1/open.
+Evidence note: beta-core live audit executed; fixture quality remains open. Image/OCR evidence is v1/open.
 
 New evidence:
 
@@ -133,7 +133,7 @@ Remaining live-audit work:
 
 ## 2026-05-18 Focused two-model private-document audit update
 
-Status: focused beta-core live audit executed with generated private-document ordinary-fact fixtures. Fixture quality remains open. Image/OCR and PowerPoint evidence remains v1/open.
+Evidence note: focused beta-core live audit executed with generated private-document ordinary-fact fixtures. Fixture quality remains open. Image/OCR and PowerPoint evidence remains v1/open.
 
 New evidence:
 
@@ -152,7 +152,7 @@ Remaining blockers:
 
 ## 2026-05-18 Private-folder bank update
 
-Status: scripted private-folder bank executed for non-interactive probes. Approval-sensitive probes still need a synchronized runner or human-operated transcript.
+Evidence note: scripted private-folder bank executed for non-interactive probes. Approval-sensitive probes still need a synchronized runner or human-operated transcript.
 
 New evidence:
 

@@ -1,6 +1,6 @@
 # T298 - Private Mode Reindex Policy Gate
 
-Status: partial implementation, open
+Status: done - private-mode reindex command paths and direct indexer private-document policy gate implemented and tested
 Severity: high / P0 for private-document beta
 Release gate: yes
 Branch: v0.9.0-beta-dev

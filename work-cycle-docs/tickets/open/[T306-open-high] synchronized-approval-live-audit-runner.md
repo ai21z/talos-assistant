@@ -1,6 +1,6 @@
 # T306 - Synchronized Approval Live Audit Runner
 
-Status: open
+Status: implemented-awaiting-evidence - synchronized approval runner works; broader full prompt-bank integration remains open
 Severity: high / P0 for private-document beta
 Release gate: yes
 Branch: v0.9.0-beta-dev

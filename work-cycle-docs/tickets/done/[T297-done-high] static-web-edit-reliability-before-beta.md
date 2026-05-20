@@ -1,6 +1,6 @@
 # T297 - Static Web Edit Reliability Before Beta
 
-Status: open
+Status: done - static selector reliability closed by synchronized/live evidence and T308/T331; broader exact three-file static-site convergence remains T322
 Severity: high
 Release gate: yes for developer/code beta
 Branch: v0.9.0-beta-dev

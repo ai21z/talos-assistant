@@ -2,7 +2,7 @@
 
 Severity: High
 
-Status: Open
+Status: done - superseded and closed by T327 no-workspace prompt minimization evidence
 
 Source: Five scenario big audit, 2026-05-19
 
@@ -64,4 +64,3 @@ priorWorkspaceHistorySuppressedWhenUserSaysJustChat
 Add a deterministic `GENERAL_QA` contract or extend direct-answer classification so ordinary non-workspace knowledge/work/life/science prompts do not enter the workspace tool loop.
 
 Do not make every unknown prompt direct-answer. Workspace questions must still inspect evidence.
-

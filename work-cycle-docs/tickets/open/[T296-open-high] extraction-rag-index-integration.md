@@ -1,6 +1,6 @@
 # T296 - Extraction RAG Index Integration
 
-Status: partial implementation, open
+Status: implemented-awaiting-evidence - private-document RAG policy gate is done; richer extraction chunk/citation provenance remains open
 Severity: high / P0 for private-document beta
 Release gate: yes
 Branch: v0.9.0-beta-dev

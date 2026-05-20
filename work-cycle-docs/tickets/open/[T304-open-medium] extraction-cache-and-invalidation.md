@@ -1,6 +1,6 @@
 # T304 - Extraction Cache and Invalidation
 
-Status: open
+Status: deferred-beyond-beta - add extraction cache only if performance evidence proves direct extraction too slow
 Severity: medium / high if extraction is slow in live audit
 Release gate: conditional for document beta
 Branch: v0.9.0-beta-dev
