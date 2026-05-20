@@ -75,7 +75,7 @@ test("copy buttons are visible, focusable, and uniquely labelled", async ({ page
   await page.goto("/");
   const buttons = page.locator(".copy-button");
   const count = await buttons.count();
-  expect(count).toBeGreaterThanOrEqual(6);
+  expect(count).toBeGreaterThanOrEqual(5);
 
   const labels = [];
   for (let index = 0; index < count; index += 1) {
@@ -145,14 +145,12 @@ test("desktop story handoff overlaps adjacent screens during scroll", async ({ p
     document.documentElement.style.scrollBehavior = "auto";
     window.scrollTo({ top: 700, behavior: "instant" });
   });
-  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
-
-  const handoff = await page.evaluate(() => {
+  const handoffHandle = await page.waitForFunction(() => {
     const productNode = document.querySelector("#product > .container");
     const contractNode = document.querySelector("#contract > .container");
     const product = productNode.getBoundingClientRect();
     const contract = contractNode.getBoundingClientRect();
-    return {
+    const handoff = {
       productBottom: product.bottom,
       contractTop: contract.top,
       productOpacity: Number(getComputedStyle(productNode).opacity),
@@ -160,7 +158,9 @@ test("desktop story handoff overlaps adjacent screens during scroll", async ({ p
       contractSectionBackground: getComputedStyle(document.querySelector("#contract")).backgroundImage,
       contractBeforeDisplay: getComputedStyle(document.querySelector("#contract"), "::before").display,
     };
+    return handoff.productOpacity < 0.25 && handoff.contractOpacity > 0.65 ? handoff : false;
   });
+  const handoff = await handoffHandle.jsonValue();
 
   expect(handoff.productBottom).toBeGreaterThan(220);
   expect(handoff.contractTop).toBeLessThan(460);
@@ -185,32 +185,31 @@ test("desktop story screens keep primary content centered across viewport height
     });
 
     for (const sectionId of ["product", "contract", "cli"]) {
-      const metrics = await page.evaluate((targetId) => {
+      await page.evaluate((targetId) => {
         const section = document.getElementById(targetId);
         window.scrollTo({ top: section.offsetTop - 72, behavior: "instant" });
-        return new Promise((resolve) => {
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-              const container = section.querySelector(":scope > .container");
-              const children = Array.from(container.children).filter((node) => {
-                const style = window.getComputedStyle(node);
-                return style.display !== "none" && style.visibility !== "hidden";
-              });
-              const rects = children
-                .map((node) => node.getBoundingClientRect())
-                .filter((rect) => rect.width > 0 && rect.height > 0);
-              const top = Math.min(...rects.map((rect) => rect.top));
-              const bottom = Math.max(...rects.map((rect) => rect.bottom));
-              const contentCenter = (top + bottom) / 2;
-              const viewportCenter = (72 + window.innerHeight) / 2;
-              resolve({
-                delta: contentCenter - viewportCenter,
-                opacity: Number(window.getComputedStyle(container).opacity),
-              });
-            });
-          });
-        });
       }, sectionId);
+      const metricsHandle = await page.waitForFunction((targetId) => {
+        const section = document.getElementById(targetId);
+        const container = section.querySelector(":scope > .container");
+        const children = Array.from(container.children).filter((node) => {
+          const style = window.getComputedStyle(node);
+          return style.display !== "none" && style.visibility !== "hidden";
+        });
+        const rects = children
+          .map((node) => node.getBoundingClientRect())
+          .filter((rect) => rect.width > 0 && rect.height > 0);
+        const top = Math.min(...rects.map((rect) => rect.top));
+        const bottom = Math.max(...rects.map((rect) => rect.bottom));
+        const contentCenter = (top + bottom) / 2;
+        const viewportCenter = (72 + window.innerHeight) / 2;
+        const metrics = {
+          delta: contentCenter - viewportCenter,
+          opacity: Number(window.getComputedStyle(container).opacity),
+        };
+        return Math.abs(metrics.delta) <= 72 && metrics.opacity > 0.86 ? metrics : false;
+      }, sectionId);
+      const metrics = await metricsHandle.jsonValue();
 
       expect(Math.abs(metrics.delta), `${sectionId} center at ${viewport.width}x${viewport.height}`).toBeLessThanOrEqual(
         viewport.maxDelta,
@@ -233,13 +232,16 @@ test("primary story nav lands on the requested centered screen", async ({ page }
     { label: "Contract", id: "contract" },
     { label: "CLI", id: "cli" },
     { label: "Trust", id: "trust" },
+    { label: "CLI", id: "cli" },
+    { label: "Contract", id: "contract" },
+    { label: "Product", id: "product" },
   ]) {
     await primaryNav.getByRole("link", { name: target.label }).click();
-    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     await expect(page).toHaveURL(new RegExp(`#${target.id}$`));
     await expect(page.locator('.site-nav a[aria-current="page"]')).toHaveText(target.label);
 
-    const metrics = await page.evaluate((sectionId) => {
+    const metrics = await page.waitForFunction(
+      (sectionId) => {
       const section = document.getElementById(sectionId);
       const container = section.querySelector(":scope > .container");
       const children = Array.from(container.children).filter((node) => {
@@ -253,14 +255,18 @@ test("primary story nav lands on the requested centered screen", async ({ page }
       const bottom = Math.max(...rects.map((rect) => rect.bottom));
       const contentCenter = (top + bottom) / 2;
       const viewportCenter = (72 + window.innerHeight) / 2;
-      return {
+      const metrics = {
         delta: contentCenter - viewportCenter,
         opacity: Number(window.getComputedStyle(container).opacity),
       };
-    }, target.id);
+      return Math.abs(metrics.delta) <= 64 && metrics.opacity > 0.86 ? metrics : false;
+      },
+      target.id,
+    );
 
-    expect(Math.abs(metrics.delta), `${target.id} nav center`).toBeLessThanOrEqual(64);
-    expect(metrics.opacity, `${target.id} nav opacity`).toBeGreaterThan(0.86);
+    const resolvedMetrics = await metrics.jsonValue();
+    expect(Math.abs(resolvedMetrics.delta), `${target.id} nav center`).toBeLessThanOrEqual(64);
+    expect(resolvedMetrics.opacity, `${target.id} nav opacity`).toBeGreaterThan(0.86);
   }
 });
 

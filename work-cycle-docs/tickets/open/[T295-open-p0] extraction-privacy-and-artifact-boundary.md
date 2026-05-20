@@ -370,6 +370,48 @@ Targeted T295 live artifact scan passed:
 
 T295 remains open because the true terminal/JLine transcript is not completed yet. The evidence is materially stronger, but a prepared manual packet is not the same thing as a real terminal/live-model transcript.
 
+## 2026-05-20 full synchronized live bank update
+
+The live mutation blockers that prevented a complete synchronized live-bank pass were fixed separately:
+
+- T330: append-line readback compaction blocked mutation approval.
+- T331: static-web selector repair could stop after wrong-target blocking.
+
+Fresh GPT-OSS synchronized live bank now passes all 24 scenarios:
+
+```text
+.\gradlew.bat runSynchronizedApprovalAudit "-PapprovalAuditMode=live" "-PapprovalAuditConfig=$env:USERPROFILE\.talos\config.yaml" "-PapprovalAuditArtifactsRoot=local/manual-testing/synchronized-approval-live-gptoss-t331-20260520-r2" "-PapprovalAuditWorkspacesRoot=local/manual-workspaces/synchronized-approval-live-gptoss-t331-20260520-r2" --no-daemon
+BUILD SUCCESSFUL
+```
+
+Summary artifact:
+
+```text
+local/manual-testing/synchronized-approval-live-gptoss-t331-20260520-r2/SYNCHRONIZED-APPROVAL-AUDIT.md
+Scenarios: 24
+Artifact scan: PASS
+```
+
+T295-relevant scenario bundles included in the passing live bank:
+
+```text
+local/manual-testing/synchronized-approval-live-gptoss-t331-20260520-r2/private-mode-extracted-docx-local-display-only/AUDIT-BUNDLE.md
+local/manual-testing/synchronized-approval-live-gptoss-t331-20260520-r2/private-mode-extracted-docx-per-turn-send-to-model-approved/AUDIT-BUNDLE.md
+local/manual-testing/synchronized-approval-live-gptoss-t331-20260520-r2/private-mode-large-document-corpus-withheld/AUDIT-BUNDLE.md
+local/manual-testing/synchronized-approval-live-gptoss-t331-20260520-r2/private-mode-extracted-pdf-local-display-only/AUDIT-BUNDLE.md
+local/manual-testing/synchronized-approval-live-gptoss-t331-20260520-r2/private-mode-extracted-xlsx-local-display-only/AUDIT-BUNDLE.md
+```
+
+Targeted live artifact scan also passed:
+
+```text
+.\gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/synchronized-approval-live-gptoss-t331-20260520-r2,local/manual-workspaces/synchronized-approval-live-gptoss-t331-20260520-r2" --no-daemon
+BUILD SUCCESSFUL
+Artifact canary scan passed.
+```
+
+This closes the synchronized live-bank evidence gap for T295. T295 remains open only for the true terminal/JLine transcript gate and maintainer review of the candidate evidence packet. The current Codex/shell execution path is redirected process execution, not a real interactive terminal, so it must not be described as completed PTY/JLine coverage.
+
 ## Rollback / migration notes
 
 If any artifact leak appears, keep the relevant extractor disabled and revert that format to honest unsupported behavior.

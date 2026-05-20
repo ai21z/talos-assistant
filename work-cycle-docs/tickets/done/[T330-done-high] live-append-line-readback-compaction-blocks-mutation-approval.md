@@ -1,6 +1,6 @@
 # T330 - Live Append-Line Readback Compaction Blocks Mutation Approval
 
-Status: open
+Status: done
 Severity: high
 Release gate: no for T295; yes for full synchronized live-audit pass
 Branch: v0.9.0-beta-dev
@@ -110,6 +110,71 @@ Prefer one of these:
 3. Avoid compacting the same-turn readback when the current task is an exact append/full-write preservation task and the file is below the normal small-file threshold.
 
 Do not weaken the preapproval preservation check. The rejection before approval is the part that worked.
+
+## Implementation update - 2026-05-20
+
+Implemented a deterministic compact repair path for append-line preapproval failures:
+
+- `ToolCallLoop.ToolOutcome.appendLinePreservationFailure()` now classifies the specific preapproval rejection produced by `APPEND_LINE_WRITE_PRESERVATION`.
+- `ToolCallRepromptStage` now detects a failed append-line full-write for a remaining expected mutation target, retrieves the complete same-turn readback from runtime state, and sends a compact `[AppendLineRepair]` frame instead of the oversized full-history continuation.
+- The compact repair frame includes only:
+  - current user request
+  - exact target path
+  - exact required appended line
+  - latest successful same-turn readback
+  - write/edit-only tool surface
+- `PendingActionObligation` now has `APPEND_LINE_TARGET_REPAIR`, so if the model responds to the compact repair with prose or the wrong target/tool, Talos stops deterministically instead of drifting back into read-only loops.
+- Sensitive readback paths are not injected into the compact append-line repair frame.
+
+Focused test evidence:
+
+```text
+.\gradlew.bat test --tests "dev.talos.runtime.ToolCallLoopTest.appendLinePreapprovalFailureUsesCompactRepairWithReadbackBeforeApproval" --no-daemon
+BUILD SUCCESSFUL
+
+.\gradlew.bat test --tests "dev.talos.runtime.ToolCallLoopTest" --no-daemon
+BUILD SUCCESSFUL
+
+.\gradlew.bat test --tests "dev.talos.runtime.expectation.TaskExpectationResolverTest" --tests "dev.talos.runtime.verification.StaticTaskVerifierTest" --no-daemon
+BUILD SUCCESSFUL
+```
+
+Close criteria:
+
+- Fresh true-live synchronized approval bank must show `mutation-append-line-verified` reaches exactly one approval prompt and writes `Release gate note`.
+- If the live bank fails later, create a new ticket for the next blocker rather than reopening this root cause unless the append-line scenario regresses.
+
+## Live evidence update - 2026-05-20
+
+Fresh GPT-OSS live synchronized approval bank:
+
+```text
+.\gradlew.bat runSynchronizedApprovalAudit "-PapprovalAuditMode=live" "-PapprovalAuditConfig=$env:USERPROFILE\.talos\config.yaml" "-PapprovalAuditArtifactsRoot=local/manual-testing/synchronized-approval-live-gptoss-t330-20260520-r1" "-PapprovalAuditWorkspacesRoot=local/manual-workspaces/synchronized-approval-live-gptoss-t330-20260520-r1" --no-daemon
+```
+
+The broader bank failed later at `static-web-selector-script-only-verified`, but `mutation-append-line-verified` passed before that failure.
+
+Append-line bundle:
+
+```text
+local/manual-testing/synchronized-approval-live-gptoss-t330-20260520-r1/mutation-append-line-verified/AUDIT-BUNDLE.md
+```
+
+Evidence:
+
+```text
+Approvals observed: 1
+TOOL_CALL_PARSED talos.read_file {pathHint=README.md}
+TOOL_EXECUTED talos.read_file {pathHint=README.md, success=true}
+TOOL_CALL_PARSED talos.write_file {pathHint=README.md}
+PERMISSION_DECISION talos.write_file {action=ASK, pathHint=README.md}
+APPROVAL_GRANTED talos.write_file {pathHint=README.md}
+TOOL_EXECUTED talos.write_file {pathHint=README.md, success=true}
+EXPECTATION_VERIFIED {status=PASSED, kind=APPEND_LINE, pathHint=README.md}
+OUTCOME_RENDERED {status=COMPLETE, classification=COMPLETED_VERIFIED}
+```
+
+This closes T330. The later full-live-bank failure is tracked separately as T331.
 
 ## Regression test
 

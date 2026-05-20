@@ -10,7 +10,9 @@ public record PendingActionObligation(Kind kind, List<String> targets, String fa
     public enum Kind {
         EXPECTED_TARGETS_REMAINING("expected target progress"),
         STATIC_REPAIR_TARGETS_REMAINING("static repair progress"),
-        OLD_STRING_MISS_TARGET_REPAIR("old-string miss repair");
+        OLD_STRING_MISS_TARGET_REPAIR("old-string miss repair"),
+        APPEND_LINE_TARGET_REPAIR("append-line repair"),
+        EXPECTED_TARGET_SCOPE_REPAIR("expected-target scope repair");
 
         private final String label;
 
@@ -50,6 +52,14 @@ public record PendingActionObligation(Kind kind, List<String> targets, String fa
 
     public static PendingActionObligation oldStringMissTargets(List<String> targets) {
         return new PendingActionObligation(Kind.OLD_STRING_MISS_TARGET_REPAIR, targets);
+    }
+
+    public static PendingActionObligation appendLineTargets(List<String> targets) {
+        return new PendingActionObligation(Kind.APPEND_LINE_TARGET_REPAIR, targets);
+    }
+
+    public static PendingActionObligation expectedTargetScopeTargets(List<String> targets) {
+        return new PendingActionObligation(Kind.EXPECTED_TARGET_SCOPE_REPAIR, targets);
     }
 
     public String failureReason() {

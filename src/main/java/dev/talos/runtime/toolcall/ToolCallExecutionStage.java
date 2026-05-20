@@ -755,6 +755,9 @@ public final class ToolCallExecutionStage {
             boolean isEditFile
     ) {
         if (effective == null || !ToolCallSupport.isMutatingTool(effective.toolName())) return false;
+        if (isExpectedTargetScopeBlock(result)) {
+            return false;
+        }
         if (isEditFile
                 && isOldStringNotFound(result)
                 && wasPathReadThisTurn(state, pathHint)
