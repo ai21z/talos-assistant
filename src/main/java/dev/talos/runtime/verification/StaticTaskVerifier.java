@@ -119,11 +119,11 @@ public final class StaticTaskVerifier {
     private static final Set<String> SOURCE_DERIVED_STOP_WORDS = Set.of(
             "about", "after", "also", "avoid", "before", "bullet", "bullets",
             "called", "clear", "concise", "content", "contents", "create",
-            "document", "file", "from", "into", "keep", "line", "long",
-            "mention", "notes", "point", "points", "private", "read",
-            "secret", "secrets", "short", "source", "summarize", "summary",
-            "target", "text", "that", "their", "them", "this", "under",
-            "with", "write");
+            "depend", "depends", "document", "file", "from", "into", "keep",
+            "line", "long", "mention", "notes", "point", "points", "private",
+            "read", "record", "records", "says", "secret", "secrets", "short",
+            "source", "summarize", "summary", "target", "text", "that", "their",
+            "them", "this", "under", "with", "write");
 
     public static TaskVerificationResult verify(
             Path workspace,
@@ -392,23 +392,25 @@ public final class StaticTaskVerifier {
             return true;
         }
 
-        String sourceText = readSourceEvidence(root, contract.sourceEvidenceTargets(), problems);
-        if (sourceText.isBlank()) {
+        List<SourceEvidence> sourceEvidence = readSourceEvidence(root, contract.sourceEvidenceTargets(), problems);
+        if (sourceEvidence.isEmpty()) {
             return true;
         }
 
         Set<String> requestTerms = distinctiveTerms(request);
-        Set<String> sourceTerms = distinctiveTerms(sourceText);
-        sourceTerms.removeAll(requestTerms);
         Set<String> targetTerms = distinctiveTerms(targetContent);
-        long overlap = sourceTerms.stream().filter(targetTerms::contains).count();
         int problemsBeforeDerivedChecks = problems.size();
 
         if (looksLikeInstructionEcho(targetContent, request, contract.sourceEvidenceTargets())) {
             problems.add(targetPath + ": target content appears to repeat the request instead of summarizing source evidence.");
         }
-        if (!sourceTerms.isEmpty() && overlap == 0) {
-            problems.add(targetPath + ": source-derived summary does not contain distinctive source facts.");
+        for (SourceEvidence source : sourceEvidence) {
+            Set<String> sourceTerms = distinctiveTerms(source.content());
+            sourceTerms.removeAll(requestTerms);
+            if (!sourceTerms.isEmpty() && sourceTerms.stream().noneMatch(targetTerms::contains)) {
+                problems.add(source.path()
+                        + ": source-derived summary does not include distinctive evidence from this readable source.");
+            }
         }
         if (bulletLimitRequested(request) && bulletLineCount(targetContent) > 8) {
             problems.add(targetPath + ": source-derived summary exceeds the requested bullet limit.");
@@ -419,6 +421,8 @@ public final class StaticTaskVerifier {
         }
         return true;
     }
+
+    private record SourceEvidence(String path, String content) {}
 
     private static String firstPath(Collection<String> paths) {
         if (paths == null || paths.isEmpty()) return "";
@@ -437,8 +441,12 @@ public final class StaticTaskVerifier {
         }
     }
 
-    private static String readSourceEvidence(Path root, Collection<String> sourceTargets, List<String> problems) {
-        StringBuilder out = new StringBuilder();
+    private static List<SourceEvidence> readSourceEvidence(
+            Path root,
+            Collection<String> sourceTargets,
+            List<String> problems
+    ) {
+        List<SourceEvidence> out = new ArrayList<>();
         for (String sourceTarget : sourceTargets) {
             if (sourceTarget == null || sourceTarget.isBlank()) continue;
             String normalized = normalizePath(sourceTarget);
@@ -448,13 +456,13 @@ public final class StaticTaskVerifier {
                 continue;
             }
             try {
-                out.append('\n').append(Files.readString(source));
+                out.add(new SourceEvidence(normalized, Files.readString(source)));
             } catch (Exception e) {
                 problems.add(normalized + ": source evidence file could not be read for derived artifact verification ("
                         + e.getMessage() + ")");
             }
         }
-        return out.toString();
+        return out;
     }
 
     private static boolean looksLikeInstructionEcho(

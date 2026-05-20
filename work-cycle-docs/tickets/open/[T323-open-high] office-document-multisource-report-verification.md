@@ -18,7 +18,7 @@ Static audit found:
 
 - source-derived verifier reads source evidence as text, not through document extraction;
 - source-to-target parsing can capture one source where the user requests multiple sources;
-- source-derived verification can pass aggregate overlap even if a generated report omits one or more sources.
+- source-derived verification could pass aggregate overlap even if a generated report omitted one or more sources. The text-only verifier now checks each readable text source independently, but this ticket remains open because document-aware PDF/DOCX/XLS/XLSX source verification is not implemented.
 
 Exploratory live office case passed only weak text/CSV assertions:
 
@@ -63,5 +63,5 @@ Implementation order:
 
 1. Extend source-to-target artifact parsing to collect multiple source files.
 2. Make source-derived verification document-aware through `DocumentExtractionService` or the same capability parser path as `read_file`.
-3. Change source-derived verification from aggregate overlap to per-source coverage.
+3. Change source-derived verification from aggregate overlap to per-source coverage. This is implemented for readable text sources by the T307 slice; it still needs document-aware extraction coverage for this ticket.
 4. Add private-mode artifact scan tests for document-source reports.
