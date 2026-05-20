@@ -83,3 +83,41 @@ Evidence:
 ```
 
 The focused regression confirms explicit no-workspace/general prompts avoid workspace manifest injection.
+
+## Follow-up Variant Closure - 2026-05-20
+
+Prompt-debug comparison audit `prompt-debug-comparison-20260520-r1` found one stale phrasing gap:
+
+```text
+Without inspecting or using this workspace, explain what entropy means in thermodynamics in two short paragraphs.
+```
+
+At commit `0967ba46`, that wording still classified as `DIAGNOSE_ONLY`, exposed workspace tools, and called `talos.list_dir`. The root cause was narrow no-workspace phrase matching: `TaskContractResolver` and `ConversationBoundaryPolicy` recognized several "do not inspect workspace" forms, but not the compound "inspect or use workspace" form.
+
+Additional fix:
+
+```text
+src/main/java/dev/talos/runtime/task/TaskContractResolver.java
+src/main/java/dev/talos/runtime/policy/ConversationBoundaryPolicy.java
+src/test/java/dev/talos/runtime/task/TaskContractResolverTest.java
+src/test/java/dev/talos/runtime/policy/ConversationBoundaryPolicyTest.java
+src/test/java/dev/talos/cli/modes/UnifiedAssistantModeTest.java
+```
+
+Fresh evidence:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.runtime.task.TaskContractResolverTest.privacyNegatedChatPromptsSuppressWorkspaceInspectionIntent" --no-daemon
+.\gradlew.bat test --tests "dev.talos.cli.modes.UnifiedAssistantModeTest.explicitNoWorkspaceOrUsingWorkspacePromptDoesNotExposeTools" --no-daemon
+.\gradlew.bat test --tests "dev.talos.runtime.task.TaskContractResolverTest" --tests "dev.talos.runtime.policy.ConversationBoundaryPolicyTest" --tests "dev.talos.cli.modes.UnifiedAssistantModeTest" --no-daemon
+```
+
+Installed-product smoke evidence:
+
+```text
+Audit id: prompt-debug-no-workspace-fix-20260520-r1
+Transcript: local/manual-testing/prompt-debug-no-workspace-fix-20260520-r1/artifacts/TRANSCRIPT.txt
+Result: contract SMALL_TALK, nativeTools none, promptTools none, no tool calls.
+```
+
+This follow-up is deterministic plus redirected-stdin smoke evidence. It is not approval-sensitive, so true ConPTY/JLine evidence is not required for this specific invariant.

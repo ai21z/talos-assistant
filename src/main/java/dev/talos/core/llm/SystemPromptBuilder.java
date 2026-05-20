@@ -7,6 +7,7 @@ import dev.talos.tools.ToolRegistry;
 import java.io.InputStream;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Composable builder for system prompts.
@@ -49,6 +50,7 @@ public final class SystemPromptBuilder {
     private boolean readOnlyToolMode;
     private boolean commandToolMode;
     private boolean directoryListingToolMode;
+    private Set<String> visibleToolNames;
     private java.nio.file.Path workspace;
 
     /** The prompt modes. */
@@ -118,6 +120,21 @@ public final class SystemPromptBuilder {
         if (directoryListingToolMode) {
             this.readOnlyToolMode = true;
         }
+        return this;
+    }
+
+    /**
+     * Restrict the textual tool section to the exact per-turn tool surface.
+     *
+     * <p>The provider API receives native tool specs separately, but the system
+     * prompt also contains human-readable tool guidance. Keeping both surfaces
+     * aligned prevents hidden or disallowed tools from being described in prompt
+     * text after policy narrowing has removed them from the native tool array.
+     */
+    public SystemPromptBuilder withVisibleToolNames(List<String> visibleToolNames) {
+        this.visibleToolNames = visibleToolNames == null
+                ? null
+                : Set.copyOf(visibleToolNames);
         return this;
     }
 
@@ -226,10 +243,11 @@ public final class SystemPromptBuilder {
     /** Build the dynamic (tool + conversation) sections. */
     private String buildDynamicSections() {
         var sb = new StringBuilder();
+        boolean visibleCommandTool = commandToolVisible();
 
         if (directoryListingToolMode) {
             sb.append(DEFAULT_DIRECTORY_LISTING_TASK_CONTRACT);
-        } else if (readOnlyToolMode && commandToolMode) {
+        } else if (readOnlyToolMode && visibleCommandTool) {
             sb.append(DEFAULT_VERIFICATION_TASK_CONTRACT);
         } else if (readOnlyToolMode) {
             sb.append(DEFAULT_READ_ONLY_TASK_CONTRACT);
@@ -265,6 +283,11 @@ public final class SystemPromptBuilder {
         }
 
         List<ToolDescriptor> descriptors = toolRegistry.descriptors();
+        if (visibleToolNames != null) {
+            descriptors = descriptors.stream()
+                    .filter(td -> visibleToolNames.contains(td.name()))
+                    .toList();
+        }
         if (directoryListingToolMode) {
             descriptors = descriptors.stream()
                     .filter(td -> "talos.list_dir".equals(td.name()))
@@ -284,13 +307,14 @@ public final class SystemPromptBuilder {
         // Choose preamble based on native tool support:
         // - Native: shorter preamble without format instructions (API handles format)
         // - Fallback: full preamble with JSON code-fenced format instructions
+        boolean visibleCommandTool = commandToolVisible();
         if (directoryListingToolMode && nativeTools) {
             sb.append(DEFAULT_DIRECTORY_LISTING_TOOLS_PREAMBLE_NATIVE);
         } else if (directoryListingToolMode) {
             sb.append(DEFAULT_DIRECTORY_LISTING_TOOLS_PREAMBLE);
-        } else if (readOnlyToolMode && commandToolMode && nativeTools) {
+        } else if (readOnlyToolMode && visibleCommandTool && nativeTools) {
             sb.append(DEFAULT_VERIFICATION_TOOLS_PREAMBLE_NATIVE);
-        } else if (readOnlyToolMode && commandToolMode) {
+        } else if (readOnlyToolMode && visibleCommandTool) {
             sb.append(DEFAULT_VERIFICATION_TOOLS_PREAMBLE);
         } else if (readOnlyToolMode && nativeTools) {
             sb.append(DEFAULT_READ_ONLY_TOOLS_PREAMBLE_NATIVE);
@@ -324,6 +348,11 @@ public final class SystemPromptBuilder {
         }
 
         return sb.toString();
+    }
+
+    private boolean commandToolVisible() {
+        return commandToolMode
+                && (visibleToolNames == null || visibleToolNames.contains("talos.run_command"));
     }
 
     /** Minimal fallback prompt when no resource files exist. */

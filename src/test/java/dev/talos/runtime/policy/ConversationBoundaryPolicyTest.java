@@ -46,7 +46,8 @@ class ConversationBoundaryPolicyTest {
                 "Do not read files, just answer normally.",
                 "No workspace access please, even though README.md exists.",
                 "please do not read my files",
-                "without checking files, say hi")) {
+                "without checking files, say hi",
+                "Without inspecting or using this workspace, explain entropy in thermodynamics.")) {
             assertEquals(PRIVACY_NO_WORKSPACE, ConversationBoundaryPolicy.classification(input), input);
             assertTrue(ConversationBoundaryPolicy.isDirectAnswerOnly(input), input);
         }

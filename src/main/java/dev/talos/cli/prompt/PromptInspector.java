@@ -46,6 +46,7 @@ public final class PromptInspector {
         boolean directoryListing = "unified".equals(resolvedMode)
                 && contract.type() == TaskType.DIRECTORY_LISTING;
         ExecutionPhase initialPhase = CurrentTurnPlan.defaultPhaseFor(contract);
+        List<String> effectiveTools = effectiveToolNames(resolvedMode, contract, ctx);
 
         SystemPromptBuilder builder = builderFor(resolvedMode)
                 .withNativeTools(nativeTools)
@@ -55,6 +56,7 @@ public final class PromptInspector {
             if (!smallTalk) {
                 builder
                         .withTools(ctx == null ? null : ctx.toolRegistry())
+                        .withVisibleToolNames(effectiveTools)
                         .withWorkspace(workspace)
                         .withReadOnlyToolMode(!contract.mutationAllowed())
                         .withCommandToolMode(initialPhase == ExecutionPhase.VERIFY);
@@ -75,7 +77,6 @@ public final class PromptInspector {
         }
 
         List<String> registryTools = registryToolNames(ctx);
-        List<String> effectiveTools = effectiveToolNames(resolvedMode, contract, ctx);
 
         return new PromptRender(
                 mode,
