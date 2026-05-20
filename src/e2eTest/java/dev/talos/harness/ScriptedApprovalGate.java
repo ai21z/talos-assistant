@@ -18,15 +18,25 @@ import java.util.Locale;
  */
 public final class ScriptedApprovalGate implements ApprovalGate {
 
-    public record Step(String descriptionContains, String detailContains, ApprovalResponse response, boolean optional) {
+    public record Step(
+            String descriptionContains,
+            String detailContains,
+            ApprovalResponse response,
+            boolean optional,
+            boolean repeatable
+    ) {
         public Step {
             descriptionContains = normalize(descriptionContains);
             detailContains = normalize(detailContains);
             response = response == null ? ApprovalResponse.DENIED : response;
         }
 
+        public Step(String descriptionContains, String detailContains, ApprovalResponse response, boolean optional) {
+            this(descriptionContains, detailContains, response, optional, false);
+        }
+
         public Step(String descriptionContains, String detailContains, ApprovalResponse response) {
-            this(descriptionContains, detailContains, response, false);
+            this(descriptionContains, detailContains, response, false, false);
         }
 
         public static Step approve(String descriptionContains, String detailContains) {
@@ -43,6 +53,10 @@ public final class ScriptedApprovalGate implements ApprovalGate {
 
         public static Step optionalDeny(String descriptionContains, String detailContains) {
             return new Step(descriptionContains, detailContains, ApprovalResponse.DENIED, true);
+        }
+
+        public static Step repeatableOptionalDeny(String descriptionContains, String detailContains) {
+            return new Step(descriptionContains, detailContains, ApprovalResponse.DENIED, true, true);
         }
 
         public static Step remember(String descriptionContains, String detailContains) {
@@ -123,7 +137,9 @@ public final class ScriptedApprovalGate implements ApprovalGate {
             Step expected = steps.get(cursor);
             if (contains(description, expected.descriptionContains())
                     && contains(detail, expected.detailContains())) {
-                cursor++;
+                if (!expected.repeatable()) {
+                    cursor++;
+                }
                 return expected;
             }
             if (expected.optional()) {

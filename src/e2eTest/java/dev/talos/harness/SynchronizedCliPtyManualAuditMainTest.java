@@ -38,6 +38,7 @@ class SynchronizedCliPtyManualAuditMainTest {
         assertTrue(Files.isRegularFile(transcript), transcript.toString());
         assertTrue(Files.isRegularFile(resultTemplate), resultTemplate.toString());
         assertTrue(Files.isRegularFile(workspace.resolve(".env")), "fixture .env should exist");
+        assertTrue(Files.isRegularFile(workspace.resolve("medical-notes.docx")), "fixture DOCX should exist");
 
         String runbookText = Files.readString(runbook);
         assertTrue(runbookText.contains("Status: MANUAL_REQUIRED"), runbookText);
@@ -45,11 +46,20 @@ class SynchronizedCliPtyManualAuditMainTest {
         assertTrue(runbookText.contains("Do not run this through Gradle redirected stdin"), runbookText);
         assertTrue(runbookText.contains("talos run --no-logo --root"), runbookText);
         assertTrue(runbookText.contains("/show README.md"), runbookText);
+        assertTrue(runbookText.contains("/privacy private on"), runbookText);
+        assertTrue(runbookText.contains("Read medical-notes.docx and tell me whether it contains a patient name."),
+                runbookText);
+        assertTrue(runbookText.contains("private document model handoff"), runbookText);
+        assertTrue(runbookText.contains("approval-denial turn"), runbookText);
+        assertTrue(runbookText.contains("per-turn approval turn"), runbookText);
         assertTrue(runbookText.contains("answer pane"), runbookText);
         assertTrue(runbookText.contains("approval trust window"), runbookText);
         assertTrue(runbookText.contains("route/progress line"), runbookText);
         assertTrue(runbookText.contains("/last trace"), runbookText);
         assertTrue(runbookText.contains("/prompt-debug save"), runbookText);
+        assertTrue(runbookText.contains("Save the terminal transcript into"), runbookText);
+        assertTrue(runbookText.contains(artifacts.resolve("TRANSCRIPT.md").toAbsolutePath().normalize().toString()),
+                runbookText);
         assertTrue(runbookText.contains("-PartifactScanAllowlist=" + workspace.resolve(".env").toAbsolutePath().normalize()),
                 runbookText);
         assertFalse(runbookText.contains("-PartifactScanAllowlist=" + allowlist.toAbsolutePath().normalize()),
@@ -66,12 +76,22 @@ class SynchronizedCliPtyManualAuditMainTest {
         assertTrue(templateText.contains("Answer pane rendered cleanly"), templateText);
         assertTrue(templateText.contains("Approval trust window rendered cleanly"), templateText);
         assertTrue(templateText.contains("Route/progress line rendered cleanly"), templateText);
+        assertTrue(templateText.contains("Private-document denial prompt visible before response"), templateText);
+        assertTrue(templateText.contains("Private-document approval prompt visible before response"), templateText);
+        assertTrue(templateText.contains("Private-document approval recorded in trace"), templateText);
 
         String resultTemplateText = Files.readString(resultTemplate);
         assertTrue(resultTemplateText.contains("\"status\" : \"NOT_RUN\""), resultTemplateText);
         assertTrue(resultTemplateText.contains("\"realInteractiveTerminal\" : false"), resultTemplateText);
         assertTrue(resultTemplateText.contains("\"redirectedOrIdePipe\" : true"), resultTemplateText);
+        assertTrue(resultTemplateText.contains("\"privateDocumentDenyPromptVisibleBeforeResponse\" : false"),
+                resultTemplateText);
+        assertTrue(resultTemplateText.contains("\"privateDocumentApprovePromptVisibleBeforeResponse\" : false"),
+                resultTemplateText);
+        assertTrue(resultTemplateText.contains("\"privateDocumentApprovalRecordedInTrace\" : false"),
+                resultTemplateText);
         assertFalse(resultTemplateText.contains("FILE_DISCOVERED_CANARY_PTY_MANUAL"), resultTemplateText);
+        assertFalse(resultTemplateText.contains("Eleni Nikolaou"), resultTemplateText);
 
         List<Path> allowlisted = List.of(Path.of(Files.readString(allowlist).strip()));
         assertTrue(ArtifactCanaryScanner.scanRuntimeArtifacts(List.of(artifacts), List.of()).isEmpty());

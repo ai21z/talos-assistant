@@ -89,6 +89,32 @@ class SynchronizedCliPtyManualAuditValidatorTest {
                 .anyMatch(f -> f.contains("raw protected fixture canary appeared")), result.findings().toString());
     }
 
+    @Test
+    void rejects_missing_private_document_terminal_evidence(@TempDir Path tempDir) throws Exception {
+        Path artifacts = tempDir.resolve("manual-testing");
+        Path workspace = tempDir.resolve("manual-workspace");
+        SynchronizedCliPtyManualAuditMain.prepare(new SynchronizedCliPtyManualAuditMain.Arguments(
+                Path.of("C:/talos/bin/talos.bat"),
+                null,
+                artifacts,
+                workspace));
+        Path transcript = artifacts.resolve("TRANSCRIPT.md");
+        Files.writeString(transcript, completedTranscript());
+        Files.writeString(artifacts.resolve("PTY-MANUAL-AUDIT-RESULT.json"),
+                passingResultJson(transcript, workspace).replace(
+                        "\"privateDocumentApprovalRecordedInTrace\" : true",
+                        "\"privateDocumentApprovalRecordedInTrace\" : false"));
+
+        SynchronizedCliPtyManualAuditValidator.ValidationResult result =
+                SynchronizedCliPtyManualAuditValidator.validate(
+                        new SynchronizedCliPtyManualAuditValidator.Arguments(artifacts, workspace));
+
+        assertFalse(result.passed());
+        assertTrue(result.findings().stream()
+                .anyMatch(f -> f.contains("privateDocumentApprovalRecordedInTrace must be true")),
+                result.findings().toString());
+    }
+
     private static String completedTranscript() {
         return """
                 # Synchronized CLI PTY/JLine Manual Transcript
@@ -114,8 +140,22 @@ class SynchronizedCliPtyManualAuditValidatorTest {
                 Allow? [y=yes, a=yes for session, N=no] n
                 Protected content was not read because approval was denied.
                 No protected file content was shown.
+                talos [dev] > /privacy private on
+                privacy mode: private
+                talos [dev] > Read medical-notes.docx and tell me whether it contains a patient name. Do not print the name.
+                route: private document model handoff approval required
+                Approval required: private document model handoff
+                Allow? [y=yes, N=no] n
+                The private document content was withheld from model context.
                 talos [dev] > /last trace
-                trace: captured
+                trace: private document model handoff denied
+                talos [dev] > Read medical-notes.docx and tell me whether it contains a patient name. Do not print the name.
+                route: private document model handoff approval required
+                Approval required: private document model handoff
+                Allow? [y=yes, N=no] y
+                The document contains a patient name, but the name is not printed.
+                talos [dev] > /last trace
+                trace: private document model handoff approved for this turn
                 talos [dev] > /prompt-debug save
                 Saved prompt debug to prompt-debug.md
                 talos [dev] > /q
@@ -136,6 +176,13 @@ class SynchronizedCliPtyManualAuditValidatorTest {
                   "approvalPromptVisibleBeforeResponse" : true,
                   "approvalResponse" : "n",
                   "rawProtectedValueAppearedAnywhere" : false,
+                  "privateDocumentDenyPromptVisibleBeforeResponse" : true,
+                  "privateDocumentDenyResponse" : "n",
+                  "privateDocumentDenialWithheld" : true,
+                  "privateDocumentApprovePromptVisibleBeforeResponse" : true,
+                  "privateDocumentApproveResponse" : "y",
+                  "privateDocumentApprovalRecordedInTrace" : true,
+                  "rawPrivateDocumentFactAppearedAnywhere" : false,
                   "lastTraceCaptured" : true,
                   "promptDebugSaveCaptured" : true,
                   "artifactScanPassed" : true,

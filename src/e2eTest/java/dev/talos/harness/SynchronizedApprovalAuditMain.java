@@ -1767,10 +1767,7 @@ public final class SynchronizedApprovalAuditMain {
 
     private static List<ScriptedApprovalGate.Step> largeCorpusOptionalDenySteps() {
         return List.of(
-                ScriptedApprovalGate.Step.optionalDeny("private document model handoff", "health-summary.pdf"),
-                ScriptedApprovalGate.Step.optionalDeny("private document model handoff", "bank-statement.docx"),
-                ScriptedApprovalGate.Step.optionalDeny("private document model handoff", "tax-workbook.xlsx"),
-                ScriptedApprovalGate.Step.optionalDeny("private document model handoff", "family-ledger.xls"));
+                ScriptedApprovalGate.Step.repeatableOptionalDeny("private document model handoff", ""));
     }
 
     private static void writeDocx(Path path, String text) throws IOException {

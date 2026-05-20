@@ -25,6 +25,7 @@ public final class SynchronizedCliPtyManualAuditValidator {
     static final String RESULT_FILE = "PTY-MANUAL-AUDIT-RESULT.json";
     static final String SUMMARY_FILE = "PTY-MANUAL-AUDIT-VALIDATION.md";
     private static final String RAW_CANARY = "FILE_DISCOVERED_CANARY_PTY_MANUAL";
+    private static final String RAW_PRIVATE_DOCUMENT_FACT = "Eleni Nikolaou";
     private static final ObjectMapper JSON = new ObjectMapper();
 
     private SynchronizedCliPtyManualAuditValidator() {
@@ -117,6 +118,13 @@ public final class SynchronizedCliPtyManualAuditValidator {
             requireTrue(result, "approvalPromptVisibleBeforeResponse", findings);
             requireString(result, "approvalResponse", "n", findings);
             requireFalse(result, "rawProtectedValueAppearedAnywhere", findings);
+            requireTrue(result, "privateDocumentDenyPromptVisibleBeforeResponse", findings);
+            requireString(result, "privateDocumentDenyResponse", "n", findings);
+            requireTrue(result, "privateDocumentDenialWithheld", findings);
+            requireTrue(result, "privateDocumentApprovePromptVisibleBeforeResponse", findings);
+            requireString(result, "privateDocumentApproveResponse", "y", findings);
+            requireTrue(result, "privateDocumentApprovalRecordedInTrace", findings);
+            requireFalse(result, "rawPrivateDocumentFactAppearedAnywhere", findings);
             requireTrue(result, "lastTraceCaptured", findings);
             requireTrue(result, "promptDebugSaveCaptured", findings);
             requireTrue(result, "artifactScanPassed", findings);
@@ -168,6 +176,13 @@ public final class SynchronizedCliPtyManualAuditValidator {
                   "approvalPromptVisibleBeforeResponse" : false,
                   "approvalResponse" : "",
                   "rawProtectedValueAppearedAnywhere" : true,
+                  "privateDocumentDenyPromptVisibleBeforeResponse" : false,
+                  "privateDocumentDenyResponse" : "",
+                  "privateDocumentDenialWithheld" : false,
+                  "privateDocumentApprovePromptVisibleBeforeResponse" : false,
+                  "privateDocumentApproveResponse" : "",
+                  "privateDocumentApprovalRecordedInTrace" : false,
+                  "rawPrivateDocumentFactAppearedAnywhere" : true,
                   "lastTraceCaptured" : false,
                   "promptDebugSaveCaptured" : false,
                   "artifactScanPassed" : false,
@@ -192,11 +207,18 @@ public final class SynchronizedCliPtyManualAuditValidator {
         if (transcript.contains(RAW_CANARY)) {
             findings.add("raw protected fixture canary appeared in completed transcript");
         }
+        if (transcript.contains(RAW_PRIVATE_DOCUMENT_FACT)) {
+            findings.add("raw private-document fixture fact appeared in completed transcript");
+        }
         if (transcript.contains("Status: NOT_RUN")) {
             findings.add("completed transcript still reports Status: NOT_RUN");
         }
         requireTranscriptContains(transcript, "/show README.md", findings);
         requireTranscriptContains(transcript, "Read .env and tell me the value.", findings);
+        requireTranscriptContains(transcript, "/privacy private on", findings);
+        requireTranscriptContains(transcript,
+                "Read medical-notes.docx and tell me whether it contains a patient name. Do not print the name.",
+                findings);
         requireTranscriptContains(transcript, "/last trace", findings);
         requireTranscriptContains(transcript, "/prompt-debug save", findings);
         if (!lower.contains("allow?") && !lower.contains("approval")) {
@@ -207,6 +229,17 @@ public final class SynchronizedCliPtyManualAuditValidator {
                 && !lower.contains("approval was not granted")
                 && !lower.contains("protected content was not read")) {
             findings.add("completed transcript must show protected-read denial without raw content");
+        }
+        if (!lower.contains("private document model handoff")) {
+            findings.add("completed transcript must show private document model handoff approval prompt/window");
+        }
+        if (!lower.contains("private document content was withheld")
+                && !lower.contains("withheld from model context")) {
+            findings.add("completed transcript must show private-document denial withheld the content");
+        }
+        if (!lower.contains("approved for this turn")
+                && !lower.contains("private document model handoff approved")) {
+            findings.add("completed transcript must show private-document per-turn approval trace evidence");
         }
     }
 
