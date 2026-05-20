@@ -127,6 +127,131 @@ if (tabs.length) {
   setTerminalState("inspect");
 }
 
+const sectionNavLinks = Array.from(document.querySelectorAll("[data-section-nav]"));
+const storySections = Array.from(document.querySelectorAll(".story-section[id]"));
+const sectionIds = new Set(storySections.map((section) => section.id));
+const storyMotionQuery = window.matchMedia("(min-width: 761px) and (prefers-reduced-motion: no-preference)");
+let activeSectionFrame = 0;
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function smoothStep(value) {
+  const t = clamp(value, 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
+function resetStorySectionBlend() {
+  storySections.forEach((section) => {
+    section.style.removeProperty("--story-opacity");
+    section.style.removeProperty("--story-shift");
+    section.style.removeProperty("--story-scale");
+    section.style.removeProperty("--story-saturation");
+  });
+}
+
+function syncStorySectionBlend() {
+  if (!storyMotionQuery.matches) {
+    resetStorySectionBlend();
+    return;
+  }
+
+  const viewportHeight = window.innerHeight || 1;
+  const fadeInStart = viewportHeight * 1.02;
+  const fadeInEnd = viewportHeight * 0.72;
+  const outgoingStart = viewportHeight * 0.92;
+  const outgoingEnd = viewportHeight * 0.76;
+  const sectionRects = storySections.map((section) => {
+    const primaryContent = section.querySelector(".container > *");
+    return {
+      contentTop: primaryContent?.getBoundingClientRect().top ?? section.getBoundingClientRect().top,
+    };
+  });
+
+  storySections.forEach((section, index) => {
+    const rect = sectionRects[index];
+    const nextRect = sectionRects[index + 1];
+    const incoming = smoothStep((fadeInStart - rect.contentTop) / (fadeInStart - fadeInEnd));
+    const outgoing = nextRect
+      ? smoothStep((outgoingStart - nextRect.contentTop) / (outgoingStart - outgoingEnd))
+      : 0;
+    const opacity = incoming * (1 - outgoing);
+    const shift = (1 - incoming) * 34 - outgoing * 24;
+    const scale = 0.992 + incoming * 0.008 - outgoing * 0.004;
+    const saturation = 0.82 + incoming * 0.18 - outgoing * 0.1;
+
+    section.style.setProperty("--story-opacity", opacity.toFixed(3));
+    section.style.setProperty("--story-shift", `${shift.toFixed(1)}px`);
+    section.style.setProperty("--story-scale", scale.toFixed(3));
+    section.style.setProperty("--story-saturation", saturation.toFixed(3));
+  });
+}
+
+function setActiveSection(sectionId) {
+  if (!sectionIds.has(sectionId)) return;
+
+  document.body.dataset.activeSection = sectionId;
+  sectionNavLinks.forEach((link) => {
+    const isActive = link.getAttribute("href") === `#${sectionId}`;
+    if (isActive) {
+      link.setAttribute("aria-current", "page");
+    } else {
+      link.removeAttribute("aria-current");
+    }
+  });
+  storySections.forEach((section) => {
+    section.classList.toggle("story-section--active", section.id === sectionId);
+  });
+}
+
+if (storySections.length) {
+  const initialSection = sectionIds.has(window.location.hash.slice(1))
+    ? window.location.hash.slice(1)
+    : storySections[0].id;
+  setActiveSection(initialSection);
+
+  sectionNavLinks.forEach((link) => {
+    link.addEventListener("click", () => {
+      const targetId = link.getAttribute("href")?.slice(1);
+      setActiveSection(targetId);
+    });
+  });
+
+  const syncActiveSectionFromScroll = () => {
+    activeSectionFrame = 0;
+    syncStorySectionBlend();
+    const readingLine = window.scrollY + window.innerHeight * 0.55;
+    const activeSection = storySections.reduce((current, section) => {
+      return section.offsetTop <= readingLine ? section : current;
+    }, storySections[0]);
+    setActiveSection(activeSection.id);
+  };
+
+  const scheduleActiveSectionSync = () => {
+    if (activeSectionFrame) return;
+    activeSectionFrame = window.requestAnimationFrame(syncActiveSectionFromScroll);
+  };
+
+  window.addEventListener("scroll", scheduleActiveSectionSync, { passive: true });
+  window.addEventListener("resize", scheduleActiveSectionSync);
+  storyMotionQuery.addEventListener("change", scheduleActiveSectionSync);
+  window.addEventListener("hashchange", () => {
+    const targetId = window.location.hash.slice(1);
+    if (sectionIds.has(targetId)) {
+      setActiveSection(targetId);
+    } else {
+      scheduleActiveSectionSync();
+    }
+  });
+
+  if (document.readyState === "complete") {
+    syncActiveSectionFromScroll();
+  } else {
+    window.addEventListener("load", syncActiveSectionFromScroll, { once: true });
+  }
+}
+
 document.querySelectorAll("[data-copy]").forEach((button) => {
   button.addEventListener("click", async () => {
     const command = button.dataset.copy;

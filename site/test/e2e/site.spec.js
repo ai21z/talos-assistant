@@ -111,6 +111,159 @@ test("mobile header and nav remain usable", async ({ page }) => {
   await expect(page.locator("#docs")).toBeInViewport();
 });
 
+test("scroll story sections keep active nav state without hijacking native scroll", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  const primaryNav = page.getByRole("navigation", { name: "Primary navigation" });
+  await expect(page.locator('.site-nav a[aria-current="page"]')).toHaveText("Product");
+
+  await primaryNav.getByRole("link", { name: "Trust" }).click();
+  await expect(page).toHaveURL(/#trust$/);
+  await expect(page.locator("#trust")).toBeInViewport();
+  await expect(page.locator('.site-nav a[aria-current="page"]')).toHaveText("Trust");
+
+  const scrollState = await page.evaluate(() => ({
+    overflowY: getComputedStyle(document.documentElement).overflowY,
+    snapped: getComputedStyle(document.documentElement).scrollSnapType,
+    contractMinHeight: getComputedStyle(document.querySelector("#contract")).minHeight,
+    expectedStoryHeight: `${window.innerHeight - 72}px`,
+  }));
+
+  expect(scrollState.overflowY).not.toBe("hidden");
+  expect(scrollState.snapped).not.toMatch(/mandatory/i);
+  expect(scrollState.contractMinHeight).toBe(scrollState.expectedStoryHeight);
+
+  await page.locator("#docs").scrollIntoViewIfNeeded();
+  await expect(page.locator("#docs")).toBeInViewport();
+  await expect(page.locator('.site-nav a[aria-current="page"]')).toHaveText("Docs");
+});
+
+test("desktop story handoff overlaps adjacent screens during scroll", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  await page.evaluate(() => {
+    document.documentElement.style.scrollBehavior = "auto";
+    window.scrollTo({ top: 700, behavior: "instant" });
+  });
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+
+  const handoff = await page.evaluate(() => {
+    const productNode = document.querySelector("#product > .container");
+    const contractNode = document.querySelector("#contract > .container");
+    const product = productNode.getBoundingClientRect();
+    const contract = contractNode.getBoundingClientRect();
+    return {
+      productBottom: product.bottom,
+      contractTop: contract.top,
+      productOpacity: Number(getComputedStyle(productNode).opacity),
+      contractOpacity: Number(getComputedStyle(contractNode).opacity),
+      contractSectionBackground: getComputedStyle(document.querySelector("#contract")).backgroundImage,
+      contractBeforeDisplay: getComputedStyle(document.querySelector("#contract"), "::before").display,
+    };
+  });
+
+  expect(handoff.productBottom).toBeGreaterThan(220);
+  expect(handoff.contractTop).toBeLessThan(460);
+  expect(handoff.contractOpacity).toBeGreaterThan(0.65);
+  expect(handoff.productOpacity).toBeLessThan(0.25);
+  expect(handoff.contractSectionBackground).toBe("none");
+  expect(handoff.contractBeforeDisplay).toBe("none");
+});
+
+test("desktop story screens keep primary content centered across viewport heights", async ({ page }) => {
+  const viewports = [
+    { width: 1440, height: 900, maxDelta: 56 },
+    { width: 1366, height: 768, maxDelta: 64 },
+    { width: 1280, height: 720, maxDelta: 72 },
+  ];
+
+  for (const viewport of viewports) {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await page.goto("/");
+    await page.evaluate(() => {
+      document.documentElement.style.scrollBehavior = "auto";
+    });
+
+    for (const sectionId of ["product", "contract", "cli"]) {
+      const metrics = await page.evaluate((targetId) => {
+        const section = document.getElementById(targetId);
+        window.scrollTo({ top: section.offsetTop - 72, behavior: "instant" });
+        return new Promise((resolve) => {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              const container = section.querySelector(":scope > .container");
+              const children = Array.from(container.children).filter((node) => {
+                const style = window.getComputedStyle(node);
+                return style.display !== "none" && style.visibility !== "hidden";
+              });
+              const rects = children
+                .map((node) => node.getBoundingClientRect())
+                .filter((rect) => rect.width > 0 && rect.height > 0);
+              const top = Math.min(...rects.map((rect) => rect.top));
+              const bottom = Math.max(...rects.map((rect) => rect.bottom));
+              const contentCenter = (top + bottom) / 2;
+              const viewportCenter = (72 + window.innerHeight) / 2;
+              resolve({
+                delta: contentCenter - viewportCenter,
+                opacity: Number(window.getComputedStyle(container).opacity),
+              });
+            });
+          });
+        });
+      }, sectionId);
+
+      expect(Math.abs(metrics.delta), `${sectionId} center at ${viewport.width}x${viewport.height}`).toBeLessThanOrEqual(
+        viewport.maxDelta,
+      );
+      expect(metrics.opacity, `${sectionId} opacity at ${viewport.width}x${viewport.height}`).toBeGreaterThan(0.86);
+    }
+  }
+});
+
+test("primary story nav lands on the requested centered screen", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  await page.evaluate(() => {
+    document.documentElement.style.scrollBehavior = "auto";
+  });
+
+  const primaryNav = page.getByRole("navigation", { name: "Primary navigation" });
+
+  for (const target of [
+    { label: "Contract", id: "contract" },
+    { label: "CLI", id: "cli" },
+    { label: "Trust", id: "trust" },
+  ]) {
+    await primaryNav.getByRole("link", { name: target.label }).click();
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await expect(page).toHaveURL(new RegExp(`#${target.id}$`));
+    await expect(page.locator('.site-nav a[aria-current="page"]')).toHaveText(target.label);
+
+    const metrics = await page.evaluate((sectionId) => {
+      const section = document.getElementById(sectionId);
+      const container = section.querySelector(":scope > .container");
+      const children = Array.from(container.children).filter((node) => {
+        const style = window.getComputedStyle(node);
+        return style.display !== "none" && style.visibility !== "hidden";
+      });
+      const rects = children
+        .map((node) => node.getBoundingClientRect())
+        .filter((rect) => rect.width > 0 && rect.height > 0);
+      const top = Math.min(...rects.map((rect) => rect.top));
+      const bottom = Math.max(...rects.map((rect) => rect.bottom));
+      const contentCenter = (top + bottom) / 2;
+      const viewportCenter = (72 + window.innerHeight) / 2;
+      return {
+        delta: contentCenter - viewportCenter,
+        opacity: Number(window.getComputedStyle(container).opacity),
+      };
+    }, target.id);
+
+    expect(Math.abs(metrics.delta), `${target.id} nav center`).toBeLessThanOrEqual(64);
+    expect(metrics.opacity, `${target.id} nav opacity`).toBeGreaterThan(0.86);
+  }
+});
+
 test("hero startup terminal image loads", async ({ page }) => {
   await page.goto("/");
   const image = page.locator(".startup-terminal-image");

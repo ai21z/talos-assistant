@@ -271,6 +271,51 @@ describe("Talos landing page static contract", () => {
     assert.doesNotMatch(css, /\.js\s+\.reveal\s*\{[\s\S]*?opacity:\s*0/);
   });
 
+  it("uses native scroll with content-only story blending without scrolljacking", () => {
+    const html = read("index.html");
+    const css = read("src/styles.css");
+    const js = read("src/main.js");
+    const storySections = Array.from(html.matchAll(/<section\b[^>]*class="[^"]*\bstory-section\b[^"]*"/g));
+
+    assert.equal(storySections.length, 7, "all primary sections should participate in the story scroll");
+    assert.match(css, /\.story-section\b/);
+    assert.match(css, /--story-top:\s*72px/);
+    assert.match(css, /\.story-section\s*\{[\s\S]*?position:\s*sticky/);
+    assert.match(css, /\.story-section\s*\{[\s\S]*?top:\s*var\(--story-top\)/);
+    assert.match(css, /\.story-section\s*\{[\s\S]*?padding:\s*0/);
+    assert.match(css, /min-height:\s*calc\(100svh\s*-\s*var\(--story-top\)\)/);
+    assert.match(css, /\.story-section\s*\{[\s\S]*?background:\s*transparent/);
+    const storyBefore = css.match(/\.story-section::before\s*\{(?<block>[\s\S]*?)\}/);
+    assert.ok(storyBefore, "story section pseudo-element should be explicitly disabled");
+    assert.match(storyBefore.groups.block, /display:\s*none/);
+    assert.doesNotMatch(storyBefore.groups.block, /animation:/);
+    assert.match(css, /opacity:\s*var\(--story-opacity,\s*1\)/);
+    assert.match(css, /transform:\s*translateY\(var\(--story-shift,\s*0px\)\)\s*scale\(var\(--story-scale,\s*1\)\)/);
+    assert.match(js, /function\s+smoothStep/);
+    assert.match(js, /style\.setProperty\("--story-opacity"/);
+    assert.match(js, /style\.setProperty\("--story-shift"/);
+    assert.match(css, /prefers-reduced-motion:\s*reduce[\s\S]*?animation:\s*none\s*!important/);
+
+    // Native scrolling only: no hijacking wheel/touch events or forcing mandatory snapping.
+    assert.doesNotMatch(js, /addEventListener\(["'](?:wheel|touchmove)["']/);
+    assert.doesNotMatch(css, /scroll-snap-type:\s*y\s+mandatory/);
+  });
+
+  it("keeps section navigation state synchronized by section id", () => {
+    const html = read("index.html");
+    const js = read("src/main.js");
+
+    for (const sectionId of ["product", "contract", "cli", "trust", "use-cases", "install", "docs"]) {
+      assert.match(html, new RegExp(`<section[^>]+id="${escapeRegExp(sectionId)}"[^>]+story-section`));
+      assert.match(html, new RegExp(`<a[^>]+href="#${escapeRegExp(sectionId)}"[^>]+data-section-nav`));
+    }
+
+    assert.match(js, /setActiveSection/);
+    assert.match(js, /aria-current/);
+    assert.match(js, /data-section-nav/);
+    assert.match(js, /IntersectionObserver/);
+  });
+
   it("uses semantic lane glyphs that match SemanticGlyphSet.java safe Unicode", () => {
     const js = read("src/main.js");
     // glyphs: bullet, arrow, success, warning, error, rail
