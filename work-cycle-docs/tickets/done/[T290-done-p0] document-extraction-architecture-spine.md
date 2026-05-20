@@ -1,8 +1,8 @@
 # T290 - Document Extraction Architecture Spine
 
-Status: open
+Status: done - beta extraction spine implemented
 Severity: P0 for beta
-Release gate: yes
+Release gate: no for beta extraction architecture spine; residual hardening remains tracked by T299/T300/T303/T304/T295
 Branch: v0.9.0-beta-dev
 Created/updated: 2026-05-16
 Owner: unassigned
@@ -15,11 +15,11 @@ Re-review correction: a central service is necessary but not sufficient. It must
 
 ## Evidence from current code
 
-- `ParserUtil.smartParse(...)` currently blocks `UnsupportedDocumentFormats` and otherwise reads UTF-8 text after a binary sniff: `src/main/java/dev/talos/core/ingest/ParserUtil.java:13`, `:17`, `:22`, `:24`.
-- `ReadFileTool` rejects unsupported formats before reading lines: `src/main/java/dev/talos/tools/impl/ReadFileTool.java:76`.
-- `GrepTool` skips unsupported files and binary-looking files: `src/main/java/dev/talos/tools/impl/GrepTool.java:142`, `:221`.
-- `Indexer` also filters unsupported/protected paths before parsing: `src/main/java/dev/talos/core/index/Indexer.java:428`, `:453`.
-- Central privacy/redaction already exists in `ProtectedContentPolicy.sanitizeToolResult(...)`: `src/main/java/dev/talos/runtime/policy/ProtectedContentPolicy.java:124`.
+- `DocumentExtractionService`, `DocumentExtractionRequest`, `DocumentExtractionResult`, `DocumentExtractionStatus`, warnings, provenance, and format adapters now provide the central extraction boundary.
+- `ReadFileTool`, `GrepTool`, slash grep, `Indexer`, and `/show` route supported document extraction through the shared service rather than adding parser-specific logic directly in each caller.
+- `ToolResult` and `ToolContentMetadata` preserve privacy/handoff metadata after extraction.
+- `PrivateDocumentPolicy` owns private-mode document handoff and RAG-indexing decisions.
+- Central privacy/redaction remains in `ProtectedContentPolicy` and artifact-specific redactors.
 
 ## Evidence from source crosscheck
 
@@ -153,3 +153,13 @@ Keep existing unsupported-format blocks as the fallback path. Enable each extrac
 - `src/main/java/dev/talos/core/index/Indexer.java`
 - `src/main/java/dev/talos/runtime/policy/ProtectedContentPolicy.java`
 - `src/main/java/dev/talos/core/context/ContextPacker.java`
+
+## 2026-05-20 resolution
+
+Closed for the beta architecture spine. Remaining work is not "create the spine"; it is deeper fixture coverage, extraction state-machine hardening, resource/caching policy, and private-document release evidence.
+
+Focused evidence:
+
+```text
+.\gradlew.bat test --tests "dev.talos.cli.modes.UnsupportedFinalAnswerTruthfulnessTest" --tests "dev.talos.core.extract.DocumentExtractionAdaptersTest" --tests "dev.talos.core.extract.DocumentExtractionCanonicalFixturesTest" --tests "dev.talos.core.extract.DocumentExtractionServiceTest" --tests "dev.talos.tools.impl.ReadFileToolTest" --no-daemon
+```

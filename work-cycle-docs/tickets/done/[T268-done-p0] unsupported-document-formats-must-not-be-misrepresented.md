@@ -1,8 +1,8 @@
 # T268 - Unsupported Document Formats Must Not Be Misrepresented
 
-Status: open - implemented for tested extractable/deferred format paths; still open for broader private-document release gate
+Status: done - implemented for tested extractable/deferred beta format paths
 Severity: P0
-Release gate: yes - private-document positioning and broad beta
+Release gate: no for beta format truthfulness; broader private-document release evidence remains gated by T295/T280/T299/T301
 Branch: v0.9.0-beta-dev
 Created/updated: 2026-05-15
 Owner: unassigned
@@ -11,7 +11,7 @@ Owner: unassigned
 
 Talos previously had partial unsupported-format handling for direct PDF/Office reads and writes, but format truthfulness was not centralized across read, grep, slash grep, retrieve/RAG, summarize, compare, and final-answer behavior.
 
-This work cycle added central format classification, local extraction for text PDFs/DOCX/XLS/XLSX, and integrated those paths into read/search/RAG. The ticket remains open because private-document positioning still requires broader real-world fixtures, and image/OCR plus PowerPoint are frozen for v1/open work.
+This work cycle added central format classification, local extraction for text PDFs/DOCX/XLS/XLSX, and integrated those paths into read/search/RAG. Image/OCR, PowerPoint, larger fixture quality, and private-document release evidence are tracked by narrower follow-up tickets instead of keeping this umbrella ticket open.
 
 ## Evidence from current code
 
@@ -20,7 +20,7 @@ This work cycle added central format classification, local extraction for text P
 - `GrepTool` and slash `GrepCommand` now skip/report unsupported and binary files.
 - `Indexer` now uses code-level capability policy for protected/deferred/unsupported and extractable document paths, not config alone.
 - `default-config.yaml` excludes protected paths plus unsupported Office/image/archive/binary extensions.
-- Remaining gap: final-answer truthfulness for complex private-document summarize/compare flows still needs broader live/e2e scenario coverage.
+- Remaining product gaps are tracked separately: T294 for image/OCR, T302 for PowerPoint, T299 for fixture depth, T301 for release claims, and T295/T280 for private-document audit evidence.
 
 ## Evidence from external/source crosscheck
 

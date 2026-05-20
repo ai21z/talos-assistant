@@ -1,21 +1,23 @@
 # T292 - Local Word DOCX Extraction
 
-Status: open
+Status: done - DOCX text extraction implemented for beta scope
 Severity: P0 for beta
-Release gate: yes
+Release gate: no for DOCX text extraction; legacy DOC and broader private-document release claims remain gated separately
 Branch: v0.9.0-beta-dev
 Created/updated: 2026-05-16
 Owner: unassigned
 
 ## Problem
 
-Talos currently refuses Word document reads. Beta requires Word support, at minimum DOCX text extraction with truthful handling of unsupported legacy DOC or corrupt documents.
+Talos now supports DOCX text extraction for beta. The original gap was that Word document reads were refused or could be misrepresented. Legacy `.doc`, full layout fidelity, comments/tracked changes/embedded objects, and Word editing remain out of scope.
 
 ## Evidence from current code
 
-- `.doc` and `.docx` are unsupported in `FileCapabilityPolicy`: `src/main/java/dev/talos/core/ingest/FileCapabilityPolicy.java:28`, `:29`.
-- `ReadFileTool` blocks unsupported document reads: `src/main/java/dev/talos/tools/impl/ReadFileTool.java:76`.
-- Unsupported DOCX final-answer fabrication is tested: `src/test/java/dev/talos/cli/modes/UnsupportedFinalAnswerTruthfulnessTest.java:30`, `:59`.
+- `.docx` is classified as extractable when document extraction is enabled.
+- Legacy `.doc` remains deferred/unsupported and must be reported honestly.
+- DOCX extraction is routed through `DocumentExtractionService`, not ad hoc tool code.
+- `ReadFileTool`, grep/slash grep, RAG indexing, and local display paths share the extraction boundary.
+- Final-answer truthfulness coverage prevents unsupported/deferred format overclaims.
 
 ## Evidence from source crosscheck
 
@@ -43,6 +45,16 @@ DOCX read, DOCX search, DOCX indexing, model context, prompt-debug, provider-bod
 ## Required behavior
 
 - Extract plain text from valid DOCX locally.
+
+## 2026-05-20 resolution
+
+Closed for beta DOCX text extraction. Broader Word semantics and private-paperwork release claims remain out of scope for this ticket.
+
+Focused evidence:
+
+```text
+.\gradlew.bat test --tests "dev.talos.cli.modes.UnsupportedFinalAnswerTruthfulnessTest" --tests "dev.talos.core.extract.DocumentExtractionAdaptersTest" --tests "dev.talos.core.extract.DocumentExtractionCanonicalFixturesTest" --tests "dev.talos.core.extract.DocumentExtractionServiceTest" --tests "dev.talos.tools.impl.ReadFileToolTest" --no-daemon
+```
 - Preserve paragraph/table/list order well enough for user-facing summaries.
 - Report unsupported legacy DOC separately if not implemented.
 - Report corrupt/password-protected documents honestly.

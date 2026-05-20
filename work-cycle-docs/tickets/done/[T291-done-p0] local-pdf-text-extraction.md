@@ -1,8 +1,8 @@
 # T291 - Local PDF Text Extraction
 
-Status: open
+Status: done - local text-PDF extraction implemented for beta scope
 Severity: P0 for beta
-Release gate: yes
+Release gate: no for text-PDF extraction; scanned/OCR and broader private-document release claims remain gated separately
 Branch: v0.9.0-beta-dev
 Created/updated: 2026-05-16
 Owner: unassigned
@@ -43,6 +43,16 @@ PDF read, PDF search, PDF RAG indexing, extracted-text model handoff, prompt-deb
 ## Required behavior
 
 - Extract text from valid text PDFs locally.
+
+## 2026-05-20 resolution
+
+Closed for beta text-PDF extraction. Scanned/image-only PDFs still require OCR, PDF visual order is limited, and private-document release claims remain blocked by T295/T280/T299.
+
+Focused evidence:
+
+```text
+.\gradlew.bat test --tests "dev.talos.cli.modes.UnsupportedFinalAnswerTruthfulnessTest" --tests "dev.talos.core.extract.DocumentExtractionAdaptersTest" --tests "dev.talos.core.extract.DocumentExtractionCanonicalFixturesTest" --tests "dev.talos.core.extract.DocumentExtractionServiceTest" --tests "dev.talos.tools.impl.ReadFileToolTest" --no-daemon
+```
 - Detect and report encrypted/password-protected/corrupt PDFs honestly.
 - Distinguish text PDF extraction from scanned-image OCR requirements.
 - Apply content redaction before model context and artifacts.

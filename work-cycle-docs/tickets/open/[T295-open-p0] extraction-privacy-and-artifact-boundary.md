@@ -1,7 +1,7 @@
 # T295 - Extraction Privacy and Artifact Boundary
 
-Status: partial implementation, open
-Severity: P0 for beta
+Status: open - private-document release gate; core provenance, artifact canaries, RAG policy, and side-path parity implemented
+Severity: P0 for private-document/personal-paperwork release claim
 Release gate: yes
 Branch: v0.9.0-beta-dev
 Created/updated: 2026-05-17
@@ -178,6 +178,31 @@ Bug found and fixed:
 - Regression: `private_mode_show_skips_index_snippet_when_private_rag_disabled`.
 
 Remaining P0 work: per-turn explicit send-to-model approval UX/tracing for extracted documents, larger real-world private corpus, and approval-sensitive transcript capture.
+
+## 2026-05-20 backlog reconciliation
+
+T305 is now closed because the ToolResult provenance boundary itself is implemented and covered. T295 remains open because it is the broader product-release privacy gate, not just the ToolResult metadata ticket.
+
+Current proven pieces:
+
+- Document extraction results carry privacy/handoff metadata through `ToolResult`.
+- Model-loop handoff withholds private extracted document output by default.
+- RAG indexing enforces `PrivateDocumentPolicy.ragIndexAllowed(...)`.
+- Prompt-debug, provider-body, session, turn-log, trace, and log sanitizers have deterministic private-document fact canary coverage.
+- T326 closed the latest strict-audit sensitive side-path parity gaps.
+
+Current remaining blockers:
+
+- Add per-turn extracted-document send-to-model approval UX distinct from config-only opt-in.
+- Trace the explicit extracted-document send-to-model decision as release evidence.
+- Run a larger private-document fixture corpus, not only small generated fixtures.
+- Capture approval-sensitive live transcripts with prompt-debug/provider-body/trace evidence.
+
+Focused evidence passed again on 2026-05-20:
+
+```text
+.\gradlew.bat test --tests "dev.talos.runtime.toolcall.ProtectedReadScopeIntegrationTest" --tests "dev.talos.core.index.IndexerPrivateDocumentPolicyTest" --tests "dev.talos.cli.prompt.PromptDebugInspectorPrivateDocumentTest" --tests "dev.talos.runtime.JsonSessionStoreTest" --tests "dev.talos.runtime.JsonTurnLogAppenderTest" --tests "dev.talos.runtime.trace.TraceRedactorTest" --tests "dev.talos.api.TalosKnowledgeEnginePrivacyTest" --no-daemon
+```
 
 ## Rollback / migration notes
 

@@ -1,7 +1,7 @@
 # T294 - Local Image OCR Extraction
 
-Status: open - frozen out of beta, v1 candidate
-Severity: high
+Status: open - deferred beyond beta, v1 image/OCR candidate
+Severity: High
 Release gate: no for beta; yes for any v1 image/OCR claim
 Branch: v0.9.0-beta-dev
 Created/updated: 2026-05-16
@@ -120,3 +120,7 @@ Remaining blockers:
 - Need independent image fixtures, language handling, confidence/no-text behavior, large-image limits, and scanned-PDF routing.
 - Need a successful `-UseRealOcr` two-model audit before claiming v1 image OCR readiness.
 - Do not claim visual image understanding.
+
+## 2026-05-20 backlog reconciliation
+
+This ticket is not a current beta P0 because Talos must not claim image/OCR support in the beta. It remains open as a high-severity v1 capability gate. If a future release claims image/OCR, this ticket becomes release-blocking again.
