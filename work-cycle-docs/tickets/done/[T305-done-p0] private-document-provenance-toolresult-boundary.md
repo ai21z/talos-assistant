@@ -1,8 +1,8 @@
 # T305 - Private Document Provenance ToolResult Boundary
 
-Status: partial implementation, open
+Status: done - ToolResult provenance and model-handoff boundary implemented
 Severity: P0 for private-document beta
-Release gate: yes
+Release gate: no for ToolResult boundary; remaining private-document release gate is T295
 Branch: v0.9.0-beta-dev
 Created/updated: 2026-05-17
 Owner: unassigned
@@ -183,11 +183,10 @@ Implemented:
 - `document_fallback_extracts_xls_for_local_display_in_private_mode`
 - `document_fallback_extracts_xlsx_for_local_display_in_private_mode`
 
-Still required:
+Residual work moved to T295:
 
-- `artifact_scan_distinguishes_private_fact_canary_from_secret_canary`
-- `private_mode_explicit_send_to_model_for_extracted_document_is_traced`
 - per-turn extracted-document send-to-model approval UX, separate from config-only opt-in
+- explicit send-to-model tracing for extracted documents
 - broader private-folder live audit over larger/adversarial private-document fixtures
 - synchronized or human-operated approval transcript coverage
 
@@ -203,7 +202,17 @@ Still required:
 Current status against acceptance criteria:
 
 - Focused beta-core and private-folder bank live audits now include ordinary private facts and passed for generated PDF/DOCX/XLSX fixtures.
-- Private-document beta remains blocked by lack of per-turn send-to-model approval UX/tracing and lack of broad real-world private-document fixture evidence.
+- The ToolResult provenance boundary is closed. Private-document beta remains blocked by T295 because per-turn send-to-model approval UX/tracing and broad real-world private-document fixture evidence are not complete.
+
+## 2026-05-20 resolution
+
+Focused evidence passed again:
+
+```text
+.\gradlew.bat test --tests "dev.talos.runtime.toolcall.ProtectedReadScopeIntegrationTest" --tests "dev.talos.core.index.IndexerPrivateDocumentPolicyTest" --tests "dev.talos.cli.prompt.PromptDebugInspectorPrivateDocumentTest" --tests "dev.talos.runtime.JsonSessionStoreTest" --tests "dev.talos.runtime.JsonTurnLogAppenderTest" --tests "dev.talos.runtime.trace.TraceRedactorTest" --tests "dev.talos.api.TalosKnowledgeEnginePrivacyTest" --no-daemon
+```
+
+This ticket is done because `ToolResult` now carries `ToolContentMetadata`, `ReadFileTool` attaches extracted-document metadata, the model-loop boundary withholds non-handoffable content, and indexing/artifact sinks have focused coverage. The remaining release blocker is not "metadata lost at ToolResult"; it is the broader private-document release gate in T295.
 
 ## Rollback / migration notes
 

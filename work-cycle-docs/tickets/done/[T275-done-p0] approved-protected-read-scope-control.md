@@ -1,8 +1,8 @@
 # T275 - Approved Protected Read Scope Control
 
-Status: open - runtime V1 and minimal UX implemented, live-audit coverage still required
+Status: done - runtime scope control and minimal UX implemented
 Severity: P0 for private-document beta
-Release gate: yes
+Release gate: no for protected-read scope control; broader private-document release evidence remains gated by T295/T280
 Branch: v0.9.0-beta-dev
 Created/updated: 2026-05-15
 Owner: unassigned
@@ -48,8 +48,7 @@ Protected direct-read approval, model context, provider-body capture, prompt-deb
 
 ## Proposed implementation
 
-Runtime V1 is implemented. Add user-facing `/privacy` UX and live-audit cases.
-Minimal `/privacy` UX is implemented in this pass; live-audit cases remain.
+Runtime V1 is implemented. Minimal `/privacy` UX is implemented. Broader release live-audit coverage is tracked by T280/T295 rather than keeping this scope-control implementation ticket open.
 
 ## Tests
 
@@ -62,10 +61,17 @@ Minimal `/privacy` UX is implemented in this pass; live-audit cases remain.
 - `private_mode_send_to_model_opt_in_allows_handoff_but_persistence_redacts`
 - `persist_raw_artifacts_false_even_when_send_to_model_true`
 
+2026-05-20 focused evidence:
+
+```text
+.\gradlew.bat test --tests "dev.talos.runtime.toolcall.ProtectedReadScopeIntegrationTest" --tests "dev.talos.core.index.IndexerPrivateDocumentPolicyTest" --tests "dev.talos.cli.prompt.PromptDebugInspectorPrivateDocumentTest" --tests "dev.talos.runtime.JsonSessionStoreTest" --tests "dev.talos.runtime.JsonTurnLogAppenderTest" --tests "dev.talos.runtime.trace.TraceRedactorTest" --tests "dev.talos.api.TalosKnowledgeEnginePrivacyTest" --no-daemon
+```
+
 ## Acceptance criteria
 
 - Focused tests pass.
-- Live audit proves private/local-display-only scope prevents model-context leakage.
+- Focused runtime tests prove private/local-display-only scope prevents model-context leakage.
+- Broader two-model/live release audit remains tracked by T280/T295.
 - README/docs do not overclaim.
 
 ## Rollback / migration notes

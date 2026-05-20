@@ -1,21 +1,23 @@
 # T293 - Local Excel XLSX Extraction
 
-Status: open
+Status: done - XLS/XLSX visible-cell extraction implemented for beta scope
 Severity: P0 for beta
-Release gate: yes
+Release gate: no for visible-cell workbook extraction; deeper spreadsheet semantics and private-document release claims remain gated separately
 Branch: v0.9.0-beta-dev
 Created/updated: 2026-05-16
 Owner: unassigned
 
 ## Problem
 
-Talos currently refuses Excel workbooks. Beta requires Excel support, but spreadsheets need structured extraction, not lossy prose-only scraping.
+Talos now supports XLS/XLSX visible-cell text extraction for beta. The original gap was that Excel workbooks were refused or could be misrepresented. Formula recalculation, macros, charts, hidden-sheet disclosure, protected workbooks, and full spreadsheet semantics remain out of scope.
 
 ## Evidence from current code
 
-- `.xls` and `.xlsx` are unsupported in `FileCapabilityPolicy`: `src/main/java/dev/talos/core/ingest/FileCapabilityPolicy.java:30`, `:31`.
-- Current compare-flow honesty is tested for XLSX versus text: `src/test/java/dev/talos/cli/modes/UnsupportedFinalAnswerTruthfulnessTest.java:59`.
-- `Indexer` filters unsupported formats before indexing: `src/main/java/dev/talos/core/index/Indexer.java:428`, `:453`.
+- `.xls` and `.xlsx` are classified as extractable when document extraction is enabled.
+- Workbook extraction is routed through `DocumentExtractionService`.
+- Hidden and very-hidden sheets are skipped for the visible-cell claim.
+- Extraction warnings state that formulas are not recalculated.
+- `Indexer` enforces extraction capability and private-document RAG policy before indexing workbook text.
 
 ## Evidence from source crosscheck
 
@@ -43,6 +45,16 @@ Workbook extraction, search, RAG indexing, citations, model context, logs, trace
 ## Required behavior
 
 - Extract visible workbook text from valid XLS/XLSX locally.
+
+## 2026-05-20 resolution
+
+Closed for beta XLS/XLSX visible-cell extraction. Deeper spreadsheet analysis and private-document release claims remain tracked separately.
+
+Focused evidence:
+
+```text
+.\gradlew.bat test --tests "dev.talos.cli.modes.UnsupportedFinalAnswerTruthfulnessTest" --tests "dev.talos.core.extract.DocumentExtractionAdaptersTest" --tests "dev.talos.core.extract.DocumentExtractionCanonicalFixturesTest" --tests "dev.talos.core.extract.DocumentExtractionServiceTest" --tests "dev.talos.tools.impl.ReadFileToolTest" --no-daemon
+```
 - Preserve sheet names and cell coordinates.
 - Distinguish formula text from cached formula values if exposed.
 - Report hidden sheets, unsupported features, truncation, and partial extraction.

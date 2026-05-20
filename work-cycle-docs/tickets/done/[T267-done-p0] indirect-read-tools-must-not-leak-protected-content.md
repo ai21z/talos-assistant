@@ -1,8 +1,8 @@
 # T267 - Indirect Read Tools Must Not Leak Protected Content
 
-Status: open - implemented for tested developer/text beta boundary; still open for broader private-document release gate
+Status: done - implemented for tested developer/text beta boundary
 Severity: P0
-Release gate: yes - private-document positioning and broad beta
+Release gate: no for this core indirect-read boundary; broader private-document positioning remains gated by T295/T280/T285
 Branch: v0.9.0-beta-dev
 Created/updated: 2026-05-15
 Owner: unassigned
@@ -11,7 +11,7 @@ Owner: unassigned
 
 Talos gates direct protected reads better than indirect reads. Before this work, `talos.read_file(".env")` could require approval, but `talos.grep`, slash `/grep`, `talos.retrieve`, and RAG indexing/retrieval could discover and return protected or canary content without the same runtime boundary.
 
-This work cycle implemented the core runtime boundary for the tested indirect-read paths. The ticket remains open because private-document positioning still requires live audit evidence, private-folder mode, broader artifact scanning, and RAG dirty-index invalidation/versioning decisions.
+This work cycle implemented the core runtime boundary for the tested indirect-read paths. Broader private-document positioning, private-folder UX, and artifact-surface expansion remain tracked by narrower follow-up tickets instead of keeping this stale umbrella P0 open.
 
 ## Evidence from current code
 
@@ -61,12 +61,7 @@ Release blocker for any claim that Talos is safe for tax, health, legal, family,
 
 Implemented `ProtectedContentPolicy` as the central runtime policy and integrated it in `ToolCallExecutionStage`, `ToolCallSupport`, `GrepTool`, `GrepCommand`, `RetrieveTool`, `RagService`, `Indexer`, `TraceRedactor`, `PromptDebugInspector`, and session/trace persistence.
 
-Remaining implementation work:
-
-- Add broader live/e2e coverage for stale RAG indexes and private-folder workflows.
-- Extend private-folder mode beyond the current protected-path defaults.
-- Expand generated-artifact scanning beyond the focused T267 canary set.
-- Run the two-model live audit prompt bank before any private-document beta claim.
+Residual implementation work is tracked by T272, T280, T285, T295, and the later strict-audit blocker tickets. This ticket is closed for the protected-content indirect-read invariant it originally introduced.
 
 ## Tests
 
@@ -121,8 +116,13 @@ Additional implementation completed:
 - Command output redaction now delegates to `ProtectedContentPolicy`.
 - RAG policy metadata/version checks were implemented; stale/missing-policy indexes rebuild before retrieval.
 
-Still open:
+2026-05-20 backlog reconciliation:
 
-- Two-model live prompt-bank audit.
-- Broader private-folder UX and sensitive-folder warning.
-- Private-document release claim remains forbidden.
+- Focused privacy/search/retrieval tests passed again after the strict-audit side-path fixes:
+
+```text
+.\gradlew.bat test --tests "dev.talos.tools.impl.GrepToolTest" --tests "dev.talos.cli.repl.slash.WorkspaceCommandsTest*Grep" --tests "dev.talos.tools.impl.RetrieveToolTest" --tests "dev.talos.core.rag.RagDirtyIndexIntegrationTest" --tests "dev.talos.runtime.policy.SensitiveLogRedactionTest" --tests "dev.talos.runtime.policy.ArtifactCanaryScanTest" --no-daemon
+```
+
+- T326 closed the sensitive side-path parity gaps found by the strict audit.
+- Private-document release claims remain forbidden until T295/T280/T285 evidence is complete.

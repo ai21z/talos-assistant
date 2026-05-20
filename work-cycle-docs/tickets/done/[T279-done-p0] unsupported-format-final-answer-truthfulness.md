@@ -1,8 +1,8 @@
 # T279 - Unsupported Format Final-Answer Truthfulness
 
-Status: open - scripted tests added, live audit still required
+Status: done - scripted final-answer truthfulness guard implemented
 Severity: P0 for private-document beta
-Release gate: yes
+Release gate: no for unsupported/deferred format final-answer shaping; broader release audit remains gated by T280/T299/T301
 Branch: v0.9.0-beta-dev
 Created/updated: 2026-05-15
 Owner: unassigned
@@ -20,6 +20,13 @@ Even if read tools report unsupported formats honestly, the model can still answ
 ## Evidence from tests/audits
 
 - `UnsupportedFinalAnswerTruthfulnessTest`
+- 2026-05-20 focused command:
+
+```text
+.\gradlew.bat test --tests "dev.talos.cli.modes.UnsupportedFinalAnswerTruthfulnessTest" --tests "dev.talos.core.extract.DocumentExtractionAdaptersTest" --tests "dev.talos.core.extract.DocumentExtractionCanonicalFixturesTest" --tests "dev.talos.core.extract.DocumentExtractionServiceTest" --tests "dev.talos.tools.impl.ReadFileToolTest" --no-daemon
+```
+
+- Capability audit reports now record that unsupported/deferred overclaims are shaped at the runtime boundary, while image/OCR, PowerPoint, and broad private-document release claims stay out of beta scope.
 
 ## User impact
 
