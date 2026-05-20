@@ -94,7 +94,9 @@ class LlmRetryExecutorTest {
         assertEquals(1, calls.get(), "wrapped generic exception must not retry");
         assertNotNull(thrown.getCause());
         assertTrue(thrown.getCause() instanceof IOException);
-        assertTrue(thrown.getMessage().contains("boom"));
+        assertFalse(thrown.getMessage().contains("boom"));
+        assertTrue(thrown.getMessage().contains("bodyHash=sha256:"), thrown.getMessage());
+        assertTrue(thrown.bodyChars() > 0);
     }
 
     @Test

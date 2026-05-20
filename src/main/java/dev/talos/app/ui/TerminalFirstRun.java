@@ -148,7 +148,8 @@ public final class TerminalFirstRun {
             Files.createDirectories(SENTINEL.getParent());
             Files.writeString(SENTINEL, "ok");
         } catch (IOException ex) {
-            LOG.warn("Failed to write first-run sentinel {}", SENTINEL, ex);
+            LOG.warn("Failed to write first-run sentinel {}: {}",
+                    SafeLogFormatter.value(SENTINEL), SafeLogFormatter.throwableMessage(ex));
         }
     }
 

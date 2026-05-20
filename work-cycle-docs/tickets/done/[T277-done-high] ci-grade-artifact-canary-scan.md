@@ -1,8 +1,8 @@
 # T277 - CI-Grade Artifact Canary Scan
 
-Status: still-open - scanner/runtime sink tests exist; decide CI/check integration versus explicit release-gate task
+Status: done - generated-artifact canary scan is now part of `check`; manual/live audit roots remain explicit release-audit scan inputs
 Severity: high
-Release gate: yes
+Release gate: closed for generated local verification artifacts
 Branch: v0.9.0-beta-dev
 Created/updated: 2026-05-17
 Owner: unassigned
@@ -89,3 +89,35 @@ Old ignored manual audit folders are not treated as current CI artifacts by defa
 
 - `src/main/java/dev/talos/runtime/policy/ArtifactCanaryScanner.java`
 - `src/test/java/dev/talos/runtime/policy/ArtifactCanaryScanTest.java`
+
+## 2026-05-20 closure update
+
+Implemented CI-grade generated-artifact scan wiring:
+
+- Added `checkGeneratedArtifactCanaries` in `build.gradle.kts`.
+- The task scans `build/reports` and `build/test-results` in runtime-artifact
+  mode after unit/e2e/report generation.
+- `tasks.check` now depends on `checkGeneratedArtifactCanaries`, so the normal
+  local verification gate runs the canary scan automatically.
+- Kept `checkRuntimeArtifactCanaries` as the explicit manual/live audit root
+  scanner requiring `-PartifactScanRoots=...`; this avoids accidentally scanning
+  stale ignored manual-audit artifacts during every local `check`.
+- Added `ArtifactCanaryBuildGateTest` to prevent the Gradle check wiring from
+  silently drifting.
+
+Fresh evidence:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.build.ArtifactCanaryBuildGateTest.checkRunsGeneratedArtifactCanaryScan" --no-daemon
+.\gradlew.bat checkGeneratedArtifactCanaries --no-daemon
+.\gradlew.bat check --no-daemon
+```
+
+The final `check` output included:
+
+```text
+> Task :checkGeneratedArtifactCanaries
+Artifact canary scan passed. Roots scanned: [C:\Users\arisz\Projects\LOQ\loqj-cli\build\reports, C:\Users\arisz\Projects\LOQ\loqj-cli\build\test-results]
+> Task :check
+BUILD SUCCESSFUL
+```

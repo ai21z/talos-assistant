@@ -33,6 +33,14 @@ function ids(html) {
   return new Set(Array.from(html.matchAll(/\sid="([^"]+)"/g), (match) => match[1]));
 }
 
+function sectionSlice(html, startId, endId) {
+  const start = html.indexOf(`id="${startId}"`);
+  const end = endId ? html.indexOf(`id="${endId}"`) : html.length;
+  assert.ok(start >= 0, `missing #${startId}`);
+  assert.ok(end > start, `missing or invalid end #${endId}`);
+  return html.slice(start, end);
+}
+
 describe("Talos landing page static contract", () => {
   it("uses the final site package name and required scripts", () => {
     const pkg = JSON.parse(read("package.json"));
@@ -61,9 +69,39 @@ describe("Talos landing page static contract", () => {
     assert.notEqual(h1Text.toUpperCase(), "TALOS");
   });
 
-  it("uses concrete hero copy and honest CTAs", () => {
+  it("uses the six-screen story map with reduced navigation labels", () => {
+    const html = read("index.html");
+    const css = read("src/styles.css");
+    const navMatch = html.match(/<nav\b[^>]*id="primary-navigation"[\s\S]*?<\/nav>/);
+    assert.ok(navMatch, "missing #primary-navigation nav");
+    const nav = navMatch[0];
+    const storySections = Array.from(html.matchAll(/<section\b(?=[^>]*\bstory-section\b)(?=[^>]*\bid="([^"]+)")[^>]*>/g), (m) => m[1]);
+
+    assert.deepEqual(storySections, [
+      "overview",
+      "execution",
+      "turn-ui",
+      "local-boundaries",
+      "good-fits",
+      "docs",
+    ]);
+
+    for (const label of ["Overview", "Execution", "Turn UI", "Local Boundaries", "Good Fits", "Docs"]) {
+      assert.match(nav, new RegExp(`>${escapeRegExp(label)}<`));
+    }
+
+    for (const removed of ["Product", "Contract", ">CLI<", "Use cases", "Install"]) {
+      assert.doesNotMatch(nav, new RegExp(escapeRegExp(removed), "i"));
+    }
+
+    assert.doesNotMatch(html, /\sid="install"/);
+    assert.doesNotMatch(html, /install-section/);
+    assert.doesNotMatch(css, /#install\b|install-section/);
+  });
+
+  it("uses concrete hero copy, honest setup state, and no fake install CTA", () => {
     const html = read("index.html").replace(/\s+/g, " ");
-    const hero = html.slice(html.indexOf('id="product"'), html.indexOf('id="contract"'));
+    const hero = sectionSlice(html, "overview", "execution");
 
     for (const copy of [
       "Inspects before acting",
@@ -73,34 +111,45 @@ describe("Talos landing page static contract", () => {
       "Interactive turns leave local trace evidence",
       "No hosted workspace handoff",
       "View on GitHub",
-      "Read the execution contract",
+      "Read docs",
+      "planned public beta",
+      "winget install talos-cli",
+      "TalosProject.TalosCLI",
+      "talos",
     ]) {
       assert.match(hero, new RegExp(escapeRegExp(copy), "i"));
     }
 
-    // Honest CTA: no placeholder-beta button must remain.
     assert.doesNotMatch(hero, /Get beta build/i);
     assert.doesNotMatch(hero, /data-beta-placeholder/i);
+    assert.doesNotMatch(hero, /data-copy="[^"]*winget/i);
   });
 
-  it("uses the locked Talos icon artifact, not the old inline SVG mark", () => {
+  it("shows the real Talos icon without cropped background or boxed mark", () => {
     const html = read("index.html");
+    const css = read("src/styles.css");
     assert.ok(existsSync(join(root, "design", "talos-icon.png")), "talos-icon.png missing");
     assert.match(html, /design\/talos-icon\.png/);
     assert.doesNotMatch(html, /data:image\/svg\+xml/i);
     assert.doesNotMatch(html, /<svg\b/i);
+    assert.doesNotMatch(css, /url\(["']?\.\.\/design\/talos-icon\.png/);
+    assert.doesNotMatch(css, /\.brand-mark img\s*\{[\s\S]*?opacity:\s*0/);
+    assert.doesNotMatch(css, /\.wordmark-mark\s*\{[\s\S]*?border:/);
+    assert.match(css, /\.wordmark-mark[\s\S]*?object-fit:\s*contain|\.wordmark-mark img[\s\S]*?object-fit:\s*contain/);
   });
 
-  it("uses the locked startup terminal screenshot in the hero", () => {
+  it("uses the locked startup terminal screenshot as the dominant hero proof", () => {
     const html = read("index.html");
-    assert.ok(existsSync(join(root, "design", "img.png")), "img.png missing");
-    const hero = html.slice(html.indexOf('id="product"'), html.indexOf('id="contract"'));
+    const css = read("src/styles.css");
+    const hero = sectionSlice(html, "overview", "execution");
     const heroText = hero.replace(/\s+/g, " ");
+
+    assert.ok(existsSync(join(root, "design", "img.png")), "img.png missing");
     assert.match(hero, /<img\b[^>]*class="startup-terminal-image"[^>]*src="\.\/design\/img\.png"/);
     assert.match(hero, /alt="[^"]*Talos startup terminal screen/i);
     assert.doesNotMatch(hero, /<pre\b[^>]*class="banner"/i);
+    assert.match(css, /grid-template-columns:\s*minmax\(0,\s*0\.7[0-9]fr\)\s+minmax\(0,\s*1\.2[0-9]fr\)/);
 
-    // The screenshot's textual content must remain represented for accessibility and review.
     for (const copy of [
       "TALOS",
       `v${currentTalosVersion()}`,
@@ -113,21 +162,47 @@ describe("Talos landing page static contract", () => {
     }
   });
 
-  it("ships the directional execution contract, not circular diagrams", () => {
+  it("renders the exact Greek heritage inscription with a self-hosted bronze font treatment", () => {
     const html = read("index.html");
     const css = read("src/styles.css");
+    const js = read("src/main.js");
+    const pkg = JSON.parse(read("package.json"));
+    const hero = sectionSlice(html, "overview", "execution");
+    const publicSurface = publicText();
+    const greekBlock = css.match(/\.greek-hero-inscription\s*\{(?<block>[\s\S]*?)\}/)?.groups?.block ?? "";
 
-    // Directional contract section exists with all six steps in order.
-    const contract = html.slice(html.indexOf('id="contract"'), html.indexOf('id="cli"'));
+    assert.ok(pkg.devDependencies["@fontsource/gfs-neohellenic"], "missing self-hosted GFS Neohellenic package");
+    assert.match(js, /@fontsource\/gfs-neohellenic\/greek-700\.css/);
+    assert.match(
+      hero,
+      /<div\s+class="greek-hero-inscription"\s+lang="el"\s+aria-hidden="true">\s*ΤΑΛΩΣ\s*<\/div>/,
+    );
+    assert.equal((publicSurface.match(/ΤΑΛΩΣ/g) ?? []).length, 1);
+    assert.doesNotMatch(publicSurface, /TAΛOS|TALΩS|TAΛΩS/);
+    assert.doesNotMatch(publicSurface, /fonts\.googleapis\.com|fonts\.gstatic\.com/);
+    assert.match(css, /\.greek-hero-inscription\s*\{[\s\S]*font-family:\s*"GFS Neohellenic"/);
+    assert.match(css, /\.greek-hero-inscription\s*\{[\s\S]*color:\s*var\(--bronze\)/);
+    assert.doesNotMatch(greekBlock, /--cyan|var\(--cyan\)|color:\s*transparent|background-clip|linear-gradient/);
+    assert.match(hero, /<img\b[^>]*class="startup-terminal-image"[^>]*src="\.\/design\/img\.png"/);
+  });
+
+  it("ships a linear execution flow with one compact tool evidence strip", () => {
+    const html = read("index.html");
+    const css = read("src/styles.css");
+    const execution = sectionSlice(html, "execution", "turn-ui");
     const stepOrder = ["Classify", "Inspect", "Approve", "Mutate", "Verify", "Trace"];
     let cursor = 0;
     for (const step of stepOrder) {
-      const idx = contract.indexOf(`>${step}<`, cursor);
-      assert.ok(idx >= 0, `contract step "${step}" missing or out of order`);
+      const idx = execution.indexOf(`>${step}<`, cursor);
+      assert.ok(idx >= 0, `execution step "${step}" missing or out of order`);
       cursor = idx;
     }
 
-    // The orbit/sentinel/medallion vocabulary must not return.
+    assert.match(execution, /execution-tool-strip/);
+    for (const token of ["talos.list_dir", "talos.read_file", "talos.write_file", "talos.run_command", "/last trace"]) {
+      assert.match(execution, new RegExp(escapeRegExp(token)));
+    }
+
     for (const banned of [
       "cycle-diagram",
       "process-orbits",
@@ -139,29 +214,31 @@ describe("Talos landing page static contract", () => {
       "footer-medallion",
       "greek-key",
     ]) {
-      assert.doesNotMatch(html, new RegExp(escapeRegExp(banned), "i"), `removed class ${banned} reappeared in html`);
-      assert.doesNotMatch(css, new RegExp(escapeRegExp(banned), "i"), `removed class ${banned} reappeared in css`);
+      assert.doesNotMatch(html, new RegExp(escapeRegExp(banned), "i"));
+      assert.doesNotMatch(css, new RegExp(escapeRegExp(banned), "i"));
     }
   });
 
-  it("declares the trust table with allow/ask/deny state tokens", () => {
+  it("presents local boundaries as grouped reads, mutations, and evidence", () => {
     const html = read("index.html");
-    const trust = html.slice(html.indexOf('id="trust"'), html.indexOf('id="use-cases"'));
-    assert.match(trust, /state--allow/);
-    assert.match(trust, /state--ask/);
-    assert.match(trust, /state--deny/);
-    for (const surface of [
-      "Workspace files (read)",
-      "Protected paths (read)",
-      "File writes / edits",
-      "Workspace ops",
-      "Command execution",
-      "Private mode",
-      "Unsupported or unreadable documents",
-      "Trace and prompt-debug",
-    ]) {
-      assert.match(trust, new RegExp(escapeRegExp(surface)));
+    const boundaries = sectionSlice(html, "local-boundaries", "good-fits");
+    for (const group of ["Reads", "Mutations", "Evidence"]) {
+      assert.match(boundaries, new RegExp(`>${escapeRegExp(group)}<`));
     }
+    for (const state of ["state--allow", "state--ask", "state--deny"]) {
+      assert.match(boundaries, new RegExp(state));
+    }
+    for (const required of [
+      "Workspace files",
+      "Protected paths",
+      "File writes",
+      "Command execution",
+      "Unsupported documents",
+      "/last trace",
+    ]) {
+      assert.match(boundaries, new RegExp(escapeRegExp(required), "i"));
+    }
+    assert.doesNotMatch(boundaries, /prompt-debug/i);
   });
 
   it("keeps content claims precise about traces, lanes, trust, and install state", () => {
@@ -169,11 +246,15 @@ describe("Talos landing page static contract", () => {
 
     for (const required of [
       "Interactive turns leave local trace evidence",
-      "Normal assistant turns render through the same semantic lanes",
+      "A consistent turn grammar",
       "Runtime policy owns approval, tool exposure, result checks, protected reads, and unsupported-file honesty",
-      "Public install is not final yet",
-      "planned public beta target is a one-line Windows install",
-      "Current developer setup remains in the repository docs",
+      "planned public beta",
+      "winget install talos-cli",
+      "TalosProject.TalosCLI",
+      "Vissarion Zounarakis",
+      "bundled Java runtime",
+      "does not bundle a llama.cpp server or model weights",
+      "Source setup remains documented",
     ]) {
       assert.match(text, new RegExp(escapeRegExp(required), "i"));
     }
@@ -182,22 +263,30 @@ describe("Talos landing page static contract", () => {
       "Every turn leaves a trace",
       "Every Talos turn runs the same six lanes",
       "The model cannot bypass them by rewording the request",
+      "install now with winget",
+      "Linux public beta",
+      "macOS public beta",
+      "bundled models",
+      "bundled llama.cpp",
     ]) {
       assert.doesNotMatch(text, new RegExp(escapeRegExp(tooAbsolute), "i"));
     }
   });
 
-  it("publishes a docs gateway with at least seven repo-linked cards", () => {
+  it("curates the docs gateway to four source-backed cards", () => {
     const html = read("index.html");
-    const docs = html.slice(html.indexOf('id="docs"'));
+    const docs = sectionSlice(html, "docs", null);
     const docCards = Array.from(docs.matchAll(/<a\s+class="doc-card[^"]*"[^>]*href="([^"]+)"/g));
-    assert.ok(docCards.length >= 7, `expected ≥7 doc cards, found ${docCards.length}`);
+    assert.equal(docCards.length, 4);
+    for (const title of ["Quickstart", "Model Setup", "Permissions", "Trace / Audit"]) {
+      assert.match(docs, new RegExp(`>${escapeRegExp(title)}<`));
+    }
     for (const [, href] of docCards) {
       assert.match(href, /^https:\/\/github\.com\/ai21z\/talos-cli/, `doc card href ${href} not in canonical repo`);
     }
   });
 
-  it("keeps real command examples and canonical runtime tool names", () => {
+  it("keeps real command examples without marketing maintainer-only debug commands", () => {
     const text = publicText();
     for (const command of [
       "talos status --verbose",
@@ -205,30 +294,25 @@ describe("Talos landing page static contract", () => {
       "/models",
       "/workspace",
       "/last trace",
-      "/prompt-debug",
       "talos.list_dir",
       "talos.read_file",
-      "talos.grep",
-      "talos.retrieve",
       "talos.write_file",
       "talos.run_command",
-      "gradle_test",
     ]) {
       assert.match(text, new RegExp(escapeRegExp(command), "i"));
     }
 
     assert.doesNotMatch(text, /--server-path\s+C:\/path\/to\/llama-server\.exe/i);
+    assert.doesNotMatch(text, /\/prompt-debug/i);
     assert.doesNotMatch(text, /data-copy="[^"]*(?:winget|curl|irm|iwr)[^"]*"/i);
   });
 
   it("does not introduce fake downloads or unsupported claims", () => {
     const text = publicText();
 
-    // No download attributes, no archive/install hrefs.
     assert.doesNotMatch(text, /href="[^"]*\.(?:zip|msi|exe|dmg|pkg|tar\.gz)"/i);
     assert.doesNotMatch(text, /\sdownload\s*=/i);
 
-    // External hrefs must only target the canonical Talos repo.
     const externalHrefs = Array.from(text.matchAll(/href="(https?:\/\/[^"]+)"/g), (m) => m[1]);
     for (const href of externalHrefs) {
       assert.match(href, /^https:\/\/github\.com\/ai21z\/talos-cli/, `unexpected external href: ${href}`);
@@ -244,7 +328,6 @@ describe("Talos landing page static contract", () => {
       "agentic",
       "browse the web",
       "Every action is verified",
-      "verified write + /last trace",
       "--local-only",
       "No telemetry",
       "Get beta build",
@@ -262,25 +345,10 @@ describe("Talos landing page static contract", () => {
     }
   });
 
-  it("labels all copy buttons uniquely and accessibly", () => {
-    const html = read("index.html");
-    const copyButtons = Array.from(html.matchAll(/<button\b[^>]*class="[^"]*\bcopy-button\b[^"]*"[^>]*>/g));
-    assert.ok(copyButtons.length >= 4);
-
-    const labels = copyButtons.map((match) => {
-      const attr = match[0].match(/\saria-label="([^"]+)"/);
-      return attr?.[1] ?? "";
-    });
-
-    assert.equal(labels.length, new Set(labels).size);
-    assert.ok(labels.every((label) => /^Copy .+ command$/i.test(label)), labels.join(", "));
-  });
-
   it("uses accessible terminal semantics", () => {
     const html = read("index.html");
     assert.doesNotMatch(html, /<pre[^>]*aria-live=/i);
     assert.match(html, /id="terminal-status"[\s\S]*aria-live="polite"/i);
-    // No SVG inside aria-hidden parents should claim role="img" or aria-label.
     assert.doesNotMatch(html, /aria-hidden="true"[\s\S]{0,500}<svg[^>]*(?:role="img"|aria-label=)/i);
   });
 
@@ -301,30 +369,17 @@ describe("Talos landing page static contract", () => {
     const js = read("src/main.js");
     const storySections = Array.from(html.matchAll(/<section\b[^>]*class="[^"]*\bstory-section\b[^"]*"/g));
 
-    assert.equal(storySections.length, 7, "all primary sections should participate in the story scroll");
+    assert.equal(storySections.length, 6);
     assert.match(css, /\.story-section\b/);
     assert.match(css, /--story-top:\s*72px/);
     assert.match(css, /\.story-section\s*\{[\s\S]*?position:\s*sticky/);
     assert.match(css, /\.story-section\s*\{[\s\S]*?top:\s*var\(--story-top\)/);
-    assert.match(css, /\.story-section\s*\{[\s\S]*?padding:\s*0/);
     assert.match(css, /min-height:\s*calc\(100svh\s*-\s*var\(--story-top\)\)/);
-    assert.match(css, /\.story-section\s*\{[\s\S]*?background:\s*transparent/);
-    const storyBefore = css.match(/\.story-section::before\s*\{(?<block>[\s\S]*?)\}/);
-    assert.ok(storyBefore, "story section pseudo-element should be explicitly disabled");
-    assert.match(storyBefore.groups.block, /display:\s*none/);
-    assert.doesNotMatch(storyBefore.groups.block, /animation:/);
     assert.match(css, /opacity:\s*var\(--story-opacity,\s*1\)/);
     assert.match(css, /transform:\s*translateY\(var\(--story-shift,\s*0px\)\)\s*scale\(var\(--story-scale,\s*1\)\)/);
-    assert.match(js, /function\s+smoothStep/);
+    assert.match(js, /function\s+smootherStep/);
     assert.match(js, /style\.setProperty\("--story-opacity"/);
-    assert.match(js, /style\.setProperty\("--story-shift"/);
-    assert.match(js, /event\.preventDefault\(\)/);
     assert.match(js, /scrollToStorySection/);
-    assert.match(js, /window\.scrollTo\(\{\s*top:[\s\S]*?behavior/);
-    assert.match(css, /transition:\s*opacity[\s\S]*?transform[\s\S]*?filter/);
-    assert.match(css, /prefers-reduced-motion:\s*reduce[\s\S]*?animation:\s*none\s*!important/);
-
-    // Native scrolling only: no hijacking wheel/touch events or forcing mandatory snapping.
     assert.doesNotMatch(js, /addEventListener\(["'](?:wheel|touchmove)["']/);
     assert.doesNotMatch(css, /scroll-snap-type:\s*y\s+mandatory/);
   });
@@ -333,7 +388,7 @@ describe("Talos landing page static contract", () => {
     const html = read("index.html");
     const js = read("src/main.js");
 
-    for (const sectionId of ["product", "contract", "cli", "trust", "use-cases", "install", "docs"]) {
+    for (const sectionId of ["overview", "execution", "turn-ui", "local-boundaries", "good-fits", "docs"]) {
       assert.match(html, new RegExp(`<section[^>]+id="${escapeRegExp(sectionId)}"[^>]+story-section`));
       assert.match(html, new RegExp(`<a[^>]+href="#${escapeRegExp(sectionId)}"[^>]+data-section-nav`));
     }
@@ -346,31 +401,23 @@ describe("Talos landing page static contract", () => {
 
   it("uses semantic lane glyphs that match SemanticGlyphSet.java safe Unicode", () => {
     const js = read("src/main.js");
-    // glyphs: bullet, arrow, success, warning, error, rail
-    for (const glyph of ["•", "→", "✓", "!", "│"]) {
+    for (const glyph of ["•", "→", "✓", "!", "│", "┌", "└"]) {
       assert.ok(js.includes(glyph), `lane glyph ${glyph} missing from main.js`);
     }
-    for (const glyph of ["┌", "└"]) {
-      assert.ok(js.includes(glyph), `answer/approval pane glyph ${glyph} missing from main.js`);
-    }
-    // companion-only glyph that current code does not ship
     assert.ok(!js.includes("◐"), "main.js uses ◐ which is not part of SemanticGlyphSet");
     assert.ok(!js.includes("╭"), "main.js uses rounded answer pane glyphs not shipped by SemanticGlyphSet");
     assert.ok(!js.includes("╰"), "main.js uses rounded answer pane glyphs not shipped by SemanticGlyphSet");
     assert.match(js, /approval required/);
-    // canonical prompt
     assert.match(js, /talos.*\[auto\]\s*&gt;|talos.*\[auto\]\s*>/);
   });
 
-  it("keeps vanilla JavaScript behavior for tabs and clipboard", () => {
+  it("keeps vanilla JavaScript behavior for tabs and scroll state", () => {
     const js = read("src/main.js");
     assert.match(js, /terminalStates/);
     assert.match(js, /ArrowRight/);
     assert.match(js, /ArrowLeft/);
     assert.match(js, /Home/);
     assert.match(js, /End/);
-    assert.match(js, /navigator\.clipboard\.writeText/);
-    // Placeholder beta toast must be gone.
     assert.doesNotMatch(js, /data-beta-placeholder/);
     assert.doesNotMatch(js, /Beta download placeholder/);
     assert.doesNotMatch(js, /React|Vue|createApp|tailwind/i);

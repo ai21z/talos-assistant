@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
 import dev.talos.core.cache.CacheDb;
+import dev.talos.core.util.Hash;
 import dev.talos.runtime.policy.SafeLogFormatter;
 import dev.talos.spi.Embeddings;
 import org.slf4j.Logger;
@@ -55,7 +56,8 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
                     "Remote Ollama host '%s' is not allowed. Set ollama.allow_remote=true to enable remote hosts, " +
                     "or use localhost (127.0.0.1 or localhost).", this.host));
             } else {
-                LOG.warn("SECURITY: Using remote Ollama host: {}. This may expose your data to external services.", this.host);
+                LOG.warn("SECURITY: Using remote Ollama host: {}. This may expose your data to external services.",
+                        SafeLogFormatter.value(this.host));
             }
         }
     }
@@ -136,10 +138,10 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
                 HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
                 if (resp.statusCode() / 100 != 2) {
                     attemptFailures.add(ep.path + " " + ep.param + " -> HTTP "
-                            + resp.statusCode() + " " + truncate(resp.body(), 120));
+                            + resp.statusCode() + " " + contentDigestSummary("body", resp.body()));
                     LOG.debug("embed non-2xx at {} {} -> {} {}", SafeLogFormatter.value(ep.path),
                             SafeLogFormatter.value(ep.param), resp.statusCode(),
-                            SafeLogFormatter.text(truncate(resp.body(), 120)));
+                            contentDigestSummary("body", resp.body()));
                     continue;
                 }
 
@@ -148,7 +150,8 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
                 if (vec != null && vec.length > 0) {
                     if (!isValidVector(vec)) {
                         attemptFailures.add(ep.path + " " + ep.param + " -> invalid vector");
-                        LOG.warn("Embedding vector invalid (NaN/Inf/zero) from {} {} — skipping", ep.path, ep.param);
+                        LOG.warn("Embedding vector invalid (NaN/Inf/zero) from {} {} — skipping",
+                                SafeLogFormatter.value(ep.path), SafeLogFormatter.value(ep.param));
                         continue;
                     }
                     if (dim != null && dim > 0 && vec.length != dim) {
@@ -158,29 +161,29 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
                     return vec;
                 } else {
                     attemptFailures.add(ep.path + " " + ep.param + " -> empty embedding");
-                    LOG.debug("Empty embedding from {} {} (continuing to next attempt)", ep.path, ep.param);
+                    LOG.debug("Empty embedding from {} {} (continuing to next attempt)",
+                            SafeLogFormatter.value(ep.path), SafeLogFormatter.value(ep.param));
                 }
             } catch (Exception e) {
                 lastErr = e;
                 attemptFailures.add(ep.path + " " + ep.param + " -> " + e.getClass().getSimpleName()
-                        + ": " + truncate(e.getMessage(), 120));
+                        + " " + contentDigestSummary("message", e.getMessage()));
                 LOG.debug("embed attempt failed at {} {} : {}", SafeLogFormatter.value(ep.path),
                         SafeLogFormatter.value(ep.param), SafeLogFormatter.throwableMessage(e));
             }
         }
         // If we got here, we failed all permutations
-        String message = embeddingFailureMessage("embedding", cleaned, attemptFailures);
+        String message = embeddingFailureMessage("embedding", attemptFailures);
         if (lastErr != null) throw new IllegalStateException(message, lastErr);
         throw new IllegalStateException(message);
     }
 
-    private String embeddingFailureMessage(String operation, String cleanedInput, List<String> attemptFailures) {
+    private String embeddingFailureMessage(String operation, List<String> attemptFailures) {
         String attempts = (attemptFailures == null || attemptFailures.isEmpty())
                 ? "no endpoint attempt details recorded"
                 : String.join("; ", attemptFailures);
-        return "No " + operation + " returned from Ollama for model '" + model
-                + "' after endpoint fallback attempts. inputPreview='"
-                + truncate(cleanedInput, 96) + "'. Attempts: " + attempts;
+        return "No " + operation + " returned from Ollama for model '" + SafeLogFormatter.value(model)
+                + "' after endpoint fallback attempts. Attempts: " + attempts;
     }
 
     private float[] parseEmbeddingFlexible(Map<String, Object> root) {
@@ -244,9 +247,11 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
         return cleaned.isEmpty() ? " " : cleaned;
     }
 
-    private static String truncate(String s, int max) {
-        if (s == null) return "";
-        return s.length() <= max ? s : s.substring(0, max) + "…";
+    private static String contentDigestSummary(String label, String value) {
+        String safeLabel = label == null || label.isBlank() ? "content" : label;
+        String text = value == null ? "" : value;
+        return safeLabel + "Hash=sha256:" + Hash.sha256Hex(text.getBytes(StandardCharsets.UTF_8))
+                + " " + safeLabel + "Chars=" + text.length();
     }
 
     private static boolean isLocalhost(String host) {
@@ -330,7 +335,7 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
                 if (resp.statusCode() / 100 != 2) {
                     LOG.debug("batch embed non-2xx at {} {} -> {} {}", SafeLogFormatter.value(ep.path),
                             SafeLogFormatter.value(ep.param), resp.statusCode(),
-                            SafeLogFormatter.text(truncate(resp.body(), 120)));
+                            contentDigestSummary("body", resp.body()));
                     continue;
                 }
 
@@ -341,7 +346,8 @@ public class EmbeddingsClient implements Embeddings, BatchEmbeddings {
                     return vectors;
                 } else {
                     LOG.debug("Batch embedding size mismatch from {} {} (expected {}, got {})",
-                            ep.path, ep.param, texts.size(), vectors != null ? vectors.size() : 0);
+                            SafeLogFormatter.value(ep.path), SafeLogFormatter.value(ep.param),
+                            texts.size(), vectors != null ? vectors.size() : 0);
                 }
             } catch (BatchTooLargeException e) {
                 throw e; // Re-throw to trigger individual fallback

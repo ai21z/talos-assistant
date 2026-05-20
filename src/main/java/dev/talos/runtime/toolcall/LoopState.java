@@ -1,6 +1,7 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.cli.repl.Context;
+import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.failure.FailureAction;
 import dev.talos.runtime.TemplatePlaceholderGuard;
 import dev.talos.runtime.Session;
@@ -54,6 +55,7 @@ public final class LoopState {
     public final Set<String> oldStringMissRepairPromptedPaths = new HashSet<>();
     public final Set<String> appendLineRepairPromptedPaths = new HashSet<>();
     public final Set<String> expectedTargetScopeRepairPromptedKeys = new HashSet<>();
+    public final Set<String> sourceEvidenceExactRepairPromptedKeys = new HashSet<>();
     public final Set<String> pathsMutatedSinceRead = new HashSet<>();
     public final Map<String, Integer> staleEditFailuresByPath = new HashMap<>();
     public final Set<String> staleEditRepairPromptedPaths = new HashSet<>();
@@ -105,6 +107,14 @@ public final class LoopState {
                 == PendingActionObligation.Kind.EXPECTED_TARGETS_REMAINING) {
             String detail = invalidExpectedTargetMutationDetail(calls, pendingActionObligation.targets());
             if (detail == null) {
+                return false;
+            }
+            if (shouldPolicyHandleStaticWebExpectedTargetViolation(calls, pendingActionObligation.targets())) {
+                // Let the normal execution policy reject the wrong target before approval.
+                // That path records the concrete blocked target and can trigger a narrower
+                // expected-target-scope repair for remaining static-web files. Keep the
+                // older fail-fast behavior for general file edits and for repeated rewrites
+                // of already-satisfied root web targets such as index.html.
                 return false;
             }
             PendingActionObligation obligation = pendingActionObligation;
@@ -242,6 +252,24 @@ public final class LoopState {
                 + targetList + ", but the model attempted: "
                 + String.join(", ", rejectedMutations)
                 + ". No approval was requested and no additional file was changed.";
+    }
+
+    private static boolean shouldPolicyHandleStaticWebExpectedTargetViolation(
+            List<ToolCall> calls,
+            List<String> targets
+    ) {
+        if (calls == null || calls.isEmpty() || targets == null || targets.isEmpty()) return false;
+        if (!targets.stream().allMatch(StaticWebCapabilityProfile::isSmallWebFile)) return false;
+        for (ToolCall call : calls) {
+            if (call == null || !ToolCallSupport.isMutatingTool(call.toolName())) continue;
+            String path = ToolCallSupport.normalizePath(ToolCallSupport.resolvePathHint(call));
+            if (path.isBlank()) continue;
+            String scoped = normalizeScopedTarget(path);
+            if (scoped.contains("/") || !StaticWebCapabilityProfile.isSmallWebFile(scoped)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean matchesPendingExpectedTarget(

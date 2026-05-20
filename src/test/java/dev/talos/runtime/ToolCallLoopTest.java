@@ -18,6 +18,7 @@ import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
 import dev.talos.tools.impl.ListDirTool;
 import dev.talos.tools.impl.MakeDirectoryTool;
+import dev.talos.tools.impl.RenamePathTool;
 import dev.talos.tools.impl.ReadFileTool;
 import org.junit.jupiter.api.Test;
 
@@ -28,6 +29,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -2189,6 +2191,202 @@ class ToolCallLoopTest {
     }
 
     @Test
+    void mutationContinuationIncludesSourceEvidenceReadbacksForSourceDerivedWrite() throws Exception {
+        Path ws = Files.createTempDirectory("talos-compact-mutation-source-evidence-");
+        try {
+            Files.writeString(ws.resolve("board-brief.md"),
+                    "Board brief marker: ORBITAL-DECK-71.\n");
+            Files.writeString(ws.resolve("client-notes.md"),
+                    "Client note marker: NEON-RESPONSE-44.\n");
+            Files.writeString(ws.resolve("revenue.csv"),
+                    "quarter,total\nQ1,1837.42\nRevenue marker: LASER-LEDGER-19\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileEditTool());
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 8);
+
+            String request = "Create office-summary.md summarizing board-brief.md, client-notes.md, and revenue.csv. "
+                    + "Include one distinctive exact evidence phrase from each source so I can audit source coverage.";
+            var contract = TaskContractResolver.fromUserRequest(request);
+            assertEquals(Set.of("board-brief.md", "client-notes.md", "revenue.csv"),
+                    contract.sourceEvidenceTargets());
+
+            String summary = """
+                    # Office Summary
+
+                    - Board evidence: Board brief marker: ORBITAL-DECK-71.
+                    - Client evidence: Client note marker: NEON-RESPONSE-44.
+                    - Revenue evidence: Revenue marker: LASER-LEDGER-19
+                    """;
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                    List.of(new LlmClient.StreamResult("", List.of(
+                            new ChatMessage.NativeToolCall(
+                                    "compact_summary",
+                                    "talos.write_file",
+                                    Map.of("path", "office-summary.md", "content", summary))))),
+                    2048);
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(recorded.client())
+                    .nativeToolSpecs(nativeSpecs(
+                            new ReadFileTool(),
+                            new FileEditTool(),
+                            new FileWriteTool()))
+                    .build();
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys " + "large-system-token ".repeat(700)),
+                    ChatMessage.user("Older unrelated turn that must not enter compact mutation continuation."),
+                    ChatMessage.assistant("Older unrelated answer that must not enter compact mutation continuation."),
+                    ChatMessage.user(request)));
+            var initialCalls = List.of(
+                    new ChatMessage.NativeToolCall(
+                            "read_board",
+                            "talos.read_file",
+                            Map.of("path", "board-brief.md")),
+                    new ChatMessage.NativeToolCall(
+                            "read_client",
+                            "talos.read_file",
+                            Map.of("path", "client-notes.md")),
+                    new ChatMessage.NativeToolCall(
+                            "read_revenue",
+                            "talos.read_file",
+                            Map.of("path", "revenue.csv")));
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(contract);
+            ToolCallLoop.LoopResult result;
+            try {
+                result = loop.run("", initialCalls, messages, ws, ctx);
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            assertEquals(summary, Files.readString(ws.resolve("office-summary.md")));
+            assertEquals(1, recorded.requests().size(),
+                    "full-history continuation should be replaced by one compact mutation continuation");
+            String compactPrompt = recorded.requests().getFirst().messages.stream()
+                    .map(ChatMessage::content)
+                    .reduce("", (left, right) -> left + "\n" + right);
+            assertTrue(compactPrompt.contains("[RequiredSourceEvidence]"), compactPrompt);
+            assertTrue(compactPrompt.contains("Each listed source must contribute at least one exact copied phrase"),
+                    compactPrompt);
+            assertTrue(compactPrompt.contains("[SourceEvidenceReadbacks]"), compactPrompt);
+            assertTrue(compactPrompt.contains("Path: board-brief.md"), compactPrompt);
+            assertTrue(compactPrompt.contains("ORBITAL-DECK-71"), compactPrompt);
+            assertTrue(compactPrompt.contains("Path: client-notes.md"), compactPrompt);
+            assertTrue(compactPrompt.contains("NEON-RESPONSE-44"), compactPrompt);
+            assertTrue(compactPrompt.contains("Path: revenue.csv"), compactPrompt);
+            assertTrue(compactPrompt.contains("LASER-LEDGER-19"), compactPrompt);
+            assertFalse(compactPrompt.contains("Older unrelated turn"), compactPrompt);
+            assertFalse(compactPrompt.contains("Older unrelated answer"), compactPrompt);
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
+    void sourceDerivedExactEvidenceWriteMissingSourcePhraseIsRepairedBeforeMutation() throws Exception {
+        Path ws = Files.createTempDirectory("talos-source-evidence-preapproval-");
+        try {
+            Files.writeString(ws.resolve("board-brief.md"),
+                    "Board brief marker: ORBITAL-DECK-71.\n");
+            Files.writeString(ws.resolve("client-notes.md"),
+                    "Client note marker: NEON-RESPONSE-44.\n");
+            Files.writeString(ws.resolve("revenue.csv"),
+                    "quarter,total\nQ1,1837.42\nRevenue marker: LASER-LEDGER-19\n");
+
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new FileEditTool());
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 8);
+
+            String request = "Create office-summary.md summarizing board-brief.md, client-notes.md, and revenue.csv. "
+                    + "Include one distinctive exact evidence phrase from each source so I can audit source coverage.";
+            var contract = TaskContractResolver.fromUserRequest(request);
+            String badSummary = """
+                    # Office Summary
+
+                    The board approved a Southeast Asia plan.
+                    The client reported latency issues.
+                    Revenue increased 12 percent.
+                    """;
+            String repairedSummary = """
+                    # Office Summary
+
+                    - Board evidence: Board brief marker: ORBITAL-DECK-71.
+                    - Client evidence: Client note marker: NEON-RESPONSE-44.
+                    - Revenue evidence: Revenue marker: LASER-LEDGER-19
+                    """;
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(List.of(
+                    new LlmClient.StreamResult("", List.of(
+                            new ChatMessage.NativeToolCall(
+                                    "bad_summary",
+                                    "talos.write_file",
+                                    Map.of("path", "office-summary.md", "content", badSummary)))),
+                    new LlmClient.StreamResult("", List.of(
+                            new ChatMessage.NativeToolCall(
+                                    "repaired_summary",
+                                    "talos.write_file",
+                                    Map.of("path", "office-summary.md", "content", repairedSummary))))),
+                    20_000);
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(recorded.client())
+                    .nativeToolSpecs(nativeSpecs(
+                            new ReadFileTool(),
+                            new FileEditTool(),
+                            new FileWriteTool()))
+                    .build();
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("system"),
+                    ChatMessage.user(request)));
+            var initialCalls = List.of(
+                    new ChatMessage.NativeToolCall(
+                            "read_board",
+                            "talos.read_file",
+                            Map.of("path", "board-brief.md")),
+                    new ChatMessage.NativeToolCall(
+                            "read_client",
+                            "talos.read_file",
+                            Map.of("path", "client-notes.md")),
+                    new ChatMessage.NativeToolCall(
+                            "read_revenue",
+                            "talos.read_file",
+                            Map.of("path", "revenue.csv")));
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(contract);
+            ToolCallLoop.LoopResult result;
+            try {
+                result = loop.run("", initialCalls, messages, ws, ctx);
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
+            String written = Files.readString(ws.resolve("office-summary.md"));
+            assertEquals(0, result.failedCalls(),
+                    "the invalid model draft should be replaced before approval/mutation, not recorded as a failed write");
+            assertTrue(written.contains("Board brief marker: ORBITAL-DECK-71."), written);
+            assertTrue(written.contains("Client note marker: NEON-RESPONSE-44."), written);
+            assertTrue(written.contains("Revenue marker: LASER-LEDGER-19"), written);
+            assertFalse(written.contains("Southeast Asia"));
+            assertEquals(1, recorded.requests().size(),
+                    "runtime repair should avoid a second model retry for exact source evidence coverage");
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
     void mutationContinuationCompactRetryNoToolRemainsFailureDominant() throws Exception {
         Path ws = Files.createTempDirectory("talos-compact-mutation-continuation-no-tool-");
         try {
@@ -2354,6 +2552,75 @@ class ToolCallLoopTest {
                     .findFirst()
                     .orElseThrow();
             assertEquals("notes.md", blocked.data().get("pathHint"));
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
+    void staticSelectorRepairRenamePathIsBlockedBeforeApproval() throws Exception {
+        Path ws = Files.createTempDirectory("talos-static-selector-rename-block-");
+        try {
+            Files.writeString(ws.resolve("script.js"),
+                    "document.querySelector('.missing-button');\n");
+            Files.writeString(ws.resolve("scripts.js"),
+                    "document.querySelector('.similar-but-forbidden');\n");
+            var registry = new ToolRegistry();
+            registry.register(new ReadFileTool());
+            registry.register(new RenamePathTool());
+            final int[] approvals = {0};
+            var processor = new TurnProcessor(
+                    ModeController.defaultController(),
+                    (description, detail) -> {
+                        approvals[0]++;
+                        return true;
+                    },
+                    registry);
+            var loop = new ToolCallLoop(processor, 10);
+
+            String request = "Read script.js, then fix the selector bug by changing .missing-button to .cta-button. "
+                    + "Do not edit scripts.js.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of("should not be called")))
+                    .build();
+            String initial = """
+                    {"name":"talos.read_file","arguments":{"path":"script.js"}}
+                    {"name":"talos.rename_path","arguments":{"path":"script.js","new_name":"script-old.js"}}
+                    """;
+
+            TurnUserRequestCapture.set(request);
+            TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+            LocalTurnTraceCapture.begin("trc-t332-rename-block", "session", 1,
+                    "2026-05-20T00:00:00Z", "ws", "test", "llama_cpp", "gpt-oss", request);
+            ToolCallLoop.LoopResult result;
+            LocalTurnTrace trace;
+            try {
+                result = loop.run(initial, messages, ws, ctx);
+                trace = LocalTurnTraceCapture.complete();
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+                LocalTurnTraceCapture.clear();
+            }
+
+            assertEquals(0, approvals[0], "rename_path must not reach approval for a narrow selector edit");
+            assertTrue(Files.exists(ws.resolve("script.js")), "script.js must remain in place");
+            assertFalse(Files.exists(ws.resolve("script-old.js")), "rename_path must not execute");
+            assertEquals(0, result.mutatingToolSuccesses());
+            assertTrue(result.toolOutcomes().stream()
+                    .anyMatch(outcome -> !outcome.success()
+                            && String.valueOf(outcome.errorMessage()).toLowerCase(Locale.ROOT)
+                            .contains("workspace organization tool")),
+                    result.toolOutcomes().toString());
+            assertTrue(trace.events().stream()
+                    .filter(event -> "TOOL_CALL_BLOCKED".equals(event.type()))
+                    .anyMatch(event -> String.valueOf(event.data().get("reason"))
+                            .toLowerCase(Locale.ROOT)
+                            .contains("workspace organization tool")));
         } finally {
             deleteRecursive(ws);
         }
@@ -2903,6 +3170,304 @@ class ToolCallLoopTest {
                     "A directory-only mutation for a website request must not end the tool loop.");
             assertTrue(result.mutatingToolSuccesses() >= 4,
                     "The loop should continue from mkdir to actual HTML/CSS/JS file writes.");
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
+    void expectedTargetScopeBlockedMkdirForStaticWebCreationRepromptsToExactFiles() throws Exception {
+        Path ws = Files.createTempDirectory("talos-static-web-scope-repair-");
+        try {
+            var registry = new ToolRegistry();
+            registry.register(new MakeDirectoryTool());
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 6);
+
+            String request = "Create the full synthwave frontend now with exactly index.html, style.css, and script.js.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+
+            String mkdirWrongTarget = """
+                    {"name":"talos.mkdir","arguments":{"path":"site"}}
+                    """;
+            String indexHtml = """
+                    <!doctype html>
+                    <html lang="en">
+                    <head>
+                      <meta charset="utf-8">
+                      <title>Neon Static</title>
+                      <link rel="stylesheet" href="style.css">
+                    </head>
+                    <body>
+                      <main class="hero">
+                        <h1>Neon Static</h1>
+                        <button id="playBtn" type="button">Play demo</button>
+                        <p id="status">Ready</p>
+                      </main>
+                      <script src="script.js"></script>
+                    </body>
+                    </html>
+                    """;
+            String styleCss = """
+                    body { margin: 0; font-family: system-ui, sans-serif; background: #120019; color: #fff; }
+                    .hero { min-height: 100vh; display: grid; place-items: center; text-align: center; }
+                    button { border: 1px solid #ff4fd8; background: #00f0ff; color: #120019; padding: 0.8rem 1.2rem; }
+                    """;
+            String scriptJs = """
+                    document.getElementById('playBtn').addEventListener('click', () => {
+                      document.getElementById('status').textContent = 'Synthwave engaged';
+                    });
+                    """;
+            String fileWrites = """
+                    {"name":"talos.write_file","arguments":{"path":"index.html","content":"%s"}}
+                    {"name":"talos.write_file","arguments":{"path":"style.css","content":"%s"}}
+                    {"name":"talos.write_file","arguments":{"path":"script.js","content":"%s"}}
+                    """.formatted(jsonEscape(indexHtml), jsonEscape(styleCss), jsonEscape(scriptJs));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of(fileWrites, "done")))
+                    .build();
+
+            ToolCallLoop.LoopResult result;
+            try {
+                TurnUserRequestCapture.set(request);
+                TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+                result = loop.run(mkdirWrongTarget, messages, ws, ctx);
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            assertFalse(Files.exists(ws.resolve("site")),
+                    "The out-of-scope directory must stay blocked before approval.");
+            assertEquals(indexHtml, Files.readString(ws.resolve("index.html")));
+            assertEquals(styleCss, Files.readString(ws.resolve("style.css")));
+            assertEquals(scriptJs, Files.readString(ws.resolve("script.js")));
+            assertTrue(result.iterations() > 1,
+                    "The loop should recover from an expected-target scope block and reprompt.");
+            assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
+    void expectedTargetProgressWrongFileAttemptRepromptsToRemainingStaticWebTarget() throws Exception {
+        Path ws = Files.createTempDirectory("talos-static-web-progress-repair-");
+        try {
+            Files.writeString(ws.resolve("README.md"), "# Fixture\n");
+            var registry = new ToolRegistry();
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 7);
+
+            String request = "Create the full synthwave frontend now with exactly index.html, style.css, and script.js.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+
+            String indexHtml = """
+                    <!doctype html>
+                    <html lang="en">
+                    <head>
+                      <meta charset="utf-8">
+                      <title>Neon Static</title>
+                      <link rel="stylesheet" href="style.css">
+                    </head>
+                    <body>
+                      <main class="hero">
+                        <h1>Neon Static</h1>
+                        <button id="playBtn" type="button">Play demo</button>
+                        <p id="status">Ready</p>
+                      </main>
+                      <script src="script.js"></script>
+                    </body>
+                    </html>
+                    """;
+            String styleCss = """
+                    body { margin: 0; font-family: system-ui, sans-serif; background: #120019; color: #fff; }
+                    .hero { min-height: 100vh; display: grid; place-items: center; text-align: center; }
+                    """;
+            String scriptJs = """
+                    document.getElementById('playBtn').addEventListener('click', () => {
+                      document.getElementById('status').textContent = 'Synthwave engaged';
+                    });
+                    """;
+            String partialWrites = """
+                    {"name":"talos.write_file","arguments":{"path":"index.html","content":"%s"}}
+                    {"name":"talos.write_file","arguments":{"path":"style.css","content":"%s"}}
+                    """.formatted(jsonEscape(indexHtml), jsonEscape(styleCss));
+            String wrongTarget = """
+                    {"name":"talos.write_file","arguments":{"path":"README.md","content":"wrong target"}}
+                    """;
+            String remainingScript = """
+                    {"name":"talos.write_file","arguments":{"path":"script.js","content":"%s"}}
+                    """.formatted(jsonEscape(scriptJs));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of(wrongTarget, remainingScript, "done")))
+                    .build();
+
+            ToolCallLoop.LoopResult result;
+            try {
+                TurnUserRequestCapture.set(request);
+                TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+                result = loop.run(partialWrites, messages, ws, ctx);
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            assertEquals(indexHtml, Files.readString(ws.resolve("index.html")));
+            assertEquals(styleCss, Files.readString(ws.resolve("style.css")));
+            assertEquals(scriptJs, Files.readString(ws.resolve("script.js")));
+            assertEquals("# Fixture\n", Files.readString(ws.resolve("README.md")),
+                    "wrong-target expected-progress attempts must remain blocked before approval.");
+            assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
+    void sameIterationExpectedTargetProgressWrongFileRepromptsToRemainingStaticWebTarget() throws Exception {
+        Path ws = Files.createTempDirectory("talos-static-web-same-iteration-progress-repair-");
+        try {
+            var registry = new ToolRegistry();
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 7);
+
+            String request = "Create the full synthwave frontend now with exactly index.html, style.css, and script.js.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+
+            String indexHtml = """
+                    <!doctype html>
+                    <html lang="en">
+                    <head>
+                      <meta charset="utf-8">
+                      <title>Neon Static</title>
+                      <link rel="stylesheet" href="style.css">
+                    </head>
+                    <body>
+                      <main class="hero">
+                        <h1>Neon Static</h1>
+                        <button id="playBtn" type="button">Play demo</button>
+                        <p id="status">Ready</p>
+                      </main>
+                      <script src="script.js"></script>
+                    </body>
+                    </html>
+                    """;
+            String styleCss = """
+                    body { margin: 0; font-family: system-ui, sans-serif; background: #120019; color: #fff; }
+                    .hero { min-height: 100vh; display: grid; place-items: center; text-align: center; }
+                    """;
+            String scriptJs = """
+                    document.getElementById('playBtn').addEventListener('click', () => {
+                      document.getElementById('status').textContent = 'Synthwave engaged';
+                    });
+                    """;
+            String partialWritesWithWrongTarget = """
+                    {"name":"talos.write_file","arguments":{"path":"index.html","content":"%s"}}
+                    {"name":"talos.write_file","arguments":{"path":"style.css","content":"%s"}}
+                    {"name":"talos.write_file","arguments":{"path":"readme_site.txt","content":"wrong target"}}
+                    """.formatted(jsonEscape(indexHtml), jsonEscape(styleCss));
+            String remainingScript = """
+                    {"name":"talos.write_file","arguments":{"path":"script.js","content":"%s"}}
+                    """.formatted(jsonEscape(scriptJs));
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(LlmClient.scripted(List.of(remainingScript, "done")))
+                    .build();
+
+            ToolCallLoop.LoopResult result;
+            try {
+                TurnUserRequestCapture.set(request);
+                TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+                result = loop.run(partialWritesWithWrongTarget, messages, ws, ctx);
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            assertEquals(indexHtml, Files.readString(ws.resolve("index.html")));
+            assertEquals(styleCss, Files.readString(ws.resolve("style.css")));
+            assertEquals(scriptJs, Files.readString(ws.resolve("script.js")));
+            assertFalse(Files.exists(ws.resolve("readme_site.txt")),
+                    "wrong-target same-iteration attempts must remain blocked before approval.");
+            assertFalse(result.failureDecision().shouldStop(), result.failureDecision().reason());
+        } finally {
+            deleteRecursive(ws);
+        }
+    }
+
+    @Test
+    void expectedTargetScopeRepairIncludesAlreadyWrittenStaticWebReadbacks() throws Exception {
+        Path ws = Files.createTempDirectory("talos-static-web-scope-repair-readbacks-");
+        try {
+            var registry = new ToolRegistry();
+            registry.register(new FileWriteTool());
+            var processor = new TurnProcessor(ModeController.defaultController(), new NoOpApprovalGate(), registry);
+            var loop = new ToolCallLoop(processor, 4);
+
+            String request = "Create the full synthwave frontend now with exactly index.html, style.css, and script.js.";
+            var messages = new ArrayList<>(List.of(
+                    ChatMessage.system("sys"),
+                    ChatMessage.user(request)));
+
+            String indexHtml = """
+                    <!doctype html>
+                    <html lang="en">
+                    <head>
+                      <meta charset="utf-8">
+                      <title>Neon Static</title>
+                      <link rel="stylesheet" href="style.css">
+                    </head>
+                    <body>
+                      <button id="playBtn" type="button">Play demo</button>
+                      <p id="status">Ready</p>
+                      <script src="script.js"></script>
+                    </body>
+                    </html>
+                    """;
+            String styleCss = "body { background: #120019; color: #fff; }\n";
+            String partialWritesWithWrongTarget = """
+                    {"name":"talos.write_file","arguments":{"path":"index.html","content":"%s"}}
+                    {"name":"talos.write_file","arguments":{"path":"style.css","content":"%s"}}
+                    {"name":"talos.write_file","arguments":{"path":"readme_site.txt","content":"wrong target"}}
+                    """.formatted(jsonEscape(indexHtml), jsonEscape(styleCss));
+            var recorded = ScriptedNativeLlmClient.recordingWithContextWindow(
+                    List.of(new LlmClient.StreamResult("", List.of())),
+                    16_384);
+            var ctx = Context.builder(new Config())
+                    .sandbox(new Sandbox(ws, Map.of()))
+                    .llm(recorded.client())
+                    .build();
+
+            try {
+                TurnUserRequestCapture.set(request);
+                TurnTaskContractCapture.set(TaskContractResolver.fromUserRequest(request));
+                loop.run(partialWritesWithWrongTarget, messages, ws, ctx);
+            } finally {
+                TurnUserRequestCapture.clear();
+                TurnTaskContractCapture.clear();
+            }
+
+            assertFalse(recorded.requests().isEmpty(), "expected a compact repair LLM request");
+            String prompt = recorded.requests().getLast().messages.stream()
+                    .map(ChatMessage::content)
+                    .filter(java.util.Objects::nonNull)
+                    .reduce("", (left, right) -> left + "\n" + right);
+            assertTrue(prompt.contains("Expected target(s): script.js"), prompt);
+            assertTrue(prompt.contains("Current generated static web file index.html:"), prompt);
+            assertTrue(prompt.contains("<script src=\"script.js\"></script>"), prompt);
+            assertTrue(prompt.contains("Current generated static web file style.css:"), prompt);
         } finally {
             deleteRecursive(ws);
         }

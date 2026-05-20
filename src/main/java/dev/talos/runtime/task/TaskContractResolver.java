@@ -284,17 +284,17 @@ public final class TaskContractResolver {
         }
         if (looksLikeRepairFollowUp(latest)) {
             TaskContract inherited = inheritedRepairContract(messages, latest, current);
-            if (inherited != null) return inherited;
+            if (inherited != null) return withContextualStaticWebTargets(messages, latest, inherited);
         }
         if (!current.mutationRequested() && looksLikeCorrectionFollowUp(latest)) {
             TaskContract inherited = inheritedCorrectionContract(messages, latest);
-            if (inherited != null) return inherited;
+            if (inherited != null) return withContextualStaticWebTargets(messages, latest, inherited);
         }
         if (looksLikeDeicticFollowUp(latest) && !current.mutationRequested()) {
             TaskContract inherited = inheritedReadOnlyWorkspaceContract(messages, latest);
             if (inherited != null) return inherited;
         }
-        return current;
+        return withContextualStaticWebTargets(messages, latest, current);
     }
 
     public static TaskContract fromUserRequest(String userRequest) {
@@ -394,6 +394,11 @@ public final class TaskContractResolver {
                 mergedSources.addAll(lexicalSourceTargets);
                 sourceEvidenceTargets = Set.copyOf(mergedSources);
                 expectedTargets = withoutForbiddenTargets(expectedTargets, sourceEvidenceTargets);
+            }
+            if (expectedTargets.isEmpty()) {
+                expectedTargets = withoutForbiddenTargets(
+                        inferConventionalStaticWebTargets(original, type),
+                        forbiddenTargets);
             }
         }
         if (!mutationRequested && StaticWebImportIntent.matches(original)) {
@@ -548,6 +553,113 @@ public final class TaskContractResolver {
                 || NATURAL_BATCH_DIRECTORY_CREATION_SPAN.matcher(userRequest).find();
     }
 
+    private static Set<String> inferConventionalStaticWebTargets(String userRequest, TaskType type) {
+        if (userRequest == null || userRequest.isBlank()) return Set.of();
+        String lower = userRequest.toLowerCase(Locale.ROOT);
+        if (looksDocumentGuideAboutWebSurface(lower)) return Set.of();
+        boolean createLike = type == TaskType.FILE_CREATE
+                || lower.contains("build")
+                || lower.contains("create")
+                || lower.contains("generate")
+                || lower.contains("scaffold")
+                || lower.contains("set up")
+                || lower.contains("setup")
+                || lower.contains("make me");
+        if (!createLike) return Set.of();
+
+        boolean webSurface = mentionsStaticWebSurface(lower);
+        boolean deicticSite = lower.contains("that site")
+                || lower.contains("the site")
+                || lower.contains("that webpage")
+                || lower.contains("the webpage")
+                || lower.contains("that web page")
+                || lower.contains("the web page");
+        boolean strongSingularConvention = lower.contains("synthwave")
+                || lower.contains("modern")
+                || lower.contains("polished")
+                || lower.contains("good looking")
+                || lower.contains("cool looking");
+        boolean namesStyleAndScript = mentionsStyleAsset(lower) && mentionsScriptAsset(lower);
+        if (!deicticSite && !(webSurface && namesStyleAndScript && strongSingularConvention)) {
+            return Set.of();
+        }
+
+        return conventionalStaticWebTargets();
+    }
+
+    private static Set<String> conventionalStaticWebTargets() {
+        LinkedHashSet<String> targets = new LinkedHashSet<>();
+        targets.add("index.html");
+        targets.add("style.css");
+        targets.add("script.js");
+        return Set.copyOf(targets);
+    }
+
+    private static boolean looksDocumentGuideAboutWebSurface(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        boolean documentOutput = lower.contains("pdf file")
+                || lower.contains(".pdf")
+                || lower.contains("docx file")
+                || lower.contains("word file")
+                || lower.contains(".docx")
+                || lower.contains("txt file")
+                || lower.contains("text file")
+                || lower.contains(".txt")
+                || lower.contains("markdown file")
+                || lower.contains(".md");
+        boolean explanatory = lower.contains("talks about")
+                || lower.contains("guide")
+                || lower.contains("instructions")
+                || lower.contains("how to build")
+                || lower.contains("how to create")
+                || lower.contains("how to make");
+        return documentOutput && explanatory && mentionsStaticWebSurface(lower);
+    }
+
+    private static boolean mentionsStaticWebSurface(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        return lower.contains("website")
+                || lower.contains("web site")
+                || lower.contains("webpage")
+                || lower.contains("web page")
+                || lower.contains("frontend")
+                || lower.contains("front-end")
+                || lower.contains("landing page")
+                || lower.contains(" site")
+                || lower.contains(" page");
+    }
+
+    private static boolean mentionsStyleAsset(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        return lower.contains("css")
+                || lower.contains(".css")
+                || lower.contains("stylesheet")
+                || lower.contains("style sheet")
+                || lower.contains("style.css")
+                || lower.contains("styles.css")
+                || lower.contains("styling")
+                || lower.contains("style")
+                || lower.contains("modern")
+                || lower.contains("synthwave")
+                || lower.contains("neon")
+                || lower.contains("visual")
+                || lower.contains("design");
+    }
+
+    private static boolean mentionsScriptAsset(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        return lower.contains("javascript")
+                || lower.contains(".js")
+                || lower.contains("script.js")
+                || lower.contains("scripts.js")
+                || lower.contains("scripting")
+                || lower.contains("script file")
+                || lower.contains("interaction")
+                || lower.contains("interactive")
+                || lower.contains("functioning")
+                || lower.contains("functional");
+    }
+
     private static List<String> splitDirectoryTargets(String rawSpan) {
         if (rawSpan == null || rawSpan.isBlank()) return List.of();
         String span = rawSpan
@@ -671,6 +783,9 @@ public final class TaskContractResolver {
             if ("explicit-source-to-target-artifact-request".equals(classificationReason)) {
                 return TaskType.FILE_CREATE;
             }
+            if (looksCreateMissingFilesRequest(lower)) {
+                return TaskType.FILE_CREATE;
+            }
             return containsAny(lower, CREATE_MARKERS) ? TaskType.FILE_CREATE : TaskType.FILE_EDIT;
         }
         if (looksExplicitNoInspectionDirectAnswer(lower)) {
@@ -727,6 +842,14 @@ public final class TaskContractResolver {
                 || lower.contains("if it cannot run")
                 || lower.contains("safe command")
                 || lower.contains("command check");
+    }
+
+    private static boolean looksCreateMissingFilesRequest(String lower) {
+        if (lower == null || lower.isBlank()) return false;
+        return (lower.contains("make") || lower.contains("create") || lower.contains("add"))
+                && (lower.contains("rest files")
+                || lower.contains("remaining files")
+                || lower.contains("missing files"));
     }
 
     public static boolean looksUnsupportedPythonCommandExecutionRequest(String request) {
@@ -953,6 +1076,88 @@ public final class TaskContractResolver {
                 || lower.contains("never added css")
                 || lower.contains("reduced it")
                 || lower.contains("changed the index");
+    }
+
+    private static TaskContract withContextualStaticWebTargets(
+            List<ChatMessage> messages,
+            String latestUserRequest,
+            TaskContract contract
+    ) {
+        if (contract == null
+                || !contract.mutationAllowed()
+                || !contract.expectedTargets().isEmpty()
+                || !looksContextualStaticWebAssetFollowUp(latestUserRequest)
+                || !priorMessagesMentionStaticWebSurface(messages, latestUserRequest)) {
+            return contract;
+        }
+        Set<String> expectedTargets = withoutForbiddenTargets(
+                conventionalStaticWebTargets(),
+                contract.forbiddenTargets());
+        if (expectedTargets.isEmpty()) return contract;
+        return new TaskContract(
+                contract.type(),
+                contract.mutationRequested(),
+                contract.mutationAllowed(),
+                contract.verificationRequired(),
+                expectedTargets,
+                contract.sourceEvidenceTargets(),
+                contract.forbiddenTargets(),
+                contract.originalUserRequest(),
+                contract.classificationReason());
+    }
+
+    private static boolean looksContextualStaticWebAssetFollowUp(String userRequest) {
+        if (userRequest == null || userRequest.isBlank()) return false;
+        String lower = userRequest.toLowerCase(Locale.ROOT);
+        if (looksDocumentGuideAboutWebSurface(lower)) return false;
+        boolean restFiles = lower.contains("rest files")
+                || lower.contains("remaining files")
+                || lower.contains("missing files");
+        boolean filesWithAssets = lower.contains("files")
+                && (mentionsStyleAsset(lower) || mentionsScriptAsset(lower));
+        boolean styledInteraction = mentionsStyleAsset(lower) && mentionsScriptAsset(lower);
+        return restFiles || filesWithAssets || styledInteraction;
+    }
+
+    private static boolean priorMessagesMentionStaticWebSurface(
+            List<ChatMessage> messages,
+            String latestUserRequest
+    ) {
+        if (messages == null || messages.isEmpty()) return false;
+        int latestUserIndex = latestUserMessageIndex(messages);
+        int endExclusive = latestUserIndex < 0 ? messages.size() : latestUserIndex;
+        for (int i = 0; i < endExclusive; i++) {
+            ChatMessage message = messages.get(i);
+            if (message == null || message.content() == null || message.content().isBlank()) {
+                continue;
+            }
+            String lower = message.content().toLowerCase(Locale.ROOT);
+            if (mentionsStaticWebSurface(lower)
+                    || lower.contains("index.html")
+                    || lower.contains("style.css")
+                    || lower.contains("styles.css")
+                    || lower.contains("script.js")
+                    || lower.contains("scripts.js")
+                    || lower.contains("static web")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static int latestUserMessageIndex(List<ChatMessage> messages) {
+        if (messages == null || messages.isEmpty()) return -1;
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            ChatMessage message = messages.get(i);
+            if (message == null || !"user".equals(message.role())) continue;
+            String content = message.content();
+            if (content == null || content.isBlank()
+                    || ToolCallSupport.isSyntheticToolResultContent(content)) {
+                continue;
+            }
+            return i;
+        }
+        return -1;
     }
 
     private static TaskContract inheritedRepairContract(

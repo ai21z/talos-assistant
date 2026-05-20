@@ -267,6 +267,60 @@ public final class ToolCallExecutionStage {
                 continue;
             }
 
+            String sourceEvidenceCoverageDiagnostic =
+                    SourceDerivedEvidenceGuard.exactEvidenceCoverageDiagnostic(
+                            state,
+                            currentTaskContract,
+                            effective,
+                            pathHint);
+            if (sourceEvidenceCoverageDiagnostic != null) {
+                ToolCall repairedSourceEvidenceWrite =
+                        SourceDerivedEvidenceGuard.repairedExactEvidenceWrite(
+                                state,
+                                currentTaskContract,
+                                effective,
+                                pathHint);
+                if (repairedSourceEvidenceWrite != null) {
+                    effective = repairedSourceEvidenceWrite;
+                    workspaceOperationPlan = workspaceOperationPlan(effective);
+                    pathHint = pathHint(effective, workspaceOperationPlan);
+                    LocalTurnTraceCapture.recordActionObligation(
+                            "SOURCE_EVIDENCE_EXACT_COVERAGE",
+                            "REPAIRED",
+                            sourceEvidenceCoverageDiagnostic,
+                            "SOURCE_EVIDENCE_WRITE_REPAIRED_BEFORE_APPROVAL");
+                } else {
+                    state.failedCalls++;
+                    failuresThisIter++;
+                    recordFailure(state, effective.toolName(), pathHint);
+                    ToolResult result = ToolResult.fail(ToolError.invalidParams(sourceEvidenceCoverageDiagnostic));
+                    emitToolResult(effective.toolName(), result);
+                    LocalTurnTraceCapture.recordActionObligation(
+                            "SOURCE_EVIDENCE_EXACT_COVERAGE",
+                            "FAILED",
+                            sourceEvidenceCoverageDiagnostic,
+                            "SOURCE_EVIDENCE_WRITE_MISSING_EXACT_EVIDENCE");
+                    state.toolOutcomes.add(new dev.talos.runtime.ToolCallLoop.ToolOutcome(
+                            effective.toolName(),
+                            pathHint,
+                            false,
+                            true,
+                            false,
+                            "",
+                            sourceEvidenceCoverageDiagnostic,
+                            null,
+                            ToolError.INVALID_PARAMS,
+                            workspaceOperationPlan));
+                    appendResultMessage(state, parsed.useNativePath(), i,
+                            ToolCallSupport.formatToolResult(effective, result));
+                    LOG.debug("Blocked source-derived {} for {} before approval: {}",
+                            effective.toolName(),
+                            SafeLogFormatter.value(pathHint),
+                            SafeLogFormatter.text(sourceEvidenceCoverageDiagnostic));
+                    continue;
+                }
+            }
+
             String appendLineDiagnostic = appendLinePreApprovalDiagnostic(
                     effective,
                     state,

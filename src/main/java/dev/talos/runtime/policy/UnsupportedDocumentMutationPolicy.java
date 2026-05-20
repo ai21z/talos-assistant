@@ -27,7 +27,9 @@ public final class UnsupportedDocumentMutationPolicy {
                 // Invalid paths are handled by the tool/pre-approval path guard.
             }
         }
-        detectRequestedFormats(contract.originalUserRequest(), formats);
+        if (formats.isEmpty() && contract.expectedTargets().isEmpty()) {
+            detectRequestedFormats(contract.originalUserRequest(), formats);
+        }
 
         if (formats.isEmpty()) return Optional.empty();
         return Optional.of(answer(formats, true));

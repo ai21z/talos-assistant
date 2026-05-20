@@ -2,6 +2,7 @@ package dev.talos.tools.impl;
 
 import dev.talos.core.capability.CapabilityKind;
 import dev.talos.core.ingest.UnsupportedDocumentFormats;
+import dev.talos.runtime.policy.SafeLogFormatter;
 import dev.talos.tools.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -85,7 +86,7 @@ public final class FileWriteTool implements TalosTool {
         String sanitized = ContentSanitizer.sanitize(content, pathParam);
         if (sanitized.length() < content.length()) {
             LOG.debug("Stripped {} chars of trailing markdown commentary from write_file content for {}",
-                    content.length() - sanitized.length(), pathParam);
+                    content.length() - sanitized.length(), SafeLogFormatter.value(pathParam));
             content = sanitized;
         }
 

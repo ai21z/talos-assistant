@@ -75,19 +75,36 @@ class EngineExceptionTest {
     // ═══════════════════════════════════════════════════════════════════════
 
     @Test
-    void responseError_carries_status_and_body() {
-        var ex = new EngineException.ResponseError(500, "internal server error");
+    void responseError_carries_status_and_body_diagnostics_without_raw_body() {
+        var ex = new EngineException.ResponseError(
+                500,
+                "{\"error\":\"backend echoed Eleni Nikolaou and API_TOKEN=raw-provider-token\"}");
         assertEquals(500, ex.httpStatus());
         assertTrue(ex.getMessage().contains("500"));
-        assertTrue(ex.getMessage().contains("internal server error"));
+        assertTrue(ex.bodyHash().startsWith("sha256:"), ex.bodyHash());
+        assertTrue(ex.bodyChars() > 0);
+        assertTrue(ex.getMessage().contains("bodyHash=sha256:"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("bodyChars="), ex.getMessage());
+        assertFalse(ex.getMessage().contains("Eleni Nikolaou"), ex.getMessage());
+        assertFalse(ex.getMessage().contains("raw-provider-token"), ex.getMessage());
     }
 
     @Test
     void responseError_truncates_long_body() {
         String longBody = "x".repeat(500);
         var ex = new EngineException.ResponseError(502, longBody);
-        // Should be truncated to ~200 chars
-        assertTrue(ex.getMessage().length() < longBody.length());
+        assertTrue(ex.getMessage().contains("bodyHash=sha256:"), ex.getMessage());
+        assertFalse(ex.getMessage().contains("x".repeat(200)), ex.getMessage());
+    }
+
+    @Test
+    void responseError_preserves_context_budget_signal_without_raw_body() {
+        String body = "request (4383 tokens) exceeds the available context size (4096 tokens)";
+        var ex = new EngineException.ResponseError(400, body);
+
+        assertTrue(ex.bodyLooksContextBudgetExceeded());
+        assertFalse(ex.getMessage().contains("4383 tokens"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("bodyHash=sha256:"), ex.getMessage());
     }
 
     @Test
@@ -102,24 +119,30 @@ class EngineExceptionTest {
     // ═══════════════════════════════════════════════════════════════════════
 
     @Test
-    void malformedResponse_carries_context_without_http_status() {
-        var ex = new EngineException.MalformedResponse("compat chat response", "{\"unexpected\":true}");
+    void malformedResponse_carries_context_without_raw_provider_body() {
+        var ex = new EngineException.MalformedResponse(
+                "compat chat response",
+                "{\"unexpected\":\"Eleni Nikolaou\", \"token\":\"raw-provider-token\"}");
         assertEquals(0, ex.httpStatus());
         assertTrue(ex.getMessage().contains("compat chat response"));
-        assertTrue(ex.getMessage().contains("unexpected"));
+        assertTrue(ex.getMessage().contains("bodyHash=sha256:"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("bodyChars="), ex.getMessage());
+        assertFalse(ex.getMessage().contains("Eleni Nikolaou"), ex.getMessage());
+        assertFalse(ex.getMessage().contains("raw-provider-token"), ex.getMessage());
+        assertEquals("", ex.bodyPreview());
     }
 
     @Test
-    void malformedResponse_diagnostic_preview_is_capped_and_redacted() {
-        String body = "token=SECRET-VALUE " + "x".repeat(800);
+    void malformedResponse_diagnostics_are_hash_and_length_only() {
+        String body = "token=SECRET-VALUE Eleni Nikolaou " + "x".repeat(800);
         var ex = new EngineException.MalformedResponse("compat chat stream tool arguments", body);
 
         assertEquals("compat chat stream tool arguments", ex.context());
         assertEquals(body.length(), ex.bodyChars());
         assertTrue(ex.bodyHash().startsWith("sha256:"));
-        assertTrue(ex.bodyPreview().contains("token=[redacted]"));
-        assertFalse(ex.bodyPreview().contains("SECRET-VALUE"));
-        assertTrue(ex.bodyPreview().length() <= 501);
+        assertEquals("", ex.bodyPreview());
+        assertFalse(ex.getMessage().contains("SECRET-VALUE"), ex.getMessage());
+        assertFalse(ex.getMessage().contains("Eleni Nikolaou"), ex.getMessage());
     }
 
     // ═══════════════════════════════════════════════════════════════════════

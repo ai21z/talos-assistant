@@ -117,4 +117,22 @@ Evidence:
 - Checked-in canonical PDF/DOCX/XLSX fixtures with expected-text files are covered by `DocumentExtractionCanonicalFixturesTest`.
 - Older reports may remain as dated evidence but should not be used as the current release decision.
 
+## 2026-05-20 Update
+
+README now has an explicit `Capability Matrix` separating:
+
+- supported developer/text workspace work;
+- PDF/DOCX/XLS/XLSX text extraction;
+- unsupported PDF/DOCX/XLS/XLSX binary generation;
+- frozen Image/OCR and PowerPoint beta claims;
+- private-paperwork warnings.
+
+Regression coverage:
+
+```powershell
+.\gradlew.bat test --tests "dev.talos.docs.ReadmePrivacyCopyTest" --no-daemon
+```
+
+T269 and T320 are closed by this matrix/test slice. Keep T301 open only for broader release-report drift prevention and any future generated/docs consistency checks.
+
 

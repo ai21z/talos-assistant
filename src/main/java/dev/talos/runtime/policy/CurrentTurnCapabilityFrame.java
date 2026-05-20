@@ -221,6 +221,7 @@ public final class CurrentTurnCapabilityFrame {
         frame.append("You must write or edit these exact target paths for this turn.\n")
                 .append("Similar filenames are not substitutes for required target paths.\n")
                 .append("script.js and scripts.js are different target paths; preserve the exact requested spelling.\n")
+                .append("Do not put required root files inside css/, js/, assets/, site/, or other subdirectories unless the required target path explicitly includes that directory.\n")
                 .append("Do not complete this turn by mutating only a similar sibling filename.\n");
     }
 

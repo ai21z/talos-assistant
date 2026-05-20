@@ -1,6 +1,7 @@
 package dev.talos.tools;
 
 import dev.talos.runtime.toolcall.ToolAliasPolicy;
+import dev.talos.runtime.policy.SafeLogFormatter;
 
 import java.util.List;
 import java.util.Map;
@@ -106,7 +107,8 @@ public final class ToolRegistry {
             tool = tools.get("talos." + name);
             if (tool != null) {
                 aliasRescueCount.incrementAndGet();
-                LOG.debug("Fuzzy tool match: '{}' → '{}'", name, tool.name());
+                LOG.debug("Fuzzy tool match: '{}' → '{}'",
+                        SafeLogFormatter.value(name), SafeLogFormatter.value(tool.name()));
                 return tool;
             }
         }
@@ -122,7 +124,8 @@ public final class ToolRegistry {
                 if (!tool.name().equals(name)) {
                     aliasRescueCount.incrementAndGet();
                 }
-                LOG.debug("Alias tool match: '{}' → '{}'", name, decision.canonicalToolName());
+                LOG.debug("Alias tool match: '{}' → '{}'",
+                        SafeLogFormatter.value(name), SafeLogFormatter.value(decision.canonicalToolName()));
                 return tool;
             }
         }
@@ -135,7 +138,8 @@ public final class ToolRegistry {
             tool = tools.get(lowered);
             if (tool != null) {
                 aliasRescueCount.incrementAndGet();
-                LOG.debug("Case-normalized exact tool match: '{}' → '{}'", name, tool.name());
+                LOG.debug("Case-normalized exact tool match: '{}' → '{}'",
+                        SafeLogFormatter.value(name), SafeLogFormatter.value(tool.name()));
                 return tool;
             }
             // Try talos. prefix with lowered name
@@ -143,7 +147,8 @@ public final class ToolRegistry {
                 tool = tools.get("talos." + lowered);
                 if (tool != null) {
                     aliasRescueCount.incrementAndGet();
-                    LOG.debug("Case-normalized prefixed tool match: '{}' → '{}'", name, tool.name());
+                    LOG.debug("Case-normalized prefixed tool match: '{}' → '{}'",
+                            SafeLogFormatter.value(name), SafeLogFormatter.value(tool.name()));
                     return tool;
                 }
             }
@@ -153,7 +158,8 @@ public final class ToolRegistry {
                 tool = tools.get(decision.canonicalToolName());
                 if (tool != null) {
                     aliasRescueCount.incrementAndGet();
-                    LOG.debug("Case-normalized alias match: '{}' → '{}'", name, decision.canonicalToolName());
+                    LOG.debug("Case-normalized alias match: '{}' → '{}'",
+                            SafeLogFormatter.value(name), SafeLogFormatter.value(decision.canonicalToolName()));
                     return tool;
                 }
             }

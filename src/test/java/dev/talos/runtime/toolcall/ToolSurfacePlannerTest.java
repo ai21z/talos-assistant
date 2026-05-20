@@ -156,6 +156,19 @@ class ToolSurfacePlannerTest {
     }
 
     @Test
+    void explicitBatchWorkspaceCopyPromptKeepsBatchSurfaceForFileTargets() {
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                TaskContractResolver.fromUserRequest(
+                        "Use talos.apply_workspace_batch only. Apply operations_json for exactly this operation: "
+                                + "copy source.md to source-copy.md. Perform only that workspace operation."),
+                ExecutionPhase.APPLY,
+                registry());
+
+        assertEquals(List.of("talos.apply_workspace_batch"), plan.nativeToolNames());
+        assertEquals("compound workspace operation surface", plan.reason());
+    }
+
+    @Test
     void naturalDirectoryCreationRequestsExposeOnlyMkdirTool() {
         for (String request : List.of(
                 "Create a new dir called workspace-notes.",
@@ -184,6 +197,47 @@ class ToolSurfacePlannerTest {
         assertFalse(
                 names.equals(List.of("talos.mkdir")),
                 "mixed directory+file creation must not be narrowed to mkdir-only");
+    }
+
+    @Test
+    void exactStaticWebFileTargetsOmitDirectoryAndWorkspaceOperationTools() {
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                TaskContractResolver.fromUserRequest(
+                        "Create the full synthwave frontend now with exactly index.html, style.css, and script.js."),
+                ExecutionPhase.APPLY,
+                registry());
+
+        List<String> names = plan.nativeToolNames();
+        assertEquals("static web file target apply surface", plan.reason());
+        assertTrue(names.contains("talos.write_file"), names.toString());
+        assertTrue(names.contains("talos.edit_file"), names.toString());
+        assertTrue(names.contains("talos.read_file"), names.toString());
+        assertFalse(names.contains("talos.mkdir"), names.toString());
+        assertFalse(names.contains("talos.apply_workspace_batch"), names.toString());
+        assertFalse(names.contains("talos.copy_path"), names.toString());
+        assertFalse(names.contains("talos.move_path"), names.toString());
+        assertFalse(names.contains("talos.rename_path"), names.toString());
+    }
+
+    @Test
+    void staticSelectorRepairDoesNotExposeWorkspaceOrganizationTools() {
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                TaskContractResolver.fromUserRequest(
+                        "Read script.js, then fix the selector bug by changing .missing-button to .cta-button. "
+                                + "Do not edit scripts.js."),
+                ExecutionPhase.APPLY,
+                registry());
+
+        List<String> names = plan.nativeToolNames();
+        assertEquals("file edit target apply surface", plan.reason());
+        assertTrue(names.contains("talos.read_file"), names.toString());
+        assertTrue(names.contains("talos.edit_file"), names.toString());
+        assertTrue(names.contains("talos.write_file"), names.toString());
+        assertFalse(names.contains("talos.rename_path"), names.toString());
+        assertFalse(names.contains("talos.move_path"), names.toString());
+        assertFalse(names.contains("talos.copy_path"), names.toString());
+        assertFalse(names.contains("talos.delete_path"), names.toString());
+        assertFalse(names.contains("talos.apply_workspace_batch"), names.toString());
     }
 
     @Test

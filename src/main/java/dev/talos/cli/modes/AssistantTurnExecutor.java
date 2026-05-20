@@ -416,7 +416,7 @@ public final class AssistantTurnExecutor {
         }
         if (ex instanceof EngineException.ModelNotFound mnf) {
             recordBackendFailureOutcome("BACKEND_MODEL_NOT_FOUND");
-            LOG.warn("Model not found: {}", mnf.model());
+            LOG.warn("Model not found: {}", SafeLogFormatter.value(mnf.model()));
             out.append("\n[Model '").append(mnf.model()).append("' not found. ")
                     .append(mnf.guidance()).append("]\n");
             return;
@@ -432,8 +432,7 @@ public final class AssistantTurnExecutor {
             LocalTurnTraceCapture.recordBackendMalformedResponse(
                     malformed.context(),
                     malformed.bodyHash(),
-                    malformed.bodyChars(),
-                    malformed.bodyPreview());
+                    malformed.bodyChars());
             LOG.warn("Malformed engine response: context={}, bodyHash={}, bodyChars={}",
                     malformed.context(), malformed.bodyHash(), malformed.bodyChars());
             out.append("\n[Engine error: Malformed engine response");
@@ -483,6 +482,10 @@ public final class AssistantTurnExecutor {
     }
 
     private static boolean isContextBudgetFailure(EngineException ex) {
+        if (ex instanceof EngineException.ResponseError responseError
+                && responseError.bodyLooksContextBudgetExceeded()) {
+            return true;
+        }
         String message = ex == null ? "" : Objects.toString(ex.getMessage(), "").toLowerCase(Locale.ROOT);
         return message.contains("exceeds")
                 && (message.contains("available context size")
@@ -1846,10 +1849,12 @@ public final class AssistantTurnExecutor {
         if (unsupportedDocumentMutation.isPresent()) {
             return unsupportedDocumentMutation.get();
         }
-        Optional<String> unsupportedDocumentCapability =
-                UnsupportedDocumentMutationPolicy.answerIfUnsupportedCapabilityQuestion(userRequest);
-        if (unsupportedDocumentCapability.isPresent()) {
-            return unsupportedDocumentCapability.get();
+        if (contract == null || !contract.mutationRequested()) {
+            Optional<String> unsupportedDocumentCapability =
+                    UnsupportedDocumentMutationPolicy.answerIfUnsupportedCapabilityQuestion(userRequest);
+            if (unsupportedDocumentCapability.isPresent()) {
+                return unsupportedDocumentCapability.get();
+            }
         }
         String unsupportedCommand = unsupportedCommandAnswerIfNeeded(contract);
         if (unsupportedCommand != null) {

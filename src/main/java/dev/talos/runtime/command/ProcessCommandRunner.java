@@ -1,6 +1,7 @@
 package dev.talos.runtime.command;
 
 import dev.talos.runtime.policy.ProtectedContentPolicy;
+import dev.talos.runtime.policy.SafeLogFormatter;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -77,7 +78,8 @@ public final class ProcessCommandRunner implements CommandRunner {
             return CommandResult.internalFailure(
                     plan,
                     elapsedMs(start),
-                    "Command execution failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+                    "Command execution failed: " + e.getClass().getSimpleName() + ": "
+                            + SafeLogFormatter.throwableMessage(e));
         } finally {
             executor.shutdownNow();
         }

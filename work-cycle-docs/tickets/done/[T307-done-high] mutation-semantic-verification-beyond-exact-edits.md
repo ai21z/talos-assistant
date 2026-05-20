@@ -1,10 +1,10 @@
 # T307 - Mutation Semantic Verification Beyond Exact Edits
 
-Status: still-open - text-only per-source source-derived verifier slice implemented; broader semantic mutation verification remains open
+Status: done - beta-relevant semantic verifier slices are implemented and verified; broader semantic verification remains future per-ticket work, not an open T307 release blocker
 Severity: high
-Release gate: yes for private-document beta
+Release gate: closed for current beta scope
 Branch: v0.9.0-beta-dev
-Created/updated: 2026-05-19
+Created/updated: 2026-05-19 / 2026-05-20
 Owner: unassigned
 
 ## Problem
@@ -12,6 +12,22 @@ Owner: unassigned
 Talos now verifies exact `talos.edit_file` replacement evidence, but many mutation tasks still fall back to `READBACK_ONLY` because the runtime can only prove that a target exists, is readable, and passed file-level syntax/content checks.
 
 That is not enough for broad beta confidence. A file can be readable after mutation while still failing the user's requested semantics.
+
+Closure note, 2026-05-20:
+
+T307 is closed as a beta release gate because the concrete verifier families raised by the recent audits are now implemented or split into more specific tickets:
+
+- exact edit replacement verification;
+- exact bullet-count verification;
+- append-line verification with exact edit and same-turn full-write evidence;
+- replacement and preserve-rest replacement verification;
+- explicit forbidden sibling-target and single-target-only mutation checks;
+- text-source per-source source-derived verification;
+- document-aware PDF/DOCX/XLSX source-derived verification through T323;
+- static-web convergence and selector guard follow-up through T322/T332;
+- Python command-boundary false-success handling through T325.
+
+This does not mean Talos can semantically prove arbitrary user intent. It means the broad T307 umbrella has been reduced enough that remaining semantic verification work should be opened as concrete tickets tied to specific failed scenarios.
 
 ## Evidence from current code
 
@@ -268,7 +284,8 @@ Add small verifier slices, one at a time:
 - Full prompt-bank integration is still open.
 - Positive append-only/no-rewrite verification is now implemented for full-file writes only when the same turn already performed a complete read of the same canonical target before mutation. It remains open for `talos.write_file` calls with no complete same-turn prior read, truncated reads, partial/offset reads, or broader preservation claims.
 - Broader preservation verification is now implemented only for explicit old-text/new-text replacement tasks with exact mutation evidence or full-write evidence. It remains open for semantic rewrites where the requested change is not expressible as one old/new literal replacement, for truncated reads, and for broad "preserve the rest" claims after multi-step transformations. A single EOF-newline difference is no longer treated as preservation failure because current read evidence cannot prove that byte-level state.
-- Source-derived per-source coverage is now implemented only for readable text sources. Document-aware multi-source verification for PDF/DOCX/XLS/XLSX remains tracked by T323, and broader semantic mutation families remain open under this ticket.
+- Source-derived per-source coverage is implemented for readable text sources and document-aware PDF/DOCX/XLS/XLSX sources. T323 carries the office-document-specific closure evidence.
+- Any future semantic verifier gap must be tracked as a narrow scenario ticket. Do not reopen T307 as a generic "verify semantics better" bucket.
 
 ## Open questions
 

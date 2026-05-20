@@ -2,7 +2,7 @@
 
 Severity: High
 
-Status: implemented-awaiting-evidence - deterministic office document source-derived verification is implemented; live office audit and artifact evidence remain
+Status: done - deterministic and installed-product live evidence now prove conservative multi-source office document report verification
 
 Source: Five scenario big audit, 2026-05-19
 
@@ -84,7 +84,36 @@ Implementation order:
 
 Current remaining work:
 
-1. Run a live office-worker audit with valid PDF/DOCX/XLSX fixtures, prompt-debug enabled, `/last trace` after every turn, and final workspace/report inspection.
-2. Run artifact canary scanning over the live office audit directories.
-3. Add corrupt/encrypted document truthfulness coverage if no existing deterministic test already proves the office-report final answer cannot guess from unreadable document sources.
-4. Close or downgrade this ticket only after evidence proves the live office scenario is not just verifier-ready but behaviorally reliable.
+Closed evidence, 2026-05-20:
+
+- `ToolCallLoopTest.sourceDerivedExactEvidenceWriteMissingSourcePhraseIsRepairedBeforeMutation` proves that exact-evidence source-derived writes with missing source phrases are replaced before approval with a conservative runtime evidence report.
+- `ToolCallLoopTest.mutationContinuationIncludesSourceEvidenceReadbacksForSourceDerivedWrite` proves compact mutation continuation includes source evidence readbacks and exact evidence requirements.
+- `StaticTaskVerifierTest.sourceDerivedOfficeDocumentSummaryFailsWhenExactMarkersMaskUnsupportedProse` proves exact source markers alone cannot mask unsupported invented office prose.
+- `StaticTaskVerifierTest.sourceDerivedOfficeDocumentSummaryPassesWhenEachExtractedSourceContributesDistinctiveFact` proves document-aware PDF/DOCX/XLSX source coverage can pass.
+- Installed-product live audit:
+
+```text
+local/manual-testing/office-multisource-live-20260520-t323-r11/artifacts/TRANSCRIPT.txt
+local/manual-testing/office-multisource-live-20260520-t323-r11/artifacts/office-summary.md
+local/manual-workspaces/office-multisource-live-20260520-t323-r11/workspace
+```
+
+Live result:
+
+```text
+Status: COMPLETE
+Outcome: COMPLETED_VERIFIED
+Verification: PASSED - Source-derived artifact verification passed.
+Action obligation: SOURCE_EVIDENCE_EXACT_COVERAGE (REPAIRED)
+Approval: required=1 granted=1 denied=0
+```
+
+Artifact scan:
+
+```powershell
+.\gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/office-multisource-live-20260520-t323-r11,local/manual-workspaces/office-multisource-live-20260520-t323-r11" --no-daemon
+```
+
+passed.
+
+Important scope note: this closes the beta verifier/reliability blocker for conservative source-evidence office reports. It does not claim rich semantic office-document understanding, layout-perfect document analysis, OCR, comments/tracked-changes fidelity, workbook formula recalculation, or high-quality business prose generation. If richer semantic office summaries become a beta goal, open a separate product-quality ticket instead of reopening this verifier gate.

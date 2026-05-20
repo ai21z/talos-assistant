@@ -1076,6 +1076,71 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void partialInvalidStaticWebRepairRunsStaticVerificationForChangedWorkspace() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-partial-invalid-static-");
+        try {
+            Files.writeString(ws.resolve("index.html"), """
+                    <!DOCTYPE html>
+                    <html lang="en">
+                    <head>
+                      <meta charset="UTF-8">
+                      <title>Broken Repair</title>
+                      <link rel="stylesheet" href="style.css">
+                    </head>
+                    <body>
+                      <main class="hero-content"><h1>Broken Repair</h1></main>
+                      <script src="script.js">
+                    </body>
+                    </html>
+                    """);
+            Files.writeString(ws.resolve("style.css"), ".hero-content { max-width: 720px; }");
+            Files.writeString(ws.resolve("script.js"), "document.querySelector('.cta-button');");
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Fix this website with the smallest exact edits so the HTML, CSS, and JavaScript remain valid and linked."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "[ok] Edited index.html\n[failed] index.html", 1, 2,
+                    List.of("talos.write_file", "talos.edit_file"), List.of(),
+                    1, 0, false, 1, List.of(),
+                    0, 0, 0, 0,
+                    FailureDecision.stop(
+                            FailureAction.STOP_WITH_PARTIAL,
+                            "failure policy stopped the tool loop after 3 consecutive no-progress iteration(s)."),
+                    List.of(
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.write_file", "index.html", true, true, false,
+                                    "Updated index.html", "", dev.talos.tools.VerificationStatus.PASS),
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.edit_file", "index.html", false, true, false,
+                                    "", "Invalid talos.edit_file call: missing required parameter `new_string`. "
+                                    + "No approval was requested and no file was changed.",
+                                    null, ToolError.INVALID_PARAMS)
+                    ));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "[ok] Edited index.html\n[failed] index.html", messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.PARTIAL, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.FAILED, outcome.verificationStatus());
+            assertTrue(outcome.finalAnswer().startsWith("[Partial verification: static checks failed -"),
+                    outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("Remaining static verification problems:"),
+                    outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("some requested file changes succeeded and some failed"),
+                    outcome.finalAnswer());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void recoveredEmptyEditArgumentFailureDoesNotPoisonCompletion() throws Exception {
         Path ws = Files.createTempDirectory("talos-recovered-empty-edit-outcome-");
         try {

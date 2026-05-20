@@ -356,8 +356,7 @@ public final class LocalTurnTraceCapture {
     public static void recordBackendMalformedResponse(
             String context,
             String bodyHash,
-            int bodyChars,
-            String bodyPreview
+            int bodyChars
     ) {
         Bag bag = HOLDER.get();
         if (bag == null) return;
@@ -365,9 +364,6 @@ public final class LocalTurnTraceCapture {
         data.put("context", safe(context));
         data.put("bodyHash", safe(bodyHash));
         data.put("bodyChars", Math.max(0, bodyChars));
-        if (bodyPreview != null && !bodyPreview.isBlank()) {
-            data.put("bodyPreview", cap(bodyPreview, 500));
-        }
         bag.builder.event(TurnTraceEvent.simple("BACKEND_MALFORMED_RESPONSE_CAPTURED", now(), data));
     }
 
