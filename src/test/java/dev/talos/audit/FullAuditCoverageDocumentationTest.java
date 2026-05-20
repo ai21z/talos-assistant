@@ -45,6 +45,20 @@ class FullAuditCoverageDocumentationTest {
         }
     }
 
+    @Test
+    void talosbenchPythonCaseRequiresExpectedOutputFiles() throws IOException {
+        String cases = read("tools/manual-eval/talosbench-cases.json");
+
+        assertTrue(cases.contains("\"id\": \"t325-python-command-boundary\""),
+                "TalosBench prompt bank must include the T325 Python command-boundary case.");
+        assertTrue(cases.contains("\"expectedFinalFilePaths\""),
+                "T325 TalosBench case must use expectedFinalFilePaths so missing Python outputs fail the audit.");
+        assertTrue(cases.contains("\"dijkstra.py\""),
+                "T325 TalosBench case must assert dijkstra.py exists after a claimed create/test turn.");
+        assertTrue(cases.contains("\"test_dijkstra.py\""),
+                "T325 TalosBench case must assert test_dijkstra.py exists after a claimed create/test turn.");
+    }
+
     private static String read(String relativePath) throws IOException {
         return Files.readString(Path.of(relativePath));
     }

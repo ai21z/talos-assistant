@@ -135,6 +135,29 @@ function Test-ExpectedFinalFiles {
     return @($failures)
 }
 
+function Test-ExpectedFinalFilePaths {
+    param($Case, [string]$Workspace)
+
+    if (-not ($Case.PSObject.Properties.Name -contains "expectedFinalFilePaths")) {
+        return @()
+    }
+    $workspaceFull = [System.IO.Path]::GetFullPath($Workspace)
+    $failures = @()
+    foreach ($raw in @($Case.expectedFinalFilePaths)) {
+        $name = [string]$raw
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+        $target = [System.IO.Path]::GetFullPath((Join-Path $workspaceFull $name))
+        if (-not $target.StartsWith($workspaceFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $failures += "expected final file path escapes workspace: $name"
+            continue
+        }
+        if (-not (Test-Path -LiteralPath $target -PathType Leaf)) {
+            $failures += "expected final file missing: $name"
+        }
+    }
+    return @($failures)
+}
+
 function Get-CaseApprovalInputs {
     param($Case)
 
@@ -865,6 +888,21 @@ talos [auto] > Last Turn
         }
         $wrongFailures = @(Test-ExpectedFinalFiles -Case $wrongFileCase -Workspace $expectedFilesRoot)
         Assert-TalosBenchEqual -Name "expected final file failure count" -Expected 1 -Actual $wrongFailures.Count
+
+        $expectedPathCase = [pscustomobject]@{
+            expectedFinalFilePaths = @("README.md")
+        }
+        $pathFailures = @(Test-ExpectedFinalFilePaths -Case $expectedPathCase -Workspace $expectedFilesRoot)
+        Assert-TalosBenchEqual -Name "expected final file path success count" -Expected 0 -Actual $pathFailures.Count
+
+        $missingPathCase = [pscustomobject]@{
+            expectedFinalFilePaths = @("missing.py")
+        }
+        $missingPathFailures = @(Test-ExpectedFinalFilePaths -Case $missingPathCase -Workspace $expectedFilesRoot)
+        Assert-TalosBenchEqual -Name "expected final file path missing count" -Expected 1 -Actual $missingPathFailures.Count
+        Assert-TalosBenchContains -Name "expected final file path missing text" `
+            -Text $missingPathFailures[0] `
+            -Needle "expected final file missing: missing.py"
     } finally {
         Remove-Item -LiteralPath $expectedFilesRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
@@ -1007,6 +1045,7 @@ function Invoke-TalosCase {
     }
     $approvalDriftFailures = @(Test-ApprovalInputDrift -Case $Case -Transcript $text)
     $fileFailures = @(Test-ExpectedFinalFiles -Case $Case -Workspace $workspace)
+    $fileFailures += @(Test-ExpectedFinalFilePaths -Case $Case -Workspace $workspace)
 
     $status = "PASS"
     $blocker = "no"
