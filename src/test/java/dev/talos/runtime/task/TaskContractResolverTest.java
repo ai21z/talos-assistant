@@ -698,6 +698,25 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void pythonExecutionRequestsBecomeUnsupportedCommandContract() {
+        List<String> inputs = List.of(
+                "Run pytest.",
+                "Run python -m pytest.",
+                "Execute python dijkstra.py.",
+                "Run tests for the Python file.",
+                "Check the tests for dijkstra.py.");
+
+        for (String input : inputs) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+            assertEquals(TaskType.VERIFY_ONLY, contract.type(), input);
+            assertFalse(contract.mutationRequested(), input);
+            assertFalse(contract.mutationAllowed(), input);
+            assertTrue(contract.verificationRequired(), input);
+            assertEquals("unsupported-command-verification-request", contract.classificationReason(), input);
+        }
+    }
+
+    @Test
     void commandCapabilityQuestionsDoNotBecomeExecutionRequests() {
         List<String> inputs = List.of(
                 "What is talos.run_command?",

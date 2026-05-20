@@ -421,6 +421,133 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void unsupportedPythonCommandGetsDeterministicDirectAnswer() {
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Run python -m pytest."));
+        var plan = dev.talos.runtime.turn.CurrentTurnPlan.create(
+                dev.talos.runtime.task.TaskContractResolver.fromMessages(messages),
+                dev.talos.runtime.phase.ExecutionPhase.VERIFY,
+                List.of(),
+                List.of(),
+                List.of());
+
+        ExecutionOutcome outcome = ExecutionOutcome.fromNoTool(
+                "pytest passed.",
+                plan,
+                messages,
+                null,
+                true);
+
+        assertEquals(ExecutionOutcome.CompletionStatus.BLOCKED, outcome.completionStatus());
+        assertEquals(TaskCompletionStatus.BLOCKED_BY_POLICY, outcome.taskOutcome().completionStatus());
+        assertTrue(outcome.finalAnswer().startsWith(
+                "[Command not run: Python execution is outside the current bounded command profile.]"),
+                outcome.finalAnswer());
+        assertFalse(outcome.finalAnswer().toLowerCase(java.util.Locale.ROOT).contains("pytest passed"),
+                outcome.finalAnswer());
+        assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.FAILED_ACTION_OBLIGATION));
+    }
+
+    @Test
+    void createPythonAndRunTestsDoesNotClaimExecution() throws Exception {
+        Path ws = Files.createTempDirectory("talos-python-command-boundary-");
+        try {
+            Files.writeString(ws.resolve("dijkstra.py"), "def shortest_path():\n    return 7\n");
+            Files.writeString(ws.resolve("test_dijkstra.py"), "def test_shortest_path():\n    assert True\n");
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Create dijkstra.py and test_dijkstra.py, then run pytest."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Created both files and pytest passed.",
+                    1,
+                    2,
+                    List.of("talos.write_file", "talos.write_file"),
+                    List.of(),
+                    2,
+                    0,
+                    false,
+                    2,
+                    List.of("dijkstra.py", "test_dijkstra.py"),
+                    0, 0, 0, 0,
+                    List.of(
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.write_file", "dijkstra.py", true, true, false,
+                                    "Created dijkstra.py", "", dev.talos.tools.VerificationStatus.PASS),
+                            new ToolCallLoop.ToolOutcome(
+                                    "talos.write_file", "test_dijkstra.py", true, true, false,
+                                    "Created test_dijkstra.py", "", dev.talos.tools.VerificationStatus.PASS)
+                    ));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "Created both files and pytest passed.", messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.VerificationStatus.READBACK_ONLY, outcome.verificationStatus());
+            assertTrue(outcome.finalAnswer().contains(
+                            "Python execution is outside the current bounded command profile"),
+                    outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().toLowerCase(java.util.Locale.ROOT).contains("pytest passed"),
+                    outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().toLowerCase(java.util.Locale.ROOT).contains("tests passed"),
+                    outcome.finalAnswer());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
+    void pythonReadbackOnlyDoesNotClaimAlgorithmVerified() throws Exception {
+        Path ws = Files.createTempDirectory("talos-python-readback-only-");
+        try {
+            Files.writeString(ws.resolve("solver.py"), "def solve(items):\n    return sorted(items)\n");
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user("Create solver.py, then run python solver.py to verify the algorithm."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Created solver.py. The algorithm is verified.",
+                    1,
+                    1,
+                    List.of("talos.write_file"),
+                    List.of(),
+                    1,
+                    0,
+                    false,
+                    1,
+                    List.of("solver.py"),
+                    0, 0, 0, 0,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.write_file", "solver.py", true, true, false,
+                            "Created solver.py", "", dev.talos.tools.VerificationStatus.PASS)));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    "Created solver.py. The algorithm is verified.", messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.VerificationStatus.READBACK_ONLY, outcome.verificationStatus());
+            assertTrue(outcome.finalAnswer().startsWith("[File write/readback passed."),
+                    outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains(
+                            "No Python, pytest, or .py command result is available"),
+                    outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().toLowerCase(java.util.Locale.ROOT).contains("algorithm is verified"),
+                    outcome.finalAnswer());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void mutationRequestStoppedByFailurePolicyWithNoMutationIsNotComplete() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));

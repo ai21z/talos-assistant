@@ -337,6 +337,22 @@ class ToolSurfacePlannerTest {
     }
 
     @Test
+    void pythonExecutionRequestsExposeNoCommandTool() {
+        for (String input : List.of(
+                "Run pytest.",
+                "Run python -m pytest.",
+                "Execute python dijkstra.py.")) {
+            var contract = TaskContractResolver.fromUserRequest(input);
+
+            ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(contract, ExecutionPhase.VERIFY, registry());
+
+            assertEquals("unsupported command request", plan.reason(), input);
+            assertEquals(List.of(), plan.nativeToolNames(), input);
+            assertFalse(plan.nativeToolNames().contains("talos.run_command"), input);
+        }
+    }
+
+    @Test
     void sessionUncertaintyQuestionExposesNoTools() {
         var contract = TaskContractResolver.fromUserRequest(
                 "what are you unsure about from this session? short and evidence-based.");
