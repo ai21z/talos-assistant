@@ -1,5 +1,11 @@
 package dev.talos.runtime.verification;
 
+import dev.talos.core.Config;
+import dev.talos.core.extract.DocumentExtractionRequest;
+import dev.talos.core.extract.DocumentExtractionResult;
+import dev.talos.core.extract.DocumentExtractionService;
+import dev.talos.core.extract.DocumentExtractionStatus;
+import dev.talos.core.ingest.FileCapabilityPolicy;
 import dev.talos.runtime.TemplatePlaceholderGuard;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.capability.ArtifactOperation;
@@ -447,12 +453,20 @@ public final class StaticTaskVerifier {
             List<String> problems
     ) {
         List<SourceEvidence> out = new ArrayList<>();
+        Config extractionConfig = new Config(null);
+        DocumentExtractionService extractionService = new DocumentExtractionService(extractionConfig);
         for (String sourceTarget : sourceTargets) {
             if (sourceTarget == null || sourceTarget.isBlank()) continue;
             String normalized = normalizePath(sourceTarget);
             Path source = resolveWorkspaceFile(root, normalized);
             if (source == null || !Files.isRegularFile(source)) {
                 problems.add(normalized + ": source evidence file is not readable for derived artifact verification.");
+                continue;
+            }
+            SourceEvidence extracted = extractedSourceEvidence(
+                    root, normalized, source, extractionConfig, extractionService, problems);
+            if (extracted != null) {
+                out.add(extracted);
                 continue;
             }
             try {
@@ -463,6 +477,30 @@ public final class StaticTaskVerifier {
             }
         }
         return out;
+    }
+
+    private static SourceEvidence extractedSourceEvidence(
+            Path root,
+            String normalized,
+            Path source,
+            Config extractionConfig,
+            DocumentExtractionService extractionService,
+            List<String> problems
+    ) {
+        FileCapabilityPolicy.FormatInfo info = FileCapabilityPolicy.describe(source, extractionConfig).orElse(null);
+        if (info == null || info.capability() != FileCapabilityPolicy.Capability.EXTRACTABLE_TEXT_ENABLED) {
+            return null;
+        }
+
+        DocumentExtractionResult result = extractionService.extract(DocumentExtractionRequest.read(source, root));
+        if ((result.status() == DocumentExtractionStatus.SUCCESS || result.status() == DocumentExtractionStatus.PARTIAL)
+                && !result.safeText().isBlank()) {
+            return new SourceEvidence(normalized, result.safeText());
+        }
+
+        problems.add(normalized + ": source evidence document could not be extracted for derived artifact verification"
+                + " (status=" + result.status() + ").");
+        return new SourceEvidence(normalized, "");
     }
 
     private static boolean looksLikeInstructionEcho(
