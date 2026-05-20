@@ -1,14 +1,20 @@
 package dev.talos.runtime.toolcall;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.core.security.Sandbox;
+import dev.talos.runtime.ApprovalGate;
+import dev.talos.runtime.ApprovalResponse;
 import dev.talos.runtime.NoOpApprovalGate;
 import dev.talos.runtime.JsonSessionStore;
 import dev.talos.runtime.TurnRecord;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.TurnProcessor;
+import dev.talos.runtime.trace.LocalTurnTrace;
+import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.runtime.trace.TurnTraceEvent;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.impl.ReadFileTool;
@@ -20,6 +26,7 @@ import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import org.apache.poi.hssf.usermodel.HSSFWorkbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -31,14 +38,23 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ProtectedReadScopeIntegrationTest {
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @TempDir
     Path workspace;
+
+    @AfterEach
+    void clearTraceCapture() {
+        LocalTurnTraceCapture.clear();
+    }
 
     @Test
     void private_mode_approved_protected_read_is_withheld_from_model_context() throws Exception {
@@ -153,7 +169,7 @@ class ProtectedReadScopeIntegrationTest {
         Config cfg = privateModeConfig();
         ToolRegistry registry = new ToolRegistry();
         registry.register(new ReadFileTool());
-        TurnProcessor processor = new TurnProcessor(null, new NoOpApprovalGate(), registry);
+        TurnProcessor processor = new TurnProcessor(null, fixedApprovalGate(ApprovalResponse.DENIED), registry);
         ToolCallLoop loop = new ToolCallLoop(processor, 5);
         Context ctx = Context.builder(cfg)
                 .llm(LlmClient.scripted(List.of("I cannot see the raw private document text.")))
@@ -193,7 +209,7 @@ class ProtectedReadScopeIntegrationTest {
         Config cfg = privateModeConfig();
         ToolRegistry registry = new ToolRegistry();
         registry.register(new ReadFileTool());
-        TurnProcessor processor = new TurnProcessor(null, new NoOpApprovalGate(), registry);
+        TurnProcessor processor = new TurnProcessor(null, fixedApprovalGate(ApprovalResponse.DENIED), registry);
         ToolCallLoop loop = new ToolCallLoop(processor, 5);
         Context ctx = Context.builder(cfg)
                 .llm(LlmClient.scripted(List.of("I cannot see the raw private workbook text.")))
@@ -225,7 +241,7 @@ class ProtectedReadScopeIntegrationTest {
         Config cfg = privateModeConfig();
         ToolRegistry registry = new ToolRegistry();
         registry.register(new ReadFileTool());
-        TurnProcessor processor = new TurnProcessor(null, new NoOpApprovalGate(), registry);
+        TurnProcessor processor = new TurnProcessor(null, fixedApprovalGate(ApprovalResponse.DENIED), registry);
         ToolCallLoop loop = new ToolCallLoop(processor, 5);
         Context ctx = Context.builder(cfg)
                 .llm(LlmClient.scripted(List.of("I cannot see the raw private PDF text.")))
@@ -258,7 +274,7 @@ class ProtectedReadScopeIntegrationTest {
         Config cfg = privateModeConfig();
         ToolRegistry registry = new ToolRegistry();
         registry.register(new ReadFileTool());
-        TurnProcessor processor = new TurnProcessor(null, new NoOpApprovalGate(), registry);
+        TurnProcessor processor = new TurnProcessor(null, fixedApprovalGate(ApprovalResponse.DENIED), registry);
         ToolCallLoop loop = new ToolCallLoop(processor, 5);
         Context ctx = Context.builder(cfg)
                 .llm(LlmClient.scripted(List.of("I cannot see the raw private workbook text.")))
@@ -297,7 +313,7 @@ class ProtectedReadScopeIntegrationTest {
         Config cfg = privateModeConfig();
         ToolRegistry registry = new ToolRegistry();
         registry.register(new ReadFileTool());
-        TurnProcessor processor = new TurnProcessor(null, new NoOpApprovalGate(), registry);
+        TurnProcessor processor = new TurnProcessor(null, fixedApprovalGate(ApprovalResponse.DENIED), registry);
         ToolCallLoop loop = new ToolCallLoop(processor, 5);
         Context ctx = Context.builder(cfg)
                 .llm(LlmClient.scripted(List.of("The patient is Eleni Nikolaou.")))
@@ -356,6 +372,121 @@ class ProtectedReadScopeIntegrationTest {
         assertTrue(transcript.contains("Clinic appointment reference Alpha Safe Handoff"), transcript);
         assertFalse(transcript.contains("withheld from model context"), transcript);
         assertTrue(result.finalAnswer().contains("Alpha Safe Handoff"), result.finalAnswer());
+    }
+
+    @Test
+    void private_mode_document_send_to_model_requires_per_turn_approval_and_traces_scope() throws Exception {
+        Path docx = workspace.resolve("medical-notes.docx");
+        try (XWPFDocument doc = new XWPFDocument()) {
+            doc.createParagraph().createRun().setText("Clinic appointment reference Alpha Per Turn");
+            try (OutputStream out = Files.newOutputStream(docx)) {
+                doc.write(out);
+            }
+        }
+
+        AtomicInteger approvals = new AtomicInteger();
+        AtomicReference<String> approvalDescription = new AtomicReference<>("");
+        AtomicReference<String> approvalDetail = new AtomicReference<>("");
+        ApprovalGate gate = approvalGate(approvals, approvalDescription, approvalDetail, ApprovalResponse.APPROVED);
+        Config cfg = privateModeConfig();
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new ReadFileTool());
+        TurnProcessor processor = new TurnProcessor(null, gate, registry);
+        ToolCallLoop loop = new ToolCallLoop(processor, 5);
+        Context ctx = Context.builder(cfg)
+                .llm(LlmClient.scripted(List.of("The document contains Alpha Per Turn.")))
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .toolRegistry(registry)
+                .toolCallLoop(loop)
+                .build();
+
+        List<ChatMessage> messages = new ArrayList<>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Read medical-notes.docx and summarize it."));
+
+        beginTrace("Read medical-notes.docx and summarize it.");
+        ToolCallLoop.LoopResult result = loop.run(
+                "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"medical-notes.docx\"}}",
+                messages,
+                workspace,
+                ctx);
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+        assertEquals(1, approvals.get());
+        assertTrue(approvalDescription.get().contains("private document model handoff"),
+                approvalDescription.get());
+        assertTrue(approvalDetail.get().contains("medical-notes.docx"), approvalDetail.get());
+        assertTrue(approvalDetail.get().contains("SEND_TO_MODEL_CONTEXT"), approvalDetail.get());
+        assertTrue(approvalDetail.get().contains("per-turn"), approvalDetail.get());
+
+        String transcript = messages.toString();
+        assertTrue(transcript.contains("Clinic appointment reference Alpha Per Turn"), transcript);
+        assertFalse(transcript.contains("withheld from model context"), transcript);
+        assertTrue(result.finalAnswer().contains("Alpha Per Turn"), result.finalAnswer());
+
+        assertTrue(hasTraceEvent(trace, "PRIVATE_DOCUMENT_MODEL_HANDOFF_APPROVAL_REQUIRED"), trace.events().toString());
+        assertTrue(hasTraceEvent(trace, "PRIVATE_DOCUMENT_MODEL_HANDOFF_APPROVAL_GRANTED"), trace.events().toString());
+        assertFalse(hasTraceEvent(trace, "PRIVATE_DOCUMENT_MODEL_HANDOFF_APPROVAL_DENIED"), trace.events().toString());
+        String traceJson = MAPPER.writeValueAsString(trace);
+        assertFalse(traceJson.contains("Clinic appointment reference Alpha Per Turn"), traceJson);
+        assertTrue(traceJson.contains("PRIVATE_DOCUMENT_EXTRACTED_TEXT"), traceJson);
+        assertTrue(traceJson.contains("SEND_TO_MODEL_CONTEXT"), traceJson);
+    }
+
+    @Test
+    void private_mode_document_send_to_model_denial_keeps_withheld_result_and_traces_denial() throws Exception {
+        Path docx = workspace.resolve("medical-notes.docx");
+        try (XWPFDocument doc = new XWPFDocument()) {
+            doc.createParagraph().createRun().setText("Clinic appointment reference Alpha Denied");
+            try (OutputStream out = Files.newOutputStream(docx)) {
+                doc.write(out);
+            }
+        }
+
+        AtomicInteger approvals = new AtomicInteger();
+        AtomicReference<String> approvalDescription = new AtomicReference<>("");
+        AtomicReference<String> approvalDetail = new AtomicReference<>("");
+        ApprovalGate gate = approvalGate(approvals, approvalDescription, approvalDetail, ApprovalResponse.DENIED);
+        Config cfg = privateModeConfig();
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new ReadFileTool());
+        TurnProcessor processor = new TurnProcessor(null, gate, registry);
+        ToolCallLoop loop = new ToolCallLoop(processor, 5);
+        Context ctx = Context.builder(cfg)
+                .llm(LlmClient.scripted(List.of("I cannot see the raw private document text.")))
+                .sandbox(new Sandbox(workspace, Map.of()))
+                .toolRegistry(registry)
+                .toolCallLoop(loop)
+                .build();
+
+        List<ChatMessage> messages = new ArrayList<>();
+        messages.add(ChatMessage.system("sys"));
+        messages.add(ChatMessage.user("Read medical-notes.docx and summarize it."));
+
+        beginTrace("Read medical-notes.docx and summarize it.");
+        ToolCallLoop.LoopResult result = loop.run(
+                "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"medical-notes.docx\"}}",
+                messages,
+                workspace,
+                ctx);
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+
+        assertEquals(1, approvals.get());
+        assertTrue(approvalDescription.get().contains("private document model handoff"),
+                approvalDescription.get());
+        assertTrue(approvalDetail.get().contains("SEND_TO_MODEL_CONTEXT"), approvalDetail.get());
+
+        String transcript = messages.toString();
+        assertFalse(transcript.contains("Clinic appointment reference Alpha Denied"), transcript);
+        assertTrue(transcript.contains("withheld from model context"), transcript);
+        assertFalse(result.finalAnswer().contains("Alpha Denied"), result.finalAnswer());
+
+        assertTrue(hasTraceEvent(trace, "PRIVATE_DOCUMENT_MODEL_HANDOFF_APPROVAL_REQUIRED"), trace.events().toString());
+        assertFalse(hasTraceEvent(trace, "PRIVATE_DOCUMENT_MODEL_HANDOFF_APPROVAL_GRANTED"), trace.events().toString());
+        assertTrue(hasTraceEvent(trace, "PRIVATE_DOCUMENT_MODEL_HANDOFF_APPROVAL_DENIED"), trace.events().toString());
+        String traceJson = MAPPER.writeValueAsString(trace);
+        assertFalse(traceJson.contains("Clinic appointment reference Alpha Denied"), traceJson);
+        assertTrue(traceJson.contains("PRIVATE_DOCUMENT_EXTRACTED_TEXT"), traceJson);
     }
 
     @Test
@@ -442,6 +573,51 @@ class ProtectedReadScopeIntegrationTest {
                         "persist_raw_artifacts", false,
                         "allow_rag_indexing", false)))));
         return cfg;
+    }
+
+    private static ApprovalGate approvalGate(
+            AtomicInteger approvals,
+            AtomicReference<String> description,
+            AtomicReference<String> detail,
+            ApprovalResponse response) {
+        return new ApprovalGate() {
+            @Override
+            public boolean approve(String description, String detail) {
+                return approveFull(description, detail).isApproved();
+            }
+
+            @Override
+            public ApprovalResponse approveFull(String desc, String det) {
+                approvals.incrementAndGet();
+                description.set(desc == null ? "" : desc);
+                detail.set(det == null ? "" : det);
+                return response;
+            }
+        };
+    }
+
+    private static ApprovalGate fixedApprovalGate(ApprovalResponse response) {
+        return approvalGate(new AtomicInteger(), new AtomicReference<>(""), new AtomicReference<>(""), response);
+    }
+
+    private static void beginTrace(String request) {
+        LocalTurnTraceCapture.begin(
+                "trc-private-doc-handoff",
+                "sid-private-doc-handoff",
+                1,
+                "2026-05-20T12:00:00Z",
+                "workspace-hash",
+                "auto",
+                "test",
+                "model",
+                request);
+    }
+
+    private static boolean hasTraceEvent(LocalTurnTrace trace, String eventType) {
+        return trace != null
+                && trace.events().stream()
+                .map(TurnTraceEvent::type)
+                .anyMatch(eventType::equals);
     }
 
     private static void writePdf(Path path, String text) throws Exception {

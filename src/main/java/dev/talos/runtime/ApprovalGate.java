@@ -43,4 +43,23 @@ public interface ApprovalGate {
     default ApprovalResponse approveFull(String description, String detail) {
         return approve(description, detail) ? ApprovalResponse.APPROVED : ApprovalResponse.DENIED;
     }
+
+    /**
+     * Request approval for a one-turn-only sensitive operation.
+     *
+     * <p>This is for operations where a remembered/session approval would
+     * weaken the policy boundary, such as private-document model handoff.
+     * The default implementation preserves compatibility with existing gates
+     * while collapsing any approved response to a one-time approval.
+     *
+     * @param description short human-readable description of the operation
+     * @param detail      optional longer detail (may be null)
+     * @return {@link ApprovalResponse#APPROVED} for this turn only, otherwise
+     * {@link ApprovalResponse#DENIED}
+     */
+    default ApprovalResponse approveOnce(String description, String detail) {
+        return approveFull(description, detail).isApproved()
+                ? ApprovalResponse.APPROVED
+                : ApprovalResponse.DENIED;
+    }
 }

@@ -20,6 +20,14 @@ public final class ApprovalPromptRenderer {
     }
 
     public String render(String action, String detail, String risk) {
+        return render(action, detail, risk, true);
+    }
+
+    public String renderOnce(String action, String detail, String risk) {
+        return render(action, detail, risk, false);
+    }
+
+    private String render(String action, String detail, String risk, boolean allowRemember) {
         StringBuilder sb = new StringBuilder();
         sb.append(border("approval required"));
         sb.append(row("Action", safe(action, "unknown operation")));
@@ -34,9 +42,12 @@ public final class ApprovalPromptRenderer {
             }
         }
         sb.append(blank());
-        String choices = "y = approve once " + glyphs.dot()
-                + " a = approve for session " + glyphs.dot()
-                + " Enter = deny";
+        String choices = allowRemember
+                ? "y = approve once " + glyphs.dot()
+                        + " a = approve for session " + glyphs.dot()
+                        + " Enter = deny"
+                : "y = approve this turn " + glyphs.dot()
+                        + " Enter = deny";
         for (String wrapped : wrap(choices, contentWidth() - 2)) {
             sb.append(rail()).append(wrapped).append(System.lineSeparator());
         }

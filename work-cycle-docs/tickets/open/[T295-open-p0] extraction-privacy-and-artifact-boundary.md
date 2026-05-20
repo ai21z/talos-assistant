@@ -1,6 +1,6 @@
 # T295 - Extraction Privacy and Artifact Boundary
 
-Status: open - private-document release gate; core provenance, artifact canaries, RAG policy, and side-path parity implemented
+Status: open - private-document release gate; per-turn handoff approval implemented, larger corpus/live evidence still pending
 Severity: P0 for private-document/personal-paperwork release claim
 Release gate: yes
 Branch: v0.9.0-beta-dev
@@ -203,6 +203,36 @@ Focused evidence passed again on 2026-05-20:
 ```text
 .\gradlew.bat test --tests "dev.talos.runtime.toolcall.ProtectedReadScopeIntegrationTest" --tests "dev.talos.core.index.IndexerPrivateDocumentPolicyTest" --tests "dev.talos.cli.prompt.PromptDebugInspectorPrivateDocumentTest" --tests "dev.talos.runtime.JsonSessionStoreTest" --tests "dev.talos.runtime.JsonTurnLogAppenderTest" --tests "dev.talos.runtime.trace.TraceRedactorTest" --tests "dev.talos.api.TalosKnowledgeEnginePrivacyTest" --no-daemon
 ```
+
+## 2026-05-20 per-turn send-to-model approval update
+
+The per-turn private-document send-to-model approval slice is implemented and covered.
+
+Behavior now enforced:
+
+- Private-mode extracted document text still defaults to withheld from model context.
+- When a private extracted document result would otherwise be withheld, the tool loop requests an explicit one-turn approval before allowing `SEND_TO_MODEL_CONTEXT`.
+- Approval is scoped to the current turn only; the CLI approval UX for this path does not offer or accept session-remember approval.
+- Approved handoff updates the tool-result metadata for this turn only and records the context-ledger decision as `PRIVATE_DOCUMENT_PER_TURN_SEND_TO_MODEL_APPROVED`.
+- Denied handoff keeps the existing withheld-result behavior and keeps raw extracted text out of model messages/final answers.
+- Local trace records redacted `PRIVATE_DOCUMENT_MODEL_HANDOFF_APPROVAL_REQUIRED`, `PRIVATE_DOCUMENT_MODEL_HANDOFF_APPROVAL_GRANTED`, and `PRIVATE_DOCUMENT_MODEL_HANDOFF_APPROVAL_DENIED` events with `SEND_TO_MODEL_CONTEXT`, privacy class, source, artifact/RAG flags, and path hint metadata.
+- Trace events do not serialize the raw extracted document text.
+
+Focused red-green evidence:
+
+```text
+.\gradlew.bat test --tests "dev.talos.runtime.CliApprovalGateTest" --tests "dev.talos.cli.ui.ApprovalPromptRendererTest" --no-daemon
+.\gradlew.bat test --tests "dev.talos.runtime.toolcall.ProtectedReadScopeIntegrationTest" --no-daemon
+.\gradlew.bat test --tests "dev.talos.runtime.toolcall.ProtectedReadScopeIntegrationTest" --tests "dev.talos.core.index.IndexerPrivateDocumentPolicyTest" --tests "dev.talos.cli.prompt.PromptDebugInspectorPrivateDocumentTest" --tests "dev.talos.runtime.JsonSessionStoreTest" --tests "dev.talos.runtime.JsonTurnLogAppenderTest" --tests "dev.talos.runtime.trace.TraceRedactorTest" --tests "dev.talos.api.TalosKnowledgeEnginePrivacyTest" --tests "dev.talos.runtime.CliApprovalGateTest" --tests "dev.talos.cli.ui.ApprovalPromptRendererTest" --tests "dev.talos.runtime.trace.LocalTurnTraceContextLedgerTest" --tests "dev.talos.runtime.context.ContextLedgerTest" --tests "dev.talos.runtime.context.ContextLedgerArtifactScanTest" --tests "dev.talos.cli.prompt.PromptDebugInspectorContextLedgerTest" --no-daemon
+.\gradlew.bat e2eTest --tests "dev.talos.harness.ScriptedApprovalGateTest" --tests "dev.talos.harness.SynchronizedApprovalAuditRunnerTest" --no-daemon
+.\gradlew.bat check --no-daemon
+```
+
+Current remaining blockers:
+
+- Run and archive approval-sensitive live transcript evidence for private-document send-to-model approval and denial.
+- Run a larger private-document fixture corpus beyond the small generated audit fixtures.
+- Keep T295 open as the private-document release gate until that live/corpus evidence is attached.
 
 ## Rollback / migration notes
 

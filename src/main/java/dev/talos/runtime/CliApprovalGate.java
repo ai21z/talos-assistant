@@ -128,6 +128,40 @@ public final class CliApprovalGate implements ApprovalGate {
         return ApprovalResponse.DENIED;
     }
 
+    /**
+     * One-turn-only approval prompt. Unlike {@link #approveFull(String, String)},
+     * this deliberately does not offer or accept a session-remember response.
+     */
+    @Override
+    public ApprovalResponse approveOnce(String description, String detail) {
+        if (prePromptHook != null) {
+            try { prePromptHook.run(); } catch (Exception ignored) { }
+        }
+
+        String risk = inferRisk(description, detail);
+        out.println();
+        out.print(new ApprovalPromptRenderer(CliTheme.current(), 80)
+                .renderOnce(description, detail, risk));
+        out.flush();
+
+        String response;
+        try {
+            response = lineReader.apply("  Allow? [y=yes, N=no] ");
+        } catch (Exception e) {
+            return ApprovalResponse.DENIED;
+        }
+
+        if (response == null) {
+            return ApprovalResponse.DENIED;
+        }
+
+        response = response.trim().toLowerCase();
+        if ("y".equals(response) || "yes".equals(response)) {
+            return ApprovalResponse.APPROVED;
+        }
+        return ApprovalResponse.DENIED;
+    }
+
     private static String inferRisk(String description, String detail) {
         String text = ((description == null ? "" : description) + "\n" + (detail == null ? "" : detail))
                 .toLowerCase(java.util.Locale.ROOT);
