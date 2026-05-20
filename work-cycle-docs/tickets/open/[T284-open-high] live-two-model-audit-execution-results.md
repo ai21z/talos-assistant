@@ -88,3 +88,41 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-t267-live-audit.
 ```
 
 The full prompt bank still has not run, so this ticket remains open.
+
+## 2026-05-20 lane-labeled execution update
+
+Current-head lane evidence now exists, but this is not yet a full release close:
+
+- `SAFE_REDIRECTED_STDIN`
+  - GPT-OSS: 19/19 PASS with `-StrictEvidence`.
+  - Qwen: 19/19 PASS with `-StrictEvidence`.
+  - Each case captured input script, transcript, `/last trace`, prompt-debug save command, session save command, workspace git baseline/status/diff, and lane-labeled summary.
+  - Runtime artifact canary scan over the fresh safe-lane roots passed with only fixture source files allowlisted.
+- `SYNC_APPROVAL`
+  - `runSynchronizedApprovalAudit` passed with 32 scripted scenarios.
+  - Artifact scan passed in the runner summary and in a separate `checkRuntimeArtifactCanaries` invocation.
+- `TRUE_PTY_MANUAL`
+  - Manual packet was prepared successfully.
+  - No true terminal/JLine transcript is claimed yet.
+
+Report: `work-cycle-docs/reports/lane-labeled-two-model-prompt-bank-audit-20260520.md`.
+
+## 2026-05-20 true PTY/manual lane update
+
+The true PTY/manual packet is now complete for the lane-labeled audit wave:
+
+```text
+Audit id: true-pty-manual-20260520-r1
+Artifacts: local/manual-testing/true-pty-manual-20260520-r1/artifacts
+Workspace: local/manual-workspaces/true-pty-manual-20260520-r1/workspace
+Validator: validateSynchronizedApprovalPtyManualAudit PASS
+Artifact scan: PASS
+```
+
+Evidence covers protected-read denial, private-document model-handoff denial,
+private-document per-turn approval, `/last trace`, `/prompt-debug save`, and
+absence of raw protected/private canaries in scanned artifacts.
+
+Remaining blocker: rerun final clean verification before using this as
+release-candidate evidence. This is still a dirty stabilization branch, not a
+versioned candidate packet.

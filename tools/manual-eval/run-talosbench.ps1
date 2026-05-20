@@ -6,6 +6,10 @@ param(
     [switch]$SelfTest,
     [switch]$IncludeManualRequired,
     [switch]$AllowPipedApprovalInputs,
+    [switch]$StrictEvidence,
+    [string]$AuditId = "",
+    [string]$ModelLabel = "",
+    [string]$Lane = "",
     [string]$TalosPath = "",
     [string]$WorkspaceRoot = "local/manual-workspaces/talosbench",
     [string]$TranscriptRoot = "local/manual-testing/talosbench"
@@ -215,6 +219,30 @@ function Get-TalosBenchManualExecutionGate {
         Status = "RUN"
         Notes = ""
     }
+}
+
+function Get-TalosBenchLane {
+    param($Case)
+
+    if (-not [string]::IsNullOrWhiteSpace($Lane)) {
+        return $Lane
+    }
+    if ($Case.PSObject.Properties.Name -contains "lane") {
+        $configured = [string]$Case.lane
+        if (-not [string]::IsNullOrWhiteSpace($configured)) {
+            return $configured
+        }
+    }
+
+    $manualRequired = $Case.manualRequired -eq $true
+    $approvalInputs = @(Get-CaseApprovalInputs -Case $Case)
+    if ($manualRequired -and $approvalInputs.Count -gt 0) {
+        return "SYNC_APPROVAL"
+    }
+    if ($manualRequired) {
+        return "TRUE_PTY_MANUAL"
+    }
+    return "SAFE_REDIRECTED_STDIN"
 }
 
 function Test-ApprovalInputDrift {
@@ -579,14 +607,24 @@ function New-TalosBenchInputLines {
         [int]$EndPromptIndex = -1,
         [hashtable]$Replacements = @{},
         [bool]$IncludeSessionClear = $true,
-        [bool]$IncludeLastTrace = $true
+        [bool]$IncludeLastTrace = $true,
+        [bool]$StrictEvidence = $false,
+        [string]$CaseArtifactRoot = ""
     )
+
+    if ($StrictEvidence -and [string]::IsNullOrWhiteSpace($CaseArtifactRoot)) {
+        throw "Strict evidence input generation requires a case artifact root."
+    }
 
     $inputLines = New-Object System.Collections.Generic.List[string]
     if ($IncludeSessionClear) {
         $inputLines.Add("/session clear")
     }
-    $inputLines.Add("/debug trace")
+    if ($StrictEvidence) {
+        $inputLines.Add("/debug prompt on")
+    } else {
+        $inputLines.Add("/debug trace")
+    }
     $prompts = @($Case.prompts)
     $hasPromptApprovals = $Case.PSObject.Properties.Name -contains "approvalInputsByPrompt"
     $promptApprovals = if ($hasPromptApprovals) { @($Case.approvalInputsByPrompt) } else { @() }
@@ -613,8 +651,15 @@ function New-TalosBenchInputLines {
                 $inputLines.Add([string]$approval)
             }
         }
+        if ($StrictEvidence -and $IncludeLastTrace) {
+            $promptArtifactRoot = Join-Path $CaseArtifactRoot ("prompt-{0:D3}" -f ($promptIndex + 1))
+            $promptDebugRoot = Join-Path $promptArtifactRoot "prompt-debug"
+            $inputLines.Add("/last trace")
+            $inputLines.Add('/prompt-debug save "' + $promptDebugRoot + '"')
+            $inputLines.Add("/session save")
+        }
     }
-    if ($IncludeLastTrace) {
+    if ((-not $StrictEvidence) -and $IncludeLastTrace) {
         $inputLines.Add("/last trace")
         $inputLines.Add("/last trace")
         $inputLines.Add("/last trace")
@@ -825,6 +870,30 @@ talos [auto] > Last Turn
         throw "Self-test failed: fewer than three /last trace commands were appended."
     }
     Assert-TalosBenchEqual -Name "input line last" -Expected "/q" -Actual $lines[$lines.Count - 1]
+
+    $strictArtifactRoot = Join-Path ([System.IO.Path]::GetTempPath()) "talosbench-strict-selftest"
+    $strictLines = @(New-TalosBenchInputLines `
+            -Case $approvalCase `
+            -StrictEvidence:$true `
+            -CaseArtifactRoot $strictArtifactRoot)
+    Assert-TalosBenchEqual -Name "strict input line first" -Expected "/session clear" -Actual $strictLines[0]
+    Assert-TalosBenchEqual -Name "strict input line second" -Expected "/debug prompt on" -Actual $strictLines[1]
+    if (($strictLines | Where-Object { $_ -eq "/debug trace" }).Count -ne 0) {
+        throw "Self-test failed: strict evidence mode used legacy /debug trace."
+    }
+    Assert-TalosBenchEqual -Name "strict last trace count" `
+        -Expected @($approvalCase.prompts).Count `
+        -Actual @(($strictLines | Where-Object { $_ -eq "/last trace" })).Count
+    Assert-TalosBenchContains -Name "strict prompt one debug save" `
+        -Text ($strictLines -join "`n") `
+        -Needle ('/prompt-debug save "' + (Join-Path (Join-Path $strictArtifactRoot "prompt-001") "prompt-debug") + '"')
+    Assert-TalosBenchContains -Name "strict prompt two debug save" `
+        -Text ($strictLines -join "`n") `
+        -Needle ('/prompt-debug save "' + (Join-Path (Join-Path $strictArtifactRoot "prompt-002") "prompt-debug") + '"')
+    Assert-TalosBenchEqual -Name "strict session save count" `
+        -Expected @($approvalCase.prompts).Count `
+        -Actual @(($strictLines | Where-Object { $_ -eq "/session save" })).Count
+    Assert-TalosBenchEqual -Name "strict input line last" -Expected "/q" -Actual $strictLines[$strictLines.Count - 1]
     Assert-TalosBenchLiteralPromptTransport
 
     $checkpointId = "chk-11111111-2222-3333-4444-555555555555"
@@ -929,9 +998,18 @@ function Get-TalosPath {
 }
 
 function Invoke-TalosProcess {
-    param([string[]]$InputLines, [string]$Workspace)
+    param(
+        [string[]]$InputLines,
+        [string]$Workspace,
+        [string]$InputCapturePath = ""
+    )
 
     $inputText = ($InputLines -join [Environment]::NewLine) + [Environment]::NewLine
+    if (-not [string]::IsNullOrWhiteSpace($InputCapturePath)) {
+        $inputParent = Split-Path -Parent $InputCapturePath
+        New-Item -ItemType Directory -Force -Path $inputParent | Out-Null
+        Set-Content -LiteralPath $InputCapturePath -Value $inputText -Encoding UTF8 -NoNewline
+    }
     Push-Location $Workspace
     try {
         $output = $inputText | & $script:TalosExe 2>&1
@@ -939,6 +1017,64 @@ function Invoke-TalosProcess {
         Pop-Location
     }
     return ($output | Out-String)
+}
+
+function Invoke-GitText {
+    param(
+        [string]$Workspace,
+        [string[]]$Arguments
+    )
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        return "[git unavailable]"
+    }
+    $output = & git -C $Workspace @Arguments 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+        return "[git exit $LASTEXITCODE]`n$output"
+    }
+    return $output
+}
+
+function Initialize-StrictEvidenceGitBaseline {
+    param([string]$Workspace, [string]$CaseArtifactRoot)
+
+    $git = Get-Command git -ErrorAction SilentlyContinue
+    if (-not $git) {
+        Set-Content -LiteralPath (Join-Path $CaseArtifactRoot "git-baseline.txt") `
+            -Value "git unavailable; workspace status/diff evidence will be best-effort." `
+            -Encoding UTF8
+        return
+    }
+
+    if (Test-Path -LiteralPath (Join-Path $Workspace ".git")) {
+        return
+    }
+
+    $baseline = New-Object System.Collections.Generic.List[string]
+    [void]$baseline.Add((Invoke-GitText -Workspace $Workspace -Arguments @("init")))
+    [void]$baseline.Add((Invoke-GitText -Workspace $Workspace -Arguments @("add", "-A")))
+    [void]$baseline.Add((Invoke-GitText -Workspace $Workspace -Arguments @(
+                    "-c", "user.name=TalosBench",
+                    "-c", "user.email=talosbench@example.invalid",
+                    "commit", "-m", "TalosBench fixture baseline"
+                )))
+    Set-Content -LiteralPath (Join-Path $CaseArtifactRoot "git-baseline.txt") `
+        -Value ($baseline -join [Environment]::NewLine) `
+        -Encoding UTF8
+}
+
+function Save-StrictEvidenceWorkspaceSnapshot {
+    param([string]$Workspace, [string]$CaseArtifactRoot)
+
+    if (-not $StrictEvidence) {
+        return
+    }
+
+    Set-Content -LiteralPath (Join-Path $CaseArtifactRoot "git-status.txt") `
+        -Value (Invoke-GitText -Workspace $Workspace -Arguments @("status", "--short")) `
+        -Encoding UTF8
+    Set-Content -LiteralPath (Join-Path $CaseArtifactRoot "git-diff.txt") `
+        -Value (Invoke-GitText -Workspace $Workspace -Arguments @("diff", "--", ".")) `
+        -Encoding UTF8
 }
 
 function Get-CheckpointPlaceholderPromptIndex {
@@ -954,11 +1090,17 @@ function Get-CheckpointPlaceholderPromptIndex {
 }
 
 function Invoke-TalosCaseTranscript {
-    param($Case, [string]$Workspace)
+    param($Case, [string]$Workspace, [string]$CaseArtifactRoot = "")
 
     $checkpointPromptIndex = Get-CheckpointPlaceholderPromptIndex -Case $Case
     if ($checkpointPromptIndex -lt 0) {
-        return Invoke-TalosProcess -InputLines @(New-TalosBenchInputLines -Case $Case) -Workspace $Workspace
+        return Invoke-TalosProcess `
+            -InputLines @(New-TalosBenchInputLines `
+                -Case $Case `
+                -StrictEvidence:$StrictEvidence.IsPresent `
+                -CaseArtifactRoot $CaseArtifactRoot) `
+            -Workspace $Workspace `
+            -InputCapturePath $(if ($StrictEvidence) { Join-Path $CaseArtifactRoot "input.txt" } else { "" })
     }
     if ($checkpointPromptIndex -eq 0) {
         throw "Case '$($Case.id)' cannot resolve <checkpoint-id> in the first prompt."
@@ -967,8 +1109,13 @@ function Invoke-TalosCaseTranscript {
     $firstPhase = @(New-TalosBenchInputLines `
             -Case $Case `
             -EndPromptIndex ($checkpointPromptIndex - 1) `
-            -IncludeLastTrace:$true)
-    $firstText = Invoke-TalosProcess -InputLines $firstPhase -Workspace $Workspace
+            -IncludeLastTrace:$true `
+            -StrictEvidence:$StrictEvidence.IsPresent `
+            -CaseArtifactRoot $CaseArtifactRoot)
+    $firstText = Invoke-TalosProcess `
+        -InputLines $firstPhase `
+        -Workspace $Workspace `
+        -InputCapturePath $(if ($StrictEvidence) { Join-Path $CaseArtifactRoot "phase-1-input.txt" } else { "" })
     $checkpointId = Get-CheckpointIdFromText -Text $firstText
     if ([string]::IsNullOrWhiteSpace($checkpointId)) {
         return $firstText + [Environment]::NewLine + "[TalosBench] Dynamic checkpoint id was not found in prior output."
@@ -980,8 +1127,13 @@ function Invoke-TalosCaseTranscript {
             -EndPromptIndex $checkpointPromptIndex `
             -IncludeSessionClear:$false `
             -IncludeLastTrace:$false `
+            -StrictEvidence:$StrictEvidence.IsPresent `
+            -CaseArtifactRoot $CaseArtifactRoot `
             -Replacements @{"<checkpoint-id>" = $checkpointId})
-    $secondText = Invoke-TalosProcess -InputLines $secondPhase -Workspace $Workspace
+    $secondText = Invoke-TalosProcess `
+        -InputLines $secondPhase `
+        -Workspace $Workspace `
+        -InputCapturePath $(if ($StrictEvidence) { Join-Path $CaseArtifactRoot "phase-2-input.txt" } else { "" })
     return $firstText + [Environment]::NewLine + $secondText
 }
 
@@ -992,7 +1144,17 @@ function Invoke-TalosCase {
     Initialize-Workspace -Case $Case -Workspace $workspace
 
     $manualRequired = $Case.manualRequired -eq $true
-    $transcript = Join-Path $RunRoot ($Case.id + ".txt")
+    $caseArtifactRoot = if ($StrictEvidence) {
+        Join-Path $RunRoot $Case.id
+    } else {
+        $RunRoot
+    }
+    New-Item -ItemType Directory -Force -Path $caseArtifactRoot | Out-Null
+    $transcript = if ($StrictEvidence) {
+        Join-Path $caseArtifactRoot "transcript.txt"
+    } else {
+        Join-Path $RunRoot ($Case.id + ".txt")
+    }
     $relativeTranscript = Resolve-Path -LiteralPath $transcript -Relative -ErrorAction SilentlyContinue
     if (-not $relativeTranscript) {
         $relativeTranscript = $transcript
@@ -1006,15 +1168,22 @@ function Invoke-TalosCase {
         return [pscustomobject]@{
             Id = $Case.id
             Category = $Case.category
+            Lane = Get-TalosBenchLane -Case $Case
             Status = $executionGate.Status
             Blocker = "no"
             Transcript = ""
+            Artifacts = ""
             Notes = $executionGate.Notes
         }
     }
 
-    $text = Invoke-TalosCaseTranscript -Case $Case -Workspace $workspace
+    if ($StrictEvidence) {
+        Initialize-StrictEvidenceGitBaseline -Workspace $workspace -CaseArtifactRoot $caseArtifactRoot
+    }
+
+    $text = Invoke-TalosCaseTranscript -Case $Case -Workspace $workspace -CaseArtifactRoot $caseArtifactRoot
     Set-Content -LiteralPath $transcript -Value $text -Encoding UTF8
+    Save-StrictEvidenceWorkspaceSnapshot -Workspace $workspace -CaseArtifactRoot $caseArtifactRoot
 
     $required = @($Case.requiredOutputSubstrings | ForEach-Object { [string]$_ })
     $forbidden = @($Case.forbiddenOutputSubstrings | ForEach-Object { [string]$_ })
@@ -1095,9 +1264,11 @@ function Invoke-TalosCase {
     return [pscustomobject]@{
         Id = $Case.id
         Category = $Case.category
+        Lane = Get-TalosBenchLane -Case $Case
         Status = $status
         Blocker = $blocker
         Transcript = $relativeTranscript
+        Artifacts = $(if ($StrictEvidence) { Resolve-Path -LiteralPath $caseArtifactRoot -Relative } else { "" })
         Notes = ($notes -join " ")
     }
 }
@@ -1128,7 +1299,10 @@ $caseConfig = Get-Content -LiteralPath $casesFullPath -Raw | ConvertFrom-Json
 $cases = @($caseConfig.cases)
 
 if ($ListCases) {
-    $cases | Sort-Object id | Select-Object id, category, manualRequired, notes | Format-Table -AutoSize
+    $cases |
+        Sort-Object id |
+        Select-Object id, category, manualRequired, @{Name = "lane"; Expression = { Get-TalosBenchLane -Case $_ } }, notes |
+        Format-Table -AutoSize
     exit 0
 }
 
@@ -1228,16 +1402,20 @@ $lines.Add("- Talos path: $script:TalosExe")
 $lines.Add("- Cases file: $casesFullPath")
 $lines.Add("- Workspace root: $script:WorkspaceRootFull")
 $lines.Add("- Transcript root: $runRoot")
+$lines.Add("- Audit id: $(if ([string]::IsNullOrWhiteSpace($AuditId)) { "not set" } else { $AuditId })")
+$lines.Add("- Model label: $(if ([string]::IsNullOrWhiteSpace($ModelLabel)) { "not set" } else { $ModelLabel })")
+$lines.Add("- Strict evidence: $($StrictEvidence.IsPresent)")
+$lines.Add("- Lane override: $(if ([string]::IsNullOrWhiteSpace($Lane)) { "none" } else { $Lane })")
 $lines.Add("- Piped approval inputs allowed: $($AllowPipedApprovalInputs.IsPresent)")
 $lines.Add("")
-$lines.Add("| Case id | Status | Category | Blocker? | Transcript | Notes |")
-$lines.Add("| --- | --- | --- | --- | --- | --- |")
+$lines.Add("| Case id | Status | Lane | Category | Blocker? | Transcript | Artifacts | Notes |")
+$lines.Add("| --- | --- | --- | --- | --- | --- | --- | --- |")
 foreach ($result in $results) {
-    $lines.Add("| $(Escape-MarkdownCell $result.Id) | $(Escape-MarkdownCell $result.Status) | $(Escape-MarkdownCell $result.Category) | $(Escape-MarkdownCell $result.Blocker) | $(Escape-MarkdownCell $result.Transcript) | $(Escape-MarkdownCell $result.Notes) |")
+    $lines.Add("| $(Escape-MarkdownCell $result.Id) | $(Escape-MarkdownCell $result.Status) | $(Escape-MarkdownCell $result.Lane) | $(Escape-MarkdownCell $result.Category) | $(Escape-MarkdownCell $result.Blocker) | $(Escape-MarkdownCell $result.Transcript) | $(Escape-MarkdownCell $result.Artifacts) | $(Escape-MarkdownCell $result.Notes) |")
 }
 Set-Content -LiteralPath $summary -Value $lines -Encoding UTF8
 
-$results | Format-Table Id, Status, Category, Blocker, Transcript -AutoSize
+$results | Format-Table Id, Status, Lane, Category, Blocker, Transcript, Artifacts -AutoSize
 Write-Output "Summary: $summary"
 
 if ($results | Where-Object { $_.Status -eq "BLOCKER" }) {

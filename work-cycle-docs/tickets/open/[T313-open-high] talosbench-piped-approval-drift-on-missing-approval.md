@@ -47,6 +47,12 @@ That contaminates evidence. It can make a real first-turn failure look like an o
   - `./gradlew.bat clean check e2eTest --no-daemon` passed.
   - `./gradlew.bat runSynchronizedApprovalAudit "-PapprovalAuditArtifactsRoot=build/synchronized-approval-audit/artifacts" "-PapprovalAuditWorkspacesRoot=build/synchronized-approval-audit/workspaces" --no-daemon` passed.
   - Runtime artifact scans passed over `build/reports,build/test-results`, `work-cycle-docs/reports,work-cycle-docs/tickets`, and `build/synchronized-approval-audit/artifacts`.
+- Fresh evidence-lane rebaseline after sink hardening:
+  - `pwsh .\tools\manual-eval\run-talosbench.ps1 -SelfTest` passed.
+  - `pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly` passed and validated 41 cases.
+  - `./gradlew.bat runSynchronizedApprovalAudit "-PapprovalAuditArtifactsRoot=local/manual-testing/t306-t313-sync-rebaseline-20260520-221208/artifacts" "-PapprovalAuditWorkspacesRoot=local/manual-workspaces/t306-t313-sync-rebaseline-20260520-221208" --no-daemon` passed.
+  - `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/t306-t313-sync-rebaseline-20260520-221208,local/manual-workspaces/t306-t313-sync-rebaseline-20260520-221208" --no-daemon` passed.
+  - The synchronized rebaseline records 32 scripted scenarios and does not make a redirected-stdin full prompt-bank claim.
 
 ## User impact
 
@@ -109,7 +115,32 @@ Remaining implementation:
 
 - Current default guard prevents contamination for normal `-IncludeManualRequired` runs by returning `SYNC_REQUIRED`, but an explicit `-AllowPipedApprovalInputs` exploratory mode still exists and must not be used as release evidence.
 - True PTY/JLine audit remains manual.
-- Full prompt-bank evidence is stronger after GPT-OSS/Qwen passes, but still not a synchronized terminal audit.
+- Full prompt-bank evidence is stronger after historical GPT-OSS/Qwen passes, but still not a synchronized terminal audit. The next release-grade prompt-bank pass must be lane-labeled: safe redirected-stdin cases separate from synchronized approval cases and manual true-PTY cases.
+- 2026-05-20 update: `run-talosbench.ps1` now has a strict safe-lane
+  evidence mode for non-approval cases. This mode uses `/debug prompt on`,
+  saves `/last trace`, `/prompt-debug save`, and `/session save` after each
+  natural-language prompt, and records per-case input/transcript/workspace
+  status artifacts. It does not change the T313 approval rule: approval cases
+  still require synchronized approval or true PTY/manual evidence.
+- Fresh lane evidence:
+  - Strict safe redirected-stdin lane passed for GPT-OSS and Qwen.
+  - Synchronized approval audit passed separately.
+- True PTY/JLine lane passed via the completed manual packet
+  `local/manual-testing/true-pty-manual-20260520-r1/artifacts`.
+
+## 2026-05-20 true PTY/manual lane update
+
+The true-terminal lane now has completed evidence for the current audit wave:
+
+```text
+Audit id: true-pty-manual-20260520-r1
+Validator: validateSynchronizedApprovalPtyManualAudit PASS
+Artifact scan: PASS
+```
+
+This does not weaken the T313 rule. Approval-sensitive redirected-stdin
+TalosBench runs still fail closed by default; true PTY evidence came from a real
+interactive terminal transcript, not piped approval input.
 
 ## Open questions
 

@@ -425,13 +425,22 @@ Keep the existing `-PrivateFolderBank` scripted path for non-interactive probes.
 
 ## Remaining blockers
 
+- Fresh sink-hardening rebaseline:
+  - `./gradlew.bat runSynchronizedApprovalAudit "-PapprovalAuditArtifactsRoot=local/manual-testing/t306-t313-sync-rebaseline-20260520-221208/artifacts" "-PapprovalAuditWorkspacesRoot=local/manual-workspaces/t306-t313-sync-rebaseline-20260520-221208" --no-daemon` passed.
+  - Summary: `local/manual-testing/t306-t313-sync-rebaseline-20260520-221208/artifacts/SYNCHRONIZED-APPROVAL-AUDIT.md`.
+  - Mode: `SCRIPTED`; scenarios: 32; artifact scan: PASS.
+  - The packet includes 32 prompt-debug files, 32 provider-body JSON files, 32 trace JSON/text pairs, 32 session snapshots, 32 turn JSONL files, and 32 audit bundles.
+  - `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=local/manual-testing/t306-t313-sync-rebaseline-20260520-221208,local/manual-workspaces/t306-t313-sync-rebaseline-20260520-221208" --no-daemon` passed.
 - Add true pseudo-terminal/JLine smoke coverage for fully interactive terminal rendering. The current CLI smoke covers synchronized redirected stdin/stdout, which is valuable but not a true terminal and now says so in generated evidence.
 - Decide whether the PTY layer should be implemented with a Java-compatible ConPTY/JNA dependency, an external PowerShell/Windows Terminal harness, or remain a manual release-audit packet. Current code/dependencies do not contain a true child-process PTY driver.
-- Run the generated manual PTY/JLine packet in a real terminal before treating the PTY/JLine blocker as closed.
+- The generated manual PTY/JLine packet was run in a real terminal for
+  `true-pty-manual-20260520-r1`; `validateSynchronizedApprovalPtyManualAudit`
+  reported PASS. Future release candidates still need provenance checked against
+  the exact candidate commit/binary before treating that candidate as covered.
 - Expand the synchronized live bank or synchronized process driver beyond the current approval scenarios into the full prompt-bank audit. Static web selector repair, exact bullet count, append line, narrow replacement, and explicit preserve-rest replacement now have two-model synchronized live evidence, but the full prompt-bank audit still needs broader task/capability coverage under a synchronized approval channel.
 - Decide whether explicit extracted-document send-to-model should be per-turn approval, config-only, or both.
-- Full `clean check e2eTest` still needs to be rerun after the complete T309/T310/T311 blocker batch.
-- Run the full prompt-bank audit after this expanded synchronized approval slice remains stable.
+- Fresh post-documentation gate passed after the evidence-lane updates: `./gradlew.bat check --no-daemon`, `./gradlew.bat e2eTest --no-daemon`, `./gradlew.bat checkRuntimeArtifactCanaries "-PartifactScanRoots=work-cycle-docs/reports,work-cycle-docs/tickets" --no-daemon`, and `git diff --check`.
+- Run the lane-labeled full prompt-bank audit after this expanded synchronized approval slice remains stable.
 
 ## Open questions
 

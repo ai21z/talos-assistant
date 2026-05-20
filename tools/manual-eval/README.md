@@ -71,6 +71,32 @@ Run every non-manual case:
 pwsh .\tools\manual-eval\run-talosbench.ps1
 ```
 
+Run non-approval cases with strict release-evidence capture:
+
+```powershell
+pwsh .\tools\manual-eval\run-talosbench.ps1 `
+  -StrictEvidence `
+  -AuditId lane-bank-20260520-r1 `
+  -ModelLabel qwen2.5-coder-14b `
+  -Lane SAFE_REDIRECTED_STDIN `
+  -TranscriptRoot local/manual-testing/lane-bank-20260520-r1/artifacts/qwen/safe-redirected `
+  -WorkspaceRoot local/manual-workspaces/lane-bank-20260520-r1/qwen
+```
+
+Strict evidence mode is for the safe redirected-stdin lane. It sends
+`/debug prompt on` instead of the legacy `/debug trace`, then saves `/last
+trace`, `/prompt-debug save <case-artifact-dir>`, and `/session save` after
+each natural-language prompt. Each case gets its own artifact directory with
+the exact input script, transcript, prompt-debug output, provider-body JSON
+when available, and workspace `git status`/`git diff` snapshots.
+
+The summary labels every case with an evidence lane:
+
+- `SAFE_REDIRECTED_STDIN`: non-approval cases that can run through redirected stdin.
+- `SYNC_APPROVAL`: approval-sensitive cases that require the synchronized approval harness for release evidence.
+- `TRUE_PTY_MANUAL`: true terminal/JLine behavior that needs a manual PTY packet.
+- `KNOWN_BLOCKED_DEFERRED`: explicit beta exclusions or future-scope cases.
+
 Create a timestamped T67 full-audit workspace with fixtures, runbook, and
 question list:
 
