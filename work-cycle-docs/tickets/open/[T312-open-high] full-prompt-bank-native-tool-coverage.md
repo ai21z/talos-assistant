@@ -101,6 +101,11 @@ Fresh focused evidence:
     without `-AllowPipedApprovalInputs`. The old full prompt-bank summaries are
     retained as historical/exploratory installed-product evidence, not as
     synchronized approval proof.
+- Fresh evidence-lane rebaseline after sink hardening:
+  - `pwsh .\tools\manual-eval\run-talosbench.ps1 -ValidateOnly` passed and validated 41 cases.
+  - `pwsh .\tools\manual-eval\run-talosbench.ps1 -ListCases` shows the current prompt bank includes safe redirected cases, approval-sensitive manual cases, and the `full-audit-run-command-profile-boundary` non-approval command-boundary case.
+  - `./gradlew.bat runSynchronizedApprovalAudit "-PapprovalAuditArtifactsRoot=local/manual-testing/t306-t313-sync-rebaseline-20260520-221208/artifacts" "-PapprovalAuditWorkspacesRoot=local/manual-workspaces/t306-t313-sync-rebaseline-20260520-221208" --no-daemon` passed with 32 scripted scenarios and artifact scan PASS.
+  - This is not a fresh two-model full prompt-bank pass. T312 remains open for lane-labeled GPT-OSS/Qwen evidence under the current fail-closed TalosBench runner.
 
 ## User Impact
 
@@ -163,10 +168,13 @@ Remaining implementation:
   scripted audit main. The remaining question is whether to add live-model
   versions before the broader synchronized full prompt-bank run.
 - Keep the full prompt-bank evidence separate from true PTY/JLine coverage and
-  synchronized approval evidence. The full GPT-OSS/Qwen TalosBench runs are
-  redirected-stdin installed-product evidence, not an interactive terminal
-  audit, and future approval-sensitive TalosBench runs now fail closed unless
-  the operator explicitly opts into exploratory piped approval input.
+  synchronized approval evidence. The historical full GPT-OSS/Qwen TalosBench
+  runs are redirected-stdin installed-product evidence, not an interactive
+  terminal audit. Future release-grade prompt-bank evidence must be lane-labeled:
+  safe redirected cases, synchronized approval cases, manual true-PTY/JLine
+  cases, and known-blocked/deferred cases. Approval-sensitive redirected runs now
+  fail closed unless the operator explicitly opts into exploratory piped approval
+  input.
 
 ## Tests
 
@@ -187,12 +195,23 @@ Remaining implementation:
 
 ## Remaining Blockers
 
-- True PTY/JLine prompt rendering and input synchronization remains separate
-  manual evidence under T306/T313.
+- True PTY/JLine prompt rendering and input synchronization now has a completed
+  manual packet under T306/T313:
+  `local/manual-testing/true-pty-manual-20260520-r1/artifacts`.
 - The full prompt-bank runner now detects approval-token drift and refuses
   approval-sensitive piped runs by default, but it still uses redirected stdin
   when `-AllowPipedApprovalInputs` is explicitly supplied. Do not call it a
   synchronized approval runner.
+- 2026-05-20 strict safe-lane rerun now proves the non-approval native-tool
+  command-boundary case for both GPT-OSS and Qwen with strict prompt-debug,
+  session-save, transcript, and workspace-status evidence:
+  - GPT-OSS safe lane: 19/19 PASS.
+  - Qwen safe lane: 19/19 PASS.
+  - `full-audit-run-command-profile-boundary` passed in both model lanes.
+  - Fresh synchronized approval audit passed with 32 scripted scenarios,
+    including workspace operation tools.
+  - True PTY/JLine manual packet passed separately at
+    `local/manual-testing/true-pty-manual-20260520-r1/artifacts`.
 
 ## Open Questions
 
