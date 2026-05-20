@@ -10,8 +10,11 @@ import dev.talos.tools.VerificationStatus;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.net.URISyntaxException;
+import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.Set;
 
@@ -1293,6 +1296,59 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void sourceDerivedOfficeDocumentSummaryPassesWhenEachExtractedSourceContributesDistinctiveFact() throws Exception {
+        copyDocumentFixture("canonical-text.pdf", "report.pdf");
+        copyDocumentFixture("canonical-report.docx", "report.docx");
+        copyDocumentFixture("canonical-workbook.xlsx", "budget.xlsx");
+        Files.writeString(workspace.resolve("office-summary.md"), """
+                - The PDF evidence includes CANONICAL_PDF_TEXT_ALPHA.
+                - The Word document evidence includes CANONICAL_DOCX_TEXT_BETA.
+                - The workbook evidence includes CANONICAL_XLSX_TEXT_GAMMA.
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                officeDocumentSummaryContract(),
+                loopResult(List.of(successfulWrite("office-summary.md", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.problems().toString());
+        assertTrue(result.summary().contains("Source-derived artifact verification passed"), result.summary());
+        assertTrue(result.facts().stream()
+                        .anyMatch(f -> f.contains("office-summary.md: source-derived artifact includes evidence from")
+                                && f.contains("report.pdf")
+                                && f.contains("report.docx")
+                                && f.contains("budget.xlsx")),
+                result.facts().toString());
+    }
+
+    @Test
+    void sourceDerivedOfficeDocumentSummaryFailsWhenOneExtractedSourceOmitted() throws Exception {
+        copyDocumentFixture("canonical-text.pdf", "report.pdf");
+        copyDocumentFixture("canonical-report.docx", "report.docx");
+        copyDocumentFixture("canonical-workbook.xlsx", "budget.xlsx");
+        Files.writeString(workspace.resolve("office-summary.md"), """
+                - The PDF evidence includes CANONICAL_PDF_TEXT_ALPHA.
+                - The Word document evidence includes CANONICAL_DOCX_TEXT_BETA.
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                officeDocumentSummaryContract(),
+                loopResult(List.of(successfulWrite("office-summary.md", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status());
+        assertTrue(result.summary().contains("Source-derived artifact verification failed"), result.summary());
+        assertTrue(result.problems().stream()
+                        .anyMatch(p -> p.contains("budget.xlsx")
+                                && p.contains("source-derived summary does not include distinctive evidence")),
+                result.problems().toString());
+        assertFalse(result.problems().stream().anyMatch(p -> p.contains("CANONICAL_XLSX_TEXT_GAMMA")),
+                result.problems().toString());
+    }
+
+    @Test
     void styledWebpageRequestFailsWhenHtmlHasNoInlineOrLinkedStyle() throws Exception {
         Files.writeString(workspace.resolve("index.html"), """
                 <!doctype html>
@@ -2314,6 +2370,29 @@ class StaticTaskVerifierTest {
                 Set.of(),
                 "Summarize alpha.txt and beta.txt into summary.md.",
                 "test-multi-source-summary");
+    }
+
+    private static TaskContract officeDocumentSummaryContract() {
+        return new TaskContract(
+                TaskType.FILE_CREATE,
+                true,
+                true,
+                true,
+                Set.of("office-summary.md"),
+                Set.of("report.pdf", "report.docx", "budget.xlsx"),
+                Set.of(),
+                "Summarize report.pdf, report.docx, and budget.xlsx into office-summary.md.",
+                "test-office-document-summary");
+    }
+
+    private void copyDocumentFixture(String fixtureName, String targetName) throws Exception {
+        Files.copy(documentFixture(fixtureName), workspace.resolve(targetName), StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    private static Path documentFixture(String name) throws URISyntaxException {
+        URL url = StaticTaskVerifierTest.class.getResource("/document-fixtures/" + name);
+        assertNotNull(url, "missing checked-in fixture: " + name);
+        return Path.of(url.toURI());
     }
 
     private void writeWebFiles(String html) throws Exception {
