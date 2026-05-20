@@ -148,9 +148,14 @@ class SynchronizedApprovalAuditRunnerTest {
                         List.of(
                                 "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"medical-notes.docx\"}}",
                                 "The private document content was withheld from model context."),
-                        List.of()));
+                        List.of(ScriptedApprovalGate.Step.deny(
+                                "private document model handoff",
+                                "medical-notes.docx"))));
 
-        assertTrue(result.approvals().isEmpty(), result.approvals().toString());
+        assertEquals(1, result.approvals().size(), result.approvals().toString());
+        assertEquals(ApprovalResponse.DENIED, result.approvals().getFirst().response());
+        assertTrue(result.approvals().getFirst().prompt().contains("Allow? [y=yes, N=no]"),
+                result.approvals().getFirst().prompt());
         assertFalse(result.modelTranscript().contains("Eleni Nikolaou"), result.modelTranscript());
         assertTrue(result.modelTranscript().contains("Private document content was read locally but withheld"),
                 result.modelTranscript());
@@ -852,9 +857,12 @@ class SynchronizedApprovalAuditRunnerTest {
                         List.of(
                                 "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\"" + fileName + "\"}}",
                                 "The private document content was withheld from model context."),
-                        List.of()));
+                        List.of(ScriptedApprovalGate.Step.deny(
+                                "private document model handoff",
+                                fileName))));
 
-        assertTrue(result.approvals().isEmpty(), result.approvals().toString());
+        assertEquals(1, result.approvals().size(), result.approvals().toString());
+        assertEquals(ApprovalResponse.DENIED, result.approvals().getFirst().response());
         assertFalse(result.modelTranscript().contains("Eleni Nikolaou"), result.modelTranscript());
         assertTrue(result.modelTranscript().contains("Private document content was read locally but withheld"),
                 result.modelTranscript());

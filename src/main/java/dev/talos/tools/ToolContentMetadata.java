@@ -89,4 +89,15 @@ public record ToolContentMetadata(
                 ragIndexAllowed,
                 decisionReason);
     }
+
+    public ToolContentMetadata withModelHandoffAllowed(boolean allowed, String reason) {
+        return new ToolContentMetadata(
+                privacyClass,
+                source,
+                sourcePath,
+                allowed,
+                rawArtifactPersistenceAllowed,
+                ragIndexAllowed,
+                reason == null || reason.isBlank() ? decisionReason : reason);
+    }
 }

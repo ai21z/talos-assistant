@@ -43,4 +43,35 @@ class ScriptedApprovalGateTest {
         gate.assertExhausted();
         assertEquals(2, gate.events().size());
     }
+
+    @Test
+    void approveOnceRecordsOneTurnPromptAndCollapsesRememberResponse() {
+        ScriptedApprovalGate gate = new ScriptedApprovalGate(List.of(
+                ScriptedApprovalGate.Step.remember("private document model handoff", "medical-notes.docx")));
+
+        ApprovalResponse response = gate.approveOnce(
+                "private document model handoff: talos.read_file",
+                "target: medical-notes.docx");
+
+        assertEquals(ApprovalResponse.APPROVED, response);
+        gate.assertExhausted();
+        assertEquals(1, gate.events().size());
+        assertEquals("Allow? [y=yes, N=no]", gate.events().getFirst().prompt());
+        assertEquals(ApprovalResponse.APPROVED, gate.events().getFirst().response());
+    }
+
+    @Test
+    void optionalDenyStepCanBeSkippedWhenNextRequiredStepMatches() {
+        ScriptedApprovalGate gate = new ScriptedApprovalGate(List.of(
+                ScriptedApprovalGate.Step.optionalDeny("private document model handoff", "medical-notes.docx"),
+                ScriptedApprovalGate.Step.approve("talos.write_file", "notes.md")));
+
+        ApprovalResponse response = gate.approveFull(
+                "Permission policy requires approval before running talos.write_file.",
+                "target: notes.md");
+
+        assertEquals(ApprovalResponse.APPROVED, response);
+        gate.assertExhausted();
+        assertEquals(1, gate.events().size());
+    }
 }

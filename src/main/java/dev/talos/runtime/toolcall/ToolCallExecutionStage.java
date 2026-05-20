@@ -1,5 +1,7 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.runtime.ApprovalResponse;
+import dev.talos.runtime.TurnAuditCapture;
 import dev.talos.runtime.TurnProcessor;
 import dev.talos.runtime.TurnSourceEvidenceCapture;
 import dev.talos.runtime.TurnTaskContractCapture;
@@ -313,35 +315,46 @@ public final class ToolCallExecutionStage {
             ToolResult rawResult = turnProcessor.executeTool(state.toolSession, effective, state.ctx);
             boolean successfulProtectedRead =
                     isSuccessfulProtectedRead(state, effective, pathHint, rawResult);
+            ToolResult handoffCandidate = rawResult;
+            boolean privateDocumentPerTurnHandoffApproved = false;
+            if (!successfulProtectedRead && requiresPrivateDocumentModelHandoffApproval(rawResult)) {
+                PrivateDocumentHandoffApproval handoffApproval =
+                        requestPrivateDocumentModelHandoffApproval(effective, pathHint, rawResult, state);
+                if (handoffApproval.approved()) {
+                    privateDocumentPerTurnHandoffApproved = true;
+                    handoffCandidate = privateDocumentModelHandoffApprovedResult(rawResult);
+                }
+            }
             boolean preserveApprovedProtectedReadResult =
                     successfulProtectedRead
                             && ProtectedReadScopePolicy.sendApprovedProtectedReadToModel(
                                     state.ctx == null ? null : state.ctx.cfg());
             boolean preservePrivateDocumentModelHandoff =
                     !successfulProtectedRead
-                            && shouldPreservePrivateDocumentModelHandoff(rawResult);
+                            && shouldPreservePrivateDocumentModelHandoff(handoffCandidate);
             ToolResult result;
             if (successfulProtectedRead && !preserveApprovedProtectedReadResult) {
                 state.contentWithheldFromModelContext = true;
                 result = approvedProtectedReadWithheldResult(pathHint, state);
-            } else if (rawResult != null
-                    && rawResult.success()
-                    && rawResult.contentMetadata() != null
-                    && !rawResult.contentMetadata().modelHandoffAllowed()) {
+            } else if (handoffCandidate != null
+                    && handoffCandidate.success()
+                    && handoffCandidate.contentMetadata() != null
+                    && !handoffCandidate.contentMetadata().modelHandoffAllowed()) {
                 state.contentWithheldFromModelContext = true;
-                result = privateContentWithheldResult(rawResult, state);
+                result = privateContentWithheldResult(handoffCandidate, state);
             } else {
                 result = preserveApprovedProtectedReadResult || preservePrivateDocumentModelHandoff
-                        ? rawResult
-                        : ProtectedContentPolicy.sanitizeToolResult(rawResult);
+                        ? handoffCandidate
+                        : ProtectedContentPolicy.sanitizeToolResult(handoffCandidate);
             }
             recordContextLedgerDecision(
                     effective.toolName(),
                     pathHint,
-                    rawResult,
+                    handoffCandidate,
                     result,
                     successfulProtectedRead,
-                    preserveApprovedProtectedReadResult);
+                    preserveApprovedProtectedReadResult,
+                    privateDocumentPerTurnHandoffApproved);
             emitToolResult(effective.toolName(), result);
             if (result.success()) {
                 successesThisIter++;
@@ -486,7 +499,8 @@ public final class ToolCallExecutionStage {
             ToolResult rawResult,
             ToolResult modelResult,
             boolean successfulProtectedRead,
-            boolean preserveApprovedProtectedReadResult
+            boolean preserveApprovedProtectedReadResult,
+            boolean privateDocumentPerTurnHandoffApproved
     ) {
         if (rawResult == null) return;
         ContextDecision decision;
@@ -494,6 +508,8 @@ public final class ToolCallExecutionStage {
             decision = ContextDecision.excludedByPrivacyOrTrustPolicy("TOOL_RESULT_ERROR");
         } else if (successfulProtectedRead && !preserveApprovedProtectedReadResult) {
             decision = ContextDecision.withheldFromModel("APPROVED_PROTECTED_READ_LOCAL_DISPLAY_ONLY");
+        } else if (privateDocumentPerTurnHandoffApproved) {
+            decision = ContextDecision.includedInModel("PRIVATE_DOCUMENT_PER_TURN_SEND_TO_MODEL_APPROVED");
         } else if (rawResult.contentMetadata() != null
                 && !rawResult.contentMetadata().modelHandoffAllowed()) {
             decision = ContextDecision.withheldFromModel(rawResult.contentMetadata().decisionReason());
@@ -828,6 +844,83 @@ public final class ToolCallExecutionStage {
                 null,
                 rawResult == null ? null : rawResult.verification(),
                 rawResult == null ? null : rawResult.contentMetadata());
+    }
+
+    private record PrivateDocumentHandoffApproval(boolean approved) {}
+
+    private PrivateDocumentHandoffApproval requestPrivateDocumentModelHandoffApproval(
+            ToolCall call,
+            String pathHint,
+            ToolResult rawResult,
+            LoopState state
+    ) {
+        ToolContentMetadata metadata = rawResult == null ? null : rawResult.contentMetadata();
+        String phase = tracePhase(state);
+        TurnAuditCapture.recordApprovalRequired();
+        LocalTurnTraceCapture.recordPrivateDocumentModelHandoffApprovalRequired(phase, call, metadata);
+        ApprovalResponse response = turnProcessor.approvalGate().approveOnce(
+                "private document model handoff: " + (call == null ? "unknown tool" : call.toolName()),
+                privateDocumentModelHandoffApprovalDetail(pathHint, metadata));
+        if (!response.isApproved()) {
+            TurnAuditCapture.recordApprovalDenied();
+            LocalTurnTraceCapture.recordPrivateDocumentModelHandoffApprovalDenied(phase, call, metadata);
+            return new PrivateDocumentHandoffApproval(false);
+        }
+        TurnAuditCapture.recordApprovalGranted();
+        LocalTurnTraceCapture.recordPrivateDocumentModelHandoffApprovalGranted(
+                phase,
+                call,
+                metadata,
+                response == ApprovalResponse.APPROVED_REMEMBER);
+        return new PrivateDocumentHandoffApproval(true);
+    }
+
+    private static String privateDocumentModelHandoffApprovalDetail(
+            String pathHint,
+            ToolContentMetadata metadata
+    ) {
+        String target = metadata != null && metadata.sourcePath() != null && !metadata.sourcePath().isBlank()
+                ? metadata.sourcePath()
+                : pathHint;
+        String safeTarget = target == null || target.isBlank()
+                ? "<private-document>"
+                : ProtectedContentPolicy.sanitizeText(target.replace('\\', '/'));
+        return "permission: Private mode requires approval before sending extracted document text "
+                + "to model context.\n"
+                + "    target: " + safeTarget + "\n"
+                + "    Approval scope: SEND_TO_MODEL_CONTEXT for this per-turn private-document handoff. "
+                + "Extracted document text may be sent to model context for this turn only. "
+                + "Raw persistence remains redacted unless explicitly enabled by maintainer config.";
+    }
+
+    private static boolean requiresPrivateDocumentModelHandoffApproval(ToolResult result) {
+        if (result == null || !result.success() || result.contentMetadata() == null) return false;
+        ToolContentMetadata metadata = result.contentMetadata();
+        return !metadata.modelHandoffAllowed()
+                && metadata.privacyClass() == ToolContentMetadata.ContentPrivacyClass.PRIVATE_DOCUMENT_EXTRACTED_TEXT
+                && metadata.source() == ToolContentMetadata.ContentSource.DOCUMENT_EXTRACTION;
+    }
+
+    private static ToolResult privateDocumentModelHandoffApprovedResult(ToolResult rawResult) {
+        if (rawResult == null || rawResult.contentMetadata() == null) return rawResult;
+        ToolContentMetadata approvedMetadata = rawResult.contentMetadata().withModelHandoffAllowed(
+                true,
+                "private document model handoff approved for this turn");
+        return new ToolResult(
+                rawResult.success(),
+                rawResult.output(),
+                rawResult.error(),
+                rawResult.verification(),
+                approvedMetadata);
+    }
+
+    private static String tracePhase(LoopState state) {
+        return state != null
+                && state.ctx != null
+                && state.ctx.executionPhaseState() != null
+                && state.ctx.executionPhaseState().phase() != null
+                ? state.ctx.executionPhaseState().phase().name()
+                : "";
     }
 
     private static boolean shouldPreservePrivateDocumentModelHandoff(ToolResult result) {

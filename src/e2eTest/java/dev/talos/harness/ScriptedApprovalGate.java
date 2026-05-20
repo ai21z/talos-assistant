@@ -41,6 +41,10 @@ public final class ScriptedApprovalGate implements ApprovalGate {
             return new Step(descriptionContains, detailContains, ApprovalResponse.DENIED);
         }
 
+        public static Step optionalDeny(String descriptionContains, String detailContains) {
+            return new Step(descriptionContains, detailContains, ApprovalResponse.DENIED, true);
+        }
+
         public static Step remember(String descriptionContains, String detailContains) {
             return new Step(descriptionContains, detailContains, ApprovalResponse.APPROVED_REMEMBER);
         }
@@ -56,6 +60,7 @@ public final class ScriptedApprovalGate implements ApprovalGate {
     }
 
     private static final String SYNTHETIC_PROMPT = "Allow? [y=yes, a=yes for session, N=no]";
+    private static final String SYNTHETIC_ONCE_PROMPT = "Allow? [y=yes, N=no]";
 
     private final List<Step> steps;
     private final List<Event> events = new ArrayList<>();
@@ -72,13 +77,30 @@ public final class ScriptedApprovalGate implements ApprovalGate {
 
     @Override
     public ApprovalResponse approveFull(String description, String detail) {
+        return approveMatching(description, detail, SYNTHETIC_PROMPT, false);
+    }
+
+    @Override
+    public ApprovalResponse approveOnce(String description, String detail) {
+        return approveMatching(description, detail, SYNTHETIC_ONCE_PROMPT, true);
+    }
+
+    private ApprovalResponse approveMatching(
+            String description,
+            String detail,
+            String prompt,
+            boolean collapseRemember
+    ) {
         if (cursor >= steps.size()) {
             throw new AssertionError("Unexpected approval prompt: " + safe(description));
         }
         String safeDescription = safe(description);
         String safeDetail = safe(detail);
         Step expected = nextMatchingStep(safeDescription, safeDetail);
-        Event event = new Event(description, detail, SYNTHETIC_PROMPT, expected.response());
+        ApprovalResponse response = collapseRemember && expected.response().isApproved()
+                ? ApprovalResponse.APPROVED
+                : expected.response();
+        Event event = new Event(description, detail, prompt, response);
         events.add(event);
         return event.response();
     }

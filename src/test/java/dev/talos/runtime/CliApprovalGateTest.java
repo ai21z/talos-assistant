@@ -105,6 +105,21 @@ class CliApprovalGateTest {
         }
 
         @Test
+        void approveOnceDoesNotOfferOrAcceptSessionRemember() {
+            var bout = new ByteArrayOutputStream();
+            var gate = new CliApprovalGate(
+                    new ByteArrayInputStream("a\n".getBytes(StandardCharsets.UTF_8)),
+                    new PrintStream(bout));
+
+            ApprovalResponse response = gate.approveOnce("private document model handoff", "target: report.docx");
+
+            assertEquals(ApprovalResponse.DENIED, response);
+            String output = bout.toString(StandardCharsets.UTF_8);
+            assertTrue(output.contains("approve this turn"), output);
+            assertFalse(output.contains("approve for session"), output);
+        }
+
+        @Test
         void outputIncludesDetail() {
             var bout = new ByteArrayOutputStream();
             var gate = new CliApprovalGate(
@@ -194,6 +209,24 @@ class CliApprovalGateTest {
             assertNotNull(capturedPrompt[0]);
             assertTrue(capturedPrompt[0].contains("Allow?"),
                     "Prompt passed to function should contain 'Allow?'");
+        }
+
+        @Test
+        void approveOncePromptPassedToFunctionHasNoSessionChoice() {
+            var capturedPrompt = new String[1];
+            Function<String, String> reader = prompt -> {
+                capturedPrompt[0] = prompt;
+                return "a";
+            };
+            var gate = new CliApprovalGate(reader,
+                    new PrintStream(new ByteArrayOutputStream()), null);
+
+            ApprovalResponse response = gate.approveOnce("private document model handoff", null);
+
+            assertEquals(ApprovalResponse.DENIED, response);
+            assertNotNull(capturedPrompt[0]);
+            assertTrue(capturedPrompt[0].contains("Allow?"));
+            assertFalse(capturedPrompt[0].contains("session"), capturedPrompt[0]);
         }
 
         @Test

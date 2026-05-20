@@ -25,6 +25,17 @@ class ApprovalPromptRendererTest {
     }
 
     @Test
+    void rendersPerTurnApprovalWithoutSessionRememberChoice() {
+        ApprovalPromptRenderer renderer = new ApprovalPromptRenderer(CliTheme.forCapabilities(UNICODE), 72);
+
+        String rendered = renderer.renderOnce("private document model handoff",
+                "target: report.docx", "sensitive read");
+
+        assertTrue(rendered.contains("│ y = approve this turn · Enter = deny"));
+        assertFalse(rendered.contains("approve for session"), rendered);
+    }
+
+    @Test
     void asciiApprovalFallbackNeverEmitsQuestionMarks() {
         ApprovalPromptRenderer renderer = new ApprovalPromptRenderer(CliTheme.forCapabilities(ASCII), 72);
 
