@@ -7,6 +7,8 @@ import dev.talos.spi.types.ChatMessage;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -129,6 +131,18 @@ class ConversationCompactionTest {
         void maxSketchChars_isReasonable() {
             // 2000 chars allows enough detail for creative artifact summaries
             assertEquals(2_000, ConversationCompactor.MAX_SKETCH_CHARS);
+        }
+
+        @Test
+        void conversationCompactorDoesNotDependOnRuntimeLogPolicy() throws Exception {
+            String source = Files.readString(Path.of(
+                    "src/main/java/dev/talos/core/context/ConversationCompactor.java"));
+            String baseline = Files.readString(Path.of("config/architecture-boundary-baseline.txt"));
+
+            assertFalse(source.contains("dev.talos.runtime.policy.SafeLogFormatter"), source);
+            assertFalse(baseline.contains(
+                    "src/main/java/dev/talos/core/context/ConversationCompactor.java"
+                            + "|dev.talos.runtime.policy.SafeLogFormatter"), baseline);
         }
     }
 
