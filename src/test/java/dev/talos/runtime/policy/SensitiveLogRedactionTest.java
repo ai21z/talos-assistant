@@ -152,7 +152,9 @@ class SensitiveLogRedactionTest {
         String writeTool = source("src/main/java/dev/talos/tools/impl/FileWriteTool.java");
         String reranker = source("src/main/java/dev/talos/core/rerank/ScoreThresholdReranker.java");
 
-        assertTrue(registry.contains("SafeLogFormatter.value(name)"), registry);
+        assertTrue(registry.contains("Fuzzy tool match resolved"), registry);
+        assertTrue(registry.contains("Alias tool match resolved"), registry);
+        assertFalse(registry.contains("SafeLogFormatter.value(name)"), registry);
         assertFalse(registry.contains("name, tool.name()"), registry);
         assertFalse(registry.contains("name, decision.canonicalToolName()"), registry);
 
