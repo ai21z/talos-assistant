@@ -4,7 +4,7 @@ import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
 import dev.talos.core.ingest.FileCapabilityPolicy;
 import dev.talos.runtime.policy.PrivateDocumentPolicy;
-import dev.talos.runtime.policy.ProtectedContentPolicy;
+import dev.talos.safety.ProtectedContentSanitizer;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
@@ -63,7 +63,7 @@ public final class DocumentExtractionService {
 
         try {
             String raw = Files.readString(path, StandardCharsets.UTF_8);
-            String safe = ProtectedContentPolicy.sanitizeText(raw);
+            String safe = ProtectedContentSanitizer.sanitizeText(raw);
             return new DocumentExtractionResult(
                     sourcePath,
                     request.intent(),
@@ -81,7 +81,7 @@ public final class DocumentExtractionService {
                     DocumentExtractionStatus.FAILED,
                     "",
                 List.of(new DocumentExtractionWarning("read-failed",
-                        "Text extraction failed: " + ProtectedContentPolicy.sanitizeText(e.getClass().getSimpleName()))),
+                        "Text extraction failed: " + ProtectedContentSanitizer.sanitizeText(e.getClass().getSimpleName()))),
                     provenance(sourcePath, "text", "builtin"),
                     false);
         }
@@ -204,7 +204,7 @@ public final class DocumentExtractionService {
             return statusOnly(request, sourcePath, info,
                     DocumentExtractionStatus.OCR_UNAVAILABLE,
                     new DocumentExtractionWarning("ocr-unavailable",
-                            "OCR command could not be started: " + ProtectedContentPolicy.sanitizeText(e.getClass().getSimpleName())));
+                            "OCR command could not be started: " + ProtectedContentSanitizer.sanitizeText(e.getClass().getSimpleName())));
         }
     }
 
@@ -217,7 +217,7 @@ public final class DocumentExtractionService {
             String adapterName,
             String adapterVersion) {
         boolean truncated = rawText != null && rawText.length() > MAX_EXTRACTED_CHARS;
-        String safe = ProtectedContentPolicy.sanitizeText(limit(rawText));
+        String safe = ProtectedContentSanitizer.sanitizeText(limit(rawText));
         List<DocumentExtractionWarning> effectiveWarnings = new ArrayList<>(
                 warnings == null ? List.of() : warnings);
         if (truncated) {
