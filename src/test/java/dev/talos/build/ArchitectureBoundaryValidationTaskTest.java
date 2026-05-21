@@ -230,6 +230,32 @@ class ArchitectureBoundaryValidationTaskTest {
     }
 
     @Test
+    @DisplayName("validateArchitectureBoundaries rejects safety package references to Talos layers")
+    void rejectsSafetyPackageReferencesToTalosLayers() throws Exception {
+        Path projectDir = createBuildFixture();
+        writeJava(projectDir.resolve("src/main/java/dev/talos/safety/BadSafety.java"), """
+                package dev.talos.safety;
+
+                import dev.talos.runtime.policy.ProtectedContentPolicy;
+
+                final class BadSafety {
+                    String sanitize(String input) {
+                        return ProtectedContentPolicy.sanitizeText(input);
+                    }
+                }
+                """);
+        writeUtf8(projectDir.resolve("config/architecture-boundary-baseline.txt"), "");
+
+        BuildResult result = runValidationAndFail(projectDir);
+
+        assertTrue(result.getOutput().contains("New architecture boundary violations detected: 1"),
+                result.getOutput());
+        assertTrue(result.getOutput().contains(
+                "safety-no-talos-layers|src/main/java/dev/talos/safety/BadSafety.java|dev.talos.runtime.policy.ProtectedContentPolicy"),
+                result.getOutput());
+    }
+
+    @Test
     @DisplayName("validateArchitectureBoundaries rejects stale baseline entries after violations are removed")
     void rejectsStaleBaselineEntry() throws Exception {
         Path projectDir = createBuildFixture();

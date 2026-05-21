@@ -18,7 +18,7 @@ import dev.talos.core.util.Sanitize;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.TurnTraceCapture;
-import dev.talos.runtime.policy.SafeLogFormatter;
+import dev.talos.safety.SafeLogFormatter;
 import dev.talos.spi.types.ChatMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

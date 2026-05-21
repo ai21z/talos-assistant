@@ -16,7 +16,7 @@ import dev.talos.runtime.policy.ProtectedPathAliasNormalizer;
 import dev.talos.runtime.policy.ProtectedPathPolicy;
 import dev.talos.runtime.policy.ProtectedReadScopePolicy;
 import dev.talos.runtime.policy.PrivateDocumentPolicy;
-import dev.talos.runtime.policy.SafeLogFormatter;
+import dev.talos.safety.SafeLogFormatter;
 import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;

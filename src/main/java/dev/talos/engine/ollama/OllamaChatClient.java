@@ -2,7 +2,7 @@ package dev.talos.engine.ollama;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.talos.runtime.policy.SafeLogFormatter;
+import dev.talos.safety.SafeLogFormatter;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatMessage.NativeToolCall;
