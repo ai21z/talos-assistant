@@ -3,6 +3,7 @@ package dev.talos.core.extract;
 import dev.talos.core.Config;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -54,6 +55,18 @@ class DocumentExtractionPreflightTest {
         assertTrue(rendered.contains("Word"), rendered);
         assertTrue(rendered.contains("Excel"), rendered);
         assertTrue(rendered.contains("Image OCR"), rendered);
+    }
+
+    @Test
+    void preflight_uses_neutral_sanitizer_instead_of_runtime_policy() throws Exception {
+        String source = Files.readString(Path.of("src/main/java/dev/talos/core/extract/DocumentExtractionPreflight.java"));
+        String baseline = Files.readString(Path.of("config/architecture-boundary-baseline.txt"));
+
+        assertTrue(source.contains("import dev.talos.safety.ProtectedContentSanitizer;"), source);
+        assertFalse(source.contains("dev.talos.runtime.policy.ProtectedContentPolicy"), source);
+        assertFalse(baseline.contains(
+                "core-no-runtime|src/main/java/dev/talos/core/extract/DocumentExtractionPreflight.java|dev.talos.runtime.policy.ProtectedContentPolicy"),
+                baseline);
     }
 
     private static Config imageOcrConfig(String command) {

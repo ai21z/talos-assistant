@@ -2,7 +2,7 @@ package dev.talos.core.extract;
 
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
-import dev.talos.runtime.policy.ProtectedContentPolicy;
+import dev.talos.safety.ProtectedContentSanitizer;
 
 import java.io.File;
 import java.nio.file.Files;
@@ -35,8 +35,8 @@ public final class DocumentExtractionPreflight {
             String detail) {
         public FamilyStatus {
             label = label == null ? "" : label;
-            summary = ProtectedContentPolicy.sanitizeText(summary == null ? "" : summary);
-            detail = ProtectedContentPolicy.sanitizeText(detail == null ? "" : detail);
+            summary = ProtectedContentSanitizer.sanitizeText(summary == null ? "" : summary);
+            detail = ProtectedContentSanitizer.sanitizeText(detail == null ? "" : detail);
         }
     }
 
