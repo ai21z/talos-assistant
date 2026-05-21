@@ -5,6 +5,8 @@ import dev.talos.core.retrieval.RetrievalCandidate;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -37,6 +39,18 @@ class ScoreThresholdRerankerTest {
         var r = new ScoreThresholdReranker();
         assertEquals(ScoreThresholdReranker.DEFAULT_MIN_RELATIVE_SCORE, r.minRelativeScore());
         assertEquals(ScoreThresholdReranker.DEFAULT_MAX_RESULTS, r.maxResults());
+    }
+
+    @Test
+    void does_not_depend_on_runtime_log_policy() throws Exception {
+        String source = Files.readString(Path.of(
+                "src/main/java/dev/talos/core/rerank/ScoreThresholdReranker.java"));
+        String baseline = Files.readString(Path.of("config/architecture-boundary-baseline.txt"));
+
+        assertFalse(source.contains("dev.talos.runtime.policy.SafeLogFormatter"), source);
+        assertFalse(baseline.contains(
+                "src/main/java/dev/talos/core/rerank/ScoreThresholdReranker.java"
+                        + "|dev.talos.runtime.policy.SafeLogFormatter"), baseline);
     }
 
     // ═══════════════════════════════════════════════════════════════════════

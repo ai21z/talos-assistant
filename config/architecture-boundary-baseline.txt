@@ -20,7 +20,6 @@ core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runti
 core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runtime.policy.ProtectedContentPolicy
 core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runtime.policy.ProtectedReadScopePolicy
 core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runtime.policy.SafeLogFormatter
-core-no-runtime|src/main/java/dev/talos/core/rerank/ScoreThresholdReranker.java|dev.talos.runtime.policy.SafeLogFormatter
 engine-no-runtime|src/main/java/dev/talos/engine/compat/CompatChatClient.java|dev.talos.runtime.policy.SafeLogFormatter
 engine-no-runtime|src/main/java/dev/talos/engine/ollama/OllamaChatClient.java|dev.talos.runtime.policy.SafeLogFormatter
 runtime-core-no-cli|src/main/java/dev/talos/core/context/ConversationManager.java|dev.talos.cli.repl.SessionMemory
