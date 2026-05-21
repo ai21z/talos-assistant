@@ -7,7 +7,6 @@ core-no-runtime|src/main/java/dev/talos/core/embed/EmbeddingsClient.java|dev.tal
 core-no-runtime|src/main/java/dev/talos/core/extract/DocumentExtractionPreflight.java|dev.talos.runtime.policy.ProtectedContentPolicy
 core-no-runtime|src/main/java/dev/talos/core/extract/DocumentExtractionService.java|dev.talos.runtime.policy.PrivateDocumentPolicy
 core-no-runtime|src/main/java/dev/talos/core/extract/DocumentExtractionService.java|dev.talos.runtime.policy.ProtectedContentPolicy
-core-no-runtime|src/main/java/dev/talos/core/index/IndexedWorkspaceSymbolChecker.java|dev.talos.runtime.policy.SafeLogFormatter
 core-no-runtime|src/main/java/dev/talos/core/index/Indexer.java|dev.talos.runtime.policy.PrivateDocumentPolicy
 core-no-runtime|src/main/java/dev/talos/core/index/Indexer.java|dev.talos.runtime.policy.ProtectedContentPolicy
 core-no-runtime|src/main/java/dev/talos/core/index/Indexer.java|dev.talos.runtime.policy.SafeLogFormatter

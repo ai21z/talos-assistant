@@ -23,6 +23,9 @@
 - [T339-done-high] Hardened `validateArchitectureBoundaries` so the ratchet
   catches fully-qualified forbidden `dev.talos...` type references as well as
   imports, while ignoring comments and string/char literals.
+- [T340-done-medium] Removed the runtime-policy logging dependency from
+  `IndexedWorkspaceSymbolChecker`, reducing the architecture-boundary baseline
+  from 60 to 59 forbidden references without changing symbol lookup behavior.
 - Documented monotonic pre-1.0 beta versioning: do not downsize or reuse
   candidate versions after artifacts, commits, tags, or audit evidence refer to
   them; use `0.9.10+` for narrow candidates, consider `0.10.0` for a broad beta
