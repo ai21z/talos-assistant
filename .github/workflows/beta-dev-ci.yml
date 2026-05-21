@@ -18,8 +18,8 @@ concurrency:
 jobs:
   gradle-check:
     name: Gradle check (Java 21)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    runs-on: windows-latest
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -34,48 +34,54 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Make Gradle wrapper executable
-        run: chmod +x ./gradlew
-
       - name: Run unit tests
-        run: ./gradlew test --no-daemon
+        run: .\gradlew.bat test --no-daemon
 
       - name: Run E2E tests
-        run: ./gradlew e2eTest --no-daemon
+        run: .\gradlew.bat e2eTest --no-daemon
 
       - name: Run coverage and artifact gates
-        run: ./gradlew jacocoTestReport checkGeneratedArtifactCanaries jacocoTestCoverageVerification --no-daemon
+        run: .\gradlew.bat jacocoTestReport checkGeneratedArtifactCanaries jacocoTestCoverageVerification --no-daemon
 
       - name: Run final Gradle check
-        run: ./gradlew check --no-daemon
+        run: .\gradlew.bat check --no-daemon
 
       - name: Report test result failures
         if: failure()
-        shell: bash
+        shell: pwsh
         run: |
-          python3 - <<'PY'
-          import glob
-          import os
-          import xml.etree.ElementTree as ET
+          function Escape-Annotation([string] $Value) {
+            return $Value.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+          }
 
-          def escape(value):
-              return str(value).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          $found = $false
+          $files = Get-ChildItem -Path build/test-results -Filter *.xml -Recurse -ErrorAction SilentlyContinue
+          foreach ($file in $files) {
+            try {
+              [xml] $xml = Get-Content -LiteralPath $file.FullName -Raw
+            } catch {
+              $path = Escape-Annotation $file.FullName
+              $message = Escape-Annotation $_.Exception.Message
+              Write-Output "::warning file=$path::Could not parse test result XML: $message"
+              continue
+            }
 
-          found = False
-          for path in glob.glob("build/test-results/**/*.xml", recursive=True):
-              try:
-                  root = ET.parse(path).getroot()
-              except ET.ParseError as exc:
-                  print(f"::warning file={escape(path)}::Could not parse test result XML: {escape(exc)}")
-                  continue
-              for case in root.findall("testcase"):
-                  classname = case.attrib.get("classname", "unknown")
-                  name = case.attrib.get("name", "unknown")
-                  for node in list(case.findall("failure")) + list(case.findall("error")):
-                      found = True
-                      message = node.attrib.get("message") or (node.text or "").strip() or "Test failed"
-                      title = f"{classname}.{name}"
-                      print(f"::error file={escape(path)},title={escape(title)}::{escape(message)}")
-          if not found:
-              print("No JUnit XML failures found under build/test-results.")
-          PY
+            foreach ($case in $xml.testsuite.testcase) {
+              $nodes = @()
+              if ($case.failure) { $nodes += $case.failure }
+              if ($case.error) { $nodes += $case.error }
+              foreach ($node in $nodes) {
+                $found = $true
+                $message = if ($node.message) { $node.message } elseif ($node.InnerText) { $node.InnerText.Trim() } else { 'Test failed' }
+                $title = "$($case.classname).$($case.name)"
+                $path = Escape-Annotation $file.FullName
+                $safeTitle = Escape-Annotation $title
+                $safeMessage = Escape-Annotation $message
+                Write-Output "::error file=$path,title=$safeTitle::$safeMessage"
+              }
+            }
+          }
+
+          if (-not $found) {
+            Write-Output "No JUnit XML failures found under build/test-results."
+          }

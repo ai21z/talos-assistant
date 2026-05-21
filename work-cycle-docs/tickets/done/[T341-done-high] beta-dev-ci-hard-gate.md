@@ -23,7 +23,8 @@ Predecessor: `[T334-T340] architecture hygiene ratchet baseline and scanner`
 - Checkpoint id: not applicable.
 - Verification status: focused release-contract test, diff hygiene, and full
   local `check` passed; first GitHub check-run creation succeeded, then exposed
-  a remote Gradle failure requiring more granular workflow diagnostics.
+  pre-existing Linux unit-test failures, so the beta gate was corrected to
+  Windows x64.
 
 ## Problem
 
@@ -48,8 +49,8 @@ copy because the new CI gate must start green.
 
 ## Goal
 
-Add the smallest useful CI gate for beta-dev PRs: Java 21 plus
-`./gradlew check --no-daemon`.
+Add the smallest useful CI gate for beta-dev PRs: Windows x64, Java 21, and
+`.\gradlew.bat check --no-daemon`.
 
 ## Non-Goals
 
@@ -58,6 +59,7 @@ Add the smallest useful CI gate for beta-dev PRs: Java 21 plus
 - No Qodana Cloud setup.
 - No branch protection change in this commit.
 - No architecture-ratchet code changes.
+- No cross-platform index/RAG refactor.
 - No changelog edit; the `Unreleased` ledger is introduced by the separate
   architecture-ratchet packet.
 
@@ -68,18 +70,20 @@ Added `.github/workflows/beta-dev-ci.yml`:
 - runs on pull requests targeting `v0.9.0-beta-dev`;
 - includes `ready_for_review` so a draft PR can be checked after CI lands;
 - runs on pushes to `v0.9.0-beta-dev`;
+- runs on `windows-latest` because the public beta install support boundary is
+  Windows x64 and the repository work-test cycle is Windows-first;
 - installs Java 21 with Temurin;
 - uses the Gradle setup action;
-- makes the Gradle wrapper executable on Linux;
 - runs the hard gate as named Gradle steps:
   `test`, `e2eTest`, coverage/artifact canaries, and final `check`.
 
-The first remote run proved GitHub check creation, but unauthenticated log
-access only exposed `Process completed with exit code 1`. The workflow now uses
-named Gradle steps so future remote failures identify the failing gate without
-requiring private job-log access. A failure-reporting step also converts JUnit
-XML failures into GitHub annotations so concrete test names and messages can be
-read through the public annotations API.
+The first remote Linux run proved GitHub check creation, but failed in existing
+unit tests around index/RAG path matching and policy behavior. That is real
+cross-platform debt, but it is not the right scope for the beta-dev CI bootstrap.
+T341 therefore gates the documented Windows x64 beta path first. A
+failure-reporting step converts JUnit XML failures into GitHub annotations so
+future Windows failures expose concrete test names and messages through the
+public annotations API.
 
 Updated `site/index.html` to keep the public install copy aligned with the
 existing release packaging contract test:
@@ -129,8 +133,8 @@ Checkpoint, evidence, verification, and repair:
 
 - Branch and PR metadata use ticket-only identifiers, not agent names.
 - A minimal beta-dev GitHub Actions workflow exists.
-- The workflow runs the Gradle `check` hard gate on Java 21, with named
-  prerequisite steps for useful failure localization.
+- The workflow runs the Gradle `check` hard gate on Windows x64 and Java 21,
+  with named prerequisite steps for useful failure localization.
 - The workflow triggers for PRs into `v0.9.0-beta-dev`.
 - The workflow includes `ready_for_review` for draft-to-ready PR checks.
 - Local `git diff --check` passes.
