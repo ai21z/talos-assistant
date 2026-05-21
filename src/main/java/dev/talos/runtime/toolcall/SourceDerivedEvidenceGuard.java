@@ -1,6 +1,7 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.runtime.task.TaskContract;
+import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolCall;
 
 import java.util.ArrayList;

@@ -140,6 +140,8 @@ Command:
 
 Expected result:
 
+- `CHANGELOG.md` has a top `Unreleased` section, no placeholder release notes,
+  and a top released version matching `talosVersion`.
 - Unit tests pass.
 - Deterministic E2E tests pass.
 - JaCoCo coverage verification passes.
@@ -157,11 +159,12 @@ Goal: give the reviewable state a version before collecting final evidence.
 
 What the developer does:
 
-1. Run the patch bump script.
-2. Edit the generated changelog stub.
-3. Replace `pending release notes` with the real change summary.
-4. For each completed ticket, include its ticket prefix and a short description
+1. Edit the top `CHANGELOG.md` `Unreleased` section with the real change
+   summary.
+2. For each completed ticket, include its ticket prefix and a short description
    of the user-visible or architecture-visible change.
+3. Run the patch bump script. It moves the `Unreleased` notes into a dated
+   version section and creates a fresh empty `Unreleased` section.
 
 Command:
 
@@ -173,7 +176,9 @@ Expected result:
 
 - `gradle.properties` has the next `talosVersion`.
 - `CHANGELOG.md` has a new entry for that version.
+- `CHANGELOG.md` still has an empty top `Unreleased` section for future work.
 - The changelog says what changed in plain words.
+- `CHANGELOG.md` does not contain `pending release notes`.
 - Done-ticket entries include the ticket prefix, for example:
 
 ```text
@@ -183,6 +188,15 @@ Expected result:
 
 Important: versioning happens before the candidate evidence run. That is what
 makes the evidence belong to a named candidate.
+
+Version discipline:
+
+- Do not downsize or reuse a version after artifacts, commits, tags, reports,
+  or audit evidence refer to it.
+- `0.9.10` is the normal numeric successor to `0.9.9`.
+- Use a new beta minor such as `0.10.0` only when intentionally declaring a
+  broader milestone.
+- Reserve `1.0.0` for stable beta exit.
 
 ## Step 5: Build The Candidate Artifact
 
@@ -316,7 +330,8 @@ Goal: decide whether the candidate is good enough.
 
 What the developer checks:
 
-1. `CHANGELOG.md` matches the actual change.
+1. `CHANGELOG.md` matches the actual change, has no placeholder release notes,
+   and its top released version matches `gradle.properties`.
 2. `version-summary.json` points to the jar you built.
 3. `coverage-summary.json` has test status and coverage data.
 4. `e2e-summary.json` shows the deterministic harness result.

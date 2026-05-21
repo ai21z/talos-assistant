@@ -1,4 +1,4 @@
-package dev.talos.runtime.toolcall;
+package dev.talos.tools;
 
 import java.util.LinkedHashMap;
 import java.util.Locale;

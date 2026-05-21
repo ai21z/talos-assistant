@@ -1,3 +1,4 @@
+import java.io.File
 import java.security.MessageDigest
 
 plugins {
@@ -180,6 +181,395 @@ java {
 
 version = providers.gradleProperty("talosVersion").orNull
     ?: throw GradleException("Missing required gradle property: talosVersion")
+
+fun validateReleaseLedgerText(changelogText: String, expectedVersion: String) {
+    val normalized = changelogText.replace("\r\n", "\n").replace("\r", "\n")
+    if (normalized.contains("pending release notes")) {
+        throw GradleException("CHANGELOG.md contains placeholder text: pending release notes")
+    }
+
+    val headings = Regex("(?m)^## \\[([^\\]]+)](?: - (\\d{4}-\\d{2}-\\d{2}))?\\s*$")
+        .findAll(normalized)
+        .toList()
+    if (headings.isEmpty() || headings.first().groupValues[1] != "Unreleased") {
+        throw GradleException("CHANGELOG.md must contain a top-level ## [Unreleased] section before released versions")
+    }
+
+    val topReleased = headings.firstOrNull { it.groupValues[1] != "Unreleased" }
+        ?: throw GradleException("CHANGELOG.md must contain at least one released version section")
+    val topReleasedVersion = topReleased.groupValues[1]
+    val topReleasedDate = topReleased.groupValues[2]
+    if (topReleasedDate.isBlank()) {
+        throw GradleException("Top released CHANGELOG.md version $topReleasedVersion must include an ISO release date")
+    }
+    if (topReleasedVersion != expectedVersion) {
+        throw GradleException("Top released CHANGELOG.md version $topReleasedVersion does not match talosVersion $expectedVersion")
+    }
+}
+
+data class ArchitectureBoundaryRule(
+    val id: String,
+    val sourcePrefixes: List<String>,
+    val forbiddenReferencePrefixes: List<String>
+)
+
+data class ArchitectureBoundaryViolation(
+    val rule: String,
+    val path: String,
+    val referencedSymbol: String
+) {
+    fun key(): String = "$rule|$path|$referencedSymbol"
+}
+
+val architectureBoundaryRules = listOf(
+    ArchitectureBoundaryRule(
+        id = "runtime-core-no-cli",
+        sourcePrefixes = listOf(
+            "src/main/java/dev/talos/runtime/",
+            "src/main/java/dev/talos/core/"
+        ),
+        forbiddenReferencePrefixes = listOf("dev.talos.cli.")
+    ),
+    ArchitectureBoundaryRule(
+        id = "core-no-runtime",
+        sourcePrefixes = listOf("src/main/java/dev/talos/core/"),
+        forbiddenReferencePrefixes = listOf("dev.talos.runtime.")
+    ),
+    ArchitectureBoundaryRule(
+        id = "tools-no-runtime",
+        sourcePrefixes = listOf("src/main/java/dev/talos/tools/"),
+        forbiddenReferencePrefixes = listOf("dev.talos.runtime.")
+    ),
+    ArchitectureBoundaryRule(
+        id = "engine-no-runtime",
+        sourcePrefixes = listOf("src/main/java/dev/talos/engine/"),
+        forbiddenReferencePrefixes = listOf("dev.talos.runtime.")
+    ),
+    ArchitectureBoundaryRule(
+        id = "spi-no-upper-layers",
+        sourcePrefixes = listOf("src/main/java/dev/talos/spi/"),
+        forbiddenReferencePrefixes = listOf(
+            "dev.talos.cli.",
+            "dev.talos.core.",
+            "dev.talos.runtime.",
+            "dev.talos.tools."
+        )
+    )
+)
+
+fun readArchitectureBoundaryBaseline(file: java.io.File): Set<String> {
+    if (!file.isFile) return emptySet()
+    return file.readLines(Charsets.UTF_8)
+        .map { it.trim() }
+        .filter { it.isNotBlank() && !it.startsWith("#") }
+        .toSortedSet()
+}
+
+fun stripJavaCommentsAndLiterals(source: String): String {
+    val out = StringBuilder(source.length)
+    var i = 0
+    var state = "code"
+    while (i < source.length) {
+        val ch = source[i]
+        val next = source.getOrNull(i + 1)
+        when (state) {
+            "code" -> when {
+                ch == '/' && next == '/' -> {
+                    out.append("  ")
+                    i += 2
+                    state = "lineComment"
+                }
+                ch == '/' && next == '*' -> {
+                    out.append("  ")
+                    i += 2
+                    state = "blockComment"
+                }
+                ch == '"' && source.getOrNull(i + 1) == '"' && source.getOrNull(i + 2) == '"' -> {
+                    out.append("   ")
+                    i += 3
+                    state = "textBlock"
+                }
+                ch == '"' -> {
+                    out.append(' ')
+                    i++
+                    state = "string"
+                }
+                ch == '\'' -> {
+                    out.append(' ')
+                    i++
+                    state = "char"
+                }
+                else -> {
+                    out.append(ch)
+                    i++
+                }
+            }
+            "lineComment" -> {
+                out.append(if (ch == '\n' || ch == '\r') ch else ' ')
+                i++
+                if (ch == '\n' || ch == '\r') state = "code"
+            }
+            "blockComment" -> {
+                if (ch == '*' && next == '/') {
+                    out.append("  ")
+                    i += 2
+                    state = "code"
+                } else {
+                    out.append(if (ch == '\n' || ch == '\r') ch else ' ')
+                    i++
+                }
+            }
+            "textBlock" -> {
+                if (ch == '"' && next == '"' && source.getOrNull(i + 2) == '"'
+                    && !hasOddBackslashRunBefore(source, i)) {
+                    out.append("   ")
+                    i += 3
+                    state = "code"
+                } else {
+                    out.append(if (ch == '\n' || ch == '\r') ch else ' ')
+                    i++
+                }
+            }
+            "string" -> {
+                if (ch == '\\' && next != null) {
+                    out.append("  ")
+                    i += 2
+                } else {
+                    out.append(if (ch == '\n' || ch == '\r') ch else ' ')
+                    i++
+                    if (ch == '"') state = "code"
+                }
+            }
+            "char" -> {
+                if (ch == '\\' && next != null) {
+                    out.append("  ")
+                    i += 2
+                } else {
+                    out.append(if (ch == '\n' || ch == '\r') ch else ' ')
+                    i++
+                    if (ch == '\'') state = "code"
+                }
+            }
+        }
+    }
+    return out.toString()
+}
+
+fun hasOddBackslashRunBefore(source: String, index: Int): Boolean {
+    var count = 0
+    var cursor = index - 1
+    while (cursor >= 0 && source[cursor] == '\\') {
+        count++
+        cursor--
+    }
+    return count % 2 == 1
+}
+
+fun normalizeJavaTypeReference(candidate: String): String? {
+    val parts = candidate.split('.')
+    if (parts.size < 4 || parts[0] != "dev" || parts[1] != "talos") return null
+    val typeIndex = parts.indexOfFirst { it.firstOrNull()?.isUpperCase() == true }
+    if (typeIndex < 0) return null
+    return parts.take(typeIndex + 1).joinToString(".")
+}
+
+fun normalizeJavaImportReference(candidate: String): String? {
+    if (candidate.endsWith(".*")) {
+        val owner = candidate.removeSuffix(".*")
+        if (owner.substringAfterLast('.').firstOrNull()?.isUpperCase() == true) {
+            return normalizeJavaTypeReference(owner)
+        }
+        return candidate
+    }
+    return normalizeJavaTypeReference(candidate)
+}
+
+fun forbiddenSourceReferences(source: String, importPattern: Regex, referencePattern: Regex): Set<String> {
+    val stripped = stripJavaCommentsAndLiterals(source)
+    val imports = stripped.lineSequence()
+        .mapNotNull { importPattern.matchEntire(it)?.groupValues?.get(1) }
+        .mapNotNull { normalizeJavaImportReference(it) }
+    val fullyQualifiedReferences = referencePattern.findAll(stripped)
+        .mapNotNull { normalizeJavaTypeReference(it.value) }
+    return (imports + fullyQualifiedReferences).toSortedSet()
+}
+
+fun scanArchitectureBoundaryViolations(projectRoot: java.io.File): List<ArchitectureBoundaryViolation> {
+    val sourceRoot = projectRoot.resolve("src/main/java")
+    if (!sourceRoot.isDirectory) return emptyList()
+    val importPattern = Regex("^\\s*import\\s+(?:static\\s+)?(dev\\.talos\\.[A-Za-z0-9_.*]+)\\s*;\\s*(?://.*)?$")
+    val referencePattern = Regex("\\bdev\\.talos(?:\\.[A-Za-z_][A-Za-z0-9_]*)+\\b")
+    return sourceRoot.walkTopDown()
+        .filter { it.isFile && it.extension == "java" }
+        .flatMap { file ->
+            val relativePath = projectRoot.toPath().relativize(file.toPath()).toString()
+                .replace(File.separatorChar, '/')
+            val matchingRules = architectureBoundaryRules.filter { rule ->
+                rule.sourcePrefixes.any { relativePath.startsWith(it) }
+            }
+            if (matchingRules.isEmpty()) {
+                emptySequence()
+            } else {
+                forbiddenSourceReferences(file.readText(Charsets.UTF_8), importPattern, referencePattern)
+                    .asSequence()
+                    .flatMap { referencedSymbol ->
+                        matchingRules.asSequence()
+                            .filter { rule ->
+                                rule.forbiddenReferencePrefixes.any { referencedSymbol.startsWith(it) }
+                            }
+                            .map { rule ->
+                                ArchitectureBoundaryViolation(rule.id, relativePath, referencedSymbol)
+                            }
+                    }
+            }
+        }
+        .distinctBy { it.key() }
+        .sortedWith(compareBy({ it.rule }, { it.path }, { it.referencedSymbol }))
+        .toList()
+}
+
+val validateReleaseLedger by tasks.registering {
+    description = "Validates changelog/version provenance for candidate evidence."
+    group = "verification"
+    val changelogFile = layout.projectDirectory.file("CHANGELOG.md")
+    inputs.file(changelogFile)
+    inputs.property("projectVersion", project.version.toString())
+
+    doLast {
+        val file = changelogFile.asFile
+        if (!file.isFile) {
+            throw GradleException("CHANGELOG.md not found at ${file.absolutePath}")
+        }
+        validateReleaseLedgerText(file.readText(Charsets.UTF_8), project.version.toString())
+    }
+}
+
+tasks.named("check") {
+    dependsOn(validateReleaseLedger)
+}
+
+val validateArchitectureBoundaries by tasks.registering {
+    description = "Ratcheted architecture-boundary source-reference scanner for known package-direction debt."
+    group = "verification"
+    val sourceRoot = layout.projectDirectory.dir("src/main/java")
+    val baselineFile = layout.projectDirectory.file("config/architecture-boundary-baseline.txt")
+    val jsonReport = talosReportsDir.map { it.file("architecture-boundaries.json") }
+    val markdownReport = talosReportsDir.map { it.file("architecture-boundaries.md") }
+    inputs.dir(sourceRoot)
+    if (baselineFile.asFile.exists()) {
+        inputs.file(baselineFile)
+    } else {
+        inputs.property("architectureBoundaryBaseline", "<missing>")
+    }
+    outputs.file(jsonReport)
+    outputs.file(markdownReport)
+
+    doLast {
+        val violations = scanArchitectureBoundaryViolations(projectDir)
+        val actualKeys = violations.map { it.key() }.toSortedSet()
+        val baselineKeys = readArchitectureBoundaryBaseline(baselineFile.asFile)
+        val newViolations = (actualKeys - baselineKeys).toSortedSet()
+        val staleBaseline = (baselineKeys - actualKeys).toSortedSet()
+
+        writeJson(
+            jsonReport.get().asFile,
+            mapOf(
+                "summaryStatus" to if (newViolations.isEmpty() && staleBaseline.isEmpty()) {
+                    "architecture-boundary-baseline-current"
+                } else {
+                    "architecture-boundary-baseline-drift"
+                },
+                "violationCount" to actualKeys.size,
+                "baselineCount" to baselineKeys.size,
+                "newViolationCount" to newViolations.size,
+                "staleBaselineCount" to staleBaseline.size,
+                "rules" to architectureBoundaryRules.map {
+                    mapOf(
+                        "id" to it.id,
+                        "sourcePrefixes" to it.sourcePrefixes,
+                        "forbiddenReferencePrefixes" to it.forbiddenReferencePrefixes
+                    )
+                },
+                "violations" to violations.map {
+                    mapOf(
+                        "rule" to it.rule,
+                        "path" to it.path,
+                        "referencedSymbol" to it.referencedSymbol,
+                        "key" to it.key()
+                    )
+                },
+                "newViolations" to newViolations,
+                "staleBaseline" to staleBaseline
+            )
+        )
+
+        val markdown = buildString {
+            appendLine("# Architecture Boundary Report")
+            appendLine()
+            appendLine("| Metric | Count |")
+            appendLine("|---|---:|")
+            appendLine("| Current forbidden references | ${actualKeys.size} |")
+            appendLine("| Baselined forbidden references | ${baselineKeys.size} |")
+            appendLine("| New forbidden references | ${newViolations.size} |")
+            appendLine("| Stale baseline entries | ${staleBaseline.size} |")
+            appendLine()
+            appendLine("## Rules")
+            appendLine()
+            architectureBoundaryRules.forEach { rule ->
+                appendLine("- `${rule.id}`: `${rule.sourcePrefixes.joinToString("`, `")}` must not reference `${rule.forbiddenReferencePrefixes.joinToString("`, `")}`")
+            }
+            appendLine()
+            appendLine("## Current Violations")
+            appendLine()
+            if (actualKeys.isEmpty()) {
+                appendLine("None.")
+            } else {
+                actualKeys.forEach { appendLine("- `$it`") }
+            }
+            appendLine()
+            appendLine("## New Violations")
+            appendLine()
+            if (newViolations.isEmpty()) {
+                appendLine("None.")
+            } else {
+                newViolations.forEach { appendLine("- `$it`") }
+            }
+            appendLine()
+            appendLine("## Stale Baseline Entries")
+            appendLine()
+            if (staleBaseline.isEmpty()) {
+                appendLine("None.")
+            } else {
+                staleBaseline.forEach { appendLine("- `$it`") }
+            }
+        }
+        markdownReport.get().asFile.apply {
+            parentFile.mkdirs()
+            writeText(markdown, Charsets.UTF_8)
+        }
+
+        if (newViolations.isNotEmpty() || staleBaseline.isNotEmpty()) {
+            val message = buildString {
+                if (newViolations.isNotEmpty()) {
+                    appendLine("New architecture boundary violations detected: ${newViolations.size}")
+                    newViolations.take(20).forEach { appendLine(it) }
+                    if (newViolations.size > 20) appendLine("... ${newViolations.size - 20} more")
+                }
+                if (staleBaseline.isNotEmpty()) {
+                    appendLine("Stale architecture boundary baseline entries detected: ${staleBaseline.size}")
+                    staleBaseline.take(20).forEach { appendLine(it) }
+                    if (staleBaseline.size > 20) appendLine("... ${staleBaseline.size - 20} more")
+                }
+                appendLine("Update config/architecture-boundary-baseline.txt only when intentionally accepting current debt.")
+            }.trim()
+            throw GradleException(message)
+        }
+    }
+}
+
+tasks.named("check") {
+    dependsOn(validateArchitectureBoundaries)
+}
 
 /* ---------- Repositories ---------- */
 

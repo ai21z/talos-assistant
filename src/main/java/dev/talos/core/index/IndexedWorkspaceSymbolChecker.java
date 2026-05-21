@@ -1,8 +1,6 @@
 package dev.talos.core.index;
 
-import dev.talos.cli.modes.WorkspaceSymbolChecker;
 import dev.talos.core.IndexPathResolver;
-import dev.talos.runtime.policy.SafeLogFormatter;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.search.IndexSearcher;
@@ -64,8 +62,8 @@ public final class IndexedWorkspaceSymbolChecker implements WorkspaceSymbolCheck
             TopDocs results = searcher.search(query, 1);
             return results.scoreDocs.length > 0;
         } catch (Exception e) {
-            LOG.debug("Symbol lookup failed for '{}': {}",
-                    SafeLogFormatter.value(lowercasedSymbol), SafeLogFormatter.throwableMessage(e));
+            LOG.debug("Symbol lookup failed for indexed workspace symbol (chars={}): {}",
+                    lowercasedSymbol.length(), e.getClass().getSimpleName());
             return false;
         }
     }

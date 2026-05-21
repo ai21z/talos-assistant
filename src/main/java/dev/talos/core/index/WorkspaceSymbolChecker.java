@@ -1,8 +1,8 @@
-package dev.talos.cli.modes;
+package dev.talos.core.index;
 
 /**
  * Checks whether a PascalCase identifier exists in the indexed workspace.
- * Used by {@link PromptClassifier} to resolve bare code identifiers.
+ * Used by the prompt classifier to resolve bare code identifiers.
  * Implementations must be thread-safe and return {@code false} gracefully on errors.
  */
 @FunctionalInterface
