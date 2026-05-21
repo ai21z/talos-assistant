@@ -1,7 +1,8 @@
 package dev.talos.tools.impl;
 
 import dev.talos.core.rag.RagService;
-import dev.talos.runtime.policy.ProtectedContentPolicy;
+import dev.talos.safety.ProtectedContentSanitizer;
+import dev.talos.safety.ProtectedWorkspacePaths;
 import dev.talos.tools.*;
 
 import java.nio.file.Path;
@@ -93,12 +94,12 @@ public final class RetrieveTool implements TalosTool {
                 }
                 sb.append(" ---\n");
                 Path snippetPath = ws.resolve(snippet.path()).normalize();
-                if (ProtectedContentPolicy.isProtectedPath(ws, snippetPath)) {
+                if (ProtectedWorkspacePaths.isProtectedPath(ws, snippetPath)) {
                     protectedSnippets++;
                     sb.append("[protected content omitted from retrieval result]");
                 } else {
                     String rawText = snippet.text() == null ? "" : snippet.text();
-                    String safeText = ProtectedContentPolicy.sanitizeText(rawText);
+                    String safeText = ProtectedContentSanitizer.sanitizeText(rawText);
                     if (!safeText.equals(rawText)) redactedSnippets++;
                     sb.append(truncate(safeText, 1000));
                 }
