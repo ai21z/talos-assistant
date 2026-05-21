@@ -125,6 +125,29 @@ class ArchitectureBoundaryValidationTaskTest {
     }
 
     @Test
+    @DisplayName("validateArchitectureBoundaries rejects forbidden package wildcard imports with trailing block comments")
+    void rejectsForbiddenPackageWildcardImportWithTrailingBlockComment() throws Exception {
+        Path projectDir = createBuildFixture();
+        writeJava(projectDir.resolve("src/main/java/dev/talos/core/BadCore.java"), """
+                package dev.talos.core;
+
+                import dev.talos.runtime.policy.*; /* explanatory comment */
+
+                final class BadCore {
+                }
+                """);
+        writeUtf8(projectDir.resolve("config/architecture-boundary-baseline.txt"), "");
+
+        BuildResult result = runValidationAndFail(projectDir);
+
+        assertTrue(result.getOutput().contains("New architecture boundary violations detected: 1"),
+                result.getOutput());
+        assertTrue(result.getOutput().contains(
+                "core-no-runtime|src/main/java/dev/talos/core/BadCore.java|dev.talos.runtime.policy.*"),
+                result.getOutput());
+    }
+
+    @Test
     @DisplayName("validateArchitectureBoundaries rejects forbidden fully qualified references without imports")
     void rejectsUnbaselinedForbiddenFullyQualifiedReference() throws Exception {
         Path projectDir = createBuildFixture();
