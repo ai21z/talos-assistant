@@ -76,21 +76,14 @@ public final class Sandbox {
         if (!enabled) return Decision.allow();
         if (p == null) return Decision.deny("null path");
 
-        // Resolve target; if it doesn't exist yet, resolve parent + filename.
         Path real;
         try {
-            if (Files.exists(p)) {
+            if (Files.exists(p, LinkOption.NOFOLLOW_LINKS)) {
                 // first, avoid link trickery; then resolve fully
                 p.toRealPath(LinkOption.NOFOLLOW_LINKS);
                 real = p.toRealPath();
             } else {
-                Path parent = p.toAbsolutePath().normalize().getParent();
-                if (parent == null) parent = workspaceReal;
-                Path parentReal = existsOrSelf(parent);
-                real = parentReal.resolve(p.getFileName() == null ? Path.of("") : p.getFileName()).normalize();
-                if (Files.exists(parentReal)) {
-                    try { real = parentReal.resolve(p.getFileName()).toRealPath(); } catch (Exception ignore) {}
-                }
+                real = resolveMissingPath(p);
             }
         } catch (Exception e) {
             real = p.toAbsolutePath().normalize();
@@ -132,8 +125,27 @@ public final class Sandbox {
         }
     }
 
+    private static Path resolveMissingPath(Path p) {
+        Path absolute = p.toAbsolutePath().normalize();
+        Path cursor = absolute.getParent();
+        Path suffix = absolute.getFileName() == null ? Path.of("") : absolute.getFileName();
+
+        while (cursor != null && !Files.exists(cursor, LinkOption.NOFOLLOW_LINKS)) {
+            Path name = cursor.getFileName();
+            if (name != null) {
+                suffix = name.resolve(suffix);
+            }
+            cursor = cursor.getParent();
+        }
+
+        if (cursor == null) {
+            return absolute;
+        }
+        return existsOrSelf(cursor).resolve(suffix).normalize();
+    }
+
     private static Path existsOrSelf(Path p) {
-        try { return Files.exists(p) ? p.toRealPath() : p.toAbsolutePath().normalize(); }
+        try { return Files.exists(p, LinkOption.NOFOLLOW_LINKS) ? p.toRealPath() : p.toAbsolutePath().normalize(); }
         catch (Exception e) { return p.toAbsolutePath().normalize(); }
     }
 
