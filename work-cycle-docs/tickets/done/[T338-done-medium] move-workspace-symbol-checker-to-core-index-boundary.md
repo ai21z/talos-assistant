@@ -3,7 +3,7 @@
 Status: done
 Priority: medium
 Date: 2026-05-21
-Branch: `codex/architecture-hygiene-ratchet`
+Branch: `T334-T340`
 Candidate version: `talosVersion=0.9.9`
 Parent baseline: `work-cycle-docs/reports/t335-architecture-hygiene-baseline-20260521.md`
 Predecessor: `[T337-done-medium] move-tool-alias-policy-to-tools-boundary`
@@ -13,7 +13,7 @@ Predecessor: `[T337-done-medium] move-tool-alias-policy-to-tools-boundary`
 - Source: post-T337 architecture ratchet selection.
 - Date: 2026-05-21.
 - Talos version / commit: `0.9.9` / local working tree on
-  `codex/architecture-hygiene-ratchet`.
+  `T334-T340`.
 - Model/backend: none; no live model was run.
 - Workspace fixture: repository checkout.
 - Raw transcript path: none.
