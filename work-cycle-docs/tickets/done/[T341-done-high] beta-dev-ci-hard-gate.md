@@ -77,7 +77,9 @@ Added `.github/workflows/beta-dev-ci.yml`:
 The first remote run proved GitHub check creation, but unauthenticated log
 access only exposed `Process completed with exit code 1`. The workflow now uses
 named Gradle steps so future remote failures identify the failing gate without
-requiring private job-log access.
+requiring private job-log access. A failure-reporting step also converts JUnit
+XML failures into GitHub annotations so concrete test names and messages can be
+read through the public annotations API.
 
 Updated `site/index.html` to keep the public install copy aligned with the
 existing release packaging contract test:
