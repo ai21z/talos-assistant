@@ -20,6 +20,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DocumentExtractionServiceTest {
 
     @Test
+    void service_uses_neutral_sanitizer_for_text_redaction_but_keeps_private_document_policy() throws Exception {
+        String source = Files.readString(Path.of("src/main/java/dev/talos/core/extract/DocumentExtractionService.java"));
+        String baseline = Files.readString(Path.of("config/architecture-boundary-baseline.txt"));
+
+        assertTrue(source.contains("import dev.talos.safety.ProtectedContentSanitizer;"), source);
+        assertTrue(source.contains("import dev.talos.runtime.policy.PrivateDocumentPolicy;"), source);
+        assertFalse(source.contains("import dev.talos.runtime.policy.ProtectedContentPolicy;"), source);
+        assertFalse(baseline.contains(
+                        "core-no-runtime|src/main/java/dev/talos/core/extract/DocumentExtractionService.java|dev.talos.runtime.policy.ProtectedContentPolicy"),
+                baseline);
+        assertTrue(baseline.contains(
+                        "core-no-runtime|src/main/java/dev/talos/core/extract/DocumentExtractionService.java|dev.talos.runtime.policy.PrivateDocumentPolicy"),
+                baseline);
+    }
+
+    @Test
     void text_file_extraction_returns_sanitized_safe_text(@TempDir Path workspace) throws Exception {
         Path notes = workspace.resolve("notes.txt");
         Files.writeString(notes, "hello\nAPI_TOKEN=t267-token-should-not-appear\n");
