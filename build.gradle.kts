@@ -1,3 +1,4 @@
+import java.io.File
 import java.security.MessageDigest
 
 plugins {
@@ -180,6 +181,265 @@ java {
 
 version = providers.gradleProperty("talosVersion").orNull
     ?: throw GradleException("Missing required gradle property: talosVersion")
+
+fun validateReleaseLedgerText(changelogText: String, expectedVersion: String) {
+    val normalized = changelogText.replace("\r\n", "\n").replace("\r", "\n")
+    if (normalized.contains("pending release notes")) {
+        throw GradleException("CHANGELOG.md contains placeholder text: pending release notes")
+    }
+
+    val headings = Regex("(?m)^## \\[([^\\]]+)](?: - (\\d{4}-\\d{2}-\\d{2}))?\\s*$")
+        .findAll(normalized)
+        .toList()
+    if (headings.isEmpty() || headings.first().groupValues[1] != "Unreleased") {
+        throw GradleException("CHANGELOG.md must contain a top-level ## [Unreleased] section before released versions")
+    }
+
+    val topReleased = headings.firstOrNull { it.groupValues[1] != "Unreleased" }
+        ?: throw GradleException("CHANGELOG.md must contain at least one released version section")
+    val topReleasedVersion = topReleased.groupValues[1]
+    val topReleasedDate = topReleased.groupValues[2]
+    if (topReleasedDate.isBlank()) {
+        throw GradleException("Top released CHANGELOG.md version $topReleasedVersion must include an ISO release date")
+    }
+    if (topReleasedVersion != expectedVersion) {
+        throw GradleException("Top released CHANGELOG.md version $topReleasedVersion does not match talosVersion $expectedVersion")
+    }
+}
+
+data class ArchitectureBoundaryRule(
+    val id: String,
+    val sourcePrefixes: List<String>,
+    val forbiddenImportPrefixes: List<String>
+)
+
+data class ArchitectureBoundaryViolation(
+    val rule: String,
+    val path: String,
+    val importedType: String
+) {
+    fun key(): String = "$rule|$path|$importedType"
+}
+
+val architectureBoundaryRules = listOf(
+    ArchitectureBoundaryRule(
+        id = "runtime-core-no-cli",
+        sourcePrefixes = listOf(
+            "src/main/java/dev/talos/runtime/",
+            "src/main/java/dev/talos/core/"
+        ),
+        forbiddenImportPrefixes = listOf("dev.talos.cli.")
+    ),
+    ArchitectureBoundaryRule(
+        id = "core-no-runtime",
+        sourcePrefixes = listOf("src/main/java/dev/talos/core/"),
+        forbiddenImportPrefixes = listOf("dev.talos.runtime.")
+    ),
+    ArchitectureBoundaryRule(
+        id = "tools-no-runtime",
+        sourcePrefixes = listOf("src/main/java/dev/talos/tools/"),
+        forbiddenImportPrefixes = listOf("dev.talos.runtime.")
+    ),
+    ArchitectureBoundaryRule(
+        id = "engine-no-runtime",
+        sourcePrefixes = listOf("src/main/java/dev/talos/engine/"),
+        forbiddenImportPrefixes = listOf("dev.talos.runtime.")
+    ),
+    ArchitectureBoundaryRule(
+        id = "spi-no-upper-layers",
+        sourcePrefixes = listOf("src/main/java/dev/talos/spi/"),
+        forbiddenImportPrefixes = listOf(
+            "dev.talos.cli.",
+            "dev.talos.core.",
+            "dev.talos.runtime.",
+            "dev.talos.tools."
+        )
+    )
+)
+
+fun readArchitectureBoundaryBaseline(file: java.io.File): Set<String> {
+    if (!file.isFile) return emptySet()
+    return file.readLines(Charsets.UTF_8)
+        .map { it.trim() }
+        .filter { it.isNotBlank() && !it.startsWith("#") }
+        .toSortedSet()
+}
+
+fun scanArchitectureBoundaryViolations(projectRoot: java.io.File): List<ArchitectureBoundaryViolation> {
+    val sourceRoot = projectRoot.resolve("src/main/java")
+    if (!sourceRoot.isDirectory) return emptyList()
+    val importPattern = Regex("^\\s*import\\s+(?:static\\s+)?(dev\\.talos\\.[A-Za-z0-9_.*]+)\\s*;\\s*(?://.*)?$")
+    return sourceRoot.walkTopDown()
+        .filter { it.isFile && it.extension == "java" }
+        .flatMap { file ->
+            val relativePath = projectRoot.toPath().relativize(file.toPath()).toString()
+                .replace(File.separatorChar, '/')
+            val matchingRules = architectureBoundaryRules.filter { rule ->
+                rule.sourcePrefixes.any { relativePath.startsWith(it) }
+            }
+            if (matchingRules.isEmpty()) {
+                emptySequence()
+            } else {
+                file.readLines(Charsets.UTF_8).asSequence()
+                    .mapNotNull { line -> importPattern.matchEntire(line)?.groupValues?.get(1) }
+                    .flatMap { importedType ->
+                        matchingRules.asSequence()
+                            .filter { rule ->
+                                rule.forbiddenImportPrefixes.any { importedType.startsWith(it) }
+                            }
+                            .map { rule ->
+                                ArchitectureBoundaryViolation(rule.id, relativePath, importedType)
+                            }
+                    }
+            }
+        }
+        .distinctBy { it.key() }
+        .sortedWith(compareBy({ it.rule }, { it.path }, { it.importedType }))
+        .toList()
+}
+
+val validateReleaseLedger by tasks.registering {
+    description = "Validates changelog/version provenance for candidate evidence."
+    group = "verification"
+    val changelogFile = layout.projectDirectory.file("CHANGELOG.md")
+    inputs.file(changelogFile)
+    inputs.property("projectVersion", project.version.toString())
+
+    doLast {
+        val file = changelogFile.asFile
+        if (!file.isFile) {
+            throw GradleException("CHANGELOG.md not found at ${file.absolutePath}")
+        }
+        validateReleaseLedgerText(file.readText(Charsets.UTF_8), project.version.toString())
+    }
+}
+
+tasks.named("check") {
+    dependsOn(validateReleaseLedger)
+}
+
+val validateArchitectureBoundaries by tasks.registering {
+    description = "Ratcheted architecture-boundary import scanner for known package-direction debt."
+    group = "verification"
+    val sourceRoot = layout.projectDirectory.dir("src/main/java")
+    val baselineFile = layout.projectDirectory.file("config/architecture-boundary-baseline.txt")
+    val jsonReport = talosReportsDir.map { it.file("architecture-boundaries.json") }
+    val markdownReport = talosReportsDir.map { it.file("architecture-boundaries.md") }
+    inputs.dir(sourceRoot)
+    if (baselineFile.asFile.exists()) {
+        inputs.file(baselineFile)
+    } else {
+        inputs.property("architectureBoundaryBaseline", "<missing>")
+    }
+    outputs.file(jsonReport)
+    outputs.file(markdownReport)
+
+    doLast {
+        val violations = scanArchitectureBoundaryViolations(projectDir)
+        val actualKeys = violations.map { it.key() }.toSortedSet()
+        val baselineKeys = readArchitectureBoundaryBaseline(baselineFile.asFile)
+        val newViolations = (actualKeys - baselineKeys).toSortedSet()
+        val staleBaseline = (baselineKeys - actualKeys).toSortedSet()
+
+        writeJson(
+            jsonReport.get().asFile,
+            mapOf(
+                "summaryStatus" to if (newViolations.isEmpty() && staleBaseline.isEmpty()) {
+                    "architecture-boundary-baseline-current"
+                } else {
+                    "architecture-boundary-baseline-drift"
+                },
+                "violationCount" to actualKeys.size,
+                "baselineCount" to baselineKeys.size,
+                "newViolationCount" to newViolations.size,
+                "staleBaselineCount" to staleBaseline.size,
+                "rules" to architectureBoundaryRules.map {
+                    mapOf(
+                        "id" to it.id,
+                        "sourcePrefixes" to it.sourcePrefixes,
+                        "forbiddenImportPrefixes" to it.forbiddenImportPrefixes
+                    )
+                },
+                "violations" to violations.map {
+                    mapOf(
+                        "rule" to it.rule,
+                        "path" to it.path,
+                        "importedType" to it.importedType,
+                        "key" to it.key()
+                    )
+                },
+                "newViolations" to newViolations,
+                "staleBaseline" to staleBaseline
+            )
+        )
+
+        val markdown = buildString {
+            appendLine("# Architecture Boundary Report")
+            appendLine()
+            appendLine("| Metric | Count |")
+            appendLine("|---|---:|")
+            appendLine("| Current forbidden imports | ${actualKeys.size} |")
+            appendLine("| Baselined forbidden imports | ${baselineKeys.size} |")
+            appendLine("| New forbidden imports | ${newViolations.size} |")
+            appendLine("| Stale baseline entries | ${staleBaseline.size} |")
+            appendLine()
+            appendLine("## Rules")
+            appendLine()
+            architectureBoundaryRules.forEach { rule ->
+                appendLine("- `${rule.id}`: `${rule.sourcePrefixes.joinToString("`, `")}` must not import `${rule.forbiddenImportPrefixes.joinToString("`, `")}`")
+            }
+            appendLine()
+            appendLine("## Current Violations")
+            appendLine()
+            if (actualKeys.isEmpty()) {
+                appendLine("None.")
+            } else {
+                actualKeys.forEach { appendLine("- `$it`") }
+            }
+            appendLine()
+            appendLine("## New Violations")
+            appendLine()
+            if (newViolations.isEmpty()) {
+                appendLine("None.")
+            } else {
+                newViolations.forEach { appendLine("- `$it`") }
+            }
+            appendLine()
+            appendLine("## Stale Baseline Entries")
+            appendLine()
+            if (staleBaseline.isEmpty()) {
+                appendLine("None.")
+            } else {
+                staleBaseline.forEach { appendLine("- `$it`") }
+            }
+        }
+        markdownReport.get().asFile.apply {
+            parentFile.mkdirs()
+            writeText(markdown, Charsets.UTF_8)
+        }
+
+        if (newViolations.isNotEmpty() || staleBaseline.isNotEmpty()) {
+            val message = buildString {
+                if (newViolations.isNotEmpty()) {
+                    appendLine("New architecture boundary violations detected: ${newViolations.size}")
+                    newViolations.take(20).forEach { appendLine(it) }
+                    if (newViolations.size > 20) appendLine("... ${newViolations.size - 20} more")
+                }
+                if (staleBaseline.isNotEmpty()) {
+                    appendLine("Stale architecture boundary baseline entries detected: ${staleBaseline.size}")
+                    staleBaseline.take(20).forEach { appendLine(it) }
+                    if (staleBaseline.size > 20) appendLine("... ${staleBaseline.size - 20} more")
+                }
+                appendLine("Update config/architecture-boundary-baseline.txt only when intentionally accepting current debt.")
+            }.trim()
+            throw GradleException(message)
+        }
+    }
+}
+
+tasks.named("check") {
+    dependsOn(validateArchitectureBoundaries)
+}
 
 /* ---------- Repositories ---------- */
 

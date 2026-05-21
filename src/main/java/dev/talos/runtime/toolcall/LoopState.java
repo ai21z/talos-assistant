@@ -10,6 +10,7 @@ import dev.talos.runtime.repair.StaticSelectorRepairGuard;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatMessage.NativeToolCall;
+import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolCall;
 
 import java.nio.file.Path;

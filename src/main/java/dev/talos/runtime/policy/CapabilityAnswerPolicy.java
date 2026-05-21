@@ -1,6 +1,6 @@
 package dev.talos.runtime.policy;
 
-import dev.talos.runtime.toolcall.ToolAliasPolicy;
+import dev.talos.tools.ToolAliasPolicy;
 
 import java.util.Locale;
 import java.util.Optional;

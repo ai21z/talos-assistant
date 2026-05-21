@@ -140,12 +140,15 @@ Command:
 
 What it runs:
 
+- release-ledger validation
 - unit tests
 - deterministic E2E tests
 - JaCoCo coverage verification
 
 Expected:
 
+- `CHANGELOG.md` has a top `Unreleased` section, no placeholder release notes,
+  and a top released version matching `talosVersion`.
 - Unit tests pass.
 - E2E tests pass.
 - Coverage stays above the configured baseline.
@@ -256,6 +259,14 @@ Expected:
 ## 8. Run The Candidate Evidence Packet
 
 Use this after the hard gate passes.
+
+Before running the bump script, write the material candidate notes under the
+top `CHANGELOG.md` `Unreleased` section. The bump script moves those notes into
+the new dated candidate entry and creates a fresh empty `Unreleased` section.
+Do not downsize or reuse a version after artifacts, commits, tags, reports, or
+audit evidence refer to it. `0.9.10` is the normal successor to `0.9.9`; use
+`0.10.0` only for an intentional broader beta milestone, and reserve `1.0.0`
+for stable beta exit.
 
 Recommended sequence:
 
