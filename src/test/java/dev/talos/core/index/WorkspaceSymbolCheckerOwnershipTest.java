@@ -17,4 +17,15 @@ class WorkspaceSymbolCheckerOwnershipTest {
         String baseline = Files.readString(Path.of("config/architecture-boundary-baseline.txt"));
         assertFalse(baseline.contains("dev.talos.cli.modes.WorkspaceSymbolChecker"), baseline);
     }
+
+    @Test
+    void indexedWorkspaceSymbolCheckerDoesNotDependOnRuntimeLogPolicy() throws Exception {
+        String source = Files.readString(Path.of("src/main/java/dev/talos/core/index/IndexedWorkspaceSymbolChecker.java"));
+        String baseline = Files.readString(Path.of("config/architecture-boundary-baseline.txt"));
+
+        assertFalse(source.contains("dev.talos.runtime.policy.SafeLogFormatter"), source);
+        assertFalse(baseline.contains(
+                "src/main/java/dev/talos/core/index/IndexedWorkspaceSymbolChecker.java"
+                        + "|dev.talos.runtime.policy.SafeLogFormatter"), baseline);
+    }
 }
