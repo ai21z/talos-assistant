@@ -8,6 +8,7 @@ import dev.talos.core.security.Sandbox;
 import dev.talos.tools.*;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -23,6 +24,19 @@ class RetrieveToolTest {
     private static ToolContext testContext() {
         Path workspace = Path.of(".").toAbsolutePath().normalize();
         return new ToolContext(workspace, new Sandbox(workspace, Map.of()), new Config());
+    }
+
+    @Test
+    void retrieve_uses_neutral_safety_for_path_omission_and_text_redaction() throws Exception {
+        String source = Files.readString(Path.of("src/main/java/dev/talos/tools/impl/RetrieveTool.java"));
+        String baseline = Files.readString(Path.of("config/architecture-boundary-baseline.txt"));
+
+        assertTrue(source.contains("import dev.talos.safety.ProtectedContentSanitizer;"), source);
+        assertTrue(source.contains("import dev.talos.safety.ProtectedWorkspacePaths;"), source);
+        assertFalse(source.contains("dev.talos.runtime.policy.ProtectedContentPolicy"), source);
+        assertFalse(baseline.contains(
+                        "tools-no-runtime|src/main/java/dev/talos/tools/impl/RetrieveTool.java|dev.talos.runtime.policy.ProtectedContentPolicy"),
+                baseline);
     }
 
     @Test
