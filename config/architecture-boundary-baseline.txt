@@ -40,7 +40,6 @@ spi-no-upper-layers|src/main/java/dev/talos/spi/CorpusStore.java|dev.talos.core.
 spi-no-upper-layers|src/main/java/dev/talos/spi/EngineRegistry.java|dev.talos.core.Config
 spi-no-upper-layers|src/main/java/dev/talos/spi/EngineRegistry.java|dev.talos.core.EngineRuntimeConfig
 spi-no-upper-layers|src/main/java/dev/talos/spi/ModelEngineProvider.java|dev.talos.core.Config
-tools-no-runtime|src/main/java/dev/talos/tools/ToolRegistry.java|dev.talos.runtime.policy.SafeLogFormatter
 tools-no-runtime|src/main/java/dev/talos/tools/impl/BatchWorkspaceApplyTool.java|dev.talos.runtime.workspace.WorkspaceBatchOperation
 tools-no-runtime|src/main/java/dev/talos/tools/impl/BatchWorkspaceApplyTool.java|dev.talos.runtime.workspace.WorkspaceBatchPlan
 tools-no-runtime|src/main/java/dev/talos/tools/impl/BatchWorkspaceApplyTool.java|dev.talos.runtime.workspace.WorkspaceBatchPlanParser
