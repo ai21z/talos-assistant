@@ -1,5 +1,6 @@
 package dev.talos.runtime.policy;
 
+import dev.talos.safety.ProtectedContentMessages;
 import dev.talos.safety.ProtectedContentSanitizer;
 import dev.talos.safety.ProtectedPathTokens;
 import dev.talos.tools.ToolError;
@@ -19,7 +20,7 @@ public final class ProtectedContentPolicy {
     public static final String REDACTED_VALUE = ProtectedContentSanitizer.REDACTED_VALUE;
     public static final String REDACTED_PATH = ProtectedContentSanitizer.REDACTED_PATH;
     public static final String PROTECTED_CONTENT_NOTE =
-            "Matches were found or may exist in protected content, but matching lines were not returned.";
+            ProtectedContentMessages.PROTECTED_CONTENT_NOTE;
 
     public static boolean isProtectedPath(Path workspace, Path path) {
         if (workspace == null || path == null) return false;
@@ -78,7 +79,6 @@ public final class ProtectedContentPolicy {
     }
 
     public static String protectedContentNote(int skippedCount) {
-        if (skippedCount <= 0) return "";
-        return "\n\n" + PROTECTED_CONTENT_NOTE;
+        return ProtectedContentMessages.protectedContentNote(skippedCount);
     }
 }

@@ -6,8 +6,10 @@ import dev.talos.core.extract.DocumentExtractionService;
 import dev.talos.core.extract.DocumentExtractionStatus;
 import dev.talos.core.ingest.FileCapabilityPolicy;
 import dev.talos.core.ingest.UnsupportedDocumentFormats;
-import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.runtime.policy.ProtectedReadScopePolicy;
+import dev.talos.safety.ProtectedContentMessages;
+import dev.talos.safety.ProtectedContentSanitizer;
+import dev.talos.safety.ProtectedWorkspacePaths;
 import dev.talos.tools.*;
 
 import java.io.IOException;
@@ -133,7 +135,7 @@ public final class GrepTool implements TalosTool {
                     // Sandbox check
                     if (!ctx.sandbox().allowedPath(file)) return FileVisitResult.CONTINUE;
 
-                    if (ProtectedContentPolicy.isProtectedPath(root, file)) {
+                    if (ProtectedWorkspacePaths.isProtectedPath(root, file)) {
                         skippedProtected[0]++;
                         return FileVisitResult.CONTINUE;
                     }
@@ -182,9 +184,9 @@ public final class GrepTool implements TalosTool {
         }
 
         if (matches.isEmpty()) {
-            String safePattern = ProtectedContentPolicy.sanitizeText(patternStr);
+            String safePattern = ProtectedContentSanitizer.sanitizeText(patternStr);
             return ToolResult.ok("No matches found in searchable non-protected text files for: " + safePattern
-                    + ProtectedContentPolicy.protectedContentNote(skippedProtected[0])
+                    + ProtectedContentMessages.protectedContentNote(skippedProtected[0])
                     + unsupportedDocumentNote(skippedUnsupportedDocuments));
         }
 
@@ -196,7 +198,7 @@ public final class GrepTool implements TalosTool {
         if (matches.size() >= maxResults) {
             sb.append("\n(results capped at ").append(maxResults).append(")\n");
         }
-        sb.append(ProtectedContentPolicy.protectedContentNote(skippedProtected[0]));
+        sb.append(ProtectedContentMessages.protectedContentNote(skippedProtected[0]));
         sb.append(unsupportedDocumentNote(skippedUnsupportedDocuments));
         return ToolResult.ok(sb.toString());
     }
@@ -292,7 +294,7 @@ public final class GrepTool implements TalosTool {
     }
 
     private static String safeSearchLine(String line, boolean privateMode) {
-        String safeLine = ProtectedContentPolicy.sanitizeSearchLine(line);
+        String safeLine = ProtectedContentSanitizer.sanitizeSearchLine(line);
         if (privateMode && !safeLine.equals(line)) {
             return "[line content withheld by private-mode search policy]";
         }
