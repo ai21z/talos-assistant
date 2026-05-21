@@ -28,6 +28,7 @@ class SafetyOwnershipTest {
         assertTrue(Files.exists(MAIN_SAFETY_DIR.resolve("ProtectedContentSanitizer.java")));
         assertTrue(Files.exists(MAIN_SAFETY_DIR.resolve("ProtectedPathTokens.java")));
         assertTrue(Files.exists(MAIN_SAFETY_DIR.resolve("ProtectedWorkspacePaths.java")));
+        assertTrue(Files.exists(MAIN_SAFETY_DIR.resolve("ProtectedContentMessages.java")));
         assertFalse(Files.exists(Path.of("src/main/java/dev/talos/runtime/policy/SafeLogFormatter.java")));
     }
 
