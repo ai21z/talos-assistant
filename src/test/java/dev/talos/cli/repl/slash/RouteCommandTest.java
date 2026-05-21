@@ -2,7 +2,7 @@ package dev.talos.cli.repl.slash;
 
 import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.modes.Mode;
-import dev.talos.cli.modes.WorkspaceSymbolChecker;
+import dev.talos.core.index.WorkspaceSymbolChecker;
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
 import dev.talos.core.Config;

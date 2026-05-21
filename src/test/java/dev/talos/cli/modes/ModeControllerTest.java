@@ -3,6 +3,7 @@ package dev.talos.cli.modes;
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.Result;
 import dev.talos.core.Config;
+import dev.talos.core.index.WorkspaceSymbolChecker;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;

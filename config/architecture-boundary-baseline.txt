@@ -25,7 +25,6 @@ core-no-runtime|src/main/java/dev/talos/core/rerank/ScoreThresholdReranker.java|
 engine-no-runtime|src/main/java/dev/talos/engine/compat/CompatChatClient.java|dev.talos.runtime.policy.SafeLogFormatter
 engine-no-runtime|src/main/java/dev/talos/engine/ollama/OllamaChatClient.java|dev.talos.runtime.policy.SafeLogFormatter
 runtime-core-no-cli|src/main/java/dev/talos/core/context/ConversationManager.java|dev.talos.cli.repl.SessionMemory
-runtime-core-no-cli|src/main/java/dev/talos/core/index/IndexedWorkspaceSymbolChecker.java|dev.talos.cli.modes.WorkspaceSymbolChecker
 runtime-core-no-cli|src/main/java/dev/talos/runtime/ActiveTaskContextUpdateListener.java|dev.talos.cli.repl.SessionMemory
 runtime-core-no-cli|src/main/java/dev/talos/runtime/CliApprovalGate.java|dev.talos.cli.ui.ApprovalPromptRenderer
 runtime-core-no-cli|src/main/java/dev/talos/runtime/CliApprovalGate.java|dev.talos.cli.ui.CliTheme
