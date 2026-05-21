@@ -1,7 +1,6 @@
 package dev.talos.core.context;
 
 import dev.talos.core.llm.LlmClient;
-import dev.talos.runtime.policy.SafeLogFormatter;
 import dev.talos.spi.types.ChatMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -99,8 +98,8 @@ public final class ConversationCompactor {
             LOG.info("Conversation compacted: {} turns → {} char sketch", oldTurns.size(), sketch.length());
             return sketch;
         } catch (Exception e) {
-            LOG.warn("Compaction LLM call failed, keeping existing sketch: {}",
-                    SafeLogFormatter.throwableMessage(e));
+            LOG.warn("Compaction LLM call failed, keeping existing sketch (exception={})",
+                    e.getClass().getSimpleName());
             return existingSketch;
         }
     }
