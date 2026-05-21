@@ -180,8 +180,8 @@ Inner dev loop. No version bump. No candidate packet. No live audit.
 ## Known Risks
 
 - This burns down one clean ownership edge only.
-- The architecture scanner is still import-declaration based and does not catch
-  fully qualified forbidden references without imports.
+- Before T339, the architecture scanner was still import-declaration based and
+  did not catch fully qualified forbidden references without imports.
 - `SafeLogFormatter` and protected-content policy remain larger, higher-risk
   shared-policy ownership questions.
 
@@ -189,5 +189,5 @@ Inner dev loop. No version bump. No candidate packet. No live audit.
 
 - Continue burning down isolated contract/interface ownership mismatches before
   touching runtime policy behavior.
-- Add an explicit scanner enhancement ticket if Talos needs fully qualified
-  forbidden reference detection before adopting ArchUnit.
+- Done by T339: fully qualified forbidden reference detection was added before
+  the next architecture burn-down ticket.

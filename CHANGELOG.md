@@ -20,6 +20,9 @@
 - [T338-done-medium] Moved `WorkspaceSymbolChecker` ownership from CLI modes
   into core indexing, reducing the architecture-boundary baseline from 61 to 60
   forbidden import edges without changing prompt-routing behavior.
+- [T339-done-high] Hardened `validateArchitectureBoundaries` so the ratchet
+  catches fully-qualified forbidden `dev.talos...` type references as well as
+  imports, while ignoring comments and string/char literals.
 - Documented monotonic pre-1.0 beta versioning: do not downsize or reuse
   candidate versions after artifacts, commits, tags, or audit evidence refer to
   them; use `0.9.10+` for narrow candidates, consider `0.10.0` for a broad beta

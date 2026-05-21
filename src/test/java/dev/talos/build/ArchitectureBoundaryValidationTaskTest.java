@@ -13,6 +13,7 @@ import java.nio.file.Path;
 
 import static org.gradle.testkit.runner.TaskOutcome.SUCCESS;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @DisplayName("Architecture boundary validation task")
@@ -43,6 +44,12 @@ class ArchitectureBoundaryValidationTaskTest {
         assertEquals(SUCCESS, result.task(":validateArchitectureBoundaries").getOutcome());
         assertTrue(Files.exists(projectDir.resolve("build/reports/talos/architecture-boundaries.json")));
         assertTrue(Files.exists(projectDir.resolve("build/reports/talos/architecture-boundaries.md")));
+        String jsonReport = Files.readString(projectDir.resolve("build/reports/talos/architecture-boundaries.json"));
+        assertTrue(jsonReport.contains("\"forbiddenReferencePrefixes\""), jsonReport);
+        assertTrue(jsonReport.contains("\"referencedSymbol\""), jsonReport);
+        assertFalse(jsonReport.contains("\"forbiddenImportPrefixes\""), jsonReport);
+        assertFalse(jsonReport.contains("\"importedType\""), jsonReport);
+        assertFalse(jsonReport.contains("\"referencedType\""), jsonReport);
     }
 
     @Test
@@ -66,6 +73,115 @@ class ArchitectureBoundaryValidationTaskTest {
         assertTrue(result.getOutput().contains(
                 "core-no-runtime|src/main/java/dev/talos/core/BadCore.java|dev.talos.runtime.policy.SafeLogFormatter"),
                 result.getOutput());
+    }
+
+    @Test
+    @DisplayName("validateArchitectureBoundaries normalizes static imports to the referenced type")
+    void normalizesStaticImportsToReferencedType() throws Exception {
+        Path projectDir = createBuildFixture();
+        writeJava(projectDir.resolve("src/main/java/dev/talos/core/BadCore.java"), """
+                package dev.talos.core;
+
+                import static dev.talos.runtime.policy.SafeLogFormatter.value;
+
+                final class BadCore {
+                    String format(String input) {
+                        return value(input);
+                    }
+                }
+                """);
+        writeUtf8(projectDir.resolve("config/architecture-boundary-baseline.txt"), "");
+
+        BuildResult result = runValidationAndFail(projectDir);
+
+        String expected = "core-no-runtime|src/main/java/dev/talos/core/BadCore.java|dev.talos.runtime.policy.SafeLogFormatter";
+        assertTrue(result.getOutput().contains("New architecture boundary violations detected: 1"),
+                result.getOutput());
+        assertTrue(result.getOutput().contains(expected), result.getOutput());
+        assertFalse(result.getOutput().contains(expected + ".value"), result.getOutput());
+    }
+
+    @Test
+    @DisplayName("validateArchitectureBoundaries rejects forbidden package wildcard imports")
+    void rejectsForbiddenPackageWildcardImport() throws Exception {
+        Path projectDir = createBuildFixture();
+        writeJava(projectDir.resolve("src/main/java/dev/talos/core/BadCore.java"), """
+                package dev.talos.core;
+
+                import dev.talos.runtime.policy.*;
+
+                final class BadCore {
+                }
+                """);
+        writeUtf8(projectDir.resolve("config/architecture-boundary-baseline.txt"), "");
+
+        BuildResult result = runValidationAndFail(projectDir);
+
+        assertTrue(result.getOutput().contains("New architecture boundary violations detected: 1"),
+                result.getOutput());
+        assertTrue(result.getOutput().contains(
+                "core-no-runtime|src/main/java/dev/talos/core/BadCore.java|dev.talos.runtime.policy.*"),
+                result.getOutput());
+    }
+
+    @Test
+    @DisplayName("validateArchitectureBoundaries rejects forbidden fully qualified references without imports")
+    void rejectsUnbaselinedForbiddenFullyQualifiedReference() throws Exception {
+        Path projectDir = createBuildFixture();
+        writeJava(projectDir.resolve("src/main/java/dev/talos/core/BadCore.java"), """
+                package dev.talos.core;
+
+                final class BadCore {
+                    // dev.talos.runtime.policy.ProtectedContentPolicy must not count from comments.
+                    private static final String DOC =
+                            "dev.talos.runtime.policy.PrivateDocumentPolicy must not count from strings";
+
+                    String format(String input) {
+                        return dev.talos.runtime.policy.SafeLogFormatter.value(input);
+                    }
+                }
+                """);
+        writeUtf8(projectDir.resolve("config/architecture-boundary-baseline.txt"), "");
+
+        BuildResult result = runValidationAndFail(projectDir);
+
+        assertTrue(result.getOutput().contains("New architecture boundary violations detected: 1"),
+                result.getOutput());
+        assertTrue(result.getOutput().contains(
+                "core-no-runtime|src/main/java/dev/talos/core/BadCore.java|dev.talos.runtime.policy.SafeLogFormatter"),
+                result.getOutput());
+    }
+
+    @Test
+    @DisplayName("validateArchitectureBoundaries ignores forbidden references in comments and literals")
+    void ignoresForbiddenReferencesInCommentsAndLiterals() throws Exception {
+        Path projectDir = createBuildFixture();
+        writeJava(projectDir.resolve("src/main/java/dev/talos/core/DocumentationOnly.java"), """
+                package dev.talos.core;
+
+                /*
+                 * dev.talos.runtime.policy.SafeLogFormatter must not count from block comments.
+                 */
+                final class DocumentationOnly {
+                    // dev.talos.runtime.policy.ProtectedContentPolicy must not count from line comments.
+                    private static final String STRING_DOC =
+                            "dev.talos.runtime.policy.PrivateDocumentPolicy must not count from strings";
+                    private static final String ESCAPED_STRING =
+                            "quoted \\\" dev.talos.runtime.policy.ProtectedReadScopePolicy";
+                    private static final char QUOTE = '"';
+                    private static final char BACKSLASH = '\\\\';
+                    private static final String TEXT_BLOCK = \"""
+                            dev.talos.runtime.policy.SafeLogFormatter must not count from text blocks.
+                            escaped delimiter: \\\"""
+                            dev.talos.runtime.policy.ProtectedContentPolicy still must not count.
+                            \""";
+                }
+                """);
+        writeUtf8(projectDir.resolve("config/architecture-boundary-baseline.txt"), "");
+
+        BuildResult result = runValidation(projectDir);
+
+        assertEquals(SUCCESS, result.task(":validateArchitectureBoundaries").getOutcome());
     }
 
     @Test
