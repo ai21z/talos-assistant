@@ -15,7 +15,7 @@ import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.runtime.policy.ActionObligation;
 import dev.talos.runtime.policy.ConditionalReviewFixPolicy;
 import dev.talos.runtime.policy.ResponseObligationVerifier;
-import dev.talos.runtime.policy.SafeLogFormatter;
+import dev.talos.safety.SafeLogFormatter;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;

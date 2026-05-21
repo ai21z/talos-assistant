@@ -4,7 +4,7 @@ import dev.talos.cli.repl.Result;
 import dev.talos.cli.repl.SessionMemory;
 import dev.talos.core.context.ConversationManager;
 import dev.talos.core.llm.LlmClient;
-import dev.talos.runtime.policy.SafeLogFormatter;
+import dev.talos.safety.SafeLogFormatter;
 import dev.talos.runtime.trace.TraceRedactor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

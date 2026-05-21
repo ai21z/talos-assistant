@@ -2,14 +2,11 @@
 # Format: rule|path|source-reference
 # This file records existing package-direction debt only. Do not add entries
 # unless a ticket explicitly accepts the new edge and explains why.
-core-no-runtime|src/main/java/dev/talos/core/embed/EmbeddingsClient.java|dev.talos.runtime.policy.SafeLogFormatter
 core-no-runtime|src/main/java/dev/talos/core/extract/DocumentExtractionPreflight.java|dev.talos.runtime.policy.ProtectedContentPolicy
 core-no-runtime|src/main/java/dev/talos/core/extract/DocumentExtractionService.java|dev.talos.runtime.policy.PrivateDocumentPolicy
 core-no-runtime|src/main/java/dev/talos/core/extract/DocumentExtractionService.java|dev.talos.runtime.policy.ProtectedContentPolicy
 core-no-runtime|src/main/java/dev/talos/core/index/Indexer.java|dev.talos.runtime.policy.PrivateDocumentPolicy
 core-no-runtime|src/main/java/dev/talos/core/index/Indexer.java|dev.talos.runtime.policy.ProtectedContentPolicy
-core-no-runtime|src/main/java/dev/talos/core/index/Indexer.java|dev.talos.runtime.policy.SafeLogFormatter
-core-no-runtime|src/main/java/dev/talos/core/index/LuceneStore.java|dev.talos.runtime.policy.SafeLogFormatter
 core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runtime.ToolCallParser
 core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runtime.context.ContextDecision
 core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runtime.context.ContextItem
@@ -18,9 +15,6 @@ core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runti
 core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runtime.context.ExecutionBoundary
 core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runtime.policy.ProtectedContentPolicy
 core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runtime.policy.ProtectedReadScopePolicy
-core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runtime.policy.SafeLogFormatter
-engine-no-runtime|src/main/java/dev/talos/engine/compat/CompatChatClient.java|dev.talos.runtime.policy.SafeLogFormatter
-engine-no-runtime|src/main/java/dev/talos/engine/ollama/OllamaChatClient.java|dev.talos.runtime.policy.SafeLogFormatter
 runtime-core-no-cli|src/main/java/dev/talos/core/context/ConversationManager.java|dev.talos.cli.repl.SessionMemory
 runtime-core-no-cli|src/main/java/dev/talos/runtime/ActiveTaskContextUpdateListener.java|dev.talos.cli.repl.SessionMemory
 runtime-core-no-cli|src/main/java/dev/talos/runtime/CliApprovalGate.java|dev.talos.cli.ui.ApprovalPromptRenderer
@@ -43,9 +37,6 @@ spi-no-upper-layers|src/main/java/dev/talos/spi/ModelEngineProvider.java|dev.tal
 tools-no-runtime|src/main/java/dev/talos/tools/impl/BatchWorkspaceApplyTool.java|dev.talos.runtime.workspace.WorkspaceBatchOperation
 tools-no-runtime|src/main/java/dev/talos/tools/impl/BatchWorkspaceApplyTool.java|dev.talos.runtime.workspace.WorkspaceBatchPlan
 tools-no-runtime|src/main/java/dev/talos/tools/impl/BatchWorkspaceApplyTool.java|dev.talos.runtime.workspace.WorkspaceBatchPlanParser
-tools-no-runtime|src/main/java/dev/talos/tools/impl/ContentVerifier.java|dev.talos.runtime.policy.SafeLogFormatter
-tools-no-runtime|src/main/java/dev/talos/tools/impl/FileEditTool.java|dev.talos.runtime.policy.SafeLogFormatter
-tools-no-runtime|src/main/java/dev/talos/tools/impl/FileWriteTool.java|dev.talos.runtime.policy.SafeLogFormatter
 tools-no-runtime|src/main/java/dev/talos/tools/impl/GrepTool.java|dev.talos.runtime.policy.ProtectedContentPolicy
 tools-no-runtime|src/main/java/dev/talos/tools/impl/GrepTool.java|dev.talos.runtime.policy.ProtectedReadScopePolicy
 tools-no-runtime|src/main/java/dev/talos/tools/impl/ReadFileTool.java|dev.talos.runtime.policy.PrivateDocumentPolicy

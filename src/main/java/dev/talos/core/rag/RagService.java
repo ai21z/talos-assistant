@@ -25,7 +25,7 @@ import dev.talos.runtime.context.ExecutionBoundary;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.runtime.policy.ProtectedReadScopePolicy;
-import dev.talos.runtime.policy.SafeLogFormatter;
+import dev.talos.safety.SafeLogFormatter;
 import dev.talos.spi.CorpusStore;
 import dev.talos.tools.ToolContentMetadata;
 import org.slf4j.Logger;
