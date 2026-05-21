@@ -90,14 +90,17 @@ Added `.github/workflows/beta-dev-ci.yml`:
   boundary is Windows x64, the repository work-test cycle is Windows-first, and
   GitHub is already migrating `windows-latest` to that image family;
 - installs Java 21 with Temurin;
-- uses the Gradle setup action;
+- avoids the optional Gradle setup action so the hard gate stays minimal and
+  does not introduce a second action dependency;
 - runs the hard gate as named Gradle steps:
   `test`, `e2eTest`, coverage/artifact canaries, and final `check`.
 
 After the first successful Windows check emitted GitHub Actions migration
 warnings, the workflow was moved to the explicit `windows-2025-vs2026` image and
-sets `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true`. This tests the upcoming GitHub
-runner defaults before they become implicit platform changes.
+sets `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true`. The workflow also moved to
+current Node 24 action majors (`actions/checkout@v6` and
+`actions/setup-java@v5`) and removed `gradle/actions/setup-gradle@v4` because
+the Gradle wrapper is sufficient for this hard gate.
 
 The first remote Linux run proved GitHub check creation, but failed in existing
 unit tests around index/RAG path matching and policy behavior. That is real
