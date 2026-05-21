@@ -1,7 +1,7 @@
 package dev.talos.tools.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.talos.runtime.policy.SafeLogFormatter;
+import dev.talos.safety.SafeLogFormatter;
 import dev.talos.tools.VerificationStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

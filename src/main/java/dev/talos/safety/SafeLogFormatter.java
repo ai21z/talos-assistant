@@ -1,4 +1,4 @@
-package dev.talos.runtime.policy;
+package dev.talos.safety;
 
 import java.util.Map;
 
@@ -7,15 +7,15 @@ public final class SafeLogFormatter {
     private SafeLogFormatter() {}
 
     public static String value(Object value) {
-        return redactPathTokens(ProtectedContentPolicy.sanitizeForLog(value));
+        return redactPathTokens(ProtectedContentSanitizer.sanitizeForLog(value));
     }
 
     public static String text(String value) {
-        return redactPathTokens(ProtectedContentPolicy.sanitizeText(value));
+        return redactPathTokens(ProtectedContentSanitizer.sanitizeText(value));
     }
 
     public static Map<String, String> parameters(Map<String, String> parameters) {
-        return ProtectedContentPolicy.sanitizeToolParameters(parameters);
+        return ProtectedContentSanitizer.sanitizeToolParameters(parameters);
     }
 
     public static String throwableMessage(Throwable throwable) {
@@ -24,7 +24,7 @@ public final class SafeLogFormatter {
         if (message == null || message.isBlank()) {
             message = throwable.getClass().getSimpleName();
         }
-        return redactPathTokens(ProtectedContentPolicy.sanitizeText(message));
+        return redactPathTokens(ProtectedContentSanitizer.sanitizeText(message));
     }
 
     private static String redactPathTokens(String text) {
@@ -34,8 +34,8 @@ public final class SafeLogFormatter {
             String trimmed = trimTokenPunctuation(token);
             if (!trimmed.isBlank()
                     && !trimmed.contains("=")
-                    && ProtectedContentPolicy.looksProtectedPathString(trimmed)) {
-                out = out.replace(trimmed, ProtectedContentPolicy.REDACTED_PATH);
+                    && ProtectedPathTokens.looksProtectedPathToken(trimmed)) {
+                out = out.replace(trimmed, ProtectedContentSanitizer.REDACTED_PATH);
             }
         }
         return out;

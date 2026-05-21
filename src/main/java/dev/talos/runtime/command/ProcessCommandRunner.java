@@ -1,7 +1,7 @@
 package dev.talos.runtime.command;
 
 import dev.talos.runtime.policy.ProtectedContentPolicy;
-import dev.talos.runtime.policy.SafeLogFormatter;
+import dev.talos.safety.SafeLogFormatter;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;

@@ -19,7 +19,7 @@ import dev.talos.core.ingest.ParserUtil;
 import dev.talos.core.ingest.UnsupportedDocumentFormats;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.runtime.policy.PrivateDocumentPolicy;
-import dev.talos.runtime.policy.SafeLogFormatter;
+import dev.talos.safety.SafeLogFormatter;
 import dev.talos.spi.Embeddings;
 import dev.talos.core.util.BuildInfo;
 import dev.talos.core.util.Hash;

@@ -1,5 +1,6 @@
 package dev.talos.runtime.policy;
 
+import dev.talos.safety.SafeLogFormatter;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
