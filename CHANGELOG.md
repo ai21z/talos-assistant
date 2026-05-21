@@ -12,11 +12,14 @@
   structure, CLI composition, release-evidence gates, and the recommended T336
   boundary-ratchet implementation.
 - [T336-done-high] Added a ratcheted architecture-boundary import scanner wired
-  into `check`, with a checked-in baseline of the current 62 forbidden import
+  into `check`, with an initial baseline of 62 forbidden import
   edges and focused TestKit coverage for new and stale boundary drift.
 - [T337-done-medium] Moved tool alias metadata ownership from
   `runtime.toolcall` to `tools`, reducing the architecture-boundary baseline
   from 62 to 61 forbidden import edges without changing alias behavior.
+- [T338-done-medium] Moved `WorkspaceSymbolChecker` ownership from CLI modes
+  into core indexing, reducing the architecture-boundary baseline from 61 to 60
+  forbidden import edges without changing prompt-routing behavior.
 - Documented monotonic pre-1.0 beta versioning: do not downsize or reuse
   candidate versions after artifacts, commits, tags, or audit evidence refer to
   them; use `0.9.10+` for narrow candidates, consider `0.10.0` for a broad beta

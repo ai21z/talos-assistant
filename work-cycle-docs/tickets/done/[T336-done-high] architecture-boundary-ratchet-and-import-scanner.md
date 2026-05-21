@@ -183,6 +183,9 @@ Inner dev loop. No version bump. No candidate packet. No live audit.
 ## Known Risks
 
 - This is a source import scanner, not bytecode dependency analysis.
+- It only scans Java `import` declarations. Fully qualified forbidden type
+  references without imports are not caught yet; add token/AST scanning or
+  ArchUnit before claiming complete dependency analysis.
 - It intentionally covers the highest-value T335 edges, not every possible
   package relation.
 - Current debt is accepted only as a baseline; follow-up tickets must burn it

@@ -1,5 +1,7 @@
 package dev.talos.cli.modes;
 
+import dev.talos.core.index.WorkspaceSymbolChecker;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;

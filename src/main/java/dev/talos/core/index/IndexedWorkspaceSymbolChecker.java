@@ -1,6 +1,5 @@
 package dev.talos.core.index;
 
-import dev.talos.cli.modes.WorkspaceSymbolChecker;
 import dev.talos.core.IndexPathResolver;
 import dev.talos.runtime.policy.SafeLogFormatter;
 import org.apache.lucene.index.DirectoryReader;
