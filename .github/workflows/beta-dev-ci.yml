@@ -7,7 +7,6 @@ on:
   push:
     branches:
       - v0.9.0-beta-dev
-      - "T*"
 
 permissions:
   contents: read
@@ -38,5 +37,14 @@ jobs:
       - name: Make Gradle wrapper executable
         run: chmod +x ./gradlew
 
-      - name: Run Gradle check
+      - name: Run unit tests
+        run: ./gradlew test --no-daemon
+
+      - name: Run E2E tests
+        run: ./gradlew e2eTest --no-daemon
+
+      - name: Run coverage and artifact gates
+        run: ./gradlew jacocoTestReport checkGeneratedArtifactCanaries jacocoTestCoverageVerification --no-daemon
+
+      - name: Run final Gradle check
         run: ./gradlew check --no-daemon
