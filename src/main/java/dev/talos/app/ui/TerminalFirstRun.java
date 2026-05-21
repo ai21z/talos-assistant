@@ -1,6 +1,6 @@
 package dev.talos.app.ui;
 
-import dev.talos.runtime.policy.SafeLogFormatter;
+import dev.talos.safety.SafeLogFormatter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

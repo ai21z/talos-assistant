@@ -6,7 +6,9 @@ This audit covers runtime/debug log paths that can touch tool parameters, protec
 
 ## 2. Implemented in this pass
 
-- Added `dev.talos.runtime.policy.SafeLogFormatter`.
+- Added `dev.talos.runtime.policy.SafeLogFormatter`; T346 later moved this
+  formatter to neutral `dev.talos.safety.SafeLogFormatter` while preserving the
+  same sink-safe formatting behavior through lower-layer sanitizer primitives.
 - Routed tool execution parameter logs through sanitized tool-parameter rendering.
 - Routed malformed tool-call payload logs through sanitized value rendering.
 - Routed indexer/RAG trace and exception summaries through safe formatting in the touched call sites.

@@ -1,5 +1,7 @@
 package dev.talos.runtime.policy;
 
+import dev.talos.safety.SafeLogFormatter;
+
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Path;

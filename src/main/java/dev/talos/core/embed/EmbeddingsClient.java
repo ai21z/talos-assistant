@@ -6,7 +6,7 @@ import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
 import dev.talos.core.cache.CacheDb;
 import dev.talos.core.util.Hash;
-import dev.talos.runtime.policy.SafeLogFormatter;
+import dev.talos.safety.SafeLogFormatter;
 import dev.talos.spi.Embeddings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

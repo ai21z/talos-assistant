@@ -246,6 +246,19 @@ val architectureBoundaryRules = listOf(
         forbiddenReferencePrefixes = listOf("dev.talos.runtime.")
     ),
     ArchitectureBoundaryRule(
+        id = "safety-no-talos-layers",
+        sourcePrefixes = listOf("src/main/java/dev/talos/safety/"),
+        forbiddenReferencePrefixes = listOf(
+            "dev.talos.app.",
+            "dev.talos.cli.",
+            "dev.talos.core.",
+            "dev.talos.engine.",
+            "dev.talos.runtime.",
+            "dev.talos.spi.",
+            "dev.talos.tools."
+        )
+    ),
+    ArchitectureBoundaryRule(
         id = "spi-no-upper-layers",
         sourcePrefixes = listOf("src/main/java/dev/talos/spi/"),
         forbiddenReferencePrefixes = listOf(

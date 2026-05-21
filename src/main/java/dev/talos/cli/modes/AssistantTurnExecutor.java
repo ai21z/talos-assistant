@@ -32,7 +32,7 @@ import dev.talos.runtime.policy.EvidenceGate;
 import dev.talos.runtime.policy.ProviderRequestControlPolicy;
 import dev.talos.runtime.policy.ProtectedPathPolicy;
 import dev.talos.runtime.policy.ResponseObligationVerifier;
-import dev.talos.runtime.policy.SafeLogFormatter;
+import dev.talos.safety.SafeLogFormatter;
 import dev.talos.runtime.policy.UnsupportedDocumentMutationPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
