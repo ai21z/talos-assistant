@@ -146,7 +146,7 @@ class SensitiveLogRedactionTest {
     }
 
     @Test
-    void high_risk_user_controlled_log_values_use_safe_formatter() throws Exception {
+    void high_risk_user_controlled_log_values_are_safely_handled() throws Exception {
         String registry = source("src/main/java/dev/talos/tools/ToolRegistry.java");
         String editTool = source("src/main/java/dev/talos/tools/impl/FileEditTool.java");
         String writeTool = source("src/main/java/dev/talos/tools/impl/FileWriteTool.java");
@@ -164,7 +164,8 @@ class SensitiveLogRedactionTest {
         assertFalse(writeTool.contains("content for {}\",\n                    content.length() - sanitized.length(), pathParam"),
                 writeTool);
 
-        assertTrue(reranker.contains("SafeLogFormatter.value(c.path())"), reranker);
+        assertTrue(reranker.contains("Rerank: dropping candidate (score {}, below threshold {})"), reranker);
+        assertFalse(reranker.contains("SafeLogFormatter.value(c.path())"), reranker);
         assertFalse(reranker.contains("c.path(), c.score(), threshold"), reranker);
     }
 
