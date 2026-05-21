@@ -112,7 +112,7 @@ Checkpoint, evidence, verification, and repair:
 - Checkpoint behavior: not changed.
 - Evidence obligation: build report with current, new, and stale boundary
   entries.
-- Verification profile: Gradle static import scan.
+- Verification profile: Gradle static source-reference scan.
 - Repair profile: not changed.
 
 Outcome and trace:
@@ -182,10 +182,12 @@ Inner dev loop. No version bump. No candidate packet. No live audit.
 
 ## Known Risks
 
-- This is a source import scanner, not bytecode dependency analysis.
-- It only scans Java `import` declarations. Fully qualified forbidden type
-  references without imports are not caught yet; add token/AST scanning or
-  ArchUnit before claiming complete dependency analysis.
+- This is a source-level scanner, not bytecode dependency analysis.
+- T339 extended it beyond Java `import` declarations to conventional
+  fully-qualified `dev.talos...` type references, with comments and literals
+  stripped before token scanning.
+- It is still not a full Java AST/bytecode dependency analyzer; use ArchUnit or
+  compiler model analysis before claiming complete dependency coverage.
 - It intentionally covers the highest-value T335 edges, not every possible
   package relation.
 - Current debt is accepted only as a baseline; follow-up tickets must burn it

@@ -210,15 +210,15 @@ fun validateReleaseLedgerText(changelogText: String, expectedVersion: String) {
 data class ArchitectureBoundaryRule(
     val id: String,
     val sourcePrefixes: List<String>,
-    val forbiddenImportPrefixes: List<String>
+    val forbiddenReferencePrefixes: List<String>
 )
 
 data class ArchitectureBoundaryViolation(
     val rule: String,
     val path: String,
-    val importedType: String
+    val referencedSymbol: String
 ) {
-    fun key(): String = "$rule|$path|$importedType"
+    fun key(): String = "$rule|$path|$referencedSymbol"
 }
 
 val architectureBoundaryRules = listOf(
@@ -228,27 +228,27 @@ val architectureBoundaryRules = listOf(
             "src/main/java/dev/talos/runtime/",
             "src/main/java/dev/talos/core/"
         ),
-        forbiddenImportPrefixes = listOf("dev.talos.cli.")
+        forbiddenReferencePrefixes = listOf("dev.talos.cli.")
     ),
     ArchitectureBoundaryRule(
         id = "core-no-runtime",
         sourcePrefixes = listOf("src/main/java/dev/talos/core/"),
-        forbiddenImportPrefixes = listOf("dev.talos.runtime.")
+        forbiddenReferencePrefixes = listOf("dev.talos.runtime.")
     ),
     ArchitectureBoundaryRule(
         id = "tools-no-runtime",
         sourcePrefixes = listOf("src/main/java/dev/talos/tools/"),
-        forbiddenImportPrefixes = listOf("dev.talos.runtime.")
+        forbiddenReferencePrefixes = listOf("dev.talos.runtime.")
     ),
     ArchitectureBoundaryRule(
         id = "engine-no-runtime",
         sourcePrefixes = listOf("src/main/java/dev/talos/engine/"),
-        forbiddenImportPrefixes = listOf("dev.talos.runtime.")
+        forbiddenReferencePrefixes = listOf("dev.talos.runtime.")
     ),
     ArchitectureBoundaryRule(
         id = "spi-no-upper-layers",
         sourcePrefixes = listOf("src/main/java/dev/talos/spi/"),
-        forbiddenImportPrefixes = listOf(
+        forbiddenReferencePrefixes = listOf(
             "dev.talos.cli.",
             "dev.talos.core.",
             "dev.talos.runtime.",
@@ -265,10 +265,140 @@ fun readArchitectureBoundaryBaseline(file: java.io.File): Set<String> {
         .toSortedSet()
 }
 
+fun stripJavaCommentsAndLiterals(source: String): String {
+    val out = StringBuilder(source.length)
+    var i = 0
+    var state = "code"
+    while (i < source.length) {
+        val ch = source[i]
+        val next = source.getOrNull(i + 1)
+        when (state) {
+            "code" -> when {
+                ch == '/' && next == '/' -> {
+                    out.append("  ")
+                    i += 2
+                    state = "lineComment"
+                }
+                ch == '/' && next == '*' -> {
+                    out.append("  ")
+                    i += 2
+                    state = "blockComment"
+                }
+                ch == '"' && source.getOrNull(i + 1) == '"' && source.getOrNull(i + 2) == '"' -> {
+                    out.append("   ")
+                    i += 3
+                    state = "textBlock"
+                }
+                ch == '"' -> {
+                    out.append(' ')
+                    i++
+                    state = "string"
+                }
+                ch == '\'' -> {
+                    out.append(' ')
+                    i++
+                    state = "char"
+                }
+                else -> {
+                    out.append(ch)
+                    i++
+                }
+            }
+            "lineComment" -> {
+                out.append(if (ch == '\n' || ch == '\r') ch else ' ')
+                i++
+                if (ch == '\n' || ch == '\r') state = "code"
+            }
+            "blockComment" -> {
+                if (ch == '*' && next == '/') {
+                    out.append("  ")
+                    i += 2
+                    state = "code"
+                } else {
+                    out.append(if (ch == '\n' || ch == '\r') ch else ' ')
+                    i++
+                }
+            }
+            "textBlock" -> {
+                if (ch == '"' && next == '"' && source.getOrNull(i + 2) == '"'
+                    && !hasOddBackslashRunBefore(source, i)) {
+                    out.append("   ")
+                    i += 3
+                    state = "code"
+                } else {
+                    out.append(if (ch == '\n' || ch == '\r') ch else ' ')
+                    i++
+                }
+            }
+            "string" -> {
+                if (ch == '\\' && next != null) {
+                    out.append("  ")
+                    i += 2
+                } else {
+                    out.append(if (ch == '\n' || ch == '\r') ch else ' ')
+                    i++
+                    if (ch == '"') state = "code"
+                }
+            }
+            "char" -> {
+                if (ch == '\\' && next != null) {
+                    out.append("  ")
+                    i += 2
+                } else {
+                    out.append(if (ch == '\n' || ch == '\r') ch else ' ')
+                    i++
+                    if (ch == '\'') state = "code"
+                }
+            }
+        }
+    }
+    return out.toString()
+}
+
+fun hasOddBackslashRunBefore(source: String, index: Int): Boolean {
+    var count = 0
+    var cursor = index - 1
+    while (cursor >= 0 && source[cursor] == '\\') {
+        count++
+        cursor--
+    }
+    return count % 2 == 1
+}
+
+fun normalizeJavaTypeReference(candidate: String): String? {
+    val parts = candidate.split('.')
+    if (parts.size < 4 || parts[0] != "dev" || parts[1] != "talos") return null
+    val typeIndex = parts.indexOfFirst { it.firstOrNull()?.isUpperCase() == true }
+    if (typeIndex < 0) return null
+    return parts.take(typeIndex + 1).joinToString(".")
+}
+
+fun normalizeJavaImportReference(candidate: String): String? {
+    if (candidate.endsWith(".*")) {
+        val owner = candidate.removeSuffix(".*")
+        if (owner.substringAfterLast('.').firstOrNull()?.isUpperCase() == true) {
+            return normalizeJavaTypeReference(owner)
+        }
+        return candidate
+    }
+    return normalizeJavaTypeReference(candidate)
+}
+
+fun forbiddenSourceReferences(source: String, importPattern: Regex, referencePattern: Regex): Set<String> {
+    val stripped = stripJavaCommentsAndLiterals(source)
+    val imports = stripped.lineSequence()
+        .mapNotNull { importPattern.matchEntire(it)?.groupValues?.get(1) }
+        .mapNotNull { normalizeJavaImportReference(it) }
+    val fullyQualifiedReferences = referencePattern.findAll(stripped)
+        .mapNotNull { normalizeJavaTypeReference(it.value) }
+    return (imports + fullyQualifiedReferences).toSortedSet()
+}
+
 fun scanArchitectureBoundaryViolations(projectRoot: java.io.File): List<ArchitectureBoundaryViolation> {
     val sourceRoot = projectRoot.resolve("src/main/java")
     if (!sourceRoot.isDirectory) return emptyList()
     val importPattern = Regex("^\\s*import\\s+(?:static\\s+)?(dev\\.talos\\.[A-Za-z0-9_.*]+)\\s*;\\s*(?://.*)?$")
+    val referencePattern = Regex("\\bdev\\.talos(?:\\.[A-Za-z_][A-Za-z0-9_]*)+\\b")
     return sourceRoot.walkTopDown()
         .filter { it.isFile && it.extension == "java" }
         .flatMap { file ->
@@ -280,21 +410,21 @@ fun scanArchitectureBoundaryViolations(projectRoot: java.io.File): List<Architec
             if (matchingRules.isEmpty()) {
                 emptySequence()
             } else {
-                file.readLines(Charsets.UTF_8).asSequence()
-                    .mapNotNull { line -> importPattern.matchEntire(line)?.groupValues?.get(1) }
-                    .flatMap { importedType ->
+                forbiddenSourceReferences(file.readText(Charsets.UTF_8), importPattern, referencePattern)
+                    .asSequence()
+                    .flatMap { referencedSymbol ->
                         matchingRules.asSequence()
                             .filter { rule ->
-                                rule.forbiddenImportPrefixes.any { importedType.startsWith(it) }
+                                rule.forbiddenReferencePrefixes.any { referencedSymbol.startsWith(it) }
                             }
                             .map { rule ->
-                                ArchitectureBoundaryViolation(rule.id, relativePath, importedType)
+                                ArchitectureBoundaryViolation(rule.id, relativePath, referencedSymbol)
                             }
                     }
             }
         }
         .distinctBy { it.key() }
-        .sortedWith(compareBy({ it.rule }, { it.path }, { it.importedType }))
+        .sortedWith(compareBy({ it.rule }, { it.path }, { it.referencedSymbol }))
         .toList()
 }
 
@@ -319,7 +449,7 @@ tasks.named("check") {
 }
 
 val validateArchitectureBoundaries by tasks.registering {
-    description = "Ratcheted architecture-boundary import scanner for known package-direction debt."
+    description = "Ratcheted architecture-boundary source-reference scanner for known package-direction debt."
     group = "verification"
     val sourceRoot = layout.projectDirectory.dir("src/main/java")
     val baselineFile = layout.projectDirectory.file("config/architecture-boundary-baseline.txt")
@@ -357,14 +487,14 @@ val validateArchitectureBoundaries by tasks.registering {
                     mapOf(
                         "id" to it.id,
                         "sourcePrefixes" to it.sourcePrefixes,
-                        "forbiddenImportPrefixes" to it.forbiddenImportPrefixes
+                        "forbiddenReferencePrefixes" to it.forbiddenReferencePrefixes
                     )
                 },
                 "violations" to violations.map {
                     mapOf(
                         "rule" to it.rule,
                         "path" to it.path,
-                        "importedType" to it.importedType,
+                        "referencedSymbol" to it.referencedSymbol,
                         "key" to it.key()
                     )
                 },
@@ -378,15 +508,15 @@ val validateArchitectureBoundaries by tasks.registering {
             appendLine()
             appendLine("| Metric | Count |")
             appendLine("|---|---:|")
-            appendLine("| Current forbidden imports | ${actualKeys.size} |")
-            appendLine("| Baselined forbidden imports | ${baselineKeys.size} |")
-            appendLine("| New forbidden imports | ${newViolations.size} |")
+            appendLine("| Current forbidden references | ${actualKeys.size} |")
+            appendLine("| Baselined forbidden references | ${baselineKeys.size} |")
+            appendLine("| New forbidden references | ${newViolations.size} |")
             appendLine("| Stale baseline entries | ${staleBaseline.size} |")
             appendLine()
             appendLine("## Rules")
             appendLine()
             architectureBoundaryRules.forEach { rule ->
-                appendLine("- `${rule.id}`: `${rule.sourcePrefixes.joinToString("`, `")}` must not import `${rule.forbiddenImportPrefixes.joinToString("`, `")}`")
+                appendLine("- `${rule.id}`: `${rule.sourcePrefixes.joinToString("`, `")}` must not reference `${rule.forbiddenReferencePrefixes.joinToString("`, `")}`")
             }
             appendLine()
             appendLine("## Current Violations")
