@@ -38,7 +38,6 @@ tools-no-runtime|src/main/java/dev/talos/tools/impl/BatchWorkspaceApplyTool.java
 tools-no-runtime|src/main/java/dev/talos/tools/impl/GrepTool.java|dev.talos.runtime.policy.ProtectedContentPolicy
 tools-no-runtime|src/main/java/dev/talos/tools/impl/GrepTool.java|dev.talos.runtime.policy.ProtectedReadScopePolicy
 tools-no-runtime|src/main/java/dev/talos/tools/impl/ReadFileTool.java|dev.talos.runtime.policy.PrivateDocumentPolicy
-tools-no-runtime|src/main/java/dev/talos/tools/impl/RetrieveTool.java|dev.talos.runtime.policy.ProtectedContentPolicy
 tools-no-runtime|src/main/java/dev/talos/tools/impl/RunCommandTool.java|dev.talos.runtime.command.CommandPlan
 tools-no-runtime|src/main/java/dev/talos/tools/impl/RunCommandTool.java|dev.talos.runtime.command.CommandPlanRejectedException
 tools-no-runtime|src/main/java/dev/talos/tools/impl/RunCommandTool.java|dev.talos.runtime.command.CommandProfileRegistry
