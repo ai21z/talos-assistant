@@ -3,7 +3,7 @@ package dev.talos.runtime.phase;
 import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolResult;
 import dev.talos.tools.ToolRiskLevel;
-import dev.talos.runtime.toolcall.ToolAliasPolicy;
+import dev.talos.tools.ToolAliasPolicy;
 
 /** Sidecar runtime policy for phase-aware tool execution. */
 public final class PhasePolicy {

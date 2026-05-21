@@ -89,8 +89,9 @@ Use this when the current state is worth evaluating as a real patch build.
 The order is:
 
 1. Finish the intended change set.
-2. Bump the patch version.
-3. Update `CHANGELOG.md`.
+2. Update the top `CHANGELOG.md` `Unreleased` section with material notes.
+3. Bump the patch version, which moves `Unreleased` into the dated candidate
+   entry.
 4. Build the jar.
 5. Run the normal test lane.
 6. Run the candidate test and deterministic scripted E2E evidence lanes.
@@ -186,8 +187,17 @@ Current branch-ready sequence:
 
 Notes:
 
-- `./scripts/bump-patch.ps1` updates `gradle.properties` and `CHANGELOG.md`
-- `./gradlew.bat check` is the hard local gate: unit tests, deterministic `e2eTest`, and coverage baseline must pass
+- before `./scripts/bump-patch.ps1`, `CHANGELOG.md` must have material notes
+  under `## [Unreleased]`
+- `./scripts/bump-patch.ps1` updates `gradle.properties` and moves
+  `Unreleased` notes into the new dated candidate entry
+- patch versions are numeric and monotonic; `0.9.10` is the normal successor to
+  `0.9.9`, and already-evidenced candidate versions must not be downsized or
+  reused
+- use a new minor such as `0.10.0` only when intentionally declaring a broader
+  beta milestone; reserve `1.0.0` for stable beta exit
+- `./gradlew.bat check` is the hard local gate: release-ledger validation, unit
+  tests, deterministic `e2eTest`, and coverage baseline must pass
 - a pre-bump `./gradlew.bat check` is allowed as a readiness check, but it is not candidate evidence
 - the candidate `./gradlew.bat check` run is mandatory after the patch version and changelog entry are declared, even if the same command passed before the bump
 - review evidence must belong to the named candidate version in `gradle.properties` and `CHANGELOG.md`
@@ -211,7 +221,8 @@ Notes:
 A candidate is in good shape when:
 
 - the patch version is intentional and numeric
-- the changelog matches the candidate
+- the changelog has a top `Unreleased` section and the top released changelog
+  version matches `talosVersion`
 - the jar identity in the packet matches the artifact under review
 - the candidate test lane status is explicit
 - the candidate `e2eTest` lane status is explicit
@@ -237,6 +248,8 @@ The rigorous conclusion is:
 
 - Talos needs two loops, not one
 - patch versioning belongs at the start of candidate review, not at the end
+- changelog notes belong in `Unreleased` before the bump, not as a generated
+  `pending release notes` stub after the bump
 - `test`, `e2eTest`, JaCoCo, Qodana, and summary generation are evidence-producing steps for a named candidate
 - `./gradlew.bat check` may run before the bump as a readiness check, but must run again after the bump as candidate evidence
 - if the candidate fails review, you change code and create a new patch candidate

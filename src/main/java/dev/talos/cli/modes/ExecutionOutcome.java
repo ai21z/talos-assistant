@@ -15,7 +15,7 @@ import dev.talos.runtime.policy.ProtectedPathPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
-import dev.talos.runtime.toolcall.ToolAliasPolicy;
+import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.runtime.verification.StaticTaskVerifier;

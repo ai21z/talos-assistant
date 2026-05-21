@@ -25,7 +25,7 @@ import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
-import dev.talos.runtime.toolcall.ToolAliasPolicy;
+import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.workspace.WorkspaceBatchPlanParser;
 import dev.talos.runtime.workspace.WorkspaceOperationIntent;

@@ -2,7 +2,7 @@ package dev.talos.runtime.command;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.talos.runtime.toolcall.ToolAliasPolicy;
+import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolCall;
 
 import java.nio.file.Files;

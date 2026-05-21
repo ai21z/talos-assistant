@@ -1,6 +1,4 @@
 package dev.talos.tools;
-
-import dev.talos.runtime.toolcall.ToolAliasPolicy;
 import dev.talos.runtime.policy.SafeLogFormatter;
 
 import java.util.List;

@@ -21,7 +21,7 @@ import dev.talos.runtime.expectation.TaskExpectation;
 import dev.talos.runtime.expectation.TaskExpectationResolver;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
-import dev.talos.runtime.toolcall.ToolAliasPolicy;
+import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.tools.VerificationStatus;

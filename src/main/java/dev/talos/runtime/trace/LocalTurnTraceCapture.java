@@ -6,7 +6,7 @@ import dev.talos.runtime.command.CommandResult;
 import dev.talos.runtime.command.CommandToolPlanner;
 import dev.talos.runtime.context.ContextLedgerCapture;
 import dev.talos.runtime.context.ContextLedgerSnapshot;
-import dev.talos.runtime.toolcall.ToolAliasPolicy;
+import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolContentMetadata;
 import dev.talos.tools.ToolCall;
 

@@ -32,6 +32,7 @@ import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.ResponseFormatMode;
 import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
+import dev.talos.tools.ToolAliasPolicy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

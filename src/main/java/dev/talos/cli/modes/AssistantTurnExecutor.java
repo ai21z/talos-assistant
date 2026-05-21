@@ -39,7 +39,7 @@ import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.toolcall.DirectoryListingEvidence;
 import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
-import dev.talos.runtime.toolcall.ToolAliasPolicy;
+import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.toolcall.ToolSurfacePlanner;
 import dev.talos.runtime.turn.CurrentTurnPlan;

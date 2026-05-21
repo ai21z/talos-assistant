@@ -1,6 +1,6 @@
 package dev.talos.runtime.workspace;
 
-import dev.talos.runtime.toolcall.ToolAliasPolicy;
+import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolRiskLevel;
 
