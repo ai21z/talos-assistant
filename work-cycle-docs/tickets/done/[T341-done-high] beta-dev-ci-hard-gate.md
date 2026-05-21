@@ -22,8 +22,8 @@ Predecessor: `[T334-T340] architecture hygiene ratchet baseline and scanner`
 - Approval choices: not applicable.
 - Checkpoint id: not applicable.
 - Verification status: focused release-contract test, diff hygiene, and full
-  local `check` passed; GitHub check-run verification occurs after this branch
-  is pushed because the workflow file is itself part of this ticket.
+  local `check` passed; first GitHub check-run creation succeeded, then exposed
+  a remote Gradle failure requiring more granular workflow diagnostics.
 
 ## Problem
 
@@ -67,11 +67,17 @@ Added `.github/workflows/beta-dev-ci.yml`:
 
 - runs on pull requests targeting `v0.9.0-beta-dev`;
 - includes `ready_for_review` so a draft PR can be checked after CI lands;
-- runs on pushes to `v0.9.0-beta-dev` and ticket-coded `T*` branches;
+- runs on pushes to `v0.9.0-beta-dev`;
 - installs Java 21 with Temurin;
 - uses the Gradle setup action;
 - makes the Gradle wrapper executable on Linux;
-- runs `./gradlew check --no-daemon`.
+- runs the hard gate as named Gradle steps:
+  `test`, `e2eTest`, coverage/artifact canaries, and final `check`.
+
+The first remote run proved GitHub check creation, but unauthenticated log
+access only exposed `Process completed with exit code 1`. The workflow now uses
+named Gradle steps so future remote failures identify the failing gate without
+requiring private job-log access.
 
 Updated `site/index.html` to keep the public install copy aligned with the
 existing release packaging contract test:
@@ -121,17 +127,19 @@ Checkpoint, evidence, verification, and repair:
 
 - Branch and PR metadata use ticket-only identifiers, not agent names.
 - A minimal beta-dev GitHub Actions workflow exists.
-- The workflow runs `./gradlew check --no-daemon` on Java 21.
+- The workflow runs the Gradle `check` hard gate on Java 21, with named
+  prerequisite steps for useful failure localization.
 - The workflow triggers for PRs into `v0.9.0-beta-dev`.
 - The workflow includes `ready_for_review` for draft-to-ready PR checks.
 - Local `git diff --check` passes.
 - Local `.\gradlew.bat check --no-daemon` passes.
-- GitHub creates a check run for the `T341` branch after push.
+- GitHub creates a pull-request check run for `T341`.
 
 ## Result
 
-Local acceptance criteria satisfied. Remote check-run creation is verified after
-push and PR creation.
+Local acceptance criteria satisfied. Initial remote check-run creation was
+verified after push and PR creation; remote pass/fail evidence remains the PR
+gate.
 
 ## Verification
 
