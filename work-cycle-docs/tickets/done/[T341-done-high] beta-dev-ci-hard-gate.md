@@ -17,14 +17,17 @@ Predecessor: `[T334-T340] architecture hygiene ratchet baseline and scanner`
 - Raw transcript path: none.
 - Trace path or `/last trace` summary: not applicable.
 - File diff summary: added one minimal GitHub Actions workflow for the
-  `v0.9.0-beta-dev` lane and corrected the public site install copy required
-  by the existing release packaging contract.
+  `v0.9.0-beta-dev` lane, corrected the public site install copy required by
+  the existing release packaging contract, force-tracked the public installation
+  document that the contract already reads, and fixed a Windows sandbox
+  canonicalization false-denial found by the first Windows CI run.
 - Approval choices: not applicable.
 - Checkpoint id: not applicable.
-- Verification status: focused release-contract test, diff hygiene, and full
-  local `check` passed; first GitHub check-run creation succeeded, then exposed
-  pre-existing Linux unit-test failures, so the beta gate was corrected to
-  Windows x64.
+- Verification status: focused release-contract and CI-exposed runtime tests
+  passed locally; first GitHub check-run creation succeeded, then exposed
+  pre-existing Linux unit-test failures and a Windows short-path sandbox
+  false-denial, so the beta gate was corrected to Windows x64 and the concrete
+  Windows failure was fixed.
 
 ## Problem
 
@@ -46,6 +49,17 @@ also exposed pre-existing site copy drift: `site/index.html` lacked the exact
 future winget command, the `Windows x64` support boundary phrase, and the exact
 `llama.cpp server or model weights` limitation phrase. T341 fixes that site
 copy because the new CI gate must start green.
+
+The first Windows check run then exposed two concrete repository issues:
+
+- `docs/public-installation.md` existed locally but was hidden by local
+  `.git/info/exclude`, so the remote checkout could not satisfy the existing
+  packaging contract test.
+- GitHub-hosted Windows temp workspaces used a short-name path segment such as
+  `RUNNER~1`, while `Sandbox` canonicalized the workspace root through
+  `toRealPath()`. Missing child paths under that workspace were compared in
+  short-path form against the long real workspace root and were falsely denied
+  as `path escapes workspace`.
 
 ## Goal
 
@@ -92,6 +106,15 @@ existing release packaging contract test:
 - public beta boundary: `Windows x64`;
 - installer limitation: `llama.cpp server or model weights`.
 
+Force-tracked `docs/public-installation.md` because the release packaging
+contract already treats it as public release evidence.
+
+Updated `Sandbox` missing-path canonicalization so a candidate under a real
+workspace root is reconstructed from the nearest existing ancestor's real path
+before the `startsWith(workspaceReal)` check. This preserves fail-closed
+workspace-boundary behavior while avoiding false denial for Windows short-path
+aliases on paths that do not exist yet.
+
 ## Architecture Metadata
 
 Capability:
@@ -119,7 +142,8 @@ Risk, approval, and protected paths:
 - Risk level: low runtime risk; medium workflow risk because CI failures now
   become visible review evidence.
 - Approval behavior: not changed.
-- Protected path behavior: not changed.
+- Protected path behavior: strictness unchanged; path canonicalization for
+  non-existing in-workspace children is corrected before boundary comparison.
 
 Checkpoint, evidence, verification, and repair:
 
