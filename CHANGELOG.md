@@ -1,5 +1,42 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- [T334-done-high] Added release-ledger discipline for beta candidates:
+  `CHANGELOG.md` now keeps an `Unreleased` section, the patch bump script moves
+  those notes into the next numeric candidate version, and `check` validates
+  that the top released changelog entry matches `talosVersion`.
+- [T335-done-high] Added an architecture hygiene baseline for the next refactor
+  sequence, covering package-boundary debt, policy ownership, verifier/repair
+  structure, CLI composition, release-evidence gates, and the recommended T336
+  boundary-ratchet implementation.
+- [T336-done-high] Added a ratcheted architecture-boundary import scanner wired
+  into `check`, with an initial baseline of 62 forbidden import
+  edges and focused TestKit coverage for new and stale boundary drift.
+- [T337-done-medium] Moved tool alias metadata ownership from
+  `runtime.toolcall` to `tools`, reducing the architecture-boundary baseline
+  from 62 to 61 forbidden import edges without changing alias behavior.
+- [T338-done-medium] Moved `WorkspaceSymbolChecker` ownership from CLI modes
+  into core indexing, reducing the architecture-boundary baseline from 61 to 60
+  forbidden import edges without changing prompt-routing behavior.
+- [T339-done-high] Hardened `validateArchitectureBoundaries` so the ratchet
+  catches fully-qualified forbidden `dev.talos...` type references as well as
+  imports, while ignoring comments and string/char literals.
+- [T340-done-medium] Removed the runtime-policy logging dependency from
+  `IndexedWorkspaceSymbolChecker`, reducing the architecture-boundary baseline
+  from 60 to 59 forbidden references without changing symbol lookup behavior.
+- Documented monotonic pre-1.0 beta versioning: do not downsize or reuse
+  candidate versions after artifacts, commits, tags, or audit evidence refer to
+  them; use `0.9.10+` for narrow candidates, consider `0.10.0` for a broad beta
+  milestone, and reserve `1.0.0` for stable beta exit.
+- Backfilled the post-0.9.9 beta stabilization ledger with the audit-evidence,
+  protected-document, terminal approval, prompt-surface, static-web, office
+  document, Python-claim, site, and artifact-canary hardening work landed after
+  the 2026-05-15 candidate declaration.
+- Strengthened candidate provenance by making placeholder changelog text a hard
+  local validation failure instead of a manual review hazard.
+
 ## [0.9.9] - 2026-05-15
 
 ### Changed

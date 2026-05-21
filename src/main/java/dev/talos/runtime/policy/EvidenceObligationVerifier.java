@@ -1,7 +1,7 @@
 package dev.talos.runtime.policy;
 
 import dev.talos.runtime.ToolCallLoop;
-import dev.talos.runtime.toolcall.ToolAliasPolicy;
+import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.tools.ToolError;
 

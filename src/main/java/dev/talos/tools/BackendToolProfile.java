@@ -1,4 +1,4 @@
-package dev.talos.runtime.toolcall;
+package dev.talos.tools;
 
 /** Minimal static profile label for tool-alias decisions. */
 public enum BackendToolProfile {

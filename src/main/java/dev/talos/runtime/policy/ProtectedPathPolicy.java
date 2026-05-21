@@ -1,6 +1,6 @@
 package dev.talos.runtime.policy;
 
-import dev.talos.runtime.toolcall.ToolAliasPolicy;
+import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.runtime.workspace.WorkspaceBatchPlanParser;
 import dev.talos.tools.PathArgumentCanonicalizer;
 import dev.talos.tools.ToolCall;

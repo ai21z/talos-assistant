@@ -25,6 +25,7 @@ import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.PathArgumentCanonicalizer;
+import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolContentMetadata;
 import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolCall;
