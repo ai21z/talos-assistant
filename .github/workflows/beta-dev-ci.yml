@@ -11,6 +11,9 @@ on:
 permissions:
   contents: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 concurrency:
   group: beta-dev-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -18,7 +21,7 @@ concurrency:
 jobs:
   gradle-check:
     name: Gradle check (Java 21)
-    runs-on: windows-latest
+    runs-on: windows-2025-vs2026
     timeout-minutes: 45
 
     steps:

@@ -27,7 +27,9 @@ Predecessor: `[T334-T340] architecture hygiene ratchet baseline and scanner`
   passed locally; first GitHub check-run creation succeeded, then exposed
   pre-existing Linux unit-test failures and a Windows short-path sandbox
   false-denial, so the beta gate was corrected to Windows x64 and the concrete
-  Windows failure was fixed.
+  Windows failure was fixed. The final workflow also opts into GitHub's Node 24
+  JavaScript-action runtime and explicit Windows 2025 + VS2026 image label to
+  remove current GitHub Actions migration warnings.
 
 ## Problem
 
@@ -84,12 +86,18 @@ Added `.github/workflows/beta-dev-ci.yml`:
 - runs on pull requests targeting `v0.9.0-beta-dev`;
 - includes `ready_for_review` so a draft PR can be checked after CI lands;
 - runs on pushes to `v0.9.0-beta-dev`;
-- runs on `windows-latest` because the public beta install support boundary is
-  Windows x64 and the repository work-test cycle is Windows-first;
+- runs on `windows-2025-vs2026` because the public beta install support
+  boundary is Windows x64, the repository work-test cycle is Windows-first, and
+  GitHub is already migrating `windows-latest` to that image family;
 - installs Java 21 with Temurin;
 - uses the Gradle setup action;
 - runs the hard gate as named Gradle steps:
   `test`, `e2eTest`, coverage/artifact canaries, and final `check`.
+
+After the first successful Windows check emitted GitHub Actions migration
+warnings, the workflow was moved to the explicit `windows-2025-vs2026` image and
+sets `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true`. This tests the upcoming GitHub
+runner defaults before they become implicit platform changes.
 
 The first remote Linux run proved GitHub check creation, but failed in existing
 unit tests around index/RAG path matching and policy behavior. That is real
@@ -159,6 +167,8 @@ Checkpoint, evidence, verification, and repair:
 - A minimal beta-dev GitHub Actions workflow exists.
 - The workflow runs the Gradle `check` hard gate on Windows x64 and Java 21,
   with named prerequisite steps for useful failure localization.
+- The workflow opts into the current GitHub Actions Node 24 and Windows
+  2025/VS2026 migration path instead of leaving migration warnings unresolved.
 - The workflow triggers for PRs into `v0.9.0-beta-dev`.
 - The workflow includes `ready_for_review` for draft-to-ready PR checks.
 - Local `git diff --check` passes.
