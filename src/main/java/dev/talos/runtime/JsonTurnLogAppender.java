@@ -1,6 +1,5 @@
 package dev.talos.runtime;
 
-import dev.talos.cli.repl.Result;
 import dev.talos.core.retrieval.RetrievalTrace;
 import dev.talos.safety.SafeLogFormatter;
 import org.slf4j.Logger;

@@ -1,6 +1,6 @@
 package dev.talos.harness;
 
-import dev.talos.cli.repl.Result;
+import dev.talos.runtime.Result;
 import dev.talos.runtime.TurnAudit;
 import dev.talos.runtime.TurnRecord;
 import org.junit.jupiter.api.DisplayName;

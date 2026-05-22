@@ -2,7 +2,6 @@ package dev.talos.runtime;
 
 import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
-import dev.talos.cli.repl.Result;
 import dev.talos.core.retrieval.RetrievalTrace;
 import dev.talos.core.ingest.UnsupportedDocumentFormats;
 import dev.talos.runtime.command.CommandPlan;

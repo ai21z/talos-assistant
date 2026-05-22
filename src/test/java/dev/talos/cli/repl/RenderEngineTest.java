@@ -1,5 +1,7 @@
 package dev.talos.cli.repl;
 
+import dev.talos.runtime.Result;
+
 import dev.talos.core.Config;
 import dev.talos.core.security.Redactor;
 import dev.talos.cli.ui.CliTheme;

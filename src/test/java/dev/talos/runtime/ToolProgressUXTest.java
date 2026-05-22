@@ -125,7 +125,7 @@ class ToolProgressUXTest {
         @Test
         @DisplayName("toString includes action and tool name")
         void toString_basic() {
-            var tp = new dev.talos.cli.repl.Result.ToolProgress("talos.write_file", "executing", "index.html");
+            var tp = new dev.talos.runtime.Result.ToolProgress("talos.write_file", "executing", "index.html");
             assertTrue(tp.toString().contains("executing"));
             assertTrue(tp.toString().contains("talos.write_file"));
             assertTrue(tp.toString().contains("index.html"));
@@ -134,14 +134,14 @@ class ToolProgressUXTest {
         @Test
         @DisplayName("toString without detail omits colon")
         void toString_no_detail() {
-            var tp = new dev.talos.cli.repl.Result.ToolProgress("talos.grep", "executing", null);
+            var tp = new dev.talos.runtime.Result.ToolProgress("talos.grep", "executing", null);
             assertEquals("executing talos.grep", tp.toString());
         }
 
         @Test
         @DisplayName("null fields become empty strings")
         void null_fields_safe() {
-            var tp = new dev.talos.cli.repl.Result.ToolProgress(null, null, null);
+            var tp = new dev.talos.runtime.Result.ToolProgress(null, null, null);
             assertEquals("", tp.toolName);
             assertEquals("", tp.action);
             assertNull(tp.detail);

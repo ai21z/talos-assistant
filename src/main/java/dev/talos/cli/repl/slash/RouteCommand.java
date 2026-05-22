@@ -3,7 +3,7 @@ package dev.talos.cli.repl.slash;
 import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.modes.PromptClassifier;
 import dev.talos.cli.repl.Context;
-import dev.talos.cli.repl.Result;
+import dev.talos.runtime.Result;
 import dev.talos.core.index.WorkspaceSymbolChecker;
 
 import java.util.List;

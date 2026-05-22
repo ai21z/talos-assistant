@@ -1,6 +1,6 @@
 package dev.talos.cli.repl.slash;
 
-import dev.talos.cli.repl.Result;
+import dev.talos.runtime.Result;
 import dev.talos.cli.repl.Context;
 
 import java.util.List;

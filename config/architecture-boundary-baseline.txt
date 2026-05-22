@@ -10,15 +10,11 @@ core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runti
 core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runtime.context.ContextLedgerCapture
 core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runtime.context.ExecutionBoundary
 runtime-core-no-cli|src/main/java/dev/talos/core/context/ConversationManager.java|dev.talos.cli.repl.SessionMemory
-runtime-core-no-cli|src/main/java/dev/talos/runtime/JsonTurnLogAppender.java|dev.talos.cli.repl.Result
-runtime-core-no-cli|src/main/java/dev/talos/runtime/MemoryUpdateListener.java|dev.talos.cli.repl.Result
 runtime-core-no-cli|src/main/java/dev/talos/runtime/MemoryUpdateListener.java|dev.talos.cli.repl.SessionMemory
 runtime-core-no-cli|src/main/java/dev/talos/runtime/Session.java|dev.talos.cli.repl.SessionMemory
 runtime-core-no-cli|src/main/java/dev/talos/runtime/ToolCallLoop.java|dev.talos.cli.repl.Context
 runtime-core-no-cli|src/main/java/dev/talos/runtime/TurnProcessor.java|dev.talos.cli.modes.ModeController
 runtime-core-no-cli|src/main/java/dev/talos/runtime/TurnProcessor.java|dev.talos.cli.repl.Context
-runtime-core-no-cli|src/main/java/dev/talos/runtime/TurnProcessor.java|dev.talos.cli.repl.Result
-runtime-core-no-cli|src/main/java/dev/talos/runtime/TurnResult.java|dev.talos.cli.repl.Result
 runtime-core-no-cli|src/main/java/dev/talos/runtime/toolcall/LoopState.java|dev.talos.cli.repl.Context
 spi-no-upper-layers|src/main/java/dev/talos/spi/CorpusStore.java|dev.talos.core.ingest.ChunkMetadata
 spi-no-upper-layers|src/main/java/dev/talos/spi/EngineRegistry.java|dev.talos.core.Config

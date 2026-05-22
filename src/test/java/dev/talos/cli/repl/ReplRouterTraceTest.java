@@ -1,5 +1,7 @@
 package dev.talos.cli.repl;
 
+import dev.talos.runtime.Result;
+
 import dev.talos.runtime.TurnAudit;
 import dev.talos.runtime.TurnPolicyTrace;
 import dev.talos.runtime.TurnResult;
