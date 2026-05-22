@@ -2,7 +2,6 @@ package dev.talos.cli.repl;
 
 import dev.talos.runtime.SessionListener;
 import dev.talos.runtime.TurnResult;
-import dev.talos.runtime.context.ActiveTaskContextUpdater;
 import dev.talos.runtime.context.ChangeSummaryContext;
 
 /** Updates session active-task memory after completed turns. */

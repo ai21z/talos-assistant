@@ -19,7 +19,6 @@ runtime-core-no-cli|src/main/java/dev/talos/runtime/TurnProcessor.java|dev.talos
 runtime-core-no-cli|src/main/java/dev/talos/runtime/TurnProcessor.java|dev.talos.cli.repl.Context
 runtime-core-no-cli|src/main/java/dev/talos/runtime/TurnProcessor.java|dev.talos.cli.repl.Result
 runtime-core-no-cli|src/main/java/dev/talos/runtime/TurnResult.java|dev.talos.cli.repl.Result
-runtime-core-no-cli|src/main/java/dev/talos/runtime/context/ActiveTaskContextUpdater.java|dev.talos.cli.repl.Result
 runtime-core-no-cli|src/main/java/dev/talos/runtime/toolcall/LoopState.java|dev.talos.cli.repl.Context
 spi-no-upper-layers|src/main/java/dev/talos/spi/CorpusStore.java|dev.talos.core.ingest.ChunkMetadata
 spi-no-upper-layers|src/main/java/dev/talos/spi/EngineRegistry.java|dev.talos.core.Config
