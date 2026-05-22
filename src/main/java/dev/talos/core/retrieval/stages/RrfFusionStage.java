@@ -3,7 +3,7 @@ import dev.talos.core.retrieval.RetrievalCandidate;
 import dev.talos.core.retrieval.RetrievalRequest;
 import dev.talos.core.retrieval.RetrievalStage;
 import dev.talos.core.retrieval.StageOutput;
-import dev.talos.core.ingest.ChunkMetadata;
+import dev.talos.spi.types.ChunkMetadata;
 import java.util.*;
 import java.util.stream.Collectors;
 /**

@@ -1,5 +1,5 @@
 package dev.talos.core.retrieval;
-import dev.talos.core.ingest.ChunkMetadata;
+import dev.talos.spi.types.ChunkMetadata;
 import java.util.Objects;
 /**
  * A single retrieval candidate: a chunk path with a relevance score,

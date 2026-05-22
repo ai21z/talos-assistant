@@ -1,6 +1,9 @@
 package dev.talos.core.ingest;
 
 import dev.talos.core.util.Hash;
+import dev.talos.spi.types.ChunkMetadata;
+import dev.talos.spi.types.SourceIdentity;
+import dev.talos.spi.types.SourceType;
 
 import java.util.ArrayList;
 import java.util.List;

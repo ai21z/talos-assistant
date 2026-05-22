@@ -1,5 +1,7 @@
 package dev.talos.core.ingest;
 
+import dev.talos.spi.types.ChunkMetadata;
+
 /**
  * A single chunk produced by {@link Chunker} from a source file.
  *

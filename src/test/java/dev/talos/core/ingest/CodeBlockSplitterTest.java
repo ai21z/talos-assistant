@@ -1,5 +1,7 @@
 package dev.talos.core.ingest;
 
+import dev.talos.spi.types.SourceFormat;
+import dev.talos.spi.types.SourceType;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 

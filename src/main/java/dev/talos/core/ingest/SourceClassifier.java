@@ -1,5 +1,10 @@
 package dev.talos.core.ingest;
 
+import dev.talos.spi.types.MediaType;
+import dev.talos.spi.types.SourceFormat;
+import dev.talos.spi.types.SourceIdentity;
+import dev.talos.spi.types.SourceType;
+
 /**
  * Classifies a file path into a full {@link SourceIdentity} by deriving
  * {@link SourceFormat}, {@link SourceType}, and {@link MediaType} from

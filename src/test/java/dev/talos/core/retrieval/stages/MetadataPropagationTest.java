@@ -1,5 +1,5 @@
 package dev.talos.core.retrieval.stages;
-import dev.talos.core.ingest.ChunkMetadata;
+import dev.talos.spi.types.ChunkMetadata;
 import dev.talos.core.retrieval.RetrievalCandidate;
 import dev.talos.core.retrieval.RetrievalRequest;
 import org.junit.jupiter.api.Test;
