@@ -1,7 +1,7 @@
 package dev.talos.harness;
 
 import dev.talos.cli.modes.AssistantTurnExecutor;
-import dev.talos.cli.repl.Result;
+import dev.talos.runtime.Result;
 import dev.talos.cli.repl.SessionMemory;
 import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;

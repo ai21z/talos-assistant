@@ -1,7 +1,7 @@
 package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
-import dev.talos.cli.repl.Result;
+import dev.talos.runtime.Result;
 import dev.talos.core.index.WorkspaceSymbolChecker;
 
 import java.nio.file.Path;

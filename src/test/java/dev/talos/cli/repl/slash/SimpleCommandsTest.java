@@ -3,7 +3,7 @@ package dev.talos.cli.repl.slash;
 import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.DebugLevel;
-import dev.talos.cli.repl.Result;
+import dev.talos.runtime.Result;
 import dev.talos.core.Config;
 import org.junit.jupiter.api.*;
 

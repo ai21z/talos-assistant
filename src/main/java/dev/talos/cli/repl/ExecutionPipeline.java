@@ -1,5 +1,7 @@
 package dev.talos.cli.repl;
 
+import dev.talos.runtime.Result;
+
 import dev.talos.spi.EngineException;
 
 import java.util.Map;

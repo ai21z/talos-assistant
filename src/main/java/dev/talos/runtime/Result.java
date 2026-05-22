@@ -1,7 +1,8 @@
-package dev.talos.cli.repl;
+package dev.talos.runtime;
 
 /**
- * Uniform result model for CLI outputs. Nothing prints directly; a RenderEngine renders these.
+ * Uniform result model for runtime turn and command outputs. Nothing prints directly;
+ * a CLI adapter renders these.
  * Sealed for exhaustiveness in switch statements (Java 21).
  */
 public sealed interface Result

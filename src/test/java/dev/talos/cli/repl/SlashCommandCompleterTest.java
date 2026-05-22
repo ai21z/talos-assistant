@@ -5,7 +5,7 @@ import dev.talos.cli.repl.slash.CommandRegistry;
 import dev.talos.cli.repl.slash.CommandSpec;
 import dev.talos.cli.repl.slash.CommandGroup;
 import dev.talos.cli.repl.Context;
-import dev.talos.cli.repl.Result;
+import dev.talos.runtime.Result;
 import org.jline.reader.Candidate;
 import org.jline.reader.ParsedLine;
 import org.junit.jupiter.api.BeforeEach;
