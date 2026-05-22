@@ -1,9 +1,6 @@
-package dev.talos.tools.impl;
+package dev.talos.runtime.workspace;
 
 import dev.talos.core.capability.CapabilityKind;
-import dev.talos.runtime.workspace.WorkspaceBatchOperation;
-import dev.talos.runtime.workspace.WorkspaceBatchPlan;
-import dev.talos.runtime.workspace.WorkspaceBatchPlanParser;
 import dev.talos.tools.TalosTool;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolContext;
@@ -12,6 +9,11 @@ import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolOperationMetadata;
 import dev.talos.tools.ToolResult;
 import dev.talos.tools.ToolRiskLevel;
+import dev.talos.tools.impl.CopyPathTool;
+import dev.talos.tools.impl.DeletePathTool;
+import dev.talos.tools.impl.MakeDirectoryTool;
+import dev.talos.tools.impl.MovePathTool;
+import dev.talos.tools.impl.RenamePathTool;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -49,7 +51,7 @@ public final class BatchWorkspaceApplyTool implements TalosTool {
 
     @Override
     public ToolResult execute(ToolCall call, ToolContext ctx) {
-        if (ctx == null) return WorkspaceOperationToolSupport.contextRequired(NAME);
+        if (ctx == null) return ToolResult.fail(ToolError.internal(NAME + " requires a ToolContext"));
 
         WorkspaceBatchPlan plan;
         try {
@@ -77,7 +79,7 @@ public final class BatchWorkspaceApplyTool implements TalosTool {
                 return ToolResult.fail(ToolError.internal(message));
             }
             applied.add(operation.appliedPathSummary());
-            summaries.add(WorkspaceOperationToolSupport.firstLine(result.output()));
+            summaries.add(firstLine(result.output()));
         }
 
         return ToolResult.ok("Applied batch workspace operation: " + plan.previewSummary()
@@ -130,5 +132,11 @@ public final class BatchWorkspaceApplyTool implements TalosTool {
                             "recursive", String.valueOf(operation.recursive()))),
                     ctx);
         };
+    }
+
+    private static String firstLine(String value) {
+        if (value == null || value.isBlank()) return "";
+        int newline = value.indexOf('\n');
+        return newline < 0 ? value.strip() : value.substring(0, newline).strip();
     }
 }

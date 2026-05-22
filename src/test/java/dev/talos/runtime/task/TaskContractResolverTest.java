@@ -4,7 +4,7 @@ import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.toolcall.ToolSurfacePlanner;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolRegistry;
-import dev.talos.tools.impl.BatchWorkspaceApplyTool;
+import dev.talos.runtime.workspace.BatchWorkspaceApplyTool;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
