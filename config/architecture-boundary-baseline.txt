@@ -2,7 +2,6 @@
 # Format: rule|path|source-reference
 # This file records existing package-direction debt only. Do not add entries
 # unless a ticket explicitly accepts the new edge and explains why.
-core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runtime.ToolCallParser
 runtime-core-no-cli|src/main/java/dev/talos/core/context/ConversationManager.java|dev.talos.cli.repl.SessionMemory
 runtime-core-no-cli|src/main/java/dev/talos/runtime/MemoryUpdateListener.java|dev.talos.cli.repl.SessionMemory
 runtime-core-no-cli|src/main/java/dev/talos/runtime/Session.java|dev.talos.cli.repl.SessionMemory
