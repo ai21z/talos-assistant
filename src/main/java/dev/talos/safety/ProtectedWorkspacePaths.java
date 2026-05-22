@@ -8,6 +8,9 @@ import java.util.Locale;
 public final class ProtectedWorkspacePaths {
     private ProtectedWorkspacePaths() {}
 
+    /** Index freshness version for protected workspace path classification. */
+    public static final String POLICY_VERSION = "protected-content-policy-v2";
+
     public record Decision(
             String rawPath,
             String relativePath,
