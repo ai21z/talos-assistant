@@ -8,7 +8,7 @@ import dev.talos.tools.FileUndoStack;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.ReadFileTool;
 import dev.talos.tools.impl.FileWriteTool;
-import dev.talos.tools.impl.RunCommandTool;
+import dev.talos.runtime.command.RunCommandTool;
 import dev.talos.tools.ToolRegistry;
 import org.junit.jupiter.api.Test;
 

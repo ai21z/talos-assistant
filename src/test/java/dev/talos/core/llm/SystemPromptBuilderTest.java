@@ -1,7 +1,7 @@
 package dev.talos.core.llm;
 
 import dev.talos.tools.*;
-import dev.talos.tools.impl.RunCommandTool;
+import dev.talos.runtime.command.RunCommandTool;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;

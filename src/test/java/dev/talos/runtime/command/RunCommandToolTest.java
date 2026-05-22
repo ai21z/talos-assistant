@@ -1,10 +1,7 @@
-package dev.talos.tools.impl;
+package dev.talos.runtime.command;
 
 import dev.talos.core.Config;
 import dev.talos.core.security.Sandbox;
-import dev.talos.runtime.command.CommandPlan;
-import dev.talos.runtime.command.CommandResult;
-import dev.talos.runtime.command.CommandRunner;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolContext;
 import dev.talos.tools.ToolError;
