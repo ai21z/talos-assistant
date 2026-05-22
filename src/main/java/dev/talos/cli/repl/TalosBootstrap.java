@@ -20,6 +20,7 @@ import dev.talos.runtime.MemoryUpdateListener;
 import dev.talos.runtime.NoOpSessionStore;
 import dev.talos.runtime.Session;
 import dev.talos.runtime.SessionData;
+import dev.talos.runtime.SessionMemory;
 import dev.talos.runtime.SessionStore;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallStreamFilter;

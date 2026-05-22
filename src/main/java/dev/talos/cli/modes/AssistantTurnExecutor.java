@@ -2,7 +2,7 @@ package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.cli.repl.DebugLevel;
-import dev.talos.cli.repl.SessionMemory;
+import dev.talos.runtime.SessionMemory;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.MutationIntent;
 import dev.talos.runtime.ToolCallLoop;

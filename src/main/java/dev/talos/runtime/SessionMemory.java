@@ -1,9 +1,9 @@
-package dev.talos.cli.repl;
+package dev.talos.runtime;
 
+import dev.talos.core.context.ConversationMemory;
 import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ArtifactGoal;
 import dev.talos.runtime.context.ChangeSummaryContext;
-import dev.talos.runtime.TurnRecord;
 import dev.talos.spi.types.ChatMessage;
 
 import java.util.ArrayList;
@@ -12,8 +12,8 @@ import java.util.List;
 
 /**
  * Minimal rolling-window session memory for conversational context.
- * Extracted from {@code RagService} where it did not belong — session memory
- * is a CLI/REPL concern, not a knowledge-engine concern.
+ * Extracted from {@code RagService} where it did not belong. Session memory is
+ * runtime session state, not CLI presentation state or knowledge-engine state.
  *
  * <p>Stores a rolling text window of recent user inputs and answers,
  * capped at {@link #MAX_CHARS} characters. Oldest content is trimmed
@@ -26,7 +26,7 @@ import java.util.List;
  *
  * <p>Thread-safe: all methods synchronize on the instance.
  */
-public final class SessionMemory {
+public final class SessionMemory implements ConversationMemory {
 
     /**
      * Maximum characters retained in the legacy rolling text window.

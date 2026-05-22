@@ -1,7 +1,7 @@
 package dev.talos.cli.repl.slash;
 import dev.talos.cli.repl.Context;
 import dev.talos.runtime.Result;
-import dev.talos.cli.repl.SessionMemory;
+import dev.talos.runtime.SessionMemory;
 import dev.talos.cli.repl.TalosBootstrap;
 import dev.talos.core.context.ConversationManager;
 import dev.talos.runtime.JsonSessionStore;

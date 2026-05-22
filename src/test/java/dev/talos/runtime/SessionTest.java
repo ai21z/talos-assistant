@@ -1,6 +1,6 @@
 package dev.talos.runtime;
 
-import dev.talos.cli.repl.SessionMemory;
+import dev.talos.runtime.SessionMemory;
 import dev.talos.core.Config;
 import org.junit.jupiter.api.Test;
 

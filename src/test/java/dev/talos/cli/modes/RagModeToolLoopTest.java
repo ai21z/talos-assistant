@@ -2,7 +2,7 @@ package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.runtime.Result;
-import dev.talos.cli.repl.SessionMemory;
+import dev.talos.runtime.SessionMemory;
 import dev.talos.core.Config;
 import dev.talos.spi.types.ChatMessage;
 import org.junit.jupiter.api.Nested;
