@@ -1,6 +1,5 @@
 package dev.talos.runtime;
 
-import dev.talos.cli.repl.Result;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

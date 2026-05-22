@@ -400,7 +400,7 @@ class ConversationCompactionTest {
             var listener = new dev.talos.runtime.MemoryUpdateListener(cm);
 
             var result = new dev.talos.runtime.TurnResult(
-                    new dev.talos.cli.repl.Result.Ok("answer"), null, 1,
+                    new dev.talos.runtime.Result.Ok("answer"), null, 1,
                     java.time.Duration.ofMillis(100));
             listener.onTurnComplete(result, "question");
 
@@ -418,7 +418,7 @@ class ConversationCompactionTest {
             var listener = new dev.talos.runtime.MemoryUpdateListener(cm, llm);
 
             var result = new dev.talos.runtime.TurnResult(
-                    new dev.talos.cli.repl.Result.Ok("answer"), null, 1,
+                    new dev.talos.runtime.Result.Ok("answer"), null, 1,
                     java.time.Duration.ofMillis(100));
             listener.onTurnComplete(result, "question");
 

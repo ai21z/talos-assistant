@@ -1,7 +1,7 @@
 package dev.talos.cli.repl.slash;
 
 import dev.talos.cli.repl.Context;
-import dev.talos.cli.repl.Result;
+import dev.talos.runtime.Result;
 import dev.talos.runtime.JsonSessionStore;
 import dev.talos.runtime.SessionStore;
 import dev.talos.runtime.TurnRecord;

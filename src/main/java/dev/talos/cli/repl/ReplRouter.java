@@ -1,5 +1,7 @@
 package dev.talos.cli.repl;
 
+import dev.talos.runtime.Result;
+
 import dev.talos.cli.repl.slash.CommandRegistry;
 import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.modes.PromptClassifier;

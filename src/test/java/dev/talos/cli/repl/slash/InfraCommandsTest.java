@@ -2,7 +2,7 @@ package dev.talos.cli.repl.slash;
 
 import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
-import dev.talos.cli.repl.Result;
+import dev.talos.runtime.Result;
 import dev.talos.core.Config;
 import dev.talos.core.rag.RagService;
 import dev.talos.runtime.ToolCallParser;

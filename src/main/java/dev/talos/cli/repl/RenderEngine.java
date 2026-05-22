@@ -1,5 +1,7 @@
 package dev.talos.cli.repl;
 
+import dev.talos.runtime.Result;
+
 import dev.talos.cli.ui.CliTheme;
 import dev.talos.cli.ui.AnswerPaneRenderer;
 import dev.talos.cli.ui.ProgressLineRenderer;
