@@ -1,7 +1,7 @@
 package dev.talos.core.retrieval.stages;
 
-import dev.talos.core.ingest.SourceIdentity;
-import dev.talos.core.ingest.SourceType;
+import dev.talos.spi.types.SourceIdentity;
+import dev.talos.spi.types.SourceType;
 import dev.talos.core.retrieval.RetrievalCandidate;
 import dev.talos.core.retrieval.RetrievalRequest;
 import dev.talos.core.retrieval.RetrievalStage;

@@ -1,4 +1,4 @@
-package dev.talos.core.ingest;
+package dev.talos.spi.types;
 
 import java.util.Locale;
 import java.util.Map;
@@ -6,12 +6,10 @@ import java.util.Map;
 /**
  * Concrete technical format of a source, typically derived from file extension.
  *
- * <p>V1 covers the formats already handled by {@link Chunker} and
- * {@code ParserUtil}: programming languages, markup, configuration, and
- * build-system files. Additional formats (PDF, DOCX, XLSX, etc.) will be
- * added as parser support lands.
- *
- * @see SourceClassifier
+ * <p>V1 covers the formats already handled by Talos source ingestion:
+ * programming languages, markup, configuration, and build-system files.
+ * Additional formats (PDF, DOCX, XLSX, etc.) will be added as parser support
+ * lands.
  */
 public enum SourceFormat {
 

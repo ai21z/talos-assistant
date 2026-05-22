@@ -2,7 +2,7 @@ package dev.talos.core.rag;
 
 import dev.talos.core.context.ContextPacker;
 import dev.talos.core.context.ContextResult;
-import dev.talos.core.ingest.ChunkMetadata;
+import dev.talos.spi.types.ChunkMetadata;
 import dev.talos.core.retrieval.RetrievalTrace;
 import org.junit.jupiter.api.Test;
 
