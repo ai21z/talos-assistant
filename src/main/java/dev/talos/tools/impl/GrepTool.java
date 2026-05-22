@@ -6,7 +6,7 @@ import dev.talos.core.extract.DocumentExtractionService;
 import dev.talos.core.extract.DocumentExtractionStatus;
 import dev.talos.core.ingest.FileCapabilityPolicy;
 import dev.talos.core.ingest.UnsupportedDocumentFormats;
-import dev.talos.runtime.policy.ProtectedReadScopePolicy;
+import dev.talos.core.privacy.PrivacyConfigFacts;
 import dev.talos.safety.ProtectedContentMessages;
 import dev.talos.safety.ProtectedContentSanitizer;
 import dev.talos.safety.ProtectedWorkspacePaths;
@@ -106,7 +106,7 @@ public final class GrepTool implements TalosTool {
         }
 
         Path root = ctx.workspace();
-        boolean privateMode = ProtectedReadScopePolicy.privateMode(ctx.config());
+        boolean privateMode = PrivacyConfigFacts.privateMode(ctx.config());
         List<String> matches = new ArrayList<>();
         List<String> skippedUnsupportedDocuments = new ArrayList<>();
         int[] skippedProtected = {0};
@@ -258,7 +258,7 @@ public final class GrepTool implements TalosTool {
             int maxResults,
             List<String> skippedUnsupportedDocuments) {
         String relPath = root.relativize(file).toString().replace('\\', '/');
-        boolean privateMode = ProtectedReadScopePolicy.privateMode(ctx.config());
+        boolean privateMode = PrivacyConfigFacts.privateMode(ctx.config());
         DocumentExtractionResult extraction = new DocumentExtractionService(ctx.config())
                 .extract(DocumentExtractionRequest.search(file, root));
         if (extraction.status() != DocumentExtractionStatus.SUCCESS
