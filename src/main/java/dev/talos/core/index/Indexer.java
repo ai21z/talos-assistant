@@ -17,7 +17,7 @@ import dev.talos.core.ingest.FileWalker;
 import dev.talos.core.ingest.ParsedChunk;
 import dev.talos.core.ingest.ParserUtil;
 import dev.talos.core.ingest.UnsupportedDocumentFormats;
-import dev.talos.runtime.policy.PrivateDocumentPolicy;
+import dev.talos.core.privacy.PrivateDocumentIndexingPolicy;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.safety.ProtectedWorkspacePaths;
 import dev.talos.spi.Embeddings;
@@ -530,9 +530,9 @@ public class Indexer {
             DocumentExtractionResult result = new DocumentExtractionService(cfg).extract(request);
             if (result.status() == DocumentExtractionStatus.SUCCESS
                     || result.status() == DocumentExtractionStatus.PARTIAL) {
-                if (!PrivateDocumentPolicy.ragIndexAllowed(cfg, request, capability)) {
+                if (!PrivateDocumentIndexingPolicy.mayIndexExtractedDocument(cfg, request, capability)) {
                     throw new PrivacyIndexingSkip("Document extraction blocked by private document RAG policy: "
-                            + PrivateDocumentPolicy.decisionReason(cfg, request, capability));
+                            + PrivateDocumentIndexingPolicy.decisionReason(cfg, request, capability));
                 }
                 return result.safeText();
             }
