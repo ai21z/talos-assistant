@@ -6,6 +6,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -34,5 +35,18 @@ class RagServiceContextLedgerTest {
         assertEquals(1, snapshot.summary().byBoundary().get("RAG_INDEX"));
         assertEquals(1, snapshot.summary().byDecision().get("EXCLUDED_BY_PRIVACY_OR_TRUST_POLICY"));
         assertEquals(1, snapshot.summary().byReason().get("PRIVATE_MODE_RAG_DISABLED"));
+    }
+
+    @Test
+    void ragServiceUsesCorePrivacyFactsForPrivateModeRagOwnership() throws Exception {
+        String source = Files.readString(Path.of("src/main/java/dev/talos/core/rag/RagService.java"));
+        String baseline = Files.readString(Path.of("config/architecture-boundary-baseline.txt"));
+
+        assertTrue(source.contains("import dev.talos.core.privacy.PrivacyConfigFacts;"), source);
+        assertFalse(source.contains("dev.talos.runtime.policy.ProtectedReadScopePolicy"), source);
+        assertFalse(baseline.contains(
+                        "core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java"
+                                + "|dev.talos.runtime.policy.ProtectedReadScopePolicy"),
+                baseline);
     }
 }
