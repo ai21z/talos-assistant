@@ -3,7 +3,7 @@ package dev.talos.core.extract;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
 import dev.talos.core.ingest.FileCapabilityPolicy;
-import dev.talos.runtime.policy.PrivateDocumentPolicy;
+import dev.talos.core.privacy.PrivateDocumentContentPolicy;
 import dev.talos.safety.ProtectedContentSanitizer;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -72,7 +72,7 @@ public final class DocumentExtractionService {
                     safe,
                     List.of(),
                     provenance(sourcePath, "text", "builtin"),
-                    PrivateDocumentPolicy.modelHandoffAllowed(cfg, request, info));
+                    PrivateDocumentContentPolicy.modelHandoffAllowed(cfg, request, info));
         } catch (IOException | RuntimeException e) {
             return new DocumentExtractionResult(
                     sourcePath,
@@ -233,7 +233,7 @@ public final class DocumentExtractionService {
                 safe,
                 List.copyOf(effectiveWarnings),
                 provenance(sourcePath, adapterName, adapterVersion),
-                PrivateDocumentPolicy.modelHandoffAllowed(cfg, request, info));
+                PrivateDocumentContentPolicy.modelHandoffAllowed(cfg, request, info));
     }
 
     private static String extractPdf(Path path) throws IOException {
