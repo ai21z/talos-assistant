@@ -52,6 +52,25 @@ class GrepToolTest {
         assertNotNull(tool.descriptor().parametersSchema());
     }
 
+    @Test void grep_uses_neutral_safety_for_protected_content_path_and_sanitizer_ownership()
+            throws IOException {
+        String source = Files.readString(Path.of("src/main/java/dev/talos/tools/impl/GrepTool.java"));
+        assertTrue(source.contains("import dev.talos.safety.ProtectedContentMessages;"), source);
+        assertTrue(source.contains("import dev.talos.safety.ProtectedContentSanitizer;"), source);
+        assertTrue(source.contains("import dev.talos.safety.ProtectedWorkspacePaths;"), source);
+        assertFalse(source.contains("import dev.talos.runtime.policy.ProtectedContentPolicy;"), source);
+        assertFalse(source.contains("ProtectedContentPolicy."), source);
+        assertTrue(source.contains("import dev.talos.runtime.policy.ProtectedReadScopePolicy;"), source);
+
+        String baseline = Files.readString(Path.of("config/architecture-boundary-baseline.txt"));
+        assertFalse(baseline.contains(
+                "tools-no-runtime|src/main/java/dev/talos/tools/impl/GrepTool.java|dev.talos.runtime.policy.ProtectedContentPolicy"),
+                baseline);
+        assertTrue(baseline.contains(
+                "tools-no-runtime|src/main/java/dev/talos/tools/impl/GrepTool.java|dev.talos.runtime.policy.ProtectedReadScopePolicy"),
+                baseline);
+    }
+
     @Test void plainTextSearch() {
         var r = tool.execute(new ToolCall("talos.grep", Map.of("pattern", "public class")), ctx);
         assertTrue(r.success());
