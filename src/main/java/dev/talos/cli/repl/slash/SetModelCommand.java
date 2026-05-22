@@ -2,7 +2,7 @@ package dev.talos.cli.repl.slash;
 
 import dev.talos.cli.repl.Context;
 import dev.talos.runtime.Result;
-import dev.talos.spi.EngineRegistry;
+import dev.talos.core.engine.EngineRegistry;
 
 import java.util.List;
 import java.util.Locale;

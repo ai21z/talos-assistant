@@ -27,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.*;
  *       going through {@code LlmClient}.</li>
  *   <li>{@code RegistryLlmEngineResolver} constructs, selects, and closes
  *       without requiring a live engine backend (all provider work in
- *       {@link dev.talos.spi.EngineRegistry} is lazy until
+ *       {@link dev.talos.core.engine.EngineRegistry} is lazy until
  *       {@code engine()} is called).</li>
  * </ul>
  *
@@ -113,7 +113,7 @@ class LlmEngineResolverTest {
 
     @Test
     void registry_resolver_null_config_is_tolerated() {
-        // EngineRegistry contract: null Config becomes an empty Config.
+        // EngineRegistry contract: null Config falls back to the normal default Config.
         RegistryLlmEngineResolver resolver = new RegistryLlmEngineResolver(null);
         try {
             assertDoesNotThrow(() -> resolver.select("ollama", "qwen2.5-coder:14b"));

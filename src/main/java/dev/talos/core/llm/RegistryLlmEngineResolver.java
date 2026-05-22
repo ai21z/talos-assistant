@@ -1,7 +1,7 @@
 package dev.talos.core.llm;
 
 import dev.talos.core.Config;
-import dev.talos.spi.EngineRegistry;
+import dev.talos.core.engine.EngineRegistry;
 import dev.talos.spi.types.Capabilities;
 import dev.talos.spi.types.ChatRequest;
 import dev.talos.spi.types.TokenChunk;
