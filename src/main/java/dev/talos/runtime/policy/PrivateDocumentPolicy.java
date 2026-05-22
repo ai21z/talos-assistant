@@ -5,6 +5,7 @@ import dev.talos.core.Config;
 import dev.talos.core.extract.DocumentExtractionIntent;
 import dev.talos.core.extract.DocumentExtractionRequest;
 import dev.talos.core.ingest.FileCapabilityPolicy;
+import dev.talos.core.privacy.DocumentContentDecision;
 
 import java.nio.file.Path;
 import java.util.Map;
@@ -17,6 +18,18 @@ public final class PrivateDocumentPolicy {
         if (info == null) return false;
         return info.capability() == FileCapabilityPolicy.Capability.EXTRACTABLE_TEXT_ENABLED
                 || info.capability() == FileCapabilityPolicy.Capability.OCR_ENABLED;
+    }
+
+    public static DocumentContentDecision decide(
+            Config cfg,
+            DocumentExtractionRequest request,
+            FileCapabilityPolicy.FormatInfo info) {
+        return new DocumentContentDecision(
+                privateDocumentContent(cfg, request, info),
+                modelHandoffAllowed(cfg, request, info),
+                rawArtifactPersistenceAllowed(cfg, request, info),
+                ragIndexAllowed(cfg, request, info),
+                decisionReason(cfg, request, info));
     }
 
     public static boolean privateDocumentContent(
