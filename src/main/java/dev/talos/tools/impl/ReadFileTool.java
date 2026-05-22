@@ -8,7 +8,7 @@ import dev.talos.core.extract.DocumentExtractionWarning;
 import dev.talos.core.ingest.FileCapabilityPolicy;
 import dev.talos.core.ingest.UnsupportedDocumentFormats;
 import dev.talos.core.privacy.DocumentContentDecision;
-import dev.talos.runtime.policy.PrivateDocumentPolicy;
+import dev.talos.core.privacy.PrivateDocumentContentPolicy;
 import dev.talos.tools.*;
 
 import java.io.IOException;
@@ -143,7 +143,7 @@ public final class ReadFileTool implements TalosTool {
                 .extract(request);
         if (extraction.status() == DocumentExtractionStatus.SUCCESS
                 || extraction.status() == DocumentExtractionStatus.PARTIAL) {
-            DocumentContentDecision decision = PrivateDocumentPolicy.decide(ctx.config(), request, info);
+            DocumentContentDecision decision = PrivateDocumentContentPolicy.decide(ctx.config(), request, info);
             return ToolResult.ok(formatExtraction(extraction), ToolContentMetadata.extractedDocument(
                     extraction.sourcePath(),
                     decision.privateDocumentContent(),
