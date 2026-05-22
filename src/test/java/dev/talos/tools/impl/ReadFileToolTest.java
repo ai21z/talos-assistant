@@ -246,12 +246,18 @@ class ReadFileToolTest {
     @Test
     void extractedDocumentMetadataUsesSinglePrivateDocumentDecision() throws IOException {
         String source = Files.readString(Path.of("src/main/java/dev/talos/tools/impl/ReadFileTool.java"));
+        String baseline = Files.readString(Path.of("config/architecture-boundary-baseline.txt"));
 
-        assertTrue(source.contains("PrivateDocumentPolicy.decide("), source);
+        assertTrue(source.contains("import dev.talos.core.privacy.PrivateDocumentContentPolicy;"), source);
+        assertFalse(source.contains("import dev.talos.runtime.policy.PrivateDocumentPolicy;"), source);
+        assertTrue(source.contains("PrivateDocumentContentPolicy.decide("), source);
         assertFalse(source.contains("PrivateDocumentPolicy.privateDocumentContent("), source);
         assertFalse(source.contains("PrivateDocumentPolicy.rawArtifactPersistenceAllowed("), source);
         assertFalse(source.contains("PrivateDocumentPolicy.ragIndexAllowed("), source);
         assertFalse(source.contains("PrivateDocumentPolicy.decisionReason("), source);
+        assertFalse(baseline.contains(
+                "tools-no-runtime|src/main/java/dev/talos/tools/impl/ReadFileTool.java|"
+                        + "dev.talos.runtime.policy.PrivateDocumentPolicy"), baseline);
     }
 
     @Test
