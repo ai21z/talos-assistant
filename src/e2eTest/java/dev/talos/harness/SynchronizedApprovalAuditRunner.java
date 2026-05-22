@@ -31,7 +31,7 @@ import dev.talos.spi.types.PromptDebugCapture;
 import dev.talos.spi.types.PromptDebugSnapshot;
 import dev.talos.tools.FileUndoStack;
 import dev.talos.tools.ToolRegistry;
-import dev.talos.tools.impl.BatchWorkspaceApplyTool;
+import dev.talos.runtime.workspace.BatchWorkspaceApplyTool;
 import dev.talos.tools.impl.CopyPathTool;
 import dev.talos.tools.impl.DeletePathTool;
 import dev.talos.tools.impl.FileEditTool;

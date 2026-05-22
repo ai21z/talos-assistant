@@ -1,4 +1,4 @@
-package dev.talos.tools.impl;
+package dev.talos.runtime.workspace;
 
 import dev.talos.core.Config;
 import dev.talos.core.capability.CapabilityKind;
@@ -79,7 +79,7 @@ class BatchWorkspaceApplyToolTest {
                 [{"op":"delete_path","path":"docs/old-plan.md"}]
                 """));
 
-        var plan = dev.talos.runtime.workspace.WorkspaceBatchPlanParser.parse(call).orElseThrow();
+        var plan = WorkspaceBatchPlanParser.parse(call).orElseThrow();
 
         assertEquals(ToolRiskLevel.DESTRUCTIVE, plan.checkpointPlan().riskLevel());
         assertEquals(List.of("docs/old-plan.md"), plan.checkpointPlan().checkpointPaths());

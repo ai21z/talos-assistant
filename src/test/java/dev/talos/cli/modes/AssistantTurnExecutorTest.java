@@ -928,7 +928,7 @@ class AssistantTurnExecutorTest {
             Files.createDirectories(workspace.resolve("docs"));
             Files.writeString(workspace.resolve("docs/summary.md"), "summary body");
             var registry = new dev.talos.tools.ToolRegistry();
-            registry.register(new dev.talos.tools.impl.BatchWorkspaceApplyTool());
+            registry.register(new dev.talos.runtime.workspace.BatchWorkspaceApplyTool());
             registry.register(new dev.talos.tools.impl.MakeDirectoryTool());
             registry.register(new dev.talos.tools.impl.CopyPathTool());
             registry.register(new dev.talos.tools.impl.RenamePathTool());

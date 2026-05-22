@@ -31,7 +31,7 @@ import dev.talos.runtime.policy.SensitiveWorkspaceDetector;
 import dev.talos.tools.FileUndoStack;
 import dev.talos.tools.ToolProgressSink;
 import dev.talos.tools.ToolRegistry;
-import dev.talos.tools.impl.BatchWorkspaceApplyTool;
+import dev.talos.runtime.workspace.BatchWorkspaceApplyTool;
 import dev.talos.tools.impl.DeletePathTool;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
