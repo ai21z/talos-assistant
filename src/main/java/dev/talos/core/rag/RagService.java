@@ -24,7 +24,8 @@ import dev.talos.runtime.context.ContextItemSource;
 import dev.talos.runtime.context.ContextLedgerCapture;
 import dev.talos.runtime.context.ExecutionBoundary;
 import dev.talos.runtime.ToolCallParser;
-import dev.talos.runtime.policy.ProtectedContentPolicy;
+import dev.talos.safety.ProtectedContentSanitizer;
+import dev.talos.safety.ProtectedWorkspacePaths;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.spi.CorpusStore;
 import dev.talos.tools.ToolContentMetadata;
@@ -210,10 +211,10 @@ public class RagService {
                 String text = store.getTextByPath(c.path());
                 if (text == null || text.isBlank()) continue;
                 Path snippetPath = ws.resolve(c.path()).normalize();
-                if (ProtectedContentPolicy.isProtectedPath(ws, snippetPath)) {
+                if (ProtectedWorkspacePaths.isProtectedPath(ws, snippetPath)) {
                     continue;
                 }
-                String sanitized = ProtectedContentPolicy.sanitizeText(text);
+                String sanitized = ProtectedContentSanitizer.sanitizeText(text);
                 snippets.add(new ContextResult.Snippet(c.path(), sanitized, c.metadata()));
                 ContextLedgerCapture.record(
                         ContextItem.fromText(

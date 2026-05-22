@@ -49,4 +49,18 @@ class RagServiceContextLedgerTest {
                                 + "|dev.talos.runtime.policy.ProtectedReadScopePolicy"),
                 baseline);
     }
+
+    @Test
+    void ragServiceUsesSafetyPrimitivesForProtectedContentOwnership() throws Exception {
+        String source = Files.readString(Path.of("src/main/java/dev/talos/core/rag/RagService.java"));
+        String baseline = Files.readString(Path.of("config/architecture-boundary-baseline.txt"));
+
+        assertTrue(source.contains("import dev.talos.safety.ProtectedContentSanitizer;"), source);
+        assertTrue(source.contains("import dev.talos.safety.ProtectedWorkspacePaths;"), source);
+        assertFalse(source.contains("dev.talos.runtime.policy.ProtectedContentPolicy"), source);
+        assertFalse(baseline.contains(
+                        "core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java"
+                                + "|dev.talos.runtime.policy.ProtectedContentPolicy"),
+                baseline);
+    }
 }
