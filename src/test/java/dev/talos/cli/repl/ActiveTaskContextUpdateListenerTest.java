@@ -1,5 +1,6 @@
 package dev.talos.cli.repl;
 
+import dev.talos.runtime.SessionMemory;
 import dev.talos.runtime.Result;
 
 import dev.talos.runtime.TurnAudit;
