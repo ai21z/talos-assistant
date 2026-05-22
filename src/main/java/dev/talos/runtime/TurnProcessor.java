@@ -1,7 +1,5 @@
 package dev.talos.runtime;
 
-import dev.talos.cli.modes.ModeController;
-import dev.talos.cli.repl.Context;
 import dev.talos.core.retrieval.RetrievalTrace;
 import dev.talos.core.ingest.UnsupportedDocumentFormats;
 import dev.talos.runtime.command.CommandPlan;
@@ -63,7 +61,7 @@ public final class TurnProcessor {
 
     private static final Logger LOG = LoggerFactory.getLogger(TurnProcessor.class);
 
-    private final ModeController modes;
+    private final TurnRouter modes;
     private final ApprovalGate approvalGate;
     private final ApprovalPolicy approvalPolicy;
     private final dev.talos.runtime.policy.PermissionPolicy permissionPolicy;
@@ -84,12 +82,12 @@ public final class TurnProcessor {
      * for tests and ad-hoc call sites — those are explicit wiring, not
      * policy-by-null.
      */
-    public TurnProcessor(ModeController modes, ApprovalGate approvalGate,
+    public TurnProcessor(TurnRouter modes, ApprovalGate approvalGate,
                          ToolRegistry toolRegistry, ApprovalPolicy approvalPolicy) {
         this(modes, approvalGate, toolRegistry, approvalPolicy, new CheckpointService());
     }
 
-    public TurnProcessor(ModeController modes, ApprovalGate approvalGate,
+    public TurnProcessor(TurnRouter modes, ApprovalGate approvalGate,
                          ToolRegistry toolRegistry, ApprovalPolicy approvalPolicy,
                          CheckpointService checkpointService) {
         this.modes = modes;
@@ -105,15 +103,15 @@ public final class TurnProcessor {
                 "checkpointService must not be null");
     }
 
-    public TurnProcessor(ModeController modes, ApprovalGate approvalGate, ToolRegistry toolRegistry) {
+    public TurnProcessor(TurnRouter modes, ApprovalGate approvalGate, ToolRegistry toolRegistry) {
         this(modes, approvalGate, toolRegistry, ApprovalPolicy.ALWAYS_ASK);
     }
 
-    public TurnProcessor(ModeController modes, ApprovalGate approvalGate) {
+    public TurnProcessor(TurnRouter modes, ApprovalGate approvalGate) {
         this(modes, approvalGate, new ToolRegistry(), ApprovalPolicy.ALWAYS_ASK);
     }
 
-    public TurnProcessor(ModeController modes) {
+    public TurnProcessor(TurnRouter modes) {
         this(modes, new NoOpApprovalGate(), new ToolRegistry(), ApprovalPolicy.ALWAYS_ASK);
     }
 
@@ -162,8 +160,8 @@ public final class TurnProcessor {
      * @return a TurnResult, or null if no mode handled the input
      * @throws Exception if mode dispatch fails (propagated for envelope handling)
      */
-    @SuppressWarnings("resource") // Context-owned LlmClient is borrowed for metadata, not closed per turn.
-    public TurnResult process(Session session, String userInput, Context ctx) throws Exception {
+    @SuppressWarnings("resource") // RuntimeTurnContext-owned LlmClient is borrowed for metadata, not closed per turn.
+    public TurnResult process(Session session, String userInput, RuntimeTurnContext ctx) throws Exception {
         if (userInput == null || userInput.isBlank()) {
             return null;
         }
@@ -259,7 +257,7 @@ public final class TurnProcessor {
         return slash >= 0 && slash + 1 < model.length() ? model.substring(slash + 1) : model;
     }
 
-    private static String tracePhase(Context ctx) {
+    private static String tracePhase(RuntimeTurnContext ctx) {
         return ctx != null && ctx.executionPhaseState() != null && ctx.executionPhaseState().phase() != null
                 ? ctx.executionPhaseState().phase().name()
                 : "";
@@ -291,7 +289,7 @@ public final class TurnProcessor {
      * recorded into the active {@link TurnAuditCapture} bag if one is
      * running on this thread.
      */
-    public ToolResult executeTool(Session session, ToolCall call, Context ctx) {
+    public ToolResult executeTool(Session session, ToolCall call, RuntimeTurnContext ctx) {
         if (call == null) {
             return ToolResult.fail(ToolError.invalidParams("Tool call is null"));
         }
@@ -774,7 +772,7 @@ public final class TurnProcessor {
     private static ToolResult validateBeforeApproval(
             ToolCall call,
             Session session,
-            Context ctx,
+            RuntimeTurnContext ctx,
             TaskContract taskContract
     ) {
         ToolResult sandboxPathValidation = validateSandboxPathBeforeApproval(call, session, ctx);
@@ -926,7 +924,7 @@ public final class TurnProcessor {
                         + "No approval was requested and no file was changed."));
     }
 
-    private static ToolResult validateSandboxPathBeforeApproval(ToolCall call, Session session, Context ctx) {
+    private static ToolResult validateSandboxPathBeforeApproval(ToolCall call, Session session, RuntimeTurnContext ctx) {
         if (call == null || !ToolCallSupport.isMutatingTool(call.toolName())) {
             return null;
         }
@@ -1116,7 +1114,7 @@ public final class TurnProcessor {
     }
 
     private static ToolResult rejectIfOutsideCurrentToolSurface(
-            Context ctx,
+            RuntimeTurnContext ctx,
             ToolCall call,
             String canonicalToolName,
             String tracePhase
