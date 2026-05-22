@@ -5,7 +5,7 @@ import dev.talos.cli.prompt.LastPromptCapture;
 import dev.talos.cli.prompt.PromptInspector;
 import dev.talos.cli.prompt.PromptRender;
 import dev.talos.cli.repl.Context;
-import dev.talos.cli.repl.Result;
+import dev.talos.runtime.Result;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;

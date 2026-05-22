@@ -4,7 +4,7 @@ import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.prompt.LastPromptCapture;
 import dev.talos.cli.prompt.PromptInspector;
 import dev.talos.cli.repl.Context;
-import dev.talos.cli.repl.Result;
+import dev.talos.runtime.Result;
 import dev.talos.core.Config;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.impl.ReadFileTool;

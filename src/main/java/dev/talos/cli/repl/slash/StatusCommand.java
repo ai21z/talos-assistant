@@ -2,7 +2,7 @@ package dev.talos.cli.repl.slash;
 
 import dev.talos.cli.modes.ModeController;
 import dev.talos.cli.repl.Context;
-import dev.talos.cli.repl.Result;
+import dev.talos.runtime.Result;
 import dev.talos.cli.ui.AnsiColor;
 import dev.talos.cli.ui.CliStatusDashboard;
 import dev.talos.core.CfgUtil;
