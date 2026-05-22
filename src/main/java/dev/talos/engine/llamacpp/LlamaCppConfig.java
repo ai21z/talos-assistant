@@ -1,7 +1,7 @@
 package dev.talos.engine.llamacpp;
 
 import dev.talos.core.CfgUtil;
-import dev.talos.core.Config;
+import dev.talos.spi.EngineConfig;
 
 import java.net.URI;
 import java.nio.file.Path;
@@ -34,8 +34,8 @@ record LlamaCppConfig(
         CONNECT_ONLY
     }
 
-    static LlamaCppConfig from(Config cfg) {
-        Map<String, Object> engines = CfgUtil.map(cfg == null ? null : cfg.data.get("engines"));
+    static LlamaCppConfig from(EngineConfig cfg) {
+        Map<String, Object> engines = CfgUtil.map(cfg == null ? null : cfg.data().get("engines"));
         Map<String, Object> block = CfgUtil.map(engines.get("llama_cpp"));
 
         Mode mode = parseMode(Objects.toString(block.getOrDefault("mode", "managed")));

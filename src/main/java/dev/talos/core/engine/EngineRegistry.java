@@ -1,21 +1,26 @@
-package dev.talos.spi;
+package dev.talos.core.engine;
 
 import dev.talos.core.Config;
 import dev.talos.core.EngineRuntimeConfig;
+import dev.talos.spi.ModelCatalog;
+import dev.talos.spi.ModelEngine;
+import dev.talos.spi.ModelEngineProvider;
 import dev.talos.spi.types.ModelRef;
 
-import java.util.*;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.ServiceLoader;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
- * Discovers model engines via ServiceLoader and exposes:
- *  - installed(): union of all catalogs
- *  - resolve(): resolve "backend/model" or bare "model"
- *  - select(backend, model): set active pair (engine is (re)created lazily)
- *  - engine(): get/create the active engine (created via Provider.create(cfg))
+ * Discovers model engines via ServiceLoader and owns active engine selection.
  *
- * Note: Engine instances are not model-bound; the active model is carried in ChatRequest.
+ * <p>This is core orchestration over SPI providers, not an SPI contract.
  */
 public final class EngineRegistry implements AutoCloseable {
 
@@ -30,14 +35,12 @@ public final class EngineRegistry implements AutoCloseable {
     public EngineRegistry(Config cfg) {
         this.cfg = (cfg == null ? new Config() : cfg);
 
-        // Discover providers and their catalogs
         ServiceLoader<ModelEngineProvider> sl = ServiceLoader.load(ModelEngineProvider.class);
         for (ModelEngineProvider p : sl) {
             providers.put(p.id(), p);
-            catalogs.put(p.id(), p.catalog(this.cfg)); // <- SPI requires catalog(Config)
+            catalogs.put(p.id(), p.catalog(this.cfg));
         }
 
-        // Defaults from config (mirrors how LlmClient seeds values)
         EngineRuntimeConfig runtime = EngineRuntimeConfig.from(this.cfg);
         this.activeBackend = runtime.backend();
         this.activeModel = runtime.model();
@@ -50,11 +53,10 @@ public final class EngineRegistry implements AutoCloseable {
 
         if (backendChanged) {
             activeBackend = backend;
-            closeEngine(); // ensure new provider.create(cfg) on next engine()
+            closeEngine();
         }
         if (modelChanged) {
             activeModel = model;
-            // engine stays; model is carried in ChatRequest
         }
     }
 
@@ -64,7 +66,7 @@ public final class EngineRegistry implements AutoCloseable {
         if (activeEngine == null) {
             ModelEngineProvider p = providers.get(activeBackend);
             if (p == null) throw new IllegalStateException("No ModelEngineProvider for backend: " + activeBackend);
-            activeEngine = p.create(this.cfg); // <- SPI requires create(Config)
+            activeEngine = p.create(this.cfg);
         }
         return activeEngine;
     }
@@ -103,7 +105,6 @@ public final class EngineRegistry implements AutoCloseable {
         if (s == null || s.isBlank()) return Optional.empty();
         String needle = s.trim();
 
-        // Qualified form: backend/model
         if (needle.contains("/")) {
             String[] parts = needle.split("/", 2);
             if (parts.length != 2) return Optional.empty();
@@ -114,7 +115,6 @@ public final class EngineRegistry implements AutoCloseable {
                     : m);
         }
 
-        // Bare model: first backend that has it
         return providers.entrySet().stream()
                 .map(e -> {
                     ModelCatalog c = catalogs.get(e.getKey());
@@ -126,15 +126,6 @@ public final class EngineRegistry implements AutoCloseable {
                 .filter(Optional::isPresent)
                 .map(Optional::get)
                 .findFirst();
-    }
-
-    private static Map<String, Object> map(Object o) {
-        if (o instanceof Map<?, ?> m) {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> x = (Map<String, Object>) (Map<?, ?>) m;
-            return x;
-        }
-        return Map.of();
     }
 
     private void ensureDefaults() {

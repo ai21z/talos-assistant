@@ -3,6 +3,3 @@
 # This file records existing package-direction debt only. Do not add entries
 # unless a ticket explicitly accepts the new edge and explains why.
 spi-no-upper-layers|src/main/java/dev/talos/spi/CorpusStore.java|dev.talos.core.ingest.ChunkMetadata
-spi-no-upper-layers|src/main/java/dev/talos/spi/EngineRegistry.java|dev.talos.core.Config
-spi-no-upper-layers|src/main/java/dev/talos/spi/EngineRegistry.java|dev.talos.core.EngineRuntimeConfig
-spi-no-upper-layers|src/main/java/dev/talos/spi/ModelEngineProvider.java|dev.talos.core.Config

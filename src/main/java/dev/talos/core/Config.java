@@ -2,6 +2,7 @@ package dev.talos.core;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+import dev.talos.spi.EngineConfig;
 
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -24,7 +25,7 @@ import java.util.*;
  *  - Strict mode via env TALOS_STRICT_CONFIG=true -> fail fast if any default is applied.
  *  - Ships "limits" block with sane defaults including llm_context_max_tokens.
  */
-public class Config {
+public class Config implements EngineConfig {
 
     /** Set TALOS_STRICT_CONFIG=true to fail when defaults are needed. */
     public static final String STRICT_ENV = "TALOS_STRICT_CONFIG";
@@ -159,6 +160,11 @@ public class Config {
     /** Typed read-only view over this config's data. */
     public ConfigView view() {
         return ConfigView.of(this);
+    }
+
+    @Override
+    public Map<String, Object> data() {
+        return data;
     }
 
     /**
