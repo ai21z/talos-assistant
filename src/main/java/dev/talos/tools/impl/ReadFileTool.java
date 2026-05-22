@@ -7,6 +7,7 @@ import dev.talos.core.extract.DocumentExtractionStatus;
 import dev.talos.core.extract.DocumentExtractionWarning;
 import dev.talos.core.ingest.FileCapabilityPolicy;
 import dev.talos.core.ingest.UnsupportedDocumentFormats;
+import dev.talos.core.privacy.DocumentContentDecision;
 import dev.talos.runtime.policy.PrivateDocumentPolicy;
 import dev.talos.tools.*;
 
@@ -142,13 +143,14 @@ public final class ReadFileTool implements TalosTool {
                 .extract(request);
         if (extraction.status() == DocumentExtractionStatus.SUCCESS
                 || extraction.status() == DocumentExtractionStatus.PARTIAL) {
+            DocumentContentDecision decision = PrivateDocumentPolicy.decide(ctx.config(), request, info);
             return ToolResult.ok(formatExtraction(extraction), ToolContentMetadata.extractedDocument(
                     extraction.sourcePath(),
-                    PrivateDocumentPolicy.privateDocumentContent(ctx.config(), request, info),
-                    extraction.modelHandoffAllowed(),
-                    PrivateDocumentPolicy.rawArtifactPersistenceAllowed(ctx.config(), request, info),
-                    PrivateDocumentPolicy.ragIndexAllowed(ctx.config(), request, info),
-                    PrivateDocumentPolicy.decisionReason(ctx.config(), request, info)));
+                    decision.privateDocumentContent(),
+                    decision.modelHandoffAllowed(),
+                    decision.rawArtifactPersistenceAllowed(),
+                    decision.ragIndexAllowed(),
+                    decision.reason()));
         }
         return ToolResult.fail(ToolError.unsupportedFormat(formatExtractionLimit(extraction)));
     }
