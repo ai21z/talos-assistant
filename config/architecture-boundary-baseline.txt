@@ -2,10 +2,6 @@
 # Format: rule|path|source-reference
 # This file records existing package-direction debt only. Do not add entries
 # unless a ticket explicitly accepts the new edge and explains why.
-runtime-core-no-cli|src/main/java/dev/talos/runtime/ToolCallLoop.java|dev.talos.cli.repl.Context
-runtime-core-no-cli|src/main/java/dev/talos/runtime/TurnProcessor.java|dev.talos.cli.modes.ModeController
-runtime-core-no-cli|src/main/java/dev/talos/runtime/TurnProcessor.java|dev.talos.cli.repl.Context
-runtime-core-no-cli|src/main/java/dev/talos/runtime/toolcall/LoopState.java|dev.talos.cli.repl.Context
 spi-no-upper-layers|src/main/java/dev/talos/spi/CorpusStore.java|dev.talos.core.ingest.ChunkMetadata
 spi-no-upper-layers|src/main/java/dev/talos/spi/EngineRegistry.java|dev.talos.core.Config
 spi-no-upper-layers|src/main/java/dev/talos/spi/EngineRegistry.java|dev.talos.core.EngineRuntimeConfig

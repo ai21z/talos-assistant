@@ -11,6 +11,7 @@ import dev.talos.core.security.Redactor;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.ApprovalGate;
 import dev.talos.runtime.NoOpApprovalGate;
+import dev.talos.runtime.RuntimeTurnContext;
 import dev.talos.runtime.SessionMemory;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.phase.ExecutionPhaseState;
@@ -42,7 +43,7 @@ public record Context(
         Runnable onStreamComplete,
         ExecutionPhaseState executionPhaseState,
         List<ToolSpec> nativeToolSpecs
-) {
+) implements RuntimeTurnContext {
     public Context {
         if (executionPhaseState == null) executionPhaseState = new ExecutionPhaseState();
         if (nativeToolSpecs != null) nativeToolSpecs = List.copyOf(nativeToolSpecs);
