@@ -11,7 +11,6 @@ core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runti
 core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runtime.context.ContextItemSource
 core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runtime.context.ContextLedgerCapture
 core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runtime.context.ExecutionBoundary
-core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runtime.policy.ProtectedContentPolicy
 runtime-core-no-cli|src/main/java/dev/talos/core/context/ConversationManager.java|dev.talos.cli.repl.SessionMemory
 runtime-core-no-cli|src/main/java/dev/talos/runtime/ActiveTaskContextUpdateListener.java|dev.talos.cli.repl.SessionMemory
 runtime-core-no-cli|src/main/java/dev/talos/runtime/CliApprovalGate.java|dev.talos.cli.ui.ApprovalPromptRenderer
