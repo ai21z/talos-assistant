@@ -20,4 +20,3 @@ spi-no-upper-layers|src/main/java/dev/talos/spi/CorpusStore.java|dev.talos.core.
 spi-no-upper-layers|src/main/java/dev/talos/spi/EngineRegistry.java|dev.talos.core.Config
 spi-no-upper-layers|src/main/java/dev/talos/spi/EngineRegistry.java|dev.talos.core.EngineRuntimeConfig
 spi-no-upper-layers|src/main/java/dev/talos/spi/ModelEngineProvider.java|dev.talos.core.Config
-tools-no-runtime|src/main/java/dev/talos/tools/impl/ReadFileTool.java|dev.talos.runtime.policy.PrivateDocumentPolicy
