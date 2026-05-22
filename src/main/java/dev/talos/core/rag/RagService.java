@@ -23,12 +23,12 @@ import dev.talos.core.context.ContextItem;
 import dev.talos.core.context.ContextItemSource;
 import dev.talos.core.context.ContextLedgerCapture;
 import dev.talos.core.context.ExecutionBoundary;
-import dev.talos.runtime.ToolCallParser;
 import dev.talos.safety.ProtectedContentSanitizer;
 import dev.talos.safety.ProtectedWorkspacePaths;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.spi.CorpusStore;
 import dev.talos.tools.ToolContentMetadata;
+import dev.talos.tools.ToolProtocolText;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -326,7 +326,7 @@ public class RagService {
                 // The rag-ask path has no tool dispatcher — tool calls are never
                 // valid here. They leak when the model sees tool-call format
                 // instructions in retrieved context (e.g., tools-preamble.txt).
-                text = ToolCallParser.stripToolCalls(text);
+                text = ToolProtocolText.stripToolCalls(text);
 
                 // Warn if we have retrieval but answer is empty
                 if (!packed.isEmpty() && text.trim().isEmpty()) {
