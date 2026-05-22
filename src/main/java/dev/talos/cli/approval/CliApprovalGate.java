@@ -1,7 +1,9 @@
-package dev.talos.runtime;
+package dev.talos.cli.approval;
 
 import dev.talos.cli.ui.ApprovalPromptRenderer;
 import dev.talos.cli.ui.CliTheme;
+import dev.talos.runtime.ApprovalGate;
+import dev.talos.runtime.ApprovalResponse;
 
 import java.io.InputStream;
 import java.io.PrintStream;
