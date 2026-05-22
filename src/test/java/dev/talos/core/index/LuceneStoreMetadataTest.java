@@ -1,6 +1,6 @@
 package dev.talos.core.index;
 
-import dev.talos.core.ingest.ChunkMetadata;
+import dev.talos.spi.types.ChunkMetadata;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 

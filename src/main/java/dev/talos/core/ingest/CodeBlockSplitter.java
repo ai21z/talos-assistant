@@ -1,5 +1,7 @@
 package dev.talos.core.ingest;
 
+import dev.talos.spi.types.SourceFormat;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
