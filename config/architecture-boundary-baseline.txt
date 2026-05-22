@@ -3,11 +3,6 @@
 # This file records existing package-direction debt only. Do not add entries
 # unless a ticket explicitly accepts the new edge and explains why.
 core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runtime.ToolCallParser
-core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runtime.context.ContextDecision
-core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runtime.context.ContextItem
-core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runtime.context.ContextItemSource
-core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runtime.context.ContextLedgerCapture
-core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runtime.context.ExecutionBoundary
 runtime-core-no-cli|src/main/java/dev/talos/core/context/ConversationManager.java|dev.talos.cli.repl.SessionMemory
 runtime-core-no-cli|src/main/java/dev/talos/runtime/MemoryUpdateListener.java|dev.talos.cli.repl.SessionMemory
 runtime-core-no-cli|src/main/java/dev/talos/runtime/Session.java|dev.talos.cli.repl.SessionMemory

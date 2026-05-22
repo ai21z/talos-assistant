@@ -1,4 +1,4 @@
-package dev.talos.runtime.context;
+package dev.talos.core.context;
 
 import dev.talos.tools.ToolContentMetadata;
 import org.junit.jupiter.api.Test;

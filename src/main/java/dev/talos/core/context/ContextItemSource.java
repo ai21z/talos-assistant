@@ -1,4 +1,4 @@
-package dev.talos.runtime.context;
+package dev.talos.core.context;
 
 /** Runtime source that produced a context item. */
 public enum ContextItemSource {

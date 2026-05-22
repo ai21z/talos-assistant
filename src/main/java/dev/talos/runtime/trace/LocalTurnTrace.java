@@ -1,7 +1,7 @@
 package dev.talos.runtime.trace;
 
 import dev.talos.runtime.task.TaskContract;
-import dev.talos.runtime.context.ContextLedgerSummary;
+import dev.talos.core.context.ContextLedgerSummary;
 
 import java.util.ArrayList;
 import java.util.List;

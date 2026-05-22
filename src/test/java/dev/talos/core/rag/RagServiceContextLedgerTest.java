@@ -1,7 +1,7 @@
 package dev.talos.core.rag;
 
 import dev.talos.core.Config;
-import dev.talos.runtime.context.ContextLedgerCapture;
+import dev.talos.core.context.ContextLedgerCapture;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -62,5 +62,24 @@ class RagServiceContextLedgerTest {
                         "core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java"
                                 + "|dev.talos.runtime.policy.ProtectedContentPolicy"),
                 baseline);
+    }
+
+    @Test
+    void ragServiceUsesCoreContextLedgerOwnership() throws Exception {
+        String source = Files.readString(Path.of("src/main/java/dev/talos/core/rag/RagService.java"));
+        String baseline = Files.readString(Path.of("config/architecture-boundary-baseline.txt"));
+
+        assertTrue(source.contains("import dev.talos.core.context.ContextDecision;"), source);
+        assertTrue(source.contains("import dev.talos.core.context.ContextItem;"), source);
+        assertTrue(source.contains("import dev.talos.core.context.ContextItemSource;"), source);
+        assertTrue(source.contains("import dev.talos.core.context.ContextLedgerCapture;"), source);
+        assertTrue(source.contains("import dev.talos.core.context.ExecutionBoundary;"), source);
+        assertFalse(source.contains("import dev.talos.runtime.context.ContextDecision;"), source);
+        assertFalse(source.contains("import dev.talos.runtime.context.ContextItem;"), source);
+        assertFalse(source.contains("import dev.talos.runtime.context.ContextItemSource;"), source);
+        assertFalse(source.contains("import dev.talos.runtime.context.ContextLedgerCapture;"), source);
+        assertFalse(source.contains("import dev.talos.runtime.context.ExecutionBoundary;"), source);
+        assertFalse(baseline.contains("src/main/java/dev/talos/core/rag/RagService.java|"
+                + "dev.talos.runtime.context."), baseline);
     }
 }

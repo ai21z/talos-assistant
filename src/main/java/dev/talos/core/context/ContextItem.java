@@ -1,8 +1,8 @@
-package dev.talos.runtime.context;
+package dev.talos.core.context;
 
 import dev.talos.tools.ToolContentMetadata;
 import dev.talos.tools.ToolResult;
-import dev.talos.runtime.policy.ProtectedContentPolicy;
+import dev.talos.safety.ProtectedPathTokens;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -117,7 +117,7 @@ public record ContextItem(
         while (normalized.startsWith("./")) {
             normalized = normalized.substring(2);
         }
-        if (ProtectedContentPolicy.looksProtectedPathString(normalized)) return "<protected-path>";
+        if (ProtectedPathTokens.looksProtectedPathToken(normalized)) return "<protected-path>";
         return normalized;
     }
 
