@@ -1,4 +1,4 @@
-package dev.talos.runtime.context;
+package dev.talos.core.context;
 
 /** Trust boundary that produced or carried a context item. */
 public enum ExecutionBoundary {

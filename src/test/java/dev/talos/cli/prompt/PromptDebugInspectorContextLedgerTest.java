@@ -1,10 +1,10 @@
 package dev.talos.cli.prompt;
 
-import dev.talos.runtime.context.ContextDecision;
-import dev.talos.runtime.context.ContextItem;
-import dev.talos.runtime.context.ContextItemSource;
-import dev.talos.runtime.context.ContextLedgerCapture;
-import dev.talos.runtime.context.ExecutionBoundary;
+import dev.talos.core.context.ContextDecision;
+import dev.talos.core.context.ContextItem;
+import dev.talos.core.context.ContextItemSource;
+import dev.talos.core.context.ContextLedgerCapture;
+import dev.talos.core.context.ExecutionBoundary;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.PromptDebugSnapshot;
 import dev.talos.tools.ToolContentMetadata;
