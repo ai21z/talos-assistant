@@ -244,6 +244,17 @@ class ReadFileToolTest {
     }
 
     @Test
+    void extractedDocumentMetadataUsesSinglePrivateDocumentDecision() throws IOException {
+        String source = Files.readString(Path.of("src/main/java/dev/talos/tools/impl/ReadFileTool.java"));
+
+        assertTrue(source.contains("PrivateDocumentPolicy.decide("), source);
+        assertFalse(source.contains("PrivateDocumentPolicy.privateDocumentContent("), source);
+        assertFalse(source.contains("PrivateDocumentPolicy.rawArtifactPersistenceAllowed("), source);
+        assertFalse(source.contains("PrivateDocumentPolicy.ragIndexAllowed("), source);
+        assertFalse(source.contains("PrivateDocumentPolicy.decisionReason("), source);
+    }
+
+    @Test
     void enabledXlsxExtractionReadsKnownCells() throws IOException {
         writeXlsx(workspace.resolve("sample.xlsx"), "Talos read-file XLSX text");
         Config cfg = extractionEnabled("excel");
