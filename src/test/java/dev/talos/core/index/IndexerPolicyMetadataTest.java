@@ -3,7 +3,7 @@ package dev.talos.core.index;
 import dev.talos.core.Config;
 import dev.talos.core.extract.DocumentExtractionService;
 import dev.talos.core.ingest.FileCapabilityPolicy;
-import dev.talos.runtime.policy.ProtectedContentPolicy;
+import dev.talos.safety.ProtectedWorkspacePaths;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -26,6 +26,20 @@ class IndexerPolicyMetadataTest {
     }
 
     @Test
+    void indexer_uses_safety_path_policy_version_for_protected_content_ownership() throws Exception {
+        String source = Files.readString(Path.of("src/main/java/dev/talos/core/index/Indexer.java"));
+        String baseline = Files.readString(Path.of("config/architecture-boundary-baseline.txt"));
+
+        assertTrue(source.contains("import dev.talos.safety.ProtectedWorkspacePaths;"), source);
+        assertTrue(source.contains("ProtectedWorkspacePaths.POLICY_VERSION"), source);
+        assertFalse(source.contains("dev.talos.runtime.policy.ProtectedContentPolicy"), source);
+        assertFalse(baseline.contains(
+                        "core-no-runtime|src/main/java/dev/talos/core/index/Indexer.java"
+                                + "|dev.talos.runtime.policy.ProtectedContentPolicy"),
+                baseline);
+    }
+
+    @Test
     void index_metadata_written_on_reindex() throws Exception {
         Files.writeString(tempDir.resolve("README.md"), "public text\n");
         Indexer indexer = new Indexer(new Config(null));
@@ -35,7 +49,7 @@ class IndexerPolicyMetadataTest {
         Path metadata = indexer.policyMetadataFile(tempDir);
         assertTrue(Files.exists(metadata));
         String text = Files.readString(metadata);
-        assertTrue(text.contains(ProtectedContentPolicy.POLICY_VERSION));
+        assertTrue(text.contains(ProtectedWorkspacePaths.POLICY_VERSION));
         assertTrue(text.contains(FileCapabilityPolicy.POLICY_VERSION));
         assertTrue(text.contains(DocumentExtractionService.EXTRACTION_POLICY_VERSION));
         assertTrue(indexer.isPolicyMetadataCurrent(tempDir));

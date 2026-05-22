@@ -3,6 +3,7 @@ package dev.talos.runtime.policy;
 import dev.talos.safety.ProtectedContentMessages;
 import dev.talos.safety.ProtectedContentSanitizer;
 import dev.talos.safety.ProtectedPathTokens;
+import dev.talos.safety.ProtectedWorkspacePaths;
 import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolResult;
 
@@ -13,7 +14,7 @@ import java.util.Map;
 public final class ProtectedContentPolicy {
     private ProtectedContentPolicy() {}
 
-    public static final String POLICY_VERSION = "protected-content-policy-v2";
+    public static final String POLICY_VERSION = ProtectedWorkspacePaths.POLICY_VERSION;
     public static final String REDACTED_CANARY = ProtectedContentSanitizer.REDACTED_CANARY;
     public static final String REDACTED_PRIVATE_DOCUMENT_CANARY =
             ProtectedContentSanitizer.REDACTED_PRIVATE_DOCUMENT_CANARY;
