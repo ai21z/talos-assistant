@@ -1,4 +1,4 @@
-package dev.talos.core.ingest;
+package dev.talos.spi.types;
 
 import java.util.Objects;
 
@@ -8,9 +8,8 @@ import java.util.Objects;
  *
  * <p>This is the "proper identity" that replaces bare path strings as the
  * system's root input abstraction. Every file ingested into Talos gets
- * a {@code SourceIdentity} assigned by {@link SourceClassifier} at ingest
- * time, and that identity flows through indexing, retrieval, and context
- * assembly.
+ * a {@code SourceIdentity} assigned at ingest time, and that identity flows
+ * through indexing, retrieval, and context assembly.
  *
  * @param path      relative file path within the workspace (never null)
  * @param type      semantic source category

@@ -1,4 +1,4 @@
-package dev.talos.core.ingest;
+package dev.talos.spi.types;
 
 /**
  * Content modality of a source, describing how it should be processed.
@@ -6,8 +6,6 @@ package dev.talos.core.ingest;
  * <p>V1 only deals with {@link #TEXTUAL} and {@link #STRUCTURED} sources.
  * {@link #VISUAL} and {@link #MIXED} are placeholders for post-V1 image
  * and multi-modal support.
- *
- * @see SourceClassifier
  */
 public enum MediaType {
 

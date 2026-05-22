@@ -1,6 +1,6 @@
 package dev.talos.core.rerank;
 
-import dev.talos.core.ingest.ChunkMetadata;
+import dev.talos.spi.types.ChunkMetadata;
 import dev.talos.core.retrieval.RetrievalCandidate;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;

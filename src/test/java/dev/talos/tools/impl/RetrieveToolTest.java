@@ -2,7 +2,7 @@ package dev.talos.tools.impl;
 
 import dev.talos.core.Config;
 import dev.talos.core.context.ContextResult;
-import dev.talos.core.ingest.ChunkMetadata;
+import dev.talos.spi.types.ChunkMetadata;
 import dev.talos.core.rag.RagService;
 import dev.talos.core.security.Sandbox;
 import dev.talos.tools.*;

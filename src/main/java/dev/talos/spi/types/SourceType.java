@@ -1,4 +1,4 @@
-package dev.talos.core.ingest;
+package dev.talos.spi.types;
 
 /**
  * Semantic category of a source within a workspace.
@@ -7,7 +7,6 @@ package dev.talos.core.ingest;
  * Additional types (REPOSITORY, EMAIL_THREAD, WEBPAGE, IMAGE, etc.) will be
  * added in later phases as source support expands.
  *
- * @see SourceClassifier
  */
 public enum SourceType {
 

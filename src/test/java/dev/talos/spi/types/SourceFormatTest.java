@@ -1,4 +1,4 @@
-package dev.talos.core.ingest;
+package dev.talos.spi.types;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;

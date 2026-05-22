@@ -1,6 +1,6 @@
 package dev.talos.core.context;
 
-import dev.talos.core.ingest.ChunkMetadata;
+import dev.talos.spi.types.ChunkMetadata;
 
 import java.util.*;
 
