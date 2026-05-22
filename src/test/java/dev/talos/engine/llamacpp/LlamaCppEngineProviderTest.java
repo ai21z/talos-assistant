@@ -2,7 +2,7 @@ package dev.talos.engine.llamacpp;
 
 import com.sun.net.httpserver.HttpServer;
 import dev.talos.core.Config;
-import dev.talos.spi.EngineRegistry;
+import dev.talos.core.engine.EngineRegistry;
 import dev.talos.spi.types.Capabilities;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;

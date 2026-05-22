@@ -4,7 +4,7 @@ import dev.talos.core.Config;
 import dev.talos.core.CfgUtil;
 import dev.talos.core.EngineRuntimeConfig;
 import dev.talos.cli.ui.CliStatusDashboard;
-import dev.talos.spi.EngineRegistry;
+import dev.talos.core.engine.EngineRegistry;
 import dev.talos.spi.types.Capabilities;
 import dev.talos.spi.types.Health;
 import org.apache.lucene.index.DirectoryReader;
