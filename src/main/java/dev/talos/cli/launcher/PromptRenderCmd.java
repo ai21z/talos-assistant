@@ -9,7 +9,7 @@ import dev.talos.core.util.Sanitize;
 import dev.talos.core.rag.RagService;
 import dev.talos.tools.FileUndoStack;
 import dev.talos.tools.ToolRegistry;
-import dev.talos.tools.impl.BatchWorkspaceApplyTool;
+import dev.talos.runtime.workspace.BatchWorkspaceApplyTool;
 import dev.talos.tools.impl.DeletePathTool;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;
