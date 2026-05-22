@@ -3,7 +3,6 @@
 # This file records existing package-direction debt only. Do not add entries
 # unless a ticket explicitly accepts the new edge and explains why.
 core-no-runtime|src/main/java/dev/talos/core/extract/DocumentExtractionService.java|dev.talos.runtime.policy.PrivateDocumentPolicy
-core-no-runtime|src/main/java/dev/talos/core/index/Indexer.java|dev.talos.runtime.policy.PrivateDocumentPolicy
 core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runtime.ToolCallParser
 core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runtime.context.ContextDecision
 core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runtime.context.ContextItem
