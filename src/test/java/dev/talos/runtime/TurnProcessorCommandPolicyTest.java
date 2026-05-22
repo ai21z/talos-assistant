@@ -13,7 +13,7 @@ import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.ToolResult;
-import dev.talos.tools.impl.RunCommandTool;
+import dev.talos.runtime.command.RunCommandTool;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

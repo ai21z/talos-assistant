@@ -22,7 +22,7 @@ import dev.talos.runtime.TurnProcessor;
 import dev.talos.runtime.NoOpApprovalGate;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.tools.ToolRegistry;
-import dev.talos.tools.impl.RunCommandTool;
+import dev.talos.runtime.command.RunCommandTool;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequest;

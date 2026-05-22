@@ -20,7 +20,7 @@ import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.ToolResult;
-import dev.talos.tools.impl.RunCommandTool;
+import dev.talos.runtime.command.RunCommandTool;
 import dev.talos.cli.repl.Context;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
