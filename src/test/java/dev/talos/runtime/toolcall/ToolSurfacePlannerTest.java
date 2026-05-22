@@ -12,7 +12,7 @@ import dev.talos.tools.ToolOperationMetadata;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.ToolResult;
 import dev.talos.tools.ToolRiskLevel;
-import dev.talos.tools.impl.BatchWorkspaceApplyTool;
+import dev.talos.runtime.workspace.BatchWorkspaceApplyTool;
 import dev.talos.tools.impl.DeletePathTool;
 import dev.talos.tools.impl.FileEditTool;
 import dev.talos.tools.impl.FileWriteTool;

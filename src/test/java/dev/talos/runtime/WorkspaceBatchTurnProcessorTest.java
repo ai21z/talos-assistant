@@ -12,7 +12,7 @@ import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolRegistry;
 import dev.talos.tools.ToolResult;
-import dev.talos.tools.impl.BatchWorkspaceApplyTool;
+import dev.talos.runtime.workspace.BatchWorkspaceApplyTool;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
