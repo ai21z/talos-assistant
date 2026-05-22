@@ -14,6 +14,7 @@ import dev.talos.core.cache.CacheDb;
 import dev.talos.core.context.ContextPacker;
 import dev.talos.core.context.ContextResult;
 import dev.talos.core.context.TokenBudget;
+import dev.talos.core.privacy.PrivacyConfigFacts;
 import dev.talos.core.rerank.ScoreThresholdReranker;
 import dev.talos.core.retrieval.*;
 import dev.talos.core.retrieval.stages.*;
@@ -24,7 +25,6 @@ import dev.talos.runtime.context.ContextLedgerCapture;
 import dev.talos.runtime.context.ExecutionBoundary;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
-import dev.talos.runtime.policy.ProtectedReadScopePolicy;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.spi.CorpusStore;
 import dev.talos.tools.ToolContentMetadata;
@@ -122,8 +122,8 @@ public class RagService {
     }
 
     public ReindexOutcome reindex(Path root, boolean forceFullReindex, IndexProgressListener listener) {
-        if (ProtectedReadScopePolicy.privateMode(cfg)
-                && !ProtectedReadScopePolicy.ragEnabledInPrivateMode(cfg)) {
+        if (PrivacyConfigFacts.privateMode(cfg)
+                && !PrivacyConfigFacts.ragEnabledInPrivateMode(cfg)) {
             LOG.info("Explicit RAG reindex refused because private mode disables indexing by default.");
             return new ReindexOutcome(false, PRIVATE_MODE_REINDEX_DISABLED);
         }
@@ -136,8 +136,8 @@ public class RagService {
     }
 
     public Prepared prepare(Path ws, String query, Integer topKOverride) {
-        if (ProtectedReadScopePolicy.privateMode(cfg)
-                && !ProtectedReadScopePolicy.ragEnabledInPrivateMode(cfg)) {
+        if (PrivacyConfigFacts.privateMode(cfg)
+                && !PrivacyConfigFacts.ragEnabledInPrivateMode(cfg)) {
             ContextLedgerCapture.record(
                     ContextItem.fromText(
                             ContextItemSource.RAG_SNIPPET,
@@ -348,8 +348,8 @@ public class RagService {
      * Guard with AtomicBoolean to prevent re-entrancy. Falls back to full rebuild on corruption.
      */
     private void ensureIndexExists(Path workspace) {
-        if (ProtectedReadScopePolicy.privateMode(cfg)
-                && !ProtectedReadScopePolicy.ragEnabledInPrivateMode(cfg)) {
+        if (PrivacyConfigFacts.privateMode(cfg)
+                && !PrivacyConfigFacts.ragEnabledInPrivateMode(cfg)) {
             LOG.info("RAG indexing skipped because private mode disables retrieval/indexing by default.");
             return;
         }
