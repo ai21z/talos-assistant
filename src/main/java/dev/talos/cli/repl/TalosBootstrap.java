@@ -1,7 +1,8 @@
 package dev.talos.cli.repl;
 
-import dev.talos.cli.repl.slash.*;
+import dev.talos.cli.approval.CliApprovalGate;
 import dev.talos.cli.modes.ModeController;
+import dev.talos.cli.repl.slash.*;
 import dev.talos.cli.ui.AnsiColor;
 import dev.talos.core.Audit;
 import dev.talos.core.CfgUtil;
@@ -15,7 +16,6 @@ import dev.talos.core.rag.RagService;
 import dev.talos.core.security.Redactor;
 import dev.talos.core.security.Sandbox;
 import dev.talos.runtime.ActiveTaskContextUpdateListener;
-import dev.talos.runtime.CliApprovalGate;
 import dev.talos.runtime.JsonSessionStore;
 import dev.talos.runtime.MemoryUpdateListener;
 import dev.talos.runtime.NoOpSessionStore;

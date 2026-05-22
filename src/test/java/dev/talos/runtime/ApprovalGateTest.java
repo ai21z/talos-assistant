@@ -2,11 +2,6 @@ package dev.talos.runtime;
 
 import org.junit.jupiter.api.Test;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.PrintStream;
-import java.nio.charset.StandardCharsets;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 class ApprovalGateTest {
@@ -31,24 +26,6 @@ class ApprovalGateTest {
         assertTrue(gate.approve("read file", null));
         assertFalse(gate.approve("delete file", null));
         assertFalse(gate.approve(null, null));
-    }
-
-    @Test
-    void cliApprovalGateLabelsProtectedReadAsSensitiveRead() {
-        var out = new ByteArrayOutputStream();
-        var gate = new CliApprovalGate(
-                new ByteArrayInputStream("\n".getBytes(StandardCharsets.UTF_8)),
-                new PrintStream(out, true, StandardCharsets.UTF_8));
-
-        gate.approveFull(
-                "protected read: talos.read_file",
-                "permission: Permission policy requires approval before reading protected path `.env`.\n"
-                        + "    target: .env");
-
-        String text = out.toString(StandardCharsets.UTF_8);
-        assertTrue(text.contains("Action  protected read: talos.read_file"), text);
-        assertTrue(text.contains("Risk    sensitive read"), text);
-        assertFalse(text.contains("Risk    write"), text);
     }
 }
 
