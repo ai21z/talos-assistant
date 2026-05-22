@@ -125,6 +125,18 @@ class IndexerPrivateDocumentPolicyTest {
         assertTrue(blockedIndexer.isPolicyMetadataCurrent(workspace));
     }
 
+    @Test
+    void indexerUsesCorePrivateDocumentIndexingPolicyInsteadOfRuntimePolicy() throws Exception {
+        String source = Files.readString(Path.of("src/main/java/dev/talos/core/index/Indexer.java"));
+        String baseline = Files.readString(Path.of("config/architecture-boundary-baseline.txt"));
+
+        assertTrue(source.contains("import dev.talos.core.privacy.PrivateDocumentIndexingPolicy;"), source);
+        assertFalse(source.contains("import dev.talos.runtime.policy.PrivateDocumentPolicy;"), source);
+        assertFalse(baseline.contains(
+                        "core-no-runtime|src/main/java/dev/talos/core/index/Indexer.java|dev.talos.runtime.policy.PrivateDocumentPolicy"),
+                baseline);
+    }
+
     private String allIndexedText(Indexer indexer) {
         try (LuceneStore store = new LuceneStore(indexer.indexDirFor(workspace), 0)) {
             StringBuilder out = new StringBuilder();

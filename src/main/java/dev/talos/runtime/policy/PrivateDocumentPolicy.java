@@ -6,6 +6,7 @@ import dev.talos.core.extract.DocumentExtractionIntent;
 import dev.talos.core.extract.DocumentExtractionRequest;
 import dev.talos.core.ingest.FileCapabilityPolicy;
 import dev.talos.core.privacy.DocumentContentDecision;
+import dev.talos.core.privacy.PrivateDocumentIndexingPolicy;
 
 import java.nio.file.Path;
 import java.util.Map;
@@ -78,31 +79,14 @@ public final class PrivateDocumentPolicy {
             Config cfg,
             DocumentExtractionRequest request,
             FileCapabilityPolicy.FormatInfo info) {
-        if (request == null) return false;
-        if (ProtectedContentPolicy.isProtectedPath(request.workspaceRoot(), request.path())) {
-            return false;
-        }
-        if (isExtractedDocument(info) && ProtectedReadScopePolicy.privateMode(cfg)) {
-            return ProtectedReadScopePolicy.ragEnabledInPrivateMode(cfg)
-                    && allowPrivateDocumentRagIndexing(cfg);
-        }
-        return true;
+        return PrivateDocumentIndexingPolicy.mayIndexExtractedDocument(cfg, request, info);
     }
 
     public static String decisionReason(
             Config cfg,
             DocumentExtractionRequest request,
             FileCapabilityPolicy.FormatInfo info) {
-        if (request != null && ProtectedContentPolicy.isProtectedPath(request.workspaceRoot(), request.path())) {
-            return "protected path content";
-        }
-        if (isExtractedDocument(info) && ProtectedReadScopePolicy.privateMode(cfg)) {
-            return "private mode treats extracted document text as local-display-only by default";
-        }
-        if (isExtractedDocument(info)) {
-            return "developer-mode extracted document text";
-        }
-        return "normal workspace content";
+        return PrivateDocumentIndexingPolicy.decisionReason(cfg, request, info);
     }
 
     public static String modelHandoffNote(Config cfg) {
