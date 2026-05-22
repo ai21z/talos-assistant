@@ -17,9 +17,9 @@ import dev.talos.core.ingest.FileWalker;
 import dev.talos.core.ingest.ParsedChunk;
 import dev.talos.core.ingest.ParserUtil;
 import dev.talos.core.ingest.UnsupportedDocumentFormats;
-import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.runtime.policy.PrivateDocumentPolicy;
 import dev.talos.safety.SafeLogFormatter;
+import dev.talos.safety.ProtectedWorkspacePaths;
 import dev.talos.spi.Embeddings;
 import dev.talos.core.util.BuildInfo;
 import dev.talos.core.util.Hash;
@@ -82,7 +82,7 @@ public class Indexer {
             @SuppressWarnings("unchecked")
             Map<String, Object> data = JSON.readValue(metadata.toFile(), Map.class);
             return INDEX_METADATA_SCHEMA_VERSION == intValue(data.get("schemaVersion"))
-                    && ProtectedContentPolicy.POLICY_VERSION.equals(String.valueOf(data.get("privacyPolicyVersion")))
+                    && ProtectedWorkspacePaths.POLICY_VERSION.equals(String.valueOf(data.get("privacyPolicyVersion")))
                     && FileCapabilityPolicy.POLICY_VERSION.equals(String.valueOf(data.get("fileCapabilityPolicyVersion")))
                     && DocumentExtractionService.EXTRACTION_POLICY_VERSION.equals(String.valueOf(data.get("documentExtractionPolicyVersion")))
                     && currentRagConfigHash().equals(String.valueOf(data.get("ragConfigHash")))
@@ -394,7 +394,7 @@ public class Indexer {
         Files.createDirectories(metadata.getParent());
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("schemaVersion", INDEX_METADATA_SCHEMA_VERSION);
-        data.put("privacyPolicyVersion", ProtectedContentPolicy.POLICY_VERSION);
+        data.put("privacyPolicyVersion", ProtectedWorkspacePaths.POLICY_VERSION);
         data.put("fileCapabilityPolicyVersion", FileCapabilityPolicy.POLICY_VERSION);
         data.put("documentExtractionPolicyVersion", DocumentExtractionService.EXTRACTION_POLICY_VERSION);
         data.put("ragConfigHash", currentRagConfigHash());
@@ -461,7 +461,7 @@ public class Indexer {
         for (String g : excludeGlobs) excludeMatchers.add(fs.getPathMatcher("glob:" + g));
 
         return p -> {
-            if (ProtectedContentPolicy.isProtectedPath(rootPath, p)
+            if (ProtectedWorkspacePaths.isProtectedPath(rootPath, p)
                     || unsupportedAndNotExtractionEnabled(p)) {
                 return false;
             }
@@ -487,7 +487,7 @@ public class Indexer {
         }
 
         return p -> {
-            if (ProtectedContentPolicy.isProtectedPath(rootPath, p)
+            if (ProtectedWorkspacePaths.isProtectedPath(rootPath, p)
                     || unsupportedAndNotExtractionEnabled(p)) {
                 return false;
             }
