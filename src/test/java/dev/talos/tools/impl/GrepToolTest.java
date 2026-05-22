@@ -60,13 +60,22 @@ class GrepToolTest {
         assertTrue(source.contains("import dev.talos.safety.ProtectedWorkspacePaths;"), source);
         assertFalse(source.contains("import dev.talos.runtime.policy.ProtectedContentPolicy;"), source);
         assertFalse(source.contains("ProtectedContentPolicy."), source);
-        assertTrue(source.contains("import dev.talos.runtime.policy.ProtectedReadScopePolicy;"), source);
 
         String baseline = Files.readString(Path.of("config/architecture-boundary-baseline.txt"));
         assertFalse(baseline.contains(
                 "tools-no-runtime|src/main/java/dev/talos/tools/impl/GrepTool.java|dev.talos.runtime.policy.ProtectedContentPolicy"),
                 baseline);
-        assertTrue(baseline.contains(
+    }
+
+    @Test void grep_uses_core_privacy_facts_for_private_mode_ownership() throws IOException {
+        String source = Files.readString(Path.of("src/main/java/dev/talos/tools/impl/GrepTool.java"));
+        assertTrue(source.contains("import dev.talos.core.privacy.PrivacyConfigFacts;"), source);
+        assertFalse(source.contains("import dev.talos.runtime.policy.ProtectedReadScopePolicy;"), source);
+        assertFalse(source.contains("ProtectedReadScopePolicy."), source);
+        assertTrue(source.contains("PrivacyConfigFacts.privateMode(ctx.config())"), source);
+
+        String baseline = Files.readString(Path.of("config/architecture-boundary-baseline.txt"));
+        assertFalse(baseline.contains(
                 "tools-no-runtime|src/main/java/dev/talos/tools/impl/GrepTool.java|dev.talos.runtime.policy.ProtectedReadScopePolicy"),
                 baseline);
     }

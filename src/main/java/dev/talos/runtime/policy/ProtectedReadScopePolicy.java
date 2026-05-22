@@ -2,6 +2,7 @@ package dev.talos.runtime.policy;
 
 import dev.talos.core.CfgUtil;
 import dev.talos.core.Config;
+import dev.talos.core.privacy.PrivacyConfigFacts;
 
 import java.util.LinkedHashMap;
 import java.util.Locale;
@@ -17,11 +18,7 @@ public final class ProtectedReadScopePolicy {
     }
 
     public static boolean privateMode(Config cfg) {
-        Map<String, Object> privacy = privacy(cfg);
-        String mode = String.valueOf(privacy.getOrDefault("mode", "developer"))
-                .strip()
-                .toLowerCase(Locale.ROOT);
-        return "private".equals(mode) || "strict".equals(mode) || "strict_privacy".equals(mode);
+        return PrivacyConfigFacts.privateMode(cfg);
     }
 
     public static ProtectedReadScope defaultScope(Config cfg) {
@@ -51,9 +48,7 @@ public final class ProtectedReadScopePolicy {
     }
 
     public static boolean ragEnabledInPrivateMode(Config cfg) {
-        if (!privateMode(cfg)) return true;
-        Map<String, Object> rag = CfgUtil.map(privacy(cfg).get("rag"));
-        return CfgUtil.boolAt(rag, "enabled_in_private_mode", false);
+        return PrivacyConfigFacts.ragEnabledInPrivateMode(cfg);
     }
 
     public static void setPrivateMode(Config cfg, boolean enabled) {
