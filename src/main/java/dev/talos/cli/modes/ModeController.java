@@ -1,7 +1,9 @@
 package dev.talos.cli.modes;
 
 import dev.talos.cli.repl.Context;
+import dev.talos.runtime.RuntimeTurnContext;
 import dev.talos.runtime.Result;
+import dev.talos.runtime.TurnRouter;
 import dev.talos.core.index.WorkspaceSymbolChecker;
 
 import java.nio.file.Path;
@@ -25,7 +27,7 @@ import java.util.*;
  * <p>When mode is explicitly set (not "auto"), that mode handles the input
  * directly. Explicit mode selection overrides the router.
  */
-public final class ModeController {
+public final class ModeController implements TurnRouter {
     private final List<Mode> order = new ArrayList<>();
     private final Map<String, Mode> byName = new HashMap<>();
     private String activeName = "auto";
@@ -100,6 +102,12 @@ public final class ModeController {
     /** Routes without hint; uses activeName. */
     public Optional<Result> route(String rawLine, Path workspace, Context ctx) throws Exception {
         return route(rawLine, workspace, ctx, null);
+    }
+
+    /** Runtime port adapter; production passes the CLI Context composition object. */
+    @Override
+    public Optional<Result> route(String rawLine, Path workspace, RuntimeTurnContext ctx) throws Exception {
+        return route(rawLine, workspace, requireCliContext(ctx), null);
     }
 
     /** Routes with a hint. If null/blank, activeName is used. */
@@ -178,6 +186,13 @@ public final class ModeController {
         if (mode == null || !mode.canHandle(rawLine)) return Optional.empty();
         Optional<Result> r = mode.handle(rawLine, workspace, ctx);
         return (r != null) ? r : Optional.empty();
+    }
+
+    private static Context requireCliContext(RuntimeTurnContext ctx) {
+        if (ctx instanceof Context cliContext) {
+            return cliContext;
+        }
+        throw new IllegalArgumentException("ModeController requires dev.talos.cli.repl.Context");
     }
 
     /**
