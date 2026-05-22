@@ -1,4 +1,4 @@
-package dev.talos.cli.repl;
+package dev.talos.runtime;
 
 import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ArtifactGoal;
