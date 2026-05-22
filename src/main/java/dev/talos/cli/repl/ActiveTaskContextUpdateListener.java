@@ -1,6 +1,7 @@
-package dev.talos.runtime;
+package dev.talos.cli.repl;
 
-import dev.talos.cli.repl.SessionMemory;
+import dev.talos.runtime.SessionListener;
+import dev.talos.runtime.TurnResult;
 import dev.talos.runtime.context.ActiveTaskContextUpdater;
 import dev.talos.runtime.context.ChangeSummaryContext;
 

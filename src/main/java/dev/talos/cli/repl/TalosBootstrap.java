@@ -15,7 +15,6 @@ import dev.talos.core.net.NetPolicy;
 import dev.talos.core.rag.RagService;
 import dev.talos.core.security.Redactor;
 import dev.talos.core.security.Sandbox;
-import dev.talos.runtime.ActiveTaskContextUpdateListener;
 import dev.talos.runtime.JsonSessionStore;
 import dev.talos.runtime.MemoryUpdateListener;
 import dev.talos.runtime.NoOpSessionStore;

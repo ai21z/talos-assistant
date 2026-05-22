@@ -1,7 +1,6 @@
 package dev.talos.cli.repl;
 
 import dev.talos.core.Config;
-import dev.talos.runtime.ActiveTaskContextUpdateListener;
 import dev.talos.runtime.ApprovalPolicy;
 import dev.talos.runtime.JsonTurnLogAppender;
 import dev.talos.runtime.MemoryUpdateListener;
