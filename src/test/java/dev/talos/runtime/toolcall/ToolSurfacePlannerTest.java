@@ -24,7 +24,7 @@ import dev.talos.tools.impl.CopyPathTool;
 import dev.talos.tools.impl.RenamePathTool;
 import dev.talos.tools.impl.ReadFileTool;
 import dev.talos.tools.impl.RetrieveTool;
-import dev.talos.tools.impl.RunCommandTool;
+import dev.talos.runtime.command.RunCommandTool;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

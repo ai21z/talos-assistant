@@ -1,13 +1,6 @@
-package dev.talos.tools.impl;
+package dev.talos.runtime.command;
 
 import dev.talos.core.capability.CapabilityKind;
-import dev.talos.runtime.command.CommandPlan;
-import dev.talos.runtime.command.CommandPlanRejectedException;
-import dev.talos.runtime.command.CommandProfileRegistry;
-import dev.talos.runtime.command.CommandResult;
-import dev.talos.runtime.command.CommandRunner;
-import dev.talos.runtime.command.CommandToolPlanner;
-import dev.talos.runtime.command.ProcessCommandRunner;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.tools.TalosTool;
 import dev.talos.tools.ToolCall;

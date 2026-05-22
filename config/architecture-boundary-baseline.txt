@@ -24,11 +24,3 @@ tools-no-runtime|src/main/java/dev/talos/tools/impl/BatchWorkspaceApplyTool.java
 tools-no-runtime|src/main/java/dev/talos/tools/impl/BatchWorkspaceApplyTool.java|dev.talos.runtime.workspace.WorkspaceBatchPlan
 tools-no-runtime|src/main/java/dev/talos/tools/impl/BatchWorkspaceApplyTool.java|dev.talos.runtime.workspace.WorkspaceBatchPlanParser
 tools-no-runtime|src/main/java/dev/talos/tools/impl/ReadFileTool.java|dev.talos.runtime.policy.PrivateDocumentPolicy
-tools-no-runtime|src/main/java/dev/talos/tools/impl/RunCommandTool.java|dev.talos.runtime.command.CommandPlan
-tools-no-runtime|src/main/java/dev/talos/tools/impl/RunCommandTool.java|dev.talos.runtime.command.CommandPlanRejectedException
-tools-no-runtime|src/main/java/dev/talos/tools/impl/RunCommandTool.java|dev.talos.runtime.command.CommandProfileRegistry
-tools-no-runtime|src/main/java/dev/talos/tools/impl/RunCommandTool.java|dev.talos.runtime.command.CommandResult
-tools-no-runtime|src/main/java/dev/talos/tools/impl/RunCommandTool.java|dev.talos.runtime.command.CommandRunner
-tools-no-runtime|src/main/java/dev/talos/tools/impl/RunCommandTool.java|dev.talos.runtime.command.CommandToolPlanner
-tools-no-runtime|src/main/java/dev/talos/tools/impl/RunCommandTool.java|dev.talos.runtime.command.ProcessCommandRunner
-tools-no-runtime|src/main/java/dev/talos/tools/impl/RunCommandTool.java|dev.talos.runtime.trace.LocalTurnTraceCapture

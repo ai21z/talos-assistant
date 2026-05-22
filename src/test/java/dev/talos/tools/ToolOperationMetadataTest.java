@@ -8,7 +8,7 @@ import dev.talos.tools.impl.GrepTool;
 import dev.talos.tools.impl.ListDirTool;
 import dev.talos.tools.impl.ReadFileTool;
 import dev.talos.tools.impl.RetrieveTool;
-import dev.talos.tools.impl.RunCommandTool;
+import dev.talos.runtime.command.RunCommandTool;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
