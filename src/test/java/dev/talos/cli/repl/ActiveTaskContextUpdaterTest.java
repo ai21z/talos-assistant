@@ -1,10 +1,11 @@
-package dev.talos.runtime.context;
+package dev.talos.cli.repl;
 
-import dev.talos.cli.repl.Result;
 import dev.talos.runtime.TurnAudit;
 import dev.talos.runtime.TurnPolicyTrace;
 import dev.talos.runtime.TurnRecord;
 import dev.talos.runtime.TurnResult;
+import dev.talos.runtime.context.ActiveTaskContext;
+import dev.talos.runtime.context.ArtifactGoal;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import org.junit.jupiter.api.Test;
 
