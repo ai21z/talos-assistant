@@ -1,6 +1,6 @@
 package dev.talos.core.context;
 
-import dev.talos.cli.repl.SessionMemory;
+import dev.talos.runtime.SessionMemory;
 import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.spi.types.ChatMessage;

@@ -1,5 +1,6 @@
 package dev.talos.cli.repl;
 
+import dev.talos.runtime.SessionMemory;
 import dev.talos.runtime.SessionListener;
 import dev.talos.runtime.TurnResult;
 import dev.talos.runtime.context.ChangeSummaryContext;

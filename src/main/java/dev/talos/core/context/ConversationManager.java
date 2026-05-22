@@ -1,6 +1,5 @@
 package dev.talos.core.context;
 
-import dev.talos.cli.repl.SessionMemory;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.spi.types.ChatMessage;
 import org.slf4j.Logger;
@@ -13,7 +12,7 @@ import java.util.Objects;
 /**
  * Token-aware conversation history manager with automatic compaction.
  *
- * <p>Wraps {@link SessionMemory} with a {@link TokenBudget} to provide
+ * <p>Wraps {@link ConversationMemory} with a {@link TokenBudget} to provide
  * budget-aware history retrieval. {@link #buildHistory(int)} returns as
  * many recent turns as fit within the available token budget.
  *
@@ -27,7 +26,7 @@ import java.util.Objects;
  * which should be called after each turn (typically from
  * {@link dev.talos.runtime.MemoryUpdateListener}).
  *
- * <p>Thread-safe: delegates to SessionMemory which synchronizes internally.
+ * <p>Thread-safe: delegates synchronization to the provided memory implementation.
  * The sketch field is guarded by {@code synchronized} on this instance.
  */
 public final class ConversationManager {
@@ -63,18 +62,18 @@ public final class ConversationManager {
      */
     static final double ASSIST_HISTORY_BUDGET_FRACTION = 0.55;
 
-    private final SessionMemory memory;
+    private final ConversationMemory memory;
     private final TokenBudget budget;
 
     /** Compact sketch of older turns (null until first compaction). */
     private volatile String sketch;
 
-    public ConversationManager(SessionMemory memory, TokenBudget budget) {
+    public ConversationManager(ConversationMemory memory, TokenBudget budget) {
         this.memory = Objects.requireNonNull(memory, "memory must not be null");
         this.budget = Objects.requireNonNull(budget, "budget must not be null");
     }
 
-    public ConversationManager(SessionMemory memory) {
+    public ConversationManager(ConversationMemory memory) {
         this(memory, new TokenBudget());
     }
 
@@ -323,7 +322,7 @@ public final class ConversationManager {
     }
 
     /** Access the underlying memory (for backward compatibility). */
-    public SessionMemory memory() {
+    public ConversationMemory memory() {
         return memory;
     }
 

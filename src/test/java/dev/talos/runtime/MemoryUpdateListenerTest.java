@@ -1,5 +1,5 @@
 package dev.talos.runtime;
-import dev.talos.cli.repl.SessionMemory;
+import dev.talos.runtime.SessionMemory;
 import dev.talos.core.context.ConversationManager;
 import dev.talos.core.context.TokenBudget;
 import dev.talos.spi.types.ChatMessage;

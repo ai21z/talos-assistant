@@ -1,6 +1,5 @@
 package dev.talos.runtime;
 
-import dev.talos.cli.repl.SessionMemory;
 import dev.talos.core.Config;
 
 import java.nio.file.Path;

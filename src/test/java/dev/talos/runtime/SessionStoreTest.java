@@ -87,7 +87,7 @@ class SessionStoreTest {
             var session = new Session(
                     java.nio.file.Path.of(".").toAbsolutePath().normalize(),
                     new dev.talos.core.Config(),
-                    new dev.talos.cli.repl.SessionMemory(),
+                    new dev.talos.runtime.SessionMemory(),
                     custom
             );
             assertSame(custom, session.store());
@@ -99,7 +99,7 @@ class SessionStoreTest {
             assertThrows(NullPointerException.class, () -> new Session(
                     java.nio.file.Path.of(".").toAbsolutePath().normalize(),
                     new dev.talos.core.Config(),
-                    new dev.talos.cli.repl.SessionMemory(),
+                    new dev.talos.runtime.SessionMemory(),
                     null
             ));
         }

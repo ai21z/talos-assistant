@@ -1,6 +1,6 @@
 package dev.talos.core.context;
 
-import dev.talos.cli.repl.SessionMemory;
+import dev.talos.runtime.SessionMemory;
 import dev.talos.spi.types.ChatMessage;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
