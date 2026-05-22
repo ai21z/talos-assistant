@@ -1,6 +1,5 @@
 package dev.talos.runtime;
 
-import dev.talos.cli.repl.Context;
 import dev.talos.core.util.Sanitize;
 import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
@@ -361,12 +360,12 @@ public final class ToolCallLoop {
         }
     }
 
-    public LoopResult run(String initialAnswer, List<ChatMessage> messages, Path workspace, Context ctx) {
+    public LoopResult run(String initialAnswer, List<ChatMessage> messages, Path workspace, RuntimeTurnContext ctx) {
         return run(initialAnswer, List.of(), messages, workspace, ctx);
     }
 
     public LoopResult run(String initialAnswer, List<NativeToolCall> nativeToolCalls,
-                          List<ChatMessage> messages, Path workspace, Context ctx) {
+                          List<ChatMessage> messages, Path workspace, RuntimeTurnContext ctx) {
         if (initialAnswer == null) initialAnswer = "";
 
         boolean hasNative = nativeToolCalls != null && !nativeToolCalls.isEmpty();

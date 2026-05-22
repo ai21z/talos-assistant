@@ -1,8 +1,8 @@
 package dev.talos.runtime.toolcall;
 
-import dev.talos.cli.repl.Context;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.failure.FailureAction;
+import dev.talos.runtime.RuntimeTurnContext;
 import dev.talos.runtime.TemplatePlaceholderGuard;
 import dev.talos.runtime.Session;
 import dev.talos.runtime.repair.RepairPolicy;
@@ -25,7 +25,7 @@ import java.util.Set;
 public final class LoopState {
     public final List<ChatMessage> messages;
     public final Path workspace;
-    public final Context ctx;
+    public final RuntimeTurnContext ctx;
     public final Session toolSession;
     public final int maxIterations;
 
@@ -71,7 +71,7 @@ public final class LoopState {
     private PendingActionObligation pendingActionObligation;
 
     public LoopState(String initialText, List<NativeToolCall> initialNativeCalls,
-                     List<ChatMessage> messages, Path workspace, Context ctx,
+                     List<ChatMessage> messages, Path workspace, RuntimeTurnContext ctx,
                      Session toolSession, int maxIterations, int aliasRescueBaseline) {
         this.currentText = initialText;
         this.currentNativeCalls = initialNativeCalls;
