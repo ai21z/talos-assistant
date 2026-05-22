@@ -11,8 +11,6 @@ core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runti
 core-no-runtime|src/main/java/dev/talos/core/rag/RagService.java|dev.talos.runtime.context.ExecutionBoundary
 runtime-core-no-cli|src/main/java/dev/talos/core/context/ConversationManager.java|dev.talos.cli.repl.SessionMemory
 runtime-core-no-cli|src/main/java/dev/talos/runtime/ActiveTaskContextUpdateListener.java|dev.talos.cli.repl.SessionMemory
-runtime-core-no-cli|src/main/java/dev/talos/runtime/CliApprovalGate.java|dev.talos.cli.ui.ApprovalPromptRenderer
-runtime-core-no-cli|src/main/java/dev/talos/runtime/CliApprovalGate.java|dev.talos.cli.ui.CliTheme
 runtime-core-no-cli|src/main/java/dev/talos/runtime/JsonTurnLogAppender.java|dev.talos.cli.repl.Result
 runtime-core-no-cli|src/main/java/dev/talos/runtime/MemoryUpdateListener.java|dev.talos.cli.repl.Result
 runtime-core-no-cli|src/main/java/dev/talos/runtime/MemoryUpdateListener.java|dev.talos.cli.repl.SessionMemory
