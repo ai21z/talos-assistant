@@ -158,10 +158,6 @@ public final class StaticTaskVerifier {
                 recordExpectationTrace);
         facts.addAll(expectationVerification.facts());
         problems.addAll(expectationVerification.problems());
-        boolean expectationRequired = expectationVerification.verifiedAny();
-        boolean bulletCountExpectationRequired = expectationVerification.bulletCountRequired();
-        boolean appendLineExpectationRequired = expectationVerification.appendLineRequired();
-        boolean replacementExpectationRequired = expectationVerification.replacementRequired();
         ExactEditReplacementVerifier.Result exactEditVerification =
                 ExactEditReplacementVerifier.verify(root, successfulMutations);
         facts.addAll(exactEditVerification.facts());
@@ -170,7 +166,6 @@ public final class StaticTaskVerifier {
                 SourceDerivedArtifactVerifier.verify(contract, root);
         facts.addAll(sourceDerivedVerification.facts());
         problems.addAll(sourceDerivedVerification.problems());
-        boolean sourceDerivedRequired = sourceDerivedVerification.required();
 
         if (webCoherenceRequired) {
             String profileFact = StaticWebCapabilityProfile.profileFact(profile);
@@ -183,83 +178,14 @@ public final class StaticTaskVerifier {
             verifySmallWebWorkspace(root, contract, profile, mutatedPaths, facts, problems);
         }
 
-        if (!problems.isEmpty()) {
-            return TaskVerificationResult.failed(
-                    sourceDerivedRequired && !webCoherenceRequired
-                            ? "Source-derived artifact verification failed."
-                    : exactEditVerification.verifiedAny() && exactEditVerification.hasProblem()
-                            ? "Exact edit replacement verification failed."
-                    : replacementExpectationRequired && problems.stream().anyMatch(StaticTaskVerifier::isReplacementProblem)
-                            ? "Replacement verification failed."
-                    : appendLineExpectationRequired && problems.stream().anyMatch(StaticTaskVerifier::isAppendLineProblem)
-                            ? "Append line verification failed."
-                    : bulletCountExpectationRequired && problems.stream().anyMatch(StaticTaskVerifier::isBulletCountProblem)
-                            ? "Bullet count verification failed."
-                    : expectationRequired && problems.stream().anyMatch(StaticTaskVerifier::isExactContentProblem)
-                            ? "Exact content verification failed."
-                            : firstProblemSummary(problems),
-                    facts,
-                    problems);
-        }
-        if (expectationRequired && !webCoherenceRequired) {
-            if (replacementExpectationRequired) {
-                return TaskVerificationResult.passed(
-                        "Replacement verification passed.",
-                        facts);
-            }
-            if (appendLineExpectationRequired) {
-                return TaskVerificationResult.passed(
-                        "Append line verification passed.",
-                        facts);
-            }
-            if (bulletCountExpectationRequired) {
-                return TaskVerificationResult.passed(
-                        "Bullet count verification passed.",
-                        facts);
-            }
-            return TaskVerificationResult.passed(
-                    "Exact content verification passed.",
-                    facts);
-        }
-        if (exactEditVerification.coversAllSuccessfulMutations() && !webCoherenceRequired) {
-            return TaskVerificationResult.passed(
-                    "Exact edit replacement verification passed.",
-                    facts);
-        }
-        if (sourceDerivedRequired && !webCoherenceRequired) {
-            return TaskVerificationResult.passed(
-                    "Source-derived artifact verification passed.",
-                    facts);
-        }
-        if (webCoherenceRequired) {
-            return TaskVerificationResult.passed(
-                    "Static web coherence checks passed for " + mutatedPaths.size() + " mutated target(s).",
-                    facts);
-        }
-        return TaskVerificationResult.readbackOnly(
-                "Target/readback checks passed for " + mutatedPaths.size()
-                        + " mutated target(s); no task-specific static verifier was applicable.",
-                facts);
-    }
-
-    private static boolean isExactContentProblem(String problem) {
-        return problem != null
-                && (problem.contains("exact content mismatch")
-                || problem.contains("exact content verification"));
-    }
-
-    private static boolean isAppendLineProblem(String problem) {
-        return problem != null
-                && (problem.contains("appended line")
-                || problem.contains("append-only preservation"));
-    }
-
-    private static boolean isReplacementProblem(String problem) {
-        return problem != null && problem.contains("replacement ");
-    }
-
-    private static boolean isBulletCountProblem(String problem) {
-        return problem != null && (problem.contains("bullet count") || problem.contains("bullet list"));
+        return TaskVerificationOutcomeSelector.select(
+                facts,
+                problems,
+                mutatedPaths.size(),
+                webCoherenceRequired,
+                expectationVerification,
+                exactEditVerification,
+                sourceDerivedVerification);
     }
 
     private static void verifyPrimaryWebMutationCoverage(
@@ -690,13 +616,6 @@ public final class StaticTaskVerifier {
         String normalized = normalizePath(path);
         int slash = normalized.lastIndexOf('/');
         return slash >= 0 ? normalized.substring(slash + 1) : normalized;
-    }
-
-    private static String firstProblemSummary(List<String> problems) {
-        if (problems == null || problems.isEmpty()) return "Static verification failed.";
-        String summary = String.join("; ", problems.subList(0, Math.min(3, problems.size())));
-        if (summary.length() > 220) summary = summary.substring(0, 217) + "...";
-        return summary;
     }
 
 }
