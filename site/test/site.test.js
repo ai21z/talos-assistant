@@ -133,7 +133,8 @@ describe("Talos landing page static contract", () => {
     assert.doesNotMatch(html, /data:image\/svg\+xml/i);
     assert.doesNotMatch(html, /<svg\b/i);
     assert.doesNotMatch(css, /url\(["']?\.\.\/design\/talos-icon\.png/);
-    assert.doesNotMatch(css, /\.brand-mark img\s*\{[\s\S]*?opacity:\s*0/);
+    const brandImageBlock = css.match(/\.brand-mark img\s*\{(?<block>[^}]*)\}/)?.groups?.block ?? "";
+    assert.doesNotMatch(brandImageBlock, /opacity:\s*0/);
     const wordmarkBlock = css.match(/\.wordmark-mark\s*\{(?<block>[^}]*)\}/)?.groups?.block ?? "";
     assert.doesNotMatch(wordmarkBlock, /border:/);
     assert.match(css, /\.wordmark-mark[\s\S]*?object-fit:\s*contain|\.wordmark-mark img[\s\S]*?object-fit:\s*contain/);
@@ -163,7 +164,7 @@ describe("Talos landing page static contract", () => {
     }
   });
 
-  it("renders the exact Greek heritage inscription with a self-hosted bronze font treatment", () => {
+  it("renders TALOS, Greek, and terminal-typed hero phrases as a restrained reveal cycle", () => {
     const html = read("index.html");
     const css = read("src/styles.css");
     const js = read("src/main.js");
@@ -176,14 +177,45 @@ describe("Talos landing page static contract", () => {
     assert.match(js, /@fontsource\/gfs-neohellenic\/greek-700\.css/);
     assert.match(
       hero,
-      /<div\s+class="greek-hero-inscription"\s+lang="el"\s+aria-hidden="true">\s*ΤΑΛΩΣ\s*<\/div>/,
+      /<div\s+class="greek-hero-inscription hero-inscription"\s+aria-hidden="true">/,
     );
+    const inscriptionHtml =
+      hero.match(/<div\s+class="greek-hero-inscription hero-inscription"[\s\S]*?<\/div>/)?.[0] ?? "";
+    assert.match(hero, /<span\s+class="hero-inscription-layer hero-inscription-layer--english"\s+lang="en">\s*TALOS\s*<\/span>/);
+    assert.match(hero, /<span\s+class="hero-inscription-layer hero-inscription-layer--greek"\s+lang="el">\s*ΤΑΛΩΣ\s*<\/span>/);
+    assert.match(
+      hero,
+      /<span\s+class="hero-inscription-layer hero-inscription-layer--terminal"\s+lang="en">/,
+    );
+    for (const phrase of [
+      "local operator",
+      "local model harness",
+      "guard your workspace",
+    ]) {
+      assert.match(hero, new RegExp(escapeRegExp(phrase)));
+    }
+    assert.doesNotMatch(hero, /approval before mutation|trace every turn|last trace/i);
     assert.equal((publicSurface.match(/ΤΑΛΩΣ/g) ?? []).length, 1);
     assert.doesNotMatch(publicSurface, /TAΛOS|TALΩS|TAΛΩS/);
+    assert.doesNotMatch(hero, /TALOS-CLI is a local-first operator for your workspace\. A local harness for local models\./);
     assert.doesNotMatch(publicSurface, /fonts\.googleapis\.com|fonts\.gstatic\.com/);
     assert.match(css, /\.greek-hero-inscription\s*\{[\s\S]*font-family:\s*"GFS Neohellenic"/);
     assert.match(css, /\.greek-hero-inscription\s*\{[\s\S]*color:\s*var\(--bronze\)/);
-    assert.doesNotMatch(greekBlock, /--cyan|var\(--cyan\)|color:\s*transparent|background-clip|linear-gradient/);
+    assert.match(css, /\.hero-inscription-layer--terminal\s*\{[\s\S]*font-family:\s*ui-monospace/);
+    assert.match(css, /\.hero-inscription-layer--terminal\s*\{[\s\S]*position:\s*absolute/);
+    assert.match(css, /\.hero-terminal-line\s*\{[\s\S]*position:\s*absolute/);
+    assert.match(css, /\.hero-terminal-prompt\s*\{[\s\S]*color:\s*var\(--cyan\)/);
+    assert.match(css, /\.hero-terminal-text\s*\{[\s\S]*color:\s*var\(--text\)/);
+    assert.match(css, /@keyframes\s+talos-inscription-english/);
+    assert.match(css, /@keyframes\s+talos-inscription-greek/);
+    assert.match(css, /@keyframes\s+talos-inscription-terminal/);
+    assert.match(css, /@keyframes\s+talos-terminal-type-one/);
+    assert.match(css, /@keyframes\s+talos-terminal-type-two/);
+    assert.match(css, /@keyframes\s+talos-terminal-type-three/);
+    assert.match(css, /animation-duration:\s*28s/);
+    assert.match(css, /prefers-reduced-motion:\s*reduce[\s\S]*hero-inscription-layer--english[\s\S]*display:\s*none/);
+    assert.match(css, /prefers-reduced-motion:\s*reduce[\s\S]*hero-inscription-layer--terminal[\s\S]*display:\s*none/);
+    assert.doesNotMatch(greekBlock, /--cyan|var\(--cyan\)|color:\s*transparent|background-clip/);
     assert.match(hero, /<img\b[^>]*class="startup-terminal-image"[^>]*src="\.\/design\/img\.png"/);
   });
 
@@ -362,7 +394,8 @@ describe("Talos landing page static contract", () => {
     assert.match(css, /transition(?:-duration)?:\s*none\s*!important|transition-duration:\s*0\.01ms\s*!important/);
     assert.match(css, /animation(?:-duration)?:\s*none\s*!important|animation-duration:\s*0\.01ms\s*!important/);
     assert.match(css, /\.js\s+\.reveal[\s\S]*opacity:\s*1/);
-    assert.doesNotMatch(css, /\.js\s+\.reveal\s*\{[\s\S]*?opacity:\s*0/);
+    const jsRevealBlock = css.match(/\.js\s+\.reveal\s*\{(?<block>[^}]*)\}/)?.groups?.block ?? "";
+    assert.doesNotMatch(jsRevealBlock, /opacity:\s*0/);
   });
 
   it("uses native scroll with content-only story blending without scrolljacking", () => {
