@@ -51,12 +51,17 @@ function renderInline(text) {
   working = working.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, label, href) => {
     let safeHref = href.trim();
     let isExternal = /^https?:\/\//i.test(safeHref);
-    const isAnchor = safeHref.startsWith("#");
+    const isAnchorOnly = safeHref.startsWith("#") && !safeHref.startsWith("#/");
     const hasUnsafeProtocol = /^[a-z][a-z0-9+.-]*:/i.test(safeHref) && !isExternal;
     if (hasUnsafeProtocol) {
       safeHref = "#/";
     }
-    if (!isExternal && !isAnchor) {
+    if (isAnchorOnly) {
+      const { slug } = currentRoute();
+      if (slug) {
+        safeHref = `#/${slug}${safeHref}`;
+      }
+    } else if (!isExternal) {
       // e.g. "installation.md" or "installation.md#section"
       const mdMatch = safeHref.match(/^([^#?]+)\.md(#.*)?$/);
       if (mdMatch) {

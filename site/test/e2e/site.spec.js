@@ -110,6 +110,15 @@ test("docs page routes render without hiding content under the sticky header", a
   expect(page.browserIssues).toEqual([]);
 });
 
+test("docs page keeps in-page Markdown anchors inside the current docs route", async ({ page }) => {
+  await page.goto("/docs.html#/quickstart");
+  await page.getByRole("link", { name: "Current Support" }).click();
+  await expect(page).toHaveURL(/\/docs\.html#\/quickstart#current-support$/);
+  await expect(page.locator("#docs-article h1")).toHaveText("Quickstart");
+  await expect(page.locator("#current-support")).toBeInViewport();
+  expect(page.browserIssues).toEqual([]);
+});
+
 test("mobile header and nav remain usable", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 780 });
   await page.goto("/");
