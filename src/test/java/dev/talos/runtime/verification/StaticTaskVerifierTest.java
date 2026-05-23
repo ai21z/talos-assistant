@@ -2382,10 +2382,10 @@ class StaticTaskVerifierTest {
 
     @Test
     void expectedTargetMatchingCanUseWindowsCaseInsensitiveSemantics() {
-        assertTrue(StaticTaskVerifier.expectedTargetMatches("Index.html", "index.html", true));
-        assertTrue(StaticTaskVerifier.expectedTargetMatches(".\\Index.html", "./index.html", true));
-        assertFalse(StaticTaskVerifier.expectedTargetMatches("scripts.js", "script.js", true));
-        assertFalse(StaticTaskVerifier.expectedTargetMatches("Index.html", "index.html", false));
+        assertTrue(TargetScopeStaticVerifier.expectedTargetMatches("Index.html", "index.html", true));
+        assertTrue(TargetScopeStaticVerifier.expectedTargetMatches(".\\Index.html", "./index.html", true));
+        assertFalse(TargetScopeStaticVerifier.expectedTargetMatches("scripts.js", "script.js", true));
+        assertFalse(TargetScopeStaticVerifier.expectedTargetMatches("Index.html", "index.html", false));
     }
 
     @Test
