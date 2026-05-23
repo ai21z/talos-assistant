@@ -342,9 +342,11 @@ h3 { margin-bottom: 0.5rem; font-size: 1rem; font-weight: 700; }
 
 .greek-hero-inscription {
   min-height: clamp(5.2rem, 11vw, 8.6rem);
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
+  isolation: isolate;
   border: 1px solid rgba(90, 90, 90, 0.42);
   border-radius: 6px;
   background:
@@ -360,6 +362,234 @@ h3 { margin-bottom: 0.5rem; font-size: 1rem; font-weight: 700; }
   text-shadow: 0 0 22px rgba(194, 138, 76, 0.1);
   overflow: hidden;
   user-select: none;
+}
+.hero-inscription-layer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--bronze);
+  font: inherit;
+  letter-spacing: inherit;
+  line-height: inherit;
+  opacity: 0;
+  clip-path: inset(0 100% 0 0);
+  transform: translateY(0.02em);
+  filter: blur(1px);
+  will-change: opacity, clip-path, transform, filter;
+  animation-duration: 28s;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  animation-iteration-count: infinite;
+  animation-fill-mode: both;
+}
+.hero-inscription-layer--english { animation-name: talos-inscription-english; }
+.hero-inscription-layer--greek { animation-name: talos-inscription-greek; }
+.hero-inscription-layer--terminal {
+  position: absolute;
+  align-items: stretch;
+  justify-content: center;
+  padding: clamp(0.85rem, 2vw, 1.3rem) clamp(1rem, 2.4vw, 1.75rem);
+  color: var(--text);
+  font-family:
+    ui-monospace, "SFMono-Regular", Consolas, "Cascadia Mono",
+    "Liberation Mono", Menlo, monospace;
+  font-size: clamp(0.92rem, 1.45vw, 1.2rem);
+  font-weight: 600;
+  line-height: 1.34;
+  letter-spacing: 0.02em;
+  text-align: left;
+  text-shadow: none;
+  clip-path: none;
+  animation-name: talos-inscription-terminal;
+}
+.hero-terminal-line {
+  position: absolute;
+  left: clamp(1rem, 2.4vw, 1.75rem);
+  top: 50%;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateY(-50%);
+  will-change: width, opacity, transform;
+  animation-duration: 28s;
+  animation-timing-function: steps(var(--terminal-steps), end);
+  animation-iteration-count: infinite;
+  animation-fill-mode: both;
+}
+.hero-terminal-line--one {
+  --terminal-width: 22ch;
+  --terminal-steps: 16;
+  animation-name: talos-terminal-type-one;
+}
+.hero-terminal-line--two {
+  --terminal-width: 30ch;
+  --terminal-steps: 23;
+  animation-name: talos-terminal-type-two;
+}
+.hero-terminal-line--three {
+  --terminal-width: 30ch;
+  --terminal-steps: 23;
+  animation-name: talos-terminal-type-three;
+}
+.hero-terminal-prompt {
+  flex: 0 0 auto;
+  color: var(--cyan);
+  font-weight: 700;
+}
+.hero-terminal-text {
+  flex: 0 0 auto;
+  color: var(--text);
+}
+.hero-terminal-line::after {
+  content: "";
+  display: inline-block;
+  width: 0.58ch;
+  height: 1em;
+  margin-left: 0.08rem;
+  background: var(--cyan);
+  transform: translateY(0.12em);
+  animation: talos-terminal-caret 1s steps(1, end) infinite;
+}
+
+@keyframes talos-inscription-english {
+  0%,
+  18% {
+    opacity: 1;
+    clip-path: inset(0 0 0 0);
+    transform: translateY(0);
+    filter: blur(0);
+  }
+  25%,
+  100% {
+    opacity: 0;
+    clip-path: inset(0 0 0 100%);
+    transform: translateY(-0.035em);
+    filter: blur(2px);
+  }
+}
+
+@keyframes talos-inscription-greek {
+  0%,
+  25% {
+    opacity: 0;
+    clip-path: inset(0 100% 0 0);
+    transform: translateY(0.035em);
+    filter: blur(2px);
+  }
+  31%,
+  38% {
+    opacity: 1;
+    clip-path: inset(0 0 0 0);
+    transform: translateY(0);
+    filter: blur(0);
+  }
+  45%,
+  100% {
+    opacity: 0;
+    clip-path: inset(0 0 0 100%);
+    transform: translateY(-0.035em);
+    filter: blur(2px);
+  }
+}
+
+@keyframes talos-inscription-terminal {
+  0%,
+  44% {
+    opacity: 0;
+    transform: translateY(0.28rem);
+    filter: blur(1px);
+  }
+  50%,
+  90% {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+  97%,
+  100% {
+    opacity: 0;
+    transform: translateY(-0.18rem);
+    filter: blur(1px);
+  }
+}
+
+@keyframes talos-terminal-type-one {
+  0%,
+  49% {
+    width: 0;
+    opacity: 0;
+  }
+  50% {
+    width: 0;
+    opacity: 1;
+  }
+  55%,
+  58% {
+    width: var(--terminal-width);
+    opacity: 1;
+  }
+  60%,
+  100% {
+    width: 0;
+    opacity: 0;
+  }
+}
+
+@keyframes talos-terminal-type-two {
+  0%,
+  60% {
+    width: 0;
+    opacity: 0;
+  }
+  61% {
+    width: 0;
+    opacity: 1;
+  }
+  66%,
+  69% {
+    width: var(--terminal-width);
+    opacity: 1;
+  }
+  71%,
+  100% {
+    width: 0;
+    opacity: 0;
+  }
+}
+
+@keyframes talos-terminal-type-three {
+  0%,
+  71% {
+    width: 0;
+    opacity: 0;
+  }
+  72% {
+    width: 0;
+    opacity: 1;
+  }
+  77%,
+  88% {
+    width: var(--terminal-width);
+    opacity: 1;
+  }
+  92%,
+  100% {
+    width: 0;
+    opacity: 0;
+  }
+}
+
+@keyframes talos-terminal-caret {
+  0%,
+  49% { opacity: 1; }
+  50%,
+  100% { opacity: 0; }
 }
 
 .startup-terminal-frame { margin: 0; max-width: 100%; }
@@ -792,6 +1022,16 @@ h3 { margin-bottom: 0.5rem; font-size: 1rem; font-weight: 700; }
     font-size: clamp(3.2rem, 15vw, 4.3rem);
     letter-spacing: 0.035em;
   }
+  .hero-inscription-layer--terminal {
+    gap: 0.18rem;
+    padding: 0.75rem 0.85rem;
+    font-size: clamp(0.78rem, 3.35vw, 0.98rem);
+    line-height: 1.28;
+    letter-spacing: 0.01em;
+  }
+  .hero-terminal-line {
+    gap: 0.42rem;
+  }
   .docs-grid, .use-case-grid { grid-template-columns: 1fr; }
   .lane-legend { grid-template-columns: 1fr; }
   .terminal-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -808,6 +1048,19 @@ h3 { margin-bottom: 0.5rem; font-size: 1rem; font-weight: 700; }
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     animation: none !important;
+  }
+  .hero-inscription-layer {
+    opacity: 0;
+    clip-path: none;
+    transform: none;
+    filter: none;
+  }
+  .hero-inscription-layer--english { opacity: 1; }
+  .hero-inscription-layer--greek,
+  .hero-inscription-layer--terminal { display: none; }
+  .hero-terminal-line {
+    width: auto;
+    opacity: 1;
   }
   .js .reveal, .reveal { opacity: 1; transform: none; }
 }

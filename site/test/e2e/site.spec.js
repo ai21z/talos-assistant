@@ -298,23 +298,45 @@ test("hero startup terminal image loads", async ({ page }) => {
   expect(loaded).toBe(true);
 });
 
-test("Greek hero inscription stays bronze, contained, and secondary to the terminal proof", async ({ page }) => {
+test("hero inscription cycles TALOS, Greek, then terminal-typed product phrases", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
 
   const inscription = page.locator(".greek-hero-inscription");
+  const english = page.locator(".hero-inscription-layer--english");
+  const greek = page.locator(".hero-inscription-layer--greek");
+  const terminal = page.locator(".hero-inscription-layer--terminal");
   const image = page.locator(".startup-terminal-image");
 
-  await expect(inscription).toHaveText("ΤΑΛΩΣ");
+  await expect(english).toHaveText("TALOS");
+  await expect(greek).toHaveText("ΤΑΛΩΣ");
+  for (const phrase of [
+    "local operator",
+    "local model harness",
+    "guard your workspace",
+  ]) {
+    await expect(terminal).toContainText(phrase);
+  }
+  await expect(terminal).not.toContainText(/approval before mutation|trace every turn|last trace/i);
   await expect(inscription).toBeVisible();
   await expect(image).toBeVisible();
 
   const visualOrder = await page.evaluate(() => {
     const inscriptionNode = document.querySelector(".greek-hero-inscription");
+    const englishNode = document.querySelector(".hero-inscription-layer--english");
+    const greekNode = document.querySelector(".hero-inscription-layer--greek");
+    const terminalNode = document.querySelector(".hero-inscription-layer--terminal");
+    const promptNode = document.querySelector(".hero-terminal-prompt");
+    const textNode = document.querySelector(".hero-terminal-text");
     const imageNode = document.querySelector(".startup-terminal-image");
     const inscription = inscriptionNode.getBoundingClientRect();
     const image = imageNode.getBoundingClientRect();
     const styles = window.getComputedStyle(inscriptionNode);
+    const englishStyles = window.getComputedStyle(englishNode);
+    const greekStyles = window.getComputedStyle(greekNode);
+    const terminalStyles = window.getComputedStyle(terminalNode);
+    const promptStyles = window.getComputedStyle(promptNode);
+    const textStyles = window.getComputedStyle(textNode);
     return {
       inscriptionTop: inscription.top,
       inscriptionLeft: inscription.left,
@@ -324,6 +346,19 @@ test("Greek hero inscription stays bronze, contained, and secondary to the termi
       imageHeight: image.height,
       color: styles.color,
       fontFamily: styles.fontFamily,
+      englishColor: englishStyles.color,
+      greekColor: greekStyles.color,
+      terminalColor: terminalStyles.color,
+      promptColor: promptStyles.color,
+      textColor: textStyles.color,
+      englishFontFamily: englishStyles.fontFamily,
+      greekFontFamily: greekStyles.fontFamily,
+      terminalFontFamily: terminalStyles.fontFamily,
+      englishAnimation: englishStyles.animationName,
+      greekAnimation: greekStyles.animationName,
+      terminalAnimation: terminalStyles.animationName,
+      terminalLineHeight: terminalStyles.lineHeight,
+      terminalTextAlign: terminalStyles.textAlign,
     };
   });
 
@@ -333,6 +368,86 @@ test("Greek hero inscription stays bronze, contained, and secondary to the termi
   expect(visualOrder.inscriptionRight).toBeLessThanOrEqual(1440);
   expect(visualOrder.color).toBe("rgb(194, 138, 76)");
   expect(visualOrder.fontFamily).toContain("GFS Neohellenic");
+  expect(visualOrder.englishColor).toBe("rgb(194, 138, 76)");
+  expect(visualOrder.greekColor).toBe("rgb(194, 138, 76)");
+  expect(visualOrder.terminalColor).toBe("rgb(243, 236, 223)");
+  expect(visualOrder.promptColor).toBe("rgb(95, 175, 207)");
+  expect(visualOrder.textColor).toBe("rgb(243, 236, 223)");
+  expect(visualOrder.englishFontFamily).toContain("GFS Neohellenic");
+  expect(visualOrder.greekFontFamily).toContain("GFS Neohellenic");
+  expect(visualOrder.terminalFontFamily).toContain("Consolas");
+  expect(visualOrder.englishAnimation).toBe("talos-inscription-english");
+  expect(visualOrder.greekAnimation).toBe("talos-inscription-greek");
+  expect(visualOrder.terminalAnimation).toBe("talos-inscription-terminal");
+  expect(visualOrder.terminalTextAlign).toBe("left");
+
+  const terminalPhrasePhases = await page.evaluate(() => {
+    const terminalNode = document.querySelector(".hero-inscription-layer--terminal");
+    const lines = Array.from(document.querySelectorAll(".hero-terminal-line"));
+    terminalNode.style.animationDelay = "-20s";
+    terminalNode.style.animationPlayState = "paused";
+    const setLinePhase = (seconds) => {
+      for (const line of lines) {
+        line.style.animationDelay = `-${seconds}s`;
+        line.style.animationPlayState = "paused";
+      }
+      return lines.map((line) => ({
+        text: line.textContent.trim().replace(/\s+/g, " "),
+        opacity: Number(window.getComputedStyle(line).opacity),
+        width: line.getBoundingClientRect().width,
+        scrollWidth: line.scrollWidth,
+      }));
+    };
+    return {
+      first: setLinePhase(15.5),
+      second: setLinePhase(18.8),
+      third: setLinePhase(22),
+    };
+  });
+  const assertOneActivePhrase = (phase, activeText) => {
+    const active = phase.filter((line) => line.opacity > 0.75);
+    expect(active.map((line) => line.text)).toEqual([activeText]);
+    expect(active[0].width + 1, `${activeText} line should not clip typed content`).toBeGreaterThanOrEqual(
+      active[0].scrollWidth,
+    );
+  };
+  assertOneActivePhrase(terminalPhrasePhases.first, "> local operator");
+  assertOneActivePhrase(terminalPhrasePhases.second, "> local model harness");
+  assertOneActivePhrase(terminalPhrasePhases.third, "> guard your workspace");
+
+  const phases = await page.evaluate(() => {
+    const englishNode = document.querySelector(".hero-inscription-layer--english");
+    const greekNode = document.querySelector(".hero-inscription-layer--greek");
+    const terminalNode = document.querySelector(".hero-inscription-layer--terminal");
+    const nodes = [englishNode, greekNode, terminalNode];
+    const setPhase = (seconds) => {
+      for (const node of nodes) {
+        node.style.animationDelay = `-${seconds}s`;
+        node.style.animationPlayState = "paused";
+      }
+      return {
+        english: Number(window.getComputedStyle(englishNode).opacity),
+        greek: Number(window.getComputedStyle(greekNode).opacity),
+        terminal: Number(window.getComputedStyle(terminalNode).opacity),
+      };
+    };
+
+    return {
+      englishPhase: setPhase(0.5),
+      greekPhase: setPhase(8.4),
+      terminalPhase: setPhase(17),
+    };
+  });
+
+  expect(phases.englishPhase.english).toBeGreaterThan(0.85);
+  expect(phases.englishPhase.greek).toBeLessThan(0.2);
+  expect(phases.englishPhase.terminal).toBeLessThan(0.2);
+  expect(phases.greekPhase.greek).toBeGreaterThan(0.85);
+  expect(phases.greekPhase.english).toBeLessThan(0.2);
+  expect(phases.greekPhase.terminal).toBeLessThan(0.2);
+  expect(phases.terminalPhase.terminal).toBeGreaterThan(0.85);
+  expect(phases.terminalPhase.english).toBeLessThan(0.2);
+  expect(phases.terminalPhase.greek).toBeLessThan(0.2);
 });
 
 test("mobile hero content fits without masked clipping", async ({ page }) => {
@@ -374,5 +489,8 @@ test("reduced-motion mode leaves content visible without reveal animations", asy
     }).length,
   );
   expect(hiddenRevealCount).toBe(0);
+  await expect(page.locator(".hero-inscription-layer--english")).toBeVisible();
+  await expect(page.locator(".hero-inscription-layer--greek")).toHaveCSS("display", "none");
+  await expect(page.locator(".hero-inscription-layer--terminal")).toHaveCSS("display", "none");
   await expect(page.locator("h1")).toBeVisible();
 });
