@@ -285,33 +285,37 @@ talos</code></pre>
               <h2 id="docs-heading">Source-backed docs, curated for the first run.</h2>
               <p class="section-lede">
                 The landing page stays narrow. Setup, permissions, local models,
-                and trace details live in the repository docs.
+                and trace details live in the user documentation.
               </p>
             </div>
+            <p class="docs-cta-row">
+              <a class="button button--primary" href="./docs.html">Open documentation</a>
+              <a class="button button--ghost" href="./docs.html#/quickstart">Jump to Quickstart</a>
+            </p>
             <div class="docs-grid">
-              <a class="doc-card reveal" href="https://github.com/ai21z/talos-cli#quick-start" rel="noopener">
+              <a class="doc-card reveal" href="./docs.html#/quickstart">
                 <span class="doc-tag">01</span>
                 <h3>Quickstart</h3>
-                <p>Current source/developer setup for local beta runs.</p>
-                <code>README.md · Quick Start</code>
+                <p>Source/developer setup to a working local Talos session.</p>
+                <code>docs/user/quickstart.md</code>
               </a>
-              <a class="doc-card reveal" href="https://github.com/ai21z/talos-cli/blob/v0.9.0-beta-dev/docs/setup-managed-models.md" rel="noopener">
+              <a class="doc-card reveal" href="./docs.html#/model-setup">
                 <span class="doc-tag">02</span>
                 <h3>Model Setup</h3>
-                <p>Managed <code>llama.cpp</code> setup and model profiles.</p>
-                <code>docs/setup-managed-models.md</code>
+                <p>Configure a managed <code>llama.cpp</code> model profile.</p>
+                <code>docs/user/model-setup.md</code>
               </a>
-              <a class="doc-card reveal" href="https://github.com/ai21z/talos-cli/blob/v0.9.0-beta-dev/docs/architecture/04-declarative-allow-ask-deny-permissions.md" rel="noopener">
+              <a class="doc-card reveal" href="./docs.html#/approvals-and-permissions">
                 <span class="doc-tag">03</span>
                 <h3>Permissions</h3>
-                <p>Declarative allow / ask / deny boundaries.</p>
-                <code>docs/architecture/04-declarative-allow-ask-deny-permissions.md</code>
+                <p>When Talos asks before reads, writes, and commands.</p>
+                <code>docs/user/approvals-and-permissions.md</code>
               </a>
-              <a class="doc-card reveal" href="https://github.com/ai21z/talos-cli/blob/v0.9.0-beta-dev/docs/architecture/03-local-turn-trace-model-v1.md" rel="noopener">
+              <a class="doc-card reveal" href="./docs.html#/how-talos-works">
                 <span class="doc-tag">04</span>
                 <h3>Trace / Audit</h3>
-                <p>Local turn trace model and audit evidence.</p>
-                <code>docs/architecture/03-local-turn-trace-model-v1.md</code>
+                <p>Execution discipline, <code>/last trace</code>, and local evidence.</p>
+                <code>docs/user/how-talos-works.md</code>
               </a>
             </div>
           </div>
