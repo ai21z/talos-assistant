@@ -2,6 +2,8 @@
 
 This page answers: "How do I get from a checkout to a usable Talos session?"
 
+Jump to [Current Support](#current-support) if you need the current install status first.
+
 ## Current Support
 
 The current reliable path is source/developer setup. A public package-manager
