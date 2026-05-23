@@ -134,7 +134,8 @@ describe("Talos landing page static contract", () => {
     assert.doesNotMatch(html, /<svg\b/i);
     assert.doesNotMatch(css, /url\(["']?\.\.\/design\/talos-icon\.png/);
     assert.doesNotMatch(css, /\.brand-mark img\s*\{[\s\S]*?opacity:\s*0/);
-    assert.doesNotMatch(css, /\.wordmark-mark\s*\{[\s\S]*?border:/);
+    const wordmarkBlock = css.match(/\.wordmark-mark\s*\{(?<block>[^}]*)\}/)?.groups?.block ?? "";
+    assert.doesNotMatch(wordmarkBlock, /border:/);
     assert.match(css, /\.wordmark-mark[\s\S]*?object-fit:\s*contain|\.wordmark-mark img[\s\S]*?object-fit:\s*contain/);
   });
 
@@ -273,7 +274,7 @@ describe("Talos landing page static contract", () => {
     }
   });
 
-  it("curates the docs gateway to four source-backed cards", () => {
+  it("curates the docs gateway to four in-site user documentation cards", () => {
     const html = read("index.html");
     const docs = sectionSlice(html, "docs", null);
     const docCards = Array.from(docs.matchAll(/<a\s+class="doc-card[^"]*"[^>]*href="([^"]+)"/g));
@@ -282,8 +283,9 @@ describe("Talos landing page static contract", () => {
       assert.match(docs, new RegExp(`>${escapeRegExp(title)}<`));
     }
     for (const [, href] of docCards) {
-      assert.match(href, /^https:\/\/github\.com\/ai21z\/talos-cli/, `doc card href ${href} not in canonical repo`);
+      assert.match(href, /^\.\/docs\.html#\//, `doc card href ${href} does not route to in-site docs`);
     }
+    assert.doesNotMatch(docs, /github\.com\/ai21z\/talos-cli\/blob\/v0\.9\.0-beta-dev\/docs\/architecture/);
   });
 
   it("keeps real command examples without marketing maintainer-only debug commands", () => {
@@ -421,5 +423,102 @@ describe("Talos landing page static contract", () => {
     assert.doesNotMatch(js, /data-beta-placeholder/);
     assert.doesNotMatch(js, /Beta download placeholder/);
     assert.doesNotMatch(js, /React|Vue|createApp|tailwind/i);
+  });
+});
+
+describe("Talos in-site documentation contract", () => {
+  const userDocSlugs = [
+    "index",
+    "quickstart",
+    "installation",
+    "model-setup",
+    "first-run",
+    "workspaces-and-indexing",
+    "how-talos-works",
+    "approvals-and-permissions",
+    "local-privacy-and-artifacts",
+    "file-support",
+    "commands",
+    "troubleshooting",
+    "release-channels",
+  ];
+
+  it("ships every user doc Markdown source needed by the docs page", () => {
+    const docsRoot = join(root, "..", "docs", "user");
+    for (const slug of userDocSlugs) {
+      const path = join(docsRoot, `${slug}.md`);
+      assert.ok(existsSync(path), `missing docs/user/${slug}.md`);
+      const body = readFileSync(path, "utf8");
+      assert.match(body, /^#\s+/m, `docs/user/${slug}.md missing h1`);
+      assert.doesNotMatch(body, /<!--|-->/, `docs/user/${slug}.md leaks HTML comments`);
+      assert.doesNotMatch(body, /\bT\d{3,}\b/, `docs/user/${slug}.md leaks ticket ids`);
+      assert.doesNotMatch(body, /work-cycle-docs|tickets\/(?:open|done)/i, `docs/user/${slug}.md leaks internal docs`);
+    }
+  });
+
+  it("registers docs.html as a Vite page without changing the landing entry", () => {
+    const config = read("vite.config.js");
+    assert.match(config, /input\s*:\s*\{/);
+    assert.match(config, /main\s*:\s*resolve\([^)]*"index\.html"/);
+    assert.match(config, /docs\s*:\s*resolve\([^)]*"docs\.html"/);
+    assert.match(config, /fs:\s*\{[\s\S]*allow:/);
+  });
+
+  it("provides a standalone docs page with grouped navigation and article shell", () => {
+    const html = read("docs.html");
+    assert.match(html, /<title>Talos documentation/);
+    assert.match(html, /<main id="main" class="docs-main">/);
+    assert.match(html, /id="docs-article"/);
+    assert.match(html, /type="module"\s+src="\/src\/docs\.js"/);
+    for (const group of ["Get Started", "Guides", "Reference", "Concepts"]) {
+      assert.match(html, new RegExp(`>${escapeRegExp(group)}<`));
+    }
+    for (const slug of userDocSlugs.filter((slug) => slug !== "index")) {
+      assert.match(html, new RegExp(`href="#/${escapeRegExp(slug)}"`), `missing #/${slug} docs route`);
+      assert.match(html, new RegExp(`data-doc-slug="${escapeRegExp(slug)}"`), `missing ${slug} nav state`);
+    }
+  });
+
+  it("renders docs from Markdown sources with a small trusted renderer", () => {
+    const js = read("src/docs.js");
+    assert.match(js, /import\.meta\.glob\(\s*"\.\.\/\.\.\/docs\/user\/\*\.md"/);
+    assert.match(js, /query:\s*"\?raw"/);
+    assert.match(js, /function renderMarkdown/);
+    assert.match(js, /function escapeHtml/);
+    assert.match(js, /docs-table/);
+    assert.match(js, /docs-code/);
+    assert.match(js, /hashchange/);
+    assert.doesNotMatch(js, /React|Vue|createApp|tailwind/i);
+  });
+
+  it("links the landing docs cards into the in-site docs experience", () => {
+    const html = read("index.html");
+    const docs = sectionSlice(html, "docs", null);
+    assert.match(docs, /href="\.\/docs\.html"/);
+    for (const route of [
+      "./docs.html#/quickstart",
+      "./docs.html#/model-setup",
+      "./docs.html#/approvals-and-permissions",
+      "./docs.html#/how-talos-works",
+    ]) {
+      assert.match(docs, new RegExp(`href="${escapeRegExp(route)}"`));
+    }
+    assert.doesNotMatch(docs, /github\.com\/ai21z\/talos-cli\/blob\/v0\.9\.0-beta-dev\/docs\/architecture/);
+  });
+
+  it("does not publish unsupported install or capability claims in docs surface", () => {
+    const surface = [read("docs.html"), read("src/docs.js"), ...userDocSlugs.map((slug) => readFileSync(join(root, "..", "docs", "user", `${slug}.md`), "utf8"))].join("\n");
+    for (const banned of [
+      "winget install works now",
+      "Linux public install is supported",
+      "macOS public install is supported",
+      "bundled models",
+      "bundled llama.cpp",
+      "GitHub Wiki",
+      "Talos browses the web",
+      "PowerPoint is supported",
+    ]) {
+      assert.doesNotMatch(surface, new RegExp(escapeRegExp(banned), "i"));
+    }
   });
 });
