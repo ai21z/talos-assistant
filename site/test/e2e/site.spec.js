@@ -90,6 +90,26 @@ test("hero CTAs are real links, not placeholder beta actions", async ({ page }) 
   await expect(page.getByRole("button", { name: "Get beta build" })).toHaveCount(0);
 });
 
+test("docs page routes render without hiding content under the sticky header", async ({ page }) => {
+  await page.goto("/docs.html#/quickstart");
+  await expect(page).toHaveTitle(/Quickstart \| Talos documentation/);
+  await expect(page.locator("#docs-article h1")).toHaveText("Quickstart");
+  await expect(page.locator('[data-doc-slug="quickstart"]')).toHaveAttribute("aria-current", "page");
+
+  const layout = await page.evaluate(() => {
+    const header = document.querySelector(".site-header").getBoundingClientRect();
+    const h1 = document.querySelector("#docs-article h1").getBoundingClientRect();
+    return {
+      h1Top: h1.top,
+      headerBottom: header.bottom,
+      overflow: document.documentElement.scrollWidth - window.innerWidth,
+    };
+  });
+  expect(layout.h1Top).toBeGreaterThan(layout.headerBottom + 8);
+  expect(layout.overflow).toBeLessThanOrEqual(1);
+  expect(page.browserIssues).toEqual([]);
+});
+
 test("mobile header and nav remain usable", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 780 });
   await page.goto("/");
