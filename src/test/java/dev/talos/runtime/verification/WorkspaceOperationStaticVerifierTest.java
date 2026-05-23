@@ -47,6 +47,31 @@ class WorkspaceOperationStaticVerifierTest {
     }
 
     @Test
+    void directVerifierExposesWorkspaceOperationFactsTargetsAndAliases() throws Exception {
+        Files.writeString(workspace.resolve("notes.md"), "notes\n");
+        Files.createDirectories(workspace.resolve("archive"));
+        Files.writeString(workspace.resolve("archive/notes-copy.md"), "notes\n");
+
+        WorkspaceOperationStaticVerifier.Result result = WorkspaceOperationStaticVerifier.verify(
+                workspace,
+                List.of(WorkspaceOperationPlan.copyPath(
+                        "notes.md",
+                        "archive/notes-copy.md",
+                        WorkspaceOperationPlan.OverwritePolicy.FAIL_IF_EXISTS,
+                        false)));
+
+        assertTrue(result.problems().isEmpty(), result.problems().toString());
+        assertTrue(result.facts().contains("copy source exists: notes.md."), result.facts().toString());
+        assertTrue(result.facts().contains("copy destination exists: archive/notes-copy.md."),
+                result.facts().toString());
+        assertTrue(result.mutationTargets().contains("archive/notes-copy.md"), result.mutationTargets().toString());
+        assertTrue(result.expectedTargetExemptions().contains("notes.md"),
+                result.expectedTargetExemptions().toString());
+        assertTrue(result.expectedTargetAliases().contains("notes-copy.md"),
+                result.expectedTargetAliases().toString());
+    }
+
+    @Test
     void copyMoveRenameSequenceVerifiesFinalWorkspaceStateFromToolLoopOutcomes() throws Exception {
         Files.writeString(workspace.resolve("notes.md"), "notes\n");
 
