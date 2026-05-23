@@ -74,12 +74,6 @@ public final class StaticTaskVerifier {
         }
     }
 
-    private static final Set<String> SMALL_WORKSPACE_WEB_EXTS = Set.of(
-            ".html", ".htm", ".css", ".js", ".ts", ".jsx", ".tsx"
-    );
-    private static final int MAX_SMALL_WORKSPACE_VISIBLE_FILES = 6;
-    private static final int MAX_TARGET_AWARE_WORKSPACE_VISIBLE_FILES = 12;
-    private static final int MAX_PRIMARY_WEB_FILES = 5;
     private static final int MAX_STATIC_SELECTOR_SEARCH_MATCHES = 50;
 
     private static final Pattern HTML_INLINE_SCRIPT = Pattern.compile(
@@ -1473,134 +1467,21 @@ public final class StaticTaskVerifier {
     }
 
     public static List<String> obviousPrimaryFiles(Path workspace) {
-        if (workspace == null || !Files.isDirectory(workspace)) return List.of();
-        try {
-            List<Path> visibleFiles = visibleRegularFiles(workspace);
-            if (visibleFiles.isEmpty()
-                    || visibleFiles.size() > MAX_SMALL_WORKSPACE_VISIBLE_FILES) return List.of();
-            List<String> webFiles = webFileNames(visibleFiles);
-            if (webFiles.isEmpty() || webFiles.size() > MAX_PRIMARY_WEB_FILES) return List.of();
-            return webFiles.stream().sorted().toList();
-        } catch (Exception e) {
-            return List.of();
-        }
+        return StaticWebSurfaceDetector.obviousPrimaryFiles(workspace);
     }
 
     private static List<String> targetAwarePrimaryFiles(Path workspace, Collection<String> targetHints) {
-        if (workspace == null || !Files.isDirectory(workspace) || targetHints == null || targetHints.isEmpty()) {
-            return List.of();
-        }
-        try {
-            List<Path> visibleFiles = visibleRegularFiles(workspace);
-            if (visibleFiles.isEmpty()
-                    || visibleFiles.size() > MAX_TARGET_AWARE_WORKSPACE_VISIBLE_FILES) return List.of();
-
-            Set<String> visibleNames = new LinkedHashSet<>();
-            for (Path file : visibleFiles) {
-                String name = visibleFileName(file);
-                if (!name.isBlank()) visibleNames.add(name);
-            }
-            if (visibleNames.isEmpty() || !hasVisibleWebTarget(visibleNames, targetHints)) return List.of();
-
-            List<String> webFiles = webFileNames(visibleFiles);
-            if (webFiles.isEmpty() || webFiles.size() > MAX_PRIMARY_WEB_FILES) return List.of();
-            return webFiles.stream().sorted().toList();
-        } catch (Exception e) {
-            return List.of();
-        }
-    }
-
-    private static List<Path> visibleRegularFiles(Path workspace) throws java.io.IOException {
-        List<Path> visibleFiles = new ArrayList<>();
-        try (var stream = Files.list(workspace)) {
-            stream.filter(Files::isRegularFile)
-                    .filter(file -> {
-                        String name = visibleFileName(file);
-                        return !name.isBlank() && !name.startsWith(".");
-                    })
-                    .forEach(visibleFiles::add);
-        }
-        return visibleFiles;
-    }
-
-    private static List<String> webFileNames(List<Path> visibleFiles) {
-        List<String> webFiles = new ArrayList<>();
-        if (visibleFiles == null) return webFiles;
-        for (Path file : visibleFiles) {
-            String name = visibleFileName(file);
-            if (isSmallWorkspaceWebFile(name)) {
-                webFiles.add(name.replace('\\', '/'));
-            }
-        }
-        return webFiles;
-    }
-
-    private static String visibleFileName(Path file) {
-        return file == null || file.getFileName() == null ? "" : file.getFileName().toString();
-    }
-
-    private static boolean hasVisibleWebTarget(Set<String> visibleNames, Collection<String> targetHints) {
-        boolean caseInsensitive = expectedTargetMatchingIsCaseInsensitive();
-        for (String hint : targetHints) {
-            String normalized = normalizePath(hint);
-            if (normalized.isBlank() || normalized.contains("/") || !isSmallWorkspaceWebFile(normalized)) {
-                continue;
-            }
-            for (String visibleName : visibleNames) {
-                if (expectedTargetMatches(visibleName, normalized, caseInsensitive)) return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean isSmallWorkspaceWebFile(String name) {
-        if (name == null || name.isBlank()) return false;
-        String lower = name.toLowerCase(Locale.ROOT);
-        int dot = lower.lastIndexOf('.');
-        String ext = dot >= 0 ? lower.substring(dot) : "";
-        return SMALL_WORKSPACE_WEB_EXTS.contains(ext);
+        return StaticWebSurfaceDetector.targetAwarePrimaryFiles(workspace, targetHints);
     }
 
     private static List<String> preferredWebTargetFiles(TaskContract contract, Collection<String> mutatedPaths) {
-        List<String> preferred = new ArrayList<>();
-        addPreferredWebTargetFiles(preferred, contract == null ? null : contract.expectedTargets());
-        addPreferredWebTargetFiles(preferred, mutatedPaths);
-        return preferred;
-    }
-
-    private static void addPreferredWebTargetFiles(List<String> preferred, Collection<String> targetHints) {
-        if (preferred == null || targetHints == null || targetHints.isEmpty()) return;
-        boolean caseInsensitive = expectedTargetMatchingIsCaseInsensitive();
-        for (String hint : targetHints) {
-            String normalized = normalizePath(hint);
-            if (normalized.isBlank()
-                    || normalized.contains("/")
-                    || !isSmallWorkspaceWebFile(normalized)) {
-                continue;
-            }
-            boolean alreadyPresent = preferred.stream()
-                    .anyMatch(existing -> expectedTargetMatches(existing, normalized, caseInsensitive));
-            if (!alreadyPresent) preferred.add(normalized);
-        }
+        return StaticWebSurfaceDetector.preferredWebTargetFiles(
+                contract == null ? null : contract.expectedTargets(),
+                mutatedPaths);
     }
 
     public static List<String> missingPrimaryReads(Path workspace, Collection<String> readPaths) {
-        List<String> primary = obviousPrimaryFiles(workspace);
-        if (primary.isEmpty()) return List.of();
-        Set<String> read = new LinkedHashSet<>();
-        if (readPaths != null) {
-            for (String p : readPaths) {
-                if (p == null || p.isBlank()) continue;
-                String normalized = p.replace('\\', '/');
-                int slash = normalized.lastIndexOf('/');
-                read.add(slash >= 0 ? normalized.substring(slash + 1) : normalized);
-            }
-        }
-        List<String> missing = new ArrayList<>();
-        for (String file : primary) {
-            if (!read.contains(file)) missing.add(file);
-        }
-        return List.copyOf(missing);
+        return StaticWebSurfaceDetector.missingPrimaryReads(workspace, readPaths);
     }
 
     public static String renderSelectorInspection(Path workspace, Collection<String> readPaths) {
@@ -1639,22 +1520,23 @@ public final class StaticTaskVerifier {
         Path root = workspace.toAbsolutePath().normalize();
         List<Path> visibleFiles;
         try {
-            visibleFiles = visibleRegularFiles(root);
+            visibleFiles = StaticWebSurfaceDetector.visibleRegularFiles(root);
         } catch (Exception e) {
             return null;
         }
         if (visibleFiles.isEmpty()
-                || visibleFiles.size() > MAX_TARGET_AWARE_WORKSPACE_VISIBLE_FILES) {
+                || visibleFiles.size() > StaticWebSurfaceDetector.MAX_TARGET_AWARE_WORKSPACE_VISIBLE_FILES) {
             return null;
         }
 
         List<String> matches = new ArrayList<>();
         search:
         for (Path file : visibleFiles.stream()
-                .sorted((a, b) -> visibleFileName(a).compareToIgnoreCase(visibleFileName(b)))
+                .sorted((a, b) -> StaticWebSurfaceDetector.visibleFileName(a)
+                        .compareToIgnoreCase(StaticWebSurfaceDetector.visibleFileName(b)))
                 .toList()) {
-            String name = visibleFileName(file).replace('\\', '/');
-            if (!isSmallWorkspaceWebFile(name)) continue;
+            String name = StaticWebSurfaceDetector.visibleFileName(file).replace('\\', '/');
+            if (!StaticWebSurfaceDetector.isSmallWorkspaceWebFile(name)) continue;
             int lineNumber = 0;
             try (var lines = Files.lines(file)) {
                 var it = lines.iterator();
@@ -1749,21 +1631,7 @@ public final class StaticTaskVerifier {
     }
 
     private static List<String> primaryHtmlTargets(Path workspace) {
-        List<String> primary = obviousPrimaryFiles(workspace);
-        if (primary.isEmpty()) return List.of();
-        List<String> html = primary.stream()
-                .filter(name -> {
-                    String lower = name.toLowerCase(Locale.ROOT);
-                    return lower.endsWith(".html") || lower.endsWith(".htm");
-                })
-                .toList();
-        if (html.isEmpty()) return List.of();
-        for (String candidate : html) {
-            if ("index.html".equalsIgnoreCase(candidate) || "index.htm".equalsIgnoreCase(candidate)) {
-                return List.of(candidate);
-            }
-        }
-        return List.of(html.get(0));
+        return StaticWebSurfaceDetector.primaryHtmlTargets(workspace);
     }
 
     public static WebDiagnostics currentWebDiagnostics(Path workspace, TaskContract contract) {
@@ -1891,9 +1759,7 @@ public final class StaticTaskVerifier {
     }
 
     private static boolean hasPrimaryWebSurface(List<String> files) {
-        return StaticWebSelectorAnalyzer.pickPrimary(files, ".html", ".htm") != null
-                && StaticWebSelectorAnalyzer.pickPrimary(files, ".css") != null
-                && StaticWebSelectorAnalyzer.pickPrimary(files, ".js") != null;
+        return StaticWebSurfaceDetector.hasPrimaryWebSurface(files);
     }
 
     private static void verifyPartialStyledWebWorkspace(
