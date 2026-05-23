@@ -1,6 +1,5 @@
 package dev.talos.runtime.verification;
 
-import dev.talos.runtime.TemplatePlaceholderGuard;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.capability.ArtifactOperation;
 import dev.talos.runtime.capability.CapabilityProfile;
@@ -9,8 +8,6 @@ import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.tools.ToolAliasPolicy;
-import dev.talos.runtime.workspace.WorkspaceOperationPlan;
-import dev.talos.tools.VerificationStatus;
 
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
@@ -133,24 +130,13 @@ public final class StaticTaskVerifier {
         List<String> problems = new ArrayList<>();
         Set<String> mutatedPaths = new LinkedHashSet<>();
         Set<String> expectedTargetExemptions = new LinkedHashSet<>();
-        List<WorkspaceOperationPlan> workspaceOperationPlans = new ArrayList<>();
-
-        for (ToolCallLoop.ToolOutcome outcome : successfulMutations) {
-            WorkspaceOperationPlan workspaceOperationPlan = outcome.workspaceOperationPlan();
-            if (workspaceOperationPlan != null && !workspaceOperationPlan.pathEffects().isEmpty()) {
-                workspaceOperationPlans.add(workspaceOperationPlan);
-                continue;
-            }
-            String pathHint = normalizePath(outcome.pathHint());
-            if (pathHint.isBlank()) {
-                problems.add(outcome.toolName() + " succeeded but did not expose a target path.");
-                continue;
-            }
-            mutatedPaths.add(pathHint);
-            verifyMutationTarget(root, pathHint, outcome.fileVerificationStatus(), facts, problems);
-        }
+        MutationTargetReadbackVerifier.Result mutationReadback =
+                MutationTargetReadbackVerifier.verify(root, successfulMutations);
+        facts.addAll(mutationReadback.facts());
+        problems.addAll(mutationReadback.problems());
+        mutatedPaths.addAll(mutationReadback.mutationTargets());
         WorkspaceOperationStaticVerifier.Result workspaceOperationVerification =
-                WorkspaceOperationStaticVerifier.verify(root, workspaceOperationPlans);
+                WorkspaceOperationStaticVerifier.verify(root, mutationReadback.workspaceOperationPlans());
         facts.addAll(workspaceOperationVerification.facts());
         problems.addAll(workspaceOperationVerification.problems());
         mutatedPaths.addAll(workspaceOperationVerification.mutationTargets());
@@ -500,50 +486,6 @@ public final class StaticTaskVerifier {
             return false;
         }
         return target.startsWith(root) && Files.isRegularFile(target);
-    }
-
-    private static void verifyMutationTarget(
-            Path root,
-            String pathHint,
-            VerificationStatus fileVerificationStatus,
-            List<String> facts,
-            List<String> problems
-    ) {
-        Path target;
-        try {
-            target = root.resolve(pathHint).normalize();
-        } catch (InvalidPathException e) {
-            problems.add(pathHint + ": target path is invalid (" + e.getMessage() + ")");
-            return;
-        }
-        if (!target.startsWith(root)) {
-            problems.add(pathHint + ": target path resolves outside the workspace.");
-            return;
-        }
-        if (!Files.isRegularFile(target)) {
-            problems.add(pathHint + ": mutated target is not a readable file after apply.");
-            return;
-        }
-        String content;
-        try {
-            content = Files.readString(target);
-        } catch (Exception e) {
-            problems.add(pathHint + ": mutated target could not be read after apply (" + e.getMessage() + ")");
-            return;
-        }
-        if (content.isBlank()) {
-            problems.add(pathHint + ": mutated target is empty after apply.");
-            return;
-        }
-        if (TemplatePlaceholderGuard.looksLikeTemplatePlaceholder(content)) {
-            problems.add(pathHint + ": mutated target contains only a template placeholder.");
-            return;
-        }
-        if (fileVerificationStatus != null && !fileVerificationStatus.acceptable()) {
-            problems.add(pathHint + ": file-level verification reported " + fileVerificationStatus.label() + ".");
-            return;
-        }
-        facts.add(pathHint + ": mutated target exists and is readable.");
     }
 
     private static void verifyPrimaryWebMutationCoverage(
