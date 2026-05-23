@@ -31,11 +31,9 @@ import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -208,12 +206,12 @@ public final class StaticTaskVerifier {
         List<String> problems = new ArrayList<>();
         Set<String> mutatedPaths = new LinkedHashSet<>();
         Set<String> expectedTargetExemptions = new LinkedHashSet<>();
-        WorkspaceOperationAccumulator workspaceOperationAccumulator = new WorkspaceOperationAccumulator();
+        List<WorkspaceOperationPlan> workspaceOperationPlans = new ArrayList<>();
 
         for (ToolCallLoop.ToolOutcome outcome : successfulMutations) {
             WorkspaceOperationPlan workspaceOperationPlan = outcome.workspaceOperationPlan();
             if (workspaceOperationPlan != null && !workspaceOperationPlan.pathEffects().isEmpty()) {
-                accumulateWorkspaceOperation(workspaceOperationAccumulator, workspaceOperationPlan);
+                workspaceOperationPlans.add(workspaceOperationPlan);
                 continue;
             }
             String pathHint = normalizePath(outcome.pathHint());
@@ -224,8 +222,10 @@ public final class StaticTaskVerifier {
             mutatedPaths.add(pathHint);
             verifyMutationTarget(root, pathHint, outcome.fileVerificationStatus(), facts, problems);
         }
-        WorkspaceOperationVerification workspaceOperationVerification =
-                verifyWorkspaceOperations(root, workspaceOperationAccumulator, facts, problems);
+        WorkspaceOperationStaticVerifier.Result workspaceOperationVerification =
+                WorkspaceOperationStaticVerifier.verify(root, workspaceOperationPlans);
+        facts.addAll(workspaceOperationVerification.facts());
+        problems.addAll(workspaceOperationVerification.problems());
         mutatedPaths.addAll(workspaceOperationVerification.mutationTargets());
         expectedTargetExemptions.addAll(workspaceOperationVerification.expectedTargetExemptions());
 
@@ -1206,183 +1206,6 @@ public final class StaticTaskVerifier {
                 0,
                 0,
                 Math.max(0, observedCount));
-    }
-
-    private static void accumulateWorkspaceOperation(
-            WorkspaceOperationAccumulator accumulator,
-            WorkspaceOperationPlan plan
-    ) {
-        if (accumulator == null || plan == null) return;
-        for (WorkspaceOperationPlan.PathEffect effect : plan.pathEffects()) {
-            String path = normalizePath(effect.path());
-            if (path.isBlank()) continue;
-            WorkspaceOperationPlan.OperationKind kind = effect.operationKind() == null
-                    ? plan.operationKind()
-                    : effect.operationKind();
-            WorkspaceOperationPlan.PathRole role = effect.role();
-
-            switch (kind) {
-                case CREATE_DIRECTORY -> putExists(
-                        accumulator, path, true, true, "directory exists");
-                case COPY_PATH -> {
-                    if (role == WorkspaceOperationPlan.PathRole.SOURCE) {
-                        accumulator.expectedTargetExemptions().add(path);
-                        putExists(accumulator, path, false, false, "copy source exists");
-                    } else {
-                        putExists(accumulator, path, false, true, "copy destination exists");
-                    }
-                }
-                case MOVE_PATH -> {
-                    if (role == WorkspaceOperationPlan.PathRole.SOURCE) {
-                        accumulator.expectedTargetExemptions().add(path);
-                        putAbsent(accumulator, path, "move source absent");
-                    } else {
-                        putExists(accumulator, path, false, true, "move destination exists");
-                    }
-                }
-                case RENAME_PATH -> {
-                    if (role == WorkspaceOperationPlan.PathRole.SOURCE) {
-                        accumulator.expectedTargetExemptions().add(path);
-                        putAbsent(accumulator, path, "rename source absent");
-                    } else {
-                        putExists(accumulator, path, false, true, "rename destination exists");
-                    }
-                }
-                case DELETE_PATH -> {
-                    accumulator.expectedTargetExemptions().add(path);
-                    putAbsent(accumulator, path, "deleted target absent");
-                }
-                case WRITE_FILE, BATCH_APPLY -> {
-                    if (role == WorkspaceOperationPlan.PathRole.SOURCE) {
-                        accumulator.expectedTargetExemptions().add(path);
-                        putExists(accumulator, path, false, false, "workspace operation source exists");
-                    } else if (role == WorkspaceOperationPlan.PathRole.DELETED) {
-                        accumulator.expectedTargetExemptions().add(path);
-                        putAbsent(accumulator, path, "workspace operation target absent");
-                    } else {
-                        putExists(accumulator, path, false, true, "workspace operation target exists");
-                    }
-                }
-            }
-        }
-    }
-
-    private static WorkspaceOperationVerification verifyWorkspaceOperations(
-            Path root,
-            WorkspaceOperationAccumulator accumulator,
-            List<String> facts,
-            List<String> problems
-    ) {
-        if (accumulator == null || accumulator.expectations().isEmpty()) {
-            return new WorkspaceOperationVerification(Set.of(), Set.of(), Set.of());
-        }
-        Set<String> mutationTargets = new LinkedHashSet<>();
-        Set<String> expectedTargetAliases = new LinkedHashSet<>();
-        for (WorkspacePathExpectation expectation : accumulator.expectations().values()) {
-            verifyWorkspacePathExpectation(root, expectation, facts, problems);
-            if (expectation.shouldExist() && expectation.mutationTarget()) {
-                mutationTargets.add(expectation.path());
-                String basename = basename(expectation.path());
-                if (!basename.isBlank() && !basename.equals(expectation.path())) {
-                    expectedTargetAliases.add(basename);
-                }
-            }
-            if (!expectation.shouldExist()) {
-                accumulator.expectedTargetExemptions().add(expectation.path());
-            }
-        }
-        return new WorkspaceOperationVerification(
-                mutationTargets,
-                accumulator.expectedTargetExemptions(),
-                expectedTargetAliases);
-    }
-
-    private static void putExists(
-            WorkspaceOperationAccumulator accumulator,
-            String path,
-            boolean directory,
-            boolean mutationTarget,
-            String factPrefix
-    ) {
-        accumulator.expectations().put(
-                path,
-                new WorkspacePathExpectation(path, true, directory, mutationTarget, factPrefix));
-    }
-
-    private static void putAbsent(
-            WorkspaceOperationAccumulator accumulator,
-            String path,
-            String factPrefix
-    ) {
-        accumulator.expectations().put(path, new WorkspacePathExpectation(path, false, false, false, factPrefix));
-    }
-
-    private static void verifyWorkspacePathExpectation(
-            Path root,
-            WorkspacePathExpectation expectation,
-            List<String> facts,
-            List<String> problems
-    ) {
-        Path target;
-        try {
-            target = root.resolve(expectation.path()).normalize();
-        } catch (InvalidPathException e) {
-            problems.add(expectation.path() + ": workspace operation path is invalid (" + e.getMessage() + ")");
-            return;
-        }
-        if (!target.startsWith(root)) {
-            problems.add(expectation.path() + ": workspace operation path resolves outside the workspace.");
-            return;
-        }
-
-        if (expectation.shouldExist()) {
-            if (!Files.exists(target)) {
-                problems.add(expectation.factPrefix() + " failed: " + expectation.path() + " is missing.");
-                return;
-            }
-            if (expectation.directory() && !Files.isDirectory(target)) {
-                problems.add(expectation.factPrefix() + " failed: " + expectation.path()
-                        + " is not a directory.");
-                return;
-            }
-            facts.add(expectation.factPrefix() + ": " + expectation.path() + ".");
-            return;
-        }
-
-        if (Files.exists(target)) {
-            problems.add(expectation.factPrefix() + " failed: " + expectation.path() + " still exists.");
-        } else {
-            facts.add(expectation.factPrefix() + ": " + expectation.path() + ".");
-        }
-    }
-
-    private record WorkspacePathExpectation(
-            String path,
-            boolean shouldExist,
-            boolean directory,
-            boolean mutationTarget,
-            String factPrefix
-    ) {}
-
-    private record WorkspaceOperationAccumulator(
-            Map<String, WorkspacePathExpectation> expectations,
-            Set<String> expectedTargetExemptions
-    ) {
-        private WorkspaceOperationAccumulator() {
-            this(new LinkedHashMap<>(), new LinkedHashSet<>());
-        }
-    }
-
-    private record WorkspaceOperationVerification(
-            Set<String> mutationTargets,
-            Set<String> expectedTargetExemptions,
-            Set<String> expectedTargetAliases
-    ) {
-        private WorkspaceOperationVerification {
-            mutationTargets = mutationTargets == null ? Set.of() : Set.copyOf(mutationTargets);
-            expectedTargetExemptions = expectedTargetExemptions == null ? Set.of() : Set.copyOf(expectedTargetExemptions);
-            expectedTargetAliases = expectedTargetAliases == null ? Set.of() : Set.copyOf(expectedTargetAliases);
-        }
     }
 
     private static void verifyExpectedTargets(
