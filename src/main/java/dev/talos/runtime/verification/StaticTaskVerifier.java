@@ -7,7 +7,6 @@ import dev.talos.runtime.capability.CapabilityProfileRegistry;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
-import dev.talos.tools.ToolAliasPolicy;
 
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
@@ -158,9 +157,10 @@ public final class StaticTaskVerifier {
         boolean bulletCountExpectationRequired = expectationVerification.bulletCountRequired();
         boolean appendLineExpectationRequired = expectationVerification.appendLineRequired();
         boolean replacementExpectationRequired = expectationVerification.replacementRequired();
-        boolean exactEditEvidenceRequired = verifyExactEditEvidence(successfulMutations, root, facts, problems);
-        boolean exactEditEvidenceCoversAllMutations =
-                exactEditEvidenceRequired && allSuccessfulMutationsHaveExactEditEvidence(successfulMutations);
+        ExactEditReplacementVerifier.Result exactEditVerification =
+                ExactEditReplacementVerifier.verify(root, successfulMutations);
+        facts.addAll(exactEditVerification.facts());
+        problems.addAll(exactEditVerification.problems());
         SourceDerivedArtifactVerifier.Result sourceDerivedVerification =
                 SourceDerivedArtifactVerifier.verify(contract, root);
         facts.addAll(sourceDerivedVerification.facts());
@@ -182,7 +182,7 @@ public final class StaticTaskVerifier {
             return TaskVerificationResult.failed(
                     sourceDerivedRequired && !webCoherenceRequired
                             ? "Source-derived artifact verification failed."
-                    : exactEditEvidenceRequired && problems.stream().anyMatch(StaticTaskVerifier::isExactEditProblem)
+                    : exactEditVerification.verifiedAny() && exactEditVerification.hasProblem()
                             ? "Exact edit replacement verification failed."
                     : replacementExpectationRequired && problems.stream().anyMatch(StaticTaskVerifier::isReplacementProblem)
                             ? "Replacement verification failed."
@@ -216,7 +216,7 @@ public final class StaticTaskVerifier {
                     "Exact content verification passed.",
                     facts);
         }
-        if (exactEditEvidenceCoversAllMutations && !webCoherenceRequired) {
+        if (exactEditVerification.coversAllSuccessfulMutations() && !webCoherenceRequired) {
             return TaskVerificationResult.passed(
                     "Exact edit replacement verification passed.",
                     facts);
@@ -245,15 +245,6 @@ public final class StaticTaskVerifier {
         return "";
     }
 
-    private static Path resolveWorkspaceFile(Path root, String path) {
-        try {
-            Path resolved = root.resolve(normalizePath(path)).normalize();
-            return resolved.startsWith(root) ? resolved : null;
-        } catch (InvalidPathException e) {
-            return null;
-        }
-    }
-
     private static boolean isExactContentProblem(String problem) {
         return problem != null
                 && (problem.contains("exact content mismatch")
@@ -270,78 +261,8 @@ public final class StaticTaskVerifier {
         return problem != null && problem.contains("replacement ");
     }
 
-    private static boolean isExactEditProblem(String problem) {
-        return problem != null && problem.contains("exact edit replacement");
-    }
-
     private static boolean isBulletCountProblem(String problem) {
         return problem != null && (problem.contains("bullet count") || problem.contains("bullet list"));
-    }
-
-    private static boolean verifyExactEditEvidence(
-            List<ToolCallLoop.ToolOutcome> outcomes,
-            Path root,
-            List<String> facts,
-            List<String> problems
-    ) {
-        if (outcomes == null || outcomes.isEmpty()) return false;
-        boolean verifiedAny = false;
-        for (ToolCallLoop.ToolOutcome outcome : outcomes) {
-            if (outcome == null
-                    || !outcome.success()
-                    || !"edit_file".equals(ToolAliasPolicy.localCanonicalName(outcome.toolName()))
-                    || outcome.mutationEvidence() == null
-                    || !outcome.mutationEvidence().exactEditReplacement()) {
-                continue;
-            }
-            verifiedAny = true;
-            String pathHint = normalizePath(outcome.pathHint());
-            Path target = resolveWorkspaceFile(root, pathHint);
-            if (target == null || !Files.isRegularFile(target)) {
-                problems.add(pathHint + ": exact edit replacement target is not readable after apply.");
-                continue;
-            }
-            String content;
-            try {
-                content = Files.readString(target);
-            } catch (Exception e) {
-                problems.add(pathHint + ": exact edit replacement target could not be read after apply ("
-                        + e.getMessage() + ")");
-                continue;
-            }
-
-            ToolCallLoop.MutationEvidence evidence = outcome.mutationEvidence();
-            String oldString = evidence.oldString();
-            String newString = evidence.newString();
-            if (!newString.isEmpty() && !content.contains(newString)) {
-                problems.add(pathHint + ": exact edit replacement text was not observed after apply.");
-                continue;
-            }
-            if (!oldString.isEmpty()
-                    && (newString.isEmpty() || !newString.contains(oldString))
-                    && content.contains(oldString)) {
-                problems.add(pathHint + ": exact edit replacement old text remained after apply.");
-                continue;
-            }
-            facts.add(pathHint + ": exact edit replacement observed in post-apply file.");
-        }
-        return verifiedAny;
-    }
-
-    private static boolean allSuccessfulMutationsHaveExactEditEvidence(List<ToolCallLoop.ToolOutcome> outcomes) {
-        if (outcomes == null || outcomes.isEmpty()) return false;
-        for (ToolCallLoop.ToolOutcome outcome : outcomes) {
-            if (outcome == null || !outcome.success() || !outcome.mutating()) continue;
-            if (!hasExactEditEvidence(outcome)) return false;
-        }
-        return true;
-    }
-
-    private static boolean hasExactEditEvidence(ToolCallLoop.ToolOutcome outcome) {
-        return outcome != null
-                && "edit_file".equals(ToolAliasPolicy.localCanonicalName(outcome.toolName()))
-                && outcome.mutationEvidence() != null
-                && outcome.mutationEvidence().exactEditReplacement();
     }
 
     private static void verifyExpectedTargets(
