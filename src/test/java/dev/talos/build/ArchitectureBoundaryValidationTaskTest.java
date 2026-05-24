@@ -10,6 +10,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.util.List;
 
 import static org.gradle.testkit.runner.TaskOutcome.SUCCESS;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -284,6 +286,11 @@ class ArchitectureBoundaryValidationTaskTest {
         copyProjectFile("build.gradle.kts", projectDir.resolve("build.gradle.kts"));
         copyProjectFile("settings.gradle", projectDir.resolve("settings.gradle"));
         copyProjectFile("gradle.properties", projectDir.resolve("gradle.properties"));
+        Files.writeString(
+                projectDir.resolve("gradle.properties"),
+                System.lineSeparator() + "org.gradle.daemon=false" + System.lineSeparator(),
+                StandardCharsets.UTF_8,
+                StandardOpenOption.APPEND);
         writeUtf8(projectDir.resolve("CHANGELOG.md"), """
                 # Changelog
 
@@ -303,19 +310,24 @@ class ArchitectureBoundaryValidationTaskTest {
     }
 
     private BuildResult runValidation(Path projectDir) {
-        return GradleRunner.create()
-                .withProjectDir(projectDir.toFile())
-                .withArguments("validateArchitectureBoundaries", "--stacktrace")
-                .forwardOutput()
-                .build();
+        return validationRunner(projectDir).build();
     }
 
     private BuildResult runValidationAndFail(Path projectDir) {
+        return validationRunner(projectDir).buildAndFail();
+    }
+
+    private GradleRunner validationRunner(Path projectDir) {
         return GradleRunner.create()
                 .withProjectDir(projectDir.toFile())
-                .withArguments("validateArchitectureBoundaries", "--stacktrace")
-                .forwardOutput()
-                .buildAndFail();
+                .withArguments(validationArguments())
+                .forwardOutput();
+    }
+
+    private List<String> validationArguments() {
+        return List.of(
+                "--stacktrace",
+                "validateArchitectureBoundaries");
     }
 
     private void writeJava(Path file, String content) throws IOException {
