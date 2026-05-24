@@ -12,6 +12,7 @@ import dev.talos.runtime.outcome.TaskOutcome;
 import dev.talos.runtime.outcome.TaskOutcomeWarningBuilder;
 import dev.talos.runtime.outcome.TruthWarning;
 import dev.talos.runtime.phase.ExecutionPhase;
+import dev.talos.runtime.policy.ActionObligationFailureAssessment;
 import dev.talos.runtime.policy.EvidenceObligation;
 import dev.talos.runtime.policy.EvidenceObligationAssessment;
 import dev.talos.runtime.task.TaskContract;
@@ -162,14 +163,11 @@ record ExecutionOutcome(
         TaskContract contract = safePlan.taskContract();
         boolean mutationRequested = contract.mutationRequested();
         boolean unsupportedDocumentCapabilityLimited = hasUnsupportedDocumentCapabilityLimit(loopResult);
-        boolean pendingActionObligationFailure = pendingActionObligationFailure(loopResult);
-        boolean failurePolicyStoppedWithoutMutation = failurePolicyStoppedWithoutMutation(
+        ActionObligationFailureAssessment actionObligationFailure = ActionObligationFailureAssessment.assess(
+                failedActionObligation,
                 loopResult,
                 contract,
                 extraMutationSuccesses);
-        boolean failedMutationObligation = failedActionObligation
-                || pendingActionObligationFailure
-                || failurePolicyStoppedWithoutMutation;
         CommandOutcomeRenderer.Conclusion commandConclusion = CommandOutcomeRenderer.conclusion(loopResult);
         boolean commandFailed = commandConclusion.failed();
         boolean commandDenied = commandConclusion.denied();
@@ -183,7 +181,7 @@ record ExecutionOutcome(
                 && !commandSucceeded
                 && !commandFailed
                 && !commandDenied;
-        boolean failedAnyActionObligation = failedMutationObligation || commandRequiredButNotRun;
+        boolean failedAnyActionObligation = actionObligationFailure.failed() || commandRequiredButNotRun;
 
         String shaped = AssistantTurnExecutor.overrideUnsupportedDocumentClaimsIfNeeded(
                 current, loopResult);
@@ -701,33 +699,6 @@ record ExecutionOutcome(
             }
         }
         return false;
-    }
-
-    private static boolean failurePolicyStoppedWithoutMutation(
-            ToolCallLoop.LoopResult loopResult,
-            TaskContract contract,
-            int extraMutationSuccesses
-    ) {
-        if (loopResult == null || loopResult.failureDecision() == null) return false;
-        if (!loopResult.failureDecision().shouldStop()) return false;
-        if (contract == null || !contract.mutationRequested()) return false;
-        if (hasDeniedMutation(loopResult)) return false;
-        return loopResult.mutatingToolSuccesses() + Math.max(0, extraMutationSuccesses) <= 0;
-    }
-
-    private static boolean pendingActionObligationFailure(ToolCallLoop.LoopResult loopResult) {
-        if (loopResult == null || loopResult.failureDecision() == null) return false;
-        if (!loopResult.failureDecision().shouldStop()) return false;
-        String reason = loopResult.failureDecision().reason();
-        if (reason != null && reason.startsWith("Pending action obligation ")) return true;
-        String answer = loopResult.finalAnswer();
-        return answer != null && answer.startsWith("[Action obligation failed:");
-    }
-
-    private static boolean hasDeniedMutation(ToolCallLoop.LoopResult loopResult) {
-        if (loopResult == null || loopResult.toolOutcomes() == null) return false;
-        return loopResult.toolOutcomes().stream()
-                .anyMatch(outcome -> outcome.mutating() && outcome.denied());
     }
 
     private static String canonicalToolName(String toolName) {
