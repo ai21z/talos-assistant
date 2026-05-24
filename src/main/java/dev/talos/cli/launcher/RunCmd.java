@@ -242,9 +242,10 @@ public class RunCmd implements Runnable, SessionState {
                 .build();
     }
 
-    private static LineReaderBuilder baseLineReaderBuilder(Terminal term) {
+    static LineReaderBuilder baseLineReaderBuilder(Terminal term) {
         return LineReaderBuilder.builder()
                 .terminal(term)
+                .option(LineReader.Option.DISABLE_EVENT_EXPANSION, true)
                 .option(LineReader.Option.BRACKETED_PASTE, false);
     }
 
