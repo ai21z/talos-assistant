@@ -78,6 +78,28 @@ class TaskExpectationStaticVerifierTest {
     }
 
     @Test
+    void mutationEvidenceProofIsOwnedByDedicatedVerifier() throws Exception {
+        Path sourceRoot = Path.of("src/main/java/dev/talos/runtime/verification");
+        Path verifierPath = sourceRoot.resolve("TaskExpectationMutationEvidenceVerifier.java");
+        assertTrue(
+                Files.isRegularFile(verifierPath),
+                "TaskExpectationMutationEvidenceVerifier must own mutation evidence proof.");
+
+        String expectationVerifier = Files.readString(sourceRoot.resolve("TaskExpectationStaticVerifier.java"));
+        String mutationVerifier = Files.readString(verifierPath);
+
+        assertFalse(expectationVerifier.contains("ToolAliasPolicy"));
+        assertFalse(expectationVerifier.contains("mutationEvidence()"));
+        assertFalse(expectationVerifier.contains("replacementOnlyChangesRequestedText"));
+        assertFalse(expectationVerifier.contains("exactEditAppendsOnlyRequestedLine"));
+        assertTrue(mutationVerifier.contains("final class TaskExpectationMutationEvidenceVerifier"));
+        assertTrue(mutationVerifier.contains("ToolAliasPolicy"));
+        assertTrue(mutationVerifier.contains("mutationEvidence()"));
+        assertTrue(mutationVerifier.contains("replacementOnlyChangesRequestedText"));
+        assertTrue(mutationVerifier.contains("exactEditAppendsOnlyRequestedLine"));
+    }
+
+    @Test
     void literalExpectationResultAndTraceStayRedacted() throws Exception {
         Files.writeString(workspace.resolve("index.html"), "AFTER");
         LocalTurnTraceCapture.begin(
