@@ -7,6 +7,7 @@ import dev.talos.runtime.outcome.CommandOutcomeRenderer;
 import dev.talos.runtime.outcome.EvidenceContainmentAnswerGuard;
 import dev.talos.runtime.outcome.MutationOutcome;
 import dev.talos.runtime.outcome.ProtectedReadAnswerGuard;
+import dev.talos.runtime.outcome.ReadOnlyToolLimitOutcome;
 import dev.talos.runtime.outcome.StaticVerificationAnswerRenderer;
 import dev.talos.runtime.outcome.TaskOutcome;
 import dev.talos.runtime.outcome.TaskOutcomeWarningBuilder;
@@ -59,9 +60,6 @@ record ExecutionOutcome(
         boolean advisoryOnly
 ) {
 
-    private static final String READ_ONLY_TOOL_LIMIT_REPLACEMENT =
-            "[Read-only evidence incomplete: the tool-call limit was reached before Talos produced "
-                    + "a complete grounded answer. The read-only inspection did not complete.]";
     private static final EvidenceContainmentAnswerGuard.AnswerMarkers EVIDENCE_CONTAINMENT_MARKERS =
             new EvidenceContainmentAnswerGuard.AnswerMarkers(
                     List.of(
@@ -282,14 +280,15 @@ record ExecutionOutcome(
                     loopResult,
                     workspace);
         }
-        boolean readOnlyToolLimitWithoutRuntimeAnswer = readOnlyToolLimitWithoutRuntimeAnswer(
+        ReadOnlyToolLimitOutcome readOnlyToolLimit = ReadOnlyToolLimitOutcome.assess(
                 contract,
                 loopResult,
                 staticWebImportGroundedOverride
                         || webDiagnosticGroundedOverride
                         || selectorGroundedOverride);
-        if (readOnlyToolLimitWithoutRuntimeAnswer) {
-            current = READ_ONLY_TOOL_LIMIT_REPLACEMENT;
+        boolean readOnlyToolLimitWithoutRuntimeAnswer = readOnlyToolLimit.withoutRuntimeAnswer();
+        if (readOnlyToolLimit.shouldReplaceAnswer()) {
+            current = readOnlyToolLimit.replacementAnswer();
         }
         OutcomeDominancePolicy.Decision preVerificationDecision = outcomeDecision(
                 contract,
@@ -622,16 +621,6 @@ record ExecutionOutcome(
         if (loopResult == null) return false;
         if (contract == null || !contract.verificationRequired()) return false;
         return loopResult.mutatingToolSuccesses() + Math.max(0, extraMutationSuccesses) > 0;
-    }
-
-    private static boolean readOnlyToolLimitWithoutRuntimeAnswer(
-            TaskContract contract,
-            ToolCallLoop.LoopResult loopResult,
-            boolean runtimeGroundedOverride
-    ) {
-        if (loopResult == null || !loopResult.hitIterLimit()) return false;
-        if (runtimeGroundedOverride) return false;
-        return contract == null || !contract.mutationRequested();
     }
 
     private static VerificationStatus mapVerificationStatus(TaskVerificationStatus status) {
