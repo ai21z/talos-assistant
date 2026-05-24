@@ -5,8 +5,8 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.outcome.MutationOutcome;
 import dev.talos.runtime.outcome.TaskOutcome;
+import dev.talos.runtime.outcome.TaskOutcomeWarningBuilder;
 import dev.talos.runtime.outcome.TruthWarning;
-import dev.talos.runtime.outcome.TruthWarningType;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.EvidenceObligation;
 import dev.talos.runtime.policy.EvidenceObligationPolicy;
@@ -399,25 +399,26 @@ record ExecutionOutcome(
                 finalDecision.taskCompletionStatus(),
                 MutationOutcome.from(contract, loopResult, extraMutationSuccesses),
                 taskVerification,
-                toolLoopWarnings(
-                        deniedMutation,
-                        deniedProtectedRead,
-                        readOnlyDeniedMutation,
-                        failedAnyActionObligation,
-                        commandFailed,
-                        commandDenied,
-                        invalidMutation,
-                        partialMutation,
-                        falseMutationClaim,
-                        inspectUnderCompleted,
-                        unsupportedDocumentCapabilityLimited,
-                        staticWebImportGroundedOverride,
-                        webDiagnosticGroundedOverride,
-                        selectorGroundedOverride,
-                        readOnlyToolLimitWithoutRuntimeAnswer,
-                        verificationStatus,
-                        missingEvidence,
-                        approvedProtectedReadPostcondition),
+                TaskOutcomeWarningBuilder.toolLoopWarnings(
+                        new TaskOutcomeWarningBuilder.ToolLoopFacts(
+                                deniedMutation,
+                                deniedProtectedRead,
+                                readOnlyDeniedMutation,
+                                failedAnyActionObligation,
+                                commandFailed,
+                                commandDenied,
+                                invalidMutation,
+                                partialMutation,
+                                falseMutationClaim,
+                                inspectUnderCompleted,
+                                unsupportedDocumentCapabilityLimited,
+                                staticWebImportGroundedOverride,
+                                webDiagnosticGroundedOverride,
+                                selectorGroundedOverride,
+                                readOnlyToolLimitWithoutRuntimeAnswer,
+                                taskVerification.status(),
+                                missingEvidence,
+                                approvedProtectedReadPostcondition)),
                 loopResult == null ? List.of() : loopResult.toolOutcomes()
         );
 
@@ -573,13 +574,14 @@ record ExecutionOutcome(
         }
         advisoryOnly = completionStatus == CompletionStatus.ADVISORY_ONLY;
         TaskVerificationResult verification = TaskVerificationResult.notRun("Post-apply verification was not applicable.");
-        List<TruthWarning> warnings = noToolWarnings(
-                noToolMutationReplaced,
-                failedActionObligation || commandRequiredButNotRun || unsupportedCommandNotAvailable,
-                ungrounded,
-                malformedProtocolDebrisReplaced,
-                localAccessCapabilityCorrected,
-                missingEvidence);
+        List<TruthWarning> warnings = TaskOutcomeWarningBuilder.noToolWarnings(
+                new TaskOutcomeWarningBuilder.NoToolFacts(
+                        noToolMutationReplaced,
+                        failedActionObligation || commandRequiredButNotRun || unsupportedCommandNotAvailable,
+                        ungrounded,
+                        malformedProtocolDebrisReplaced,
+                        localAccessCapabilityCorrected,
+                        missingEvidence));
         TaskOutcome taskOutcome = new TaskOutcome(
                 contract,
                 decision.taskCompletionStatus(),
@@ -746,158 +748,6 @@ record ExecutionOutcome(
                 protectedReadApprovalMissing,
                 approvedProtectedReadPostcondition,
                 verificationStatus));
-    }
-
-    private static List<TruthWarning> toolLoopWarnings(
-            boolean deniedMutation,
-            boolean deniedProtectedRead,
-            boolean readOnlyDeniedMutation,
-            boolean failedActionObligation,
-            boolean commandFailed,
-            boolean commandDenied,
-            boolean invalidMutation,
-            boolean partialMutation,
-            boolean falseMutationClaim,
-            boolean inspectUnderCompleted,
-            boolean unsupportedDocumentCapabilityLimited,
-            boolean staticWebImportGroundedOverride,
-            boolean webDiagnosticGroundedOverride,
-            boolean selectorGroundedOverride,
-            boolean readOnlyToolLimitWithoutRuntimeAnswer,
-            VerificationStatus verificationStatus,
-            boolean missingEvidence,
-            boolean approvedProtectedReadPostcondition
-    ) {
-        List<TruthWarning> warnings = new ArrayList<>();
-        if (deniedMutation) {
-            warnings.add(TruthWarning.of(
-                    TruthWarningType.DENIED_MUTATION,
-                    readOnlyDeniedMutation
-                            ? "A mutating tool call was blocked by the read-only task contract."
-                            : "A mutating tool call was denied by approval."));
-        }
-        if (failedActionObligation) {
-            warnings.add(TruthWarning.of(
-                    TruthWarningType.FAILED_ACTION_OBLIGATION,
-                    "A required tool action was not performed after retry."));
-        }
-        if (commandFailed) {
-            warnings.add(TruthWarning.of(
-                    TruthWarningType.COMMAND_FAILED,
-                    "A requested verification command failed or timed out."));
-        }
-        if (commandDenied) {
-            warnings.add(TruthWarning.of(
-                    TruthWarningType.COMMAND_DENIED,
-                    "A requested verification command was not run because approval or policy blocked it."));
-        }
-        if (deniedProtectedRead) {
-            warnings.add(TruthWarning.of(
-                    TruthWarningType.DENIED_PROTECTED_READ,
-                    "A protected read was blocked because approval was denied."));
-        }
-        if (invalidMutation) {
-            warnings.add(TruthWarning.of(
-                    TruthWarningType.INVALID_MUTATION_ARGUMENTS,
-                    "A mutating tool call had invalid arguments and no file changed."));
-        }
-        if (partialMutation) {
-            warnings.add(TruthWarning.of(
-                    TruthWarningType.PARTIAL_MUTATION,
-                    "At least one mutating tool call succeeded and at least one failed."));
-        }
-        if (falseMutationClaim) {
-            warnings.add(TruthWarning.of(
-                    TruthWarningType.FALSE_MUTATION_CLAIM,
-                    "The answer claimed a mutation without a successful mutating tool outcome."));
-        }
-        if (inspectUnderCompleted) {
-            warnings.add(TruthWarning.of(
-                    TruthWarningType.INSPECT_UNDER_COMPLETION,
-                    "The answer sounded complete after an inspection-only tool path."));
-        }
-        if (unsupportedDocumentCapabilityLimited) {
-            warnings.add(TruthWarning.of(
-                    TruthWarningType.UNSUPPORTED_DOCUMENT_CAPABILITY_NOTE,
-                    "Unsupported binary document reads were corrected to capability-based wording."));
-        }
-        if (selectorGroundedOverride) {
-            warnings.add(TruthWarning.of(
-                    TruthWarningType.SELECTOR_GROUNDED_OVERRIDE,
-                    "Selector/linkage analysis was corrected from workspace evidence."));
-        }
-        if (staticWebImportGroundedOverride || webDiagnosticGroundedOverride) {
-            warnings.add(TruthWarning.of(
-                    TruthWarningType.WEB_DIAGNOSTIC_GROUNDED_OVERRIDE,
-                    "Read-only web diagnostics were corrected from static workspace evidence."));
-        }
-        if (readOnlyToolLimitWithoutRuntimeAnswer) {
-            warnings.add(TruthWarning.of(
-                    TruthWarningType.READ_ONLY_TOOL_LOOP_LIMIT,
-                    "The read-only tool-call limit was reached before a complete grounded answer was produced."));
-        }
-        if (verificationStatus == VerificationStatus.FAILED) {
-            warnings.add(TruthWarning.of(
-                    TruthWarningType.STATIC_VERIFICATION_FAILED,
-                    "Static post-apply verification failed."));
-        } else if (verificationStatus == VerificationStatus.UNAVAILABLE) {
-            warnings.add(TruthWarning.of(
-                    TruthWarningType.STATIC_VERIFICATION_UNAVAILABLE,
-                    "Static post-apply verification could not complete."));
-        }
-        if (missingEvidence) {
-            warnings.add(TruthWarning.of(
-                    TruthWarningType.MISSING_EVIDENCE,
-                    "Required workspace evidence was not gathered in this turn."));
-        }
-        if (approvedProtectedReadPostcondition) {
-            warnings.add(TruthWarning.of(
-                    TruthWarningType.APPROVED_PROTECTED_READ_POSTCONDITION,
-                    "A generic model refusal after an approved protected read was replaced with current read evidence."));
-        }
-        return List.copyOf(warnings);
-    }
-
-    private static List<TruthWarning> noToolWarnings(
-            boolean noToolMutationReplaced,
-            boolean failedActionObligation,
-            boolean ungrounded,
-            boolean malformedProtocolDebrisReplaced,
-            boolean localAccessCapabilityCorrected,
-            boolean missingEvidence
-    ) {
-        List<TruthWarning> warnings = new ArrayList<>();
-        if (noToolMutationReplaced) {
-            warnings.add(TruthWarning.of(
-                    TruthWarningType.STREAMING_NO_TOOL_MUTATION_REPLACED,
-                    "A streaming no-tool mutation narrative was blocked."));
-        }
-        if (failedActionObligation) {
-            warnings.add(TruthWarning.of(
-                    TruthWarningType.FAILED_ACTION_OBLIGATION,
-                    "The required tool calls were not issued, so the requested action did not run."));
-        }
-        if (ungrounded) {
-            warnings.add(TruthWarning.of(
-                    TruthWarningType.STREAMING_NO_TOOL_UNGROUNDED,
-                    "A streaming no-tool answer made workspace-evidence claims without tool grounding."));
-        }
-        if (malformedProtocolDebrisReplaced) {
-            warnings.add(TruthWarning.of(
-                    TruthWarningType.MALFORMED_TOOL_PROTOCOL_DEBRIS_REPLACED,
-                    "Malformed tool protocol debris was replaced with a no-action notice."));
-        }
-        if (localAccessCapabilityCorrected) {
-            warnings.add(TruthWarning.of(
-                    TruthWarningType.NO_TOOL_LOCAL_ACCESS_CAPABILITY_CORRECTED,
-                    "A no-tool answer denied local workspace access despite Talos read tools."));
-        }
-        if (missingEvidence) {
-            warnings.add(TruthWarning.of(
-                    TruthWarningType.MISSING_EVIDENCE,
-                    "Required workspace evidence was not gathered in this turn."));
-        }
-        return List.copyOf(warnings);
     }
 
     private static EvidenceObligation evidenceObligation(CurrentTurnPlan plan) {
