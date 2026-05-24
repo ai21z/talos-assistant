@@ -1,7 +1,15 @@
 package dev.talos.cli.launcher;
 
+import org.jline.reader.LineReader;
+import org.jline.terminal.Terminal;
+import org.jline.terminal.TerminalBuilder;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -26,6 +34,23 @@ class RunCmdTerminalModeTest {
     void pipedModeCanBuildNonSystemTerminal() throws Exception {
         try (var terminal = RunCmd.buildTerminal(false)) {
             assertNotNull(terminal);
+        }
+    }
+
+    @Test
+    void terminalReaderPreservesLiteralWindowsPathBackslashes() throws Exception {
+        String command = "/prompt-debug save "
+                + "\"C:\\Users\\arisz\\Projects\\LOQ\\loqj-cli\\local\\manual-testing\\example\\artifacts\\prompt-debug\"";
+        ByteArrayInputStream input = new ByteArrayInputStream((command + "\n").getBytes(StandardCharsets.UTF_8));
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (Terminal terminal = TerminalBuilder.builder()
+                .system(false)
+                .dumb(true)
+                .streams(input, output)
+                .build()) {
+            LineReader reader = RunCmd.baseLineReaderBuilder(terminal).build();
+
+            assertEquals(command, reader.readLine(""));
         }
     }
 }

@@ -249,6 +249,40 @@ class PromptDebugCommandTest {
     }
 
     @Test
+    void saveSupportsUnquotedAbsoluteDestination(@TempDir Path tempDir) throws Exception {
+        Path explicitDir = tempDir.resolve("explicit-prompt-debug");
+        PromptDebugCapture.record(protectedToolResultSnapshot());
+        PromptDebugCommand command = new PromptDebugCommand();
+
+        Result result = command.execute("save " + explicitDir, ctx);
+
+        Result.TrustedInfo info = assertInstanceOf(Result.TrustedInfo.class, result);
+        Path providerBody = savedPath(info.text, "Saved provider body JSON to: ");
+        Path render = savedPath(info.text, "Saved prompt debug render to: ");
+        assertTrue(providerBody.startsWith(explicitDir.toAbsolutePath().normalize()), info.text);
+        assertTrue(render.startsWith(explicitDir.toAbsolutePath().normalize()), info.text);
+        assertTrue(Files.exists(providerBody), info.text);
+        assertTrue(Files.exists(render), info.text);
+    }
+
+    @Test
+    void saveSupportsQuotedAbsoluteDestination(@TempDir Path tempDir) throws Exception {
+        Path explicitDir = tempDir.resolve("explicit prompt-debug");
+        PromptDebugCapture.record(protectedToolResultSnapshot());
+        PromptDebugCommand command = new PromptDebugCommand();
+
+        Result result = command.execute("save \"" + explicitDir + "\"", ctx);
+
+        Result.TrustedInfo info = assertInstanceOf(Result.TrustedInfo.class, result);
+        Path providerBody = savedPath(info.text, "Saved provider body JSON to: ");
+        Path render = savedPath(info.text, "Saved prompt debug render to: ");
+        assertTrue(providerBody.startsWith(explicitDir.toAbsolutePath().normalize()), info.text);
+        assertTrue(render.startsWith(explicitDir.toAbsolutePath().normalize()), info.text);
+        assertTrue(Files.exists(providerBody), info.text);
+        assertTrue(Files.exists(render), info.text);
+    }
+
+    @Test
     void saveAllSupportsExplicitDestination(@TempDir Path tempDir) throws Exception {
         Path explicitDir = tempDir.resolve("explicit-prompt-debug");
         PromptDebugCapture.record(protectedToolResultSnapshot());
