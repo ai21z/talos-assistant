@@ -5,6 +5,7 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.outcome.CommandOutcomeRenderer;
 import dev.talos.runtime.outcome.MutationOutcome;
+import dev.talos.runtime.outcome.StaticVerificationAnswerRenderer;
 import dev.talos.runtime.outcome.TaskOutcome;
 import dev.talos.runtime.outcome.TaskOutcomeWarningBuilder;
 import dev.talos.runtime.outcome.TruthWarning;
@@ -21,7 +22,6 @@ import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.runtime.verification.StaticTaskVerifier;
 import dev.talos.runtime.verification.TaskVerificationResult;
 import dev.talos.runtime.verification.TaskVerificationStatus;
-import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.spi.types.ChatMessage;
 
 import java.nio.file.Path;
@@ -342,22 +342,22 @@ record ExecutionOutcome(
                 // the dominant action-obligation failure. Keep that precise answer intact
                 // while still recording FAILED verification in outcome/trace evidence.
             } else if (completionStatus == CompletionStatus.PARTIAL) {
-                current = partialStaticVerificationFailedAnnotation(taskVerification) + current;
+                current = StaticVerificationAnswerRenderer.partialFailedAnnotation(taskVerification) + current;
             } else {
-                current = staticVerificationFailedReplacement(taskVerification, loopResult);
+                current = StaticVerificationAnswerRenderer.failedReplacement(taskVerification, loopResult);
             }
         } else if (verificationStatus == VerificationStatus.UNAVAILABLE) {
-            current = staticVerificationUnavailableAnnotation(taskVerification) + current;
+            current = StaticVerificationAnswerRenderer.unavailableAnnotation(taskVerification) + current;
         } else if (verificationStatus == VerificationStatus.READBACK_ONLY) {
             if (completionStatus == CompletionStatus.COMPLETE) {
-                current = readbackOnlyVerificationAnnotation(taskVerification, loopResult)
-                        + verifiedChangedFilesSummary(loopResult)
+                current = StaticVerificationAnswerRenderer.readbackOnlyAnnotation(taskVerification, loopResult)
+                        + StaticVerificationAnswerRenderer.changedFilesSummary(loopResult)
                         + current;
             }
         } else if (verificationStatus == VerificationStatus.PASSED) {
             if (completionStatus == CompletionStatus.COMPLETE) {
-                current = staticVerificationPassedAnnotation(taskVerification)
-                        + verifiedChangedFilesSummary(loopResult)
+                current = StaticVerificationAnswerRenderer.passedAnnotation(taskVerification)
+                        + StaticVerificationAnswerRenderer.changedFilesSummary(loopResult)
                         + current;
             }
         }
@@ -1194,163 +1194,6 @@ record ExecutionOutcome(
         return "talos.read_file was attempted for the protected target, but protected content "
                 + "was not returned successfully. No protected content was read from this turn."
                 + targetSentence(plan);
-    }
-
-    private static String staticVerificationPassedAnnotation(TaskVerificationResult result) {
-        return "[Static verification: passed - " + verificationSummary(result) + "]\n\n";
-    }
-
-    private static String readbackOnlyVerificationAnnotation(
-            TaskVerificationResult result,
-            ToolCallLoop.LoopResult loopResult
-    ) {
-        String readbackKind = hasSuccessfulWorkspaceOperation(loopResult)
-                ? "Workspace operation/readback"
-                : "File write/readback";
-        return "[" + readbackKind + " passed. No task-specific verifier was applicable, "
-                + "so task completion was not verified. "
-                + verificationSummary(result) + "]\n\n";
-    }
-
-    private static boolean hasSuccessfulWorkspaceOperation(ToolCallLoop.LoopResult loopResult) {
-        if (loopResult == null || loopResult.toolOutcomes() == null) return false;
-        return loopResult.toolOutcomes().stream()
-                .filter(Objects::nonNull)
-                .anyMatch(outcome -> outcome.success()
-                        && outcome.mutating()
-                        && isWorkspaceOperationOutcome(outcome));
-    }
-
-    private static boolean isWorkspaceOperationOutcome(ToolCallLoop.ToolOutcome outcome) {
-        if (outcome == null) return false;
-        WorkspaceOperationPlan plan = outcome.workspaceOperationPlan();
-        if (plan != null && plan.operationKind() != WorkspaceOperationPlan.OperationKind.WRITE_FILE) {
-            return true;
-        }
-        String tool = canonicalToolName(outcome.toolName());
-        return "talos.move_path".equals(tool)
-                || "talos.copy_path".equals(tool)
-                || "talos.rename_path".equals(tool)
-                || "talos.mkdir".equals(tool)
-                || "talos.apply_workspace_batch".equals(tool);
-    }
-
-    private static String staticVerificationFailedAnnotation(TaskVerificationResult result) {
-        StringBuilder out = new StringBuilder();
-        out.append("[Task incomplete: Static verification failed - ")
-                .append(verificationSummary(result))
-                .append("]\n\n")
-                .append("The requested task is not verified complete. ")
-                .append("Applied changes below are workspace changes only; unresolved static problems remain.");
-        List<String> problems = result == null ? List.of() : result.problems();
-        if (!problems.isEmpty()) {
-            out.append("\n\nUnresolved static verification problems:");
-            for (String problem : problems.subList(0, Math.min(5, problems.size()))) {
-                out.append("\n- ").append(singleLine(problem));
-            }
-            if (problems.size() > 5) {
-                out.append("\n- ... ").append(problems.size() - 5).append(" more");
-            }
-        }
-        out.append("\n\n");
-        return out.toString();
-    }
-
-    private static String staticVerificationFailedReplacement(
-            TaskVerificationResult result,
-            ToolCallLoop.LoopResult loopResult
-    ) {
-        StringBuilder out = new StringBuilder();
-        out.append("[Task incomplete: Static verification failed - ")
-                .append(verificationSummary(result))
-                .append("]\n\n")
-                .append("The requested task is not verified complete. ")
-                .append("Applied changes, if any, are workspace changes only; unresolved static problems remain.");
-        List<String> problems = result == null ? List.of() : result.problems();
-        if (!problems.isEmpty()) {
-            out.append("\n\nUnresolved static verification problems:");
-            for (String problem : problems.subList(0, Math.min(5, problems.size()))) {
-                out.append("\n- ").append(singleLine(problem));
-            }
-            if (problems.size() > 5) {
-                out.append("\n- ... ").append(problems.size() - 5).append(" more");
-            }
-        }
-        List<ToolCallLoop.ToolOutcome> applied = successfulMutatingOutcomes(loopResult);
-        if (!applied.isEmpty()) {
-            out.append("\n\nApplied mutating tool calls:");
-            for (ToolCallLoop.ToolOutcome outcome : applied.subList(0, Math.min(5, applied.size()))) {
-                out.append("\n- ")
-                        .append(outcome.pathHint().isBlank() ? outcome.toolName() : outcome.pathHint())
-                        .append(": ")
-                        .append(outcome.summary().isBlank() ? "mutation applied" : singleLine(outcome.summary()));
-            }
-            if (applied.size() > 5) {
-                out.append("\n- ... ").append(applied.size() - 5).append(" more");
-            }
-        }
-        out.append("\n\nThe assistant success summary was replaced with this runtime verification result because verification failed.");
-        return out.toString().stripTrailing();
-    }
-
-    private static List<ToolCallLoop.ToolOutcome> successfulMutatingOutcomes(
-            ToolCallLoop.LoopResult loopResult
-    ) {
-        if (loopResult == null || loopResult.toolOutcomes() == null) return List.of();
-        return loopResult.toolOutcomes().stream()
-                .filter(ToolCallLoop.ToolOutcome::mutating)
-                .filter(ToolCallLoop.ToolOutcome::success)
-                .toList();
-    }
-
-    private static String verifiedChangedFilesSummary(ToolCallLoop.LoopResult loopResult) {
-        List<ToolCallLoop.ToolOutcome> applied = successfulMutatingOutcomes(loopResult);
-        if (applied.isEmpty()) return "";
-        LinkedHashSet<String> paths = new LinkedHashSet<>();
-        for (ToolCallLoop.ToolOutcome outcome : applied) {
-            if (outcome == null) continue;
-            if (outcome.workspaceOperationPlan() != null
-                    && !outcome.workspaceOperationPlan().changedPaths().isEmpty()) {
-                paths.addAll(outcome.workspaceOperationPlan().changedPaths());
-                continue;
-            }
-            if (outcome.pathHint() == null || outcome.pathHint().isBlank()) continue;
-            paths.add(outcome.pathHint().strip().replace('\\', '/'));
-        }
-        if (paths.size() <= 1) return "";
-        return "Updated " + paths.size() + " files: " + String.join(", ", paths) + ".\n\n";
-    }
-
-    private static String partialStaticVerificationFailedAnnotation(TaskVerificationResult result) {
-        StringBuilder out = new StringBuilder();
-        out.append("[Partial verification: static checks failed - ")
-                .append(verificationSummary(result))
-                .append("]\n\n")
-                .append("The turn remains partial. Some changes were applied, but unresolved static problems remain.");
-        List<String> problems = result == null ? List.of() : result.problems();
-        if (!problems.isEmpty()) {
-            out.append("\n\nRemaining static verification problems:");
-            for (String problem : problems.subList(0, Math.min(5, problems.size()))) {
-                out.append("\n- ").append(singleLine(problem));
-            }
-            if (problems.size() > 5) {
-                out.append("\n- ... ").append(problems.size() - 5).append(" more");
-            }
-        }
-        out.append("\n\n");
-        return out.toString();
-    }
-
-    private static String staticVerificationUnavailableAnnotation(TaskVerificationResult result) {
-        return "[Static verification incomplete: " + verificationSummary(result) + "]\n\n";
-    }
-
-    private static String verificationSummary(TaskVerificationResult result) {
-        if (result == null || result.summary() == null || result.summary().isBlank()) {
-            return "no additional detail";
-        }
-        String summary = result.summary().replace('\n', ' ').replace('\r', ' ').strip();
-        return summary.length() <= 240 ? summary : summary.substring(0, 237) + "...";
     }
 
     private static String singleLine(String value) {
