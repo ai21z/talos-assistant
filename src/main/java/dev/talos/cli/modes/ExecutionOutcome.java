@@ -218,7 +218,7 @@ record ExecutionOutcome(
         boolean deniedMutation = readOnlyDeniedMutation || !Objects.equals(current, shaped);
         current = shaped;
 
-        shaped = AssistantTurnExecutor.summarizeDeniedProtectedReadOutcomesIfNeeded(
+        shaped = ProtectedReadAnswerGuard.summarizeDeniedProtectedReadOutcomesIfNeeded(
                 current, loopResult);
         boolean deniedProtectedRead = !Objects.equals(current, shaped);
         current = shaped;
