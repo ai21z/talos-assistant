@@ -9,7 +9,6 @@ import dev.talos.runtime.expectation.ReplacementExpectation;
 import dev.talos.runtime.expectation.TaskExpectation;
 import dev.talos.runtime.expectation.TaskExpectationResolver;
 import dev.talos.runtime.task.TaskContract;
-import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.tools.ToolAliasPolicy;
 
 import java.nio.file.Files;
@@ -92,12 +91,18 @@ final class TaskExpectationStaticVerifier {
             target = root.resolve(pathHint).normalize();
         } catch (InvalidPathException e) {
             problems.add(pathHint + ": exact content verification could not resolve target path.");
-            if (recordExpectationTrace) recordLiteralExpectation(expectation, ExpectationVerificationStatus.FAILED, "");
+            if (recordExpectationTrace) TaskExpectationTraceRecorder.recordLiteralExpectation(
+                    expectation,
+                    ExpectationVerificationStatus.FAILED,
+                    "");
             return;
         }
         if (!target.startsWith(root) || !Files.isRegularFile(target)) {
             problems.add(pathHint + ": exact content verification target is not a readable file.");
-            if (recordExpectationTrace) recordLiteralExpectation(expectation, ExpectationVerificationStatus.FAILED, "");
+            if (recordExpectationTrace) TaskExpectationTraceRecorder.recordLiteralExpectation(
+                    expectation,
+                    ExpectationVerificationStatus.FAILED,
+                    "");
             return;
         }
         String observed;
@@ -105,7 +110,10 @@ final class TaskExpectationStaticVerifier {
             observed = Files.readString(target);
         } catch (Exception e) {
             problems.add(pathHint + ": exact content verification could not read target (" + e.getMessage() + ")");
-            if (recordExpectationTrace) recordLiteralExpectation(expectation, ExpectationVerificationStatus.FAILED, "");
+            if (recordExpectationTrace) TaskExpectationTraceRecorder.recordLiteralExpectation(
+                    expectation,
+                    ExpectationVerificationStatus.FAILED,
+                    "");
             return;
         }
 
@@ -113,7 +121,9 @@ final class TaskExpectationStaticVerifier {
         ExpectationVerificationStatus status = matched
                 ? ExpectationVerificationStatus.PASSED
                 : ExpectationVerificationStatus.FAILED;
-        if (recordExpectationTrace) recordLiteralExpectation(expectation, status, observed);
+        if (recordExpectationTrace) {
+            TaskExpectationTraceRecorder.recordLiteralExpectation(expectation, status, observed);
+        }
         if (matched) {
             facts.add(pathHint + ": literal content matched requested exact content.");
         } else {
@@ -124,26 +134,6 @@ final class TaskExpectationStaticVerifier {
                     + LiteralContentExpectation.byteCount(observed) + " bytes/"
                     + LiteralContentExpectation.lineCount(observed) + " lines).");
         }
-    }
-
-    private static void recordLiteralExpectation(
-            LiteralContentExpectation expectation,
-            ExpectationVerificationStatus status,
-            String observedContent
-    ) {
-        LocalTurnTraceCapture.recordExpectationVerified(
-                expectation.kind(),
-                status == null ? "" : status.name(),
-                expectation.targetPath(),
-                expectation.sourcePattern(),
-                expectation.expectedHash(),
-                expectation.expectedBytes(),
-                expectation.expectedChars(),
-                expectation.expectedLines(),
-                LiteralContentExpectation.hash(observedContent),
-                LiteralContentExpectation.byteCount(observedContent),
-                LiteralContentExpectation.charCount(observedContent),
-                LiteralContentExpectation.lineCount(observedContent));
     }
 
     private static void verifyReplacementExpectation(
@@ -160,7 +150,7 @@ final class TaskExpectationStaticVerifier {
             target = root.resolve(pathHint).normalize();
         } catch (InvalidPathException e) {
             problems.add(pathHint + ": replacement verification could not resolve target path.");
-            if (recordExpectationTrace) recordReplacementExpectation(
+            if (recordExpectationTrace) TaskExpectationTraceRecorder.recordReplacementExpectation(
                     expectation,
                     ExpectationVerificationStatus.FAILED,
                     false,
@@ -169,7 +159,7 @@ final class TaskExpectationStaticVerifier {
         }
         if (!target.startsWith(root) || !Files.isRegularFile(target)) {
             problems.add(pathHint + ": replacement verification target is not a readable file.");
-            if (recordExpectationTrace) recordReplacementExpectation(
+            if (recordExpectationTrace) TaskExpectationTraceRecorder.recordReplacementExpectation(
                     expectation,
                     ExpectationVerificationStatus.FAILED,
                     false,
@@ -182,7 +172,7 @@ final class TaskExpectationStaticVerifier {
             observed = Files.readString(target);
         } catch (Exception e) {
             problems.add(pathHint + ": replacement verification could not read target (" + e.getMessage() + ")");
-            if (recordExpectationTrace) recordReplacementExpectation(
+            if (recordExpectationTrace) TaskExpectationTraceRecorder.recordReplacementExpectation(
                     expectation,
                     ExpectationVerificationStatus.FAILED,
                     false,
@@ -202,7 +192,7 @@ final class TaskExpectationStaticVerifier {
                     problems);
         }
         if (recordExpectationTrace) {
-            recordReplacementExpectation(
+            TaskExpectationTraceRecorder.recordReplacementExpectation(
                     expectation,
                     matched ? ExpectationVerificationStatus.PASSED : ExpectationVerificationStatus.FAILED,
                     oldPresent,
@@ -314,28 +304,6 @@ final class TaskExpectationStaticVerifier {
         return value.endsWith("\n") ? value.substring(0, value.length() - 1) : value;
     }
 
-    private static void recordReplacementExpectation(
-            ReplacementExpectation expectation,
-            ExpectationVerificationStatus status,
-            boolean oldPresent,
-            boolean newPresent
-    ) {
-        String observedState = "oldPresent:" + oldPresent + ";newPresent:" + newPresent;
-        LocalTurnTraceCapture.recordExpectationVerified(
-                expectation == null ? "TEXT_REPLACEMENT" : expectation.kind(),
-                status == null ? "" : status.name(),
-                expectation == null ? "" : expectation.targetPath(),
-                expectation == null ? "" : expectation.sourcePattern(),
-                expectation == null ? "" : "old:" + expectation.oldHash() + ";new:" + expectation.newHash(),
-                expectation == null ? 0 : expectation.newBytes(),
-                expectation == null ? 0 : expectation.newChars(),
-                0,
-                LiteralContentExpectation.hash(observedState),
-                0,
-                0,
-                0);
-    }
-
     private static void verifyAppendLineExpectation(
             Path root,
             AppendLineExpectation expectation,
@@ -350,12 +318,18 @@ final class TaskExpectationStaticVerifier {
             target = root.resolve(pathHint).normalize();
         } catch (InvalidPathException e) {
             problems.add(pathHint + ": appended line verification could not resolve target path.");
-            if (recordExpectationTrace) recordAppendLineExpectation(expectation, ExpectationVerificationStatus.FAILED, "");
+            if (recordExpectationTrace) TaskExpectationTraceRecorder.recordAppendLineExpectation(
+                    expectation,
+                    ExpectationVerificationStatus.FAILED,
+                    "");
             return;
         }
         if (!target.startsWith(root) || !Files.isRegularFile(target)) {
             problems.add(pathHint + ": appended line verification target is not a readable file.");
-            if (recordExpectationTrace) recordAppendLineExpectation(expectation, ExpectationVerificationStatus.FAILED, "");
+            if (recordExpectationTrace) TaskExpectationTraceRecorder.recordAppendLineExpectation(
+                    expectation,
+                    ExpectationVerificationStatus.FAILED,
+                    "");
             return;
         }
 
@@ -364,7 +338,10 @@ final class TaskExpectationStaticVerifier {
             observed = Files.readString(target);
         } catch (Exception e) {
             problems.add(pathHint + ": appended line verification could not read target (" + e.getMessage() + ")");
-            if (recordExpectationTrace) recordAppendLineExpectation(expectation, ExpectationVerificationStatus.FAILED, "");
+            if (recordExpectationTrace) TaskExpectationTraceRecorder.recordAppendLineExpectation(
+                    expectation,
+                    ExpectationVerificationStatus.FAILED,
+                    "");
             return;
         }
 
@@ -377,7 +354,7 @@ final class TaskExpectationStaticVerifier {
                 && verifyAppendLineMutationEvidence(pathHint, expectedLine, successfulMutations, facts, problems);
         boolean matched = postStateMatched && appendOnlyEvidenceSatisfied;
         if (recordExpectationTrace) {
-            recordAppendLineExpectation(
+            TaskExpectationTraceRecorder.recordAppendLineExpectation(
                     expectation,
                     matched ? ExpectationVerificationStatus.PASSED : ExpectationVerificationStatus.FAILED,
                     finalLine);
@@ -487,27 +464,6 @@ final class TaskExpectationStaticVerifier {
         return count;
     }
 
-    private static void recordAppendLineExpectation(
-            AppendLineExpectation expectation,
-            ExpectationVerificationStatus status,
-            String observedFinalLine
-    ) {
-        String observed = observedFinalLine == null ? "" : observedFinalLine;
-        LocalTurnTraceCapture.recordExpectationVerified(
-                expectation == null ? "APPEND_LINE" : expectation.kind(),
-                status == null ? "" : status.name(),
-                expectation == null ? "" : expectation.targetPath(),
-                expectation == null ? "" : expectation.sourcePattern(),
-                expectation == null ? "" : expectation.expectedHash(),
-                expectation == null ? 0 : expectation.expectedBytes(),
-                expectation == null ? 0 : expectation.expectedChars(),
-                1,
-                LiteralContentExpectation.hash(observed),
-                LiteralContentExpectation.byteCount(observed),
-                LiteralContentExpectation.charCount(observed),
-                observed.isBlank() ? 0 : 1);
-    }
-
     private static List<String> logicalLines(String content) {
         if (content == null || content.isEmpty()) return List.of();
         List<String> lines = new ArrayList<>(List.of(content.split("\\R", -1)));
@@ -530,12 +486,18 @@ final class TaskExpectationStaticVerifier {
             target = root.resolve(pathHint).normalize();
         } catch (InvalidPathException e) {
             problems.add(pathHint + ": bullet count verification could not resolve target path.");
-            if (recordExpectationTrace) recordBulletListExpectation(expectation, ExpectationVerificationStatus.FAILED, 0);
+            if (recordExpectationTrace) TaskExpectationTraceRecorder.recordBulletListExpectation(
+                    expectation,
+                    ExpectationVerificationStatus.FAILED,
+                    0);
             return;
         }
         if (!target.startsWith(root) || !Files.isRegularFile(target)) {
             problems.add(pathHint + ": bullet count verification target is not a readable file.");
-            if (recordExpectationTrace) recordBulletListExpectation(expectation, ExpectationVerificationStatus.FAILED, 0);
+            if (recordExpectationTrace) TaskExpectationTraceRecorder.recordBulletListExpectation(
+                    expectation,
+                    ExpectationVerificationStatus.FAILED,
+                    0);
             return;
         }
 
@@ -544,7 +506,10 @@ final class TaskExpectationStaticVerifier {
             observed = Files.readString(target);
         } catch (Exception e) {
             problems.add(pathHint + ": bullet count verification could not read target (" + e.getMessage() + ")");
-            if (recordExpectationTrace) recordBulletListExpectation(expectation, ExpectationVerificationStatus.FAILED, 0);
+            if (recordExpectationTrace) TaskExpectationTraceRecorder.recordBulletListExpectation(
+                    expectation,
+                    ExpectationVerificationStatus.FAILED,
+                    0);
             return;
         }
 
@@ -552,7 +517,7 @@ final class TaskExpectationStaticVerifier {
         int nonBulletLines = nonBlankNonBulletLineCount(observed);
         boolean matched = observedCount == expectation.expectedBulletCount() && nonBulletLines == 0;
         if (recordExpectationTrace) {
-            recordBulletListExpectation(
+            TaskExpectationTraceRecorder.recordBulletListExpectation(
                     expectation,
                     matched ? ExpectationVerificationStatus.PASSED : ExpectationVerificationStatus.FAILED,
                     observedCount);
@@ -565,27 +530,6 @@ final class TaskExpectationStaticVerifier {
         } else {
             problems.add(pathHint + ": bullet list contains non-bullet content.");
         }
-    }
-
-    private static void recordBulletListExpectation(
-            BulletListExpectation expectation,
-            ExpectationVerificationStatus status,
-            int observedCount
-    ) {
-        int expectedCount = expectation == null ? 0 : expectation.expectedBulletCount();
-        LocalTurnTraceCapture.recordExpectationVerified(
-                expectation == null ? "BULLET_LIST_COUNT" : expectation.kind(),
-                status == null ? "" : status.name(),
-                expectation == null ? "" : expectation.targetPath(),
-                expectation == null ? "" : expectation.sourcePattern(),
-                "count:" + expectedCount,
-                0,
-                0,
-                expectedCount,
-                "count:" + Math.max(0, observedCount),
-                0,
-                0,
-                Math.max(0, observedCount));
     }
 
     private static int bulletLineCount(String content) {

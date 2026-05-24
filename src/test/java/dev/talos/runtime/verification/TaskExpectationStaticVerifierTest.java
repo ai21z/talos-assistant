@@ -22,6 +22,29 @@ class TaskExpectationStaticVerifierTest {
     Path workspace;
 
     @Test
+    void traceRecordingIsOwnedByDedicatedRecorder() throws Exception {
+        Path sourceRoot = Path.of("src/main/java/dev/talos/runtime/verification");
+        Path recorderPath = sourceRoot.resolve("TaskExpectationTraceRecorder.java");
+        assertTrue(Files.isRegularFile(recorderPath), "TaskExpectationTraceRecorder must own trace recording.");
+
+        String verifier = Files.readString(sourceRoot.resolve("TaskExpectationStaticVerifier.java"));
+        String recorder = Files.readString(recorderPath);
+
+        assertFalse(
+                verifier.contains("LocalTurnTraceCapture"),
+                "TaskExpectationStaticVerifier should not format trace events directly.");
+        assertFalse(
+                verifier.contains("recordExpectationVerified"),
+                "TaskExpectationStaticVerifier should delegate expectation trace recording.");
+        assertTrue(recorder.contains("final class TaskExpectationTraceRecorder"));
+        assertTrue(recorder.contains("LocalTurnTraceCapture.recordExpectationVerified"));
+        assertTrue(recorder.contains("recordLiteralExpectation"));
+        assertTrue(recorder.contains("recordReplacementExpectation"));
+        assertTrue(recorder.contains("recordAppendLineExpectation"));
+        assertTrue(recorder.contains("recordBulletListExpectation"));
+    }
+
+    @Test
     void literalExpectationResultAndTraceStayRedacted() throws Exception {
         Files.writeString(workspace.resolve("index.html"), "AFTER");
         LocalTurnTraceCapture.begin(
