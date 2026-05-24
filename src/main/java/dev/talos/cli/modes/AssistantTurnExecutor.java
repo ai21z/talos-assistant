@@ -18,7 +18,7 @@ import dev.talos.runtime.context.ArtifactGoal;
 import dev.talos.runtime.context.ChangeSummaryContext;
 import dev.talos.runtime.expectation.LiteralContentExpectation;
 import dev.talos.runtime.expectation.TaskExpectation;
-import dev.talos.runtime.outcome.MutationFailureRecovery;
+import dev.talos.runtime.outcome.MutationFailureAnswerRenderer;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.ActionObligation;
 import dev.talos.runtime.policy.ActionObligationPolicy;
@@ -3224,210 +3224,39 @@ public final class AssistantTurnExecutor {
 
     // ── Claim-vs-action truth layer ──────────────────────────────────────
 
-    /**
-     * Phrases that strongly indicate the answer is claiming a file mutation
-     * was performed. Kept narrow on purpose: match confident past-tense /
-     * perfect-tense claims, not future-tense intent or questions.
-     *
-     * <p>Design: each phrase is unambiguous about an applied change having
-     * happened. We avoid bare verbs (e.g. "updated") because they routinely
-     * appear in grounded discussions of file contents ("the label is
-     * updated to…"). We only flag phrasings a model uses when asserting
-     * <em>it just did something</em>.
-     */
-    private static final Set<String> MUTATION_CLAIM_MARKERS = Set.of(
-            "i have updated",   "i've updated",   "i updated",
-            "i have edited",    "i've edited",    "i edited",
-            "i have changed",   "i've changed",   "i changed",
-            "i have applied",   "i've applied",   "i applied",
-            "i have written",   "i've written",   "i wrote",
-            "i have created",   "i've created",   "i created",
-            "i have modified",  "i've modified",  "i modified",
-            "i have saved",     "i've saved",     "i saved",
-            "i have replaced",  "i've replaced",  "i replaced",
-            "changes have been applied",
-            "changes were applied",
-            "the file has been updated",
-            "the file has been modified",
-            "the file has been edited",
-            "the file has been saved",
-            "the file has been written",
-            "the changes have been saved",
-            "has been updated to",
-            "has been modified to"
-    );
-
-    /**
-     * Prefix prepended to answers that claim a mutation when no mutating
-     * tool succeeded in the turn. Kept short, unambiguous, and separable
-     * from the model's own prose so the annotation is visually obvious.
-     */
     public static final String FALSE_MUTATION_ANNOTATION =
-            "[Truth check: the response below claims a file was changed, "
-            + "but no file-mutating tool succeeded in this turn. "
-            + "No file on disk was actually modified.]\n\n";
-
+            MutationFailureAnswerRenderer.FALSE_MUTATION_ANNOTATION;
     public static final String PARTIAL_MUTATION_ANNOTATION =
-            "[Truth check: some requested file changes succeeded and some failed. "
-            + "Verified outcomes for this turn are listed below.]\n\n";
-
+            MutationFailureAnswerRenderer.PARTIAL_MUTATION_ANNOTATION;
     public static final String DENIED_MUTATION_ANNOTATION =
-            "[Truth check: no file was changed in this turn because the requested "
-            + "write was not approved.]\n\n";
-
+            MutationFailureAnswerRenderer.DENIED_MUTATION_ANNOTATION;
     public static final String POLICY_DENIED_MUTATION_ANNOTATION =
-            "[Truth check: no file was changed in this turn because permission "
-            + "policy denied or blocked the requested write.]\n\n";
-
+            MutationFailureAnswerRenderer.POLICY_DENIED_MUTATION_ANNOTATION;
     public static final String MIXED_DENIED_MUTATION_ANNOTATION =
-            "[Truth check: no file was changed in this turn because all requested "
-            + "writes were denied or blocked.]\n\n";
-
+            MutationFailureAnswerRenderer.MIXED_DENIED_MUTATION_ANNOTATION;
     public static final String INVALID_MUTATION_ANNOTATION =
-            "[Truth check: no file was changed in this turn because the requested "
-            + "write tool call was invalid.]\n\n";
+            MutationFailureAnswerRenderer.INVALID_MUTATION_ANNOTATION;
 
-    /**
-     * Returns {@code true} if the answer contains language that strongly
-     * asserts a file mutation was performed (applied, edited, written,
-     * created, etc.).
-     *
-     * <p>Package-private for direct testing.
-     */
     static boolean containsMutationClaim(String answer) {
-        if (answer == null || answer.isBlank()) return false;
-        String lower = answer.toLowerCase();
-        for (String marker : MUTATION_CLAIM_MARKERS) {
-            if (lower.contains(marker)) return true;
-        }
-        return false;
+        return MutationFailureAnswerRenderer.containsMutationClaim(answer);
     }
 
-    /**
-     * Claim-vs-action audit (annotate-first). If the answer asserts that a
-     * file change was performed but no mutating tool call (write_file /
-     * edit_file) succeeded this turn, prepend a short truth-check notice.
-     *
-     * <p>The invariant this enforces: <em>a mutation claim in the answer
-     * must correspond to at least one successful mutating tool call in
-     * the same turn.</em>
-     *
-     * <p>Annotate-first posture (see §9 R2 of the main harness plan):
-     * we do not rewrite or strip the model's text. We only add a visible
-     * signal so the user can see the mismatch. Preserves transparent
-     * transcripts and avoids silent rewrites.
-     *
-     * <p>Package-private for direct testing.
-     *
-     * @param answer     the answer text after any synthesis retry
-     * @param loopResult the tool-loop result for the current turn
-     * @return the (possibly annotated) answer
-     */
     static String annotateIfFalseMutationClaim(String answer, ToolCallLoop.LoopResult loopResult) {
-        return annotateIfFalseMutationClaim(answer, loopResult, 0);
+        return MutationFailureAnswerRenderer.annotateIfFalseMutationClaim(answer, loopResult);
     }
 
-    /**
-     * Variant that also accounts for mutations performed during a Point-3
-     * missing-mutation retry (which executes its own tool loop).
-     */
     static String annotateIfFalseMutationClaim(String answer,
                                                ToolCallLoop.LoopResult loopResult,
                                                int extraMutationSuccesses) {
-        if (answer == null || answer.isBlank()) return answer;
-        if (loopResult == null) return answer;
-        int totalMutations = loopResult.mutatingToolSuccesses() + Math.max(0, extraMutationSuccesses);
-        if (totalMutations > 0) return answer; // a real mutation backs the claim
-        if (hasDeniedMutation(loopResult)) return answer;
-        if (!containsMutationClaim(answer)) return answer;
-
-        LOG.warn("False mutation claim detected: answer asserts a file change, "
-                + "but no mutating tool succeeded this turn. Annotating.");
-        return FALSE_MUTATION_ANNOTATION + answer;
+        return MutationFailureAnswerRenderer.annotateIfFalseMutationClaim(
+                answer, loopResult, extraMutationSuccesses);
     }
 
     static String summarizePartialMutationOutcomesIfNeeded(String answer,
                                                             ToolCallLoop.LoopResult loopResult,
                                                             int extraMutationSuccesses) {
-        if (loopResult == null) return answer;
-        if (extraMutationSuccesses > 0) return answer;
-        if (answer != null && answer.startsWith(
-                "[Action obligation failed: static repair used the wrong mutation tool.]")) return answer;
-
-        List<ToolCallLoop.ToolOutcome> outcomes = loopResult.toolOutcomes();
-        if (outcomes == null || outcomes.isEmpty()) return answer;
-
-        List<ToolCallLoop.ToolOutcome> mutating = outcomes.stream()
-                .filter(ToolCallLoop.ToolOutcome::mutating)
-                .toList();
-        if (mutating.isEmpty()) return answer;
-
-        List<ToolCallLoop.ToolOutcome> successes = mutating.stream()
-                .filter(ToolCallLoop.ToolOutcome::success)
-                .toList();
-        List<ToolCallLoop.ToolOutcome> failures = mutating.stream()
-                .filter(o -> !o.success())
-                .filter(o -> !isRecoveredInvalidEditFailure(o, mutating))
-                .filter(o -> !MutationFailureRecovery.isRecoveredDuplicateWorkspaceOperationFailure(o, mutating))
-                .toList();
-        if (successes.isEmpty() || failures.isEmpty()) return answer;
-
-        StringBuilder out = new StringBuilder(PARTIAL_MUTATION_ANNOTATION);
-        out.append("Succeeded:\n");
-        for (ToolCallLoop.ToolOutcome outcome : successes) {
-            out.append("- ")
-                    .append(outcome.pathHint().isBlank() ? outcome.toolName() : outcome.pathHint())
-                    .append(": ")
-                    .append(outcome.summary().isBlank() ? "mutation applied" : outcome.summary())
-                    .append('\n');
-        }
-        out.append("Failed:\n");
-        for (ToolCallLoop.ToolOutcome outcome : failures) {
-            out.append("- ")
-                    .append(outcome.pathHint().isBlank() ? outcome.toolName() : outcome.pathHint())
-                    .append(": ")
-                    .append(trimFailureMessage(outcome.errorMessage()))
-                    .append('\n');
-        }
-        out.append("\nThe assistant summary was replaced with this verified mutation outcome because the turn had partial success.");
-        return out.toString().stripTrailing();
-    }
-
-    private static boolean isRecoveredInvalidEditFailure(
-            ToolCallLoop.ToolOutcome failure,
-            List<ToolCallLoop.ToolOutcome> orderedMutatingOutcomes
-    ) {
-        if (failure == null || orderedMutatingOutcomes == null || orderedMutatingOutcomes.isEmpty()) return false;
-        if (!failure.invalidEmptyEditArguments()
-                && !failure.fullRewriteRepairRedirect()
-                && !failure.oldStringNotFoundEditFailure()) {
-            return false;
-        }
-        String failedPath = ToolCallSupport.normalizePath(failure.pathHint());
-        if (failedPath.isBlank()) return false;
-        boolean sawFailure = false;
-        for (ToolCallLoop.ToolOutcome outcome : orderedMutatingOutcomes) {
-            if (outcome == failure) {
-                sawFailure = true;
-                continue;
-            }
-            if (!sawFailure) continue;
-            if (outcome.mutating()
-                    && outcome.success()
-                    && failedPath.equals(ToolCallSupport.normalizePath(outcome.pathHint()))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static String trimFailureMessage(String errorMessage) {
-        if (errorMessage == null || errorMessage.isBlank()) return "mutation failed";
-        String msg = errorMessage.strip();
-        int newline = msg.indexOf('\n');
-        if (newline > 0) msg = msg.substring(0, newline).strip();
-        if (msg.length() > 180) msg = msg.substring(0, 177) + "…";
-        return msg;
+        return MutationFailureAnswerRenderer.summarizePartialMutationOutcomesIfNeeded(
+                answer, loopResult, extraMutationSuccesses);
     }
 
     static String summarizeDeniedMutationOutcomesIfNeeded(String answer,
@@ -3443,89 +3272,8 @@ public final class AssistantTurnExecutor {
                                                           List<ChatMessage> messages,
                                                           ToolCallLoop.LoopResult loopResult,
                                                           int extraMutationSuccesses) {
-        if (loopResult == null) return answer;
-        if (extraMutationSuccesses > 0) return answer;
-        if (loopResult.mutatingToolSuccesses() > 0) return answer;
-        if (!planRequestsMutation(plan, messages)) return answer;
-
-        List<ToolCallLoop.ToolOutcome> outcomes = loopResult.toolOutcomes();
-        if (outcomes == null || outcomes.isEmpty()) return answer;
-        List<ToolCallLoop.ToolOutcome> deniedMutations = outcomes.stream()
-                .filter(ToolCallLoop.ToolOutcome::mutating)
-                .filter(ToolCallLoop.ToolOutcome::denied)
-                .toList();
-        if (deniedMutations.isEmpty()) return answer;
-
-        List<ToolCallLoop.ToolOutcome> approvalDeniedMutations = deniedMutations.stream()
-                .filter(AssistantTurnExecutor::isUserApprovalDeniedOutcome)
-                .toList();
-        List<ToolCallLoop.ToolOutcome> policyDeniedMutations = deniedMutations.stream()
-                .filter(outcome -> !isUserApprovalDeniedOutcome(outcome))
-                .toList();
-
-        StringBuilder out = new StringBuilder(deniedMutationAnnotation(
-                policyDeniedMutations,
-                approvalDeniedMutations));
-        if (!policyDeniedMutations.isEmpty()) {
-            out.append("No file changes were applied because permission policy denied or blocked:\n");
-            for (ToolCallLoop.ToolOutcome outcome : policyDeniedMutations) {
-                out.append("- ")
-                        .append(outcome.pathHint().isBlank() ? outcome.toolName() : outcome.pathHint())
-                        .append(": ")
-                        .append(trimFailureMessage(outcome.errorMessage()))
-                        .append('\n');
-            }
-        }
-        if (!approvalDeniedMutations.isEmpty()) {
-            if (!policyDeniedMutations.isEmpty()) out.append('\n');
-            out.append("No file changes were applied because approval was denied for:\n");
-            for (ToolCallLoop.ToolOutcome outcome : approvalDeniedMutations) {
-                out.append("- ")
-                        .append(outcome.pathHint().isBlank() ? outcome.toolName() : outcome.pathHint())
-                        .append(": approval denied\n");
-            }
-        }
-        List<ToolCallLoop.ToolOutcome> invalidMutations = outcomes.stream()
-                .filter(ToolCallLoop.ToolOutcome::mutating)
-                .filter(outcome -> !outcome.success())
-                .filter(outcome -> !outcome.denied())
-                .filter(outcome -> ToolError.INVALID_PARAMS.equals(outcome.errorCode()))
-                .toList();
-        if (!invalidMutations.isEmpty()) {
-            out.append("\nEarlier invalid mutation attempts in this turn were also rejected before approval:\n");
-            for (ToolCallLoop.ToolOutcome outcome : invalidMutations) {
-                out.append("- ")
-                        .append(outcome.pathHint().isBlank() ? outcome.toolName() : outcome.pathHint())
-                        .append(": ")
-                        .append(trimFailureMessage(outcome.errorMessage()))
-                        .append('\n');
-            }
-        }
-        out.append("\nTalos can still help in a later turn if you want to retry the edit or take a read-only approach.");
-        return out.toString().stripTrailing();
-    }
-
-    private static boolean planRequestsMutation(CurrentTurnPlan plan, List<ChatMessage> messages) {
-        CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, null);
-        TaskContract contract = safePlan.taskContract();
-        return contract.mutationRequested()
-                || looksLikeMutationRequest(safePlan.originalUserRequest());
-    }
-
-    private static String deniedMutationAnnotation(List<ToolCallLoop.ToolOutcome> policyDeniedMutations,
-                                                   List<ToolCallLoop.ToolOutcome> approvalDeniedMutations) {
-        if (!policyDeniedMutations.isEmpty() && approvalDeniedMutations.isEmpty()) {
-            return POLICY_DENIED_MUTATION_ANNOTATION;
-        }
-        if (!policyDeniedMutations.isEmpty()) {
-            return MIXED_DENIED_MUTATION_ANNOTATION;
-        }
-        return DENIED_MUTATION_ANNOTATION;
-    }
-
-    private static boolean isUserApprovalDeniedOutcome(ToolCallLoop.ToolOutcome outcome) {
-        if (outcome == null || outcome.errorMessage() == null) return false;
-        return outcome.errorMessage().startsWith("User did not approve ");
+        return MutationFailureAnswerRenderer.summarizeDeniedMutationOutcomesIfNeeded(
+                answer, plan, messages, loopResult, extraMutationSuccesses);
     }
 
     static String summarizeDeniedProtectedReadOutcomesIfNeeded(
@@ -3556,6 +3304,11 @@ public final class AssistantTurnExecutor {
         return pathHint == null ? "" : pathHint.strip().replace('\\', '/');
     }
 
+    private static boolean isUserApprovalDeniedOutcome(ToolCallLoop.ToolOutcome outcome) {
+        if (outcome == null || outcome.errorMessage() == null) return false;
+        return outcome.errorMessage().startsWith("User did not approve ");
+    }
+
     private static boolean isDeniedProtectedReadOutcome(ToolCallLoop.ToolOutcome outcome) {
         if (outcome == null || outcome.mutating() || outcome.success() || !outcome.denied()) {
             return false;
@@ -3578,59 +3331,8 @@ public final class AssistantTurnExecutor {
                                                                   List<ChatMessage> messages,
                                                                   ToolCallLoop.LoopResult loopResult,
                                                                   int extraMutationSuccesses) {
-        if (loopResult == null) return answer;
-        if (extraMutationSuccesses > 0) return answer;
-        if (loopResult.mutatingToolSuccesses() > 0) return answer;
-
-        TaskContract contract = safePlanFromMessages(plan, messages, null).taskContract();
-        if (contract.mutationAllowed()) return answer;
-
-        List<ToolCallLoop.ToolOutcome> readOnlyBlockedMutations = loopResult.toolOutcomes().stream()
-                .filter(ToolCallLoop.ToolOutcome::mutating)
-                .filter(outcome -> !outcome.success())
-                .toList();
-        if (readOnlyBlockedMutations.isEmpty()) return answer;
-
-        String cleanReadOnlyAnswer = readOnlyDeniedCleanAnswer(answer);
-        if (cleanReadOnlyAnswer.isBlank()) {
-            return READ_ONLY_DENIED_MUTATION_REPLACEMENT;
-        }
-        return READ_ONLY_DENIED_MUTATION_REPLACEMENT
-                + "\n\nRead-only answer from inspected evidence:\n"
-                + cleanReadOnlyAnswer;
-    }
-
-    private static String readOnlyDeniedCleanAnswer(String answer) {
-        String stripped = ToolCallParser.stripToolCalls(answer == null ? "" : answer).strip();
-        if (stripped.isBlank()) return "";
-
-        List<String> kept = new ArrayList<>();
-        for (String line : stripped.lines().toList()) {
-            if (looksLikeFakeApprovalLine(line)) continue;
-            kept.add(line);
-        }
-        String cleaned = String.join("\n", kept).strip();
-        if (cleaned.isBlank()) return "";
-        if (looksLikeOnlyMutationPreparation(cleaned)) return "";
-        return cleaned;
-    }
-
-    private static boolean looksLikeFakeApprovalLine(String line) {
-        if (line == null || line.isBlank()) return false;
-        String lower = line.toLowerCase(Locale.ROOT).strip();
-        return lower.contains("do you approve these changes")
-                || lower.contains("please approve these changes")
-                || lower.contains("allow these changes")
-                || lower.contains("would you like me to apply these changes");
-    }
-
-    private static boolean looksLikeOnlyMutationPreparation(String text) {
-        if (text == null || text.isBlank()) return false;
-        String lower = text.toLowerCase(Locale.ROOT).strip();
-        return lower.equals("i prepared the update.")
-                || lower.equals("i prepared the update")
-                || lower.equals("i prepared these changes.")
-                || lower.equals("i prepared these changes");
+        return MutationFailureAnswerRenderer.summarizeReadOnlyDeniedMutationOutcomesIfNeeded(
+                answer, plan, messages, loopResult, extraMutationSuccesses);
     }
 
     static String summarizeInvalidMutationOutcomesIfNeeded(String answer,
@@ -3646,42 +3348,8 @@ public final class AssistantTurnExecutor {
                                                            List<ChatMessage> messages,
                                                            ToolCallLoop.LoopResult loopResult,
                                                            int extraMutationSuccesses) {
-        if (answer != null && answer.startsWith("[Action obligation failed:")) return answer;
-        if (loopResult == null) return answer;
-        if (extraMutationSuccesses > 0) return answer;
-        if (loopResult.mutatingToolSuccesses() > 0) return answer;
-        if (!planRequestsMutation(plan, messages)) return answer;
-
-        List<ToolCallLoop.ToolOutcome> outcomes = loopResult.toolOutcomes();
-        if (outcomes == null || outcomes.isEmpty()) return answer;
-        if (hasDeniedMutation(loopResult)) return answer;
-        List<ToolCallLoop.ToolOutcome> invalidMutations = outcomes.stream()
-                .filter(ToolCallLoop.ToolOutcome::mutating)
-                .filter(outcome -> !outcome.success())
-                .filter(outcome -> !outcome.denied())
-                .filter(outcome -> ToolError.INVALID_PARAMS.equals(outcome.errorCode()))
-                .toList();
-        if (invalidMutations.isEmpty()) return answer;
-
-        StringBuilder out = new StringBuilder(INVALID_MUTATION_ANNOTATION);
-        out.append("No file changes were applied because Talos proposed invalid mutation arguments:\n");
-        for (ToolCallLoop.ToolOutcome outcome : invalidMutations) {
-            out.append("- ")
-                    .append(outcome.pathHint().isBlank() ? outcome.toolName() : outcome.pathHint())
-                    .append(": ")
-                    .append(trimFailureMessage(outcome.errorMessage()))
-                    .append('\n');
-        }
-        String failureReason = loopResult.failureDecision() == null
-                ? ""
-                : loopResult.failureDecision().reason();
-        if (failureReason != null && !failureReason.isBlank()) {
-            out.append("\nFailure policy reason:\n- ")
-                    .append(trimFailureMessage(failureReason))
-                    .append('\n');
-        }
-        out.append("\nTalos needs to inspect the current file content and retry with exact, valid tool arguments before any edit can be applied.");
-        return out.toString().stripTrailing();
+        return MutationFailureAnswerRenderer.summarizeInvalidMutationOutcomesIfNeeded(
+                answer, plan, messages, loopResult, extraMutationSuccesses);
     }
 
     // ── Point 3 — Missing-mutation retry ─────────────────────────────────
@@ -5281,11 +4949,7 @@ public final class AssistantTurnExecutor {
             + "No file changes were applied. Please retry the request.";
 
     public static final String READ_ONLY_DENIED_MUTATION_REPLACEMENT =
-            "[Truth check: no file was changed in this turn. The model attempted "
-            + "to call mutating tools, but this turn was classified as read-only, "
-            + "so those calls were blocked.]\n\n"
-            + "No file changes were applied. Ask explicitly to edit, update, or "
-            + "create files if you want Talos to modify the workspace.";
+            MutationFailureAnswerRenderer.READ_ONLY_DENIED_MUTATION_REPLACEMENT;
 
     public static final String LOCAL_ACCESS_CAPABILITY_CORRECTION =
             "[Capability correction: Talos can inspect files in the current workspace "
