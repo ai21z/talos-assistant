@@ -19,6 +19,7 @@ import dev.talos.runtime.context.ChangeSummaryContext;
 import dev.talos.runtime.expectation.LiteralContentExpectation;
 import dev.talos.runtime.expectation.TaskExpectation;
 import dev.talos.runtime.outcome.MutationFailureAnswerRenderer;
+import dev.talos.runtime.outcome.ProtectedReadAnswerGuard;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.ActionObligation;
 import dev.talos.runtime.policy.ActionObligationPolicy;
@@ -3280,42 +3281,7 @@ public final class AssistantTurnExecutor {
             String answer,
             ToolCallLoop.LoopResult loopResult
     ) {
-        if (loopResult == null) return answer;
-        List<ToolCallLoop.ToolOutcome> deniedProtectedReads = loopResult.toolOutcomes().stream()
-                .filter(AssistantTurnExecutor::isDeniedProtectedReadOutcome)
-                .toList();
-        if (deniedProtectedReads.isEmpty()) return answer;
-
-        StringBuilder out = new StringBuilder();
-        out.append("[Approval blocked: protected content was not read]\n\n")
-                .append("Protected content was not read because approval was denied for:\n");
-        for (ToolCallLoop.ToolOutcome outcome : deniedProtectedReads) {
-            String path = canonicalDisplayPath(outcome.pathHint());
-            out.append("- ")
-                    .append(path.isBlank() ? outcome.toolName() : path)
-                    .append(": approval denied\n");
-        }
-        out.append("\nNo protected file content was shown. ")
-                .append("Approve the protected read if you want Talos to inspect it.");
-        return out.toString().stripTrailing();
-    }
-
-    private static String canonicalDisplayPath(String pathHint) {
-        return pathHint == null ? "" : pathHint.strip().replace('\\', '/');
-    }
-
-    private static boolean isUserApprovalDeniedOutcome(ToolCallLoop.ToolOutcome outcome) {
-        if (outcome == null || outcome.errorMessage() == null) return false;
-        return outcome.errorMessage().startsWith("User did not approve ");
-    }
-
-    private static boolean isDeniedProtectedReadOutcome(ToolCallLoop.ToolOutcome outcome) {
-        if (outcome == null || outcome.mutating() || outcome.success() || !outcome.denied()) {
-            return false;
-        }
-        if (!"talos.read_file".equals(outcome.toolName())) return false;
-        if (!ToolError.DENIED.equals(outcome.errorCode())) return false;
-        return isUserApprovalDeniedOutcome(outcome);
+        return ProtectedReadAnswerGuard.summarizeDeniedProtectedReadOutcomesIfNeeded(answer, loopResult);
     }
 
     static String summarizeReadOnlyDeniedMutationOutcomesIfNeeded(String answer,
