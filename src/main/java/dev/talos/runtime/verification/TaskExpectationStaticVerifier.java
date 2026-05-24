@@ -11,8 +11,6 @@ import dev.talos.runtime.expectation.TaskExpectationResolver;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.tools.ToolAliasPolicy;
 
-import java.nio.file.Files;
-import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -85,31 +83,15 @@ final class TaskExpectationStaticVerifier {
             List<String> problems,
             boolean recordExpectationTrace
     ) {
-        String pathHint = normalizePath(expectation.targetPath());
-        Path target;
-        try {
-            target = root.resolve(pathHint).normalize();
-        } catch (InvalidPathException e) {
-            problems.add(pathHint + ": exact content verification could not resolve target path.");
-            if (recordExpectationTrace) TaskExpectationTraceRecorder.recordLiteralExpectation(
-                    expectation,
-                    ExpectationVerificationStatus.FAILED,
-                    "");
-            return;
-        }
-        if (!target.startsWith(root) || !Files.isRegularFile(target)) {
-            problems.add(pathHint + ": exact content verification target is not a readable file.");
-            if (recordExpectationTrace) TaskExpectationTraceRecorder.recordLiteralExpectation(
-                    expectation,
-                    ExpectationVerificationStatus.FAILED,
-                    "");
-            return;
-        }
-        String observed;
-        try {
-            observed = Files.readString(target);
-        } catch (Exception e) {
-            problems.add(pathHint + ": exact content verification could not read target (" + e.getMessage() + ")");
+        TaskExpectationTargetReader.Result target = TaskExpectationTargetReader.read(
+                root,
+                expectation.targetPath(),
+                "exact content verification could not resolve target path.",
+                "exact content verification target is not a readable file.",
+                "exact content verification could not read target");
+        String pathHint = target.pathHint();
+        if (target.hasProblem()) {
+            problems.add(target.problem());
             if (recordExpectationTrace) TaskExpectationTraceRecorder.recordLiteralExpectation(
                     expectation,
                     ExpectationVerificationStatus.FAILED,
@@ -117,6 +99,7 @@ final class TaskExpectationStaticVerifier {
             return;
         }
 
+        String observed = target.content();
         boolean matched = observed.equals(expectation.expectedContent());
         ExpectationVerificationStatus status = matched
                 ? ExpectationVerificationStatus.PASSED
@@ -144,34 +127,15 @@ final class TaskExpectationStaticVerifier {
             List<String> problems,
             boolean recordExpectationTrace
     ) {
-        String pathHint = normalizePath(expectation.targetPath());
-        Path target;
-        try {
-            target = root.resolve(pathHint).normalize();
-        } catch (InvalidPathException e) {
-            problems.add(pathHint + ": replacement verification could not resolve target path.");
-            if (recordExpectationTrace) TaskExpectationTraceRecorder.recordReplacementExpectation(
-                    expectation,
-                    ExpectationVerificationStatus.FAILED,
-                    false,
-                    false);
-            return;
-        }
-        if (!target.startsWith(root) || !Files.isRegularFile(target)) {
-            problems.add(pathHint + ": replacement verification target is not a readable file.");
-            if (recordExpectationTrace) TaskExpectationTraceRecorder.recordReplacementExpectation(
-                    expectation,
-                    ExpectationVerificationStatus.FAILED,
-                    false,
-                    false);
-            return;
-        }
-
-        String observed;
-        try {
-            observed = Files.readString(target);
-        } catch (Exception e) {
-            problems.add(pathHint + ": replacement verification could not read target (" + e.getMessage() + ")");
+        TaskExpectationTargetReader.Result target = TaskExpectationTargetReader.read(
+                root,
+                expectation.targetPath(),
+                "replacement verification could not resolve target path.",
+                "replacement verification target is not a readable file.",
+                "replacement verification could not read target");
+        String pathHint = target.pathHint();
+        if (target.hasProblem()) {
+            problems.add(target.problem());
             if (recordExpectationTrace) TaskExpectationTraceRecorder.recordReplacementExpectation(
                     expectation,
                     ExpectationVerificationStatus.FAILED,
@@ -180,6 +144,7 @@ final class TaskExpectationStaticVerifier {
             return;
         }
 
+        String observed = target.content();
         boolean oldPresent = !expectation.oldText().isEmpty() && observed.contains(expectation.oldText());
         boolean newPresent = !expectation.newText().isEmpty() && observed.contains(expectation.newText());
         boolean matched = !oldPresent && newPresent;
@@ -312,32 +277,15 @@ final class TaskExpectationStaticVerifier {
             List<String> problems,
             boolean recordExpectationTrace
     ) {
-        String pathHint = normalizePath(expectation.targetPath());
-        Path target;
-        try {
-            target = root.resolve(pathHint).normalize();
-        } catch (InvalidPathException e) {
-            problems.add(pathHint + ": appended line verification could not resolve target path.");
-            if (recordExpectationTrace) TaskExpectationTraceRecorder.recordAppendLineExpectation(
-                    expectation,
-                    ExpectationVerificationStatus.FAILED,
-                    "");
-            return;
-        }
-        if (!target.startsWith(root) || !Files.isRegularFile(target)) {
-            problems.add(pathHint + ": appended line verification target is not a readable file.");
-            if (recordExpectationTrace) TaskExpectationTraceRecorder.recordAppendLineExpectation(
-                    expectation,
-                    ExpectationVerificationStatus.FAILED,
-                    "");
-            return;
-        }
-
-        String observed;
-        try {
-            observed = Files.readString(target);
-        } catch (Exception e) {
-            problems.add(pathHint + ": appended line verification could not read target (" + e.getMessage() + ")");
+        TaskExpectationTargetReader.Result target = TaskExpectationTargetReader.read(
+                root,
+                expectation.targetPath(),
+                "appended line verification could not resolve target path.",
+                "appended line verification target is not a readable file.",
+                "appended line verification could not read target");
+        String pathHint = target.pathHint();
+        if (target.hasProblem()) {
+            problems.add(target.problem());
             if (recordExpectationTrace) TaskExpectationTraceRecorder.recordAppendLineExpectation(
                     expectation,
                     ExpectationVerificationStatus.FAILED,
@@ -345,6 +293,7 @@ final class TaskExpectationStaticVerifier {
             return;
         }
 
+        String observed = target.content();
         List<String> lines = logicalLines(observed);
         String expectedLine = expectation.expectedLine();
         long matchingLines = lines.stream().filter(expectedLine::equals).count();
@@ -480,32 +429,15 @@ final class TaskExpectationStaticVerifier {
             List<String> problems,
             boolean recordExpectationTrace
     ) {
-        String pathHint = normalizePath(expectation.targetPath());
-        Path target;
-        try {
-            target = root.resolve(pathHint).normalize();
-        } catch (InvalidPathException e) {
-            problems.add(pathHint + ": bullet count verification could not resolve target path.");
-            if (recordExpectationTrace) TaskExpectationTraceRecorder.recordBulletListExpectation(
-                    expectation,
-                    ExpectationVerificationStatus.FAILED,
-                    0);
-            return;
-        }
-        if (!target.startsWith(root) || !Files.isRegularFile(target)) {
-            problems.add(pathHint + ": bullet count verification target is not a readable file.");
-            if (recordExpectationTrace) TaskExpectationTraceRecorder.recordBulletListExpectation(
-                    expectation,
-                    ExpectationVerificationStatus.FAILED,
-                    0);
-            return;
-        }
-
-        String observed;
-        try {
-            observed = Files.readString(target);
-        } catch (Exception e) {
-            problems.add(pathHint + ": bullet count verification could not read target (" + e.getMessage() + ")");
+        TaskExpectationTargetReader.Result target = TaskExpectationTargetReader.read(
+                root,
+                expectation.targetPath(),
+                "bullet count verification could not resolve target path.",
+                "bullet count verification target is not a readable file.",
+                "bullet count verification could not read target");
+        String pathHint = target.pathHint();
+        if (target.hasProblem()) {
+            problems.add(target.problem());
             if (recordExpectationTrace) TaskExpectationTraceRecorder.recordBulletListExpectation(
                     expectation,
                     ExpectationVerificationStatus.FAILED,
@@ -513,6 +445,7 @@ final class TaskExpectationStaticVerifier {
             return;
         }
 
+        String observed = target.content();
         int observedCount = bulletLineCount(observed);
         int nonBulletLines = nonBlankNonBulletLineCount(observed);
         boolean matched = observedCount == expectation.expectedBulletCount() && nonBulletLines == 0;
