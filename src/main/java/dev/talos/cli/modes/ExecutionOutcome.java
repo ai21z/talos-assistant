@@ -5,6 +5,7 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.outcome.CommandOutcomeRenderer;
 import dev.talos.runtime.outcome.EvidenceContainmentAnswerGuard;
+import dev.talos.runtime.outcome.MutationFailureAnswerRenderer;
 import dev.talos.runtime.outcome.MutationOutcome;
 import dev.talos.runtime.outcome.ProtectedReadAnswerGuard;
 import dev.talos.runtime.outcome.ReadOnlyToolLimitOutcome;
@@ -66,10 +67,10 @@ record ExecutionOutcome(
                             AssistantTurnExecutor.READ_ONLY_DENIED_MUTATION_REPLACEMENT,
                             AssistantTurnExecutor.STREAMING_NO_TOOL_MUTATION_REPLACEMENT,
                             AssistantTurnExecutor.MALFORMED_TOOL_PROTOCOL_REPLACEMENT,
-                            AssistantTurnExecutor.DENIED_MUTATION_ANNOTATION,
-                            AssistantTurnExecutor.POLICY_DENIED_MUTATION_ANNOTATION,
-                            AssistantTurnExecutor.MIXED_DENIED_MUTATION_ANNOTATION,
-                            AssistantTurnExecutor.INVALID_MUTATION_ANNOTATION),
+                            MutationFailureAnswerRenderer.DENIED_MUTATION_ANNOTATION,
+                            MutationFailureAnswerRenderer.POLICY_DENIED_MUTATION_ANNOTATION,
+                            MutationFailureAnswerRenderer.MIXED_DENIED_MUTATION_ANNOTATION,
+                            MutationFailureAnswerRenderer.INVALID_MUTATION_ANNOTATION),
                     AssistantTurnExecutor.UNGROUNDED_ANNOTATION,
                     AssistantTurnExecutor.LOCAL_ACCESS_CAPABILITY_CORRECTION);
 
@@ -207,12 +208,12 @@ record ExecutionOutcome(
                 || !Objects.equals(current, shaped);
         current = shaped;
 
-        shaped = AssistantTurnExecutor.summarizeReadOnlyDeniedMutationOutcomesIfNeeded(
+        shaped = MutationFailureAnswerRenderer.summarizeReadOnlyDeniedMutationOutcomesIfNeeded(
                 current, safePlan, messages, loopResult, extraMutationSuccesses);
         boolean readOnlyDeniedMutation = !Objects.equals(current, shaped);
         current = shaped;
 
-        shaped = AssistantTurnExecutor.summarizeDeniedMutationOutcomesIfNeeded(
+        shaped = MutationFailureAnswerRenderer.summarizeDeniedMutationOutcomesIfNeeded(
                 current, safePlan, messages, loopResult, extraMutationSuccesses);
         boolean deniedMutation = readOnlyDeniedMutation || !Objects.equals(current, shaped);
         current = shaped;
@@ -222,19 +223,19 @@ record ExecutionOutcome(
         boolean deniedProtectedRead = !Objects.equals(current, shaped);
         current = shaped;
 
-        shaped = AssistantTurnExecutor.summarizeInvalidMutationOutcomesIfNeeded(
+        shaped = MutationFailureAnswerRenderer.summarizeInvalidMutationOutcomesIfNeeded(
                 current, safePlan, messages, loopResult, extraMutationSuccesses);
         boolean invalidMutation = !Objects.equals(current, shaped);
         current = shaped;
 
-        shaped = AssistantTurnExecutor.summarizePartialMutationOutcomesIfNeeded(
+        shaped = MutationFailureAnswerRenderer.summarizePartialMutationOutcomesIfNeeded(
                 current, loopResult, extraMutationSuccesses);
         boolean partialMutation = !Objects.equals(current, shaped);
         current = shaped;
 
         boolean falseMutationClaim = false;
         if (!invalidMutation) {
-            shaped = AssistantTurnExecutor.annotateIfFalseMutationClaim(
+            shaped = MutationFailureAnswerRenderer.annotateIfFalseMutationClaim(
                     current, loopResult, extraMutationSuccesses);
             falseMutationClaim = !Objects.equals(current, shaped);
             current = shaped;
