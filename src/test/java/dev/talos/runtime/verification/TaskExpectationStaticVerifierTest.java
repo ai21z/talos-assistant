@@ -45,6 +45,39 @@ class TaskExpectationStaticVerifierTest {
     }
 
     @Test
+    void targetReadingIsOwnedByDedicatedReader() throws Exception {
+        Path sourceRoot = Path.of("src/main/java/dev/talos/runtime/verification");
+        Path readerPath = sourceRoot.resolve("TaskExpectationTargetReader.java");
+        assertTrue(Files.isRegularFile(readerPath), "TaskExpectationTargetReader must own target file reads.");
+
+        String verifier = Files.readString(sourceRoot.resolve("TaskExpectationStaticVerifier.java"));
+        String reader = Files.readString(readerPath);
+
+        assertFalse(verifier.contains("InvalidPathException"));
+        assertFalse(verifier.contains("Files.isRegularFile"));
+        assertFalse(verifier.contains("Files.readString"));
+        assertTrue(reader.contains("final class TaskExpectationTargetReader"));
+        assertTrue(reader.contains("Files.isRegularFile"));
+        assertTrue(reader.contains("Files.readString"));
+    }
+
+    @Test
+    void targetReaderPreservesExpectationSpecificMissingTargetWording() {
+        assertProblem(
+                "Overwrite missing.txt with exactly AFTER. Use talos.write_file.",
+                "missing.txt: exact content verification target is not a readable file.");
+        assertProblem(
+                "Replace old with new in missing.txt.",
+                "missing.txt: replacement verification target is not a readable file.");
+        assertProblem(
+                "Append exactly this line to missing.txt: AFTER",
+                "missing.txt: appended line verification target is not a readable file.");
+        assertProblem(
+                "Create missing.md with exactly three bullet points.",
+                "missing.md: bullet count verification target is not a readable file.");
+    }
+
+    @Test
     void literalExpectationResultAndTraceStayRedacted() throws Exception {
         Files.writeString(workspace.resolve("index.html"), "AFTER");
         LocalTurnTraceCapture.begin(
@@ -89,6 +122,21 @@ class TaskExpectationStaticVerifierTest {
         } finally {
             LocalTurnTraceCapture.clear();
         }
+    }
+
+    private void assertProblem(String request, String expectedProblem) {
+        TaskExpectationStaticVerifier.Result result = TaskExpectationStaticVerifier.verify(
+                TaskContractResolver.fromUserRequest(request),
+                workspace,
+                List.of(successfulWrite(targetFromProblem(expectedProblem), VerificationStatus.PASS)),
+                false);
+
+        assertTrue(result.problems().contains(expectedProblem), result.problems().toString());
+    }
+
+    private static String targetFromProblem(String problem) {
+        int separator = problem == null ? -1 : problem.indexOf(':');
+        return separator < 0 ? "" : problem.substring(0, separator);
     }
 
     private static ToolCallLoop.ToolOutcome successfulWrite(String path, VerificationStatus verificationStatus) {
