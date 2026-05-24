@@ -19,6 +19,7 @@ import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
+import dev.talos.runtime.trace.TaskOutcomeTraceRecorder;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.runtime.verification.StaticTaskVerifier;
 import dev.talos.runtime.verification.TaskVerificationResult;
@@ -419,9 +420,9 @@ record ExecutionOutcome(
             LocalTurnTraceCapture.recordProtocolSanitized(
                     "mutating tool protocol blocked by read-only task contract");
         }
-        recordLocalTraceOutcome(
-                completionStatus,
-                verificationStatus,
+        TaskOutcomeTraceRecorder.record(
+                completionStatus == null ? "" : completionStatus.name(),
+                verificationStatus == null ? "" : verificationStatus.name(),
                 taskOutcome,
                 taskVerification);
 
@@ -583,9 +584,9 @@ record ExecutionOutcome(
             LocalTurnTraceCapture.recordProtocolSanitized(
                     "malformed tool protocol debris was replaced with a no-action notice");
         }
-        recordLocalTraceOutcome(
-                completionStatus,
-                VerificationStatus.NOT_RUN,
+        TaskOutcomeTraceRecorder.record(
+                completionStatus == null ? "" : completionStatus.name(),
+                VerificationStatus.NOT_RUN.name(),
                 taskOutcome,
                 verification);
 
@@ -848,35 +849,4 @@ record ExecutionOutcome(
         return toolName == null ? "" : toolName;
     }
 
-    private static void recordLocalTraceOutcome(
-            CompletionStatus completionStatus,
-            VerificationStatus verificationStatus,
-            TaskOutcome taskOutcome,
-            TaskVerificationResult verification
-    ) {
-        if (verification != null) {
-            LocalTurnTraceCapture.recordVerification(
-                    verification.status().name(),
-                    verification.summary(),
-                    verification.problems());
-        }
-        if (taskOutcome != null) {
-            taskOutcome.warnings().forEach(warning ->
-                    LocalTurnTraceCapture.warning(warning.type().name(), warning.message()));
-            LocalTurnTraceCapture.recordOutcome(
-                    completionStatus == null ? "" : completionStatus.name(),
-                    verificationStatus == null ? "" : verificationStatus.name(),
-                    approvalStatus(taskOutcome),
-                    taskOutcome.mutationOutcome().status().name(),
-                    taskOutcome.completionStatus().name());
-        }
-    }
-
-    private static String approvalStatus(TaskOutcome outcome) {
-        if (outcome == null || outcome.mutationOutcome() == null) return "UNKNOWN";
-        if (outcome.toolOutcomes().stream().anyMatch(ToolCallLoop.ToolOutcome::denied)) return "DENIED";
-        if (!outcome.mutationOutcome().denied().isEmpty()) return "DENIED";
-        if (outcome.mutationOutcome().successCount() > 0) return "GRANTED_OR_NOT_REQUIRED";
-        return "NONE";
-    }
 }
