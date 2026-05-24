@@ -4,6 +4,7 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.tools.ToolError;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -124,6 +125,33 @@ class ProtectedReadAnswerGuardTest {
     }
 
     @Test
+    void deniedProtectedReadSummaryReplacesModelContentAndCanonicalizesPath() {
+        String answer = ProtectedReadAnswerGuard.summarizeDeniedProtectedReadOutcomesIfNeeded(
+                "The file says SECRET=original.",
+                loopResult(deniedReadOutcome(" .env")));
+
+        assertEquals("""
+                [Approval blocked: protected content was not read]
+
+                Protected content was not read because approval was denied for:
+                - .env: approval denied
+
+                No protected file content was shown. Approve the protected read if you want Talos to inspect it.""",
+                answer);
+    }
+
+    @Test
+    void deniedProtectedReadSummaryPassesThroughWhenNoDeniedProtectedReadExists() {
+        String answer = "No protected read was requested.";
+
+        String result = ProtectedReadAnswerGuard.summarizeDeniedProtectedReadOutcomesIfNeeded(
+                answer,
+                loopResult(readOutcome("talos.read_file", "README.md", "readme contents")));
+
+        assertEquals(answer, result);
+    }
+
+    @Test
     void blankProtectedReadSummaryKeepsExistingNoAdditionalDetailFallback() throws Exception {
         Files.writeString(workspace.resolve(".env"), "SAFE_AUDIT_SETTING=fake\n");
 
@@ -146,6 +174,19 @@ class ProtectedReadAnswerGuardTest {
                 false,
                 summary,
                 "");
+    }
+
+    private static ToolCallLoop.ToolOutcome deniedReadOutcome(String pathHint) {
+        return new ToolCallLoop.ToolOutcome(
+                "talos.read_file",
+                pathHint,
+                false,
+                false,
+                true,
+                "",
+                "User did not approve the talos.read_file call.",
+                null,
+                ToolError.DENIED);
     }
 
     private static ToolCallLoop.LoopResult loopResult(ToolCallLoop.ToolOutcome... outcomes) {
