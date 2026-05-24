@@ -4,6 +4,7 @@ import dev.talos.cli.repl.Context;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.outcome.CommandOutcomeRenderer;
+import dev.talos.runtime.outcome.EvidenceContainmentAnswerGuard;
 import dev.talos.runtime.outcome.MutationOutcome;
 import dev.talos.runtime.outcome.ProtectedReadAnswerGuard;
 import dev.talos.runtime.outcome.StaticVerificationAnswerRenderer;
@@ -27,7 +28,6 @@ import dev.talos.spi.types.ChatMessage;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 
@@ -62,6 +62,18 @@ record ExecutionOutcome(
     private static final String READ_ONLY_TOOL_LIMIT_REPLACEMENT =
             "[Read-only evidence incomplete: the tool-call limit was reached before Talos produced "
                     + "a complete grounded answer. The read-only inspection did not complete.]";
+    private static final EvidenceContainmentAnswerGuard.AnswerMarkers EVIDENCE_CONTAINMENT_MARKERS =
+            new EvidenceContainmentAnswerGuard.AnswerMarkers(
+                    List.of(
+                            AssistantTurnExecutor.READ_ONLY_DENIED_MUTATION_REPLACEMENT,
+                            AssistantTurnExecutor.STREAMING_NO_TOOL_MUTATION_REPLACEMENT,
+                            AssistantTurnExecutor.MALFORMED_TOOL_PROTOCOL_REPLACEMENT,
+                            AssistantTurnExecutor.DENIED_MUTATION_ANNOTATION,
+                            AssistantTurnExecutor.POLICY_DENIED_MUTATION_ANNOTATION,
+                            AssistantTurnExecutor.MIXED_DENIED_MUTATION_ANNOTATION,
+                            AssistantTurnExecutor.INVALID_MUTATION_ANNOTATION),
+                    AssistantTurnExecutor.UNGROUNDED_ANNOTATION,
+                    AssistantTurnExecutor.LOCAL_ACCESS_CAPABILITY_CORRECTION);
 
     enum CompletionStatus {
         COMPLETE,
@@ -259,11 +271,12 @@ record ExecutionOutcome(
                 evidenceResult);
         boolean approvedProtectedReadPostcondition = false;
         if (missingEvidence) {
-            current = suppressDerivedContentForMissingEvidence(
+            current = EvidenceContainmentAnswerGuard.containMissingEvidence(
                     current,
                     safePlan,
                     evidenceObligation,
-                    evidenceResult);
+                    evidenceResult,
+                    EVIDENCE_CONTAINMENT_MARKERS);
         } else {
             ProtectedReadAnswerGuard.PostconditionResult protectedReadPostcondition =
                     ProtectedReadAnswerGuard.enforceApprovedProtectedReadPostcondition(current, loopResult, workspace);
@@ -306,7 +319,7 @@ record ExecutionOutcome(
                 VerificationStatus.NOT_RUN);
         CompletionStatus completionStatus = preVerificationDecision.completionStatus();
         if (missingEvidence && completionStatus == CompletionStatus.ADVISORY_ONLY) {
-            current = missingEvidencePrefix(current);
+            current = EvidenceContainmentAnswerGuard.missingEvidencePrefix(current);
         }
 
         TaskVerificationResult embeddedVerification = embeddedStaticVerificationFailure(current);
@@ -511,11 +524,12 @@ record ExecutionOutcome(
                 evidenceObligation,
                 evidenceResult);
         if (missingEvidence && !commandRequiredButNotRun && !unsupportedCommandNotAvailable) {
-            shaped = suppressDerivedContentForMissingEvidence(
+            shaped = EvidenceContainmentAnswerGuard.containMissingEvidence(
                     shaped,
                     safePlan,
                     evidenceObligation,
-                    evidenceResult);
+                    evidenceResult,
+                    EVIDENCE_CONTAINMENT_MARKERS);
         } else {
             shaped = ProtectedReadAnswerGuard.suppressProtectedHistoryContentIfNeeded(
                     shaped,
@@ -545,7 +559,7 @@ record ExecutionOutcome(
                 VerificationStatus.NOT_RUN);
         CompletionStatus completionStatus = decision.completionStatus();
         if (missingEvidence && completionStatus == CompletionStatus.ADVISORY_ONLY) {
-            shaped = missingEvidencePrefix(shaped);
+            shaped = EvidenceContainmentAnswerGuard.missingEvidencePrefix(shaped);
         }
         advisoryOnly = completionStatus == CompletionStatus.ADVISORY_ONLY;
         TaskVerificationResult verification = TaskVerificationResult.notRun("Post-apply verification was not applicable.");
@@ -796,119 +810,6 @@ record ExecutionOutcome(
                 && result.status() == EvidenceObligationVerifier.Status.UNSATISFIED;
     }
 
-    private static String suppressDerivedContentForMissingEvidence(
-            String answer,
-            CurrentTurnPlan plan,
-            EvidenceObligation obligation,
-            EvidenceObligationVerifier.Result evidenceResult
-    ) {
-        if (obligation == EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED) {
-            return protectedReadMissingEvidenceContainment(plan, evidenceResult);
-        }
-        if (isRuntimeFailureStatus(answer)) {
-            return missingEvidencePrefix(answer);
-        }
-        if (isDominantRuntimeContainment(answer)) {
-            return answer;
-        }
-        String runtimeSafeBody = runtimeSafeBodyForMissingEvidence(answer);
-        if (runtimeSafeBody != null) {
-            return missingEvidencePrefix(runtimeSafeBody);
-        }
-        return missingEvidencePrefix(missingEvidenceContainmentMessage(plan, obligation, evidenceResult));
-    }
-
-    private static String missingEvidenceContainmentMessage(
-            CurrentTurnPlan plan,
-            EvidenceObligation obligation,
-            EvidenceObligationVerifier.Result evidenceResult
-    ) {
-        return switch (obligation) {
-            case PROTECTED_READ_APPROVAL_REQUIRED ->
-                    "I did not read protected content this turn. A protected read approval "
-                            + "path was required before answering from that file, so no protected "
-                            + "file content is available from this turn."
-                            + targetSentence(plan);
-            case READ_TARGET_REQUIRED ->
-                    "I did not inspect the required workspace target this turn, so I cannot "
-                            + "answer from its contents or propose grounded changes yet."
-                            + targetSentence(plan);
-            case LIST_DIRECTORY_ONLY ->
-                    "I did not complete a directory-list-only evidence path this turn. "
-                            + "I cannot answer with file contents or derived file claims from "
-                            + "this turn.";
-            case WORKSPACE_INSPECTION_REQUIRED ->
-                    "I did not inspect the workspace this turn, so I cannot list files, "
-                            + "show file contents, or claim changed files from this turn.";
-            case STATIC_WEB_DIAGNOSIS_REQUIRED ->
-                    "I did not inspect the required static web files this turn, so I cannot "
-                            + "diagnose the page from grounded HTML, CSS, or JavaScript evidence."
-                            + evidenceDetailSentence(evidenceResult);
-            case VERIFY_FROM_TRACE_OR_EVIDENCE ->
-                    "I did not gather trace or workspace evidence this turn, so I cannot "
-                            + "verify the requested status from this turn.";
-            case UNSUPPORTED_CAPABILITY_CHECK_REQUIRED ->
-                    "I did not gather the required unsupported-capability evidence this turn, "
-                            + "so I cannot answer from unsupported document contents.";
-            case NONE -> "";
-        };
-    }
-
-    private static String evidenceDetailSentence(EvidenceObligationVerifier.Result evidenceResult) {
-        if (evidenceResult == null || evidenceResult.message() == null || evidenceResult.message().isBlank()) {
-            return "";
-        }
-        String message = evidenceResult.message().strip();
-        return " " + message;
-    }
-
-    private static boolean isDominantRuntimeContainment(String answer) {
-        if (answer == null || answer.isBlank()) return false;
-        return answer.startsWith(AssistantTurnExecutor.READ_ONLY_DENIED_MUTATION_REPLACEMENT)
-                || answer.startsWith(AssistantTurnExecutor.STREAMING_NO_TOOL_MUTATION_REPLACEMENT)
-                || answer.startsWith(AssistantTurnExecutor.MALFORMED_TOOL_PROTOCOL_REPLACEMENT)
-                || answer.startsWith(AssistantTurnExecutor.DENIED_MUTATION_ANNOTATION)
-                || answer.startsWith(AssistantTurnExecutor.POLICY_DENIED_MUTATION_ANNOTATION)
-                || answer.startsWith(AssistantTurnExecutor.MIXED_DENIED_MUTATION_ANNOTATION)
-                || answer.startsWith(AssistantTurnExecutor.INVALID_MUTATION_ANNOTATION);
-    }
-
-    private static String runtimeSafeBodyForMissingEvidence(String answer) {
-        if (answer == null || answer.isBlank()) return null;
-        if (answer.startsWith(AssistantTurnExecutor.UNGROUNDED_ANNOTATION)) {
-            return AssistantTurnExecutor.UNGROUNDED_ANNOTATION
-                    + "I did not inspect the required workspace evidence this turn, "
-                    + "so I cannot answer from workspace facts yet.";
-        }
-        if (answer.startsWith(AssistantTurnExecutor.LOCAL_ACCESS_CAPABILITY_CORRECTION)) {
-            return AssistantTurnExecutor.LOCAL_ACCESS_CAPABILITY_CORRECTION;
-        }
-        if (isCapabilityLimitation(answer)) {
-            return answer;
-        }
-        return null;
-    }
-
-    private static boolean isCapabilityLimitation(String answer) {
-        String lower = answer.toLowerCase(java.util.Locale.ROOT);
-        return lower.startsWith("talos cannot extract ")
-                || lower.startsWith("i cannot extract ")
-                || lower.startsWith("i can't extract ")
-                || lower.startsWith("unsupported ");
-    }
-
-    private static boolean isRuntimeFailureStatus(String answer) {
-        if (answer == null || answer.isBlank()) return false;
-        return answer.contains("[Tool loop stopped by failure policy:");
-    }
-
-    private static String targetSentence(CurrentTurnPlan plan) {
-        TaskContract contract = plan == null ? null : plan.taskContract();
-        Set<String> targets = evidenceTargets(contract);
-        if (targets.isEmpty()) return "";
-        return " Required target(s): " + String.join(", ", targets) + ".";
-    }
-
     private static Set<String> evidenceTargets(TaskContract contract) {
         if (contract == null) return Set.of();
         if (!contract.sourceEvidenceTargets().isEmpty()) {
@@ -937,55 +838,6 @@ record ExecutionOutcome(
                     toolName, pathHint, true, false, false, "", ""));
         }
         return outcomes;
-    }
-
-    private static String missingEvidencePrefix(String answer) {
-        String current = answer == null ? "" : answer;
-        if (current.startsWith(EvidenceObligationVerifier.MISSING_EVIDENCE_PREFIX)) {
-            return current;
-        }
-        return EvidenceObligationVerifier.MISSING_EVIDENCE_PREFIX + "\n\n" + current;
-    }
-
-    private static String protectedReadMissingEvidenceContainment(
-            CurrentTurnPlan plan,
-            EvidenceObligationVerifier.Result evidenceResult
-    ) {
-        String message = evidenceResult == null ? "" : evidenceResult.message();
-        if (message.contains("not attempted")) {
-            return protectedReadNotAttemptedPrefix(protectedReadNotAttemptedMessage(plan));
-        }
-        return protectedReadIncompletePrefix(protectedReadIncompleteMessage(plan));
-    }
-
-    private static String protectedReadNotAttemptedPrefix(String answer) {
-        String current = answer == null ? "" : answer;
-        String prefix = "[Protected read not attempted: approval-required read_file tool call was not issued.]";
-        if (current.startsWith(prefix)) {
-            return current;
-        }
-        return prefix + "\n\n" + current;
-    }
-
-    private static String protectedReadNotAttemptedMessage(CurrentTurnPlan plan) {
-        return "The model did not call talos.read_file for the protected target, "
-                + "so no approval prompt ran and no protected content was read."
-                + targetSentence(plan);
-    }
-
-    private static String protectedReadIncompletePrefix(String answer) {
-        String current = answer == null ? "" : answer;
-        String prefix = "[Protected read incomplete: approval-required read_file tool call did not return content.]";
-        if (current.startsWith(prefix)) {
-            return current;
-        }
-        return prefix + "\n\n" + current;
-    }
-
-    private static String protectedReadIncompleteMessage(CurrentTurnPlan plan) {
-        return "talos.read_file was attempted for the protected target, but protected content "
-                + "was not returned successfully. No protected content was read from this turn."
-                + targetSentence(plan);
     }
 
     private static String canonicalToolName(String toolName) {
