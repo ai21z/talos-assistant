@@ -13,8 +13,7 @@ import dev.talos.runtime.outcome.TaskOutcomeWarningBuilder;
 import dev.talos.runtime.outcome.TruthWarning;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.EvidenceObligation;
-import dev.talos.runtime.policy.EvidenceObligationPolicy;
-import dev.talos.runtime.policy.EvidenceObligationVerifier;
+import dev.talos.runtime.policy.EvidenceObligationAssessment;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.tools.ToolAliasPolicy;
@@ -28,10 +27,8 @@ import dev.talos.runtime.verification.TaskVerificationStatus;
 import dev.talos.spi.types.ChatMessage;
 
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 
 /**
  * Centralized end-of-turn outcome classification for current answer shaping.
@@ -262,15 +259,12 @@ record ExecutionOutcome(
             current = CommandOutcomeRenderer.unsupportedCommandNotAvailableReplacement();
         }
 
-        EvidenceObligation evidenceObligation = evidenceObligation(safePlan);
-        EvidenceObligationVerifier.Result evidenceResult = verifyEvidence(
-                safePlan,
-                evidenceOutcomes(loopResult),
-                workspace);
-        boolean missingEvidence = evidenceResult.status() == EvidenceObligationVerifier.Status.UNSATISFIED;
-        boolean protectedReadApprovalMissing = protectedReadApprovalMissing(
-                evidenceObligation,
-                evidenceResult);
+        EvidenceObligationAssessment evidenceAssessment =
+                EvidenceObligationAssessment.assess(safePlan, loopResult, workspace);
+        EvidenceObligation evidenceObligation = evidenceAssessment.obligation();
+        var evidenceResult = evidenceAssessment.result();
+        boolean missingEvidence = evidenceAssessment.missingEvidence();
+        boolean protectedReadApprovalMissing = evidenceAssessment.protectedReadApprovalMissing();
         boolean approvedProtectedReadPostcondition = false;
         if (missingEvidence) {
             current = EvidenceContainmentAnswerGuard.containMissingEvidence(
@@ -519,12 +513,12 @@ record ExecutionOutcome(
                 && (shaped.startsWith(AssistantTurnExecutor.UNGROUNDED_ANNOTATION)
                 || localAccessCapabilityCorrected);
         boolean advisoryOnly = ungrounded && !blocked;
-        EvidenceObligation evidenceObligation = evidenceObligation(safePlan);
-        EvidenceObligationVerifier.Result evidenceResult = verifyEvidence(safePlan, List.of(), null);
-        boolean missingEvidence = evidenceResult.status() == EvidenceObligationVerifier.Status.UNSATISFIED;
-        boolean protectedReadApprovalMissing = protectedReadApprovalMissing(
-                evidenceObligation,
-                evidenceResult);
+        EvidenceObligationAssessment evidenceAssessment =
+                EvidenceObligationAssessment.assess(safePlan, null, null);
+        EvidenceObligation evidenceObligation = evidenceAssessment.obligation();
+        var evidenceResult = evidenceAssessment.result();
+        boolean missingEvidence = evidenceAssessment.missingEvidence();
+        boolean protectedReadApprovalMissing = evidenceAssessment.protectedReadApprovalMissing();
         if (missingEvidence && !commandRequiredButNotRun && !unsupportedCommandNotAvailable) {
             shaped = EvidenceContainmentAnswerGuard.containMissingEvidence(
                     shaped,
@@ -696,28 +690,6 @@ record ExecutionOutcome(
                 verificationStatus));
     }
 
-    private static EvidenceObligation evidenceObligation(CurrentTurnPlan plan) {
-        if (plan == null) return EvidenceObligation.NONE;
-        return EvidenceObligationPolicy.parse(plan.evidenceObligation());
-    }
-
-    private static EvidenceObligationVerifier.Result verifyEvidence(
-            CurrentTurnPlan plan,
-            List<ToolCallLoop.ToolOutcome> toolOutcomes,
-            Path workspace
-    ) {
-        if (plan == null) {
-            return EvidenceObligationVerifier.Result.satisfied("No current-turn plan was available.");
-        }
-        EvidenceObligation obligation = evidenceObligation(plan);
-        TaskContract contract = plan.taskContract();
-        return EvidenceObligationVerifier.verify(
-                obligation,
-                evidenceTargets(contract),
-                toolOutcomes,
-                workspace);
-    }
-
     private static boolean hasUnsupportedDocumentCapabilityLimit(ToolCallLoop.LoopResult loopResult) {
         if (loopResult == null || loopResult.toolOutcomes() == null) return false;
         for (ToolCallLoop.ToolOutcome outcome : loopResult.toolOutcomes()) {
@@ -756,45 +728,6 @@ record ExecutionOutcome(
         if (loopResult == null || loopResult.toolOutcomes() == null) return false;
         return loopResult.toolOutcomes().stream()
                 .anyMatch(outcome -> outcome.mutating() && outcome.denied());
-    }
-
-    private static boolean protectedReadApprovalMissing(
-            EvidenceObligation obligation,
-            EvidenceObligationVerifier.Result result
-    ) {
-        return obligation == EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED
-                && result != null
-                && result.status() == EvidenceObligationVerifier.Status.UNSATISFIED;
-    }
-
-    private static Set<String> evidenceTargets(TaskContract contract) {
-        if (contract == null) return Set.of();
-        if (!contract.sourceEvidenceTargets().isEmpty()) {
-            return contract.sourceEvidenceTargets();
-        }
-        return contract.expectedTargets();
-    }
-
-    private static List<ToolCallLoop.ToolOutcome> evidenceOutcomes(ToolCallLoop.LoopResult loopResult) {
-        if (loopResult == null) return List.of();
-        if (loopResult.toolOutcomes() != null && !loopResult.toolOutcomes().isEmpty()) {
-            return loopResult.toolOutcomes();
-        }
-        if (loopResult.toolNames() == null || loopResult.toolNames().isEmpty()) {
-            return List.of();
-        }
-        List<ToolCallLoop.ToolOutcome> outcomes = new ArrayList<>();
-        List<String> readPaths = loopResult.readPaths() == null ? List.of() : loopResult.readPaths();
-        int readPathIndex = 0;
-        for (String toolName : loopResult.toolNames()) {
-            String pathHint = "";
-            if ("talos.read_file".equals(toolName) && readPathIndex < readPaths.size()) {
-                pathHint = readPaths.get(readPathIndex++);
-            }
-            outcomes.add(new ToolCallLoop.ToolOutcome(
-                    toolName, pathHint, true, false, false, "", ""));
-        }
-        return outcomes;
     }
 
     private static String canonicalToolName(String toolName) {
