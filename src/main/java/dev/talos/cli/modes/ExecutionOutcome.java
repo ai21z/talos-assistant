@@ -3,6 +3,7 @@ package dev.talos.cli.modes;
 import dev.talos.cli.repl.Context;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
+import dev.talos.runtime.outcome.CommandOutcomeRenderer;
 import dev.talos.runtime.outcome.MutationOutcome;
 import dev.talos.runtime.outcome.TaskOutcome;
 import dev.talos.runtime.outcome.TaskOutcomeWarningBuilder;
@@ -14,7 +15,6 @@ import dev.talos.runtime.policy.EvidenceObligationVerifier;
 import dev.talos.runtime.policy.ProtectedPathPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
-import dev.talos.runtime.task.TaskType;
 import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.turn.CurrentTurnPlan;
@@ -99,17 +99,6 @@ record ExecutionOutcome(
         }
     }
 
-    private record CommandToolConclusion(
-            ToolCallLoop.ToolOutcome outcome,
-            boolean succeeded,
-            boolean failed,
-            boolean denied
-    ) {
-        static CommandToolConclusion none() {
-            return new CommandToolConclusion(null, false, false, false);
-        }
-    }
-
     static ExecutionOutcome fromToolLoop(
             String answer,
             List<ChatMessage> messages,
@@ -184,16 +173,16 @@ record ExecutionOutcome(
         boolean failedMutationObligation = failedActionObligation
                 || pendingActionObligationFailure
                 || failurePolicyStoppedWithoutMutation;
-        CommandToolConclusion commandConclusion = commandConclusion(loopResult);
+        CommandOutcomeRenderer.Conclusion commandConclusion = CommandOutcomeRenderer.conclusion(loopResult);
         boolean commandFailed = commandConclusion.failed();
         boolean commandDenied = commandConclusion.denied();
         boolean commandSucceeded = commandConclusion.succeeded();
-        boolean commandVerificationSucceeded = commandSucceeded && commandSatisfiesVerifyOnlyRequest(contract);
-        boolean commandRequiredButNotRun = explicitCommandVerificationRequired(contract)
+        boolean commandVerificationSucceeded = commandSucceeded && CommandOutcomeRenderer.satisfiesVerifyOnlyRequest(contract);
+        boolean commandRequiredButNotRun = CommandOutcomeRenderer.explicitCommandVerificationRequired(contract)
                 && !commandSucceeded
                 && !commandFailed
                 && !commandDenied;
-        boolean unsupportedPythonCommandRequiredButNotRun = unsupportedPythonCommandExecutionRequest(contract)
+        boolean unsupportedPythonCommandRequiredButNotRun = CommandOutcomeRenderer.unsupportedPythonCommandExecutionRequest(contract)
                 && !commandSucceeded
                 && !commandFailed
                 && !commandDenied;
@@ -264,13 +253,13 @@ record ExecutionOutcome(
         current = shaped;
 
         if (commandDenied || commandFailed) {
-            current = commandFailureReplacement(commandConclusion);
+            current = CommandOutcomeRenderer.failureReplacement(commandConclusion);
         } else if (commandVerificationSucceeded) {
-            current = commandSuccessReplacement(commandConclusion);
+            current = CommandOutcomeRenderer.successReplacement(commandConclusion);
         } else if (commandRequiredButNotRun) {
-            current = commandRequiredButNotRunReplacement();
+            current = CommandOutcomeRenderer.requiredButNotRunReplacement();
         } else if (unsupportedPythonCommandRequiredButNotRun) {
-            current = unsupportedCommandNotAvailableReplacement();
+            current = CommandOutcomeRenderer.unsupportedCommandNotAvailableReplacement();
         }
 
         EvidenceObligation evidenceObligation = evidenceObligation(safePlan);
@@ -517,12 +506,12 @@ record ExecutionOutcome(
 
         TaskContract contract = safePlan.taskContract();
         boolean mutationRequested = contract.mutationRequested();
-        boolean commandRequiredButNotRun = explicitCommandVerificationRequired(contract);
-        boolean unsupportedCommandNotAvailable = unsupportedCommandVerificationRequest(contract);
+        boolean commandRequiredButNotRun = CommandOutcomeRenderer.explicitCommandVerificationRequired(contract);
+        boolean unsupportedCommandNotAvailable = CommandOutcomeRenderer.unsupportedCommandVerificationRequest(contract);
         if (commandRequiredButNotRun) {
-            shaped = commandRequiredButNotRunReplacement();
+            shaped = CommandOutcomeRenderer.requiredButNotRunReplacement();
         } else if (unsupportedCommandNotAvailable) {
-            shaped = unsupportedCommandNotAvailableReplacement();
+            shaped = CommandOutcomeRenderer.unsupportedCommandNotAvailableReplacement();
         }
         boolean blocked = noToolMutationReplaced || commandRequiredButNotRun || unsupportedCommandNotAvailable;
         boolean ungrounded = shaped != null
@@ -804,83 +793,6 @@ record ExecutionOutcome(
         if (reason != null && reason.startsWith("Pending action obligation ")) return true;
         String answer = loopResult.finalAnswer();
         return answer != null && answer.startsWith("[Action obligation failed:");
-    }
-
-    private static CommandToolConclusion commandConclusion(ToolCallLoop.LoopResult loopResult) {
-        if (loopResult == null || loopResult.toolOutcomes() == null) return CommandToolConclusion.none();
-        ToolCallLoop.ToolOutcome firstSuccess = null;
-        for (ToolCallLoop.ToolOutcome outcome : loopResult.toolOutcomes()) {
-            if (outcome == null || !"talos.run_command".equals(canonicalToolName(outcome.toolName()))) continue;
-            if (!outcome.success()) {
-                return new CommandToolConclusion(outcome, false, !outcome.denied(), outcome.denied());
-            }
-            if (firstSuccess == null) {
-                firstSuccess = outcome;
-            }
-        }
-        return firstSuccess == null
-                ? CommandToolConclusion.none()
-                : new CommandToolConclusion(firstSuccess, true, false, false);
-    }
-
-    private static String commandFailureReplacement(CommandToolConclusion conclusion) {
-        ToolCallLoop.ToolOutcome outcome = conclusion == null ? null : conclusion.outcome();
-        String detail = outcome == null ? "" : singleLine(outcome.errorMessage());
-        if (conclusion != null && conclusion.denied()) {
-            return "[Command not run: talos.run_command was blocked before execution.]\n\n"
-                    + (detail.isBlank()
-                    ? "No command result is available because the command was not approved or policy blocked it."
-                    : detail);
-        }
-        String prefix = detail.toLowerCase(Locale.ROOT).startsWith("command timed out:")
-                ? "[Command timed out: talos.run_command did not finish successfully.]"
-                : "[Command failed: talos.run_command did not finish successfully.]";
-        return prefix + "\n\n"
-                + (detail.isBlank() ? "The command returned a failed result." : detail);
-    }
-
-    private static String commandSuccessReplacement(CommandToolConclusion conclusion) {
-        ToolCallLoop.ToolOutcome outcome = conclusion == null ? null : conclusion.outcome();
-        String summary = outcome == null ? "" : singleLine(outcome.summary());
-        if (summary.isBlank()) {
-            summary = "Command succeeded: talos.run_command completed";
-        }
-        if (!summary.endsWith(".") && !summary.endsWith("!") && !summary.endsWith("?")) {
-            summary += ".";
-        }
-        return summary;
-    }
-
-    private static String commandRequiredButNotRunReplacement() {
-        return "[Command not run: talos.run_command was required for this explicit command request.]\n\n"
-                + "No command result is available because the model did not call talos.run_command.";
-    }
-
-    private static String unsupportedCommandNotAvailableReplacement() {
-        return "[Command not run: Python execution is outside the current bounded command profile.]\n\n"
-                + "No Python, pytest, or .py command result is available in this beta turn.";
-    }
-
-    private static boolean commandSatisfiesVerifyOnlyRequest(TaskContract contract) {
-        return contract != null
-                && contract.type() == TaskType.VERIFY_ONLY
-                && contract.verificationRequired()
-                && !contract.mutationRequested();
-    }
-
-    private static boolean explicitCommandVerificationRequired(TaskContract contract) {
-        return contract != null
-                && "explicit-command-verification-request".equals(contract.classificationReason());
-    }
-
-    private static boolean unsupportedCommandVerificationRequest(TaskContract contract) {
-        return contract != null
-                && "unsupported-command-verification-request".equals(contract.classificationReason());
-    }
-
-    private static boolean unsupportedPythonCommandExecutionRequest(TaskContract contract) {
-        return contract != null
-                && TaskContractResolver.looksUnsupportedPythonCommandExecutionRequest(contract.originalUserRequest());
     }
 
     private static boolean hasDeniedMutation(ToolCallLoop.LoopResult loopResult) {
