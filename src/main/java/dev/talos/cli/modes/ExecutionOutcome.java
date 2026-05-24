@@ -12,13 +12,13 @@ import dev.talos.runtime.outcome.StaticVerificationAnswerRenderer;
 import dev.talos.runtime.outcome.TaskOutcome;
 import dev.talos.runtime.outcome.TaskOutcomeWarningBuilder;
 import dev.talos.runtime.outcome.TruthWarning;
+import dev.talos.runtime.outcome.UnsupportedDocumentCapabilityOutcome;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.ActionObligationFailureAssessment;
 import dev.talos.runtime.policy.EvidenceObligation;
 import dev.talos.runtime.policy.EvidenceObligationAssessment;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
-import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.trace.TaskOutcomeTraceRecorder;
 import dev.talos.runtime.turn.CurrentTurnPlan;
@@ -160,7 +160,7 @@ record ExecutionOutcome(
         CurrentTurnPlan safePlan = plan == null ? compatibilityPlan(messages) : plan;
         TaskContract contract = safePlan.taskContract();
         boolean mutationRequested = contract.mutationRequested();
-        boolean unsupportedDocumentCapabilityLimited = hasUnsupportedDocumentCapabilityLimit(loopResult);
+        boolean unsupportedDocumentCapabilityLimited = UnsupportedDocumentCapabilityOutcome.assess(loopResult).limited();
         ActionObligationFailureAssessment actionObligationFailure = ActionObligationFailureAssessment.assess(
                 failedActionObligation,
                 loopResult,
@@ -675,27 +675,6 @@ record ExecutionOutcome(
                 protectedReadApprovalMissing,
                 approvedProtectedReadPostcondition,
                 verificationStatus));
-    }
-
-    private static boolean hasUnsupportedDocumentCapabilityLimit(ToolCallLoop.LoopResult loopResult) {
-        if (loopResult == null || loopResult.toolOutcomes() == null) return false;
-        for (ToolCallLoop.ToolOutcome outcome : loopResult.toolOutcomes()) {
-            if (outcome == null) continue;
-            if (!"talos.read_file".equals(canonicalToolName(outcome.toolName()))) continue;
-            if (outcome.success()) continue;
-            if (dev.talos.tools.ToolError.UNSUPPORTED_FORMAT.equals(outcome.errorCode())) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static String canonicalToolName(String toolName) {
-        ToolAliasPolicy.Decision decision = ToolAliasPolicy.resolve(toolName);
-        if (decision.accepted() && decision.canonicalToolName() != null && !decision.canonicalToolName().isBlank()) {
-            return decision.canonicalToolName();
-        }
-        return toolName == null ? "" : toolName;
     }
 
 }
