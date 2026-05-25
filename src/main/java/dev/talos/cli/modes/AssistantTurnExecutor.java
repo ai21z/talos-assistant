@@ -19,6 +19,7 @@ import dev.talos.runtime.context.ChangeSummaryContext;
 import dev.talos.runtime.expectation.LiteralContentExpectation;
 import dev.talos.runtime.expectation.TaskExpectation;
 import dev.talos.runtime.outcome.MutationFailureAnswerRenderer;
+import dev.talos.runtime.outcome.NoToolAnswerTruthfulnessGuard;
 import dev.talos.runtime.outcome.ProtectedReadAnswerGuard;
 import dev.talos.runtime.outcome.UnsupportedDocumentAnswerGuard;
 import dev.talos.runtime.phase.ExecutionPhase;
@@ -4135,7 +4136,7 @@ public final class AssistantTurnExecutor {
      * Phrases in the <em>user request</em> that strongly imply the user
      * asked for multi-file inspection before answering — i.e., explicitly
      * more than one file should be read. Deliberately narrower than
-     * {@link #EVIDENCE_REQUEST_MARKERS}: an evidence request is a
+     * {@link NoToolAnswerTruthfulnessGuard}: an evidence request is a
      * superset; an inspect-first request is the subset that names or
      * implies plurality.
      *
@@ -4641,7 +4642,7 @@ public final class AssistantTurnExecutor {
      * comfortably inside the window. Values below 600 risk fighting the
      * short-deflection tier (≤ 500 chars) already handled elsewhere.
      */
-    static final int UNGROUNDED_MIN_CHARS = 600;
+    static final int UNGROUNDED_MIN_CHARS = NoToolAnswerTruthfulnessGuard.UNGROUNDED_MIN_CHARS;
 
     /**
      * Phrases in the <em>user request</em> that indicate the user wants the
@@ -4651,89 +4652,28 @@ public final class AssistantTurnExecutor {
      *
      * <p>Matched case-insensitively against the latest user message only.
      */
-    private static final Set<String> EVIDENCE_REQUEST_MARKERS = Set.of(
-            "read the",
-            "read first",
-            "inspect",
-            "check whether",
-            "check if",
-            "check that",
-            "verify",
-            "evidence",
-            "actual file",
-            "based on the file",
-            "from the file",
-            "wired together",
-            "wiring",
-            "mismatch",
-            "suspicious reference",
-            "broken reference",
-            "identify the"
-    );
-
     /**
      * Annotation prepended to the original answer if the grounding retry
      * fires but the retry itself does not produce a better result. Keeps the
      * user informed without silently rewriting.
      */
     public static final String UNGROUNDED_ANNOTATION =
-            "[Grounding check: the user asked for an answer based on workspace "
-            + "contents, but no files were read this turn. The response below was "
-            + "produced without reading any files.]\n\n";
+            NoToolAnswerTruthfulnessGuard.UNGROUNDED_ANNOTATION;
 
     public static final String STREAMING_NO_TOOL_MUTATION_ANNOTATION =
-            "[Truth check: the response below narrates completed file changes, "
-            + "but no file tool was called in this turn. Treat it as unverified.]\n\n";
+            NoToolAnswerTruthfulnessGuard.STREAMING_NO_TOOL_MUTATION_ANNOTATION;
 
     public static final String STREAMING_NO_TOOL_MUTATION_REPLACEMENT =
-            "[Truth check: no file was changed in this turn. The user asked for a "
-            + "modification, but the assistant did not call any file-editing tool, so "
-            + "the prior \"updated file\" narrative was discarded.]\n\n"
-            + "No file changes were applied. Please retry with actual tool-backed edits.";
+            NoToolAnswerTruthfulnessGuard.STREAMING_NO_TOOL_MUTATION_REPLACEMENT;
 
     public static final String MALFORMED_TOOL_PROTOCOL_REPLACEMENT =
-            "[Truth check: the model produced an invalid tool-call payload, so no action was taken.]\n\n"
-            + "No file changes were applied. Please retry the request.";
+            NoToolAnswerTruthfulnessGuard.MALFORMED_TOOL_PROTOCOL_REPLACEMENT;
 
     public static final String READ_ONLY_DENIED_MUTATION_REPLACEMENT =
             MutationFailureAnswerRenderer.READ_ONLY_DENIED_MUTATION_REPLACEMENT;
 
     public static final String LOCAL_ACCESS_CAPABILITY_CORRECTION =
-            "[Capability correction: Talos can inspect files in the current workspace "
-            + "with local read tools, but no file tool was called in this turn.]\n\n"
-            + "I can read, list, and search files in this workspace when the task calls "
-            + "for it. I did not inspect files in this turn, so I cannot give an "
-            + "evidence-backed workspace answer yet.";
-
-    private static final Set<String> NEGATIVE_LOCAL_ACCESS_MARKERS = Set.of(
-            "don't have direct access to your local workspace",
-            "do not have direct access to your local workspace",
-            "don't have direct access to your local files",
-            "do not have direct access to your local files",
-            "can't browse your local files",
-            "cannot browse your local files",
-            "can't access your local files",
-            "cannot access your local files",
-            "can't inspect your local files",
-            "cannot inspect your local files",
-            "can't read your files",
-            "cannot read your files",
-            "if you provide the file contents",
-            "if you provide specific details or content from the files"
-    );
-
-    private static final Set<String> LOCAL_WORKSPACE_TURN_MARKERS = Set.of(
-            "workspace",
-            "folder",
-            "directory",
-            "file",
-            "files",
-            "project",
-            "repo",
-            "repository",
-            "here",
-            "this"
-    );
+            NoToolAnswerTruthfulnessGuard.LOCAL_ACCESS_CAPABILITY_CORRECTION;
 
     /**
      * Returns the content of the latest user-role message in {@code messages},
@@ -4767,12 +4707,7 @@ public final class AssistantTurnExecutor {
      * inspects the assistant's own prior output. Package-private for testing.
      */
     static boolean looksLikeEvidenceRequest(String userRequest) {
-        if (userRequest == null || userRequest.isBlank()) return false;
-        String lower = userRequest.toLowerCase();
-        for (String marker : EVIDENCE_REQUEST_MARKERS) {
-            if (lower.contains(marker)) return true;
-        }
-        return false;
+        return NoToolAnswerTruthfulnessGuard.looksLikeEvidenceRequest(userRequest);
     }
 
     static String correctNegativeLocalAccessClaimIfNeeded(
@@ -4788,8 +4723,7 @@ public final class AssistantTurnExecutor {
             CurrentTurnPlan plan,
             List<ChatMessage> messages
     ) {
-        if (!shouldCorrectNegativeLocalAccessClaim(answer, plan, messages)) return answer;
-        return LOCAL_ACCESS_CAPABILITY_CORRECTION;
+        return NoToolAnswerTruthfulnessGuard.correctNegativeLocalAccessClaimIfNeeded(answer, plan, messages);
     }
 
     static boolean shouldCorrectNegativeLocalAccessClaim(
@@ -4805,55 +4739,11 @@ public final class AssistantTurnExecutor {
             CurrentTurnPlan plan,
             List<ChatMessage> messages
     ) {
-        if (!containsNegativeLocalAccessClaim(answer)) return false;
-        return looksLikeLocalWorkspaceTurn(plan, messages, answer);
+        return NoToolAnswerTruthfulnessGuard.shouldCorrectNegativeLocalAccessClaim(answer, plan, messages);
     }
 
     static boolean containsNegativeLocalAccessClaim(String answer) {
-        if (answer == null || answer.isBlank()) return false;
-        String lower = answer.toLowerCase(Locale.ROOT);
-        for (String marker : NEGATIVE_LOCAL_ACCESS_MARKERS) {
-            if (lower.contains(marker)) return true;
-        }
-        return false;
-    }
-
-    private static boolean looksLikeLocalWorkspaceTurn(
-            List<ChatMessage> messages,
-            String answer
-    ) {
-        return looksLikeLocalWorkspaceTurn(safePlanFromMessages(null, messages, null), messages, answer);
-    }
-
-    private static boolean looksLikeLocalWorkspaceTurn(
-            CurrentTurnPlan plan,
-            List<ChatMessage> messages,
-            String answer
-    ) {
-        CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, null);
-        TaskContract contract = safePlan.taskContract();
-        if (contract.mutationRequested()) return false;
-
-        TaskType type = contract.type();
-        if (type == TaskType.DIRECTORY_LISTING
-                || type == TaskType.WORKSPACE_EXPLAIN
-                || type == TaskType.DIAGNOSE_ONLY
-                || type == TaskType.VERIFY_ONLY) {
-            return true;
-        }
-
-        String userRequest = latestUserRequest(safePlan, messages);
-        if (containsLocalWorkspaceMarker(userRequest)) return true;
-        return containsLocalWorkspaceMarker(answer) && type != TaskType.SMALL_TALK;
-    }
-
-    private static boolean containsLocalWorkspaceMarker(String value) {
-        if (value == null || value.isBlank()) return false;
-        String lower = value.toLowerCase(Locale.ROOT);
-        for (String marker : LOCAL_WORKSPACE_TURN_MARKERS) {
-            if (lower.contains(marker)) return true;
-        }
-        return false;
+        return NoToolAnswerTruthfulnessGuard.containsNegativeLocalAccessClaim(answer);
     }
 
     /**
@@ -4891,11 +4781,7 @@ public final class AssistantTurnExecutor {
             CurrentTurnPlan plan,
             List<ChatMessage> messages
     ) {
-        if (answer == null || answer.isBlank()) return false;
-        if (answer.length() < UNGROUNDED_MIN_CHARS) return false;
-        CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, null);
-        if (isDirectAnswerOnlyTurn(safePlan)) return false;
-        return looksLikeEvidenceRequest(latestUserRequest(safePlan, messages));
+        return NoToolAnswerTruthfulnessGuard.shouldAppendStreamingGroundingAnnotation(answer, plan, messages);
     }
 
     static String annotateStreamingNoToolMutationClaim(String answer, List<ChatMessage> messages) {
@@ -4908,36 +4794,11 @@ public final class AssistantTurnExecutor {
             CurrentTurnPlan plan,
             List<ChatMessage> messages
     ) {
-        if (answer == null || answer.isBlank()) return answer;
-        if (!safePlanFromMessages(plan, messages, null).taskContract().mutationRequested()) return answer;
-        if (!containsMutationClaim(answer) && !containsStreamingMutationNarrative(answer)) return answer;
-        return STREAMING_NO_TOOL_MUTATION_ANNOTATION + answer;
+        return NoToolAnswerTruthfulnessGuard.annotateStreamingNoToolMutationClaim(answer, plan, messages);
     }
 
-    private static final Set<String> STREAMING_MUTATION_NARRATIVE_MARKERS = Set.of(
-            "updated `index.html`",
-            "updated index.html",
-            "updated `style.css`",
-            "updated style.css",
-            "updated `script.js`",
-            "updated script.js",
-            "here is the updated",
-            "summary of changes",
-            "summary of changes and verifications",
-            "### updated `index.html`",
-            "### updated `style.css`",
-            "### updated `script.js`",
-            "these changes should ensure",
-            "these changes should align"
-    );
-
     static boolean containsStreamingMutationNarrative(String answer) {
-        if (answer == null || answer.isBlank()) return false;
-        String lower = answer.toLowerCase();
-        for (String marker : STREAMING_MUTATION_NARRATIVE_MARKERS) {
-            if (lower.contains(marker)) return true;
-        }
-        return false;
+        return NoToolAnswerTruthfulnessGuard.containsStreamingMutationNarrative(answer);
     }
 
     static String enforceStreamingNoToolTruthfulness(String answer, List<ChatMessage> messages) {
@@ -4950,15 +4811,7 @@ public final class AssistantTurnExecutor {
             CurrentTurnPlan plan,
             List<ChatMessage> messages
     ) {
-        String out = answer;
-        if (shouldReplaceStreamingNoToolMutationNarrative(answer, plan, messages)) {
-            return STREAMING_NO_TOOL_MUTATION_REPLACEMENT;
-        }
-        if (shouldAppendStreamingGroundingAnnotation(answer, plan, messages)) {
-            out = UNGROUNDED_ANNOTATION + answer;
-        }
-        out = annotateStreamingNoToolMutationClaim(out, plan, messages);
-        return out;
+        return NoToolAnswerTruthfulnessGuard.enforceStreamingNoToolTruthfulness(answer, plan, messages);
     }
 
     static boolean shouldReplaceStreamingNoToolMutationNarrative(
@@ -4972,9 +4825,7 @@ public final class AssistantTurnExecutor {
             CurrentTurnPlan plan,
             List<ChatMessage> messages
     ) {
-        if (answer == null || answer.isBlank()) return false;
-        if (!safePlanFromMessages(plan, messages, null).taskContract().mutationRequested()) return false;
-        return containsMutationClaim(answer) || containsStreamingMutationNarrative(answer);
+        return NoToolAnswerTruthfulnessGuard.shouldReplaceStreamingNoToolMutationNarrative(answer, plan, messages);
     }
 
     /**
@@ -4989,7 +4840,7 @@ public final class AssistantTurnExecutor {
      *       long — substantive enough that the existing deflection gate is
      *       not going to catch it.</li>
      *   <li>The latest user request in {@code messages} contains an
-     *       evidence-request marker (see {@link #EVIDENCE_REQUEST_MARKERS}).</li>
+     *       evidence-request marker.</li>
      * </ol>
      *
      * <p>On fire, performs <b>exactly one</b> retry via
