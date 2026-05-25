@@ -1,7 +1,6 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.runtime.TurnProcessor;
-import dev.talos.runtime.TurnSourceEvidenceCapture;
 import dev.talos.runtime.TurnTaskContractCapture;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.core.context.ContextDecision;
@@ -16,7 +15,6 @@ import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.PathArgumentCanonicalizer;
-import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolCall;
 import dev.talos.tools.ToolProgressSink;
@@ -351,15 +349,7 @@ public final class ToolCallExecutionStage {
                 successesThisIter++;
             }
 
-            if (isReadFileTool(effective) && pathHint != null && result.success()) {
-                recordSuccessfulRead(state, pathHint);
-                TurnSourceEvidenceCapture.recordRead(pathHint);
-            }
-            if (result.success() && ToolCallSupport.isReadOnlyTool(effective.toolName())) {
-                String readSignature = ToolCallSupport.buildReadCallSignature(effective);
-                state.successfulReadCalls.put(readSignature, ToolCallSupport.truncateForLog(result.output()));
-                state.successfulReadCallBodies.put(readSignature, result.output() == null ? "" : result.output());
-            }
+            ReadEvidenceStateAccounting.recordSuccessfulToolResult(state, effective, pathHint, result);
             dev.talos.runtime.ToolCallLoop.MutationEvidence mutationEvidence =
                     result.success() ? ToolMutationEvidenceFactory.from(effective, state, pathHint) : null;
             if (ToolCallSupport.isMutatingTool(effective.toolName()) && result.success()) {
@@ -372,7 +362,7 @@ public final class ToolCallExecutionStage {
                     mutationSummariesThisIter.add("✓ " + summary);
                     state.pendingMutationSummaries.add("✓ " + summary);
                 }
-                clearSuccessfulReadCalls(state);
+                ReadEvidenceStateAccounting.clearSuccessfulReadCaches(state);
             }
 
             boolean denied = !result.success()
@@ -384,7 +374,7 @@ public final class ToolCallExecutionStage {
             if (!result.success()
                     && result.error() != null
                     && ToolError.UNSUPPORTED_FORMAT.equals(result.error().code())
-                    && isReadFileTool(effective)
+                    && ReadEvidenceStateAccounting.isReadFileTool(effective)
                     && pathHint != null
                     && !pathHint.isBlank()) {
                 unsupportedReadPathsThisIter.add(ToolCallSupport.normalizePath(pathHint));
@@ -418,7 +408,7 @@ public final class ToolCallExecutionStage {
                 failuresThisIter++;
                 recordFailure(state, effective.toolName(), pathHint);
                 if (shouldClearSuccessfulReadCallsAfterFailure(state, effective, result, pathHint, isEditFile)) {
-                    clearSuccessfulReadCalls(state);
+                    ReadEvidenceStateAccounting.clearSuccessfulReadCaches(state);
                 }
                 if (isEditFile) {
                     String callSig = ToolCallSupport.buildCallSignature(effective);
@@ -520,18 +510,6 @@ public final class ToolCallExecutionStage {
         return paths;
     }
 
-    private static void recordSuccessfulRead(LoopState state, String pathHint) {
-        if (state == null || pathHint == null || pathHint.isBlank()) return;
-        String path = normalizePath(pathHint);
-        state.pathsReadThisTurn.add(path);
-        state.pathsMutatedSinceRead.remove(path);
-        state.staleEditFailuresByPath.remove(path);
-        state.staleEditRepairPromptedPaths.remove(path);
-        if (path.equals(state.staleEditRereadIgnoredPath)) {
-            state.staleEditRereadIgnoredPath = null;
-        }
-    }
-
     private static void recordMutationSuccess(LoopState state, String pathHint) {
         if (state == null || pathHint == null || pathHint.isBlank()) return;
         String path = normalizePath(pathHint);
@@ -557,17 +535,6 @@ public final class ToolCallExecutionStage {
             return false;
         }
         return true;
-    }
-
-    private static void clearSuccessfulReadCalls(LoopState state) {
-        if (state == null) return;
-        state.successfulReadCalls.clear();
-        state.successfulReadCallBodies.clear();
-    }
-
-    private static boolean isReadFileTool(ToolCall call) {
-        if (call == null) return false;
-        return "read_file".equals(ToolAliasPolicy.localCanonicalName(call.toolName()));
     }
 
     private static void recordEmptyEditArgumentFailure(LoopState state, String pathHint) {
