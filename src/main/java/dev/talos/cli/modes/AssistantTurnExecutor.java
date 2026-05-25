@@ -628,7 +628,7 @@ public final class AssistantTurnExecutor {
                             readEvidenceHandoff.loopResult(), workspace, 0, opts),
                     readEvidenceHandoff.extraSummary());
         }
-        ReadOnlyInspectionRetryResult inspectionRetry = readOnlyInspectionRetryIfNeeded(
+        ReadOnlyInspectionRetry.Result inspectionRetry = readOnlyInspectionRetryIfNeeded(
                 mrr.answer(), messages, plan, workspace, ctx);
         if (inspectionRetry.loopResult() != null) {
             return new ToolLoopAnswerResolution(
@@ -643,12 +643,6 @@ public final class AssistantTurnExecutor {
                         mrr.actionObligationFailed(), opts),
                 null);
     }
-
-    record ReadOnlyInspectionRetryResult(
-            String answer,
-            ToolCallLoop.LoopResult loopResult,
-            String extraSummary
-    ) {}
 
     static ReadEvidenceHandoff.Result unsupportedCapabilityPreflightIfNeeded(
             List<ChatMessage> messages,
@@ -686,7 +680,7 @@ public final class AssistantTurnExecutor {
                 answer, messages, safePlan, loopResult, workspace, ctx);
     }
 
-    static ReadOnlyInspectionRetryResult readOnlyInspectionRetryIfNeeded(
+    static ReadOnlyInspectionRetry.Result readOnlyInspectionRetryIfNeeded(
             String answer,
             List<ChatMessage> messages,
             Path workspace,
@@ -700,94 +694,21 @@ public final class AssistantTurnExecutor {
                 ctx);
     }
 
-    static ReadOnlyInspectionRetryResult readOnlyInspectionRetryIfNeeded(
+    static ReadOnlyInspectionRetry.Result readOnlyInspectionRetryIfNeeded(
             String answer,
             List<ChatMessage> messages,
             CurrentTurnPlan plan,
             Path workspace,
             Context ctx
     ) {
-        if (answer == null) answer = "";
         CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, ctx);
-        TaskContract contract = safePlan.taskContract();
-        if (!requiresWorkspaceEvidence(contract)) {
-            return new ReadOnlyInspectionRetryResult(answer, null, null);
-        }
-        if (contract.mutationRequested()) {
-            return new ReadOnlyInspectionRetryResult(answer, null, null);
-        }
-        if (ctx == null || ctx.llm() == null || ctx.toolCallLoop() == null || workspace == null) {
-            return new ReadOnlyInspectionRetryResult(answer, null, null);
-        }
-
-        String userRequest = safePlan.originalUserRequest();
-        List<ChatMessage> retryMessages = new ArrayList<>(messages);
-        retryMessages.add(ChatMessage.assistant(answer.isBlank() ? "(no answer)" : answer));
-        retryMessages.add(ChatMessage.user(readOnlyInspectionRetryPrompt(contract, userRequest, workspace)));
-
-        try {
-            LlmClient.StreamResult retry = chatFull(ctx, retryMessages);
-            String retryText = retry.text() == null ? "" : retry.text();
-            if (retry.hasToolCalls() || hasAnyTextToolCalls(retryText)) {
-                ToolCallLoop.LoopResult retryLoop = ctx.toolCallLoop().run(
-                        retryText, retry.toolCalls(), retryMessages, workspace, ctx);
-                String mergedAnswer = retryLoop.finalAnswer();
-                return new ReadOnlyInspectionRetryResult(
-                        mergedAnswer == null || mergedAnswer.isBlank() ? answer : mergedAnswer,
-                        retryLoop,
-                        retryLoop.summary());
-            }
-            if (!retryText.isBlank() && !retryText.equals(answer)) {
-                return new ReadOnlyInspectionRetryResult(
-                        ToolCallParser.stripToolCalls(retryText), null, null);
-            }
-        } catch (Exception e) {
-            LOG.warn("Read-only inspection retry failed: {}", SafeLogFormatter.throwableMessage(e));
-        }
-        return new ReadOnlyInspectionRetryResult(answer, null, null);
-    }
-
-    private static String readOnlyInspectionRetryPrompt(
-            TaskContract contract,
-            String userRequest,
-            Path workspace
-    ) {
-        String type = contract == null ? "READ_ONLY_QA" : contract.type().name();
-        String request = userRequest == null ? "" : userRequest.strip();
-        if (request.length() > 1000) {
-            request = request.substring(0, 1000) + "...";
-        }
-        String primaryFiles = String.join(", ", obviousPrimaryFiles(workspace));
-        if (primaryFiles.isBlank()) {
-            primaryFiles = "any obvious primary text files";
-        }
-        if (contract != null && contract.type() == TaskType.DIRECTORY_LISTING) {
-            return """
-                The previous answer did not inspect the local workspace, but the current task asks only for directory entries.
-
-                Task type: DIRECTORY_LISTING
-                User request: "%s"
-
-                Use talos.list_dir on "." unless the user named another in-workspace directory. Do not inspect, search, retrieve, summarize, infer, write, or edit file contents. Answer with file and directory names only.""".formatted(request);
-        }
-        if (contract != null
-                && contract.type() == TaskType.VERIFY_ONLY
-                && "explicit-command-verification-request".equals(contract.classificationReason())) {
-            return """
-                The previous answer did not run the requested bounded command verification.
-
-                Task type: VERIFY_ONLY
-                User request: "%s"
-
-                Use talos.run_command now with the requested approved command profile. Do not call file-inspection, search, retrieval, write, or edit tools on this retry. If the runtime rejects the command profile or no approved profile matches, report that verified command-tool result directly and do not claim the command passed.""".formatted(request);
-        }
-        return """
-                The previous answer did not inspect the local workspace, but the current task contract requires evidence.
-
-                Task type: %s
-                User request: "%s"
-
-                Use read-only tools now. Start with talos.list_dir on "." for "this folder", "here", or "this workspace". Then read the obvious primary files if present: %s. Answer from observed file evidence only. If there are no readable relevant files, say that directly. Do not call write_file or edit_file.""".formatted(type, request, primaryFiles);
+        return ReadOnlyInspectionRetry.retryIfNeeded(
+                answer,
+                messages,
+                safePlan,
+                workspace,
+                ctx,
+                retryMessages -> chatFull(ctx, retryMessages));
     }
 
     private static ToolCallLoop.LoopResult emptyNoToolLoopResult(
