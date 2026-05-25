@@ -97,15 +97,22 @@ class ReadEvidenceStateAccountingTest {
 
     @Test
     void executionStageDelegatesReadEvidenceStateAccounting() throws Exception {
-        String source = Files.readString(Path.of(
+        String stage = Files.readString(Path.of(
                 "src/main/java/dev/talos/runtime/toolcall/ToolCallExecutionStage.java"));
+        String mutationAccounting = Files.readString(Path.of(
+                "src/main/java/dev/talos/runtime/toolcall/ToolMutationStateAccounting.java"));
+        String failureAccounting = Files.readString(Path.of(
+                "src/main/java/dev/talos/runtime/toolcall/ToolFailureStateAccounting.java"));
 
-        assertTrue(source.contains("ReadEvidenceStateAccounting.recordSuccessfulToolResult"), source);
-        assertTrue(source.contains("ReadEvidenceStateAccounting.clearSuccessfulReadCaches"), source);
-        assertFalse(source.contains("private static void recordSuccessfulRead"), source);
-        assertFalse(source.contains("state.successfulReadCalls.put"), source);
-        assertFalse(source.contains("state.successfulReadCallBodies.put"), source);
-        assertFalse(source.contains("TurnSourceEvidenceCapture.recordRead"), source);
+        assertTrue(stage.contains("ReadEvidenceStateAccounting.recordSuccessfulToolResult"), stage);
+        assertTrue(mutationAccounting.contains("ReadEvidenceStateAccounting.clearSuccessfulReadCaches"),
+                mutationAccounting);
+        assertTrue(failureAccounting.contains("ReadEvidenceStateAccounting.clearSuccessfulReadCaches"),
+                failureAccounting);
+        assertFalse(stage.contains("private static void recordSuccessfulRead"), stage);
+        assertFalse(stage.contains("state.successfulReadCalls.put"), stage);
+        assertFalse(stage.contains("state.successfulReadCallBodies.put"), stage);
+        assertFalse(stage.contains("TurnSourceEvidenceCapture.recordRead"), stage);
     }
 
     private static LoopState loopState() {
