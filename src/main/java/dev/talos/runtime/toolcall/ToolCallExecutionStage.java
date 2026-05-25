@@ -182,20 +182,17 @@ public final class ToolCallExecutionStage {
                 continue;
             }
 
-            if (!strict && !state.mutationSinceStart && ToolCallSupport.isReadOnlyTool(effective.toolName())) {
-                String readSig = ToolCallSupport.buildReadCallSignature(effective);
-                String priorResult = state.successfulReadCalls.get(readSig);
-                if (priorResult != null) {
-                    state.cushionFiresRedundantRead++;
-                    String diagnostic = "[tool_result: " + effective.toolName() + "]\n"
-                            + "You already gathered this information and the workspace has not changed since then. "
-                            + "Answer the user's question now using the evidence you already have."
-                            + "\n[/tool_result]";
-                    appendResultMessage(state, parsed.useNativePath(), i, diagnostic);
-                    LOG.debug("  Suppressed redundant {} call (sig: {})",
-                            effective.toolName(), SafeLogFormatter.value(readSig));
-                    continue;
-                }
+            RedundantReadSuppressionGuard.Decision redundantReadDecision =
+                    RedundantReadSuppressionGuard.decision(effective, state, strict);
+            if (redundantReadDecision != null) {
+                state.cushionFiresRedundantRead++;
+                String diagnostic = "[tool_result: " + effective.toolName() + "]\n"
+                        + redundantReadDecision.diagnostic()
+                        + "\n[/tool_result]";
+                appendResultMessage(state, parsed.useNativePath(), i, diagnostic);
+                LOG.debug("  Suppressed redundant {} call (sig: {})",
+                        effective.toolName(), SafeLogFormatter.value(redundantReadDecision.readSignature()));
+                continue;
             }
 
             state.totalToolsInvoked++;
