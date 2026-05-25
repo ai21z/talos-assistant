@@ -7,6 +7,7 @@ import dev.talos.runtime.outcome.CommandOutcomeRenderer;
 import dev.talos.runtime.outcome.EvidenceContainmentAnswerGuard;
 import dev.talos.runtime.outcome.MutationFailureAnswerRenderer;
 import dev.talos.runtime.outcome.MutationOutcome;
+import dev.talos.runtime.outcome.NoToolAnswerTruthfulnessGuard;
 import dev.talos.runtime.outcome.ProtectedReadAnswerGuard;
 import dev.talos.runtime.outcome.ReadOnlyToolLimitOutcome;
 import dev.talos.runtime.outcome.StaticVerificationAnswerRenderer;
@@ -66,14 +67,14 @@ record ExecutionOutcome(
             new EvidenceContainmentAnswerGuard.AnswerMarkers(
                     List.of(
                             AssistantTurnExecutor.READ_ONLY_DENIED_MUTATION_REPLACEMENT,
-                            AssistantTurnExecutor.STREAMING_NO_TOOL_MUTATION_REPLACEMENT,
-                            AssistantTurnExecutor.MALFORMED_TOOL_PROTOCOL_REPLACEMENT,
+                            NoToolAnswerTruthfulnessGuard.STREAMING_NO_TOOL_MUTATION_REPLACEMENT,
+                            NoToolAnswerTruthfulnessGuard.MALFORMED_TOOL_PROTOCOL_REPLACEMENT,
                             MutationFailureAnswerRenderer.DENIED_MUTATION_ANNOTATION,
                             MutationFailureAnswerRenderer.POLICY_DENIED_MUTATION_ANNOTATION,
                             MutationFailureAnswerRenderer.MIXED_DENIED_MUTATION_ANNOTATION,
                             MutationFailureAnswerRenderer.INVALID_MUTATION_ANNOTATION),
-                    AssistantTurnExecutor.UNGROUNDED_ANNOTATION,
-                    AssistantTurnExecutor.LOCAL_ACCESS_CAPABILITY_CORRECTION);
+                    NoToolAnswerTruthfulnessGuard.UNGROUNDED_ANNOTATION,
+                    NoToolAnswerTruthfulnessGuard.LOCAL_ACCESS_CAPABILITY_CORRECTION);
 
     enum CompletionStatus {
         COMPLETE,
@@ -477,19 +478,20 @@ record ExecutionOutcome(
 
         if (ToolCallParser.looksLikeMalformedProtocolArrayDebris(shaped)
                 || ToolCallParser.looksLikeMalformedToolProtocol(shaped)) {
-            shaped = AssistantTurnExecutor.MALFORMED_TOOL_PROTOCOL_REPLACEMENT;
+            shaped = NoToolAnswerTruthfulnessGuard.MALFORMED_TOOL_PROTOCOL_REPLACEMENT;
             malformedProtocolDebrisReplaced = true;
         } else {
-            String corrected = AssistantTurnExecutor.correctNegativeLocalAccessClaimIfNeeded(
+            String corrected = NoToolAnswerTruthfulnessGuard.correctNegativeLocalAccessClaimIfNeeded(
                     shaped, safePlan, messages);
             localAccessCapabilityCorrected = !Objects.equals(shaped, corrected);
             shaped = corrected;
 
             if (!localAccessCapabilityCorrected) {
                 if (streamed) {
-                    String replaced = AssistantTurnExecutor.enforceStreamingNoToolTruthfulness(
+                    String replaced = NoToolAnswerTruthfulnessGuard.enforceStreamingNoToolTruthfulness(
                             shaped, safePlan, messages);
-                    noToolMutationReplaced = AssistantTurnExecutor.STREAMING_NO_TOOL_MUTATION_REPLACEMENT.equals(replaced);
+                    noToolMutationReplaced =
+                            NoToolAnswerTruthfulnessGuard.STREAMING_NO_TOOL_MUTATION_REPLACEMENT.equals(replaced);
                     shaped = replaced;
                 } else {
                     shaped = AssistantTurnExecutor.groundingRetryIfNeeded(
@@ -509,7 +511,7 @@ record ExecutionOutcome(
         }
         boolean blocked = noToolMutationReplaced || commandRequiredButNotRun || unsupportedCommandNotAvailable;
         boolean ungrounded = shaped != null
-                && (shaped.startsWith(AssistantTurnExecutor.UNGROUNDED_ANNOTATION)
+                && (shaped.startsWith(NoToolAnswerTruthfulnessGuard.UNGROUNDED_ANNOTATION)
                 || localAccessCapabilityCorrected);
         boolean advisoryOnly = ungrounded && !blocked;
         EvidenceObligationAssessment evidenceAssessment =
