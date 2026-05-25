@@ -3085,44 +3085,15 @@ public final class AssistantTurnExecutor {
 
     // ── Post-tool answer acceptance gate ─────────────────────────────────
 
-    /** Short phrases that indicate the model deflected instead of answering. */
-    private static final Set<String> DEFLECTION_MARKERS = Set.of(
-            "how can i help",
-            "how can i assist",
-            "what would you like",
-            "what do you want me to",
-            "let me know if you",
-            "is there anything",
-            "would you like me to",
-            "what can i do for you",
-            "feel free to ask"
-    );
-
-    /**
-     * Phrases that indicate a capability-recitation non-answer (generic assistant
-     * meta-talk about what the assistant can do, instead of answering the question).
-     */
-    private static final Set<String> CAPABILITY_MARKERS = Set.of(
-            "here is what i can do",
-            "here's what i can do",
-            "i can help you with",
-            "i am able to",
-            "i'm able to",
-            "my capabilities include",
-            "i have the following capabilities",
-            "i can perform the following",
-            "i can do the following"
-    );
-
     /**
      * Detect if the model's answer is a deflection (generic assistant boilerplate)
      * instead of a substantive response to the user's question.
      *
      * <p>Two-tier heuristic:
      * <ol>
-     *   <li><b>Short deflection</b> (≤ 500 chars): any {@link #DEFLECTION_MARKERS} match.</li>
+     *   <li><b>Short deflection</b> (≤ 500 chars): any post-tool deflection marker match.</li>
      *   <li><b>Capability-recitation</b> (≤ 1500 chars): answer contains a
-     *       {@link #CAPABILITY_MARKERS} phrase AND ends with a deflection marker.
+     *       post-tool capability marker phrase AND ends with a deflection marker.
      *       This catches the longer "here's what I can do… How can I help?" pattern
      *       without flagging genuinely substantive answers that happen to mention a capability.</li>
      * </ol>
@@ -3130,33 +3101,7 @@ public final class AssistantTurnExecutor {
      * <p>Answers over 1500 chars always pass — they are long enough to be substantive.
      */
     static boolean isDeflection(String answer) {
-        if (answer == null || answer.isBlank()) return true;
-        String lower = answer.toLowerCase();
-
-        // Tier 1: short boilerplate deflection
-        if (answer.length() <= 500) {
-            for (String marker : DEFLECTION_MARKERS) {
-                if (lower.contains(marker)) return true;
-            }
-            return false;
-        }
-
-        // Tier 2: medium-length capability-recitation non-answer
-        if (answer.length() <= 1500) {
-            boolean hasCapability = false;
-            for (String cm : CAPABILITY_MARKERS) {
-                if (lower.contains(cm)) { hasCapability = true; break; }
-            }
-            if (hasCapability) {
-                // Must also end with a deflection marker (last 200 chars)
-                String tail = lower.substring(Math.max(0, lower.length() - 200));
-                for (String dm : DEFLECTION_MARKERS) {
-                    if (tail.contains(dm)) return true;
-                }
-            }
-        }
-
-        return false; // long enough or no pattern match — substantive
+        return PostToolSynthesisRetry.isDeflection(answer);
     }
 
     /**
@@ -3168,62 +3113,12 @@ public final class AssistantTurnExecutor {
      * @return the improved answer, or the original if retry was not needed or failed
      */
     static String synthesisRetryIfNeeded(String answer, int toolsInvoked,
-                                                  List<ChatMessage> messages, Context ctx) {
-        if (toolsInvoked <= 0) return answer;
-        if (!isDeflection(answer)) return answer;
-
-        LOG.info("Post-tool deflection detected ({} tools used). Attempting synthesis retry.", toolsInvoked);
-
-        // Anchor the retry to the verbatim original user request.
-        //
-        // Rationale (real transcript, Turn 2 / Turn 6 failure shape): the
-        // previous generic retry prompt ("answer the original question
-        // directly") caused the local 8B model to respond "the original
-        // question is not visible in our current conversation history"
-        // because, after tool_call + tool_result messages are appended,
-        // the user's request is several turns back and the model fails
-        // to re-anchor on it. On the native tool-call path, tool results
-        // are role="tool" so {@link #latestUserRequest} correctly returns
-        // the original request, not a tool-result message.
-        String originalRequest = latestUserRequest(messages);
-
-        String retryPrompt;
-        if (originalRequest != null && !originalRequest.isBlank()) {
-            // Trim if very long so the retry prompt itself doesn't balloon context.
-            String pinned = originalRequest.length() <= 2000
-                    ? originalRequest
-                    : originalRequest.substring(0, 2000) + "…";
-            retryPrompt = "The user's original request was:\n\n«" + pinned + "»\n\n"
-                    + "You already gathered the needed evidence using tools. "
-                    + "Now answer that exact request directly and concretely, "
-                    + "using the tool results you received. "
-                    + "Do not say the question is missing. "
-                    + "Do not ask what I want — answer the question above.";
-        } else {
-            // Fallback (should be rare): no user-role message found. Keep the
-            // previous wording so pre-anchor tests and callers still hit the
-            // "already gathered the needed evidence" sentinel phrase.
-            retryPrompt = "You already gathered the needed evidence using tools. "
-                    + "Now answer the original question directly and concretely, "
-                    + "using the tool results you received. "
-                    + "Do not ask what I want — answer the question.";
-        }
-
-        messages.add(ChatMessage.assistant(answer));
-        messages.add(ChatMessage.user(retryPrompt));
-
-        try {
-            LlmClient.StreamResult retry = chatFull(ctx, messages);
-            String retryText = retry.text();
-            if (retryText != null && !retryText.isBlank() && !isDeflection(retryText)) {
-                LOG.info("Synthesis retry produced substantive answer ({} chars)", retryText.length());
-                return retryText;
-            }
-            LOG.warn("Synthesis retry still deflected. Returning original answer.");
-        } catch (Exception e) {
-            LOG.warn("Synthesis retry failed: {}", SafeLogFormatter.throwableMessage(e));
-        }
-        return answer;
+                                                   List<ChatMessage> messages, Context ctx) {
+        return PostToolSynthesisRetry.synthesizeIfNeeded(
+                answer,
+                toolsInvoked,
+                messages,
+                retryMessages -> chatFull(ctx, retryMessages));
     }
 
     // ── Claim-vs-action truth layer ──────────────────────────────────────
