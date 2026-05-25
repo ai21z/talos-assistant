@@ -16,8 +16,6 @@ import dev.talos.runtime.context.ActiveTaskContext;
 import dev.talos.runtime.context.ActiveTaskContextPolicy;
 import dev.talos.runtime.context.ArtifactGoal;
 import dev.talos.runtime.context.ChangeSummaryContext;
-import dev.talos.runtime.expectation.LiteralContentExpectation;
-import dev.talos.runtime.expectation.TaskExpectation;
 import dev.talos.runtime.outcome.InspectUnderCompletionAnswerGuard;
 import dev.talos.runtime.outcome.MutationFailureAnswerRenderer;
 import dev.talos.runtime.outcome.NoToolAnswerTruthfulnessGuard;
@@ -120,13 +118,6 @@ public final class AssistantTurnExecutor {
             "what did you do",
             "summary of changes"
     );
-
-    private static final String COMPACT_EXACT_WRITE_CONTEXT_FALLBACK_SYSTEM_PROMPT = """
-            Talos compact current-turn retry.
-            The full conversation exceeded the local context budget before the backend call.
-            Ignore prior conversation history. Execute only the current exact file-write request using the available tool.
-            Prose/manual snippets do not change files; call the required tool.
-            """;
 
     private AssistantTurnExecutor() {} // utility class
 
@@ -314,13 +305,16 @@ public final class AssistantTurnExecutor {
                     if (!(cause instanceof EngineException.ContextBudgetExceeded budget)) {
                         throw ex;
                     }
-                    ExactWriteContextFallback fallback = exactWriteContextFallback(turnContext, currentTurnPlan);
-                    if (fallback == null) {
+                    Optional<ExactWriteContextFallback.Request> fallback = ExactWriteContextFallback.prepare(
+                            turnContext,
+                            currentTurnPlan,
+                            AssistantTurnExecutor::chatControlsForTurn);
+                    if (fallback.isEmpty()) {
                         throw ex;
                     }
-                    recordExactWriteContextFallback(currentTurnPlan, budget);
+                    ExactWriteContextFallback.record(currentTurnPlan, budget);
                     CompletableFuture<LlmClient.StreamResult> fallbackFuture = CompletableFuture.supplyAsync(
-                            () -> chatFullExactWriteContextFallback(turnContext, fallback));
+                            () -> chatFullExactWriteContextFallback(turnContext, fallback.get()));
                     streamResult = fallbackFuture.get(opts.llmTimeoutMs, TimeUnit.MILLISECONDS);
                 }
                 if (ctx.streamSink() != null && ctx.onStreamComplete() != null) {
@@ -1046,16 +1040,20 @@ public final class AssistantTurnExecutor {
         try {
             return chatStreamFull(ctx, messages, plan);
         } catch (EngineException.ContextBudgetExceeded budget) {
-            ExactWriteContextFallback fallback = exactWriteContextFallback(ctx, plan);
-            if (fallback == null) {
+            Optional<ExactWriteContextFallback.Request> fallback = ExactWriteContextFallback.prepare(
+                    ctx,
+                    plan,
+                    AssistantTurnExecutor::chatControlsForTurn);
+            if (fallback.isEmpty()) {
                 throw budget;
             }
-            recordExactWriteContextFallback(plan, budget);
+            ExactWriteContextFallback.record(plan, budget);
+            ExactWriteContextFallback.Request request = fallback.get();
             return ctx.llm().chatStreamFull(
-                    fallback.messages(),
+                    request.messages(),
                     ctx.streamSink(),
-                    fallback.toolSpecs(),
-                    fallback.controls());
+                    request.toolSpecs(),
+                    request.controls());
         }
     }
 
@@ -1106,112 +1104,12 @@ public final class AssistantTurnExecutor {
 
     private static LlmClient.StreamResult chatFullExactWriteContextFallback(
             Context ctx,
-            ExactWriteContextFallback fallback
+            ExactWriteContextFallback.Request fallback
     ) {
         return ctx.llm().chatFull(
                 fallback.messages(),
                 fallback.toolSpecs(),
                 fallback.controls());
-    }
-
-    private record ExactWriteContextFallback(
-            List<ChatMessage> messages,
-            List<ToolSpec> toolSpecs,
-            ChatRequestControls controls
-    ) {}
-
-    private static ExactWriteContextFallback exactWriteContextFallback(Context ctx, CurrentTurnPlan plan) {
-        if (!shouldAttemptExactWriteContextFallback(plan)) {
-            return null;
-        }
-        List<ToolSpec> toolSpecs = MissingMutationRetry.toolSpecs(ctx, List.of("talos.write_file"));
-        if (toolSpecs.isEmpty()) {
-            return null;
-        }
-        CurrentTurnPlan compactPlan = compactExactWriteFallbackPlan(plan);
-        List<ChatMessage> fallbackMessages = compactExactWriteFallbackMessages(compactPlan);
-        ChatRequestControls controls = withDebugTag(
-                chatControlsForTurn(ctx, compactPlan, toolSpecs),
-                "context-budget-current-turn-fallback");
-        return new ExactWriteContextFallback(fallbackMessages, toolSpecs, controls);
-    }
-
-    private static boolean shouldAttemptExactWriteContextFallback(CurrentTurnPlan plan) {
-        if (plan == null || plan.taskContract() == null) return false;
-        if (!plan.taskContract().mutationAllowed()) return false;
-        if (plan.actionObligation() != ActionObligation.MUTATING_TOOL_REQUIRED) return false;
-        if (plan.taskExpectations().isEmpty()) return false;
-        return plan.taskExpectations().stream()
-                .anyMatch(AssistantTurnExecutor::isExactLiteralContentExpectation);
-    }
-
-    private static boolean isExactLiteralContentExpectation(TaskExpectation expectation) {
-        return expectation instanceof LiteralContentExpectation literal
-                && literal.matchMode() == LiteralContentExpectation.MatchMode.EXACT
-                && !literal.targetPath().isBlank();
-    }
-
-    private static CurrentTurnPlan compactExactWriteFallbackPlan(CurrentTurnPlan plan) {
-        return new CurrentTurnPlan(
-                plan.taskContract(),
-                plan.originalUserRequest(),
-                plan.phaseInitial(),
-                plan.phaseFinal(),
-                plan.actionObligation(),
-                plan.taskExpectations(),
-                List.of("talos.write_file"),
-                List.of("talos.write_file"),
-                plan.blockedTools(),
-                plan.evidenceObligation(),
-                plan.outputObligation(),
-                CurrentTurnPlan.NONE_OR_NOT_DERIVED,
-                plan.artifactGoal(),
-                plan.verifierProfile());
-    }
-
-    private static List<ChatMessage> compactExactWriteFallbackMessages(CurrentTurnPlan plan) {
-        List<ChatMessage> out = new ArrayList<>();
-        out.add(ChatMessage.system(COMPACT_EXACT_WRITE_CONTEXT_FALLBACK_SYSTEM_PROMPT));
-        out.add(ChatMessage.system(CurrentTurnCapabilityFrame.render(plan)));
-        out.add(ChatMessage.user(Objects.toString(plan.originalUserRequest(), "")));
-        return out;
-    }
-
-    private static ChatRequestControls withDebugTag(ChatRequestControls controls, String tag) {
-        ChatRequestControls safe = controls == null ? ChatRequestControls.defaults() : controls;
-        if (tag == null || tag.isBlank() || safe.debugTags().contains(tag)) {
-            return safe;
-        }
-        List<String> tags = new ArrayList<>(safe.debugTags());
-        tags.add(tag.strip());
-        return new ChatRequestControls(
-                safe.toolChoice(),
-                safe.namedTool(),
-                safe.responseFormat(),
-                safe.jsonSchema(),
-                tags);
-    }
-
-    private static void recordExactWriteContextFallback(
-            CurrentTurnPlan plan,
-            EngineException.ContextBudgetExceeded budget
-    ) {
-        String obligation = plan == null || plan.actionObligation() == null
-                ? ActionObligation.UNKNOWN.name()
-                : plan.actionObligation().name();
-        String reason = "initial request exceeded context budget before backend call; "
-                + "retrying current exact write with compact prompt and talos.write_file only. "
-                + "estimatedTokens=" + budget.estimatedTokens()
-                + ", inputBudgetTokens=" + budget.inputBudgetTokens()
-                + ", contextWindowTokens=" + budget.contextWindowTokens();
-        LocalTurnTraceCapture.recordActionObligation(
-                obligation,
-                "RETRIED_COMPACT_CONTEXT",
-                reason,
-                "CONTEXT_BUDGET_CURRENT_TURN_FALLBACK");
-        LocalTurnTraceCapture.warning(
-                "CONTEXT_BUDGET_CURRENT_TURN_FALLBACK",
-                "Retried the current exact file write with compact prompt after the full turn exceeded context budget.");
     }
 
     private static List<ToolSpec> requestToolSpecsForControls(Context ctx, List<ToolSpec> requestToolSpecs) {
