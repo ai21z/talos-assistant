@@ -34,7 +34,6 @@ import dev.talos.runtime.policy.EvidenceObligation;
 import dev.talos.runtime.policy.EvidenceObligationVerifier;
 import dev.talos.runtime.policy.EvidenceGate;
 import dev.talos.runtime.policy.ProviderRequestControlPolicy;
-import dev.talos.runtime.policy.ProtectedPathPolicy;
 import dev.talos.runtime.policy.ResponseObligationVerifier;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.runtime.policy.UnsupportedDocumentMutationPolicy;
@@ -547,7 +546,7 @@ public final class AssistantTurnExecutor {
                 answer, messages, plan, loopResult, workspace, ctx);
         answer = mrr.answer();
 
-        InspectRetryResult irr = inspectCompletenessRetryIfNeeded(
+        InspectCompletenessRetry.Result irr = inspectCompletenessRetryIfNeeded(
                 answer, messages, plan, loopResult, workspace, ctx);
         answer = irr.answer();
 
@@ -579,7 +578,7 @@ public final class AssistantTurnExecutor {
     private static String visibleToolLoopSummary(
             ToolCallLoop.LoopResult loopResult,
             MutationRetryResult mutationRetry,
-            InspectRetryResult inspectRetry
+            InspectCompletenessRetry.Result inspectRetry
     ) {
         String baseSummary = loopResult == null ? null : loopResult.summary();
         String mutationRetrySummary = mutationRetry == null ? null : mutationRetry.extraSummary();
@@ -3757,12 +3756,6 @@ public final class AssistantTurnExecutor {
                 .anyMatch(outcome -> outcome.mutating() && outcome.denied());
     }
 
-    record InspectRetryResult(
-            String answer,
-            ToolCallLoop.LoopResult loopResult,
-            String extraSummary
-    ) {}
-
     private static final Set<String> SELECTOR_MISMATCH_MARKERS = Set.of(
             "mismatches between html classes/ids and the selectors used in css or javascript",
             "mismatches between html classes/ids",
@@ -3801,19 +3794,10 @@ public final class AssistantTurnExecutor {
     }
 
     static List<String> missingInspectReads(Path workspace, ToolCallLoop.LoopResult loopResult) {
-        if (loopResult == null) return List.of();
-        LinkedHashSet<String> missing = new LinkedHashSet<>(missingPrimaryReads(workspace, loopResult));
-        for (String target : EvidenceObligationVerifier.missingLinkedScriptReadTargets(
-                workspace, loopResult.toolOutcomes())) {
-            if (target == null || target.isBlank()) continue;
-            if (ProtectedPathPolicy.classify(workspace, target).protectedPath()) continue;
-            String normalized = ToolCallSupport.normalizePath(target);
-            if (!normalized.isBlank()) missing.add(normalized);
-        }
-        return List.copyOf(missing);
+        return InspectCompletenessRetry.missingReads(workspace, loopResult);
     }
 
-    static InspectRetryResult inspectCompletenessRetryIfNeeded(
+    static InspectCompletenessRetry.Result inspectCompletenessRetryIfNeeded(
             String answer, List<ChatMessage> messages,
             ToolCallLoop.LoopResult loopResult,
             Path workspace, Context ctx) {
@@ -3826,101 +3810,20 @@ public final class AssistantTurnExecutor {
                 ctx);
     }
 
-    static InspectRetryResult inspectCompletenessRetryIfNeeded(
+    static InspectCompletenessRetry.Result inspectCompletenessRetryIfNeeded(
             String answer, List<ChatMessage> messages,
             CurrentTurnPlan plan,
             ToolCallLoop.LoopResult loopResult,
             Path workspace, Context ctx) {
-        if (answer == null) answer = "";
-        if (loopResult == null || ctx == null || ctx.llm() == null || ctx.toolCallLoop() == null) {
-            return new InspectRetryResult(answer, null, null);
-        }
         CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, ctx);
-        String userRequest = safePlan.originalUserRequest();
-        TaskContract contract = safePlan.taskContract();
-        if (contract.type() == TaskType.DIRECTORY_LISTING) {
-            return new InspectRetryResult(answer, null, null);
-        }
-        if (!looksLikeInspectFirstRequest(userRequest) && !requiresWorkspaceEvidence(contract)) {
-            return new InspectRetryResult(answer, null, null);
-        }
-        List<String> missing = missingInspectReads(workspace, loopResult);
-        if (missing.isEmpty()) return new InspectRetryResult(answer, null, null);
-        if (loopResult.mutatingToolSuccesses() > 0) return new InspectRetryResult(answer, null, null);
-        if (answer.isBlank()) return new InspectRetryResult(answer, null, null);
-
-        LOG.info("Inspect-completeness retry fired: tiny workspace, inspect-first request, "
-                + "missing reads for {}", missing);
-
-        List<ChatMessage> retryMessages = new ArrayList<>(messages);
-        retryMessages.add(ChatMessage.assistant(answer));
-        retryMessages.add(ChatMessage.user(
-                """
-                You started diagnosing the workspace before reading all of the obvious primary files.
-
-                Task type: %s
-                User request: "%s"
-
-                Read these files now before answering: %s. After reading them, answer concretely from the file contents. Do not speculate about files that do not exist.""".formatted(
-                        contract.type().name(),
-                        userRequest == null ? "" : userRequest.strip(),
-                        String.join(", ", missing))));
-        try {
-            LlmClient.StreamResult retry = chatFull(ctx, retryMessages);
-            String retryText = retry.text() == null ? "" : retry.text();
-            if (retry.hasToolCalls() || hasAnyTextToolCalls(retryText)) {
-                ToolCallLoop.LoopResult retryLoop = ctx.toolCallLoop().run(
-                        retryText, retry.toolCalls(), retryMessages, workspace, ctx);
-                ToolCallLoop.LoopResult groundedRetryLoop =
-                        mergeReadOnlyInspectRetryEvidence(loopResult, retryLoop);
-                String mergedAnswer = retryLoop.finalAnswer();
-                return new InspectRetryResult(
-                        mergedAnswer == null || mergedAnswer.isBlank() ? answer : mergedAnswer,
-                        groundedRetryLoop,
-                        groundedRetryLoop == null ? retryLoop.summary() : groundedRetryLoop.summary());
-            }
-            if (!retryText.isBlank() && !retryText.equals(answer)) {
-                return new InspectRetryResult(retryText, null, null);
-            }
-        } catch (Exception e) {
-            LOG.warn("Inspect-completeness retry failed: {}", SafeLogFormatter.throwableMessage(e));
-        }
-        return new InspectRetryResult(answer, null, null);
-    }
-
-    private static ToolCallLoop.LoopResult mergeReadOnlyInspectRetryEvidence(
-            ToolCallLoop.LoopResult original,
-            ToolCallLoop.LoopResult retry
-    ) {
-        if (retry == null) return null;
-        if (original == null) return retry;
-        if (original.mutatingToolSuccesses() > 0 || retry.mutatingToolSuccesses() > 0) return retry;
-
-        List<String> mergedReadPaths = mergeReadPaths(original.readPaths(), retry.readPaths());
-        List<String> mergedToolNames = new ArrayList<>();
-        if (original.toolNames() != null) mergedToolNames.addAll(original.toolNames());
-        if (retry.toolNames() != null) mergedToolNames.addAll(retry.toolNames());
-        List<ToolCallLoop.ToolOutcome> mergedOutcomes = new ArrayList<>();
-        if (original.toolOutcomes() != null) mergedOutcomes.addAll(original.toolOutcomes());
-        if (retry.toolOutcomes() != null) mergedOutcomes.addAll(retry.toolOutcomes());
-
-        return new ToolCallLoop.LoopResult(
-                retry.finalAnswer(),
-                original.iterations() + retry.iterations(),
-                original.toolsInvoked() + retry.toolsInvoked(),
-                mergedToolNames,
-                retry.messages(),
-                original.failedCalls() + retry.failedCalls(),
-                original.retriedCalls() + retry.retriedCalls(),
-                original.hitIterLimit() || retry.hitIterLimit(),
-                retry.mutatingToolSuccesses(),
-                mergedReadPaths,
-                original.cushionFiresRedundantRead() + retry.cushionFiresRedundantRead(),
-                original.cushionFiresAliasRescue() + retry.cushionFiresAliasRescue(),
-                original.cushionFiresB3EditShortCircuit() + retry.cushionFiresB3EditShortCircuit(),
-                original.cushionFiresE1Suggestion() + retry.cushionFiresE1Suggestion(),
-                retry.failureDecision(),
-                mergedOutcomes);
+        return InspectCompletenessRetry.retryIfNeeded(
+                answer,
+                messages,
+                safePlan,
+                loopResult,
+                workspace,
+                ctx,
+                retryMessages -> chatFull(ctx, retryMessages));
     }
 
     private static ToolCallLoop.LoopResult mergeMutationRetryEvidence(
