@@ -235,7 +235,7 @@ public final class AssistantTurnExecutor {
         if (directAnswer != null) {
             return directTurnOutput(directAnswer, ctx, opts);
         }
-        ReadEvidenceHandoffResult unsupportedPreflight = unsupportedCapabilityPreflightIfNeeded(
+        ReadEvidenceHandoff.Result unsupportedPreflight = unsupportedCapabilityPreflightIfNeeded(
                 messages, currentTurnPlan, workspace, ctx);
         if (unsupportedPreflight.loopResult() != null) {
             appendExtraSummary(out, unsupportedPreflight.extraSummary());
@@ -554,7 +554,7 @@ public final class AssistantTurnExecutor {
         ToolCallLoop.LoopResult outcomeLoopResult = mrr.retryLoopResult() != null
                 ? mergeMutationRetryEvidence(loopResult, mrr.retryLoopResult())
                 : irr.loopResult() != null ? irr.loopResult() : loopResult;
-        ReadEvidenceHandoffResult evidenceRecovery = readEvidenceRecoveryForPartialTargetsIfNeeded(
+        ReadEvidenceHandoff.Result evidenceRecovery = readEvidenceRecoveryForPartialTargetsIfNeeded(
                 answer, messages, plan, outcomeLoopResult, workspace, ctx);
         if (evidenceRecovery.loopResult() != null) {
             answer = evidenceRecovery.answer();
@@ -619,7 +619,7 @@ public final class AssistantTurnExecutor {
                             extraMutationSuccesses, mrr.actionObligationFailed(), opts),
                     mrr.extraSummary());
         }
-        ReadEvidenceHandoffResult readEvidenceHandoff = readEvidenceHandoffIfNeeded(
+        ReadEvidenceHandoff.Result readEvidenceHandoff = readEvidenceHandoffIfNeeded(
                 mrr.answer(), messages, plan, workspace, ctx);
         if (readEvidenceHandoff.loopResult() != null) {
             return new ToolLoopAnswerResolution(
@@ -650,96 +650,30 @@ public final class AssistantTurnExecutor {
             String extraSummary
     ) {}
 
-    record ReadEvidenceHandoffResult(
-            String answer,
-            ToolCallLoop.LoopResult loopResult,
-            String extraSummary
-    ) {}
-
-    static ReadEvidenceHandoffResult unsupportedCapabilityPreflightIfNeeded(
+    static ReadEvidenceHandoff.Result unsupportedCapabilityPreflightIfNeeded(
             List<ChatMessage> messages,
             CurrentTurnPlan plan,
             Path workspace,
             Context ctx
     ) {
         CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, ctx);
-        if (EvidenceGate.selectObligation(safePlan, workspace, ctx == null ? null : ctx.cfg())
-                != EvidenceObligation.UNSUPPORTED_CAPABILITY_CHECK_REQUIRED) {
-            return new ReadEvidenceHandoffResult("", null, null);
-        }
-        TaskContract contract = safePlan.taskContract();
-        if (!EvidenceGate.hasOnlyUnsupportedExpectedTargets(contract, ctx == null ? null : ctx.cfg())) {
-            return new ReadEvidenceHandoffResult("", null, null);
-        }
-        TurnTaskContractCapture.set(contract);
-        try {
-            return readEvidenceHandoffIfNeeded("", messages, safePlan, workspace, ctx);
-        } finally {
-            TurnTaskContractCapture.clear();
-        }
+        return ReadEvidenceHandoff.unsupportedCapabilityPreflightIfNeeded(
+                messages, safePlan, workspace, ctx);
     }
 
-    static ReadEvidenceHandoffResult readEvidenceHandoffIfNeeded(
+    static ReadEvidenceHandoff.Result readEvidenceHandoffIfNeeded(
             String answer,
             List<ChatMessage> messages,
             CurrentTurnPlan plan,
             Path workspace,
             Context ctx
     ) {
-        if (answer == null) answer = "";
         CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, ctx);
-        TaskContract contract = safePlan.taskContract();
-        EvidenceObligation obligation = EvidenceGate.selectObligation(
-                safePlan,
-                workspace,
-                ctx == null ? null : ctx.cfg());
-        if (!EvidenceGate.requiresReadEvidenceHandoff(obligation)) {
-            return new ReadEvidenceHandoffResult(answer, null, null);
-        }
-        if (contract.mutationRequested() || contract.mutationAllowed()) {
-            return new ReadEvidenceHandoffResult(answer, null, null);
-        }
-        if (ctx == null || ctx.llm() == null || ctx.toolCallLoop() == null || workspace == null) {
-            return new ReadEvidenceHandoffResult(answer, null, null);
-        }
-
-        if (obligation == EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED
-                && !EvidenceGate.hasExplicitProtectedReadIntent(
-                        contract,
-                        EvidenceGate.protectedExpectedTargets(contract, workspace))) {
-            return new ReadEvidenceHandoffResult(answer, null, null);
-        }
-        List<String> targets = EvidenceGate.handoffTargets(
-                contract,
-                obligation,
-                workspace,
-                ctx == null ? null : ctx.cfg());
-        if (targets.isEmpty()) {
-            return new ReadEvidenceHandoffResult(answer, null, null);
-        }
-
-        String handoffCalls = targets.stream()
-                .map(AssistantTurnExecutor::readFileToolCallJson)
-                .reduce((left, right) -> left + "\n" + right)
-                .orElse("");
-        try {
-            ToolCallLoop.LoopResult loop = ctx.toolCallLoop().run(
-                    handoffCalls,
-                    messages,
-                    workspace,
-                    ctx);
-            String mergedAnswer = loop.finalAnswer();
-            return new ReadEvidenceHandoffResult(
-                    mergedAnswer == null || mergedAnswer.isBlank() ? answer : mergedAnswer,
-                    loop,
-                    loop.summary());
-        } catch (Exception e) {
-            LOG.warn("Read evidence handoff failed: {}", SafeLogFormatter.throwableMessage(e));
-            return new ReadEvidenceHandoffResult(answer, null, null);
-        }
+        return ReadEvidenceHandoff.readEvidenceHandoffIfNeeded(
+                answer, messages, safePlan, workspace, ctx);
     }
 
-    static ReadEvidenceHandoffResult readEvidenceRecoveryForPartialTargetsIfNeeded(
+    static ReadEvidenceHandoff.Result readEvidenceRecoveryForPartialTargetsIfNeeded(
             String answer,
             List<ChatMessage> messages,
             CurrentTurnPlan plan,
@@ -748,102 +682,8 @@ public final class AssistantTurnExecutor {
             Context ctx
     ) {
         CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, ctx);
-        TaskContract contract = safePlan.taskContract();
-        EvidenceObligation obligation = EvidenceGate.selectObligation(
-                safePlan,
-                workspace,
-                ctx == null ? null : ctx.cfg());
-        if (obligation != EvidenceObligation.READ_TARGET_REQUIRED) {
-            return new ReadEvidenceHandoffResult(answer, null, null);
-        }
-        if (contract.mutationRequested() || contract.mutationAllowed()) {
-            return new ReadEvidenceHandoffResult(answer, null, null);
-        }
-        if (loopResult == null || loopResult.toolOutcomes() == null || loopResult.toolOutcomes().isEmpty()) {
-            return new ReadEvidenceHandoffResult(answer, null, null);
-        }
-        if (loopResult.failureDecision() != null && loopResult.failureDecision().shouldStop()) {
-            return new ReadEvidenceHandoffResult(answer, null, null);
-        }
-        Set<String> targets = evidenceTargets(contract);
-        if (deniedOutcomesBlockReadEvidenceRecovery(loopResult.toolOutcomes(), targets, workspace)) {
-            return new ReadEvidenceHandoffResult(answer, null, null);
-        }
-        EvidenceObligationVerifier.Result evidence = EvidenceObligationVerifier.verify(
-                obligation,
-                targets,
-                loopResult.toolOutcomes(),
-                workspace);
-        if (evidence.status() != EvidenceObligationVerifier.Status.UNSATISFIED) {
-            return new ReadEvidenceHandoffResult(answer, null, null);
-        }
-        return readEvidenceHandoffIfNeeded("", messages, safePlan, workspace, ctx);
-    }
-
-    private static boolean deniedOutcomesBlockReadEvidenceRecovery(
-            List<ToolCallLoop.ToolOutcome> outcomes,
-            Set<String> evidenceTargets,
-            Path workspace
-    ) {
-        if (outcomes == null || outcomes.isEmpty()) return false;
-        for (ToolCallLoop.ToolOutcome outcome : outcomes) {
-            if (outcome == null || !outcome.denied()) continue;
-            String deniedPath = ToolCallSupport.normalizePath(outcome.pathHint());
-            if (deniedPath.isBlank()) return true;
-            if (matchesEvidenceTarget(deniedPath, evidenceTargets)) return true;
-            if (!"talos.read_file".equals(canonicalToolName(outcome.toolName()))) return true;
-            if (workspace == null || !ProtectedPathPolicy.classify(workspace, deniedPath).protectedPath()) return true;
-        }
-        return false;
-    }
-
-    private static boolean matchesEvidenceTarget(String normalizedPath, Set<String> evidenceTargets) {
-        if (normalizedPath == null || normalizedPath.isBlank() || evidenceTargets == null) return false;
-        for (String target : evidenceTargets) {
-            if (normalizedPath.equals(ToolCallSupport.normalizePath(target))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static Set<String> evidenceTargets(TaskContract contract) {
-        if (contract == null) return Set.of();
-        if (!contract.sourceEvidenceTargets().isEmpty()) {
-            return contract.sourceEvidenceTargets();
-        }
-        return contract.expectedTargets();
-    }
-
-    private static String readFileToolCallJson(String target) {
-        return "{\"name\":\"talos.read_file\",\"arguments\":{\"path\":\""
-                + jsonEscape(target)
-                + "\"}}";
-    }
-
-    private static String jsonEscape(String value) {
-        if (value == null || value.isBlank()) return "";
-        StringBuilder escaped = new StringBuilder(value.length() + 8);
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            switch (c) {
-                case '"' -> escaped.append("\\\"");
-                case '\\' -> escaped.append("\\\\");
-                case '\b' -> escaped.append("\\b");
-                case '\f' -> escaped.append("\\f");
-                case '\n' -> escaped.append("\\n");
-                case '\r' -> escaped.append("\\r");
-                case '\t' -> escaped.append("\\t");
-                default -> {
-                    if (c < 0x20) {
-                        escaped.append(String.format("\\u%04x", (int) c));
-                    } else {
-                        escaped.append(c);
-                    }
-                }
-            }
-        }
-        return escaped.toString();
+        return ReadEvidenceHandoff.readEvidenceRecoveryForPartialTargetsIfNeeded(
+                answer, messages, safePlan, loopResult, workspace, ctx);
     }
 
     static ReadOnlyInspectionRetryResult readOnlyInspectionRetryIfNeeded(
