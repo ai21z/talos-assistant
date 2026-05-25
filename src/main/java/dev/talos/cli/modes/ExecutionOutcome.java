@@ -5,6 +5,7 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.outcome.CommandOutcomeRenderer;
 import dev.talos.runtime.outcome.EvidenceContainmentAnswerGuard;
+import dev.talos.runtime.outcome.InspectUnderCompletionAnswerGuard;
 import dev.talos.runtime.outcome.MutationFailureAnswerRenderer;
 import dev.talos.runtime.outcome.MutationOutcome;
 import dev.talos.runtime.outcome.NoToolAnswerTruthfulnessGuard;
@@ -243,7 +244,7 @@ record ExecutionOutcome(
             current = shaped;
         }
 
-        shaped = AssistantTurnExecutor.annotateIfInspectUnderCompletion(
+        shaped = InspectUnderCompletionAnswerGuard.annotateIfInspectUnderCompletion(
                 current, messages, loopResult);
         boolean inspectUnderCompleted = !Objects.equals(current, shaped);
         current = shaped;
