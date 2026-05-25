@@ -47,7 +47,6 @@ public final class ToolCallRepromptStage {
     private static final Logger LOG = LoggerFactory.getLogger(ToolCallRepromptStage.class);
     private static final int REPAIR_READ_ONLY_TOOL_BUDGET = 6;
     private static final int COMPACT_READBACK_REPAIR_MAX_CHARS = 12_000;
-    private static final int COMPACT_MUTATION_READBACK_MAX_CHARS = 4_000;
 
     private record OldStringMissRepair(String path, String reason, String readback) {}
     private record AppendLineRepair(String path, String expectedLine, String reason, String readback) {}
@@ -59,12 +58,6 @@ public final class ToolCallRepromptStage {
             String replacementOldText,
             String replacementNewText
     ) {}
-    private record SourceEvidenceExactRepair(
-            String path,
-            String reason,
-            List<SourceDerivedEvidenceGuard.SourceReadback> sourceReadbacks
-    ) {}
-
     public boolean reprompt(LoopState state, ToolCallExecutionStage.IterationOutcome outcome) {
         if (outcome.approvalDeniedThisIteration()) {
             state.currentText = "[Tool loop stopped because the requested mutation was not approved.]";
@@ -264,15 +257,13 @@ public final class ToolCallRepromptStage {
         }
 
         String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
-        Optional<SourceEvidenceExactRepair> sourceEvidenceRepair = nextSourceEvidenceExactRepair(state);
+        Optional<SourceEvidenceExactRepairPlanner.Plan> sourceEvidenceRepair =
+                SourceEvidenceExactRepairPlanner.nextPlan(state, currentNativeToolSpecs(state), userTask);
         if (sourceEvidenceRepair.isPresent()) {
-            SourceEvidenceExactRepair repair = sourceEvidenceRepair.get();
+            SourceEvidenceExactRepairPlanner.Plan repair = sourceEvidenceRepair.get();
             state.setPendingActionObligation(PendingActionObligation.expectedTargets(List.of(repair.path())));
-            state.sourceEvidenceExactRepairPromptedKeys.add(sourceEvidenceExactRepairKey(repair));
-            List<ToolSpec> repairToolSpecs = sourceEvidenceExactRepairToolSpecs(state, repair);
-            List<ChatMessage> requestMessages = sourceEvidenceExactRepairMessages(repair, userTask);
-            return chatReprompt(state, requestMessages, repairToolSpecs,
-                    repromptControls(state, "source-evidence-exact-compact-repair"),
+            state.sourceEvidenceExactRepairPromptedKeys.add(repair.key());
+            return chatReprompt(state, repair.messages(), repair.tools(), repair.controls(),
                     "source-evidence exact compact repair");
         }
 
@@ -616,14 +607,6 @@ public final class ToolCallRepromptStage {
                 || normalized.contains("secret");
     }
 
-    private static String truncateForCompactMutation(String readback) {
-        if (readback == null || readback.length() <= COMPACT_MUTATION_READBACK_MAX_CHARS) {
-            return readback;
-        }
-        return readback.substring(0, COMPACT_MUTATION_READBACK_MAX_CHARS)
-                + "\n... [readback truncated for compact mutation continuation]";
-    }
-
     private static boolean chatReprompt(
             LoopState state,
             List<ChatMessage> requestMessages,
@@ -936,50 +919,6 @@ public final class ToolCallRepromptStage {
                         "new_string", repair.replacementNewText()));
     }
 
-    private static Optional<SourceEvidenceExactRepair> nextSourceEvidenceExactRepair(LoopState state) {
-        if (state == null || state.toolOutcomes == null || state.toolOutcomes.isEmpty()) {
-            return Optional.empty();
-        }
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
-        if (contract == null || contract.sourceEvidenceTargets().isEmpty()) return Optional.empty();
-        List<SourceDerivedEvidenceGuard.SourceReadback> sourceReadbacks =
-                SourceDerivedEvidenceGuard.sourceReadbacks(state, contract);
-        if (sourceReadbacks.isEmpty()) return Optional.empty();
-
-        List<String> remainingExpectedTargets = remainingExpectedMutationTargets(state);
-        if (remainingExpectedTargets.isEmpty()) return Optional.empty();
-        Set<String> remaining = remainingExpectedTargets.stream()
-                .map(ToolCallRepromptStage::normalizeExpectedTargetKey)
-                .collect(java.util.stream.Collectors.toSet());
-        for (int i = state.toolOutcomes.size() - 1; i >= 0; i--) {
-            ToolCallLoop.ToolOutcome outcome = state.toolOutcomes.get(i);
-            if (outcome == null || !outcome.mutating() || outcome.success()) continue;
-            String reason = outcome.errorMessage() == null ? "" : outcome.errorMessage();
-            if (!reason.contains("Source-derived write blocked before approval")) continue;
-            String pathKey = normalizeExpectedTargetKey(outcome.pathHint());
-            if (pathKey.isBlank() || !remaining.contains(pathKey)) continue;
-            String path = displayExpectedTargetForKey(remainingExpectedTargets, pathKey);
-            if (path.isBlank()) {
-                path = ToolCallSupport.normalizePath(outcome.pathHint());
-            }
-            SourceEvidenceExactRepair repair = new SourceEvidenceExactRepair(path, reason, sourceReadbacks);
-            if (state.sourceEvidenceExactRepairPromptedKeys.contains(sourceEvidenceExactRepairKey(repair))) {
-                continue;
-            }
-            return Optional.of(repair);
-        }
-        return Optional.empty();
-    }
-
-    private static String sourceEvidenceExactRepairKey(SourceEvidenceExactRepair repair) {
-        if (repair == null) return "";
-        return ToolCallSupport.normalizePath(repair.path())
-                + "->"
-                + repair.sourceReadbacks().stream()
-                .map(SourceDerivedEvidenceGuard.SourceReadback::path)
-                .collect(java.util.stream.Collectors.joining(","));
-    }
-
     private static Optional<AppendLineRepair> nextAppendLineCompactRepair(LoopState state) {
         if (state == null || state.toolOutcomes == null || state.toolOutcomes.isEmpty()) {
             return Optional.empty();
@@ -1119,105 +1058,10 @@ public final class ToolCallRepromptStage {
                 + "\n... [readback truncated for compact old-string repair]";
     }
 
-    private static String jsonEscape(String value) {
-        if (value == null) return "";
-        StringBuilder escaped = new StringBuilder(value.length() + 8);
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            switch (c) {
-                case '"' -> escaped.append("\\\"");
-                case '\\' -> escaped.append("\\\\");
-                case '\n' -> escaped.append("\\n");
-                case '\r' -> escaped.append("\\r");
-                case '\t' -> escaped.append("\\t");
-                default -> escaped.append(c);
-            }
-        }
-        return escaped.toString();
-    }
-
     private static List<ToolSpec> oldStringMissRepairToolSpecs(LoopState state) {
         List<ToolSpec> base = currentNativeToolSpecs(state);
         List<ToolSpec> narrowed = filterTools(base, List.of("talos.edit_file", "talos.write_file"));
         return narrowed.isEmpty() ? base : narrowed;
-    }
-
-    private static List<ToolSpec> sourceEvidenceExactRepairToolSpecs(
-            LoopState state,
-            SourceEvidenceExactRepair repair
-    ) {
-        List<ToolSpec> base = currentNativeToolSpecs(state);
-        List<ToolSpec> narrowed = filterTools(base, List.of("talos.write_file"));
-        if (narrowed.isEmpty()) return oldStringMissRepairToolSpecs(state);
-        String target = repair == null ? "" : ToolCallSupport.normalizePath(repair.path());
-        String snippets = repair == null || repair.sourceReadbacks() == null
-                ? ""
-                : repair.sourceReadbacks().stream()
-                .map(sourceReadback -> SourceDerivedEvidenceGuard.evidenceSnippet(sourceReadback.readback()))
-                .filter(snippet -> snippet != null && !snippet.isBlank())
-                .collect(java.util.stream.Collectors.joining("; "));
-        return narrowed.stream()
-                .map(spec -> {
-                    if (spec == null || !"talos.write_file".equals(spec.name())) return spec;
-                    String schema = "{\"type\":\"object\",\"properties\":{"
-                            + "\"path\":{\"type\":\"string\",\"enum\":[\"" + jsonEscape(target) + "\"]},"
-                            + "\"content\":{\"type\":\"string\",\"description\":\"Complete content for "
-                            + jsonEscape(target)
-                            + ". Must include these exact source evidence phrases verbatim: "
-                            + jsonEscape(snippets)
-                            + "\"}},\"required\":[\"path\",\"content\"]}";
-                    return new ToolSpec(
-                            "talos.write_file",
-                            "Write the complete repaired source-derived output to " + target
-                                    + " only, including the required exact source evidence phrases.",
-                            schema);
-                })
-                .toList();
-    }
-
-    private static List<ChatMessage> sourceEvidenceExactRepairMessages(
-            SourceEvidenceExactRepair repair,
-            String userTask
-    ) {
-        String currentTask = userTask == null || userTask.isBlank()
-                ? "Create the requested source-derived output."
-                : userTask.strip();
-        StringBuilder frame = new StringBuilder();
-        frame.append("[SourceEvidenceExactRepair] Target: ").append(repair.path()).append('\n')
-                .append("Previous write was rejected before approval because it omitted exact source evidence. ")
-                .append("No file was changed by the rejected write.\n")
-                .append("Failed reason: ").append(safeRepairReason(repair.reason())).append('\n')
-                .append("Only mutate this target. Ignore stale prior history outside this compact repair frame.\n\n")
-                .append("Required exact source evidence phrases:\n");
-        for (SourceDerivedEvidenceGuard.SourceReadback sourceReadback : repair.sourceReadbacks()) {
-            String snippet = SourceDerivedEvidenceGuard.evidenceSnippet(sourceReadback.readback());
-            if (snippet.isBlank()) continue;
-            frame.append("- ").append(sourceReadback.path())
-                    .append(": `")
-                    .append(snippet)
-                    .append("`\n");
-        }
-        frame.append("\nSource readbacks:\n");
-        for (SourceDerivedEvidenceGuard.SourceReadback sourceReadback : repair.sourceReadbacks()) {
-            frame.append("Path: ").append(sourceReadback.path()).append('\n')
-                    .append(truncateForCompactMutation(sourceReadback.readback()))
-                    .append("\n---\n");
-        }
-        return List.of(
-                ChatMessage.system("""
-                        You are Talos, a local-first workspace assistant.
-                        This is a compact source-evidence repair after a source-derived write was blocked before approval.
-                        Call a file mutation tool now; do not inspect more files and do not answer in prose.
-                        The replacement content must include at least one required exact source evidence phrase for every listed source.
-                        Do not invent office facts that are not present in the source readbacks.
-                        """),
-                ChatMessage.system(frame.toString()),
-                ChatMessage.user(
-                        "Current user request:\n"
-                                + currentTask
-                                + "\n\nWrite " + repair.path()
-                                + " now using talos.write_file or talos.edit_file. "
-                                + "Include the required exact source evidence phrases verbatim."));
     }
 
     private static List<ChatMessage> oldStringMissRepairMessages(
