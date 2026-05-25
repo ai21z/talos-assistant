@@ -1870,11 +1870,13 @@ class AssistantTurnExecutorTest {
                                     java.util.Map.of("path", "index.html", "content", "AFTER")))),
                             new LlmClient.StreamResult("Updated index.html.", List.of())),
                     2048);
+            var visibleChunks = new ArrayList<String>();
             var ctx = Context.builder(new Config())
                     .llm(recorded.client())
                     .sandbox(new dev.talos.core.security.Sandbox(workspace, java.util.Map.of()))
                     .toolRegistry(registry)
                     .toolCallLoop(loop)
+                    .streamSink(visibleChunks::add)
                     .nativeToolSpecs(List.of(writeFile, editFile))
                     .build();
             var messages = new ArrayList<ChatMessage>();
@@ -1909,6 +1911,8 @@ class AssistantTurnExecutorTest {
             }
 
             assertEquals("AFTER", Files.readString(workspace.resolve("index.html")));
+            assertFalse(out.streamed(), "mutation turns with a stream sink still use the buffered fallback path");
+            assertTrue(visibleChunks.isEmpty(), "exact-write fallback must not stream partial mutation output");
             assertFalse(out.text().contains("Context budget exceeded"), out.text());
             assertFalse(out.text().contains("OLD_BMI_HISTORY_MARKER"), out.text());
             assertFalse(recorded.requests().isEmpty(), "compact fallback must reach the backend");
