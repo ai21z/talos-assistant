@@ -535,7 +535,7 @@ public final class ToolCallRepromptStage {
         if (compactMutation == CompactMutationContinuationOutcome.STOP_TURN) {
             return false;
         }
-        if (tryCompactReadOnlyEvidenceContinuation(state, retryName)) {
+        if (CompactReadOnlyEvidenceContinuation.tryAnswer(state, retryName)) {
             LOG.info("Answered {} with compact read-only evidence continuation after context budget overflow.",
                     retryName);
             return false;
@@ -925,115 +925,6 @@ public final class ToolCallRepromptStage {
         }
         return readback.substring(0, COMPACT_MUTATION_READBACK_MAX_CHARS)
                 + "\n... [readback truncated for compact mutation continuation]";
-    }
-
-    private static boolean tryCompactReadOnlyEvidenceContinuation(LoopState state, String retryName) {
-        Optional<ReadOnlyEvidenceAnswer> evidence = readOnlyEvidenceAnswerForCompactFallback(state);
-        if (evidence.isEmpty()) return false;
-        ReadOnlyEvidenceAnswer answer = evidence.get();
-        List<ChatMessage> messages = readOnlyEvidenceAnswerMessages(answer);
-        try {
-            LlmClient.StreamResult result = state.ctx.llm().chatFull(
-                    messages,
-                    List.of(),
-                    ChatRequestControls.defaults());
-            String text = result.text() == null ? "" : result.text().strip();
-            if (result.hasToolCalls() || ToolCallParser.containsToolCalls(text)) {
-                LocalTurnTraceCapture.warning(
-                        "READ_ONLY_EVIDENCE_COMPACT_REJECTED",
-                        "compact read-only evidence continuation emitted tool calls after " + retryName);
-                return false;
-            }
-            String stripped = ToolCallParser.stripToolCalls(text).strip();
-            if (stripped.isBlank()) {
-                LocalTurnTraceCapture.warning(
-                        "READ_ONLY_EVIDENCE_COMPACT_REJECTED",
-                        "compact read-only evidence continuation returned empty text after " + retryName);
-                return false;
-            }
-            state.currentText = stripped;
-            state.currentNativeCalls = List.of();
-            state.failureDecision = FailureDecision.continueLoop();
-            state.clearPendingActionObligation();
-            LocalTurnTraceCapture.warning(
-                    "READ_ONLY_EVIDENCE_COMPACT_CONTINUATION",
-                    "used compact evidence-only answer for " + answer.target() + " after " + retryName);
-            return true;
-        } catch (EngineException.ContextBudgetExceeded budget) {
-            LocalTurnTraceCapture.warning(
-                    "READ_ONLY_EVIDENCE_COMPACT_CONTEXT_BUDGET_EXCEEDED",
-                    ResponseObligationVerifier.contextBudgetRetrySkippedDetail(budget));
-            return false;
-        } catch (EngineException ee) {
-            LocalTurnTraceCapture.warning(
-                    "READ_ONLY_EVIDENCE_COMPACT_FAILED",
-                    ee.getMessage() == null ? ee.getClass().getSimpleName() : ee.getMessage());
-            return false;
-        } catch (Exception e) {
-            LocalTurnTraceCapture.warning(
-                    "READ_ONLY_EVIDENCE_COMPACT_FAILED",
-                    e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
-            return false;
-        }
-    }
-
-    private record ReadOnlyEvidenceAnswer(String target, String userTask, String readback) {}
-
-    private static Optional<ReadOnlyEvidenceAnswer> readOnlyEvidenceAnswerForCompactFallback(LoopState state) {
-        if (state == null || state.ctx == null || state.ctx.llm() == null) return Optional.empty();
-        if (state.hasPendingActionObligation()) return Optional.empty();
-        if (state.mutationSinceStart || state.mutatingToolSuccesses > 0) return Optional.empty();
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
-        if (contract.type() != TaskType.READ_ONLY_QA || contract.expectedTargets().size() != 1) {
-            return Optional.empty();
-        }
-        String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
-        if (!looksLikeReadOnlyReviewProposal(userTask)) return Optional.empty();
-        String target = contract.expectedTargets().iterator().next();
-        String normalizedTarget = ToolCallSupport.normalizePath(target);
-        if (!successfulReadbackForPath(state, normalizedTarget)) return Optional.empty();
-        String body = latestSuccessfulReadbackForPath(state, normalizedTarget);
-        if (body == null || body.isBlank()) return Optional.empty();
-        return Optional.of(new ReadOnlyEvidenceAnswer(normalizedTarget, userTask.strip(), body));
-    }
-
-    private static boolean looksLikeReadOnlyReviewProposal(String userTask) {
-        if (userTask == null || userTask.isBlank()) return false;
-        String lower = userTask.toLowerCase(Locale.ROOT);
-        boolean reviewProposal = lower.contains("review")
-                || lower.contains("propose")
-                || lower.contains("proposal")
-                || lower.contains("improvement")
-                || lower.contains("suggest");
-        boolean markdownTarget = lower.contains("readme") || lower.contains(".md");
-        boolean explicitlyReadOnly = lower.contains("do not edit")
-                || lower.contains("don't edit")
-                || lower.contains("dont edit")
-                || lower.contains("do not change")
-                || lower.contains("without editing")
-                || lower.contains("no file changes");
-        return reviewProposal && markdownTarget && explicitlyReadOnly;
-    }
-
-    private static List<ChatMessage> readOnlyEvidenceAnswerMessages(ReadOnlyEvidenceAnswer answer) {
-        return List.of(
-                ChatMessage.system("""
-                        You are Talos, a local-first workspace assistant.
-                        [ReadOnlyEvidenceAnswer]
-                        This is a compact evidence-only continuation after the full-history continuation exceeded the local context budget.
-                        Answer the current user request using only the read_file evidence below.
-                        Do not claim any file was changed, edited, updated, saved, completed, or ready to use.
-                        For review/proposal output, separate observed evidence from suggestions.
-                        Do not state commands, dependencies, package managers, frameworks, scripts, licenses, or file meanings as facts unless they appear in the read_file evidence.
-                        """),
-                ChatMessage.system("[ReadOnlyEvidenceAnswer] Target: " + answer.target()
-                        + "\nOlder conversation history is intentionally omitted from this compact frame."),
-                ChatMessage.user(
-                        "Current user request:\n"
-                                + answer.userTask()
-                                + "\n\nCurrent read_file evidence for " + answer.target() + ":\n"
-                                + answer.readback()
-                                + "\n\nAnswer now without tools."));
     }
 
     private static boolean chatReprompt(
