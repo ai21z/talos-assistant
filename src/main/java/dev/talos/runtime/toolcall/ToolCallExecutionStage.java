@@ -233,12 +233,17 @@ public final class ToolCallExecutionStage {
             state.totalToolsInvoked++;
             state.toolNames.add(effective.toolName());
 
-            List<String> missingSourceEvidenceTargets = missingSourceEvidenceTargets(state, currentTaskContract);
-            if (isSourceDerivedContentMutation(effective) && !missingSourceEvidenceTargets.isEmpty()) {
+            SourceDerivedEvidenceGuard.RequiredSourceEvidenceDiagnostic requiredSourceEvidence =
+                    SourceDerivedEvidenceGuard.requiredSourceEvidenceDiagnostic(
+                            state,
+                            currentTaskContract,
+                            effective,
+                            pathHint);
+            if (requiredSourceEvidence != null) {
                 state.failedCalls++;
                 failuresThisIter++;
                 recordFailure(state, effective.toolName(), pathHint);
-                String diagnosticError = sourceEvidenceRequiredDiagnostic(pathHint, missingSourceEvidenceTargets);
+                String diagnosticError = requiredSourceEvidence.message();
                 ToolResult result = ToolResult.fail(ToolError.invalidParams(diagnosticError));
                 emitToolResult(effective.toolName(), result);
                 LocalTurnTraceCapture.recordActionObligation(
@@ -262,7 +267,7 @@ public final class ToolCallExecutionStage {
                 LOG.debug("Blocked source-derived {} for {} until source target(s) are read: {}",
                         effective.toolName(),
                         SafeLogFormatter.value(pathHint),
-                        SafeLogFormatter.value(missingSourceEvidenceTargets));
+                        SafeLogFormatter.value(requiredSourceEvidence.missingSourceTargets()));
                 continue;
             }
 
@@ -761,35 +766,6 @@ public final class ToolCallExecutionStage {
         state.successfulReadCallBodies.clear();
     }
 
-    private static List<String> missingSourceEvidenceTargets(LoopState state, TaskContract contract) {
-        if (state == null || contract == null || contract.sourceEvidenceTargets().isEmpty()) {
-            return List.of();
-        }
-        Set<String> readPaths = new HashSet<>();
-        readPaths.addAll(TurnSourceEvidenceCapture.readPaths());
-        for (String readPath : state.pathsReadThisTurn) {
-            String normalized = evidencePathKey(readPath);
-            if (!normalized.isBlank()) {
-                readPaths.add(normalized);
-            }
-        }
-        List<String> missing = new ArrayList<>();
-        for (String sourceTarget : contract.sourceEvidenceTargets()) {
-            String normalized = evidencePathKey(sourceTarget);
-            if (normalized.isBlank()) continue;
-            if (!readPaths.contains(normalized)) {
-                missing.add(sourceTarget);
-            }
-        }
-        return List.copyOf(missing);
-    }
-
-    private static boolean isSourceDerivedContentMutation(ToolCall call) {
-        if (call == null) return false;
-        String canonical = ToolAliasPolicy.localCanonicalName(call.toolName());
-        return "write_file".equals(canonical) || "edit_file".equals(canonical);
-    }
-
     private static boolean isReadFileTool(ToolCall call) {
         if (call == null) return false;
         return "read_file".equals(ToolAliasPolicy.localCanonicalName(call.toolName()));
@@ -922,19 +898,6 @@ public final class ToolCallExecutionStage {
                 && metadata.source() == ToolContentMetadata.ContentSource.DOCUMENT_EXTRACTION;
     }
 
-    private static String sourceEvidenceRequiredDiagnostic(String pathHint, List<String> missingSourceTargets) {
-        String target = pathHint == null || pathHint.isBlank()
-                ? "the derived artifact"
-                : "`" + pathHint + "`";
-        String sources = missingSourceTargets == null || missingSourceTargets.isEmpty()
-                ? "(unknown)"
-                : String.join(", ", missingSourceTargets);
-        return "Source-derived artifact write blocked before approval: the current task requires reading "
-                + "source target(s) " + sources + " before writing " + target + ". "
-                + "Call talos.read_file for the source target(s) first, then retry the write. "
-                + "No approval was requested and no file was changed.";
-    }
-
     private static void recordEmptyEditArgumentFailure(LoopState state, String pathHint) {
         if (state == null || pathHint == null || pathHint.isBlank()) return;
         state.emptyEditArgumentFailuresByPath.merge(
@@ -1017,17 +980,6 @@ public final class ToolCallExecutionStage {
 
     private static String normalizePath(String pathHint) {
         return ToolCallSupport.normalizePath(pathHint == null ? "" : pathHint);
-    }
-
-    private static String evidencePathKey(String pathHint) {
-        String normalized = normalizePath(pathHint).strip();
-        while (normalized.startsWith("./")) {
-            normalized = normalized.substring(2);
-        }
-        while (normalized.length() > 1 && normalized.endsWith("/")) {
-            normalized = normalized.substring(0, normalized.length() - 1);
-        }
-        return normalized;
     }
 
     private static String emptyEditArgumentDiagnostic(String pathHint, boolean pathWasRead) {
