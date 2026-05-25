@@ -4427,45 +4427,13 @@ public final class AssistantTurnExecutor {
             List<ChatMessage> messages,
             Context ctx
     ) {
-        if (answer == null || answer.isBlank()) return answer;
-        if (answer.length() < UNGROUNDED_MIN_CHARS) return answer;
-        if (ctx == null || ctx.llm() == null) return answer;
-        if (isDirectAnswerOnlyTurn(plan)) return answer;
-
-        String userRequest = latestUserRequest(plan, messages);
-        if (!looksLikeEvidenceRequest(userRequest)) return answer;
-
-        LOG.info("No-tool grounding retry fired: answer={} chars, zero tools, "
-                + "user asked for evidence. Re-prompting once.", answer.length());
-
-        messages.add(ChatMessage.assistant(answer));
-        messages.add(ChatMessage.user(
-                "Your previous answer was produced without reading any files. "
-                + "The user asked for an answer grounded in the actual workspace. "
-                + "Use the available file tools to read the relevant files, then "
-                + "answer concretely from what you read. Do not guess about file "
-                + "contents. Do not describe files you have not read."));
-
-        try {
-            LlmClient.StreamResult retry = chatFull(ctx, messages);
-            String retryText = retry.text();
-            if (retryText != null && !retryText.isBlank() && !retryText.equals(answer)) {
-                LOG.info("Grounding retry produced a different answer ({} → {} chars)",
-                        answer.length(), retryText.length());
-                return retryText;
-            }
-            LOG.warn("Grounding retry did not produce a substantive new answer. "
-                    + "Annotating original.");
-        } catch (Exception e) {
-            LOG.warn("Grounding retry failed: {}. Annotating original.", SafeLogFormatter.throwableMessage(e));
-        }
-        return UNGROUNDED_ANNOTATION + answer;
-    }
-
-    private static boolean isDirectAnswerOnlyTurn(CurrentTurnPlan plan) {
-        if (plan == null) return false;
-        return plan.actionObligation() == ActionObligation.DIRECT_ANSWER_ONLY
-                || plan.taskContract().type() == TaskType.SMALL_TALK;
+        CurrentTurnPlan safePlan = safePlanFromMessages(plan, messages, ctx);
+        return NoToolGroundingRetry.retryIfNeeded(
+                answer,
+                safePlan,
+                messages,
+                ctx,
+                retryMessages -> chatFull(ctx, retryMessages));
     }
 }
 
