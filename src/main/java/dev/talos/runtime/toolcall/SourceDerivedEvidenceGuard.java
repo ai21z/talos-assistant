@@ -1,5 +1,6 @@
 package dev.talos.runtime.toolcall;
 
+import dev.talos.runtime.TurnSourceEvidenceCapture;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolCall;
@@ -14,8 +15,23 @@ import java.util.StringJoiner;
 
 final class SourceDerivedEvidenceGuard {
     record SourceReadback(String path, String readback) {}
+    record RequiredSourceEvidenceDiagnostic(String message, List<String> missingSourceTargets) {}
 
     private SourceDerivedEvidenceGuard() {}
+
+    static RequiredSourceEvidenceDiagnostic requiredSourceEvidenceDiagnostic(
+            LoopState state,
+            TaskContract contract,
+            ToolCall call,
+            String pathHint
+    ) {
+        if (!isSourceDerivedContentMutation(call)) return null;
+        List<String> missingSourceTargets = missingSourceEvidenceTargets(state, contract);
+        if (missingSourceTargets.isEmpty()) return null;
+        return new RequiredSourceEvidenceDiagnostic(
+                sourceEvidenceRequiredDiagnostic(pathHint, missingSourceTargets),
+                missingSourceTargets);
+    }
 
     static String exactEvidenceCoverageDiagnostic(
             LoopState state,
@@ -86,6 +102,29 @@ final class SourceDerivedEvidenceGuard {
             out.add(new SourceReadback(target, readback));
         }
         return out;
+    }
+
+    private static List<String> missingSourceEvidenceTargets(LoopState state, TaskContract contract) {
+        if (state == null || contract == null || contract.sourceEvidenceTargets().isEmpty()) {
+            return List.of();
+        }
+        Set<String> readPaths = new LinkedHashSet<>();
+        readPaths.addAll(TurnSourceEvidenceCapture.readPaths());
+        for (String readPath : state.pathsReadThisTurn) {
+            String normalized = evidencePathKey(readPath);
+            if (!normalized.isBlank()) {
+                readPaths.add(normalized);
+            }
+        }
+        List<String> missing = new ArrayList<>();
+        for (String sourceTarget : contract.sourceEvidenceTargets()) {
+            String normalized = evidencePathKey(sourceTarget);
+            if (normalized.isBlank()) continue;
+            if (!readPaths.contains(normalized)) {
+                missing.add(sourceTarget);
+            }
+        }
+        return List.copyOf(missing);
     }
 
     static String deterministicEvidenceSummary(
@@ -180,6 +219,25 @@ final class SourceDerivedEvidenceGuard {
         return null;
     }
 
+    private static boolean isSourceDerivedContentMutation(ToolCall call) {
+        if (call == null) return false;
+        String canonical = ToolAliasPolicy.localCanonicalName(call.toolName());
+        return "write_file".equals(canonical) || "edit_file".equals(canonical);
+    }
+
+    private static String sourceEvidenceRequiredDiagnostic(String pathHint, List<String> missingSourceTargets) {
+        String target = pathHint == null || pathHint.isBlank()
+                ? "the derived artifact"
+                : "`" + pathHint + "`";
+        String sources = missingSourceTargets == null || missingSourceTargets.isEmpty()
+                ? "(unknown)"
+                : String.join(", ", missingSourceTargets);
+        return "Source-derived artifact write blocked before approval: the current task requires reading "
+                + "source target(s) " + sources + " before writing " + target + ". "
+                + "Call talos.read_file for the source target(s) first, then retry the write. "
+                + "No approval was requested and no file was changed.";
+    }
+
     private static boolean exactEvidenceRequested(String request) {
         if (request == null || request.isBlank()) return false;
         String lower = request.toLowerCase(Locale.ROOT);
@@ -216,6 +274,17 @@ final class SourceDerivedEvidenceGuard {
             }
         }
         return null;
+    }
+
+    private static String evidencePathKey(String pathHint) {
+        String normalized = ToolCallSupport.normalizePath(pathHint == null ? "" : pathHint).strip();
+        while (normalized.startsWith("./")) {
+            normalized = normalized.substring(2);
+        }
+        while (normalized.length() > 1 && normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        return normalized;
     }
 
     private static boolean isSensitiveReadbackPath(String path) {
