@@ -9,8 +9,6 @@ import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.core.context.ContextDecision;
 import dev.talos.core.context.ContextItem;
 import dev.talos.core.context.ContextLedgerCapture;
-import dev.talos.runtime.expectation.AppendLineExpectation;
-import dev.talos.runtime.expectation.TaskExpectationResolver;
 import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.runtime.policy.ProtectedPathAliasNormalizer;
 import dev.talos.runtime.policy.ProtectedPathPolicy;
@@ -322,7 +320,7 @@ public final class ToolCallExecutionStage {
                 }
             }
 
-            String appendLineDiagnostic = appendLinePreApprovalDiagnostic(
+            String appendLineDiagnostic = AppendLinePreApprovalGuard.diagnostic(
                     effective,
                     state,
                     currentTaskContract,
@@ -586,71 +584,6 @@ public final class ToolCallExecutionStage {
         }
         return value.substring(0, LIST_DIR_EVIDENCE_SUMMARY_CHARS)
                 + "\n... (tool outcome summary truncated)";
-    }
-
-    private static String appendLinePreApprovalDiagnostic(
-            ToolCall call,
-            LoopState state,
-            TaskContract contract,
-            String pathHint
-    ) {
-        if (call == null || contract == null || pathHint == null || pathHint.isBlank()) return null;
-        String canonicalTool = ToolAliasPolicy.localCanonicalName(call.toolName());
-        if (!"write_file".equals(canonicalTool)) return null;
-        AppendLineExpectation expectation = appendLineExpectationForPath(contract, pathHint);
-        if (expectation == null) return null;
-        String content = firstParam(call, "content", "text", "body", "data", "file_content");
-        if (content == null) return null;
-        String previousContent = priorReadContentForPath(state, pathHint);
-        if (previousContent == null) {
-            return "append-line write_file for " + pathHint
-                    + " requires complete same-turn read evidence before approval.";
-        }
-        if (appendLineContentPreservesReadback(previousContent, content, expectation.expectedLine())) {
-            return null;
-        }
-        return "append-line write_file for " + pathHint
-                + " does not preserve the complete same-turn readback and append exactly `"
-                + expectation.expectedLine() + "`.";
-    }
-
-    private static AppendLineExpectation appendLineExpectationForPath(TaskContract contract, String pathHint) {
-        if (contract == null || pathHint == null || pathHint.isBlank()) return null;
-        String target = normalizePath(pathHint);
-        for (var expectation : TaskExpectationResolver.resolve(contract)) {
-            if (expectation instanceof AppendLineExpectation appendLine
-                    && normalizePath(appendLine.targetPath()).equals(target)) {
-                return appendLine;
-            }
-        }
-        return null;
-    }
-
-    private static boolean appendLineContentPreservesReadback(
-            String previousContent,
-            String content,
-            String appendedLine
-    ) {
-        if (previousContent == null || content == null || appendedLine == null || appendedLine.isBlank()) {
-            return false;
-        }
-        String previous = normalizeLineEndings(previousContent);
-        String actual = normalizeLineEndings(content);
-        String line = normalizeLineEndings(appendedLine).strip();
-        if (line.isBlank() || line.contains("\n")) return false;
-        String separator = previous.endsWith("\n") || previous.isEmpty() ? "" : "\n";
-        String expected = previous + separator + line + "\n";
-        String expectedWithoutTerminalNewline = stripSingleTerminalNewline(expected);
-        return actual.equals(expected) || actual.equals(expectedWithoutTerminalNewline);
-    }
-
-    private static String normalizeLineEndings(String value) {
-        return value == null ? "" : value.replace("\r\n", "\n").replace('\r', '\n');
-    }
-
-    private static String stripSingleTerminalNewline(String value) {
-        if (value == null || value.isEmpty()) return value;
-        return value.endsWith("\n") ? value.substring(0, value.length() - 1) : value;
     }
 
     private static dev.talos.runtime.ToolCallLoop.MutationEvidence mutationEvidence(
