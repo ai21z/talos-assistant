@@ -18,6 +18,7 @@ import dev.talos.runtime.context.ArtifactGoal;
 import dev.talos.runtime.context.ChangeSummaryContext;
 import dev.talos.runtime.expectation.LiteralContentExpectation;
 import dev.talos.runtime.expectation.TaskExpectation;
+import dev.talos.runtime.outcome.InspectUnderCompletionAnswerGuard;
 import dev.talos.runtime.outcome.MutationFailureAnswerRenderer;
 import dev.talos.runtime.outcome.NoToolAnswerTruthfulnessGuard;
 import dev.talos.runtime.outcome.ProtectedReadAnswerGuard;
@@ -4120,106 +4121,17 @@ public final class AssistantTurnExecutor {
 
     // ── Inspect under-completion truth layer (N3 / P4) ───────────────────
 
-    /**
-     * Minimum answer length at which the inspect under-completion gate
-     * becomes eligible.
-     *
-     * <p>Lower than {@link #UNGROUNDED_MIN_CHARS} because N3 fires on the
-     * with-tools branch, where the answer has already passed through the
-     * deflection / synthesis-retry tiers. A substantive answer after ≤ 1
-     * read is the exact Turn-1 failure shape regardless of length above
-     * this threshold.
-     */
-    static final int INSPECT_MIN_CHARS = 500;
+    static final int INSPECT_MIN_CHARS = InspectUnderCompletionAnswerGuard.INSPECT_MIN_CHARS;
 
-    /**
-     * Phrases in the <em>user request</em> that strongly imply the user
-     * asked for multi-file inspection before answering — i.e., explicitly
-     * more than one file should be read. Deliberately narrower than
-     * {@link NoToolAnswerTruthfulnessGuard}: an evidence request is a
-     * superset; an inspect-first request is the subset that names or
-     * implies plurality.
-     *
-     * <p>Matched case-insensitively against the latest user message only.
-     * Anchored to real transcript Turn-1 wording ("Read the relevant
-     * files first", "identify the main HTML entry file, the main
-     * stylesheet file, and the main JavaScript file").
-     */
-    private static final Set<String> INSPECT_REQUEST_MARKERS = Set.of(
-            "entry file",
-            "entry files",
-            "read the relevant",
-            "read the main",
-            "read the files",
-            "read all the",
-            "read all ",
-            "read each",
-            "read them all",
-            "read both",
-            "read these",
-            "all three",
-            "look at each",
-            "look at all",
-            "inspect each",
-            "inspect all",
-            "open each",
-            "start by reading",
-            "first read",
-            "first, read"
-    );
-
-    /**
-     * Annotation prepended to the answer when the turn completed with
-     * a substantive answer but only one read-only tool call, despite the
-     * user asking for multi-file inspection.
-     */
     public static final String UNDER_INSPECTION_ANNOTATION =
-            "[Inspect check: the user asked for multiple files to be read "
-            + "before answering, but only one read-only tool call was made "
-            + "this turn. The response below may not reflect the full "
-            + "workspace contents.]\n\n";
+            InspectUnderCompletionAnswerGuard.UNDER_INSPECTION_ANNOTATION;
 
-    /**
-     * True iff the latest user request contains an inspect-first marker
-     * indicating plural-file inspection (see
-     * {@link #INSPECT_REQUEST_MARKERS}). Package-private for direct
-     * testing.
-     */
     static boolean looksLikeInspectFirstRequest(String userRequest) {
-        if (userRequest == null || userRequest.isBlank()) return false;
-        String lower = userRequest.toLowerCase();
-        for (String marker : INSPECT_REQUEST_MARKERS) {
-            if (lower.contains(marker)) return true;
-        }
-        return false;
+        return InspectUnderCompletionAnswerGuard.looksLikeInspectFirstRequest(userRequest);
     }
 
-    /**
-     * Counts successful-or-attempted read-only tool invocations in
-     * {@code loopResult.toolNames()}. Read-only tools are {@code read_file},
-     * {@code list_dir}, and {@code grep}; the {@code talos.} namespace
-     * prefix is stripped before comparison. Package-private for direct
-     * testing.
-     *
-     * <p>Using {@code toolNames()} (the total invocation list) rather
-     * than filtering for success is intentional: the gate fires on
-     * <em>under-inspection intent</em>, and even a failed read is a
-     * sign the model did try to inspect. The residual false-positive
-     * risk (counting a failed read as "one read done") is acceptable
-     * because the gate is annotate-only.
-     */
     static int readOnlyToolCount(ToolCallLoop.LoopResult loopResult) {
-        if (loopResult == null || loopResult.toolNames() == null) return 0;
-        int n = 0;
-        for (String t : loopResult.toolNames()) {
-            if (t == null) continue;
-            String name = t.toLowerCase();
-            if (name.startsWith("talos.")) name = name.substring("talos.".length());
-            if (name.equals("read_file") || name.equals("list_dir") || name.equals("grep")) {
-                n++;
-            }
-        }
-        return n;
+        return InspectUnderCompletionAnswerGuard.readOnlyToolCount(loopResult);
     }
 
     static List<String> obviousPrimaryFiles(Path workspace) {
@@ -4584,7 +4496,7 @@ public final class AssistantTurnExecutor {
      *       the Turn-1 failure shape: one read, then a confident
      *       multi-file summary.</li>
      *   <li>The latest user request contains an inspect-first marker
-     *       (see {@link #INSPECT_REQUEST_MARKERS}).</li>
+     *       owned by {@link InspectUnderCompletionAnswerGuard}.</li>
      * </ol>
      *
      * <p><b>Posture: annotate, do not retry.</b> A retry here would
@@ -4616,20 +4528,8 @@ public final class AssistantTurnExecutor {
             String answer,
             List<ChatMessage> messages,
             ToolCallLoop.LoopResult loopResult) {
-        if (answer == null || answer.isBlank()) return answer;
-        if (loopResult == null) return answer;
-        if (loopResult.toolsInvoked() == 0) return answer;
-        if (loopResult.mutatingToolSuccesses() > 0) return answer;
-        if (answer.length() < INSPECT_MIN_CHARS) return answer;
-        if (readOnlyToolCount(loopResult) > 1) return answer;
-        if (!looksLikeInspectFirstRequest(latestUserRequest(messages))) return answer;
-
-        LOG.warn("Inspect under-completion detected: answer={} chars, "
-                + "read-only tool calls={}, tools invoked={}, "
-                + "user asked for multi-file inspection. Annotating.",
-                answer.length(), readOnlyToolCount(loopResult),
-                loopResult.toolsInvoked());
-        return UNDER_INSPECTION_ANNOTATION + answer;
+        return InspectUnderCompletionAnswerGuard.annotateIfInspectUnderCompletion(
+                answer, messages, loopResult);
     }
 
     // ── No-tool grounding retry (R6, scoped) ─────────────────────────────
