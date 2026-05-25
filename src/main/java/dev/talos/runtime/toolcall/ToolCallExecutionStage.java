@@ -361,29 +361,25 @@ public final class ToolCallExecutionStage {
                 }
             }
 
-            boolean denied = !result.success()
-                    && result.error() != null
-                    && ToolError.DENIED.equals(result.error().code());
-            if (denied && ToolCallSupport.isMutatingTool(effective.toolName())) {
+            ToolExecutionFailureClassifier.Classification failureClassification =
+                    ToolExecutionFailureClassifier.classify(effective, result, pathHint);
+            if (failureClassification.mutatingDenied()) {
                 mutatingDeniedThisIter = true;
             }
-            if (!result.success()
-                    && result.error() != null
-                    && ToolError.UNSUPPORTED_FORMAT.equals(result.error().code())
-                    && ReadEvidenceStateAccounting.isReadFileTool(effective)
-                    && pathHint != null
-                    && !pathHint.isBlank()) {
-                unsupportedReadPathsThisIter.add(ToolCallSupport.normalizePath(pathHint));
+            if (!failureClassification.unsupportedReadPath().isBlank()) {
+                unsupportedReadPathsThisIter.add(failureClassification.unsupportedReadPath());
             }
-            if (isPreApprovalPathPolicyBlock(result) && ToolCallSupport.isMutatingTool(effective.toolName())) {
+            if (failureClassification.preApprovalPathPolicyBlock()
+                    && ToolCallSupport.isMutatingTool(effective.toolName())) {
                 pathPolicyBlockedThisIter = true;
-                if (isExpectedTargetScopeBlock(result)) {
+                if (failureClassification.expectedTargetScopeBlock()) {
                     state.failureDecision = dev.talos.runtime.failure.FailureDecision.stop(
                             dev.talos.runtime.failure.FailureAction.ASK_USER,
                             result.errorMessage());
                 }
             }
-            if (isUserApprovalDenial(result) && ToolCallSupport.isMutatingTool(effective.toolName())) {
+            if (failureClassification.userApprovalDenial()
+                    && ToolCallSupport.isMutatingTool(effective.toolName())) {
                 approvalDeniedThisIter = true;
             }
             state.toolOutcomes.add(new dev.talos.runtime.ToolCallLoop.ToolOutcome(
@@ -391,7 +387,7 @@ public final class ToolCallExecutionStage {
                     pathHint,
                     result.success(),
                     ToolCallSupport.isMutatingTool(effective.toolName()),
-                    denied,
+                    failureClassification.denied(),
                     result.success() ? toolOutcomeSummary(effective.toolName(), result.output()) : "",
                     result.success() ? "" : result.errorMessage(),
                     result.verification(),
@@ -403,16 +399,21 @@ public final class ToolCallExecutionStage {
                 state.failedCalls++;
                 failuresThisIter++;
                 recordFailure(state, effective.toolName(), pathHint);
-                if (shouldClearSuccessfulReadCallsAfterFailure(state, effective, result, pathHint, isEditFile)) {
+                if (shouldClearSuccessfulReadCallsAfterFailure(
+                        state,
+                        effective,
+                        failureClassification,
+                        pathHint,
+                        isEditFile)) {
                     ReadEvidenceStateAccounting.clearSuccessfulReadCaches(state);
                 }
                 if (isEditFile) {
                     String callSig = ToolCallSupport.buildCallSignature(effective);
                     state.failedCallSignatures.add(callSig);
-                    if (isOldStringNotFound(result) && wasMutatedSinceRead(state, pathHint)) {
+                    if (failureClassification.oldStringNotFound() && wasMutatedSinceRead(state, pathHint)) {
                         recordStaleEditFailure(state, pathHint);
                     }
-                    if (isOldStringNotFound(result)
+                    if (failureClassification.oldStringNotFound()
                             && shouldRecoverStaticWebEditFailureWithFullRewrite(state, pathHint)) {
                         recordStaticWebFullRewriteRequired(state, pathHint);
                     }
@@ -509,16 +510,16 @@ public final class ToolCallExecutionStage {
     private static boolean shouldClearSuccessfulReadCallsAfterFailure(
             LoopState state,
             ToolCall effective,
-            ToolResult result,
+            ToolExecutionFailureClassifier.Classification failureClassification,
             String pathHint,
             boolean isEditFile
     ) {
         if (effective == null || !ToolCallSupport.isMutatingTool(effective.toolName())) return false;
-        if (isExpectedTargetScopeBlock(result)) {
+        if (failureClassification.expectedTargetScopeBlock()) {
             return false;
         }
         if (isEditFile
-                && isOldStringNotFound(result)
+                && failureClassification.oldStringNotFound()
                 && wasPathReadThisTurn(state, pathHint)
                 && !wasMutatedSinceRead(state, pathHint)) {
             return false;
@@ -547,13 +548,6 @@ public final class ToolCallExecutionStage {
         return state != null
                 && pathHint != null
                 && state.pathsMutatedSinceRead.contains(normalizePath(pathHint));
-    }
-
-    private static boolean isOldStringNotFound(ToolResult result) {
-        if (result == null || result.success() || result.error() == null) return false;
-        if (!ToolError.INVALID_PARAMS.equals(result.error().code())) return false;
-        String message = result.errorMessage();
-        return message != null && message.contains("old_string not found");
     }
 
     private static Set<String> fullRewriteRepairTargets(LoopState state) {
@@ -629,30 +623,6 @@ public final class ToolCallExecutionStage {
                 // No pre-approval block.
             }
         }
-    }
-
-    private static boolean isUserApprovalDenial(ToolResult result) {
-        if (result == null || result.success() || result.error() == null) return false;
-        if (!ToolError.DENIED.equals(result.error().code())) return false;
-        String message = result.errorMessage();
-        return message != null && message.startsWith("User did not approve ");
-    }
-
-    private static boolean isPreApprovalPathPolicyBlock(ToolResult result) {
-        if (result == null || result.success() || result.error() == null) return false;
-        if (!ToolError.INVALID_PARAMS.equals(result.error().code())) return false;
-        String message = result.errorMessage();
-        return message != null
-                && (message.startsWith("Path not allowed before approval")
-                || message.startsWith("Invalid path before approval")
-                || message.startsWith("Target outside expected targets before approval"));
-    }
-
-    private static boolean isExpectedTargetScopeBlock(ToolResult result) {
-        if (result == null || result.success() || result.error() == null) return false;
-        if (!ToolError.INVALID_PARAMS.equals(result.error().code())) return false;
-        String message = result.errorMessage();
-        return message != null && message.startsWith("Target outside expected targets before approval");
     }
 
     private void appendResultMessage(LoopState state, boolean nativePath, int callIndex, String content) {
