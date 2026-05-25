@@ -148,70 +148,38 @@ public final class ToolCallExecutionStage {
                     SafeLogFormatter.parameters(effective.parameters()));
 
             boolean isEditFile = "talos.edit_file".equals(effective.toolName());
-            if (isEditFile
-                    && !strict
-                    && fullRewriteRepairTargets.contains(normalizePath(pathHint))) {
-                state.failedCalls++;
-                failuresThisIter++;
-                recordFailure(state, effective.toolName(), pathHint);
-                String diagnosticError = fullRewriteRepairRequiredDiagnostic(pathHint);
-                String diagnostic = "[tool_result: " + effective.toolName() + "]\n"
-                        + "[error] " + diagnosticError
-                        + "\n[/tool_result]";
-                state.toolOutcomes.add(new dev.talos.runtime.ToolCallLoop.ToolOutcome(
-                        effective.toolName(), pathHint, false, true, false, "", diagnosticError,
-                        null, ToolError.INVALID_PARAMS));
-                appendResultMessage(state, parsed.useNativePath(), i, diagnostic);
-                LOG.debug("Blocked edit_file for full-rewrite repair target {}", SafeLogFormatter.value(pathHint));
-                continue;
-            }
-
-            if (isEditFile && !strict && staleRereadRequiredAtStart.contains(normalizePath(pathHint))) {
-                state.failedCalls++;
-                failuresThisIter++;
-                recordFailure(state, effective.toolName(), pathHint);
-                state.staleEditRereadIgnoredPath = normalizePath(pathHint);
-                String diagnosticError = staleEditRereadRequiredDiagnostic(pathHint);
-                String diagnostic = "[tool_result: " + effective.toolName() + "]\n"
-                        + "[error] " + diagnosticError
-                        + "\n[/tool_result]";
-                state.toolOutcomes.add(new dev.talos.runtime.ToolCallLoop.ToolOutcome(
-                        effective.toolName(), pathHint, false, true, false, "", diagnosticError,
-                        null, ToolError.INVALID_PARAMS));
-                appendResultMessage(state, parsed.useNativePath(), i, diagnostic);
-                LOG.debug("Blocked stale edit retry for path {} until read_file runs in a later iteration",
-                        SafeLogFormatter.value(pathHint));
-                continue;
-            }
-
-            if (isEditFile && !strict) {
-                String callSig = ToolCallSupport.buildCallSignature(effective);
-                if (state.failedCallSignatures.contains(callSig)) {
+            EditFilePreApprovalGuard.Decision editPreApprovalDecision =
+                    EditFilePreApprovalGuard.decision(
+                            effective,
+                            state,
+                            pathHint,
+                            strict,
+                            staleRereadRequiredAtStart,
+                            fullRewriteRepairTargets);
+            if (editPreApprovalDecision != null) {
+                if (editPreApprovalDecision.kind() == EditFilePreApprovalGuard.Kind.DUPLICATE_FAILED_EDIT) {
                     state.retriedCalls++;
-                    state.failedCalls++;
                     state.cushionFiresB3EditShortCircuit++;
-                    failuresThisIter++;
-                    recordFailure(state, effective.toolName(), pathHint);
-                    boolean emptyEditArguments = ToolCallSupport.hasEmptyEditArguments(effective);
-                    if (emptyEditArguments) {
-                        recordEmptyEditArgumentFailure(state, pathHint);
-                    }
-                    String diagnosticError = emptyEditArguments
-                            ? emptyEditArgumentDiagnostic(pathHint, wasPathReadThisTurn(state, pathHint))
-                            : "This exact edit was already attempted and failed. "
-                                    + "Call talos.read_file to see the file's current state, "
-                                    + "then provide the exact raw content (without line-number prefixes) in old_string. "
-                                    + "Alternatively, use talos.write_file to replace the entire file content.";
-                    String diagnostic = "[tool_result: " + effective.toolName() + "]\n"
-                            + "[error] " + diagnosticError
-                            + "\n[/tool_result]";
-                    state.toolOutcomes.add(new dev.talos.runtime.ToolCallLoop.ToolOutcome(
-                            effective.toolName(), pathHint, false, true, false, "", diagnosticError,
-                            null, ToolError.INVALID_PARAMS));
-                    appendResultMessage(state, parsed.useNativePath(), i, diagnostic);
-                    LOG.debug("  Skipped duplicate failing edit_file call for path: {}", SafeLogFormatter.value(pathHint));
-                    continue;
                 }
+                state.failedCalls++;
+                failuresThisIter++;
+                recordFailure(state, effective.toolName(), pathHint);
+                if (editPreApprovalDecision.kind() == EditFilePreApprovalGuard.Kind.STALE_REREAD_REQUIRED) {
+                    state.staleEditRereadIgnoredPath = editPreApprovalDecision.normalizedPath();
+                }
+                if (editPreApprovalDecision.emptyEditArguments()) {
+                    recordEmptyEditArgumentFailure(state, pathHint);
+                }
+                String diagnosticError = editPreApprovalDecision.diagnostic();
+                String diagnostic = "[tool_result: " + effective.toolName() + "]\n"
+                        + "[error] " + diagnosticError
+                        + "\n[/tool_result]";
+                state.toolOutcomes.add(new dev.talos.runtime.ToolCallLoop.ToolOutcome(
+                        effective.toolName(), pathHint, false, true, false, "", diagnosticError,
+                        null, ToolError.INVALID_PARAMS));
+                appendResultMessage(state, parsed.useNativePath(), i, diagnostic);
+                logEditPreApprovalBlock(editPreApprovalDecision, pathHint);
+                continue;
             }
 
             if (!strict && !state.mutationSinceStart && ToolCallSupport.isReadOnlyTool(effective.toolName())) {
@@ -982,39 +950,25 @@ public final class ToolCallExecutionStage {
         return ToolCallSupport.normalizePath(pathHint == null ? "" : pathHint);
     }
 
-    private static String emptyEditArgumentDiagnostic(String pathHint, boolean pathWasRead) {
-        String target = pathHint == null || pathHint.isBlank()
-                ? "the target file"
-                : "`" + pathHint + "`";
-        String prefix = pathWasRead
-                ? "Repeated empty or missing talos.edit_file arguments for " + target + " after the file was read. "
-                : "Repeated empty or missing talos.edit_file arguments for " + target + ". ";
-        return prefix
-                + "`old_string` was empty or `new_string` was missing, so no approval was requested "
-                + "and no file was changed. Copy the exact `old_string` from the latest "
-                + "talos.read_file result and provide the intended `new_string`, or stop "
-                + "and explain why the edit cannot be formed.";
-    }
-
-    private static String staleEditRereadRequiredDiagnostic(String pathHint) {
-        String target = pathHint == null || pathHint.isBlank()
-                ? "the target file"
-                : "`" + pathHint + "`";
-        return "A previous edit changed " + target
-                + ", then another edit for the same file failed because old_string was not found. "
-                + "Call talos.read_file for " + target
-                + " in a separate follow-up step before attempting another talos.edit_file. "
-                + "No approval was requested and no additional file change was made.";
-    }
-
-    private static String fullRewriteRepairRequiredDiagnostic(String pathHint) {
-        String target = pathHint == null || pathHint.isBlank()
-                ? "the target file"
-                : "`" + pathHint + "`";
-        return "Static verification repair requires a complete talos.write_file replacement for "
-                + target + ". This talos.edit_file call was not executed, no approval was requested, "
-                + "and no file was changed. Use talos.write_file with the full corrected file content "
-                + "for this small web file.";
+    private static void logEditPreApprovalBlock(
+            EditFilePreApprovalGuard.Decision decision,
+            String pathHint
+    ) {
+        if (decision == null) return;
+        switch (decision.kind()) {
+            case FULL_REWRITE_REPAIR_REQUIRED ->
+                    LOG.debug("Blocked edit_file for full-rewrite repair target {}",
+                            SafeLogFormatter.value(pathHint));
+            case STALE_REREAD_REQUIRED ->
+                    LOG.debug("Blocked stale edit retry for path {} until read_file runs in a later iteration",
+                            SafeLogFormatter.value(pathHint));
+            case DUPLICATE_FAILED_EDIT ->
+                    LOG.debug("  Skipped duplicate failing edit_file call for path: {}",
+                            SafeLogFormatter.value(pathHint));
+            case NONE -> {
+                // No pre-approval block.
+            }
+        }
     }
 
     private static boolean isUserApprovalDenial(ToolResult result) {
