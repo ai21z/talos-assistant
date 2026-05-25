@@ -152,9 +152,9 @@ public final class ToolCallExecutionStage {
                     state.retriedCalls++;
                     state.cushionFiresB3EditShortCircuit++;
                 }
-                state.failedCalls++;
-                failuresThisIter++;
-                recordFailure(state, effective.toolName(), pathHint);
+                if (ToolFailureStateAccounting.recordFailure(state, effective, pathHint).failureRecorded()) {
+                    failuresThisIter++;
+                }
                 if (editPreApprovalDecision.kind() == EditFilePreApprovalGuard.Kind.STALE_REREAD_REQUIRED) {
                     state.staleEditRereadIgnoredPath = editPreApprovalDecision.normalizedPath();
                 }
@@ -196,9 +196,9 @@ public final class ToolCallExecutionStage {
                             effective,
                             pathHint);
             if (requiredSourceEvidence != null) {
-                state.failedCalls++;
-                failuresThisIter++;
-                recordFailure(state, effective.toolName(), pathHint);
+                if (ToolFailureStateAccounting.recordFailure(state, effective, pathHint).failureRecorded()) {
+                    failuresThisIter++;
+                }
                 String diagnosticError = requiredSourceEvidence.message();
                 ToolResult result = ToolResult.fail(ToolError.invalidParams(diagnosticError));
                 emitToolResult(effective.toolName(), result);
@@ -251,9 +251,9 @@ public final class ToolCallExecutionStage {
                             sourceEvidenceCoverageDiagnostic,
                             "SOURCE_EVIDENCE_WRITE_REPAIRED_BEFORE_APPROVAL");
                 } else {
-                    state.failedCalls++;
-                    failuresThisIter++;
-                    recordFailure(state, effective.toolName(), pathHint);
+                    if (ToolFailureStateAccounting.recordFailure(state, effective, pathHint).failureRecorded()) {
+                        failuresThisIter++;
+                    }
                     ToolResult result = ToolResult.fail(ToolError.invalidParams(sourceEvidenceCoverageDiagnostic));
                     emitToolResult(effective.toolName(), result);
                     LocalTurnTraceCapture.recordActionObligation(
@@ -288,9 +288,9 @@ public final class ToolCallExecutionStage {
                     currentTaskContract,
                     pathHint);
             if (appendLineDiagnostic != null) {
-                state.failedCalls++;
-                failuresThisIter++;
-                recordFailure(state, effective.toolName(), pathHint);
+                if (ToolFailureStateAccounting.recordFailure(state, effective, pathHint).failureRecorded()) {
+                    failuresThisIter++;
+                }
                 ToolResult result = ToolResult.fail(ToolError.invalidParams(appendLineDiagnostic));
                 emitToolResult(effective.toolName(), result);
                 LocalTurnTraceCapture.recordActionObligation(
@@ -396,16 +396,13 @@ public final class ToolCallExecutionStage {
                     mutationEvidence));
 
             if (!result.success()) {
-                state.failedCalls++;
-                failuresThisIter++;
-                recordFailure(state, effective.toolName(), pathHint);
-                if (shouldClearSuccessfulReadCallsAfterFailure(
+                if (ToolFailureStateAccounting.recordFailure(
                         state,
                         effective,
                         failureClassification,
                         pathHint,
-                        isEditFile)) {
-                    ReadEvidenceStateAccounting.clearSuccessfulReadCaches(state);
+                        isEditFile).failureRecorded()) {
+                    failuresThisIter++;
                 }
                 if (isEditFile) {
                     String callSig = ToolCallSupport.buildCallSignature(effective);
@@ -461,16 +458,6 @@ public final class ToolCallExecutionStage {
                 unsupportedReadPathsThisIter);
     }
 
-    private static void recordFailure(LoopState state, String toolName, String pathHint) {
-        if (state == null) return;
-        if (toolName != null && !toolName.isBlank()) {
-            state.failureCountsByTool.merge(toolName, 1, Integer::sum);
-        }
-        if (pathHint != null && !pathHint.isBlank()) {
-            state.failureCountsByPath.merge(ToolCallSupport.normalizePath(pathHint), 1, Integer::sum);
-        }
-    }
-
     private static void recordContextLedgerDecision(
             String toolName,
             String pathHint,
@@ -507,26 +494,6 @@ public final class ToolCallExecutionStage {
         return paths;
     }
 
-    private static boolean shouldClearSuccessfulReadCallsAfterFailure(
-            LoopState state,
-            ToolCall effective,
-            ToolExecutionFailureClassifier.Classification failureClassification,
-            String pathHint,
-            boolean isEditFile
-    ) {
-        if (effective == null || !ToolCallSupport.isMutatingTool(effective.toolName())) return false;
-        if (failureClassification.expectedTargetScopeBlock()) {
-            return false;
-        }
-        if (isEditFile
-                && failureClassification.oldStringNotFound()
-                && wasPathReadThisTurn(state, pathHint)
-                && !wasMutatedSinceRead(state, pathHint)) {
-            return false;
-        }
-        return true;
-    }
-
     private static void recordEmptyEditArgumentFailure(LoopState state, String pathHint) {
         if (state == null || pathHint == null || pathHint.isBlank()) return;
         state.emptyEditArgumentFailuresByPath.merge(
@@ -536,12 +503,6 @@ public final class ToolCallExecutionStage {
     private static void recordStaleEditFailure(LoopState state, String pathHint) {
         if (state == null || pathHint == null || pathHint.isBlank()) return;
         state.staleEditFailuresByPath.merge(normalizePath(pathHint), 1, Integer::sum);
-    }
-
-    private static boolean wasPathReadThisTurn(LoopState state, String pathHint) {
-        return state != null
-                && pathHint != null
-                && state.pathsReadThisTurn.contains(normalizePath(pathHint));
     }
 
     private static boolean wasMutatedSinceRead(LoopState state, String pathHint) {
