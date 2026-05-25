@@ -352,17 +352,13 @@ public final class ToolCallExecutionStage {
             ReadEvidenceStateAccounting.recordSuccessfulToolResult(state, effective, pathHint, result);
             dev.talos.runtime.ToolCallLoop.MutationEvidence mutationEvidence =
                     result.success() ? ToolMutationEvidenceFactory.from(effective, state, pathHint) : null;
-            if (ToolCallSupport.isMutatingTool(effective.toolName()) && result.success()) {
-                state.mutationSinceStart = true;
-                state.mutatingToolSuccesses++;
+            ToolMutationStateAccounting.Result mutationState =
+                    ToolMutationStateAccounting.recordSuccessfulMutation(state, effective, pathHint, result);
+            if (mutationState.mutationRecorded()) {
                 mutationsThisIter++;
-                recordMutationSuccess(state, pathHint);
-                String summary = ToolCallSupport.firstSentenceSummary(result.output());
-                if (!summary.isBlank()) {
-                    mutationSummariesThisIter.add("✓ " + summary);
-                    state.pendingMutationSummaries.add("✓ " + summary);
+                if (mutationState.hasMutationSummary()) {
+                    mutationSummariesThisIter.add(mutationState.mutationSummary());
                 }
-                ReadEvidenceStateAccounting.clearSuccessfulReadCaches(state);
             }
 
             boolean denied = !result.success()
@@ -508,13 +504,6 @@ public final class ToolCallExecutionStage {
             }
         }
         return paths;
-    }
-
-    private static void recordMutationSuccess(LoopState state, String pathHint) {
-        if (state == null || pathHint == null || pathHint.isBlank()) return;
-        String path = normalizePath(pathHint);
-        state.pathsMutatedSinceRead.add(path);
-        state.staticWebFullRewriteRequiredTargets.remove(path);
     }
 
     private static boolean shouldClearSuccessfulReadCallsAfterFailure(
