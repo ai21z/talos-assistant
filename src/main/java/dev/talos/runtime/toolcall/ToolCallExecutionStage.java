@@ -14,7 +14,6 @@ import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
-import dev.talos.runtime.workspace.WorkspaceOperationPlanner;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.PathArgumentCanonicalizer;
 import dev.talos.tools.ToolAliasPolicy;
@@ -133,8 +132,9 @@ public final class ToolCallExecutionStage {
                 }
             }
 
-            WorkspaceOperationPlan workspaceOperationPlan = workspaceOperationPlan(effective);
-            String pathHint = pathHint(effective, workspaceOperationPlan);
+            ToolExecutionPathContext pathContext = ToolExecutionPathContext.from(effective);
+            WorkspaceOperationPlan workspaceOperationPlan = pathContext.workspaceOperationPlan();
+            String pathHint = pathContext.pathHint();
             emitProgress(effective.toolName(), "executing", pathHint);
             LOG.debug("  Executing tool: {} (params: {})",
                     effective.toolName(),
@@ -244,8 +244,9 @@ public final class ToolCallExecutionStage {
                                 pathHint);
                 if (repairedSourceEvidenceWrite != null) {
                     effective = repairedSourceEvidenceWrite;
-                    workspaceOperationPlan = workspaceOperationPlan(effective);
-                    pathHint = pathHint(effective, workspaceOperationPlan);
+                    pathContext = ToolExecutionPathContext.from(effective);
+                    workspaceOperationPlan = pathContext.workspaceOperationPlan();
+                    pathHint = pathContext.pathHint();
                     LocalTurnTraceCapture.recordActionObligation(
                             "SOURCE_EVIDENCE_EXACT_COVERAGE",
                             "REPAIRED",
@@ -517,23 +518,6 @@ public final class ToolCallExecutionStage {
             }
         }
         return paths;
-    }
-
-    private static WorkspaceOperationPlan workspaceOperationPlan(ToolCall call) {
-        if (call == null || !WorkspaceOperationPlanner.isWorkspaceOperationTool(call.toolName())) return null;
-        try {
-            return WorkspaceOperationPlanner.checkpointPlan(call).orElse(null);
-        } catch (IllegalArgumentException e) {
-            return null;
-        }
-    }
-
-    private static String pathHint(ToolCall call, WorkspaceOperationPlan workspaceOperationPlan) {
-        if (workspaceOperationPlan != null) {
-            String changedPath = workspaceOperationPlan.primaryChangedPath();
-            if (!changedPath.isBlank()) return changedPath;
-        }
-        return ToolCallSupport.resolvePathHint(call);
     }
 
     private static void recordSuccessfulRead(LoopState state, String pathHint) {
