@@ -13,6 +13,7 @@ import dev.talos.runtime.outcome.StaticVerificationAnswerRenderer;
 import dev.talos.runtime.outcome.TaskOutcome;
 import dev.talos.runtime.outcome.TaskOutcomeWarningBuilder;
 import dev.talos.runtime.outcome.TruthWarning;
+import dev.talos.runtime.outcome.UnsupportedDocumentAnswerGuard;
 import dev.talos.runtime.outcome.UnsupportedDocumentCapabilityOutcome;
 import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.policy.ActionObligationFailureAssessment;
@@ -182,7 +183,7 @@ record ExecutionOutcome(
                 && !commandDenied;
         boolean failedAnyActionObligation = actionObligationFailure.failed() || commandRequiredButNotRun;
 
-        String shaped = AssistantTurnExecutor.overrideUnsupportedDocumentClaimsIfNeeded(
+        String shaped = UnsupportedDocumentAnswerGuard.overrideUnsupportedDocumentClaimsIfNeeded(
                 current, loopResult);
         boolean unsupportedDocumentCapabilityOverride = !Objects.equals(current, shaped);
         current = shaped;
