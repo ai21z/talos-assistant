@@ -15,7 +15,6 @@ import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.ToolSpec;
-import dev.talos.tools.ToolAliasPolicy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -484,14 +483,6 @@ public final class ToolCallRepromptStage {
 
     private static boolean hasStaticRepairContext(LoopState state) {
         return state != null && !RepairPolicy.fullRewriteTargetsFromRepairContext(state.messages).isEmpty();
-    }
-
-    private static String canonicalToolName(String toolName) {
-        ToolAliasPolicy.Decision decision = ToolAliasPolicy.resolve(toolName);
-        if (decision.accepted() && decision.canonicalToolName() != null && !decision.canonicalToolName().isBlank()) {
-            return decision.canonicalToolName();
-        }
-        return toolName == null ? "" : toolName;
     }
 
     private static List<String> remainingFullRewriteRepairTargets(LoopState state) {
