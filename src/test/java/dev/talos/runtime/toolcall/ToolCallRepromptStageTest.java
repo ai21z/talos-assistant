@@ -238,8 +238,11 @@ class ToolCallRepromptStageTest {
     void repromptStageDelegatesTemporaryMessageOverlayLifecycle() throws Exception {
         String source = Files.readString(Path.of(
                 "src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java"));
+        String overlayContinuation = Files.readString(Path.of(
+                "src/main/java/dev/talos/runtime/toolcall/ToolRepromptOverlayContinuation.java"));
 
-        assertTrue(source.contains("ToolRepromptMessageOverlay.apply("), source);
+        assertFalse(source.contains("ToolRepromptMessageOverlay.apply("), source);
+        assertTrue(overlayContinuation.contains("ToolRepromptMessageOverlay.apply("), overlayContinuation);
         assertFalse(source.contains("int staleRepairIndex"), source);
         assertFalse(source.contains("int emptyRepairIndex"), source);
         assertFalse(source.contains("int repairProgressIndex"), source);
@@ -270,10 +273,23 @@ class ToolCallRepromptStageTest {
                 "src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java"));
 
         assertTrue(source.contains("ToolRepromptChatExecutor.execute("), source);
-        assertTrue(source.contains("ToolRepromptChatExecutor.executeResult("), source);
-        assertTrue(source.contains("ToolRepromptChatExecutor.executeRetryResult("), source);
+        assertFalse(source.contains("ToolRepromptChatExecutor.executeResult("), source);
+        assertFalse(source.contains("ToolRepromptChatExecutor.executeRetryResult("), source);
         assertFalse(source.contains("private static boolean chatReprompt("), source);
         assertFalse(source.contains("private static boolean chatRepromptResult("), source);
+    }
+
+    @Test
+    void repromptStageDelegatesGenericOverlayContinuation() throws Exception {
+        String source = Files.readString(Path.of(
+                "src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java"));
+
+        assertTrue(source.contains("ToolRepromptOverlayContinuation.execute("), source);
+        assertFalse(source.contains("ToolRepromptMessageOverlay.apply("), source);
+        assertFalse(source.contains("ToolRepromptChatExecutor.executeResult("), source);
+        assertFalse(source.contains("ToolRepromptChatExecutor.executeRetryResult("), source);
+        assertFalse(source.contains("Thread.sleep(400)"), source);
+        assertFalse(source.contains("catch (EngineException.Transient"), source);
     }
 
     private static dev.talos.runtime.ToolCallLoop.ToolOutcome workspaceOutcome(
