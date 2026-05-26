@@ -5,7 +5,6 @@ import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.failure.FailurePolicy;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.safety.SafeLogFormatter;
-import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.types.ToolSpec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,33 +32,10 @@ public final class ToolCallRepromptStage {
             return false;
         }
 
-        if (outcome.pathPolicyBlockedThisIteration()) {
-            Optional<ExpectedTargetScopeRepairPlanner.Plan> expectedTargetRepair =
-                    ExpectedTargetScopeRepairPlanner.nextPlan(
-                            state,
-                            ToolRepromptRequestBuilder.currentNativeToolSpecs(state),
-                            ToolCallSupport.latestUserRequestIn(state.messages));
-            if (expectedTargetRepair.isPresent()) {
-                ExpectedTargetScopeRepairPlanner.Plan repair = expectedTargetRepair.get();
-                state.failureDecision = FailureDecision.continueLoop();
-                state.setPendingActionObligation(
-                        PendingActionObligation.expectedTargetScopeTargets(repair.expectedTargets()));
-                state.expectedTargetScopeRepairPromptedKeys.add(repair.key());
-                if (repair.exactReplacementRepair() != null) {
-                    LocalTurnTraceCapture.recordRepair("PLANNED", repair.traceDetail());
-                    state.currentText = "";
-                    state.currentNativeCalls = List.of(repair.exactReplacementRepair());
-                    return true;
-                }
-                return ToolRepromptChatExecutor.execute(
-                        state, repair.messages(), repair.tools(), repair.controls(), repair.retryName());
-            }
-            state.currentText = state.failureDecision.shouldStop()
-                    ? ToolFailurePolicyStopAnswer.render(state, state.failureDecision)
-                    : "[Tool loop stopped because a mutating path was blocked by workspace policy before approval.]";
-            state.currentNativeCalls = List.of();
-            LOG.debug("Stopping tool-call loop after pre-approval path policy block; not re-prompting.");
-            return false;
+        Optional<Boolean> pathPolicyBlockedDecision =
+                ToolRepromptPathPolicyBlockedDecision.tryHandle(state, outcome);
+        if (pathPolicyBlockedDecision.isPresent()) {
+            return pathPolicyBlockedDecision.get();
         }
 
         if (state.staleEditRereadIgnoredPath != null && !state.staleEditRereadIgnoredPath.isBlank()) {
