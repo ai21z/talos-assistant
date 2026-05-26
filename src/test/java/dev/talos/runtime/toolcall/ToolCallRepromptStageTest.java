@@ -212,6 +212,15 @@ class ToolCallRepromptStageTest {
         assertFalse(source.contains("static String emptyEditRepairInstruction"), source);
     }
 
+    @Test
+    void repromptStageDoesNotOwnAliasCanonicalization() throws Exception {
+        String source = Files.readString(Path.of(
+                "src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java"));
+
+        assertFalse(source.contains("import dev.talos.tools.ToolAliasPolicy;"), source);
+        assertFalse(source.contains("canonicalToolName("), source);
+    }
+
     private static dev.talos.runtime.ToolCallLoop.ToolOutcome workspaceOutcome(
             String toolName,
             String pathHint,
