@@ -8,8 +8,6 @@ import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.repair.RepairInstruction;
 import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.safety.SafeLogFormatter;
-import dev.talos.runtime.task.TaskContract;
-import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
