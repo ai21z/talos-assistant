@@ -259,10 +259,16 @@ class ToolCallRepromptStageTest {
     void repromptStageDelegatesStaticRepairTargetProgressAccounting() throws Exception {
         String source = Files.readString(Path.of(
                 "src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java"));
+        String selector = Files.readString(Path.of(
+                "src/main/java/dev/talos/runtime/toolcall/ToolRepromptObligationSelector.java"));
 
-        assertTrue(source.contains(
+        assertTrue(source.contains("ToolRepromptObligationSelector.select("), source);
+        assertFalse(source.contains(
                 "StaticRepairTargetProgressAccounting.remainingFullRewriteRepairTargets(state)"), source);
-        assertTrue(source.contains("StaticRepairTargetProgressAccounting.hasStaticRepairContext(state)"), source);
+        assertFalse(source.contains("StaticRepairTargetProgressAccounting.hasStaticRepairContext(state)"), source);
+        assertTrue(selector.contains(
+                "StaticRepairTargetProgressAccounting.remainingFullRewriteRepairTargets(state)"), selector);
+        assertTrue(selector.contains("StaticRepairTargetProgressAccounting.hasStaticRepairContext(state)"), selector);
         assertFalse(source.contains("private static List<String> remainingFullRewriteRepairTargets"), source);
         assertFalse(source.contains("private static boolean hasStaticRepairContext"), source);
     }
