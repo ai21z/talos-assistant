@@ -264,6 +264,18 @@ class ToolCallRepromptStageTest {
         assertFalse(source.contains("private static boolean hasStaticRepairContext"), source);
     }
 
+    @Test
+    void repromptStageDelegatesNormalChatRepromptExecution() throws Exception {
+        String source = Files.readString(Path.of(
+                "src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java"));
+
+        assertTrue(source.contains("ToolRepromptChatExecutor.execute("), source);
+        assertTrue(source.contains("ToolRepromptChatExecutor.executeResult("), source);
+        assertTrue(source.contains("ToolRepromptChatExecutor.executeRetryResult("), source);
+        assertFalse(source.contains("private static boolean chatReprompt("), source);
+        assertFalse(source.contains("private static boolean chatRepromptResult("), source);
+    }
+
     private static dev.talos.runtime.ToolCallLoop.ToolOutcome workspaceOutcome(
             String toolName,
             String pathHint,
