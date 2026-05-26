@@ -110,18 +110,22 @@ class TargetReadbackCompactRepairPlannerTest {
     }
 
     @Test
-    void repromptStageDelegatesTargetReadbackCompactRepairPlanningToOwner() throws Exception {
-        String source = Files.readString(Path.of(
+    void targetReadbackDecisionDelegatesTargetReadbackCompactRepairPlanningToOwner() throws Exception {
+        String stageSource = Files.readString(Path.of(
                 "src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java"));
+        String decisionSource = Files.readString(Path.of(
+                "src/main/java/dev/talos/runtime/toolcall/ToolRepromptTargetReadbackRepairDecision.java"));
 
-        assertTrue(source.contains("TargetReadbackCompactRepairPlanner.nextAppendLinePlan"), source);
-        assertTrue(source.contains("TargetReadbackCompactRepairPlanner.nextOldStringMissPlan"), source);
-        assertFalse(source.contains("private static Optional<AppendLineRepair> "
-                + "nextAppendLineCompactRepair"), source);
-        assertFalse(source.contains("private static Optional<OldStringMissRepair> "
-                + "nextOldStringMissCompactRepair"), source);
-        assertFalse(source.contains("private static List<ChatMessage> appendLineRepairMessages"), source);
-        assertFalse(source.contains("private static List<ChatMessage> oldStringMissRepairMessages"), source);
+        assertFalse(stageSource.contains("TargetReadbackCompactRepairPlanner.nextAppendLinePlan"), stageSource);
+        assertFalse(stageSource.contains("TargetReadbackCompactRepairPlanner.nextOldStringMissPlan"), stageSource);
+        assertTrue(decisionSource.contains("TargetReadbackCompactRepairPlanner.nextAppendLinePlan"), decisionSource);
+        assertTrue(decisionSource.contains("TargetReadbackCompactRepairPlanner.nextOldStringMissPlan"), decisionSource);
+        assertFalse(stageSource.contains("private static Optional<AppendLineRepair> "
+                + "nextAppendLineCompactRepair"), stageSource);
+        assertFalse(stageSource.contains("private static Optional<OldStringMissRepair> "
+                + "nextOldStringMissCompactRepair"), stageSource);
+        assertFalse(stageSource.contains("private static List<ChatMessage> appendLineRepairMessages"), stageSource);
+        assertFalse(stageSource.contains("private static List<ChatMessage> oldStringMissRepairMessages"), stageSource);
     }
 
     private LoopState loopState(String request) {
