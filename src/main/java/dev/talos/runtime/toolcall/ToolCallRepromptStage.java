@@ -1,6 +1,5 @@
 package dev.talos.runtime.toolcall;
 
-import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.failure.FailureAction;
 import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.failure.FailurePolicy;
@@ -9,7 +8,6 @@ import dev.talos.safety.SafeLogFormatter;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
-import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.ToolSpec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,7 +54,8 @@ public final class ToolCallRepromptStage {
                     state.currentNativeCalls = List.of(repair.exactReplacementRepair());
                     return true;
                 }
-                return chatReprompt(state, repair.messages(), repair.tools(), repair.controls(), repair.retryName());
+                return ToolRepromptChatExecutor.execute(
+                        state, repair.messages(), repair.tools(), repair.controls(), repair.retryName());
             }
             state.currentText = state.failureDecision.shouldStop()
                     ? ToolFailurePolicyStopAnswer.render(state, state.failureDecision)
@@ -127,7 +126,8 @@ public final class ToolCallRepromptStage {
                         LOG.debug("Continuing static web creation after verification found missing target(s): {}",
                                 plan.missingTargets());
                     }
-                    return chatReprompt(state, plan.messages(), plan.tools(), plan.controls(), plan.retryName());
+                    return ToolRepromptChatExecutor.execute(
+                            state, plan.messages(), plan.tools(), plan.controls(), plan.retryName());
                 }
             }
             if (remainingRepairTargets.isEmpty() && remainingExpectedTargets.isEmpty()) {
@@ -190,7 +190,7 @@ public final class ToolCallRepromptStage {
             SourceEvidenceExactRepairPlanner.Plan repair = sourceEvidenceRepair.get();
             state.setPendingActionObligation(PendingActionObligation.expectedTargets(List.of(repair.path())));
             state.sourceEvidenceExactRepairPromptedKeys.add(repair.key());
-            return chatReprompt(state, repair.messages(), repair.tools(), repair.controls(),
+            return ToolRepromptChatExecutor.execute(state, repair.messages(), repair.tools(), repair.controls(),
                     "source-evidence exact compact repair");
         }
 
@@ -204,7 +204,8 @@ public final class ToolCallRepromptStage {
             state.setPendingActionObligation(
                     PendingActionObligation.appendLineTargets(List.of(repair.path())));
             state.appendLineRepairPromptedPaths.add(repair.promptedPathKey());
-            return chatReprompt(state, repair.messages(), repair.tools(), repair.controls(), repair.retryName());
+            return ToolRepromptChatExecutor.execute(
+                    state, repair.messages(), repair.tools(), repair.controls(), repair.retryName());
         }
 
         Optional<TargetReadbackCompactRepairPlanner.Plan> oldStringMissRepair =
@@ -217,7 +218,8 @@ public final class ToolCallRepromptStage {
             state.setPendingActionObligation(
                     PendingActionObligation.oldStringMissTargets(List.of(repair.path())));
             state.oldStringMissRepairPromptedPaths.add(repair.promptedPathKey());
-            return chatReprompt(state, repair.messages(), repair.tools(), repair.controls(), repair.retryName());
+            return ToolRepromptChatExecutor.execute(
+                    state, repair.messages(), repair.tools(), repair.controls(), repair.retryName());
         }
 
         List<String> remainingRepairTargets =
@@ -255,8 +257,12 @@ public final class ToolCallRepromptStage {
                     staticRepairObligationActive,
                     remainingRepairTargets,
                     userTask));
-            if (!chatRepromptResult(state, requestMessages, repromptToolSpecs,
-                    ToolRepromptRequestBuilder.controls(state))) {
+            if (!ToolRepromptChatExecutor.executeResult(
+                    state,
+                    requestMessages,
+                    repromptToolSpecs,
+                    ToolRepromptRequestBuilder.controls(state),
+                    "(no answer from model after tool execution)")) {
                 return false;
             }
             return true;
@@ -279,21 +285,12 @@ public final class ToolCallRepromptStage {
                     state.iterations, SafeLogFormatter.throwableMessage(tr));
             try {
                 Thread.sleep(400);
-                LlmClient.StreamResult retryResult =
-                        state.ctx.llm().chatFull(
-                                requestMessages,
-                                repromptToolSpecs,
-                                ToolRepromptRequestBuilder.controls(state));
-                state.currentText = retryResult.text();
-                state.currentNativeCalls = retryResult.hasToolCalls()
-                        ? new ArrayList<>(retryResult.toolCalls()) : List.of();
-                if (state.currentText == null) state.currentText = "";
-                if (state.currentText.isEmpty() && state.currentNativeCalls.isEmpty()) {
-                    if (!state.pendingMutationSummaries.isEmpty()) {
-                        state.currentText = String.join("\n", state.pendingMutationSummaries);
-                    } else {
-                        state.currentText = "(no answer from model after retry)";
-                    }
+                if (!ToolRepromptChatExecutor.executeRetryResult(
+                        state,
+                        requestMessages,
+                        repromptToolSpecs,
+                        ToolRepromptRequestBuilder.controls(state),
+                        "(no answer from model after retry)")) {
                     return false;
                 }
                 return true;
@@ -323,74 +320,6 @@ public final class ToolCallRepromptStage {
             state.currentNativeCalls = List.of();
             return false;
         }
-    }
-
-    private static boolean chatReprompt(
-            LoopState state,
-            List<ChatMessage> requestMessages,
-            List<ToolSpec> repromptToolSpecs,
-            ChatRequestControls controls,
-            String retryName
-    ) {
-        try {
-            return chatRepromptResult(state, requestMessages, repromptToolSpecs, controls);
-        } catch (EngineException.ContextBudgetExceeded budget) {
-            return ToolRepromptContextBudgetHandler.handle(state, budget, retryName);
-        } catch (EngineException.ConnectionFailed cf) {
-            LOG.warn("Ollama not reachable during {}: {}",
-                    SafeLogFormatter.value(retryName), SafeLogFormatter.throwableMessage(cf));
-            state.currentText = "[Ollama not reachable — tool loop aborted. " + cf.guidance() + "]";
-            state.currentNativeCalls = List.of();
-            return false;
-        } catch (EngineException.ModelNotFound mnf) {
-            LOG.warn("Model not found during {}: {}",
-                    SafeLogFormatter.value(retryName), SafeLogFormatter.value(mnf.model()));
-            state.currentText = "[Model '" + mnf.model() + "' not found — tool loop aborted. "
-                    + mnf.guidance() + "]";
-            state.currentNativeCalls = List.of();
-            return false;
-        } catch (EngineException ee) {
-            LOG.warn("Engine error during {}: {}",
-                    SafeLogFormatter.value(retryName), SafeLogFormatter.throwableMessage(ee));
-            state.currentText = "[Engine error during tool loop: " + ee.getMessage() + "]";
-            state.currentNativeCalls = List.of();
-            return false;
-        } catch (Exception e) {
-            LOG.warn("LLM call failed during {}: {}",
-                    SafeLogFormatter.value(retryName), SafeLogFormatter.throwableMessage(e));
-            state.currentText = "(error during follow-up LLM call: " + e.getMessage() + ")";
-            state.currentNativeCalls = List.of();
-            return false;
-        }
-    }
-
-    private static boolean chatRepromptResult(
-            LoopState state,
-            List<ChatMessage> requestMessages,
-            List<ToolSpec> repromptToolSpecs,
-            ChatRequestControls controls
-    ) {
-        LlmClient.StreamResult repromptResult =
-                state.ctx.llm().chatFull(
-                        requestMessages,
-                        repromptToolSpecs,
-                        controls);
-        state.currentText = repromptResult.text();
-        state.currentNativeCalls = repromptResult.hasToolCalls()
-                ? new ArrayList<>(repromptResult.toolCalls()) : List.of();
-        if (state.currentText == null) state.currentText = "";
-        if (state.currentText.isEmpty() && state.currentNativeCalls.isEmpty()) {
-            if (state.failPendingActionObligationAfterNoExecutableToolCalls()) {
-                return false;
-            }
-            if (!state.pendingMutationSummaries.isEmpty()) {
-                state.currentText = String.join("\n", state.pendingMutationSummaries);
-            } else {
-                state.currentText = "(no answer from model after tool execution)";
-            }
-            return false;
-        }
-        return true;
     }
 
     public boolean hitIterationLimit(LoopState state) {
