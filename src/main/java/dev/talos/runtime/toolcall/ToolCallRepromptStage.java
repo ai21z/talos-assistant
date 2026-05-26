@@ -14,7 +14,6 @@ import dev.talos.runtime.policy.ResponseObligationVerifier;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
-import dev.talos.runtime.task.TaskType;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.workspace.WorkspaceOperationIntent;
 import dev.talos.spi.EngineException;
@@ -27,7 +26,6 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 
@@ -72,7 +70,7 @@ public final class ToolCallRepromptStage {
                 return chatReprompt(state, repair.messages(), repair.tools(), repair.controls(), repair.retryName());
             }
             state.currentText = state.failureDecision.shouldStop()
-                    ? failurePolicyStopMessage(state, state.failureDecision)
+                    ? ToolFailurePolicyStopAnswer.render(state, state.failureDecision)
                     : "[Tool loop stopped because a mutating path was blocked by workspace policy before approval.]";
             state.currentNativeCalls = List.of();
             LOG.debug("Stopping tool-call loop after pre-approval path policy block; not re-prompting.");
@@ -86,7 +84,7 @@ public final class ToolCallRepromptStage {
                             + state.staleEditRereadIgnoredPath
                             + "` before rereading the file after a same-turn mutation changed it. "
                             + "No approval was requested for the stale retry and no additional file change was made.");
-            state.currentText = failurePolicyStopMessage(state, state.failureDecision);
+            state.currentText = ToolFailurePolicyStopAnswer.render(state, state.failureDecision);
             state.currentNativeCalls = List.of();
             LOG.debug("Stopping tool-call loop after stale edit retry ignored reread requirement for {}",
                     SafeLogFormatter.value(state.staleEditRereadIgnoredPath));
@@ -212,7 +210,7 @@ public final class ToolCallRepromptStage {
                 .afterIteration(state, outcome);
         if (failureDecision.shouldStop()) {
             state.failureDecision = failureDecision;
-            state.currentText = failurePolicyStopMessage(state, failureDecision);
+            state.currentText = ToolFailurePolicyStopAnswer.render(state, failureDecision);
             state.currentNativeCalls = List.of();
             LOG.debug("Stopping tool-call loop by failure policy: {}", failureDecision.reason());
             return false;
@@ -583,35 +581,6 @@ public final class ToolCallRepromptStage {
 
     private static boolean hasStaticRepairContext(LoopState state) {
         return state != null && !RepairPolicy.fullRewriteTargetsFromRepairContext(state.messages).isEmpty();
-    }
-
-    private static String failurePolicyStopMessage(LoopState state, FailureDecision decision) {
-        String reason = decision == null || decision.reason().isBlank()
-                ? "repeated tool failures"
-                : decision.reason();
-        String message = "[Tool loop stopped by failure policy: "
-                + reason
-                + " Review the latest tool errors before retrying.]";
-        String context = failurePolicyRuntimeContext(state, reason);
-        if (context.isBlank()) return message;
-        return message + "\n\n" + context;
-    }
-
-    private static String failurePolicyRuntimeContext(LoopState state, String reason) {
-        if (state == null || reason == null || !reason.toLowerCase(java.util.Locale.ROOT).contains("no-progress")) {
-            return "";
-        }
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
-        if (contract == null || contract.type() == TaskType.UNKNOWN) return "";
-        StringBuilder out = new StringBuilder("Runtime context:\n");
-        out.append("- task contract: ").append(contract.type()).append('\n');
-        out.append("- mutationAllowed=").append(contract.mutationAllowed()).append('\n');
-        out.append("- successful mutations: ").append(state.mutatingToolSuccesses).append('\n');
-        if (!contract.mutationAllowed()) {
-            out.append("- mutating tools were not available for this turn's contract; ")
-                    .append("use an explicit create/edit/fix request if you intend a workspace change.\n");
-        }
-        return out.toString().stripTrailing();
     }
 
     private static String canonicalToolName(String toolName) {
