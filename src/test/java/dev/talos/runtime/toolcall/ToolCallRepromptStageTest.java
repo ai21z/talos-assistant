@@ -252,6 +252,18 @@ class ToolCallRepromptStageTest {
         assertFalse(source.contains("startsWith(\"[Current task\")"), source);
     }
 
+    @Test
+    void repromptStageDelegatesStaticRepairTargetProgressAccounting() throws Exception {
+        String source = Files.readString(Path.of(
+                "src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java"));
+
+        assertTrue(source.contains(
+                "StaticRepairTargetProgressAccounting.remainingFullRewriteRepairTargets(state)"), source);
+        assertTrue(source.contains("StaticRepairTargetProgressAccounting.hasStaticRepairContext(state)"), source);
+        assertFalse(source.contains("private static List<String> remainingFullRewriteRepairTargets"), source);
+        assertFalse(source.contains("private static boolean hasStaticRepairContext"), source);
+    }
+
     private static dev.talos.runtime.ToolCallLoop.ToolOutcome workspaceOutcome(
             String toolName,
             String pathHint,

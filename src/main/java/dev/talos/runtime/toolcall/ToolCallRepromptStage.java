@@ -5,7 +5,6 @@ import dev.talos.runtime.failure.FailureAction;
 import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.failure.FailurePolicy;
 import dev.talos.runtime.ToolCallParser;
-import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.EngineException;
@@ -18,7 +17,6 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 
 @SuppressWarnings("resource") // LoopState.ctx owns the shared LlmClient for the active REPL session.
 public final class ToolCallRepromptStage {
@@ -111,7 +109,8 @@ public final class ToolCallRepromptStage {
                 LOG.debug("Stopping static web repair after verifier-passed mutation before expected-target progress.");
                 return false;
             }
-            List<String> remainingRepairTargets = remainingFullRewriteRepairTargets(state);
+            List<String> remainingRepairTargets =
+                    StaticRepairTargetProgressAccounting.remainingFullRewriteRepairTargets(state);
             List<String> remainingExpectedTargets =
                     ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state);
             if (remainingRepairTargets.isEmpty() && remainingExpectedTargets.isEmpty()) {
@@ -221,12 +220,13 @@ public final class ToolCallRepromptStage {
             return chatReprompt(state, repair.messages(), repair.tools(), repair.controls(), repair.retryName());
         }
 
-        List<String> remainingRepairTargets = remainingFullRewriteRepairTargets(state);
+        List<String> remainingRepairTargets =
+                StaticRepairTargetProgressAccounting.remainingFullRewriteRepairTargets(state);
         List<String> remainingExpectedTargets =
                 ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state);
         boolean staticRepairObligationActive = !remainingRepairTargets.isEmpty()
                 && (!state.staticWebFullRewriteRequiredTargets.isEmpty()
-                || hasStaticRepairContext(state)
+                || StaticRepairTargetProgressAccounting.hasStaticRepairContext(state)
                 || state.hasPendingActionObligation());
         boolean expectedTargetObligationActive = !remainingExpectedTargets.isEmpty()
                 && (outcome.mutationsThisIteration() > 0 || state.hasPendingActionObligation());
@@ -396,30 +396,6 @@ public final class ToolCallRepromptStage {
     public boolean hitIterationLimit(LoopState state) {
         return state.iterations >= state.maxIterations
                 && (!state.currentNativeCalls.isEmpty() || ToolCallParser.containsToolCalls(state.currentText));
-    }
-
-    private static boolean hasStaticRepairContext(LoopState state) {
-        return state != null && !RepairPolicy.fullRewriteTargetsFromRepairContext(state.messages).isEmpty();
-    }
-
-    private static List<String> remainingFullRewriteRepairTargets(LoopState state) {
-        if (state == null) return List.of();
-        Set<String> required = new java.util.LinkedHashSet<>(
-                RepairPolicy.fullRewriteTargetsFromRepairContext(state.messages));
-        required.addAll(state.staticWebFullRewriteRequiredTargets);
-        if (required.isEmpty()) return List.of();
-        Set<String> successfullyMutated = new java.util.HashSet<>();
-        for (dev.talos.runtime.ToolCallLoop.ToolOutcome outcome : state.toolOutcomes) {
-            if (outcome == null || !outcome.success() || !outcome.mutating()) continue;
-            String path = ToolCallSupport.normalizePath(outcome.pathHint());
-            if (!path.isBlank()) successfullyMutated.add(path);
-        }
-        return required.stream()
-                .map(ToolCallSupport::normalizePath)
-                .filter(path -> !path.isBlank())
-                .filter(path -> !successfullyMutated.contains(path))
-                .sorted()
-                .toList();
     }
 
 }
