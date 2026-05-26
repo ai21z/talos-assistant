@@ -201,15 +201,19 @@ class ToolCallRepromptStageTest {
 
     @Test
     void repromptStageDoesNotExposeRepairPolicyWrappers() throws Exception {
-        String source = Files.readString(Path.of(
+        String stageSource = Files.readString(Path.of(
                 "src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java"));
+        String overlaySource = Files.readString(Path.of(
+                "src/main/java/dev/talos/runtime/toolcall/ToolRepromptMessageOverlay.java"));
 
-        assertTrue(source.contains("RepairPolicy.nextStaleEditRepair(state)"), source);
-        assertTrue(source.contains("RepairPolicy.nextEmptyEditRepair(state)"), source);
-        assertFalse(source.contains("static Optional<RepairInstruction> nextStaleEditRepair"), source);
-        assertFalse(source.contains("static String staleEditRepairInstruction"), source);
-        assertFalse(source.contains("static Optional<RepairInstruction> nextEmptyEditRepair"), source);
-        assertFalse(source.contains("static String emptyEditRepairInstruction"), source);
+        assertFalse(stageSource.contains("RepairPolicy.nextStaleEditRepair(state)"), stageSource);
+        assertFalse(stageSource.contains("RepairPolicy.nextEmptyEditRepair(state)"), stageSource);
+        assertTrue(overlaySource.contains("RepairPolicy.nextStaleEditRepair(state)"), overlaySource);
+        assertTrue(overlaySource.contains("RepairPolicy.nextEmptyEditRepair(state)"), overlaySource);
+        assertFalse(stageSource.contains("static Optional<RepairInstruction> nextStaleEditRepair"), stageSource);
+        assertFalse(stageSource.contains("static String staleEditRepairInstruction"), stageSource);
+        assertFalse(stageSource.contains("static Optional<RepairInstruction> nextEmptyEditRepair"), stageSource);
+        assertFalse(stageSource.contains("static String emptyEditRepairInstruction"), stageSource);
     }
 
     @Test
@@ -228,6 +232,24 @@ class ToolCallRepromptStageTest {
 
         assertFalse(source.contains("import dev.talos.runtime.task.TaskContract;"), source);
         assertFalse(source.contains("import dev.talos.runtime.task.TaskContractResolver;"), source);
+    }
+
+    @Test
+    void repromptStageDelegatesTemporaryMessageOverlayLifecycle() throws Exception {
+        String source = Files.readString(Path.of(
+                "src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java"));
+
+        assertTrue(source.contains("ToolRepromptMessageOverlay.apply("), source);
+        assertFalse(source.contains("int staleRepairIndex"), source);
+        assertFalse(source.contains("int emptyRepairIndex"), source);
+        assertFalse(source.contains("int repairProgressIndex"), source);
+        assertFalse(source.contains("int expectedProgressIndex"), source);
+        assertFalse(source.contains("int anchorIndex"), source);
+        assertFalse(source.contains("startsWith(\"[Stale edit repair required]\")"), source);
+        assertFalse(source.contains("startsWith(\"[Edit repair required]\")"), source);
+        assertFalse(source.contains("startsWith(\"[Static repair progress]\")"), source);
+        assertFalse(source.contains("startsWith(\"[Expected target progress]\")"), source);
+        assertFalse(source.contains("startsWith(\"[Current task\")"), source);
     }
 
     private static dev.talos.runtime.ToolCallLoop.ToolOutcome workspaceOutcome(
