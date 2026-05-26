@@ -38,6 +38,14 @@ post-mutation continuation decisions, and static repair target calculation.
 The RED ownership test failed before implementation because
 `ToolRepromptMessageOverlay` did not exist.
 
+PR review then identified that the stage's manual transient retry could lose
+temporary overlay messages if the request message list still aliased
+`state.messages` after overlay cleanup. The regression test was tightened to
+exhaust `LlmClient`'s internal transient retry budget first, then prove the
+stage-level retry still receives `[Expected target progress]` and the current
+task anchor. The stage now snapshots request messages after applying the
+overlay.
+
 The focused tests cover:
 
 - stale and empty repair message insertion and prompted-path side effects;
