@@ -27,7 +27,6 @@ import java.util.Set;
 
 public final class ToolCallExecutionStage {
     private static final Logger LOG = LoggerFactory.getLogger(ToolCallExecutionStage.class);
-    private static final int LIST_DIR_EVIDENCE_SUMMARY_CHARS = 4_000;
 
     /**
      * Outcome of one tool-call iteration.
@@ -159,9 +158,8 @@ public final class ToolCallExecutionStage {
                 String diagnostic = "[tool_result: " + effective.toolName() + "]\n"
                         + "[error] " + diagnosticError
                         + "\n[/tool_result]";
-                state.toolOutcomes.add(new dev.talos.runtime.ToolCallLoop.ToolOutcome(
-                        effective.toolName(), pathHint, false, true, false, "", diagnosticError,
-                        null, ToolError.INVALID_PARAMS));
+                state.toolOutcomes.add(ToolOutcomeFactory.failedEditPreApproval(
+                        effective, pathHint, diagnosticError));
                 appendResultMessage(state, parsed.useNativePath(), i, diagnostic);
                 logEditPreApprovalBlock(editPreApprovalDecision, pathHint);
                 continue;
@@ -201,16 +199,10 @@ public final class ToolCallExecutionStage {
                         "FAILED",
                         diagnosticError,
                         "SOURCE_EVIDENCE_WRITE_BEFORE_READ");
-                state.toolOutcomes.add(new dev.talos.runtime.ToolCallLoop.ToolOutcome(
-                        effective.toolName(),
+                state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionMutation(
+                        effective,
                         pathHint,
-                        false,
-                        true,
-                        false,
-                        "",
                         diagnosticError,
-                        null,
-                        ToolError.INVALID_PARAMS,
                         workspaceOperationPlan));
                 appendResultMessage(state, parsed.useNativePath(), i,
                         ToolCallSupport.formatToolResult(effective, result));
@@ -255,16 +247,10 @@ public final class ToolCallExecutionStage {
                             "FAILED",
                             sourceEvidenceCoverageDiagnostic,
                             "SOURCE_EVIDENCE_WRITE_MISSING_EXACT_EVIDENCE");
-                    state.toolOutcomes.add(new dev.talos.runtime.ToolCallLoop.ToolOutcome(
-                            effective.toolName(),
+                    state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionMutation(
+                            effective,
                             pathHint,
-                            false,
-                            true,
-                            false,
-                            "",
                             sourceEvidenceCoverageDiagnostic,
-                            null,
-                            ToolError.INVALID_PARAMS,
                             workspaceOperationPlan));
                     appendResultMessage(state, parsed.useNativePath(), i,
                             ToolCallSupport.formatToolResult(effective, result));
@@ -292,16 +278,10 @@ public final class ToolCallExecutionStage {
                         "FAILED",
                         appendLineDiagnostic,
                         "APPEND_LINE_WRITE_BEFORE_VALID_PRESERVATION");
-                state.toolOutcomes.add(new dev.talos.runtime.ToolCallLoop.ToolOutcome(
-                        effective.toolName(),
+                state.toolOutcomes.add(ToolOutcomeFactory.failedPreExecutionMutation(
+                        effective,
                         pathHint,
-                        false,
-                        true,
-                        false,
-                        "",
                         appendLineDiagnostic,
-                        null,
-                        ToolError.INVALID_PARAMS,
                         workspaceOperationPlan));
                 appendResultMessage(state, parsed.useNativePath(), i,
                         ToolCallSupport.formatToolResult(effective, result));
@@ -371,16 +351,11 @@ public final class ToolCallExecutionStage {
             if (failureSignals.approvalDenied()) {
                 approvalDeniedThisIter = true;
             }
-            state.toolOutcomes.add(new dev.talos.runtime.ToolCallLoop.ToolOutcome(
-                    effective.toolName(),
+            state.toolOutcomes.add(ToolOutcomeFactory.executed(
+                    effective,
                     pathHint,
-                    result.success(),
-                    ToolCallSupport.isMutatingTool(effective.toolName()),
-                    failureClassification.denied(),
-                    result.success() ? toolOutcomeSummary(effective.toolName(), result.output()) : "",
-                    result.success() ? "" : result.errorMessage(),
-                    result.verification(),
-                    result.error() == null ? "" : result.error().code(),
+                    result,
+                    failureClassification,
                     workspaceOperationPlan,
                     mutationEvidence));
 
@@ -441,18 +416,6 @@ public final class ToolCallExecutionStage {
     ) {
         if (candidateResult == null) return;
         ContextLedgerCapture.record(ContextItem.fromToolResult(toolName, pathHint, candidateResult), decision);
-    }
-
-    private static String toolOutcomeSummary(String toolName, String output) {
-        if (!"talos.list_dir".equals(toolName)) {
-            return ToolCallSupport.firstSentenceSummary(output);
-        }
-        String value = output == null ? "" : output.strip();
-        if (value.length() <= LIST_DIR_EVIDENCE_SUMMARY_CHARS) {
-            return value;
-        }
-        return value.substring(0, LIST_DIR_EVIDENCE_SUMMARY_CHARS)
-                + "\n... (tool outcome summary truncated)";
     }
 
     private static Set<String> staleRereadRequiredPaths(LoopState state) {
