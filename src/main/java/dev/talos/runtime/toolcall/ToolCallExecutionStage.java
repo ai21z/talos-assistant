@@ -2,7 +2,6 @@ package dev.talos.runtime.toolcall;
 
 import dev.talos.runtime.TurnProcessor;
 import dev.talos.runtime.TurnTaskContractCapture;
-import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.core.context.ContextDecision;
 import dev.talos.core.context.ContextItem;
 import dev.talos.core.context.ContextLedgerCapture;
@@ -10,7 +9,6 @@ import dev.talos.runtime.policy.ProtectedPathAliasNormalizer;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.runtime.task.TaskContract;
-import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.spi.types.ChatMessage;
@@ -155,12 +153,8 @@ public final class ToolCallExecutionStage {
                 if (ToolFailureStateAccounting.recordFailure(state, effective, pathHint).failureRecorded()) {
                     failuresThisIter++;
                 }
-                if (editPreApprovalDecision.kind() == EditFilePreApprovalGuard.Kind.STALE_REREAD_REQUIRED) {
-                    state.staleEditRereadIgnoredPath = editPreApprovalDecision.normalizedPath();
-                }
-                if (editPreApprovalDecision.emptyEditArguments()) {
-                    recordEmptyEditArgumentFailure(state, pathHint);
-                }
+                EditFailureRepairStateAccounting.recordPreApprovalDecision(
+                        state, editPreApprovalDecision, pathHint);
                 String diagnosticError = editPreApprovalDecision.diagnostic();
                 String diagnostic = "[tool_result: " + effective.toolName() + "]\n"
                         + "[error] " + diagnosticError
@@ -405,29 +399,15 @@ public final class ToolCallExecutionStage {
                     failuresThisIter++;
                 }
                 if (isEditFile) {
-                    String callSig = ToolCallSupport.buildCallSignature(effective);
-                    state.failedCallSignatures.add(callSig);
-                    if (failureClassification.oldStringNotFound() && wasMutatedSinceRead(state, pathHint)) {
-                        recordStaleEditFailure(state, pathHint);
-                    }
-                    if (failureClassification.oldStringNotFound()
-                            && shouldRecoverStaticWebEditFailureWithFullRewrite(state, pathHint)) {
-                        recordStaticWebFullRewriteRequired(state, pathHint);
-                    }
-                    if (ToolCallSupport.hasEmptyEditArguments(effective)) {
-                        recordEmptyEditArgumentFailure(state, pathHint);
-                    }
-                    if (!strict && pathHint != null) {
-                        int failCount = state.editFailuresByPath.merge(
-                                ToolCallSupport.normalizePath(pathHint), 1, Integer::sum);
-                        if (failCount >= 2) {
-                            state.cushionFiresE1Suggestion++;
-                            result = ToolResult.fail(dev.talos.tools.ToolError.invalidParams(
-                                    result.errorMessage()
-                                            + "\nSuggestion: edit_file has failed on this file multiple times. "
-                                            + "Consider using talos.write_file with the complete updated file content instead."));
-                        }
-                    }
+                    EditFailureRepairStateAccounting.Result editFailureState =
+                            EditFailureRepairStateAccounting.recordFailedEditResult(
+                                    state,
+                                    effective,
+                                    failureClassification,
+                                    pathHint,
+                                    result,
+                                    strict);
+                    result = editFailureState.toolResult();
                 }
             }
 
@@ -494,75 +474,11 @@ public final class ToolCallExecutionStage {
         return paths;
     }
 
-    private static void recordEmptyEditArgumentFailure(LoopState state, String pathHint) {
-        if (state == null || pathHint == null || pathHint.isBlank()) return;
-        state.emptyEditArgumentFailuresByPath.merge(
-                normalizePath(pathHint), 1, Integer::sum);
-    }
-
-    private static void recordStaleEditFailure(LoopState state, String pathHint) {
-        if (state == null || pathHint == null || pathHint.isBlank()) return;
-        state.staleEditFailuresByPath.merge(normalizePath(pathHint), 1, Integer::sum);
-    }
-
-    private static boolean wasMutatedSinceRead(LoopState state, String pathHint) {
-        return state != null
-                && pathHint != null
-                && state.pathsMutatedSinceRead.contains(normalizePath(pathHint));
-    }
-
     private static Set<String> fullRewriteRepairTargets(LoopState state) {
         if (state == null) return Set.of();
         Set<String> targets = new HashSet<>(RepairPolicy.fullRewriteTargetsFromRepairContext(state.messages));
         targets.addAll(state.staticWebFullRewriteRequiredTargets);
         return Set.copyOf(targets);
-    }
-
-    private static boolean shouldRecoverStaticWebEditFailureWithFullRewrite(
-            LoopState state,
-            String pathHint
-    ) {
-        if (state == null || pathHint == null || pathHint.isBlank()) return false;
-        String path = normalizePath(pathHint);
-        if (!StaticWebCapabilityProfile.isSmallWebFile(path)) return false;
-        if (!state.pathsReadThisTurn.contains(path)) return false;
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
-        if (contract == null || !contract.mutationAllowed() || !contract.verificationRequired()) {
-            return false;
-        }
-        String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
-        if (!looksLikeStaticWebWork(userTask)) return false;
-        if (contract.expectedTargets().isEmpty()) return true;
-        return contract.expectedTargets().stream()
-                .map(ToolCallSupport::normalizePath)
-                .anyMatch(StaticWebCapabilityProfile::isSmallWebFile);
-    }
-
-    private static boolean looksLikeStaticWebWork(String userTask) {
-        if (userTask == null || userTask.isBlank()) return false;
-        String lower = userTask.toLowerCase(java.util.Locale.ROOT);
-        return lower.contains("static web")
-                || lower.contains("browser")
-                || lower.contains("button")
-                || lower.contains("html")
-                || lower.contains("javascript")
-                || lower.contains("script.js")
-                || lower.contains("styles.css");
-    }
-
-    private static void recordStaticWebFullRewriteRequired(LoopState state, String pathHint) {
-        String path = normalizePath(pathHint);
-        if (path.isBlank()) return;
-        if (state.staticWebFullRewriteRequiredTargets.add(path)) {
-            LocalTurnTraceCapture.recordRepair(
-                    "PLANNED",
-                    "static-web-edit-rewrite target=" + path
-                            + " reason=old_string-not-found-after-read");
-        }
-    }
-
-    private static String normalizePath(String pathHint) {
-        return ToolCallSupport.normalizePath(pathHint == null ? "" : pathHint);
     }
 
     private static void logEditPreApprovalBlock(
