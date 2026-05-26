@@ -105,16 +105,19 @@ class ExpectedTargetScopeRepairPlannerTest {
     }
 
     @Test
-    void repromptStageDelegatesExpectedTargetScopeRepairPlanningToOwner() throws Exception {
-        String source = Files.readString(Path.of(
+    void pathPolicyDecisionDelegatesExpectedTargetScopeRepairPlanningToOwner() throws Exception {
+        String stageSource = Files.readString(Path.of(
                 "src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java"));
+        String decisionSource = Files.readString(Path.of(
+                "src/main/java/dev/talos/runtime/toolcall/ToolRepromptPathPolicyBlockedDecision.java"));
 
-        assertTrue(source.contains("ExpectedTargetScopeRepairPlanner.nextPlan"), source);
-        assertFalse(source.contains("private static Optional<ExpectedTargetRepair> "
-                + "nextExpectedTargetScopeRepair"), source);
-        assertFalse(source.contains("private static List<ChatMessage> expectedTargetRepairMessages"), source);
-        assertFalse(source.contains("private static ChatMessage.NativeToolCall "
-                + "exactExpectedTargetReplacementRepairCall"), source);
+        assertFalse(stageSource.contains("ExpectedTargetScopeRepairPlanner.nextPlan"), stageSource);
+        assertTrue(decisionSource.contains("ExpectedTargetScopeRepairPlanner.nextPlan"), decisionSource);
+        assertFalse(stageSource.contains("private static Optional<ExpectedTargetRepair> "
+                + "nextExpectedTargetScopeRepair"), stageSource);
+        assertFalse(stageSource.contains("private static List<ChatMessage> expectedTargetRepairMessages"), stageSource);
+        assertFalse(stageSource.contains("private static ChatMessage.NativeToolCall "
+                + "exactExpectedTargetReplacementRepairCall"), stageSource);
     }
 
     private LoopState loopState(String request) {
