@@ -45,7 +45,7 @@ public final class ToolCallRepromptStage {
         }
 
         if (outcome.mutatingDeniedThisIteration()) {
-            state.currentText = responseOnlyAfterDeniedMutation(state);
+            state.currentText = DeniedMutationResponseOnlySynthesizer.synthesize(state);
             state.currentNativeCalls = List.of();
             LOG.debug("Stopping tool-call loop after denied mutating tool call; not re-prompting.");
             return false;
@@ -612,49 +612,6 @@ public final class ToolCallRepromptStage {
                     .append("use an explicit create/edit/fix request if you intend a workspace change.\n");
         }
         return out.toString().stripTrailing();
-    }
-
-    private static String responseOnlyAfterDeniedMutation(LoopState state) {
-        if (state == null || state.ctx == null || state.ctx.llm() == null) {
-            return deniedMutationStopMessage();
-        }
-
-        state.messages.add(ChatMessage.system(
-                "[Tool policy stop] The latest mutating tool call was rejected by Talos policy. "
-                        + "Do not call any more tools in this turn. Answer the user's request using only "
-                        + "the tool results already gathered. If the gathered evidence is insufficient, "
-                        + "say exactly what was inspected and what remains unknown."));
-        int anchorIndex = state.messages.size() - 1;
-
-        try {
-            LlmClient.StreamResult terminal =
-                    state.ctx.llm().chatFull(state.messages, state.ctx.nativeToolSpecs());
-            String text = terminal.text() == null ? "" : terminal.text();
-            if (terminal.hasToolCalls()) {
-                return deniedMutationStopMessage();
-            }
-            String stripped = ToolCallParser.stripToolCalls(text).strip();
-            if (stripped.isBlank() || ToolCallParser.containsToolCalls(text)) {
-                return deniedMutationStopMessage();
-            }
-            return stripped;
-        } catch (Exception e) {
-            LOG.warn("Response-only synthesis after denied mutation failed: {}", SafeLogFormatter.throwableMessage(e));
-            return deniedMutationStopMessage();
-        } finally {
-            if (anchorIndex < state.messages.size()) {
-                ChatMessage m = state.messages.get(anchorIndex);
-                if ("system".equals(m.role())
-                        && m.content() != null
-                        && m.content().startsWith("[Tool policy stop]")) {
-                    state.messages.remove(anchorIndex);
-                }
-            }
-        }
-    }
-
-    private static String deniedMutationStopMessage() {
-        return "[Tool loop stopped because a mutating tool was not allowed for this turn.]";
     }
 
     private static String canonicalToolName(String toolName) {
