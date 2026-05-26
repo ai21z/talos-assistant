@@ -1,9 +1,11 @@
 package dev.talos.runtime.toolcall;
 
 import dev.talos.spi.types.ChatMessage;
+import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -176,12 +178,12 @@ class ToolCallRepromptStageTest {
 
         state.emptyEditArgumentFailuresByPath.put("index.html", 1);
 
-        assertTrue(ToolCallRepromptStage.nextEmptyEditRepair(state).isEmpty(),
+        assertTrue(RepairPolicy.nextEmptyEditRepair(state).isEmpty(),
                 "An empty edit failure alone is not enough; the model must read the target first.");
 
         state.pathsReadThisTurn.add("index.html");
 
-        var repair = ToolCallRepromptStage.nextEmptyEditRepair(state);
+        var repair = RepairPolicy.nextEmptyEditRepair(state);
         assertTrue(repair.isPresent());
         assertEquals("index.html", repair.get().path());
         assertTrue(repair.get().instruction().contains("[Edit repair required]"));
@@ -193,8 +195,21 @@ class ToolCallRepromptStageTest {
 
         state.emptyEditRepairPromptedPaths.add("index.html");
 
-        assertTrue(ToolCallRepromptStage.nextEmptyEditRepair(state).isEmpty(),
+        assertTrue(RepairPolicy.nextEmptyEditRepair(state).isEmpty(),
                 "The specialized repair instruction is one-shot per path.");
+    }
+
+    @Test
+    void repromptStageDoesNotExposeRepairPolicyWrappers() throws Exception {
+        String source = Files.readString(Path.of(
+                "src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java"));
+
+        assertTrue(source.contains("RepairPolicy.nextStaleEditRepair(state)"), source);
+        assertTrue(source.contains("RepairPolicy.nextEmptyEditRepair(state)"), source);
+        assertFalse(source.contains("static Optional<RepairInstruction> nextStaleEditRepair"), source);
+        assertFalse(source.contains("static String staleEditRepairInstruction"), source);
+        assertFalse(source.contains("static Optional<RepairInstruction> nextEmptyEditRepair"), source);
+        assertFalse(source.contains("static String emptyEditRepairInstruction"), source);
     }
 
     private static dev.talos.runtime.ToolCallLoop.ToolOutcome workspaceOutcome(
