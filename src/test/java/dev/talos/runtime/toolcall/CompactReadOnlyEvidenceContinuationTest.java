@@ -80,8 +80,11 @@ class CompactReadOnlyEvidenceContinuationTest {
     void repromptStageDelegatesCompactReadOnlyEvidenceContinuationToOwner() throws Exception {
         String source = Files.readString(Path.of(
                 "src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java"));
+        String handler = Files.readString(Path.of(
+                "src/main/java/dev/talos/runtime/toolcall/ToolRepromptContextBudgetHandler.java"));
 
-        assertTrue(source.contains("CompactReadOnlyEvidenceContinuation.tryAnswer"), source);
+        assertFalse(source.contains("CompactReadOnlyEvidenceContinuation.tryAnswer"), source);
+        assertTrue(handler.contains("CompactReadOnlyEvidenceContinuation.tryAnswer"), handler);
         assertFalse(source.contains("private static boolean tryCompactReadOnlyEvidenceContinuation"), source);
         assertFalse(source.contains("private static List<ChatMessage> readOnlyEvidenceAnswerMessages"), source);
     }
