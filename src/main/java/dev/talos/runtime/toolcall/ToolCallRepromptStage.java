@@ -5,7 +5,6 @@ import dev.talos.runtime.failure.FailureAction;
 import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.failure.FailurePolicy;
 import dev.talos.runtime.ToolCallParser;
-import dev.talos.runtime.repair.RepairInstruction;
 import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.safety.SafeLogFormatter;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
@@ -222,46 +221,9 @@ public final class ToolCallRepromptStage {
             return chatReprompt(state, repair.messages(), repair.tools(), repair.controls(), repair.retryName());
         }
 
-        int staleRepairIndex = -1;
-        Optional<RepairInstruction> staleRepair = RepairPolicy.nextStaleEditRepair(state);
-        if (staleRepair.isPresent()) {
-            state.messages.add(ChatMessage.system(staleRepair.get().instruction()));
-            state.staleEditRepairPromptedPaths.add(staleRepair.get().path());
-            staleRepairIndex = state.messages.size() - 1;
-        }
-
-        int emptyRepairIndex = -1;
-        Optional<RepairInstruction> repair = RepairPolicy.nextEmptyEditRepair(state);
-        if (repair.isPresent()) {
-            state.messages.add(ChatMessage.system(repair.get().instruction()));
-            state.emptyEditRepairPromptedPaths.add(repair.get().path());
-            emptyRepairIndex = state.messages.size() - 1;
-        }
-
-        int repairProgressIndex = -1;
         List<String> remainingRepairTargets = remainingFullRewriteRepairTargets(state);
-        if (!remainingRepairTargets.isEmpty()) {
-            state.messages.add(ChatMessage.system(
-                    "[Static repair progress] Continue the bounded repair. Remaining full-file "
-                            + "replacement targets: " + String.join(", ", remainingRepairTargets)
-                            + ". Use talos.write_file with complete corrected file content for each remaining target. "
-                            + "Do not claim completion until static verification passes."));
-            repairProgressIndex = state.messages.size() - 1;
-        }
-
-        int expectedProgressIndex = -1;
         List<String> remainingExpectedTargets =
                 ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state);
-        if (!remainingExpectedTargets.isEmpty()) {
-            state.messages.add(ChatMessage.system(
-                    "[Expected target progress] Continue this mutation task. Remaining expected target paths "
-                            + "not successfully mutated in this turn: " + String.join(", ", remainingExpectedTargets)
-                            + ". Use the visible write/edit tools to mutate these exact paths before answering. "
-                            + "Similar filenames are not substitutes. For small static web files, prefer "
-                            + "talos.write_file with complete file content. Do not claim completion until "
-                            + "static verification passes."));
-            expectedProgressIndex = state.messages.size() - 1;
-        }
         boolean staticRepairObligationActive = !remainingRepairTargets.isEmpty()
                 && (!state.staticWebFullRewriteRequiredTargets.isEmpty()
                 || hasStaticRepairContext(state)
@@ -282,19 +244,17 @@ public final class ToolCallRepromptStage {
                 staticRepairObligationActive,
                 expectedTargetObligationActive);
 
-        int anchorIndex = -1;
-        if (userTask != null && !userTask.isBlank()) {
-            String pinned = userTask.length() <= 500 ? userTask : userTask.substring(0, 500) + "…";
-            state.messages.add(ChatMessage.system("[Current task — stay focused on this] " + pinned));
-            anchorIndex = state.messages.size() - 1;
-        }
-        List<ChatMessage> requestMessages = ToolRepromptRequestBuilder.messages(
+        List<ChatMessage> requestMessages = List.of();
+        try (ToolRepromptMessageOverlay ignored = ToolRepromptMessageOverlay.apply(
                 state,
-                staticRepairObligationActive,
                 remainingRepairTargets,
-                userTask);
-
-        try {
+                remainingExpectedTargets,
+                userTask)) {
+            requestMessages = new ArrayList<>(ToolRepromptRequestBuilder.messages(
+                    state,
+                    staticRepairObligationActive,
+                    remainingRepairTargets,
+                    userTask));
             if (!chatRepromptResult(state, requestMessages, repromptToolSpecs,
                     ToolRepromptRequestBuilder.controls(state))) {
                 return false;
@@ -362,47 +322,6 @@ public final class ToolCallRepromptStage {
             state.currentText = "(error during follow-up LLM call: " + e.getMessage() + ")";
             state.currentNativeCalls = List.of();
             return false;
-        } finally {
-            if (anchorIndex >= 0 && anchorIndex < state.messages.size()) {
-                ChatMessage m = state.messages.get(anchorIndex);
-                if ("system".equals(m.role())
-                        && m.content() != null
-                        && m.content().startsWith("[Current task")) {
-                    state.messages.remove(anchorIndex);
-                }
-            }
-            if (expectedProgressIndex >= 0 && expectedProgressIndex < state.messages.size()) {
-                ChatMessage m = state.messages.get(expectedProgressIndex);
-                if ("system".equals(m.role())
-                        && m.content() != null
-                        && m.content().startsWith("[Expected target progress]")) {
-                    state.messages.remove(expectedProgressIndex);
-                }
-            }
-            if (repairProgressIndex >= 0 && repairProgressIndex < state.messages.size()) {
-                ChatMessage m = state.messages.get(repairProgressIndex);
-                if ("system".equals(m.role())
-                        && m.content() != null
-                        && m.content().startsWith("[Static repair progress]")) {
-                    state.messages.remove(repairProgressIndex);
-                }
-            }
-            if (emptyRepairIndex >= 0 && emptyRepairIndex < state.messages.size()) {
-                ChatMessage m = state.messages.get(emptyRepairIndex);
-                if ("system".equals(m.role())
-                        && m.content() != null
-                        && m.content().startsWith("[Edit repair required]")) {
-                    state.messages.remove(emptyRepairIndex);
-                }
-            }
-            if (staleRepairIndex >= 0 && staleRepairIndex < state.messages.size()) {
-                ChatMessage m = state.messages.get(staleRepairIndex);
-                if ("system".equals(m.role())
-                        && m.content() != null
-                        && m.content().startsWith("[Stale edit repair required]")) {
-                    state.messages.remove(staleRepairIndex);
-                }
-            }
         }
     }
 
