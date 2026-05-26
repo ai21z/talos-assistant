@@ -315,6 +315,17 @@ class ToolCallRepromptStageTest {
         assertFalse(source.contains("before rereading the file after a same-turn mutation changed it"), source);
     }
 
+    @Test
+    void repromptStageDelegatesSourceEvidenceRepairDecision() throws Exception {
+        String source = Files.readString(Path.of(
+                "src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java"));
+
+        assertTrue(source.contains("ToolRepromptSourceEvidenceRepairDecision.tryHandle("), source);
+        assertFalse(source.contains("SourceEvidenceExactRepairPlanner.nextPlan("), source);
+        assertFalse(source.contains("sourceEvidenceExactRepairPromptedKeys.add"), source);
+        assertFalse(source.contains("source-evidence exact compact repair"), source);
+    }
+
     private static dev.talos.runtime.ToolCallLoop.ToolOutcome workspaceOutcome(
             String toolName,
             String pathHint,

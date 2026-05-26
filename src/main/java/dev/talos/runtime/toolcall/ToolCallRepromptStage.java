@@ -90,17 +90,10 @@ public final class ToolCallRepromptStage {
         }
 
         String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
-        Optional<SourceEvidenceExactRepairPlanner.Plan> sourceEvidenceRepair =
-                SourceEvidenceExactRepairPlanner.nextPlan(
-                        state,
-                        ToolRepromptRequestBuilder.currentNativeToolSpecs(state),
-                        userTask);
+        Optional<Boolean> sourceEvidenceRepair =
+                ToolRepromptSourceEvidenceRepairDecision.tryHandle(state, userTask);
         if (sourceEvidenceRepair.isPresent()) {
-            SourceEvidenceExactRepairPlanner.Plan repair = sourceEvidenceRepair.get();
-            state.setPendingActionObligation(PendingActionObligation.expectedTargets(List.of(repair.path())));
-            state.sourceEvidenceExactRepairPromptedKeys.add(repair.key());
-            return ToolRepromptChatExecutor.execute(state, repair.messages(), repair.tools(), repair.controls(),
-                    "source-evidence exact compact repair");
+            return sourceEvidenceRepair.get();
         }
 
         Optional<TargetReadbackCompactRepairPlanner.Plan> appendLineRepair =
