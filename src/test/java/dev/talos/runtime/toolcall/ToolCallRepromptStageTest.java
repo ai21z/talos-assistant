@@ -303,6 +303,18 @@ class ToolCallRepromptStageTest {
         assertFalse(source.contains("P0: skipping re-prompt"), source);
     }
 
+    @Test
+    void repromptStageDelegatesStaleEditRereadStop() throws Exception {
+        String source = Files.readString(Path.of(
+                "src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java"));
+
+        assertTrue(source.contains("ToolRepromptStaleEditRereadStop.tryHandle("), source);
+        assertFalse(source.contains("import dev.talos.runtime.failure.FailureAction;"), source);
+        assertFalse(source.contains("import dev.talos.safety.SafeLogFormatter;"), source);
+        assertFalse(source.contains("staleEditRereadIgnoredPath != null"), source);
+        assertFalse(source.contains("before rereading the file after a same-turn mutation changed it"), source);
+    }
+
     private static dev.talos.runtime.ToolCallLoop.ToolOutcome workspaceOutcome(
             String toolName,
             String pathHint,
