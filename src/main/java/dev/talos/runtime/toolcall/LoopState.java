@@ -4,7 +4,6 @@ import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.failure.FailureAction;
 import dev.talos.runtime.RuntimeTurnContext;
 import dev.talos.runtime.Session;
-import dev.talos.runtime.repair.StaticSelectorRepairGuard;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatMessage.NativeToolCall;
@@ -198,26 +197,21 @@ public final class LoopState {
     }
 
     public boolean failStaticSelectorRepairAfterInvalidWriteContent(List<ToolCall> calls) {
-        if (calls == null || calls.isEmpty()) return false;
-        for (ToolCall call : calls) {
-            if (call == null) continue;
-            var violation = StaticSelectorRepairGuard.violationForWrite(messages, call);
-            if (violation.isEmpty()) continue;
-            StaticSelectorRepairGuard.Violation detail = violation.get();
-            String reason = "STATIC_SELECTOR_REPAIR_PRESERVED_MISSING_SELECTOR: " + detail.detail();
-            failureDecision = dev.talos.runtime.failure.FailureDecision.stop(
-                    FailureAction.ASK_USER,
-                    reason);
-            currentText = staticSelectorRepairFailureAnswer(detail);
-            currentNativeCalls = List.of();
-            LocalTurnTraceCapture.recordActionObligation(
-                    "STATIC_SELECTOR_REPAIR",
-                    "FAILED",
-                    reason,
-                    "STATIC_SELECTOR_REPAIR_PRESERVED_MISSING_SELECTOR");
-            return true;
-        }
-        return false;
+        var failure = StaticSelectorRepairWriteGuard.evaluate(messages, calls);
+        if (failure.isEmpty()) return false;
+
+        StaticSelectorRepairWriteGuard.Failure detail = failure.get();
+        failureDecision = dev.talos.runtime.failure.FailureDecision.stop(
+                FailureAction.ASK_USER,
+                detail.reason());
+        currentText = detail.answer();
+        currentNativeCalls = List.of();
+        LocalTurnTraceCapture.recordActionObligation(
+                StaticSelectorRepairWriteGuard.OBLIGATION,
+                "FAILED",
+                detail.reason(),
+                StaticSelectorRepairWriteGuard.FAILURE_KIND);
+        return true;
     }
 
     private static String invalidExpectedTargetMutationDetail(
@@ -368,19 +362,6 @@ public final class LoopState {
             }
         }
         return false;
-    }
-
-    private static String staticSelectorRepairFailureAnswer(StaticSelectorRepairGuard.Violation violation) {
-        String target = violation == null ? "(unknown)" : violation.target();
-        String selectors = violation == null || violation.selectors().isEmpty()
-                ? "(unknown)"
-                : String.join(", ", violation.selectors());
-        String detail = violation == null ? "" : violation.detail();
-        return "[Action obligation failed: static selector repair write preserved verifier-known missing selectors.]\n\n"
-                + "Target: " + target + ".\n"
-                + "Preserved selector(s): " + selectors + ".\n"
-                + detail + "\n"
-                + "Talos stopped this turn deterministically.";
     }
 
     private static String staticRepairInvalidToolDetail(
