@@ -21,8 +21,6 @@ import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequestControls;
-import dev.talos.spi.types.ResponseFormatMode;
-import dev.talos.spi.types.ToolChoiceMode;
 import dev.talos.spi.types.ToolSpec;
 import dev.talos.tools.ToolAliasPolicy;
 import org.slf4j.Logger;
@@ -58,7 +56,7 @@ public final class ToolCallRepromptStage {
             Optional<ExpectedTargetScopeRepairPlanner.Plan> expectedTargetRepair =
                     ExpectedTargetScopeRepairPlanner.nextPlan(
                             state,
-                            currentNativeToolSpecs(state),
+                            ToolRepromptRequestBuilder.currentNativeToolSpecs(state),
                             ToolCallSupport.latestUserRequestIn(state.messages));
             if (expectedTargetRepair.isPresent()) {
                 ExpectedTargetScopeRepairPlanner.Plan repair = expectedTargetRepair.get();
@@ -129,7 +127,9 @@ public final class ToolCallRepromptStage {
             List<String> remainingExpectedTargets = remainingExpectedMutationTargets(state);
             if (remainingRepairTargets.isEmpty() && remainingExpectedTargets.isEmpty()) {
                 Optional<StaticWebContinuationPlanner.Plan> staticWebPlan =
-                        StaticWebContinuationPlanner.nextPlan(state, currentNativeToolSpecs(state));
+                        StaticWebContinuationPlanner.nextPlan(
+                                state,
+                                ToolRepromptRequestBuilder.currentNativeToolSpecs(state));
                 if (staticWebPlan.isPresent()) {
                     StaticWebContinuationPlanner.Plan plan = staticWebPlan.get();
                     plan.pendingActionObligation().ifPresent(state::setPendingActionObligation);
@@ -231,7 +231,10 @@ public final class ToolCallRepromptStage {
 
         String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
         Optional<SourceEvidenceExactRepairPlanner.Plan> sourceEvidenceRepair =
-                SourceEvidenceExactRepairPlanner.nextPlan(state, currentNativeToolSpecs(state), userTask);
+                SourceEvidenceExactRepairPlanner.nextPlan(
+                        state,
+                        ToolRepromptRequestBuilder.currentNativeToolSpecs(state),
+                        userTask);
         if (sourceEvidenceRepair.isPresent()) {
             SourceEvidenceExactRepairPlanner.Plan repair = sourceEvidenceRepair.get();
             state.setPendingActionObligation(PendingActionObligation.expectedTargets(List.of(repair.path())));
@@ -243,7 +246,7 @@ public final class ToolCallRepromptStage {
         Optional<TargetReadbackCompactRepairPlanner.Plan> appendLineRepair =
                 TargetReadbackCompactRepairPlanner.nextAppendLinePlan(
                         state,
-                        currentNativeToolSpecs(state),
+                        ToolRepromptRequestBuilder.currentNativeToolSpecs(state),
                         userTask);
         if (appendLineRepair.isPresent()) {
             TargetReadbackCompactRepairPlanner.Plan repair = appendLineRepair.get();
@@ -256,7 +259,7 @@ public final class ToolCallRepromptStage {
         Optional<TargetReadbackCompactRepairPlanner.Plan> oldStringMissRepair =
                 TargetReadbackCompactRepairPlanner.nextOldStringMissPlan(
                         state,
-                        currentNativeToolSpecs(state),
+                        ToolRepromptRequestBuilder.currentNativeToolSpecs(state),
                         userTask);
         if (oldStringMissRepair.isPresent()) {
             TargetReadbackCompactRepairPlanner.Plan repair = oldStringMissRepair.get();
@@ -320,7 +323,7 @@ public final class ToolCallRepromptStage {
         } else {
             state.clearPendingActionObligation();
         }
-        List<ToolSpec> repromptToolSpecs = repromptToolSpecs(
+        List<ToolSpec> repromptToolSpecs = ToolRepromptRequestBuilder.toolSpecs(
                 state,
                 staticRepairObligationActive,
                 expectedTargetObligationActive);
@@ -331,14 +334,15 @@ public final class ToolCallRepromptStage {
             state.messages.add(ChatMessage.system("[Current task — stay focused on this] " + pinned));
             anchorIndex = state.messages.size() - 1;
         }
-        List<ChatMessage> requestMessages = repromptMessages(
+        List<ChatMessage> requestMessages = ToolRepromptRequestBuilder.messages(
                 state,
                 staticRepairObligationActive,
                 remainingRepairTargets,
                 userTask);
 
         try {
-            if (!chatRepromptResult(state, requestMessages, repromptToolSpecs, repromptControls(state))) {
+            if (!chatRepromptResult(state, requestMessages, repromptToolSpecs,
+                    ToolRepromptRequestBuilder.controls(state))) {
                 return false;
             }
             return true;
@@ -365,7 +369,7 @@ public final class ToolCallRepromptStage {
                         state.ctx.llm().chatFull(
                                 requestMessages,
                                 repromptToolSpecs,
-                                repromptControls(state));
+                                ToolRepromptRequestBuilder.controls(state));
                 state.currentText = retryResult.text();
                 state.currentNativeCalls = retryResult.hasToolCalls()
                         ? new ArrayList<>(retryResult.toolCalls()) : List.of();
@@ -504,7 +508,7 @@ public final class ToolCallRepromptStage {
         Optional<CompactMutationContinuationPlanner.Plan> continuation =
                 CompactMutationContinuationPlanner.planForContextBudget(
                         state,
-                        currentNativeToolSpecs(state),
+                        ToolRepromptRequestBuilder.currentNativeToolSpecs(state),
                         retryName);
         if (continuation.isEmpty()) return CompactMutationContinuationOutcome.NOT_APPLICABLE;
 
@@ -635,136 +639,9 @@ public final class ToolCallRepromptStage {
         return true;
     }
 
-    private static List<ToolSpec> repromptToolSpecs(
-            LoopState state,
-            boolean staticRepairProgress,
-            boolean expectedTargetProgress
-    ) {
-        List<ToolSpec> base = currentNativeToolSpecs(state);
-        if (base == null || base.isEmpty()) return base;
-        if (staticRepairProgress) {
-            List<ToolSpec> narrowed = filterTools(base, List.of("talos.write_file"));
-            return narrowed.isEmpty() ? base : narrowed;
-        }
-        if (expectedTargetProgress) {
-            List<ToolSpec> narrowed = filterTools(base, List.of("talos.write_file", "talos.edit_file"));
-            return narrowed.isEmpty() ? base : narrowed;
-        }
-        return base;
-    }
-
-    private static List<ChatMessage> repromptMessages(
-            LoopState state,
-            boolean staticRepairObligationActive,
-            List<String> remainingRepairTargets,
-            String userTask
-    ) {
-        if (!staticRepairObligationActive) {
-            return state == null ? List.of() : state.messages;
-        }
-        List<ChatMessage> out = new ArrayList<>();
-        out.add(ChatMessage.system("""
-                You are Talos, a local-first workspace assistant.
-                This is a bounded static-repair continuation. Use the available file-write tool to repair the exact remaining target paths.
-                Do not answer in prose instead of calling the required tool. Do not claim completion until tool-backed changes have executed.
-                """));
-        lastStaticVerificationRepairContext(state.messages)
-                .map(message -> enrichStaticRepairContextForReprompt(message, state))
-                .ifPresent(out::add);
-        out.add(ChatMessage.system(
-                "[Static repair progress] Continue the bounded repair. Remaining full-file "
-                        + "replacement targets: " + String.join(", ", remainingRepairTargets)
-                        + ". Use talos.write_file with complete corrected file content for each remaining target. "
-                        + "Do not claim completion until static verification passes."));
-        String currentTask = userTask == null || userTask.isBlank()
-                ? "Continue the bounded static repair."
-                : userTask.strip();
-        out.add(ChatMessage.user(currentTask));
-        return out;
-    }
-
-    private static Optional<ChatMessage> lastStaticVerificationRepairContext(List<ChatMessage> messages) {
-        if (messages == null || messages.isEmpty()) return Optional.empty();
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            ChatMessage message = messages.get(i);
-            if (message != null
-                    && "system".equals(message.role())
-                    && message.content() != null
-                    && message.content().startsWith("[Static verification repair context]")) {
-                return Optional.of(message);
-            }
-        }
-        return Optional.empty();
-    }
-
-    private static ChatMessage enrichStaticRepairContextForReprompt(ChatMessage message, LoopState state) {
-        if (message == null || message.content() == null) return message;
-        String enriched = RepairPolicy.enrichSelectorFactsForRepairContext(
-                message.content(),
-                state == null ? null : state.workspace);
-        if (enriched.equals(message.content())) return message;
-        return ChatMessage.system(enriched);
-    }
-
-    private static List<ToolSpec> currentNativeToolSpecs(LoopState state) {
-        if (state == null || state.ctx == null) return List.of();
-        if (state.ctx.nativeToolSpecs() != null) {
-            return state.ctx.nativeToolSpecs();
-        }
-        if (state.ctx.llm() != null) {
-            return state.ctx.llm().getToolSpecs();
-        }
-        return List.of();
-    }
-
-    private static List<ToolSpec> filterTools(List<ToolSpec> specs, List<String> allowedNames) {
-        if (specs == null || specs.isEmpty() || allowedNames == null || allowedNames.isEmpty()) {
-            return List.of();
-        }
-        return specs.stream()
-                .filter(spec -> spec != null && allowedNames.contains(spec.name()))
-                .toList();
-    }
-
     public boolean hitIterationLimit(LoopState state) {
         return state.iterations >= state.maxIterations
                 && (!state.currentNativeCalls.isEmpty() || ToolCallParser.containsToolCalls(state.currentText));
-    }
-
-    private static ChatRequestControls repromptControls(LoopState state) {
-        return repromptControls(state, "pending-action-obligation");
-    }
-
-    private static ChatRequestControls repromptControls(LoopState state, String debugTag) {
-        if (state == null
-                || state.ctx == null
-                || state.ctx.llm() == null
-                || !state.hasPendingActionObligation()
-                || !state.ctx.llm().supportsRequiredToolChoice()
-                || !hasMutatingTool(state.ctx.nativeToolSpecs())) {
-            return ChatRequestControls.defaults();
-        }
-        List<String> tags = new ArrayList<>(List.of("pending-action-obligation"));
-        if (debugTag != null && !debugTag.isBlank() && !tags.contains(debugTag)) {
-            tags.add(debugTag);
-        }
-        return new ChatRequestControls(
-                ToolChoiceMode.REQUIRED,
-                "",
-                ResponseFormatMode.TEXT,
-                "",
-                tags);
-    }
-
-    private static boolean hasMutatingTool(List<ToolSpec> specs) {
-        if (specs == null || specs.isEmpty()) return false;
-        for (ToolSpec spec : specs) {
-            String name = spec == null ? "" : spec.name();
-            if ("talos.write_file".equals(name) || "talos.edit_file".equals(name)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private static boolean repairReadOnlyBudgetExceeded(LoopState state) {
