@@ -115,8 +115,11 @@ class ToolRepromptRequestBuilderTest {
     void executionStageDelegatesRepromptRequestAssemblyToBuilder() throws Exception {
         String source = Files.readString(Path.of(
                 "src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java"));
+        String selector = Files.readString(Path.of(
+                "src/main/java/dev/talos/runtime/toolcall/ToolRepromptObligationSelector.java"));
 
-        assertTrue(source.contains("ToolRepromptRequestBuilder."), source);
+        assertTrue(selector.contains("ToolRepromptRequestBuilder."), selector);
+        assertFalse(source.contains("ToolRepromptRequestBuilder."), source);
         assertFalse(source.contains("private static List<ToolSpec> repromptToolSpecs"), source);
         assertFalse(source.contains("private static List<ChatMessage> repromptMessages"), source);
         assertFalse(source.contains("private static ChatRequestControls repromptControls"), source);

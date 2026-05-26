@@ -3,7 +3,6 @@ package dev.talos.runtime.toolcall;
 import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.failure.FailurePolicy;
 import dev.talos.runtime.ToolCallParser;
-import dev.talos.spi.types.ToolSpec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -102,37 +101,16 @@ public final class ToolCallRepromptStage {
             return targetReadbackRepair.get();
         }
 
-        List<String> remainingRepairTargets =
-                StaticRepairTargetProgressAccounting.remainingFullRewriteRepairTargets(state);
-        List<String> remainingExpectedTargets =
-                ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state);
-        boolean staticRepairObligationActive = !remainingRepairTargets.isEmpty()
-                && (!state.staticWebFullRewriteRequiredTargets.isEmpty()
-                || StaticRepairTargetProgressAccounting.hasStaticRepairContext(state)
-                || state.hasPendingActionObligation());
-        boolean expectedTargetObligationActive = !remainingExpectedTargets.isEmpty()
-                && (outcome.mutationsThisIteration() > 0 || state.hasPendingActionObligation());
-        if (staticRepairObligationActive) {
-            state.setPendingActionObligation(
-                    PendingActionObligation.staticRepairTargets(remainingRepairTargets));
-        } else if (expectedTargetObligationActive) {
-            state.setPendingActionObligation(
-                    PendingActionObligation.expectedTargets(remainingExpectedTargets));
-        } else {
-            state.clearPendingActionObligation();
-        }
-        List<ToolSpec> repromptToolSpecs = ToolRepromptRequestBuilder.toolSpecs(
-                state,
-                staticRepairObligationActive,
-                expectedTargetObligationActive);
+        ToolRepromptObligationSelector.Selection obligation =
+                ToolRepromptObligationSelector.select(state, outcome);
 
         return ToolRepromptOverlayContinuation.execute(
                 state,
-                remainingRepairTargets,
-                remainingExpectedTargets,
+                obligation.remainingRepairTargets(),
+                obligation.remainingExpectedTargets(),
                 userTask,
-                staticRepairObligationActive,
-                repromptToolSpecs);
+                obligation.staticRepairObligationActive(),
+                obligation.repromptToolSpecs());
     }
 
     public boolean hitIterationLimit(LoopState state) {

@@ -99,19 +99,20 @@ class ExpectedTargetProgressAccountingTest {
 
     @Test
     void adoptersDoNotKeepPrivateExpectedTargetAccountingCopies() throws Exception {
-        String stage = java.nio.file.Files.readString(Path.of(
-                "src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java"));
+        String selector = java.nio.file.Files.readString(Path.of(
+                "src/main/java/dev/talos/runtime/toolcall/ToolRepromptObligationSelector.java"));
         String sourcePlanner = java.nio.file.Files.readString(Path.of(
                 "src/main/java/dev/talos/runtime/toolcall/SourceEvidenceExactRepairPlanner.java"));
         String targetPlanner = java.nio.file.Files.readString(Path.of(
                 "src/main/java/dev/talos/runtime/toolcall/TargetReadbackCompactRepairPlanner.java"));
 
-        assertTrue(stage.contains("ExpectedTargetProgressAccounting.remainingExpectedMutationTargets"), stage);
+        assertTrue(selector.contains("ExpectedTargetProgressAccounting.remainingExpectedMutationTargets"),
+                selector);
         assertTrue(sourcePlanner.contains("ExpectedTargetProgressAccounting.remainingExpectedMutationTargets"),
                 sourcePlanner);
         assertTrue(targetPlanner.contains("ExpectedTargetProgressAccounting.remainingExpectedMutationTargets"),
                 targetPlanner);
-        for (String source : List.of(stage, sourcePlanner, targetPlanner)) {
+        for (String source : List.of(selector, sourcePlanner, targetPlanner)) {
             assertFalse(source.contains("private static List<String> remainingExpectedMutationTargets"), source);
             assertFalse(source.contains("private static void addSatisfiedExpectedTargetKeys"), source);
             assertFalse(source.contains("private static void addExpectedTargetPathKeys"), source);
