@@ -268,11 +268,13 @@ class ToolCallRepromptStageTest {
     }
 
     @Test
-    void repromptStageDelegatesNormalChatRepromptExecution() throws Exception {
+    void repromptStageDoesNotOwnNormalChatRepromptExecution() throws Exception {
         String source = Files.readString(Path.of(
                 "src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java"));
+        String executor = Files.readString(Path.of(
+                "src/main/java/dev/talos/runtime/toolcall/ToolRepromptChatExecutor.java"));
 
-        assertTrue(source.contains("ToolRepromptChatExecutor.execute("), source);
+        assertTrue(executor.contains("static boolean execute("), executor);
         assertFalse(source.contains("ToolRepromptChatExecutor.executeResult("), source);
         assertFalse(source.contains("ToolRepromptChatExecutor.executeRetryResult("), source);
         assertFalse(source.contains("private static boolean chatReprompt("), source);
@@ -324,6 +326,18 @@ class ToolCallRepromptStageTest {
         assertFalse(source.contains("SourceEvidenceExactRepairPlanner.nextPlan("), source);
         assertFalse(source.contains("sourceEvidenceExactRepairPromptedKeys.add"), source);
         assertFalse(source.contains("source-evidence exact compact repair"), source);
+    }
+
+    @Test
+    void repromptStageDelegatesTargetReadbackRepairDecision() throws Exception {
+        String source = Files.readString(Path.of(
+                "src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java"));
+
+        assertTrue(source.contains("ToolRepromptTargetReadbackRepairDecision.tryHandle("), source);
+        assertFalse(source.contains("TargetReadbackCompactRepairPlanner.nextAppendLinePlan("), source);
+        assertFalse(source.contains("TargetReadbackCompactRepairPlanner.nextOldStringMissPlan("), source);
+        assertFalse(source.contains("appendLineRepairPromptedPaths.add"), source);
+        assertFalse(source.contains("oldStringMissRepairPromptedPaths.add"), source);
     }
 
     private static dev.talos.runtime.ToolCallLoop.ToolOutcome workspaceOutcome(
