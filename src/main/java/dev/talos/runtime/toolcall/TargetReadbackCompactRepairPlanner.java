@@ -3,10 +3,8 @@ package dev.talos.runtime.toolcall;
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.expectation.AppendLineExpectation;
 import dev.talos.runtime.expectation.TaskExpectationResolver;
-import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
-import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequestControls;
 import dev.talos.spi.types.ResponseFormatMode;
@@ -49,19 +47,22 @@ final class TargetReadbackCompactRepairPlanner {
         if (state == null || state.toolOutcomes == null || state.toolOutcomes.isEmpty()) {
             return Optional.empty();
         }
-        List<String> remainingExpectedTargets = remainingExpectedMutationTargets(state);
+        List<String> remainingExpectedTargets =
+                ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state);
         if (remainingExpectedTargets.isEmpty()) return Optional.empty();
         Set<String> remaining = remainingExpectedTargets.stream()
-                .map(TargetReadbackCompactRepairPlanner::normalizeExpectedTargetKey)
+                .map(ExpectedTargetProgressAccounting::normalizeExpectedTargetKey)
                 .collect(Collectors.toSet());
         TaskContract contract = TaskContractResolver.fromMessages(state.messages);
         for (int i = state.toolOutcomes.size() - 1; i >= 0; i--) {
             ToolCallLoop.ToolOutcome outcome = state.toolOutcomes.get(i);
             if (outcome == null || !outcome.appendLinePreservationFailure()) continue;
-            String pathKey = normalizeExpectedTargetKey(outcome.pathHint());
+            String pathKey = ExpectedTargetProgressAccounting.normalizeExpectedTargetKey(outcome.pathHint());
             if (pathKey.isBlank() || !remaining.contains(pathKey)) continue;
             if (state.appendLineRepairPromptedPaths.contains(pathKey)) continue;
-            String path = displayExpectedTargetForKey(remainingExpectedTargets, pathKey);
+            String path = ExpectedTargetProgressAccounting.displayExpectedTargetForKey(
+                    remainingExpectedTargets,
+                    pathKey);
             if (path.isBlank()) {
                 path = ToolCallSupport.normalizePath(outcome.pathHint());
             }
@@ -95,18 +96,21 @@ final class TargetReadbackCompactRepairPlanner {
         if (state == null || state.toolOutcomes == null || state.toolOutcomes.isEmpty()) {
             return Optional.empty();
         }
-        List<String> remainingExpectedTargets = remainingExpectedMutationTargets(state);
+        List<String> remainingExpectedTargets =
+                ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state);
         if (remainingExpectedTargets.isEmpty()) return Optional.empty();
         Set<String> remaining = remainingExpectedTargets.stream()
-                .map(TargetReadbackCompactRepairPlanner::normalizeExpectedTargetKey)
+                .map(ExpectedTargetProgressAccounting::normalizeExpectedTargetKey)
                 .collect(Collectors.toSet());
         for (int i = state.toolOutcomes.size() - 1; i >= 0; i--) {
             ToolCallLoop.ToolOutcome outcome = state.toolOutcomes.get(i);
             if (outcome == null || !outcome.oldStringNotFoundEditFailure()) continue;
-            String pathKey = normalizeExpectedTargetKey(outcome.pathHint());
+            String pathKey = ExpectedTargetProgressAccounting.normalizeExpectedTargetKey(outcome.pathHint());
             if (pathKey.isBlank() || !remaining.contains(pathKey)) continue;
             if (state.oldStringMissRepairPromptedPaths.contains(pathKey)) continue;
-            String path = displayExpectedTargetForKey(remainingExpectedTargets, pathKey);
+            String path = ExpectedTargetProgressAccounting.displayExpectedTargetForKey(
+                    remainingExpectedTargets,
+                    pathKey);
             if (path.isBlank()) {
                 path = ToolCallSupport.normalizePath(outcome.pathHint());
             }
@@ -145,12 +149,12 @@ final class TargetReadbackCompactRepairPlanner {
 
     static boolean successfulReadbackForPath(LoopState state, String normalizedPath) {
         if (state == null || normalizedPath == null || normalizedPath.isBlank()) return false;
-        String targetKey = normalizeExpectedTargetKey(normalizedPath);
+        String targetKey = ExpectedTargetProgressAccounting.normalizeExpectedTargetKey(normalizedPath);
         if (targetKey.isBlank()) return false;
         for (ToolCallLoop.ToolOutcome outcome : state.toolOutcomes) {
             if (outcome == null || !outcome.success()) continue;
             if (!"talos.read_file".equals(canonicalToolName(outcome.toolName()))) continue;
-            if (targetKey.equals(normalizeExpectedTargetKey(outcome.pathHint()))) {
+            if (targetKey.equals(ExpectedTargetProgressAccounting.normalizeExpectedTargetKey(outcome.pathHint()))) {
                 return true;
             }
         }
@@ -274,79 +278,6 @@ final class TargetReadbackCompactRepairPlanner {
                 List.of("pending-action-obligation", debugTag));
     }
 
-    private static List<String> remainingExpectedMutationTargets(LoopState state) {
-        if (state == null || state.messages == null) return List.of();
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
-        if (contract == null || !contract.mutationAllowed()) {
-            return List.of();
-        }
-        if (!RepairPolicy.fullRewriteTargetsFromRepairContext(state.messages).isEmpty()
-                || !state.staticWebFullRewriteRequiredTargets.isEmpty()) {
-            return List.of();
-        }
-        String latestUserRequest = ToolCallSupport.latestUserRequestIn(state.messages);
-        Set<String> expectedTargets = contract.expectedTargets().isEmpty()
-                ? TaskContractResolver.extractExpectedTargets(latestUserRequest)
-                : contract.expectedTargets();
-        if (expectedTargets.isEmpty()) {
-            return List.of();
-        }
-        Set<String> satisfiedTargets = new java.util.HashSet<>();
-        for (ToolCallLoop.ToolOutcome outcome : state.toolOutcomes) {
-            if (outcome == null || !outcome.success() || !outcome.mutating()) continue;
-            addSatisfiedExpectedTargetKeys(satisfiedTargets, outcome);
-        }
-        java.util.LinkedHashMap<String, String> expectedDisplayByKey = new java.util.LinkedHashMap<>();
-        for (String target : expectedTargets) {
-            String display = ToolCallSupport.normalizePath(target);
-            String key = normalizeExpectedTargetKey(display);
-            if (!key.isBlank()) {
-                expectedDisplayByKey.putIfAbsent(key, display);
-            }
-        }
-        return expectedDisplayByKey.entrySet().stream()
-                .filter(entry -> !satisfiedTargets.contains(entry.getKey()))
-                .map(Map.Entry::getValue)
-                .sorted()
-                .toList();
-    }
-
-    private static void addSatisfiedExpectedTargetKeys(
-            Set<String> satisfiedTargets,
-            ToolCallLoop.ToolOutcome outcome
-    ) {
-        if (satisfiedTargets == null || outcome == null) return;
-        WorkspaceOperationPlan plan = outcome.workspaceOperationPlan();
-        if (plan != null && !plan.pathEffects().isEmpty()) {
-            for (WorkspaceOperationPlan.PathEffect effect : plan.pathEffects()) {
-                addExpectedTargetPathKeys(satisfiedTargets, effect.path());
-            }
-            return;
-        }
-        addExpectedTargetPathKeys(satisfiedTargets, outcome.pathHint());
-    }
-
-    private static void addExpectedTargetPathKeys(Set<String> satisfiedTargets, String path) {
-        String normalized = normalizeExpectedTargetKey(path);
-        if (normalized.isBlank()) return;
-        satisfiedTargets.add(normalized);
-        int slash = normalized.lastIndexOf('/');
-        if (slash >= 0 && slash + 1 < normalized.length()) {
-            satisfiedTargets.add(normalized.substring(slash + 1));
-        }
-    }
-
-    private static String displayExpectedTargetForKey(List<String> targets, String key) {
-        if (targets == null || targets.isEmpty() || key == null || key.isBlank()) return "";
-        for (String target : targets) {
-            String display = ToolCallSupport.normalizePath(target);
-            if (!display.isBlank() && key.equals(normalizeExpectedTargetKey(display))) {
-                return display;
-            }
-        }
-        return "";
-    }
-
     private static boolean isSensitiveReadbackPath(String path) {
         if (path == null || path.isBlank()) return true;
         String normalized = ToolCallSupport.normalizePath(path).toLowerCase(Locale.ROOT);
@@ -378,10 +309,6 @@ final class TargetReadbackCompactRepairPlanner {
             return "append-line write_file did not preserve same-turn readback";
         }
         return reason.strip();
-    }
-
-    private static String normalizeExpectedTargetKey(String path) {
-        return ToolCallSupport.normalizePath(path).toLowerCase(Locale.ROOT);
     }
 
     private static String canonicalToolName(String toolName) {
