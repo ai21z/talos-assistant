@@ -4,6 +4,10 @@
 
 Done.
 
+Replacement PR note: PR #176 supersedes PR #175 because GitHub did not create
+current-head CI for #175 after the review fix, even after branch updates and
+reopen attempts.
+
 ## Scope
 
 T509 extracts the temporary reprompt message overlay from
