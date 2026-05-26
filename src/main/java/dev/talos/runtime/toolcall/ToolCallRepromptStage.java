@@ -226,7 +226,7 @@ public final class ToolCallRepromptStage {
         }
 
         int staleRepairIndex = -1;
-        Optional<RepairInstruction> staleRepair = nextStaleEditRepair(state);
+        Optional<RepairInstruction> staleRepair = RepairPolicy.nextStaleEditRepair(state);
         if (staleRepair.isPresent()) {
             state.messages.add(ChatMessage.system(staleRepair.get().instruction()));
             state.staleEditRepairPromptedPaths.add(staleRepair.get().path());
@@ -234,7 +234,7 @@ public final class ToolCallRepromptStage {
         }
 
         int emptyRepairIndex = -1;
-        Optional<RepairInstruction> repair = nextEmptyEditRepair(state);
+        Optional<RepairInstruction> repair = RepairPolicy.nextEmptyEditRepair(state);
         if (repair.isPresent()) {
             state.messages.add(ChatMessage.system(repair.get().instruction()));
             state.emptyEditRepairPromptedPaths.add(repair.get().path());
@@ -492,22 +492,6 @@ public final class ToolCallRepromptStage {
             return decision.canonicalToolName();
         }
         return toolName == null ? "" : toolName;
-    }
-
-    static Optional<RepairInstruction> nextStaleEditRepair(LoopState state) {
-        return RepairPolicy.nextStaleEditRepair(state);
-    }
-
-    static String staleEditRepairInstruction(String path) {
-        return RepairPolicy.staleEditRepairInstruction(path);
-    }
-
-    static Optional<RepairInstruction> nextEmptyEditRepair(LoopState state) {
-        return RepairPolicy.nextEmptyEditRepair(state);
-    }
-
-    static String emptyEditRepairInstruction(String path) {
-        return RepairPolicy.emptyEditRepairInstruction(path);
     }
 
     private static List<String> remainingFullRewriteRepairTargets(LoopState state) {
