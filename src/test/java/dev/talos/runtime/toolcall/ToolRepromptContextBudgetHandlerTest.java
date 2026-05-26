@@ -112,16 +112,19 @@ class ToolRepromptContextBudgetHandlerTest {
 
     @Test
     void repromptStageDelegatesContextBudgetHandlingToOwner() throws Exception {
-        String source = Files.readString(Path.of(
+        String stage = Files.readString(Path.of(
                 "src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java"));
+        String overlayContinuation = Files.readString(Path.of(
+                "src/main/java/dev/talos/runtime/toolcall/ToolRepromptOverlayContinuation.java"));
 
-        assertTrue(source.contains("ToolRepromptContextBudgetHandler.handle"), source);
-        assertFalse(source.contains("tryCompactMutationContinuation"), source);
-        assertFalse(source.contains("CompactMutationContinuationOutcome"), source);
-        assertFalse(source.contains("private static boolean stopAfterContextBudgetExceeded"), source);
-        assertFalse(source.contains("private static CompactMutationContinuationOutcome tryCompactMutationContinuation"),
-                source);
-        assertFalse(source.contains("private enum CompactMutationContinuationOutcome"), source);
+        assertFalse(stage.contains("ToolRepromptContextBudgetHandler.handle"), stage);
+        assertTrue(overlayContinuation.contains("ToolRepromptContextBudgetHandler.handle"), overlayContinuation);
+        assertFalse(stage.contains("tryCompactMutationContinuation"), stage);
+        assertFalse(stage.contains("CompactMutationContinuationOutcome"), stage);
+        assertFalse(stage.contains("private static boolean stopAfterContextBudgetExceeded"), stage);
+        assertFalse(stage.contains("private static CompactMutationContinuationOutcome tryCompactMutationContinuation"),
+                stage);
+        assertFalse(stage.contains("private enum CompactMutationContinuationOutcome"), stage);
     }
 
     private LoopState mutationState(String request, LlmClient llm) {
