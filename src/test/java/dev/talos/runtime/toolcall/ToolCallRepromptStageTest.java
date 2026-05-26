@@ -292,6 +292,17 @@ class ToolCallRepromptStageTest {
         assertFalse(source.contains("catch (EngineException.Transient"), source);
     }
 
+    @Test
+    void repromptStageDelegatesSuccessfulMutationDecision() throws Exception {
+        String source = Files.readString(Path.of(
+                "src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java"));
+
+        assertTrue(source.contains("ToolRepromptSuccessfulMutationDecision.tryHandle("), source);
+        assertFalse(source.contains("StaticWebContinuationPlanner.staticWebVerificationAlreadyPasses"), source);
+        assertFalse(source.contains("StaticWebContinuationPlanner.nextPlan("), source);
+        assertFalse(source.contains("P0: skipping re-prompt"), source);
+    }
+
     private static dev.talos.runtime.ToolCallLoop.ToolOutcome workspaceOutcome(
             String toolName,
             String pathHint,
