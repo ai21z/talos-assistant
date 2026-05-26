@@ -3,9 +3,7 @@ package dev.talos.runtime.toolcall;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.failure.FailureAction;
 import dev.talos.runtime.RuntimeTurnContext;
-import dev.talos.runtime.TemplatePlaceholderGuard;
 import dev.talos.runtime.Session;
-import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.runtime.repair.StaticSelectorRepairGuard;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.spi.types.ChatMessage;
@@ -160,7 +158,9 @@ public final class LoopState {
                 != PendingActionObligation.Kind.STATIC_REPAIR_TARGETS_REMAINING) {
             return false;
         }
-        String invalidWriteDetail = invalidStaticRepairWriteDetail(calls, pendingActionObligation.targets());
+        String invalidWriteDetail = StaticRepairWriteContentGuard.invalidWriteDetail(
+                calls,
+                pendingActionObligation.targets());
         if (invalidWriteDetail == null
                 && containsWriteFileForPendingTarget(calls, pendingActionObligation.targets())) {
             return false;
@@ -180,23 +180,20 @@ public final class LoopState {
     }
 
     public boolean failStaticRepairAfterInvalidWriteContent(List<ToolCall> calls) {
-        if (calls == null || calls.isEmpty()) return false;
-        Set<String> targets = RepairPolicy.fullRewriteTargetsFromRepairContext(messages);
-        if (targets == null || targets.isEmpty()) return false;
-        String detail = invalidStaticRepairWriteDetail(calls, new ArrayList<>(targets));
-        if (detail == null) return false;
+        var failure = StaticRepairWriteContentGuard.evaluate(messages, calls);
+        if (failure.isEmpty()) return false;
 
-        String reason = "STATIC_REPAIR_INVALID_WRITE_CONTENT: " + detail;
+        StaticRepairWriteContentGuard.Failure detail = failure.get();
         failureDecision = dev.talos.runtime.failure.FailureDecision.stop(
                 FailureAction.ASK_USER,
-                reason);
-        currentText = staticRepairInvalidWriteFailureAnswer(detail);
+                detail.reason());
+        currentText = detail.answer();
         currentNativeCalls = List.of();
         LocalTurnTraceCapture.recordActionObligation(
                 "STATIC_REPAIR_WRITE_CONTENT",
                 "FAILED",
-                reason,
-                "STATIC_REPAIR_INVALID_WRITE_CONTENT");
+                detail.reason(),
+                StaticRepairWriteContentGuard.FAILURE_KIND);
         return true;
     }
 
@@ -373,60 +370,6 @@ public final class LoopState {
         return false;
     }
 
-    private static String invalidStaticRepairWriteDetail(
-            List<ToolCall> calls,
-            List<String> targets
-    ) {
-        Set<String> normalizedTargets = normalizedTargets(targets);
-        if (normalizedTargets.isEmpty() || calls == null || calls.isEmpty()) {
-            return null;
-        }
-        for (ToolCall call : calls) {
-            if (call == null || !"talos.write_file".equals(call.toolName())) continue;
-            String path = ToolCallSupport.normalizePath(call.param("path", ""));
-            if (path.isBlank() || !normalizedTargets.contains(path)) continue;
-            String content = firstPresentParam(
-                    call,
-                    "content",
-                    "text",
-                    "body",
-                    "data",
-                    "file_content");
-            if (content == null) {
-                return rejectedStaticRepairWriteDetail(
-                        path,
-                        "missing required `content` argument");
-            }
-            if (content.isBlank()) {
-                return rejectedStaticRepairWriteDetail(
-                        path,
-                        "empty or blank content");
-            }
-            if (TemplatePlaceholderGuard.looksLikeTemplatePlaceholder(content)) {
-                return rejectedStaticRepairWriteDetail(
-                        path,
-                        "literal template-placeholder content");
-            }
-        }
-        return null;
-    }
-
-    private static String rejectedStaticRepairWriteDetail(String path, String reason) {
-        String safePath = path == null || path.isBlank() ? "(unknown)" : path;
-        String safeReason = reason == null || reason.isBlank() ? "invalid content" : reason;
-        return "Static web repair rejected talos.write_file(" + safePath + ") before apply because "
-                + safeReason + ". No approval was requested and no file was changed.";
-    }
-
-    private static String staticRepairInvalidWriteFailureAnswer(String detail) {
-        String safeDetail = detail == null || detail.isBlank()
-                ? "Static web repair write content was invalid before apply."
-                : detail.strip();
-        return "[Action obligation failed: static repair write content was invalid.]\n\n"
-                + safeDetail + "\n"
-                + "Talos stopped this turn deterministically.";
-    }
-
     private static String staticSelectorRepairFailureAnswer(StaticSelectorRepairGuard.Violation violation) {
         String target = violation == null ? "(unknown)" : violation.target();
         String selectors = violation == null || violation.selectors().isEmpty()
@@ -505,12 +448,4 @@ public final class LoopState {
                 || "create_directory".equals(normalized);
     }
 
-    private static String firstPresentParam(ToolCall call, String... keys) {
-        if (call == null || keys == null) return null;
-        for (String key : keys) {
-            String value = call.param(key);
-            if (value != null) return value;
-        }
-        return null;
-    }
 }
