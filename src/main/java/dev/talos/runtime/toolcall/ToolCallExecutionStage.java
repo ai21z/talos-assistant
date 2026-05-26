@@ -357,23 +357,18 @@ public final class ToolCallExecutionStage {
 
             ToolExecutionFailureClassifier.Classification failureClassification =
                     ToolExecutionFailureClassifier.classify(effective, result, pathHint);
-            if (failureClassification.mutatingDenied()) {
+            ToolFailureIterationSignals.Result failureSignals =
+                    ToolFailureIterationSignals.from(state, effective, failureClassification, result);
+            if (failureSignals.mutatingDenied()) {
                 mutatingDeniedThisIter = true;
             }
-            if (!failureClassification.unsupportedReadPath().isBlank()) {
-                unsupportedReadPathsThisIter.add(failureClassification.unsupportedReadPath());
+            if (failureSignals.hasUnsupportedReadPaths()) {
+                unsupportedReadPathsThisIter.addAll(failureSignals.unsupportedReadPaths());
             }
-            if (failureClassification.preApprovalPathPolicyBlock()
-                    && ToolCallSupport.isMutatingTool(effective.toolName())) {
+            if (failureSignals.pathPolicyBlocked()) {
                 pathPolicyBlockedThisIter = true;
-                if (failureClassification.expectedTargetScopeBlock()) {
-                    state.failureDecision = dev.talos.runtime.failure.FailureDecision.stop(
-                            dev.talos.runtime.failure.FailureAction.ASK_USER,
-                            result.errorMessage());
-                }
             }
-            if (failureClassification.userApprovalDenial()
-                    && ToolCallSupport.isMutatingTool(effective.toolName())) {
+            if (failureSignals.approvalDenied()) {
                 approvalDeniedThisIter = true;
             }
             state.toolOutcomes.add(new dev.talos.runtime.ToolCallLoop.ToolOutcome(
