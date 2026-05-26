@@ -96,32 +96,10 @@ public final class ToolCallRepromptStage {
             return sourceEvidenceRepair.get();
         }
 
-        Optional<TargetReadbackCompactRepairPlanner.Plan> appendLineRepair =
-                TargetReadbackCompactRepairPlanner.nextAppendLinePlan(
-                        state,
-                        ToolRepromptRequestBuilder.currentNativeToolSpecs(state),
-                        userTask);
-        if (appendLineRepair.isPresent()) {
-            TargetReadbackCompactRepairPlanner.Plan repair = appendLineRepair.get();
-            state.setPendingActionObligation(
-                    PendingActionObligation.appendLineTargets(List.of(repair.path())));
-            state.appendLineRepairPromptedPaths.add(repair.promptedPathKey());
-            return ToolRepromptChatExecutor.execute(
-                    state, repair.messages(), repair.tools(), repair.controls(), repair.retryName());
-        }
-
-        Optional<TargetReadbackCompactRepairPlanner.Plan> oldStringMissRepair =
-                TargetReadbackCompactRepairPlanner.nextOldStringMissPlan(
-                        state,
-                        ToolRepromptRequestBuilder.currentNativeToolSpecs(state),
-                        userTask);
-        if (oldStringMissRepair.isPresent()) {
-            TargetReadbackCompactRepairPlanner.Plan repair = oldStringMissRepair.get();
-            state.setPendingActionObligation(
-                    PendingActionObligation.oldStringMissTargets(List.of(repair.path())));
-            state.oldStringMissRepairPromptedPaths.add(repair.promptedPathKey());
-            return ToolRepromptChatExecutor.execute(
-                    state, repair.messages(), repair.tools(), repair.controls(), repair.retryName());
+        Optional<Boolean> targetReadbackRepair =
+                ToolRepromptTargetReadbackRepairDecision.tryHandle(state, userTask);
+        if (targetReadbackRepair.isPresent()) {
+            return targetReadbackRepair.get();
         }
 
         List<String> remainingRepairTargets =
