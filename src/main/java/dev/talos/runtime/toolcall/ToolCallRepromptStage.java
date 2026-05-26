@@ -1,10 +1,8 @@
 package dev.talos.runtime.toolcall;
 
-import dev.talos.runtime.failure.FailureAction;
 import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.failure.FailurePolicy;
 import dev.talos.runtime.ToolCallParser;
-import dev.talos.safety.SafeLogFormatter;
 import dev.talos.spi.types.ToolSpec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,18 +36,9 @@ public final class ToolCallRepromptStage {
             return pathPolicyBlockedDecision.get();
         }
 
-        if (state.staleEditRereadIgnoredPath != null && !state.staleEditRereadIgnoredPath.isBlank()) {
-            state.failureDecision = FailureDecision.stop(
-                    FailureAction.ASK_USER,
-                    "failure policy stopped the tool loop because talos.edit_file was retried for path `"
-                            + state.staleEditRereadIgnoredPath
-                            + "` before rereading the file after a same-turn mutation changed it. "
-                            + "No approval was requested for the stale retry and no additional file change was made.");
-            state.currentText = ToolFailurePolicyStopAnswer.render(state, state.failureDecision);
-            state.currentNativeCalls = List.of();
-            LOG.debug("Stopping tool-call loop after stale edit retry ignored reread requirement for {}",
-                    SafeLogFormatter.value(state.staleEditRereadIgnoredPath));
-            return false;
+        Optional<Boolean> staleRereadStop = ToolRepromptStaleEditRereadStop.tryHandle(state);
+        if (staleRereadStop.isPresent()) {
+            return staleRereadStop.get();
         }
 
         TerminalReadOnlyStopAnswer.Answer terminalReadOnlyAnswer =
