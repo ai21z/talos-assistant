@@ -95,15 +95,20 @@ class SourceEvidenceExactRepairPlannerTest {
     }
 
     @Test
-    void repromptStageDelegatesSourceEvidenceExactRepairPlanningToOwner() throws Exception {
-        String source = Files.readString(Path.of(
+    void sourceEvidenceDecisionDelegatesSourceEvidenceExactRepairPlanningToOwner() throws Exception {
+        String stageSource = Files.readString(Path.of(
                 "src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java"));
+        String decisionSource = Files.readString(Path.of(
+                "src/main/java/dev/talos/runtime/toolcall/ToolRepromptSourceEvidenceRepairDecision.java"));
 
-        assertTrue(source.contains("SourceEvidenceExactRepairPlanner.nextPlan"), source);
-        assertFalse(source.contains("private static Optional<SourceEvidenceExactRepair> "
-                + "nextSourceEvidenceExactRepair"), source);
-        assertFalse(source.contains("private static List<ToolSpec> sourceEvidenceExactRepairToolSpecs"), source);
-        assertFalse(source.contains("private static List<ChatMessage> sourceEvidenceExactRepairMessages"), source);
+        assertFalse(stageSource.contains("SourceEvidenceExactRepairPlanner.nextPlan"), stageSource);
+        assertTrue(decisionSource.contains("SourceEvidenceExactRepairPlanner.nextPlan"), decisionSource);
+        assertFalse(stageSource.contains("private static Optional<SourceEvidenceExactRepair> "
+                + "nextSourceEvidenceExactRepair"), stageSource);
+        assertFalse(stageSource.contains("private static List<ToolSpec> sourceEvidenceExactRepairToolSpecs"),
+                stageSource);
+        assertFalse(stageSource.contains("private static List<ChatMessage> sourceEvidenceExactRepairMessages"),
+                stageSource);
     }
 
     private LoopState sourceEvidenceState(String request) {
