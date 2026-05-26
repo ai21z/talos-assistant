@@ -4,7 +4,6 @@ import dev.talos.core.llm.LlmClient;
 import dev.talos.runtime.failure.FailureAction;
 import dev.talos.runtime.failure.FailureDecision;
 import dev.talos.runtime.failure.FailurePolicy;
-import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.ToolCallParser;
 import dev.talos.runtime.repair.RepairInstruction;
 import dev.talos.runtime.repair.RepairPolicy;
@@ -12,7 +11,6 @@ import dev.talos.safety.SafeLogFormatter;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
-import dev.talos.runtime.workspace.WorkspaceOperationIntent;
 import dev.talos.spi.EngineException;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatRequestControls;
@@ -167,14 +165,10 @@ public final class ToolCallRepromptStage {
             return repairBudgetStop.get();
         }
 
-        if (mutationReadOnlyBudgetExceeded(state)) {
-            Optional<Boolean> compactMutation =
-                    ToolRepromptContextBudgetHandler.handleReadOnlyMutationEvidenceBudget(
-                            state,
-                            readOnlyInspectionAttemptCount(state));
-            if (compactMutation.isPresent()) {
-                return compactMutation.get();
-            }
+        Optional<Boolean> mutationEvidenceBudget =
+                ToolMutationEvidenceBudgetGate.tryContinueOrStop(state, REPAIR_READ_ONLY_TOOL_BUDGET);
+        if (mutationEvidenceBudget.isPresent()) {
+            return mutationEvidenceBudget.get();
         }
 
         FailureDecision failureDecision = FailurePolicy.defaults(state.maxIterations)
@@ -415,17 +409,6 @@ public final class ToolCallRepromptStage {
         }
     }
 
-    private static boolean readOnlyProgressOnly(LoopState state) {
-        if (state == null || state.toolOutcomes.isEmpty()) return false;
-        for (ToolCallLoop.ToolOutcome outcome : state.toolOutcomes) {
-            if (outcome == null || !outcome.success()) return false;
-            if (!ToolCallSupport.isReadOnlyTool(outcome.toolName()) || outcome.mutating()) {
-                return false;
-            }
-        }
-        return true;
-    }
-
     private static boolean chatReprompt(
             LoopState state,
             List<ChatMessage> requestMessages,
@@ -497,23 +480,6 @@ public final class ToolCallRepromptStage {
     public boolean hitIterationLimit(LoopState state) {
         return state.iterations >= state.maxIterations
                 && (!state.currentNativeCalls.isEmpty() || ToolCallParser.containsToolCalls(state.currentText));
-    }
-
-    private static boolean mutationReadOnlyBudgetExceeded(LoopState state) {
-        if (state == null || state.toolNames.isEmpty()) return false;
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
-        if (contract == null || !contract.mutationAllowed() || !contract.mutationRequested()) return false;
-        if (WorkspaceOperationIntent.detect(contract).isPresent()) return false;
-        if (state.mutationSinceStart || state.mutatingToolSuccesses > 0) return false;
-        if (state.failedCalls > 0) return false;
-        if (!readOnlyProgressOnly(state)) return false;
-        if (!CompactMutationContinuationPlanner.hasMutationTargets(state, contract)) return false;
-        return readOnlyInspectionAttemptCount(state) >= REPAIR_READ_ONLY_TOOL_BUDGET;
-    }
-
-    private static int readOnlyInspectionAttemptCount(LoopState state) {
-        if (state == null) return 0;
-        return Math.max(0, state.toolNames.size()) + Math.max(0, state.cushionFiresRedundantRead);
     }
 
     private static boolean hasStaticRepairContext(LoopState state) {
