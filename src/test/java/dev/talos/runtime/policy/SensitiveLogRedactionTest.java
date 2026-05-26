@@ -179,6 +179,8 @@ class SensitiveLogRedactionTest {
         String lucene = source("src/main/java/dev/talos/core/index/LuceneStore.java");
         String executor = source("src/main/java/dev/talos/cli/modes/AssistantTurnExecutor.java");
         String reprompt = source("src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java");
+        String overlayContinuation = source(
+                "src/main/java/dev/talos/runtime/toolcall/ToolRepromptOverlayContinuation.java");
         String support = source("src/main/java/dev/talos/runtime/toolcall/ToolCallSupport.java");
 
         assertTrue(firstRun.contains("SafeLogFormatter.value(SENTINEL)"), firstRun);
@@ -198,7 +200,8 @@ class SensitiveLogRedactionTest {
         assertTrue(executor.contains("SafeLogFormatter.value(mnf.model())"), executor);
         assertFalse(executor.contains("LOG.warn(\"Model not found: {}\", mnf.model())"), executor);
 
-        assertTrue(reprompt.contains("SafeLogFormatter.value(mnf.model())"), reprompt);
+        assertFalse(reprompt.contains("mnf.model()"), reprompt);
+        assertTrue(overlayContinuation.contains("SafeLogFormatter.value(mnf.model())"), overlayContinuation);
         assertFalse(reprompt.contains("state.iterations, mnf.model()"), reprompt);
         assertFalse(reprompt.contains("retryName, mnf.model()"), reprompt);
 
