@@ -6,6 +6,7 @@ import dev.talos.runtime.toolcall.ToolCallExecutionStage;
 import dev.talos.runtime.toolcall.ToolCallParseStage;
 import dev.talos.runtime.toolcall.ToolCallRepromptStage;
 import dev.talos.runtime.toolcall.ToolCallSupport;
+import dev.talos.runtime.toolcall.ToolLoopResultSummaryFormatter;
 import dev.talos.runtime.toolcall.ToolMutationEvidence;
 import dev.talos.runtime.toolcall.ToolOutcomeFailureShape;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
@@ -140,55 +141,7 @@ public final class ToolCallLoop {
         }
 
         public String summary() {
-            if (toolsInvoked <= 0) return null;
-            var unique = new java.util.LinkedHashSet<>(toolNames != null ? toolNames : List.of());
-            String names = unique.isEmpty() ? "" : ": " + String.join(", ", unique);
-            String base = "[Used " + toolsInvoked + " tool(s)" + names + " | " + iterations + " iteration(s)]";
-            int displayFailedCalls = displayFailedCalls();
-            if (displayFailedCalls > 0) {
-                base += " [" + displayFailedCalls + " failed]";
-            }
-            if (hitIterLimit) {
-                base += " [iteration limit reached]";
-            }
-            if (failureDecision.shouldStop()) {
-                base += " [failure policy stopped]";
-            }
-            return base;
-        }
-
-        private int displayFailedCalls() {
-            if (failedCalls <= 0 || toolOutcomes.isEmpty()) return Math.max(0, failedCalls);
-            int recovered = 0;
-            for (int i = 0; i < toolOutcomes.size(); i++) {
-                ToolOutcome failure = toolOutcomes.get(i);
-                if (!isRecoveredEditFailureShape(failure)) continue;
-                String failedPath = normalizeSummaryPath(failure.pathHint());
-                if (failedPath.isBlank()) continue;
-                for (int j = i + 1; j < toolOutcomes.size(); j++) {
-                    ToolOutcome later = toolOutcomes.get(j);
-                    if (later != null
-                            && later.mutating()
-                            && later.success()
-                            && failedPath.equals(normalizeSummaryPath(later.pathHint()))) {
-                        recovered++;
-                        break;
-                    }
-                }
-            }
-            return Math.max(0, failedCalls - recovered);
-        }
-
-        private static boolean isRecoveredEditFailureShape(ToolOutcome outcome) {
-            return outcome != null
-                    && (outcome.invalidEmptyEditArguments()
-                    || outcome.fullRewriteRepairRedirect()
-                    || outcome.oldStringNotFoundEditFailure());
-        }
-
-        private static String normalizeSummaryPath(String path) {
-            if (path == null || path.isBlank()) return "";
-            return path.replace('\\', '/').replaceFirst("^\\./+", "").toLowerCase(java.util.Locale.ROOT);
+            return ToolLoopResultSummaryFormatter.format(this);
         }
     }
 
