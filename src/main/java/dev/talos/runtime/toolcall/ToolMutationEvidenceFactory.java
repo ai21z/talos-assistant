@@ -1,40 +1,39 @@
 package dev.talos.runtime.toolcall;
 
-import dev.talos.runtime.ToolCallLoop;
 import dev.talos.tools.ToolAliasPolicy;
 import dev.talos.tools.ToolCall;
 
 final class ToolMutationEvidenceFactory {
     private ToolMutationEvidenceFactory() {}
 
-    static ToolCallLoop.MutationEvidence from(
+    static ToolMutationEvidence from(
             ToolCall call,
             LoopState state,
             String pathHint
     ) {
         if (call == null) {
-            return ToolCallLoop.MutationEvidence.none();
+            return ToolMutationEvidence.none();
         }
         String canonicalTool = ToolAliasPolicy.localCanonicalName(call.toolName());
         if ("write_file".equals(canonicalTool)) {
             String content = firstParam(call, "content", "text", "body", "data", "file_content");
             String previousContent = priorReadContentForPath(state, pathHint);
             if (content == null || previousContent == null) {
-                return ToolCallLoop.MutationEvidence.none();
+                return ToolMutationEvidence.none();
             }
-            return ToolCallLoop.MutationEvidence.fullWriteReplacement(previousContent, content);
+            return ToolMutationEvidence.fullWriteReplacement(previousContent, content);
         }
         if (!"edit_file".equals(canonicalTool)) {
-            return ToolCallLoop.MutationEvidence.none();
+            return ToolMutationEvidence.none();
         }
         String oldString = firstParam(call,
                 "old_string", "oldString", "old_text", "search", "find", "original");
         String newString = firstParam(call,
                 "new_string", "newString", "new_text", "replace", "replacement");
         if (oldString == null || oldString.isEmpty() || newString == null) {
-            return ToolCallLoop.MutationEvidence.none();
+            return ToolMutationEvidence.none();
         }
-        return ToolCallLoop.MutationEvidence.exactEdit(oldString, newString);
+        return ToolMutationEvidence.exactEdit(oldString, newString);
     }
 
     private static String priorReadContentForPath(LoopState state, String pathHint) {

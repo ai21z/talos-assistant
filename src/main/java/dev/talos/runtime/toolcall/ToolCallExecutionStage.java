@@ -324,7 +324,7 @@ public final class ToolCallExecutionStage {
             }
 
             ReadEvidenceStateAccounting.recordSuccessfulToolResult(state, effective, pathHint, result);
-            dev.talos.runtime.ToolCallLoop.MutationEvidence mutationEvidence =
+            ToolMutationEvidence mutationEvidence =
                     result.success() ? ToolMutationEvidenceFactory.from(effective, state, pathHint) : null;
             ToolMutationStateAccounting.Result mutationState =
                     ToolMutationStateAccounting.recordSuccessfulMutation(state, effective, pathHint, result);

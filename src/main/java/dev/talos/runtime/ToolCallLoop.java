@@ -6,6 +6,7 @@ import dev.talos.runtime.toolcall.ToolCallExecutionStage;
 import dev.talos.runtime.toolcall.ToolCallParseStage;
 import dev.talos.runtime.toolcall.ToolCallRepromptStage;
 import dev.talos.runtime.toolcall.ToolCallSupport;
+import dev.talos.runtime.toolcall.ToolMutationEvidence;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatMessage.NativeToolCall;
@@ -202,7 +203,7 @@ public final class ToolCallLoop {
             dev.talos.tools.VerificationStatus fileVerificationStatus,
             String errorCode,
             WorkspaceOperationPlan workspaceOperationPlan,
-            MutationEvidence mutationEvidence
+            ToolMutationEvidence mutationEvidence
     ) {
         public ToolOutcome {
             toolName = toolName == null ? "" : toolName;
@@ -210,7 +211,7 @@ public final class ToolCallLoop {
             summary = summary == null ? "" : summary;
             errorMessage = errorMessage == null ? "" : errorMessage;
             errorCode = errorCode == null ? "" : errorCode;
-            mutationEvidence = mutationEvidence == null ? MutationEvidence.none() : mutationEvidence;
+            mutationEvidence = mutationEvidence == null ? ToolMutationEvidence.none() : mutationEvidence;
         }
 
         public ToolOutcome(
@@ -226,7 +227,7 @@ public final class ToolCallLoop {
                 WorkspaceOperationPlan workspaceOperationPlan
         ) {
             this(toolName, pathHint, success, mutating, denied, summary, errorMessage,
-                    fileVerificationStatus, errorCode, workspaceOperationPlan, MutationEvidence.none());
+                    fileVerificationStatus, errorCode, workspaceOperationPlan, ToolMutationEvidence.none());
         }
 
         public ToolOutcome(
@@ -323,38 +324,6 @@ public final class ToolCallLoop {
             if (!ToolError.INVALID_PARAMS.equals(errorCode)) return false;
             String lower = errorMessage.toLowerCase(java.util.Locale.ROOT);
             return lower.contains("target outside expected targets before approval");
-        }
-    }
-
-    public record MutationEvidence(
-            String kind,
-            String oldString,
-            String newString
-    ) {
-        public MutationEvidence {
-            kind = kind == null ? "" : kind;
-            oldString = oldString == null ? "" : oldString;
-            newString = newString == null ? "" : newString;
-        }
-
-        public static MutationEvidence none() {
-            return new MutationEvidence("", "", "");
-        }
-
-        public static MutationEvidence exactEdit(String oldString, String newString) {
-            return new MutationEvidence("EXACT_EDIT_REPLACEMENT", oldString, newString);
-        }
-
-        public static MutationEvidence fullWriteReplacement(String previousContent, String newContent) {
-            return new MutationEvidence("FULL_WRITE_REPLACEMENT", previousContent, newContent);
-        }
-
-        public boolean exactEditReplacement() {
-            return "EXACT_EDIT_REPLACEMENT".equals(kind);
-        }
-
-        public boolean fullWriteReplacement() {
-            return "FULL_WRITE_REPLACEMENT".equals(kind);
         }
     }
 

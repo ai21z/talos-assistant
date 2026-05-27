@@ -4,7 +4,6 @@ import dev.talos.cli.repl.Context;
 import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
 import dev.talos.core.security.Sandbox;
-import dev.talos.runtime.ToolCallLoop;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolCall;
 import org.junit.jupiter.api.Test;
@@ -30,7 +29,7 @@ class ToolMutationEvidenceFactoryTest {
                 "old_string", "status=old",
                 "new_string", "status=new"));
 
-        ToolCallLoop.MutationEvidence evidence =
+        ToolMutationEvidence evidence =
                 ToolMutationEvidenceFactory.from(edit, state, "README.md");
 
         assertTrue(evidence.exactEditReplacement());
@@ -48,7 +47,7 @@ class ToolMutationEvidenceFactoryTest {
                 "path", "README.md",
                 "content", "# New\nBody\n"));
 
-        ToolCallLoop.MutationEvidence evidence =
+        ToolMutationEvidence evidence =
                 ToolMutationEvidenceFactory.from(write, state, "README.md");
 
         assertTrue(evidence.fullWriteReplacement());
@@ -66,7 +65,7 @@ class ToolMutationEvidenceFactoryTest {
                 "path", "README.md",
                 "content", "# New\n"));
 
-        ToolCallLoop.MutationEvidence evidence =
+        ToolMutationEvidence evidence =
                 ToolMutationEvidenceFactory.from(write, state, "README.md");
 
         assertFalse(evidence.fullWriteReplacement());
@@ -81,9 +80,9 @@ class ToolMutationEvidenceFactoryTest {
                 "path", "README.md",
                 "old_string", "status=old"));
 
-        assertEquals(ToolCallLoop.MutationEvidence.none(),
+        assertEquals(ToolMutationEvidence.none(),
                 ToolMutationEvidenceFactory.from(read, state, "README.md"));
-        assertEquals(ToolCallLoop.MutationEvidence.none(),
+        assertEquals(ToolMutationEvidence.none(),
                 ToolMutationEvidenceFactory.from(editMissingNewString, state, "README.md"));
     }
 
@@ -93,9 +92,25 @@ class ToolMutationEvidenceFactoryTest {
                 "src/main/java/dev/talos/runtime/toolcall/ToolCallExecutionStage.java"));
 
         assertTrue(source.contains("ToolMutationEvidenceFactory.from"), source);
-        assertFalse(source.contains("private static dev.talos.runtime.ToolCallLoop.MutationEvidence mutationEvidence"),
+        assertFalse(source.contains("private static ToolMutationEvidence mutationEvidence"),
                 source);
         assertFalse(source.contains("private static String priorReadContentForPath"), source);
+    }
+
+    @Test
+    void mutationEvidenceValueIsOwnedOutsideToolCallLoop() throws Exception {
+        String loopSource = Files.readString(Path.of("src/main/java/dev/talos/runtime/ToolCallLoop.java"));
+        Path evidencePath = Path.of("src/main/java/dev/talos/runtime/toolcall/ToolMutationEvidence.java");
+        String factorySource = Files.readString(Path.of(
+                "src/main/java/dev/talos/runtime/toolcall/ToolMutationEvidenceFactory.java"));
+        String verifierSource = Files.readString(Path.of(
+                "src/main/java/dev/talos/runtime/verification/TaskExpectationMutationEvidenceVerifier.java"));
+
+        assertFalse(loopSource.contains("record MutationEvidence"), loopSource);
+        assertTrue(Files.exists(evidencePath), "Tool mutation evidence must be a tool-call owned value.");
+        assertTrue(Files.readString(evidencePath).contains("public record ToolMutationEvidence"), evidencePath::toString);
+        assertTrue(factorySource.contains("ToolMutationEvidence from("), factorySource);
+        assertTrue(verifierSource.contains("ToolMutationEvidence evidence"), verifierSource);
     }
 
     private LoopState loopState() {
