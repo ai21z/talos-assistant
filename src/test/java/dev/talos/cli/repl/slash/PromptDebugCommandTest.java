@@ -230,6 +230,27 @@ class PromptDebugCommandTest {
     }
 
     @Test
+    void saveDelegatesArtifactWritingToPromptDebugArtifactWriter() throws Exception {
+        Path commandPath = Path.of("src/main/java/dev/talos/cli/repl/slash/PromptDebugCommand.java");
+        Path writerPath = Path.of("src/main/java/dev/talos/cli/prompt/PromptDebugArtifactWriter.java");
+
+        assertTrue(Files.exists(writerPath),
+                "PromptDebugArtifactWriter should own prompt-debug artifact file naming and writes");
+
+        String command = Files.readString(commandPath);
+        String writer = Files.readString(writerPath);
+
+        assertTrue(command.contains("PromptDebugArtifactWriter.writeLatest("), command);
+        assertTrue(command.contains("PromptDebugArtifactWriter.writeHistory("), command);
+        assertFalse(command.contains("Files.writeString("), command);
+        assertFalse(command.contains("DateTimeFormatter"), command);
+        assertTrue(writer.contains("Files.writeString("), writer);
+        assertTrue(writer.contains("public record LatestArtifact"), writer);
+        assertTrue(writer.contains("public record HistoryArtifact"), writer);
+        assertFalse(writer.contains("dev.talos.runtime.Result"), writer);
+    }
+
+    @Test
     void saveUsesConfiguredDirectoryInsteadOfWorkspaceLocalPrompts(@TempDir Path tempDir) throws Exception {
         Path configuredDir = tempDir.resolve("prompt-debug-artifacts");
         System.setProperty("talos.promptDebugDir", configuredDir.toString());

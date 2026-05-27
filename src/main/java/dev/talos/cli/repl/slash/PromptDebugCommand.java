@@ -1,24 +1,18 @@
 package dev.talos.cli.repl.slash;
 
+import dev.talos.cli.prompt.PromptDebugArtifactWriter;
 import dev.talos.cli.prompt.PromptDebugInspector;
 import dev.talos.cli.repl.Context;
 import dev.talos.runtime.Result;
 import dev.talos.spi.types.PromptDebugCapture;
 import dev.talos.spi.types.PromptDebugSnapshot;
 
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
 /** Hidden maintainer command for inspecting the latest assembled/provider prompt. */
 public final class PromptDebugCommand implements Command {
-    private static final DateTimeFormatter FILE_TS =
-            DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
     private static final String PROMPT_DEBUG_DIR_PROPERTY = "talos.promptDebugDir";
     private static final String PROMPT_DEBUG_DIR_ENV = "TALOS_PROMPT_DEBUG_DIR";
 
@@ -64,21 +58,15 @@ public final class PromptDebugCommand implements Command {
         }
         PromptDebugSnapshot snapshot = latest.get();
         Path dir = promptDebugDirectory(explicitDir);
-        Files.createDirectories(dir);
-
-        String ts = FILE_TS.format(LocalDateTime.now());
-        Path md = dir.resolve("prompt-debug-" + ts + ".md");
-        Files.writeString(md, PromptDebugInspector.format(snapshot), StandardCharsets.UTF_8);
+        PromptDebugArtifactWriter.LatestArtifact artifact =
+                PromptDebugArtifactWriter.writeLatest(dir, snapshot);
 
         StringBuilder result = new StringBuilder();
         result.append("Saved prompt debug render to: ")
-                .append(md.toAbsolutePath().normalize()).append('\n');
-        if (!snapshot.providerBodyJson().isBlank()) {
-            Path json = dir.resolve("prompt-debug-" + ts + ".provider-body.json");
-            Files.writeString(json, PromptDebugInspector.redactedProviderBodyJson(snapshot), StandardCharsets.UTF_8);
+                .append(artifact.renderPath().toAbsolutePath().normalize()).append('\n');
+        artifact.providerBodyPath().ifPresent(json ->
             result.append("Saved provider body JSON to: ")
-                    .append(json.toAbsolutePath().normalize()).append('\n');
-        }
+                    .append(json.toAbsolutePath().normalize()).append('\n'));
         return new Result.TrustedInfo(result.toString());
     }
 
@@ -88,34 +76,20 @@ public final class PromptDebugCommand implements Command {
             return missingCaptureInfo();
         }
         Path dir = promptDebugDirectory(explicitDir);
-        Files.createDirectories(dir);
+        PromptDebugArtifactWriter.HistoryArtifact artifact =
+                PromptDebugArtifactWriter.writeHistory(dir, snapshots);
 
-        String ts = FILE_TS.format(LocalDateTime.now());
-        List<String> indexLines = new ArrayList<>();
         StringBuilder result = new StringBuilder();
         result.append("Saved ").append(snapshots.size()).append(" prompt debug capture(s).\n");
-        for (int i = 0; i < snapshots.size(); i++) {
-            PromptDebugSnapshot snapshot = snapshots.get(i);
-            String prefix = "prompt-debug-" + ts + "-" + String.format("%02d", i + 1);
-            Path md = dir.resolve(prefix + ".md");
-            Files.writeString(md, PromptDebugInspector.format(snapshot), StandardCharsets.UTF_8);
+        for (PromptDebugArtifactWriter.CaptureArtifact capture : artifact.captures()) {
             result.append("Saved prompt debug render to: ")
-                    .append(md.toAbsolutePath().normalize()).append('\n');
-            indexLines.add((i + 1) + ". " + md.toAbsolutePath().normalize());
-            if (!snapshot.providerBodyJson().isBlank()) {
-                Path json = dir.resolve(prefix + ".provider-body.json");
-                Files.writeString(json, PromptDebugInspector.redactedProviderBodyJson(snapshot), StandardCharsets.UTF_8);
+                    .append(capture.renderPath().toAbsolutePath().normalize()).append('\n');
+            capture.providerBodyPath().ifPresent(json ->
                 result.append("Saved provider body JSON to: ")
-                        .append(json.toAbsolutePath().normalize()).append('\n');
-                indexLines.add("   provider: " + json.toAbsolutePath().normalize());
-            }
+                        .append(json.toAbsolutePath().normalize()).append('\n'));
         }
-        Path index = dir.resolve("prompt-debug-" + ts + "-index.md");
-        Files.writeString(index,
-                "# Talos Prompt Debug History\n\n" + String.join("\n", indexLines) + "\n",
-                StandardCharsets.UTF_8);
         result.append("Saved prompt debug history index to: ")
-                .append(index.toAbsolutePath().normalize()).append('\n');
+                .append(artifact.indexPath().toAbsolutePath().normalize()).append('\n');
         return new Result.TrustedInfo(result.toString());
     }
 
