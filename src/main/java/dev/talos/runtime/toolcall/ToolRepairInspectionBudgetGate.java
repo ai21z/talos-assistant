@@ -12,7 +12,6 @@ import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.List;
 import java.util.Optional;
 
 final class ToolRepairInspectionBudgetGate {
@@ -35,8 +34,7 @@ final class ToolRepairInspectionBudgetGate {
                         state.mutatingToolSuccesses,
                         state.workspace);
         if (conditionalNoChange.isPresent()) {
-            state.currentText = conditionalNoChange.get();
-            state.currentNativeCalls = List.of();
+            state.finishWithAnswer(conditionalNoChange.get());
             state.clearPendingActionObligation();
             LOG.debug("Stopping conditional review/fix loop after inspection found no current static blocker.");
             return Optional.of(false);
@@ -46,9 +44,9 @@ final class ToolRepairInspectionBudgetGate {
                 + readOnlyInspectionAttemptCount(state)
                 + " read-only/no-progress inspection attempt(s) but did not call write/edit before "
                 + "the read-only repair budget was exhausted.";
-        state.failureDecision = FailureDecision.stop(FailureAction.ASK_USER, reason);
-        state.currentText = ResponseObligationVerifier.deterministicRepairInspectionOnlyAnswer();
-        state.currentNativeCalls = List.of();
+        state.stopWithFailure(
+                FailureDecision.stop(FailureAction.ASK_USER, reason),
+                ResponseObligationVerifier.deterministicRepairInspectionOnlyAnswer());
         LocalTurnTraceCapture.recordActionObligation(
                 conditionalRepairObligationName(contract),
                 "FAILED",

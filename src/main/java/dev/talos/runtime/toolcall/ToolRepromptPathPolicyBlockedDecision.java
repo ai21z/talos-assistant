@@ -42,10 +42,9 @@ final class ToolRepromptPathPolicyBlockedDecision {
             return Optional.of(ToolRepromptChatExecutor.execute(
                     state, repair.messages(), repair.tools(), repair.controls(), repair.retryName()));
         }
-        state.currentText = state.failureDecision.shouldStop()
+        state.finishWithAnswer(state.failureDecision.shouldStop()
                 ? ToolFailurePolicyStopAnswer.render(state, state.failureDecision)
-                : "[Tool loop stopped because a mutating path was blocked by workspace policy before approval.]";
-        state.currentNativeCalls = List.of();
+                : "[Tool loop stopped because a mutating path was blocked by workspace policy before approval.]");
         LOG.debug("Stopping tool-call loop after pre-approval path policy block; not re-prompting.");
         return Optional.of(false);
     }

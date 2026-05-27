@@ -33,8 +33,7 @@ final class ToolRepromptSuccessfulMutationDecision {
         // for all-success iterations; that path still avoids the 5-15
         // minute post-mutation bloviation observed on local 31B Q4 models.
         if (StaticWebContinuationPlanner.staticWebVerificationAlreadyPasses(state)) {
-            state.currentText = String.join("\n", outcome.mutationSummaries());
-            state.currentNativeCalls = List.of();
+            state.finishWithAnswer(String.join("\n", outcome.mutationSummaries()));
             state.clearPendingActionObligation();
             LOG.debug("Stopping static web repair after verifier-passed mutation before expected-target progress.");
             return Optional.of(false);
@@ -62,8 +61,7 @@ final class ToolRepromptSuccessfulMutationDecision {
             }
         }
         if (remainingRepairTargets.isEmpty() && remainingExpectedTargets.isEmpty()) {
-            state.currentText = String.join("\n", outcome.mutationSummaries());
-            state.currentNativeCalls = List.of();
+            state.finishWithAnswer(String.join("\n", outcome.mutationSummaries()));
             LOG.debug("P0: skipping re-prompt after {} successful mutation(s) this iteration",
                     outcome.mutationsThisIteration());
             return Optional.of(false);
