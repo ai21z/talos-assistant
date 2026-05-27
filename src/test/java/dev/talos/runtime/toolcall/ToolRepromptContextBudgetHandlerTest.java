@@ -119,6 +119,9 @@ class ToolRepromptContextBudgetHandlerTest {
 
         assertFalse(stage.contains("ToolRepromptContextBudgetHandler.handle"), stage);
         assertTrue(overlayContinuation.contains("ToolRepromptContextBudgetHandler.handle"), overlayContinuation);
+        assertTrue(Files.readString(Path.of(
+                "src/main/java/dev/talos/runtime/toolcall/ToolRepromptContextBudgetHandler.java"))
+                .contains("CompactMutationContinuationExecutor.tryExecute"));
         assertFalse(stage.contains("tryCompactMutationContinuation"), stage);
         assertFalse(stage.contains("CompactMutationContinuationOutcome"), stage);
         assertFalse(stage.contains("private static boolean stopAfterContextBudgetExceeded"), stage);
