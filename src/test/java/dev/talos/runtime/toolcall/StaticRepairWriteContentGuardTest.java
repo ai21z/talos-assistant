@@ -19,13 +19,17 @@ class StaticRepairWriteContentGuardTest {
     void guardOwnsStaticRepairWriteContentClassificationAndFailureWording() throws Exception {
         String loopState = Files.readString(Path.of(
                 "src/main/java/dev/talos/runtime/toolcall/LoopState.java"));
+        String breachGuard = Files.readString(Path.of(
+                "src/main/java/dev/talos/runtime/toolcall/PendingActionObligationBreachGuard.java"));
         String guard = Files.readString(Path.of(
                 "src/main/java/dev/talos/runtime/toolcall/StaticRepairWriteContentGuard.java"));
 
         assertTrue(loopState.contains("StaticRepairWriteContentGuard.evaluate(messages, calls)"),
                 loopState);
-        assertTrue(loopState.contains("StaticRepairWriteContentGuard.invalidWriteDetail("),
+        assertFalse(loopState.contains("StaticRepairWriteContentGuard.invalidWriteDetail("),
                 loopState);
+        assertTrue(breachGuard.contains("StaticRepairWriteContentGuard.invalidWriteDetail("),
+                breachGuard);
         assertFalse(loopState.contains("TemplatePlaceholderGuard"), loopState);
         assertFalse(loopState.contains("RepairPolicy.fullRewriteTargetsFromRepairContext(messages)"),
                 loopState);
