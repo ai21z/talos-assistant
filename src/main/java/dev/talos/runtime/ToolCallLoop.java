@@ -1,8 +1,6 @@
 package dev.talos.runtime;
 
-import dev.talos.core.util.Sanitize;
 import dev.talos.runtime.failure.FailureDecision;
-import dev.talos.runtime.policy.ProtectedContentPolicy;
 import dev.talos.runtime.toolcall.LoopState;
 import dev.talos.runtime.toolcall.ToolCallExecutionStage;
 import dev.talos.runtime.toolcall.ToolCallParseStage;
@@ -408,10 +406,12 @@ public final class ToolCallLoop {
                 if (state.failPendingActionObligationAfterNoExecutableToolCalls()) {
                     break;
                 }
-                if (shouldSuppressUnfinishedToolContinuation(state.currentText, state.totalToolsInvoked)) {
+                if (ToolLoopFinalAnswerFinalizer.shouldSuppressUnfinishedToolContinuation(
+                        state.currentText,
+                        state.totalToolsInvoked)) {
                     LOG.warn("Suppressing unfinished tool-call continuation after {} executed tool(s)",
                             state.totalToolsInvoked);
-                    state.currentText = unresolvedContinuationFallback();
+                    state.currentText = ToolLoopFinalAnswerFinalizer.unresolvedContinuationFallback();
                 }
                 break;
             }
@@ -434,11 +434,10 @@ public final class ToolCallLoop {
         boolean hitIterLimit = repromptStage.hitIterationLimit(state);
         if (hitIterLimit) {
             LOG.warn("Tool-call loop reached max iterations ({}). Stopping.", maxIterations);
-            state.currentText = ToolCallParser.stripToolCalls(state.currentText)
-                    + "\n\n[Tool-call limit reached. Some tool calls were not executed.]";
+            state.currentText = ToolLoopFinalAnswerFinalizer.withIterationLimitNotice(state.currentText);
         }
 
-        String finalAnswer = finalizeAnswer(
+        String finalAnswer = ToolLoopFinalAnswerFinalizer.finalizeAnswer(
                 state.currentText,
                 state.totalToolsInvoked,
                 state.contentWithheldFromModelContext);
@@ -455,24 +454,6 @@ public final class ToolCallLoop {
                 state.cushionFiresRedundantRead,
                 cushionFiresAliasRescue, state.cushionFiresB3EditShortCircuit,
                 state.cushionFiresE1Suggestion, state.failureDecision, List.copyOf(state.toolOutcomes));
-    }
-
-    private static String finalizeAnswer(String currentText, int toolsInvoked, boolean contentWithheldFromModelContext) {
-        if (shouldSuppressUnfinishedToolContinuation(currentText, toolsInvoked)) {
-            return unresolvedContinuationFallback();
-        }
-        String answer = Sanitize.stripSuspiciousHtml(ToolCallParser.stripToolCalls(currentText));
-        return contentWithheldFromModelContext
-                ? ProtectedContentPolicy.sanitizeText(answer)
-                : answer;
-    }
-
-    private static boolean shouldSuppressUnfinishedToolContinuation(String text, int toolsInvoked) {
-        return toolsInvoked > 0 && ToolCallParser.looksLikeUnfinishedToolPayload(text);
-    }
-
-    private static String unresolvedContinuationFallback() {
-        return "[Tool-call continuation could not be completed. No further tool calls were executed.]";
     }
 
     static List<ToolCall> convertNativeToolCalls(List<NativeToolCall> nativeCalls) {
