@@ -1,6 +1,7 @@
 package dev.talos.runtime.verification;
 
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.toolcall.ToolMutationEvidence;
 import dev.talos.tools.ToolAliasPolicy;
 
 import java.nio.file.Files;
@@ -45,7 +46,7 @@ final class ExactEditReplacementVerifier {
                 continue;
             }
 
-            ToolCallLoop.MutationEvidence evidence = outcome.mutationEvidence();
+            ToolMutationEvidence evidence = outcome.mutationEvidence();
             String oldString = evidence.oldString();
             String newString = evidence.newString();
             if (!newString.isEmpty() && !content.contains(newString)) {
