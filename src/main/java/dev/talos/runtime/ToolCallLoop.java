@@ -7,11 +7,11 @@ import dev.talos.runtime.toolcall.ToolCallParseStage;
 import dev.talos.runtime.toolcall.ToolCallRepromptStage;
 import dev.talos.runtime.toolcall.ToolCallSupport;
 import dev.talos.runtime.toolcall.ToolMutationEvidence;
+import dev.talos.runtime.toolcall.ToolOutcomeFailureShape;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.spi.types.ChatMessage;
 import dev.talos.spi.types.ChatMessage.NativeToolCall;
 import dev.talos.tools.ToolCall;
-import dev.talos.tools.ToolError;
 import dev.talos.tools.ToolProgressSink;
 import dev.talos.tools.ToolResult;
 import org.slf4j.Logger;
@@ -282,48 +282,23 @@ public final class ToolCallLoop {
         }
 
         public boolean invalidEmptyEditArguments() {
-            if (!"talos.edit_file".equals(toolName)) return false;
-            if (!mutating || success || denied) return false;
-            if (!ToolError.INVALID_PARAMS.equals(errorCode)) return false;
-            String lower = errorMessage.toLowerCase(java.util.Locale.ROOT);
-            boolean oldStringProblem = lower.contains("old_string")
-                    && (lower.contains("empty")
-                    || lower.contains("non-empty")
-                    || lower.contains("present"));
-            boolean newStringProblem = lower.contains("new_string")
-                    && lower.contains("missing required parameter");
-            return oldStringProblem || newStringProblem;
+            return ToolOutcomeFailureShape.invalidEmptyEditArguments(this);
         }
 
         public boolean fullRewriteRepairRedirect() {
-            if (!"talos.edit_file".equals(toolName)) return false;
-            if (!mutating || success || denied) return false;
-            if (!ToolError.INVALID_PARAMS.equals(errorCode)) return false;
-            String lower = errorMessage.toLowerCase(java.util.Locale.ROOT);
-            return lower.contains("static verification repair requires a complete talos.write_file replacement");
+            return ToolOutcomeFailureShape.fullRewriteRepairRedirect(this);
         }
 
         public boolean oldStringNotFoundEditFailure() {
-            if (!"talos.edit_file".equals(toolName)) return false;
-            if (!mutating || success || denied) return false;
-            if (!ToolError.INVALID_PARAMS.equals(errorCode)) return false;
-            String lower = errorMessage.toLowerCase(java.util.Locale.ROOT);
-            return lower.contains("old_string not found");
+            return ToolOutcomeFailureShape.oldStringNotFoundEditFailure(this);
         }
 
         public boolean appendLinePreservationFailure() {
-            if (!"talos.write_file".equals(toolName)) return false;
-            if (!mutating || success || denied) return false;
-            if (!ToolError.INVALID_PARAMS.equals(errorCode)) return false;
-            String lower = errorMessage.toLowerCase(java.util.Locale.ROOT);
-            return lower.contains("append-line write_file");
+            return ToolOutcomeFailureShape.appendLinePreservationFailure(this);
         }
 
         public boolean expectedTargetScopeFailure() {
-            if (!mutating || success || denied) return false;
-            if (!ToolError.INVALID_PARAMS.equals(errorCode)) return false;
-            String lower = errorMessage.toLowerCase(java.util.Locale.ROOT);
-            return lower.contains("target outside expected targets before approval");
+            return ToolOutcomeFailureShape.expectedTargetScopeFailure(this);
         }
     }
 
