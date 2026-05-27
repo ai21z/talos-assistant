@@ -6,7 +6,6 @@ import dev.talos.runtime.ToolCallParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.List;
 import java.util.Optional;
 
 @SuppressWarnings("resource") // LoopState.ctx owns the shared LlmClient for the active REPL session.
@@ -16,15 +15,13 @@ public final class ToolCallRepromptStage {
 
     public boolean reprompt(LoopState state, ToolCallExecutionStage.IterationOutcome outcome) {
         if (outcome.approvalDeniedThisIteration()) {
-            state.currentText = "[Tool loop stopped because the requested mutation was not approved.]";
-            state.currentNativeCalls = List.of();
+            state.finishWithAnswer("[Tool loop stopped because the requested mutation was not approved.]");
             LOG.debug("Stopping tool-call loop after denied mutating tool call; not re-prompting.");
             return false;
         }
 
         if (outcome.mutatingDeniedThisIteration()) {
-            state.currentText = DeniedMutationResponseOnlySynthesizer.synthesize(state);
-            state.currentNativeCalls = List.of();
+            state.finishWithAnswer(DeniedMutationResponseOnlySynthesizer.synthesize(state));
             LOG.debug("Stopping tool-call loop after denied mutating tool call; not re-prompting.");
             return false;
         }
@@ -43,8 +40,7 @@ public final class ToolCallRepromptStage {
         TerminalReadOnlyStopAnswer.Answer terminalReadOnlyAnswer =
                 TerminalReadOnlyStopAnswer.select(state, outcome);
         if (terminalReadOnlyAnswer != null) {
-            state.currentText = terminalReadOnlyAnswer.text();
-            state.currentNativeCalls = List.of();
+            state.finishWithAnswer(terminalReadOnlyAnswer.text());
             LOG.debug(terminalReadOnlyAnswer.logMessage());
             return false;
         }
@@ -77,9 +73,7 @@ public final class ToolCallRepromptStage {
         FailureDecision failureDecision = FailurePolicy.defaults(state.maxIterations)
                 .afterIteration(state, outcome);
         if (failureDecision.shouldStop()) {
-            state.failureDecision = failureDecision;
-            state.currentText = ToolFailurePolicyStopAnswer.render(state, failureDecision);
-            state.currentNativeCalls = List.of();
+            state.stopWithFailure(failureDecision, ToolFailurePolicyStopAnswer.render(state, failureDecision));
             LOG.debug("Stopping tool-call loop by failure policy: {}", failureDecision.reason());
             return false;
         }
