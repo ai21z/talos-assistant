@@ -138,6 +138,20 @@ class ToolOutcomeFactoryTest {
         assertFalse(source.contains("private static String toolOutcomeSummary"), source);
     }
 
+    @Test
+    void toolOutcomeFailureShapePredicatesDelegateToOwner() throws Exception {
+        String loopSource = Files.readString(Path.of("src/main/java/dev/talos/runtime/ToolCallLoop.java"));
+        Path shapePath = Path.of("src/main/java/dev/talos/runtime/toolcall/ToolOutcomeFailureShape.java");
+
+        assertTrue(Files.exists(shapePath), "Tool outcome failure-shape classification needs its own owner.");
+        String shapeSource = Files.readString(shapePath);
+        assertTrue(shapeSource.contains("final class ToolOutcomeFailureShape"), shapeSource);
+        assertFalse(loopSource.contains("errorMessage.toLowerCase"), loopSource);
+        assertFalse(loopSource.contains("ToolError.INVALID_PARAMS"), loopSource);
+        assertTrue(loopSource.contains("ToolOutcomeFailureShape.invalidEmptyEditArguments(this)"), loopSource);
+        assertTrue(loopSource.contains("ToolOutcomeFailureShape.expectedTargetScopeFailure(this)"), loopSource);
+    }
+
     private static WorkspaceOperationPlan writePlan() {
         return WorkspaceOperationPlan.batch(
                 WorkspaceOperationPlan.OperationKind.WRITE_FILE,
