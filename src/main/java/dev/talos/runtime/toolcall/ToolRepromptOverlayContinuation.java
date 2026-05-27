@@ -49,14 +49,13 @@ final class ToolRepromptOverlayContinuation {
         } catch (EngineException.ConnectionFailed cf) {
             LOG.warn("Ollama not reachable during tool-call loop iteration {}: {}",
                     state.iterations, SafeLogFormatter.throwableMessage(cf));
-            state.currentText = "[Ollama not reachable — tool loop aborted. " + cf.guidance() + "]";
-            state.currentNativeCalls = List.of();
+            state.finishWithAnswer("[Ollama not reachable — tool loop aborted. " + cf.guidance() + "]");
             return false;
         } catch (EngineException.ModelNotFound mnf) {
             LOG.warn("Model not found during tool-call loop iteration {}: {}",
                     state.iterations, SafeLogFormatter.value(mnf.model()));
-            state.currentText = "[Model '" + mnf.model() + "' not found — tool loop aborted. " + mnf.guidance() + "]";
-            state.currentNativeCalls = List.of();
+            state.finishWithAnswer(
+                    "[Model '" + mnf.model() + "' not found — tool loop aborted. " + mnf.guidance() + "]");
             return false;
         } catch (EngineException.Transient tr) {
             LOG.warn("Transient error during tool-call loop iteration {}: {}",
@@ -74,28 +73,24 @@ final class ToolRepromptOverlayContinuation {
                 return true;
             } catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();
-                state.currentText = "[Interrupted during tool-call loop]";
-                state.currentNativeCalls = List.of();
+                state.finishWithAnswer("[Interrupted during tool-call loop]");
                 return false;
             } catch (Exception retryEx) {
                 if (retryEx instanceof EngineException.ContextBudgetExceeded budget) {
                     return ToolRepromptContextBudgetHandler.handle(state, budget, "transient retry continuation");
                 }
-                state.currentText = "[" + tr.guidance() + "]";
-                state.currentNativeCalls = List.of();
+                state.finishWithAnswer("[" + tr.guidance() + "]");
                 return false;
             }
         } catch (EngineException ee) {
             LOG.warn("Engine error during tool-call loop iteration {}: {}",
                     state.iterations, SafeLogFormatter.throwableMessage(ee));
-            state.currentText = "[Engine error during tool loop: " + ee.getMessage() + "]";
-            state.currentNativeCalls = List.of();
+            state.finishWithAnswer("[Engine error during tool loop: " + ee.getMessage() + "]");
             return false;
         } catch (Exception e) {
             LOG.warn("LLM call failed during tool-call loop iteration {}: {}",
                     state.iterations, SafeLogFormatter.throwableMessage(e));
-            state.currentText = "(error during follow-up LLM call: " + e.getMessage() + ")";
-            state.currentNativeCalls = List.of();
+            state.finishWithAnswer("(error during follow-up LLM call: " + e.getMessage() + ")");
             return false;
         }
     }

@@ -51,12 +51,12 @@ final class ToolRepromptContextBudgetHandler {
             return false;
         }
         if (state != null) {
-            state.failureDecision = FailureDecision.stop(
+            FailureDecision decision = FailureDecision.stop(
                     FailureAction.ASK_USER,
                     "Context budget prevented " + retryName + ". " + detail);
-            state.currentText = ResponseObligationVerifier
-                    .deterministicContextBudgetRetrySkippedAnswer(retryName, budget);
-            state.currentNativeCalls = List.of();
+            state.stopWithFailure(
+                    decision,
+                    ResponseObligationVerifier.deterministicContextBudgetRetrySkippedAnswer(retryName, budget));
         }
         LOG.info("Skipping {} because it exceeded the local context budget.", retryName);
         return false;

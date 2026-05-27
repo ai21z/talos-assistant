@@ -38,27 +38,23 @@ final class ToolRepromptChatExecutor {
         } catch (EngineException.ConnectionFailed cf) {
             LOG.warn("Ollama not reachable during {}: {}",
                     SafeLogFormatter.value(retryName), SafeLogFormatter.throwableMessage(cf));
-            state.currentText = "[Ollama not reachable — tool loop aborted. " + cf.guidance() + "]";
-            state.currentNativeCalls = List.of();
+            state.finishWithAnswer("[Ollama not reachable — tool loop aborted. " + cf.guidance() + "]");
             return false;
         } catch (EngineException.ModelNotFound mnf) {
             LOG.warn("Model not found during {}: {}",
                     SafeLogFormatter.value(retryName), SafeLogFormatter.value(mnf.model()));
-            state.currentText = "[Model '" + mnf.model() + "' not found — tool loop aborted. "
-                    + mnf.guidance() + "]";
-            state.currentNativeCalls = List.of();
+            state.finishWithAnswer("[Model '" + mnf.model() + "' not found — tool loop aborted. "
+                    + mnf.guidance() + "]");
             return false;
         } catch (EngineException ee) {
             LOG.warn("Engine error during {}: {}",
                     SafeLogFormatter.value(retryName), SafeLogFormatter.throwableMessage(ee));
-            state.currentText = "[Engine error during tool loop: " + ee.getMessage() + "]";
-            state.currentNativeCalls = List.of();
+            state.finishWithAnswer("[Engine error during tool loop: " + ee.getMessage() + "]");
             return false;
         } catch (Exception e) {
             LOG.warn("LLM call failed during {}: {}",
                     SafeLogFormatter.value(retryName), SafeLogFormatter.throwableMessage(e));
-            state.currentText = "(error during follow-up LLM call: " + e.getMessage() + ")";
-            state.currentNativeCalls = List.of();
+            state.finishWithAnswer("(error during follow-up LLM call: " + e.getMessage() + ")");
             return false;
         }
     }
@@ -139,11 +135,11 @@ final class ToolRepromptChatExecutor {
                 return false;
             }
             if (!state.pendingMutationSummaries.isEmpty()) {
-                state.currentText = String.join("\n", state.pendingMutationSummaries);
+                state.finishWithAnswer(String.join("\n", state.pendingMutationSummaries));
             } else {
-                state.currentText = noAnswerFallback == null || noAnswerFallback.isBlank()
+                state.finishWithAnswer(noAnswerFallback == null || noAnswerFallback.isBlank()
                         ? NO_ANSWER_AFTER_TOOL_EXECUTION
-                        : noAnswerFallback;
+                        : noAnswerFallback);
             }
             return false;
         }
