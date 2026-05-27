@@ -142,9 +142,12 @@ class CompactMutationContinuationPlannerTest {
                 "src/main/java/dev/talos/runtime/toolcall/ToolCallRepromptStage.java"));
         String handler = Files.readString(Path.of(
                 "src/main/java/dev/talos/runtime/toolcall/ToolRepromptContextBudgetHandler.java"));
+        String executor = Files.readString(Path.of(
+                "src/main/java/dev/talos/runtime/toolcall/CompactMutationContinuationExecutor.java"));
 
         assertFalse(source.contains("CompactMutationContinuationPlanner.planForContextBudget"), source);
-        assertTrue(handler.contains("CompactMutationContinuationPlanner.planForContextBudget"), handler);
+        assertFalse(handler.contains("CompactMutationContinuationPlanner.planForContextBudget"), handler);
+        assertTrue(executor.contains("CompactMutationContinuationPlanner.planForContextBudget"), executor);
         assertFalse(source.contains("private static Optional<CompactMutationContinuation> "
                 + "compactMutationContinuationForContextBudget"), source);
         assertFalse(source.contains("private static List<ChatMessage> compactMutationContinuationMessages"), source);
