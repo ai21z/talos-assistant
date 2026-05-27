@@ -5,6 +5,7 @@ import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.trace.LocalTurnTraceCapture;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
+import dev.talos.runtime.toolcall.ToolMutationEvidence;
 import dev.talos.runtime.trace.LocalTurnTrace;
 import dev.talos.tools.VerificationStatus;
 import org.junit.jupiter.api.Test;
@@ -2730,7 +2731,7 @@ class StaticTaskVerifierTest {
                 toolName, path, true, true, false,
                 "edited " + path, "", verificationStatus, "",
                 null,
-                ToolCallLoop.MutationEvidence.exactEdit(oldString, newString));
+                ToolMutationEvidence.exactEdit(oldString, newString));
     }
 
     private static ToolCallLoop.ToolOutcome successfulFullWrite(
@@ -2742,7 +2743,7 @@ class StaticTaskVerifierTest {
                 "talos.write_file", path, true, true, false,
                 "wrote " + path, "", verificationStatus, "",
                 null,
-                ToolCallLoop.MutationEvidence.fullWriteReplacement(previousContent, newContent));
+                ToolMutationEvidence.fullWriteReplacement(previousContent, newContent));
     }
 
     private static ToolCallLoop.ToolOutcome successfulWrite(String path, VerificationStatus verificationStatus) {

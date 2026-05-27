@@ -2,6 +2,7 @@ package dev.talos.runtime.verification;
 
 import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.expectation.ReplacementExpectation;
+import dev.talos.runtime.toolcall.ToolMutationEvidence;
 import dev.talos.tools.ToolAliasPolicy;
 
 import java.util.List;
@@ -31,7 +32,7 @@ final class TaskExpectationMutationEvidenceVerifier {
             }
             sawRelevantMutation = true;
             String canonicalTool = ToolAliasPolicy.localCanonicalName(outcome.toolName());
-            ToolCallLoop.MutationEvidence evidence = outcome.mutationEvidence();
+            ToolMutationEvidence evidence = outcome.mutationEvidence();
             if ("edit_file".equals(canonicalTool)) {
                 if (evidence == null || !evidence.exactEditReplacement()) {
                     problems.add(pathHint + ": talos.edit_file cannot prove preserve-rest replacement "
@@ -95,7 +96,7 @@ final class TaskExpectationMutationEvidenceVerifier {
                 if (outcome.mutationEvidence() != null
                         && outcome.mutationEvidence().fullWriteReplacement()) {
                     sawRelevantFullWrite = true;
-                    ToolCallLoop.MutationEvidence evidence = outcome.mutationEvidence();
+                    ToolMutationEvidence evidence = outcome.mutationEvidence();
                     if (!exactEditAppendsOnlyRequestedLine(evidence.oldString(), evidence.newString(), expectedLine)) {
                         problems.add(pathHint
                                 + ": full-file write did not preserve prior content before appended line.");
@@ -117,7 +118,7 @@ final class TaskExpectationMutationEvidenceVerifier {
                 continue;
             }
             sawRelevantExactEdit = true;
-            ToolCallLoop.MutationEvidence evidence = outcome.mutationEvidence();
+            ToolMutationEvidence evidence = outcome.mutationEvidence();
             if (!exactEditAppendsOnlyRequestedLine(evidence.oldString(), evidence.newString(), expectedLine)) {
                 problems.add(pathHint + ": exact edit did not preserve prior content before appended line.");
                 return false;
