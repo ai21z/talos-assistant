@@ -94,6 +94,16 @@ public final class LoopState {
         return pendingActionObligation != null;
     }
 
+    public void finishWithAnswer(String answer) {
+        currentText = answer;
+        currentNativeCalls = List.of();
+    }
+
+    public void stopWithFailure(dev.talos.runtime.failure.FailureDecision decision, String answer) {
+        failureDecision = Objects.requireNonNull(decision, "decision");
+        finishWithAnswer(answer);
+    }
+
     public boolean failPendingActionObligationAfterInvalidToolCalls(List<ToolCall> calls) {
         if (pendingActionObligation == null) {
             return false;
@@ -107,11 +117,11 @@ public final class LoopState {
         PendingActionObligation obligation = pendingActionObligation;
         pendingActionObligation = null;
         obligation.recordBreached(decision.detail());
-        failureDecision = dev.talos.runtime.failure.FailureDecision.stop(
-                FailureAction.ASK_USER,
-                obligation.failureReason(decision.detail()));
-        currentText = obligation.failureAnswer(decision.detail());
-        currentNativeCalls = List.of();
+        stopWithFailure(
+                dev.talos.runtime.failure.FailureDecision.stop(
+                        FailureAction.ASK_USER,
+                        obligation.failureReason(decision.detail())),
+                obligation.failureAnswer(decision.detail()));
         return true;
     }
 
@@ -120,11 +130,9 @@ public final class LoopState {
         if (failure.isEmpty()) return false;
 
         StaticRepairWriteContentGuard.Failure detail = failure.get();
-        failureDecision = dev.talos.runtime.failure.FailureDecision.stop(
-                FailureAction.ASK_USER,
-                detail.reason());
-        currentText = detail.answer();
-        currentNativeCalls = List.of();
+        stopWithFailure(
+                dev.talos.runtime.failure.FailureDecision.stop(FailureAction.ASK_USER, detail.reason()),
+                detail.answer());
         LocalTurnTraceCapture.recordActionObligation(
                 "STATIC_REPAIR_WRITE_CONTENT",
                 "FAILED",
@@ -138,11 +146,9 @@ public final class LoopState {
         if (failure.isEmpty()) return false;
 
         StaticSelectorRepairWriteGuard.Failure detail = failure.get();
-        failureDecision = dev.talos.runtime.failure.FailureDecision.stop(
-                FailureAction.ASK_USER,
-                detail.reason());
-        currentText = detail.answer();
-        currentNativeCalls = List.of();
+        stopWithFailure(
+                dev.talos.runtime.failure.FailureDecision.stop(FailureAction.ASK_USER, detail.reason()),
+                detail.answer());
         LocalTurnTraceCapture.recordActionObligation(
                 StaticSelectorRepairWriteGuard.OBLIGATION,
                 "FAILED",
@@ -164,11 +170,11 @@ public final class LoopState {
                 ? "model response had no executable write/edit tool calls"
                 : detail.strip();
         obligation.recordBreached(safeDetail);
-        failureDecision = dev.talos.runtime.failure.FailureDecision.stop(
-                FailureAction.ASK_USER,
-                obligation.failureReason(safeDetail));
-        currentText = obligation.failureAnswer(safeDetail);
-        currentNativeCalls = List.of();
+        stopWithFailure(
+                dev.talos.runtime.failure.FailureDecision.stop(
+                        FailureAction.ASK_USER,
+                        obligation.failureReason(safeDetail)),
+                obligation.failureAnswer(safeDetail));
         return true;
     }
 
