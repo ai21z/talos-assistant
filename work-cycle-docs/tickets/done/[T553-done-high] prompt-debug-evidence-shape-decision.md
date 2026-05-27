@@ -159,7 +159,14 @@ The next implementation ticket should be:
 
 Proposed implementation shape:
 
-- Create package-private `dev.talos.cli.prompt.PromptDebugArtifactWriter`.
+- Create `dev.talos.cli.prompt.PromptDebugArtifactWriter`.
+- Visibility requirement from PR review: because `PromptDebugCommand` lives in
+  `dev.talos.cli.repl.slash`, a writer in `dev.talos.cli.prompt` must be
+  accessible from outside the package. T554 should therefore make
+  `PromptDebugArtifactWriter` a narrowly scoped `public final` class in
+  `dev.talos.cli.prompt`, with public entry points only for the command's
+  required latest/history artifact writes. The writer should still return data
+  records rather than importing CLI `Result` types.
 - Move timestamped prompt-debug artifact file naming and `Files.writeString`
   operations out of `PromptDebugCommand`.
 - Keep destination precedence in `PromptDebugCommand`:
