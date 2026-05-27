@@ -1,6 +1,7 @@
 package dev.talos.runtime.verification;
 
 import dev.talos.runtime.ToolCallLoop;
+import dev.talos.runtime.toolcall.ToolMutationEvidence;
 import dev.talos.tools.VerificationStatus;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -78,7 +79,7 @@ class ExactEditReplacementVerifierTest {
                 "talos.edit_file", path, true, true, false,
                 "edited " + path, "", verificationStatus, "",
                 null,
-                ToolCallLoop.MutationEvidence.exactEdit(oldString, newString));
+                ToolMutationEvidence.exactEdit(oldString, newString));
     }
 
     private static ToolCallLoop.ToolOutcome successfulWrite(String path, VerificationStatus verificationStatus) {

@@ -53,7 +53,7 @@ final class ToolOutcomeFactory {
             ToolResult result,
             ToolExecutionFailureClassifier.Classification classification,
             WorkspaceOperationPlan workspaceOperationPlan,
-            ToolCallLoop.MutationEvidence mutationEvidence
+            ToolMutationEvidence mutationEvidence
     ) {
         boolean success = result != null && result.success();
         return new ToolCallLoop.ToolOutcome(

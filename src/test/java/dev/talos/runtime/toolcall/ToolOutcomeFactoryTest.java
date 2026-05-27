@@ -40,7 +40,7 @@ class ToolOutcomeFactoryTest {
         assertEquals(ToolError.INVALID_PARAMS, outcome.errorCode());
         assertEquals(null, outcome.fileVerificationStatus());
         assertEquals(null, outcome.workspaceOperationPlan());
-        assertEquals(ToolCallLoop.MutationEvidence.none(), outcome.mutationEvidence());
+        assertEquals(ToolMutationEvidence.none(), outcome.mutationEvidence());
     }
 
     @Test
@@ -73,8 +73,8 @@ class ToolOutcomeFactoryTest {
         ToolExecutionFailureClassifier.Classification classification =
                 ToolExecutionFailureClassifier.classify(write, result, "README.md");
         WorkspaceOperationPlan plan = writePlan();
-        ToolCallLoop.MutationEvidence evidence =
-                ToolCallLoop.MutationEvidence.fullWriteReplacement("old", "new");
+        ToolMutationEvidence evidence =
+                ToolMutationEvidence.fullWriteReplacement("old", "new");
 
         ToolCallLoop.ToolOutcome outcome =
                 ToolOutcomeFactory.executed(write, "README.md", result, classification, plan, evidence);
@@ -110,7 +110,7 @@ class ToolOutcomeFactoryTest {
         assertEquals("", outcome.summary());
         assertEquals("Permission denied", outcome.errorMessage());
         assertEquals(ToolError.DENIED, outcome.errorCode());
-        assertEquals(ToolCallLoop.MutationEvidence.none(), outcome.mutationEvidence());
+        assertEquals(ToolMutationEvidence.none(), outcome.mutationEvidence());
     }
 
     @Test
