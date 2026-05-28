@@ -314,7 +314,7 @@ public final class LocalTurnTraceCapture {
     public static void recordProtocolSanitized(String reason) {
         Bag bag = HOLDER.get();
         if (bag == null) return;
-        bag.builder.event(TurnTraceEvent.simple("PROTOCOL_SANITIZED", now(), Map.of("reason", safe(reason))));
+        bag.builder.event(ProtocolSanitizationTraceEventFactory.sanitized(reason));
     }
 
     public static void recordBackendMalformedResponse(
