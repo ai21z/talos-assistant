@@ -375,12 +375,7 @@ public final class LocalTurnTraceCapture {
     public static void recordRepair(String status, String summary) {
         Bag bag = HOLDER.get();
         if (bag == null) return;
-        String safeStatus = safe(status);
-        String safeSummary = safe(summary);
-        bag.builder.repair(safeStatus, safeSummary);
-        bag.builder.event(TurnTraceEvent.simple("REPAIR_DECISION_RECORDED", now(), Map.of(
-                "status", safeStatus,
-                "summary", safeSummary)));
+        RepairTraceRecorder.record(bag.builder, status, summary);
     }
 
     public static void recordVerification(String status, String summary, List<String> problems) {
