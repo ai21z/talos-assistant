@@ -324,11 +324,7 @@ public final class LocalTurnTraceCapture {
     ) {
         Bag bag = HOLDER.get();
         if (bag == null) return;
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("context", safe(context));
-        data.put("bodyHash", safe(bodyHash));
-        data.put("bodyChars", Math.max(0, bodyChars));
-        bag.builder.event(TurnTraceEvent.simple("BACKEND_MALFORMED_RESPONSE_CAPTURED", now(), data));
+        bag.builder.event(BackendMalformedResponseTraceEventFactory.captured(context, bodyHash, bodyChars));
     }
 
     public static void recordExactLiteralWriteCorrected(
