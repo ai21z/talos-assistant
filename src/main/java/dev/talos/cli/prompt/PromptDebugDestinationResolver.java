@@ -10,13 +10,21 @@ public final class PromptDebugDestinationResolver {
     private PromptDebugDestinationResolver() {}
 
     public static Path resolve(String explicitDir) {
-        String configured = firstNonBlank(
+        return resolve(
                 explicitDir,
                 System.getProperty(PROMPT_DEBUG_DIR_PROPERTY),
-                System.getenv(PROMPT_DEBUG_DIR_ENV));
+                System.getenv(PROMPT_DEBUG_DIR_ENV),
+                System.getProperty("user.home", "."));
+    }
+
+    static Path resolve(String explicitDir, String propertyDir, String envDir, String userHome) {
+        String configured = firstNonBlank(
+                explicitDir,
+                propertyDir,
+                envDir);
         if (configured == null) {
             configured = Path.of(
-                    System.getProperty("user.home", "."),
+                    userHome == null || userHome.isBlank() ? "." : userHome,
                     ".talos",
                     "prompt-debug").toString();
         }
