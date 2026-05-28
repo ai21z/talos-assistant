@@ -78,27 +78,7 @@ public final class LocalTurnTraceCapture {
     public static void recordPolicyTrace(TurnPolicyTrace trace) {
         Bag bag = HOLDER.get();
         if (bag == null || trace == null || !trace.hasPolicyData()) return;
-        bag.builder.taskContract(new LocalTurnTrace.TaskContractSummary(
-                trace.taskType(),
-                trace.mutationAllowed(),
-                trace.verificationRequired(),
-                trace.mutationAllowed(),
-                trace.expectedTargets(),
-                trace.forbiddenTargets(),
-                trace.classificationReason()));
-        bag.builder.phaseTransition(trace.initialPhase(), trace.finalPhase(), "policy trace");
-        bag.builder.toolSurface(trace.nativeTools(), trace.promptTools(), "selected for resolved task contract");
-        bag.builder.event(TurnTraceEvent.simple("TASK_CONTRACT_RESOLVED", now(), Map.of(
-                "taskType", trace.taskType(),
-                "mutationAllowed", trace.mutationAllowed(),
-                "verificationRequired", trace.verificationRequired(),
-                "classificationReason", trace.classificationReason())));
-        bag.builder.event(TurnTraceEvent.simple("TOOL_SURFACE_SELECTED", now(), Map.of(
-                "nativeToolCount", trace.nativeTools().size(),
-                "promptToolCount", trace.promptTools().size())));
-        for (String block : trace.blocks()) {
-            recordPolicyBlock(block);
-        }
+        PolicyTraceRecorder.record(bag.builder, trace);
     }
 
     public static void recordModelResponseReceived(String assistantText) {
@@ -287,14 +267,6 @@ public final class LocalTurnTraceCapture {
         Bag bag = HOLDER.get();
         if (bag == null) return;
         CheckpointTraceRecorder.record(bag.builder, status, checkpointId, reason, capturedFiles);
-    }
-
-    public static void recordPolicyBlock(String reason) {
-        Bag bag = HOLDER.get();
-        if (bag == null || reason == null || reason.isBlank()) return;
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("reason", reason.strip());
-        bag.builder.event(TurnTraceEvent.simple("TOOL_CALL_BLOCKED", now(), data));
     }
 
     public static void recordProtocolSanitized(String reason) {
