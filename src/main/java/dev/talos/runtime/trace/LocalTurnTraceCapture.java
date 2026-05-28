@@ -300,19 +300,7 @@ public final class LocalTurnTraceCapture {
     public static void recordCheckpoint(String status, String checkpointId, String reason, int capturedFiles) {
         Bag bag = HOLDER.get();
         if (bag == null) return;
-        String safeStatus = safe(status);
-        String safeId = safe(checkpointId);
-        bag.builder.checkpoint(safeStatus, safeId);
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("status", safeStatus);
-        data.put("checkpointId", safeId);
-        data.put("capturedFiles", capturedFiles);
-        if (reason != null && !reason.isBlank()) {
-            data.put("reason", reason.strip());
-        }
-        bag.builder.event(TurnTraceEvent.simple("CHECKPOINT_" + (safeStatus.isBlank() ? "RECORDED" : safeStatus),
-                now(),
-                data));
+        CheckpointTraceRecorder.record(bag.builder, status, checkpointId, reason, capturedFiles);
     }
 
     public static void recordPolicyBlock(String reason) {
