@@ -25,17 +25,17 @@ Primary files inspected:
 
 | File | Lines | Current owner |
 | --- | ---: | --- |
-| `src/main/java/dev/talos/cli/prompt/PromptDebugArtifactWriter.java` | 83 | Prompt-debug artifact filenames and writes. |
-| `src/main/java/dev/talos/cli/repl/slash/PromptDebugCommand.java` | 144 | Slash command parsing, capture selection, destination resolution, UX wording. |
-| `src/main/java/dev/talos/cli/prompt/PromptDebugInspector.java` | 167 | Prompt-debug markdown display facade. |
-| `src/main/java/dev/talos/cli/prompt/PromptDebugRedactor.java` | 213 | Prompt-debug message and provider-body redaction. |
-| `src/main/java/dev/talos/spi/types/PromptDebugCapture.java` | 66 | Process-local latest/history capture holder. |
-| `src/main/java/dev/talos/spi/types/PromptDebugSnapshot.java` | 70 | SPI prompt-debug capture value and factories. |
-| `src/main/java/dev/talos/core/llm/LlmClient.java` | 1093 | Core chat request capture call sites. |
-| `src/main/java/dev/talos/engine/compat/CompatChatClient.java` | 543 | Compat provider-body capture call sites. |
-| `src/main/java/dev/talos/engine/ollama/OllamaChatClient.java` | 358 | Ollama provider-body capture call sites. |
-| `src/test/java/dev/talos/cli/repl/slash/PromptDebugCommandTest.java` | 619 | Prompt-debug command save/render/redaction behavior. |
-| `src/test/java/dev/talos/runtime/policy/ArtifactCanaryScanTest.java` | 159 | Generated artifact canary scanning. |
+| `src/main/java/dev/talos/cli/prompt/PromptDebugArtifactWriter.java` | 98 | Prompt-debug artifact filenames and writes. |
+| `src/main/java/dev/talos/cli/repl/slash/PromptDebugCommand.java` | 163 | Slash command parsing, capture selection, destination resolution, UX wording. |
+| `src/main/java/dev/talos/cli/prompt/PromptDebugInspector.java` | 191 | Prompt-debug markdown display facade. |
+| `src/main/java/dev/talos/cli/prompt/PromptDebugRedactor.java` | 233 | Prompt-debug message and provider-body redaction. |
+| `src/main/java/dev/talos/spi/types/PromptDebugCapture.java` | 78 | Process-local latest/history capture holder. |
+| `src/main/java/dev/talos/spi/types/PromptDebugSnapshot.java` | 76 | SPI prompt-debug capture value and factories. |
+| `src/main/java/dev/talos/core/llm/LlmClient.java` | 1206 | Core chat request capture call sites. |
+| `src/main/java/dev/talos/engine/compat/CompatChatClient.java` | 619 | Compat provider-body capture call sites. |
+| `src/main/java/dev/talos/engine/ollama/OllamaChatClient.java` | 416 | Ollama provider-body capture call sites. |
+| `src/test/java/dev/talos/cli/repl/slash/PromptDebugCommandTest.java` | 693 | Prompt-debug command save/render/redaction behavior. |
+| `src/test/java/dev/talos/runtime/policy/ArtifactCanaryScanTest.java` | 214 | Generated artifact canary scanning. |
 
 ## Current prompt-debug counts
 
