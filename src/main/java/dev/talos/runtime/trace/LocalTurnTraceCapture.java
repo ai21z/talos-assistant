@@ -191,12 +191,9 @@ public final class LocalTurnTraceCapture {
             ToolCall call,
             ToolContentMetadata metadata
     ) {
-        recordPrivateDocumentModelHandoffApproval(
-                "PRIVATE_DOCUMENT_MODEL_HANDOFF_APPROVAL_REQUIRED",
-                phase,
-                call,
-                metadata,
-                false);
+        Bag bag = HOLDER.get();
+        if (bag == null) return;
+        bag.builder.event(PrivateDocumentHandoffTraceEventFactory.approvalRequired(phase, call, metadata));
     }
 
     public static void recordPrivateDocumentModelHandoffApprovalGranted(
@@ -205,12 +202,13 @@ public final class LocalTurnTraceCapture {
             ToolContentMetadata metadata,
             boolean rememberIgnored
     ) {
-        recordPrivateDocumentModelHandoffApproval(
-                "PRIVATE_DOCUMENT_MODEL_HANDOFF_APPROVAL_GRANTED",
+        Bag bag = HOLDER.get();
+        if (bag == null) return;
+        bag.builder.event(PrivateDocumentHandoffTraceEventFactory.approvalGranted(
                 phase,
                 call,
                 metadata,
-                rememberIgnored);
+                rememberIgnored));
     }
 
     public static void recordPrivateDocumentModelHandoffApprovalDenied(
@@ -218,12 +216,9 @@ public final class LocalTurnTraceCapture {
             ToolCall call,
             ToolContentMetadata metadata
     ) {
-        recordPrivateDocumentModelHandoffApproval(
-                "PRIVATE_DOCUMENT_MODEL_HANDOFF_APPROVAL_DENIED",
-                phase,
-                call,
-                metadata,
-                false);
+        Bag bag = HOLDER.get();
+        if (bag == null) return;
+        bag.builder.event(PrivateDocumentHandoffTraceEventFactory.approvalDenied(phase, call, metadata));
     }
 
     public static void recordCommandPlanCreated(String phase, ToolCall call, CommandPlan plan) {
@@ -566,34 +561,4 @@ public final class LocalTurnTraceCapture {
         return value == null ? "" : value.strip();
     }
 
-    private static void recordPrivateDocumentModelHandoffApproval(
-            String eventType,
-            String phase,
-            ToolCall call,
-            ToolContentMetadata metadata,
-            boolean rememberIgnored
-    ) {
-        Bag bag = HOLDER.get();
-        if (bag == null) return;
-        Map<String, Object> data = new LinkedHashMap<>(TurnTraceEvent.toolPayloadSummary(call));
-        data.put("scope", "SEND_TO_MODEL_CONTEXT");
-        data.put("perTurn", true);
-        data.put("rememberIgnored", rememberIgnored);
-        if (metadata != null) {
-            data.put("privacyClass", metadata.privacyClass().name());
-            data.put("source", metadata.source().name());
-            data.put("rawArtifactPersistenceAllowed", metadata.rawArtifactPersistenceAllowed());
-            data.put("ragIndexAllowed", metadata.ragIndexAllowed());
-            data.put("decisionReason", safe(metadata.decisionReason()));
-            if (metadata.sourcePath() != null && !metadata.sourcePath().isBlank()) {
-                data.put("pathHint", TraceRedactor.pathHint(metadata.sourcePath()));
-            }
-        }
-        bag.builder.event(new TurnTraceEvent(
-                eventType,
-                now(),
-                phase == null ? "" : phase,
-                call == null ? "" : call.toolName(),
-                data));
-    }
 }
