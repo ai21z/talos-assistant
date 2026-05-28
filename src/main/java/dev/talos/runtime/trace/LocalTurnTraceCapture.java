@@ -104,10 +104,7 @@ public final class LocalTurnTraceCapture {
     public static void recordModelResponseReceived(String assistantText) {
         Bag bag = HOLDER.get();
         if (bag == null) return;
-        bag.builder.assistantSummary(assistantText);
-        bag.builder.event(TurnTraceEvent.simple("MODEL_RESPONSE_RECEIVED", now(), Map.of(
-                "assistantHash", TraceRedactor.hash(assistantText),
-                "assistantChars", assistantText == null ? 0 : assistantText.length())));
+        ModelResponseTraceRecorder.record(bag.builder, assistantText);
     }
 
     public static void recordToolCallParsed(String phase, ToolCall call) {
