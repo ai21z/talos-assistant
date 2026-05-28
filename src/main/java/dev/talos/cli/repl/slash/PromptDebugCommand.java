@@ -1,21 +1,18 @@
 package dev.talos.cli.repl.slash;
 
 import dev.talos.cli.prompt.PromptDebugArtifactWriter;
+import dev.talos.cli.prompt.PromptDebugDestinationResolver;
 import dev.talos.cli.prompt.PromptDebugInspector;
 import dev.talos.cli.repl.Context;
 import dev.talos.runtime.Result;
 import dev.talos.spi.types.PromptDebugCapture;
 import dev.talos.spi.types.PromptDebugSnapshot;
 
-import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
 
 /** Hidden maintainer command for inspecting the latest assembled/provider prompt. */
 public final class PromptDebugCommand implements Command {
-    private static final String PROMPT_DEBUG_DIR_PROPERTY = "talos.promptDebugDir";
-    private static final String PROMPT_DEBUG_DIR_ENV = "TALOS_PROMPT_DEBUG_DIR";
-
     @Override
     public CommandSpec spec() {
         return new CommandSpec(
@@ -57,7 +54,7 @@ public final class PromptDebugCommand implements Command {
             return missingCaptureInfo();
         }
         PromptDebugSnapshot snapshot = latest.get();
-        Path dir = promptDebugDirectory(explicitDir);
+        var dir = PromptDebugDestinationResolver.resolve(explicitDir);
         PromptDebugArtifactWriter.LatestArtifact artifact =
                 PromptDebugArtifactWriter.writeLatest(dir, snapshot);
 
@@ -75,7 +72,7 @@ public final class PromptDebugCommand implements Command {
         if (snapshots.isEmpty()) {
             return missingCaptureInfo();
         }
-        Path dir = promptDebugDirectory(explicitDir);
+        var dir = PromptDebugDestinationResolver.resolve(explicitDir);
         PromptDebugArtifactWriter.HistoryArtifact artifact =
                 PromptDebugArtifactWriter.writeHistory(dir, snapshots);
 
@@ -102,38 +99,6 @@ public final class PromptDebugCommand implements Command {
     private static String commandArgument(String raw, String command) {
         if (raw == null || raw.length() <= command.length()) return "";
         return raw.substring(command.length()).trim();
-    }
-
-    private static Path promptDebugDirectory(String explicitDir) {
-        String configured = firstNonBlank(
-                explicitDir,
-                System.getProperty(PROMPT_DEBUG_DIR_PROPERTY),
-                System.getenv(PROMPT_DEBUG_DIR_ENV));
-        if (configured == null) {
-            configured = Path.of(
-                    System.getProperty("user.home", "."),
-                    ".talos",
-                    "prompt-debug").toString();
-        }
-        return Path.of(stripOptionalQuotes(configured)).toAbsolutePath().normalize();
-    }
-
-    private static String firstNonBlank(String... values) {
-        for (String value : values) {
-            if (value != null && !value.isBlank()) return value.strip();
-        }
-        return null;
-    }
-
-    private static String stripOptionalQuotes(String value) {
-        if (value == null) return "";
-        String stripped = value.strip();
-        if (stripped.length() >= 2
-                && ((stripped.startsWith("\"") && stripped.endsWith("\""))
-                || (stripped.startsWith("'") && stripped.endsWith("'")))) {
-            return stripped.substring(1, stripped.length() - 1);
-        }
-        return stripped;
     }
 
     private static Result.Info missingCaptureInfo() {
