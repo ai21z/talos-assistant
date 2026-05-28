@@ -287,20 +287,14 @@ public final class LocalTurnTraceCapture {
     ) {
         Bag bag = HOLDER.get();
         if (bag == null) return;
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("action", safe(action));
-        data.put("reasonCode", safe(reasonCode));
-        data.put("rememberEligible", rememberEligible);
-        data.put("protectedPath", protectedPath);
-        if (relativePath != null && !relativePath.isBlank()) {
-            data.put("pathHint", TraceRedactor.pathHint(relativePath));
-        }
-        bag.builder.event(new TurnTraceEvent(
-                "PERMISSION_DECISION",
-                now(),
-                phase == null ? "" : phase,
-                call == null ? "" : call.toolName(),
-                data));
+        bag.builder.event(PermissionTraceEventFactory.decision(
+                phase,
+                call,
+                action,
+                reasonCode,
+                relativePath,
+                protectedPath,
+                rememberEligible));
     }
 
     public static void recordCheckpoint(String status, String checkpointId, String reason, int capturedFiles) {
