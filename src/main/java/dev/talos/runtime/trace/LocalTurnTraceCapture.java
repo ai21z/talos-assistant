@@ -120,14 +120,7 @@ public final class LocalTurnTraceCapture {
     public static void recordToolAliasDecision(ToolAliasPolicy.Decision decision) {
         Bag bag = HOLDER.get();
         if (bag == null || decision == null || !decision.traceWorthy()) return;
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("status", decision.status().name());
-        data.put("rawName", safe(decision.rawName()));
-        data.put("canonicalTool", safe(decision.canonicalToolName()));
-        data.put("profile", decision.profile().id());
-        data.put("mutating", decision.mutating());
-        data.put("readOnly", decision.readOnly());
-        bag.builder.event(TurnTraceEvent.simple("TOOL_ALIAS_DECISION", now(), data));
+        bag.builder.event(ToolAliasDecisionTraceEventFactory.decision(decision));
     }
 
     public static void recordPathArgumentNormalized(
