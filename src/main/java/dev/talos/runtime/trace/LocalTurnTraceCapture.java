@@ -381,10 +381,7 @@ public final class LocalTurnTraceCapture {
     public static void recordVerification(String status, String summary, List<String> problems) {
         Bag bag = HOLDER.get();
         if (bag == null) return;
-        bag.builder.event(TurnTraceEvent.simple("VERIFICATION_COMPLETED", now(), Map.of(
-                "status", safe(status),
-                "problemCount", problems == null ? 0 : problems.size())));
-        bag.builder.verification(status, summary, problems);
+        VerificationTraceRecorder.record(bag.builder, status, summary, problems);
     }
 
     public static void recordExpectationVerified(
