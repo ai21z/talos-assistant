@@ -339,16 +339,15 @@ public final class LocalTurnTraceCapture {
     ) {
         Bag bag = HOLDER.get();
         if (bag == null) return;
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("pathHint", TraceRedactor.pathHint(path));
-        data.put("sourcePattern", safe(sourcePattern));
-        data.put("expectedHash", safe(expectedHash));
-        data.put("expectedBytes", Math.max(0, expectedBytes));
-        data.put("expectedLines", Math.max(0, expectedLines));
-        data.put("observedHash", safe(observedHash));
-        data.put("observedBytes", Math.max(0, observedBytes));
-        data.put("observedLines", Math.max(0, observedLines));
-        bag.builder.event(TurnTraceEvent.simple("EXACT_LITERAL_WRITE_CORRECTED", now(), data));
+        bag.builder.event(ExactLiteralWriteCorrectionTraceEventFactory.corrected(
+                path,
+                sourcePattern,
+                expectedHash,
+                expectedBytes,
+                expectedLines,
+                observedHash,
+                observedBytes,
+                observedLines));
     }
 
     public static void recordActionObligation(String obligation, String status, String reason) {
