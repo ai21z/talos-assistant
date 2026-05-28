@@ -42,15 +42,15 @@ Primary files inspected:
 | --- | ---: | --- |
 | `src/main/java/dev/talos/runtime/trace/LocalTurnTraceCapture.java` | 538 | Thread-local trace facade, trace lifecycle, remaining generic trace helpers, protocol sanitization event construction, action-obligation event construction, repair/outcome/expectation trace bridges. |
 | `src/main/java/dev/talos/runtime/trace/ProtectedReadPostconditionTraceEventFactory.java` | 26 | Protected-read postcondition trace event construction. |
-| `src/main/java/dev/talos/cli/modes/ExecutionOutcome.java` | 688 | End-of-turn outcome classification, read-only mutation answer shaping, malformed protocol answer replacement, protocol sanitization trace call sites. |
-| `src/main/java/dev/talos/cli/modes/AssistantTurnExecutor.java` | 1304 | Turn execution orchestration, backend malformed response trace call, prompt audit trace call, repair trace call sites. |
-| `src/main/java/dev/talos/runtime/TurnProcessor.java` | 614 | Runtime turn processing and exact literal write correction trace call. |
+| `src/main/java/dev/talos/cli/modes/ExecutionOutcome.java` | 685 | End-of-turn outcome classification, read-only mutation answer shaping, malformed protocol answer replacement, protocol sanitization trace call sites. |
+| `src/main/java/dev/talos/cli/modes/AssistantTurnExecutor.java` | 3470 | Turn execution orchestration, backend malformed response trace call, prompt audit trace call, repair trace call sites. |
+| `src/main/java/dev/talos/runtime/TurnProcessor.java` | 1305 | Runtime turn processing and exact literal write correction trace call. |
 | `src/main/java/dev/talos/runtime/toolcall/PendingActionObligation.java` | 121 | Pending action-obligation value, failure wording, raised/breached trace facade calls. |
 | `src/main/java/dev/talos/runtime/trace/TaskOutcomeTraceRecorder.java` | 46 | Task verification/outcome trace facade. |
 | `src/main/java/dev/talos/runtime/verification/TaskExpectationTraceRecorder.java` | 98 | Expectation verification trace facade. |
-| `src/test/java/dev/talos/cli/modes/ExecutionOutcomeTest.java` | 3180 | Outcome and malformed/no-tool/read-only policy regression coverage. |
-| `src/test/java/dev/talos/runtime/ToolCallLoopTest.java` | 4027 | Pending/action-obligation trace behavior coverage. |
-| `src/test/java/dev/talos/cli/modes/AssistantTurnExecutorTest.java` | 9196 | Backend malformed response and action-obligation integration coverage. |
+| `src/test/java/dev/talos/cli/modes/ExecutionOutcomeTest.java` | 3177 | Outcome and malformed/no-tool/read-only policy regression coverage. |
+| `src/test/java/dev/talos/runtime/ToolCallLoopTest.java` | 5010 | Pending/action-obligation trace behavior coverage. |
+| `src/test/java/dev/talos/cli/modes/AssistantTurnExecutorTest.java` | 9183 | Backend malformed response and action-obligation integration coverage. |
 
 ## Current measurements
 
