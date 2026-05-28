@@ -118,6 +118,26 @@ class LocalTurnTraceCommandTest {
         assertFalse(eventTypes.contains("COMMAND_STARTED"), eventTypes.toString());
     }
 
+    @Test
+    void commandTraceEventConstructionIsOwnedByFactory() throws Exception {
+        Path capturePath = Path.of("src/main/java/dev/talos/runtime/trace/LocalTurnTraceCapture.java");
+        Path factoryPath = Path.of("src/main/java/dev/talos/runtime/trace/CommandTraceEventFactory.java");
+
+        assertTrue(Files.exists(factoryPath), "command trace event construction should have a dedicated owner");
+
+        String capture = Files.readString(capturePath);
+        String factory = Files.readString(factoryPath);
+        assertTrue(capture.contains("CommandTraceEventFactory."), capture);
+        assertFalse(capture.contains("import dev.talos.runtime.command.CommandToolPlanner;"), capture);
+        assertFalse(capture.contains("private static Map<String, Object> commandPlanData"), capture);
+        assertFalse(capture.contains("private static Map<String, Object> commandResultData"), capture);
+        assertFalse(capture.contains("CommandToolPlanner.displayCommand"), capture);
+        assertFalse(capture.contains("\"COMMAND_"), capture);
+        assertTrue(factory.contains("CommandToolPlanner.displayCommand"), factory);
+        assertTrue(factory.contains("COMMAND_OUTPUT_TRUNCATED"), factory);
+        assertTrue(factory.contains("COMMAND_FAILED"), factory);
+    }
+
     private static TurnProcessor processor(
             AtomicInteger approvals,
             ApprovalResponse response,
