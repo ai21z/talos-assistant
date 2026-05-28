@@ -251,6 +251,32 @@ class PromptDebugCommandTest {
     }
 
     @Test
+    void saveDelegatesDestinationResolutionToPromptDebugDestinationResolver() throws Exception {
+        Path commandPath = Path.of("src/main/java/dev/talos/cli/repl/slash/PromptDebugCommand.java");
+        Path resolverPath = Path.of("src/main/java/dev/talos/cli/prompt/PromptDebugDestinationResolver.java");
+
+        assertTrue(Files.exists(resolverPath),
+                "PromptDebugDestinationResolver should own prompt-debug destination precedence and quote handling");
+
+        String command = Files.readString(commandPath);
+        String resolver = Files.readString(resolverPath);
+
+        assertTrue(command.contains("PromptDebugDestinationResolver.resolve("), command);
+        assertFalse(command.contains("PROMPT_DEBUG_DIR_PROPERTY"), command);
+        assertFalse(command.contains("PROMPT_DEBUG_DIR_ENV"), command);
+        assertFalse(command.contains("System.getProperty"), command);
+        assertFalse(command.contains("System.getenv"), command);
+        assertFalse(command.contains("stripOptionalQuotes"), command);
+        assertFalse(command.contains("firstNonBlank"), command);
+        assertTrue(resolver.contains("talos.promptDebugDir"), resolver);
+        assertTrue(resolver.contains("TALOS_PROMPT_DEBUG_DIR"), resolver);
+        assertTrue(resolver.contains(".talos"), resolver);
+        assertTrue(resolver.contains("prompt-debug"), resolver);
+        assertTrue(resolver.contains("stripOptionalQuotes"), resolver);
+        assertFalse(resolver.contains("dev.talos.runtime.Result"), resolver);
+    }
+
+    @Test
     void saveUsesConfiguredDirectoryInsteadOfWorkspaceLocalPrompts(@TempDir Path tempDir) throws Exception {
         Path configuredDir = tempDir.resolve("prompt-debug-artifacts");
         System.setProperty("talos.promptDebugDir", configuredDir.toString());
