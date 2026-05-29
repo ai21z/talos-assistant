@@ -10,7 +10,6 @@ import dev.talos.tools.ToolContentMetadata;
 import dev.talos.tools.ToolCall;
 
 import java.time.Instant;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -311,10 +310,7 @@ public final class LocalTurnTraceCapture {
     public static void recordActionObligation(String obligation, String status, String reason) {
         Bag bag = HOLDER.get();
         if (bag == null) return;
-        bag.builder.event(TurnTraceEvent.simple("ACTION_OBLIGATION_EVALUATED", now(), Map.of(
-                "obligation", safe(obligation),
-                "status", safe(status),
-                "reason", safe(reason))));
+        bag.builder.event(ActionObligationTraceEventFactory.evaluated(obligation, status, reason));
     }
 
     public static void recordActionObligation(
@@ -325,14 +321,11 @@ public final class LocalTurnTraceCapture {
     ) {
         Bag bag = HOLDER.get();
         if (bag == null) return;
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("obligation", safe(obligation));
-        data.put("status", safe(status));
-        data.put("reason", safe(reason));
-        if (failureKind != null && !failureKind.isBlank()) {
-            data.put("failureKind", failureKind.strip());
-        }
-        bag.builder.event(TurnTraceEvent.simple("ACTION_OBLIGATION_EVALUATED", now(), data));
+        bag.builder.event(ActionObligationTraceEventFactory.evaluated(
+                obligation,
+                status,
+                reason,
+                failureKind));
     }
 
     public static void recordPendingActionObligation(
