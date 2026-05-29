@@ -631,6 +631,10 @@ dependencies {
     testImplementation(gradleTestKit())
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+
+    // ArchUnit: bytecode-level architecture boundary guards (complements the
+    // regex-based validateArchitectureBoundaries ratchet in this build script).
+    testImplementation("com.tngtech.archunit:archunit-junit5:${project.property("archunitVersion")}")
 }
 
 /* ---------- Deterministic scripted E2E harness lane ---------- */

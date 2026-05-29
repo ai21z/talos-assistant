@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+- Added ArchUnit (`com.tngtech.archunit:archunit-junit5`) bytecode-level
+  architecture guards in `dev.talos.architecture.LayeredArchitectureTest`,
+  mirroring the six package-direction invariants enforced by the regex-based
+  `validateArchitectureBoundaries` ratchet. ArchUnit additionally catches
+  dependencies expressed through types, generics, annotations, and exceptions
+  that the source scanner cannot see.
+
 ### Changed
 - [T334-done-high] Added release-ledger discipline for beta candidates:
   `CHANGELOG.md` now keeps an `Unreleased` section, the patch bump script moves
