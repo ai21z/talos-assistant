@@ -9,6 +9,14 @@
   `validateArchitectureBoundaries` ratchet. ArchUnit additionally catches
   dependencies expressed through types, generics, annotations, and exceptions
   that the source scanner cannot see.
+- Added a report-only architecture discovery pass
+  (`dev.talos.architecture.ArchitectureDiscoveryReportTest`) that uses the
+  ArchUnit Core API to write a deterministic Markdown report to
+  `build/reports/talos/architecture/architecture-discovery-report.md` (package
+  counts, dependency hotspots/fan-in/fan-out, package dependency map,
+  runtime-control spine, layer-boundary candidates, and top-level package
+  cycles). It never fails the build on findings; it is evidence for manual
+  review before any rule is promoted to a hard guard.
 
 ### Changed
 - [T334-done-high] Added release-ledger discipline for beta candidates:
