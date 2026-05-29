@@ -26,6 +26,15 @@
   detected by a Tarjan strongly-connected-component pass and cross-checked with
   ArchUnit's caught `beFreeOfCycles` rule; severity is classified per level. It
   never fails the build on detected cycles.
+- Added a report-only execution-harness spine access report
+  (`dev.talos.architecture.ArchitectureSpineAccessReportTest`) that, for a fixed
+  set of runtime-control "spine" classes (e.g. `AssistantTurnExecutor`,
+  `ToolCallLoop`, `TaskContractResolver`, the policy/verifier classes,
+  `CurrentTurnPlan`, `ExecutionOutcome`, `ConversationManager`), reports
+  class-level fan-in/fan-out, top callers/callees, and ArchUnit-resolved
+  method/constructor call counts to
+  `build/reports/talos/architecture/harness-spine-access-report.md`. Deterministic,
+  capped to top-N, and never fails the build on high fan-in/fan-out.
 
 ### Changed
 - [T334-done-high] Added release-ledger discipline for beta candidates:
