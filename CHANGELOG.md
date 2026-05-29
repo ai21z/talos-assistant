@@ -35,6 +35,12 @@
   method/constructor call counts to
   `build/reports/talos/architecture/harness-spine-access-report.md`. Deterministic,
   capped to top-N, and never fails the build on high fan-in/fan-out.
+- Added a second generation of hard ArchUnit guards in
+  `dev.talos.architecture.LayeredArchitectureTest`, promoted only after the
+  report-only passes showed zero edges: `runtime.policy`, `runtime.verification`
+  ↛ `cli`; `runtime.toolcall` ↛ `cli.repl`; `tools` ↛ `cli`; and `spi` ↛ `app`.
+  Documented hard guards, report-only findings, accepted exceptions, and
+  candidate future guards in `docs/architecture/11-architecture-guardrails.md`.
 
 ### Changed
 - [T334-done-high] Added release-ledger discipline for beta candidates:
