@@ -1,0 +1,240 @@
+# [T598] Runtime artifact canary ownership decision
+
+## Decision
+
+Do not implement a runtime artifact canary extraction yet.
+
+The current artifact canary system is already owned as a deterministic
+release/test gate:
+
+- `ArtifactCanaryScanner` owns scan mechanics and finding sanitization.
+- `ArtifactCanaryScanCli` owns command-line option parsing and process exit
+  semantics for Gradle/manual use.
+- `checkGeneratedArtifactCanaries` is part of normal `check` and scans generated
+  verification reports.
+- `checkRuntimeArtifactCanaries` is an explicit maintainer gate for targeted
+  live-audit/runtime artifact roots.
+
+Do not wire artifact scanning into live runtime turns. Do not merge it into
+prompt-debug, session persistence, or local trace lifecycle. Those artifacts
+are scanned after creation as audit evidence, not during normal turn execution.
+
+The next ticket should be a no-code closeout:
+
+`T599 Trace And Artifact Evidence Lane Closeout`
+
+T599 should close this hygiene lane and decide the next lane from source
+evidence. It should not invent an implementation ticket merely to keep motion.
+
+## Source Evidence
+
+Inspected from fresh `origin/v0.9.0-beta-dev` at `7bd07e69`.
+
+| File | Lines | Why inspected |
+| --- | ---: | --- |
+| `src/main/java/dev/talos/runtime/policy/ArtifactCanaryScanner.java` | 148 | Scanner policy, broad/runtime scan modes, skipped directories, text-file detection, canary matching, and sanitized findings. |
+| `src/main/java/dev/talos/runtime/policy/ArtifactCanaryScanCli.java` | 100 | CLI wrapper, root/allowlist parsing, runtime/broad mode selection, and exit codes. |
+| `build.gradle.kts` | 2278 | `checkGeneratedArtifactCanaries`, `checkRuntimeArtifactCanaries`, and `check` integration. |
+| `src/test/java/dev/talos/runtime/policy/ArtifactCanaryScanTest.java` | 214 | Scanner and CLI coverage for prompt-debug, provider-body, sessions, traces, turn JSONL, command output, reports, allowlists, and private-document fact canaries. |
+| `src/test/java/dev/talos/build/ArtifactCanaryBuildGateTest.java` | 23 | Regression proving generated-artifact canary scanning stays wired into `check`. |
+| `src/test/java/dev/talos/release/RuntimeSinkSafetyInventoryTest.java` | 39 | Release inventory coverage for current durable sink families and artifact canary scanner ownership. |
+| `src/main/java/dev/talos/cli/prompt/PromptDebugArtifactWriter.java` | 98 | Prompt-debug markdown/provider-body artifact writer that produces scan targets. |
+| `src/main/java/dev/talos/cli/prompt/PromptDebugDestinationResolver.java` | 51 | Prompt-debug destination precedence and default location. |
+| `src/main/java/dev/talos/runtime/JsonSessionStore.java` | 575 | Session snapshot, turn JSONL, and local trace artifact persistence. |
+| `src/main/java/dev/talos/runtime/JsonTurnLogAppender.java` | 158 | Post-turn bridge that writes local traces and turn records for later scanning. |
+| `src/main/java/dev/talos/runtime/SessionStore.java` | 69 | Persistence seam for session, turn, and local trace artifacts. |
+| `scripts/run-capability-live-audit.ps1` | 723 | Live-audit runbook generation and targeted artifact scan command with allowlist. |
+| `scripts/run-t267-live-audit.ps1` | 375 | Older live-audit preflight/smoke script and scan command guidance. |
+| `work-cycle-docs/reports/final-pre-beta-verification.md` | 175 | Release report describing targeted artifact scanning coverage and broad-scan exclusions. |
+| `work-cycle-docs/blended-manual-audit-scenario-bank.md` | 261 | Manual audit scenario bank requiring prompt-debug, trace, and targeted artifact scan evidence. |
+| `work-cycle-docs/tickets/done/[T597-done-high] trace-lifecycle-persistence-ownership-decision.md` | 264 | Prior decision routing artifact canary ownership to this ticket. |
+
+## Current Ownership Model
+
+### Scanner
+
+`ArtifactCanaryScanner` owns deterministic content scanning:
+
+- broad scans via `scan(...)`;
+- targeted runtime scans via `scanRuntimeArtifacts(...)`;
+- existing-root filtering via `scanExisting(...)`;
+- exact file/line finding reporting;
+- redacted finding snippets;
+- known canary matching through protected-content policy and explicit test
+  secret patterns;
+- text-like file selection for common report, trace, session, provider-body,
+  prompt-debug, command-output, and turn-log files.
+
+This is a real owner, not a scattered policy.
+
+### CLI wrapper
+
+`ArtifactCanaryScanCli` owns process-facing scan invocation:
+
+- `--runtime` versus `--broad`;
+- `--root`/`--roots`;
+- `--allow`/`--allowlist`;
+- exit `0` for pass, `2` for findings, `1` for scan read failure, `64` for
+  bad usage.
+
+That boundary is appropriate. The scanner should not know about Gradle
+properties, and Gradle should not reimplement scan parsing.
+
+### Generated-artifact gate
+
+`checkGeneratedArtifactCanaries` is wired into `check`.
+
+It scans:
+
+- `build/reports`;
+- `build/test-results`.
+
+This is intentionally narrow. It guards artifacts generated by deterministic
+local verification, not every ignored manual-audit directory in the repository.
+
+### Targeted runtime-artifact gate
+
+`checkRuntimeArtifactCanaries` requires `-PartifactScanRoots=...`.
+
+That is correct. Runtime/live-audit artifact roots must be explicit because old
+ignored manual-audit packets may contain fixture secrets or intentionally dirty
+evidence. Auto-scanning every historical `local/manual-testing` or
+`local/manual-workspaces` tree would create false blockers and teach maintainers
+to ignore the gate.
+
+### Prompt-debug artifacts
+
+`PromptDebugArtifactWriter` writes redacted prompt-debug markdown and redacted
+provider-body JSON. These are scan targets, not scan owners.
+
+`PromptDebugDestinationResolver` controls where those artifacts go. That
+destination policy is separate from canary scanning. The scanner should inspect
+the resulting roots only when a maintainer chooses those roots as audit
+evidence.
+
+### Session, turn, and trace artifacts
+
+`JsonSessionStore` writes:
+
+- session snapshots;
+- turn JSONL records;
+- local trace JSON artifacts.
+
+`JsonTurnLogAppender` is the post-turn bridge that causes completed turn traces
+and turn records to reach the store.
+
+Those writers should remain responsible for persistence and redaction before
+write. The artifact canary scanner is the independent after-the-fact gate that
+checks whether raw known canaries escaped anyway.
+
+### Runbooks and scripts
+
+Manual/live audit scripts and runbooks already treat artifact scanning as an
+explicit evidence step. That is the right operating model:
+
+```text
+run Talos -> capture transcript/trace/prompt-debug/provider-body/artifacts ->
+run targeted artifact canary scan over the chosen evidence roots
+```
+
+The scan belongs after evidence production, not inside the assistant turn.
+
+## Rejected Moves
+
+### Wire artifact canary scanning into live runtime turns
+
+Rejected.
+
+Per-turn runtime scanning would add I/O and failure semantics to normal
+assistant execution. It would also blur the distinction between redaction
+before writing and audit verification after writing. Artifact canary scanning
+should stay as a gate over artifact roots.
+
+### Extract a scan-root manifest now
+
+Rejected for immediate implementation.
+
+There is a plausible future need for a typed audit evidence-root manifest, but
+the current source does not show enough duplication or ambiguity to justify it
+yet. The Gradle task intentionally requires explicit roots, and live-audit
+scripts already print concrete commands.
+
+### Extract allowlist provenance now
+
+Rejected for immediate implementation.
+
+The allowlist path mechanism is deliberately simple and test-covered. A richer
+allowlist provenance model may be useful for release-candidate packets, but it
+should be designed in the manual-audit/release-evidence lane, not as a scanner
+refactor.
+
+### Move prompt-debug artifact policy into the scanner
+
+Rejected.
+
+Prompt-debug owns artifact creation and redaction. The scanner owns independent
+leak detection over completed artifacts. Combining them would reduce the
+scanner's value as an external gate.
+
+### Move session/trace persistence policy into the scanner
+
+Rejected.
+
+Session and trace persistence already sanitize before write. The scanner should
+not become a persistence policy object. Its job is to fail the evidence packet
+if raw canaries appear in saved artifacts.
+
+### Extract canary matching away from `ArtifactCanaryScanner` now
+
+Rejected.
+
+The canary matching code is short, deterministic, and tested. Extracting a
+`CanaryPatternCatalog` or similar value now would add indirection without a
+current second consumer.
+
+## Ownership Answers
+
+1. Artifact canary scanning remains a release/test gate, not runtime turn
+   behavior.
+2. Scan-root selection does not need a dedicated manifest owner yet. Explicit
+   roots are correct for live-audit evidence because historical ignored
+   artifacts may be dirty by design.
+3. Allowlist provenance does not need implementation in this ticket. Keep the
+   simple path allowlist until the manual-audit/release packet lane proves a
+   richer structure is necessary.
+4. Runtime/session/prompt-debug artifact classes should not share a typed
+   evidence-root model yet. They already have different creation owners; the
+   scanner can remain an independent post-production gate.
+5. The next ticket is a no-code closeout: `T599 Trace And Artifact Evidence
+   Lane Closeout`.
+
+## T599 Scope
+
+T599 should be no-code.
+
+It should:
+
+- summarize what the trace/artifact evidence hygiene lane changed;
+- confirm which ownership boundaries are now coherent enough to stop;
+- identify remaining evidence risks that belong to later release/manual-audit
+  work rather than implementation cleanup;
+- decide the next hygiene lane from current source evidence;
+- decide whether the repo is close enough to start the deep manual Talos test
+  packet after the next lane, or whether one more focused hygiene lane should
+  run first.
+
+It should not:
+
+- start another local trace extraction;
+- start a prompt-debug extraction;
+- wire artifact scanning into live runtime turns;
+- add a scan-root manifest without release-packet evidence;
+- invent an implementation ticket solely to keep the ticket counter moving.
+
+## Verification
+
+This ticket is documentation-only. Required gates:
+
+- `git diff --check`
+- `validateArchitectureBoundaries`
+- full `check`
