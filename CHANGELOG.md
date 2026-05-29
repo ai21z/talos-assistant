@@ -17,6 +17,15 @@
   runtime-control spine, layer-boundary candidates, and top-level package
   cycles). It never fails the build on findings; it is evidence for manual
   review before any rule is promoted to a hard guard.
+- Added a report-only architecture cycle analysis pass
+  (`dev.talos.architecture.ArchitectureCycleReportTest`) that slices the
+  imported `dev.talos` bytecode at four levels (top-level packages, runtime
+  subpackages, cli subpackages, core subpackages) and writes a deterministic
+  Markdown report to
+  `build/reports/talos/architecture/architecture-cycle-report.md`. Cycles are
+  detected by a Tarjan strongly-connected-component pass and cross-checked with
+  ArchUnit's caught `beFreeOfCycles` rule; severity is classified per level. It
+  never fails the build on detected cycles.
 
 ### Changed
 - [T334-done-high] Added release-ledger discipline for beta candidates:
