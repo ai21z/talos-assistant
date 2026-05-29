@@ -343,17 +343,11 @@ public final class LocalTurnTraceCapture {
     ) {
         Bag bag = HOLDER.get();
         if (bag == null) return;
-        String safeStatus = safe(status);
-        String eventType = switch (safeStatus) {
-            case "RAISED" -> "PENDING_ACTION_OBLIGATION_RAISED";
-            case "BREACHED" -> "PENDING_ACTION_OBLIGATION_BREACHED";
-            default -> "PENDING_ACTION_OBLIGATION_EVALUATED";
-        };
-        bag.builder.event(TurnTraceEvent.simple(eventType, now(), Map.of(
-                "status", safeStatus,
-                "kind", safe(kind),
-                "targets", targets == null ? List.of() : List.copyOf(targets),
-                "reason", safe(reason))));
+        bag.builder.event(PendingActionObligationTraceEventFactory.evaluated(
+                status,
+                kind,
+                targets,
+                reason));
     }
 
     public static void recordProtectedReadPostcondition(
