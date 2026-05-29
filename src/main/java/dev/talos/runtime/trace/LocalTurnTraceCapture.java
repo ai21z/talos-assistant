@@ -425,11 +425,14 @@ public final class LocalTurnTraceCapture {
     ) {
         Bag bag = HOLDER.get();
         if (bag == null) return;
-        bag.builder.outcome(status, verificationStatus, approvalStatus, mutationStatus, classification);
+        OutcomeTraceRecorder.record(
+                bag.builder,
+                status,
+                verificationStatus,
+                approvalStatus,
+                mutationStatus,
+                classification);
         bag.outcomeRecorded = true;
-        bag.builder.event(TurnTraceEvent.simple("OUTCOME_RENDERED", now(), Map.of(
-                "status", safe(status),
-                "classification", safe(classification))));
     }
 
     public static void recordOutcomeIfAbsent(
