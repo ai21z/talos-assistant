@@ -1982,14 +1982,56 @@ class StaticTaskVerifierTest {
                 });
                 """);
 
-        TaskVerificationResult result = StaticTaskVerifier.verify(
+        TaskVerificationEvidence evidence = StaticTaskVerifier.verifyWithEvidence(
                 workspace,
-                "Update scripts.js so #teaser-button updates #teaser-status when clicked.",
+                TaskContractResolver.fromUserRequest(
+                        "Update scripts.js so #teaser-button updates #teaser-status when clicked."),
                 loopResult(List.of(successfulWrite("scripts.js", VerificationStatus.PASS))),
                 0);
+        TaskVerificationResult result = evidence.compatibilityResult();
 
-        assertNotEquals(TaskVerificationStatus.PASSED, result.status(), result.summary());
-        assertTrue(result.summary().contains("interaction"), result.summary());
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.summary());
+        assertTrue(evidence.report().authoritativeProofKinds().stream()
+                .noneMatch(ProofKind.BROWSER_BEHAVIOR.name()::equals));
+        assertTrue(evidence.report().problems().stream()
+                        .anyMatch(problem -> problem.contains("did not change")),
+                evidence.report().problems().toString());
+    }
+
+    @Test
+    void requestedButtonStatusInteractionCarriesBrowserBehaviorProofWhenRuntimePasses() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head><link rel="stylesheet" href="styles.css"></head>
+                  <body>
+                    <button id="teaser-button">Show teaser</button>
+                    <p id="teaser-status">Waiting.</p>
+                    <script src="scripts.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), "button { font: inherit; }\n");
+        Files.writeString(workspace.resolve("scripts.js"), """
+                const trigger = document.getElementById('teaser-button');
+                const status = document.getElementById('teaser-status');
+                trigger.addEventListener('click', function() {
+                  status.textContent = 'Teaser ready';
+                });
+                """);
+
+        TaskVerificationEvidence evidence = StaticTaskVerifier.verifyWithEvidence(
+                workspace,
+                TaskContractResolver.fromUserRequest(
+                        "Update scripts.js so #teaser-button updates #teaser-status when clicked."),
+                loopResult(List.of(successfulWrite("scripts.js", VerificationStatus.PASS))),
+                0);
+        TaskVerificationResult result = evidence.compatibilityResult();
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.summary());
+        assertTrue(evidence.report().requiredClaimsSatisfied(), evidence.report().toString());
+        assertTrue(evidence.report().authoritativeProofKinds().contains(ProofKind.BROWSER_BEHAVIOR.name()),
+                evidence.report().authoritativeProofKinds().toString());
     }
 
     @Test

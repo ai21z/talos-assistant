@@ -622,6 +622,9 @@ dependencies {
     implementation("org.apache.pdfbox:pdfbox:${project.property("pdfboxVersion")}")
     implementation("org.apache.poi:poi-ooxml:${project.property("poiVersion")}")
 
+    // Local static-web behavior verification: in-process, workspace-local page execution only.
+    implementation("org.htmlunit:htmlunit:${project.property("htmlUnitVersion")}")
+
     // REPL
     implementation("org.jline:jline:3.26.3")
 

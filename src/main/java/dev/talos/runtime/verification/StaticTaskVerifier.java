@@ -298,6 +298,11 @@ public final class StaticTaskVerifier {
         VerificationReport interactionReport = StaticWebInteractionVerifier.verify(
                 contract.originalUserRequest(),
                 selectors);
+        VerificationReport browserBehaviorReport = StaticWebBrowserBehaviorVerifier.verify(
+                root,
+                contract.originalUserRequest(),
+                selectors);
+        interactionReport = VerificationReport.merge(interactionReport, browserBehaviorReport);
         facts.addAll(interactionReport.facts());
         facts.addAll(interactionReport.limitations());
         if (interactionReport.hasRequiredFailure()) {
