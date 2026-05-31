@@ -203,6 +203,17 @@ public record TurnPolicyTrace(
         return value == null || value.isBlank() ? fallback : value;
     }
 
+    private static boolean mutationTargetRole(String role) {
+        return "MUST_MUTATE".equals(role) || "OUTPUT_DESTINATION".equals(role);
+    }
+
+    private static String expectedTargetRole(TaskContract contract) {
+        if (contract != null && !contract.mutationAllowed()) {
+            return contract.verificationRequired() ? "VERIFY_ONLY" : "MUST_READ";
+        }
+        return "MUST_MUTATE";
+    }
+
     private static List<RolefulTarget> rolefulTargetsFrom(TaskIntent intent, TaskContract contract) {
         LinkedHashMap<String, RolefulTarget> out = new LinkedHashMap<>();
         Set<String> activeExpected = contract == null ? Set.of() : contract.expectedTargets();
@@ -211,9 +222,13 @@ public record TurnPolicyTrace(
             for (TargetRef ref : intent.targets().targets()) {
                 if (ref == null) continue;
                 String role = ref.role().name();
-                if (("MUST_MUTATE".equals(role) || "OUTPUT_DESTINATION".equals(role))
-                        && !activeExpected.contains(ref.path())) {
-                    continue;
+                if (mutationTargetRole(role)) {
+                    if (!activeExpected.contains(ref.path())) {
+                        continue;
+                    }
+                    if (contract != null && !contract.mutationAllowed()) {
+                        continue;
+                    }
                 }
                 if ("FORBIDDEN".equals(role) && !activeForbidden.contains(ref.path())) {
                     continue;
@@ -221,11 +236,12 @@ public record TurnPolicyTrace(
                 out.putIfAbsent(ref.path() + "\u0000" + role, RolefulTarget.from(ref));
             }
         }
+        String expectedRole = expectedTargetRole(contract);
         for (String expected : activeExpected.stream().sorted().toList()) {
-            String key = expected + "\u0000MUST_MUTATE";
+            String key = expected + "\u0000" + expectedRole;
             out.putIfAbsent(key, new RolefulTarget(
                     expected,
-                    "MUST_MUTATE",
+                    expectedRole,
                     "RUNTIME_DEFAULT",
                     "active-contract-projection",
                     "",
