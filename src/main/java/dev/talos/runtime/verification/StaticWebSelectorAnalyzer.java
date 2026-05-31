@@ -21,6 +21,7 @@ final class StaticWebSelectorAnalyzer {
             "<link\\b[^>]*\\bhref\\s*=\\s*(['\"])(.*?)\\1", Pattern.CASE_INSENSITIVE);
     private static final Pattern HTML_SCRIPT_SRC = Pattern.compile(
             "<script\\b[^>]*\\bsrc\\s*=\\s*(['\"])(.*?)\\1", Pattern.CASE_INSENSITIVE);
+    private static final Pattern CSS_BLOCK_COMMENT = Pattern.compile("(?s)/\\*.*?\\*/");
     private static final Pattern CSS_CLASS_SELECTOR = Pattern.compile("\\.([A-Za-z_][A-Za-z0-9_-]*)");
     private static final Pattern CSS_ID_SELECTOR = Pattern.compile("#([A-Za-z_][A-Za-z0-9_-]*)");
     private static final Pattern CSS_SELECTOR_PRELUDE = Pattern.compile("(?s)([^{}]+)\\{");
@@ -345,7 +346,7 @@ final class StaticWebSelectorAnalyzer {
     private static Set<String> extractCssSelectors(String css, Pattern selectorPattern) {
         Set<String> out = new LinkedHashSet<>();
         if (css == null || css.isBlank()) return out;
-        Matcher preludeMatcher = CSS_SELECTOR_PRELUDE.matcher(css);
+        Matcher preludeMatcher = CSS_SELECTOR_PRELUDE.matcher(stripCssComments(css));
         while (preludeMatcher.find()) {
             String prelude = preludeMatcher.group(1);
             if (prelude == null || prelude.isBlank()) continue;
@@ -361,7 +362,7 @@ final class StaticWebSelectorAnalyzer {
     private static Set<String> extractBareClassSelectors(String css, Set<String> htmlClasses) {
         Set<String> out = new LinkedHashSet<>();
         if (css == null || css.isBlank() || htmlClasses == null || htmlClasses.isEmpty()) return out;
-        Matcher preludeMatcher = CSS_SELECTOR_PRELUDE.matcher(css);
+        Matcher preludeMatcher = CSS_SELECTOR_PRELUDE.matcher(stripCssComments(css));
         while (preludeMatcher.find()) {
             String prelude = preludeMatcher.group(1);
             if (prelude == null || prelude.isBlank()) continue;
@@ -373,6 +374,10 @@ final class StaticWebSelectorAnalyzer {
             }
         }
         return out;
+    }
+
+    private static String stripCssComments(String css) {
+        return css == null ? "" : CSS_BLOCK_COMMENT.matcher(css).replaceAll(" ");
     }
 
     private static boolean looksLikeNearPlaceholder(String content, String kind) {
