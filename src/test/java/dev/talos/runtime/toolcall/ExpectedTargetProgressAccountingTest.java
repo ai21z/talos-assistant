@@ -37,6 +37,16 @@ class ExpectedTargetProgressAccountingTest {
     }
 
     @Test
+    void verifyOnlyConstraintTargetDoesNotRemainAsMutationProgressTarget() {
+        LoopState state = state("Rewrite styles.css so index.html still works.");
+        state.toolOutcomes.add(outcome("talos.write_file", "styles.css"));
+
+        List<String> remaining = ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state);
+
+        assertTrue(remaining.isEmpty(), remaining.toString());
+    }
+
+    @Test
     void workspaceOperationPathEffectsSatisfyExpectedTargets() {
         LoopState state = state(
                 "Organize these files using workspace operation tools only: copy README.md to "
