@@ -269,11 +269,12 @@ public final class StaticTaskVerifier {
             return;
         }
 
-        problems.addAll(selectors.linkageProblems());
-        problems.addAll(selectors.contentProblems());
-        problems.addAll(selectors.selectorProblems());
+        List<String> staticWebProblems = new ArrayList<>();
+        staticWebProblems.addAll(selectors.linkageProblems());
+        staticWebProblems.addAll(selectors.contentProblems());
+        staticWebProblems.addAll(selectors.selectorProblems());
         List<String> buttonBehaviorProblems = selectors.buttonResultBehaviorProblems(contract.originalUserRequest());
-        problems.addAll(buttonBehaviorProblems);
+        staticWebProblems.addAll(buttonBehaviorProblems);
         if (buttonBehaviorProblems.isEmpty()
                 && StaticWebSelectorAnalyzer.expectsRunButtonResultClicked(contract.originalUserRequest())) {
             facts.add("Static button/result behavior passed for " + selectors.jsFile() + ".");
@@ -281,11 +282,18 @@ public final class StaticTaskVerifier {
         if (StaticWebCapabilityProfile.looksCalculatorOrFormTask(contract)) {
             List<String> formProblems = StaticWebStructureVerifier.calculatorFormProblems(
                     contract.originalUserRequest(), selectors.html());
-            problems.addAll(formProblems);
+            staticWebProblems.addAll(formProblems);
             if (formProblems.isEmpty()) {
                 facts.add("Calculator/form static structure checks passed.");
             }
         }
+        StaticWebProblemScope.Result scopedProblems = StaticWebProblemScope.classify(
+                contract,
+                profile,
+                mutatedPaths,
+                staticWebProblems);
+        problems.addAll(scopedProblems.blockingProblems());
+        facts.addAll(scopedProblems.contextualFacts());
         if (selectors.linkageProblems().isEmpty()
                 && selectors.contentProblems().isEmpty()
                 && selectors.selectorProblems().isEmpty()) {
