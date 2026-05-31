@@ -985,6 +985,29 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/83-static-verification-continuation-preserves-scripts-js.json] 83: static verification continuation preserves scripts.js")
+    void staticVerificationContinuationPreservesScriptsJs() {
+        var loaded = JsonScenarioLoader.load("scenarios/83-static-verification-continuation-preserves-scripts-js.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(2, 2, 0, 0)
+                    .assertAnswerContains("Remaining target(s): scripts.js")
+                    .assertAnswerNotContains("Remaining target(s): script.js")
+                    .assertAnswerNotContains("Missing or unmutated target files: script.js")
+                    .assertAnswerNotContains("Static verification: passed")
+                    .assertFileContains("index.html", "<script src=\"scripts.js\"></script>")
+                    .assertFileContains("styles.css", ".calculator")
+                    .assertFileAbsent("scripts.js")
+                    .assertLocalTraceRecorded();
+            assertEquals("BLOCKED", result.localTrace().outcome().status());
+            assertEquals("BLOCKED_BY_POLICY", result.localTrace().outcome().classification());
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/63-functional-web-task-missing-js-fails-verification.json] 63: functional web task missing JavaScript fails verification")
     void functionalWebTaskMissingJavascriptFailsVerification() {
         var loaded = JsonScenarioLoader.load("scenarios/63-functional-web-task-missing-js-fails-verification.json");
