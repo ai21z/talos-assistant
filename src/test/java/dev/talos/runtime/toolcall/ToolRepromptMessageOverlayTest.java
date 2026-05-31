@@ -65,6 +65,25 @@ class ToolRepromptMessageOverlayTest {
     }
 
     @Test
+    void expectedTargetProgressMessagePreservesExactPluralScriptTarget() {
+        LoopState state = stateWith(ChatMessage.system("existing"));
+
+        try (ToolRepromptMessageOverlay ignored = ToolRepromptMessageOverlay.apply(
+                state,
+                List.of(),
+                List.of("scripts.js"),
+                "Create index.html, styles.css, and scripts.js.")) {
+            String prompt = state.messages.get(1).content();
+            assertTrue(prompt.contains(
+                    "Remaining expected target paths not successfully mutated in this turn: scripts.js"),
+                    prompt);
+            assertFalse(prompt.contains(
+                    "Remaining expected target paths not successfully mutated in this turn: script.js"),
+                    prompt);
+        }
+    }
+
+    @Test
     void closesOverlayWhenContinuationThrows() {
         LoopState state = stateWith(ChatMessage.system("existing"));
 
