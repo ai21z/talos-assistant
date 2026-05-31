@@ -241,6 +241,24 @@ class ToolSurfacePlannerTest {
     }
 
     @Test
+    void scopedExtraFileCreationConstraintKeepsFileEditToolsVisible() {
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
+                TaskContractResolver.fromUserRequest(
+                        "Improve only styles.css. Do not create extra files. "
+                                + "Do not modify index.html or scripts.js."),
+                ExecutionPhase.APPLY,
+                registry());
+
+        List<String> names = plan.nativeToolNames();
+        assertEquals("file edit target apply surface", plan.reason());
+        assertTrue(names.contains("talos.edit_file"), names.toString());
+        assertTrue(names.contains("talos.write_file"), names.toString());
+        assertTrue(names.contains("talos.read_file"), names.toString());
+        assertFalse(names.contains("talos.mkdir"), names.toString());
+        assertFalse(names.contains("talos.apply_workspace_batch"), names.toString());
+    }
+
+    @Test
     void directoryListingSurfaceUsesDirectoryTargetMetadata() {
         ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(
                 TaskContractResolver.fromUserRequest("What files are in this folder?"),

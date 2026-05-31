@@ -17,7 +17,10 @@ final class PolicyTraceRecorder {
                 trace.mutationAllowed(),
                 trace.expectedTargets(),
                 trace.forbiddenTargets(),
-                trace.classificationReason()));
+                trace.classificationReason(),
+                trace.rolefulTargets().stream()
+                        .map(LocalTurnTrace.TaskContractSummary::rolefulTargetFrom)
+                        .toList()));
         builder.phaseTransition(trace.initialPhase(), trace.finalPhase(), "policy trace");
         builder.toolSurface(trace.nativeTools(), trace.promptTools(), "selected for resolved task contract");
         builder.event(TurnTraceEvent.simple("TASK_CONTRACT_RESOLVED", now(), Map.of(

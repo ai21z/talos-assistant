@@ -4,7 +4,9 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 import dev.talos.spi.types.ChatMessage;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -34,6 +36,34 @@ class ExpectedTargetProgressAccountingTest {
         List<String> remaining = ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state);
 
         assertEquals(List.of("notes.md"), remaining);
+    }
+
+    @Test
+    void verifyOnlyConstraintTargetDoesNotRemainAsMutationProgressTarget() {
+        LoopState state = state("Rewrite styles.css so index.html still works.");
+        state.toolOutcomes.add(outcome("talos.write_file", "styles.css"));
+
+        List<String> remaining = ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state);
+
+        assertTrue(remaining.isEmpty(), remaining.toString());
+    }
+
+    @Test
+    void workspaceReconciledPluralStaticWebTargetsSatisfyExpectedProgress(@TempDir Path workspace)
+            throws Exception {
+        Files.writeString(workspace.resolve("index.html"), "<script src=\"scripts.js\"></script>\n");
+        Files.writeString(workspace.resolve("styles.css"), "body { margin: 0; }\n");
+        Files.writeString(workspace.resolve("scripts.js"), "console.log('existing');\n");
+        LoopState state = state(
+                "Create a modern synthwave website here with CSS styling and JavaScript interaction.",
+                workspace);
+        state.toolOutcomes.add(outcome("talos.write_file", "index.html"));
+        state.toolOutcomes.add(outcome("talos.write_file", "styles.css"));
+        state.toolOutcomes.add(outcome("talos.write_file", "scripts.js"));
+
+        List<String> remaining = ExpectedTargetProgressAccounting.remainingExpectedMutationTargets(state);
+
+        assertTrue(remaining.isEmpty(), remaining.toString());
     }
 
     @Test
@@ -120,11 +150,15 @@ class ExpectedTargetProgressAccountingTest {
     }
 
     private static LoopState state(String userRequest) {
+        return state(userRequest, Path.of("."));
+    }
+
+    private static LoopState state(String userRequest, Path workspace) {
         return new LoopState(
                 "",
                 List.of(),
                 new ArrayList<>(List.of(ChatMessage.system("sys"), ChatMessage.user(userRequest))),
-                Path.of("."),
+                workspace,
                 null,
                 null,
                 5,
