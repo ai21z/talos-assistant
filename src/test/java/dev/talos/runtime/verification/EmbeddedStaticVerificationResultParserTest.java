@@ -18,6 +18,16 @@ class EmbeddedStaticVerificationResultParserTest {
     }
 
     @Test
+    void ignoresEmbeddedStaticVerificationPassMarker() {
+        TaskVerificationResult result = EmbeddedStaticVerificationResultParser.parse(
+                "[Static verification: passed - Static web coherence checks passed.]");
+
+        assertEquals(TaskVerificationStatus.NOT_RUN, result.status());
+        assertEquals("Post-apply verification was not applicable.", result.summary());
+        assertEquals(List.of(), result.problems());
+    }
+
+    @Test
     void extractsSummaryAndProblemsFromRenderedStaticFailure() {
         TaskVerificationResult result = EmbeddedStaticVerificationResultParser.parse("""
                 [Task incomplete: Static verification failed - HTML references missing JavaScript file: `script.js`]

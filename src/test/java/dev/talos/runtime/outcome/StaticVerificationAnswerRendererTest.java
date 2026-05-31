@@ -50,6 +50,22 @@ class StaticVerificationAnswerRendererTest {
     }
 
     @Test
+    void readbackOnlyAnnotationDoesNotSayNoVerifierWhenRequiredVerificationWasUnsatisfied() {
+        TaskVerificationResult result = TaskVerificationResult.readbackOnly(
+                "Static interaction #teaser-button -> #teaser-status. "
+                        + "Required interaction verification was not satisfied.",
+                List.of("readback"));
+
+        assertEquals(
+                "[File write/readback passed. Task-specific verification did not satisfy the requested claim, "
+                        + "so task completion was not verified. "
+                        + "Static interaction #teaser-button -> #teaser-status. "
+                        + "Required interaction verification was not satisfied.]\n\n",
+                StaticVerificationAnswerRenderer.readbackOnlyAnnotation(result, loopResult(
+                        mutatingOutcome("talos.write_file", "scripts.js", "Wrote scripts.js"))));
+    }
+
+    @Test
     void failedAnnotationPreservesExistingPartialPrefixWordingForCompleteTurns() {
         TaskVerificationResult result = TaskVerificationResult.failed(
                 "HTML does not link JavaScript file: `scripts.js`",

@@ -31,6 +31,7 @@ public final class StaticWebCapabilityProfile {
         if (looksWebGuideDocumentTask(request)) return false;
         if (hasExactHtmlCssJsExpectedTargets(contract)
                 || shouldCheckSelectorCoherence(request)
+                || looksSelectorInteractionTask(contract)
                 || looksBroadWebTask(contract)
                 || looksFunctionalWebTask(contract)
                 || looksStyledWebTask(contract, mutatedPaths)) {
@@ -274,6 +275,24 @@ public final class StaticWebCapabilityProfile {
                 || lower.contains("wire")
                 || lower.contains("reference");
         return namesWebParts && asksAlignment;
+    }
+
+    private static boolean looksSelectorInteractionTask(TaskContract contract) {
+        if (contract == null || !contract.mutationRequested()) return false;
+        String request = contract.originalUserRequest();
+        if (request == null || request.isBlank()) return false;
+        String lower = request.toLowerCase(Locale.ROOT);
+        boolean mentionsSelectors = lower.indexOf('#') >= 0;
+        boolean asksVisibleUpdate = lower.contains("update")
+                || lower.contains("change")
+                || lower.contains("set ")
+                || lower.contains("display")
+                || lower.contains("show")
+                || lower.contains("write");
+        boolean clickLike = lower.contains("click")
+                || lower.contains("clicked")
+                || lower.contains("button");
+        return mentionsSelectors && asksVisibleUpdate && clickLike;
     }
 
     private static boolean looksBroadWebTask(TaskContract contract) {
