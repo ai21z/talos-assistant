@@ -60,6 +60,14 @@ public final class ToolSurfacePlanner {
         }
         if (contract != null
                 && !contract.mutationAllowed()
+                && readOnlyPathExistenceCheck(contract)) {
+            return select(
+                    registry,
+                    descriptor -> isFileReadTool(descriptor) || isDirectoryListingTool(descriptor),
+                    "read-only path existence surface");
+        }
+        if (contract != null
+                && !contract.mutationAllowed()
                 && !contract.expectedTargets().isEmpty()) {
             return select(registry, ToolSurfacePlanner::isFileReadTool, "expected target read");
         }
@@ -107,6 +115,10 @@ public final class ToolSurfacePlanner {
         if (contract.type() == TaskType.DIRECTORY_LISTING) return List.of("talos.list_dir");
         if (!contract.mutationAllowed()
                 && verifyOnlyDirectoryAwarePathCheck(contract)) {
+            return List.of("talos.list_dir", "talos.read_file");
+        }
+        if (!contract.mutationAllowed()
+                && readOnlyPathExistenceCheck(contract)) {
             return List.of("talos.list_dir", "talos.read_file");
         }
         if (contract.mutationAllowed() && phase == ExecutionPhase.APPLY) {
@@ -284,6 +296,23 @@ public final class ToolSurfacePlanner {
                 || lower.contains("present")
                 || lower.contains("path");
         return mentionsDirectory && asksPathStatus;
+    }
+
+    private static boolean readOnlyPathExistenceCheck(TaskContract contract) {
+        if (contract == null || contract.mutationAllowed() || contract.expectedTargets().isEmpty()) {
+            return false;
+        }
+        String request = contract.originalUserRequest();
+        if (request == null || request.isBlank()) return false;
+        String lower = request.toLowerCase(Locale.ROOT);
+        boolean asksExistence = lower.contains("exists")
+                || lower.contains("exist")
+                || lower.contains("present")
+                || lower.contains("is there")
+                || lower.contains("are there");
+        boolean asksPathStatus = lower.contains("path")
+                && (lower.contains("check") || lower.contains("verify") || lower.contains("whether"));
+        return asksExistence || asksPathStatus;
     }
 
     private static boolean containsExtensionlessSlashPath(String request) {
