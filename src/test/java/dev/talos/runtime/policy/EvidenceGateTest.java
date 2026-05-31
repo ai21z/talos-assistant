@@ -69,6 +69,27 @@ class EvidenceGateTest {
     }
 
     @Test
+    void pathExistenceHandoffUsesNamedNonProtectedTargets(@TempDir Path workspace) {
+        TaskContract contract = new TaskContract(
+                TaskType.DIAGNOSE_ONLY,
+                false,
+                false,
+                false,
+                Set.of("scripts.js", "script.js"),
+                Set.of(),
+                "Check whether scripts.js exists and whether script.js exists. Do not change anything.");
+
+        assertTrue(EvidenceGate.requiresReadEvidenceHandoff(
+                EvidenceObligation.PATH_EXISTENCE_EVIDENCE_REQUIRED));
+        assertEquals(
+                Set.of("scripts.js", "script.js"),
+                Set.copyOf(EvidenceGate.handoffTargets(
+                        contract,
+                        EvidenceObligation.PATH_EXISTENCE_EVIDENCE_REQUIRED,
+                        workspace)));
+    }
+
+    @Test
     void protectedReadHandoffRequiresExplicitReadIntent(@TempDir Path workspace) {
         TaskContract readEnv = new TaskContract(
                 TaskType.READ_ONLY_QA,

@@ -398,6 +398,9 @@ public final class CurrentTurnCapabilityFrame {
     private static String evidenceGuidance(EvidenceObligation evidence) {
         return switch (evidence) {
             case READ_TARGET_REQUIRED -> "Evidence: read the named target before answering.";
+            case PATH_EXISTENCE_EVIDENCE_REQUIRED ->
+                    "Evidence: verify path existence with talos.list_dir for the parent directory "
+                            + "or talos.read_file for each named target before answering.";
             case PROTECTED_READ_APPROVAL_REQUIRED ->
                     "Evidence: the named target is protected. "
                             + "Call talos.read_file for the protected target; runtime will request approval. "
