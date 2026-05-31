@@ -14,26 +14,32 @@ public final class TaskIntentResolver {
     public static TaskIntent fromUserRequest(String userRequest, TaskContract legacyContract) {
         TaskIntent parityIntent = fromLegacyContract(legacyContract);
         Set<String> mutationTargets = explicitMutationTargets(userRequest, legacyContract);
+        Set<String> verifyOnlyTargets = explicitVerifyOnlyTargets(userRequest, legacyContract);
         if (!shouldTreatExtraFileConstraintAsScoped(userRequest, legacyContract, mutationTargets)) {
-            return parityIntent;
+            if (!shouldTreatConstraintTargetsAsVerifyOnly(legacyContract, mutationTargets, verifyOnlyTargets)) {
+                return parityIntent;
+            }
+            return rolefulIntent(
+                    legacyContract.type(),
+                    legacyContract.mutationRequested(),
+                    legacyContract.mutationAllowed(),
+                    legacyContract.verificationRequired(),
+                    mutationTargets,
+                    verifyOnlyTargets,
+                    explicitForbiddenTargets(userRequest, legacyContract),
+                    legacyContract.sourceEvidenceTargets(),
+                    legacyContract.originalUserRequest(),
+                    legacyContract.classificationReason());
         }
-
-        ArtifactTargetSet targets = ArtifactTargetSet.empty();
-        for (String target : mutationTargets) {
-            targets = targets.with(TargetRef.of(target, TargetRole.MUST_MUTATE));
-        }
-        for (String target : legacyContract.sourceEvidenceTargets()) {
-            targets = targets.with(TargetRef.of(target, TargetRole.SOURCE_EVIDENCE));
-        }
-        for (String target : explicitForbiddenTargets(userRequest, legacyContract)) {
-            targets = targets.with(TargetRef.of(target, TargetRole.FORBIDDEN));
-        }
-        return new TaskIntent(
+        return rolefulIntent(
                 TaskType.FILE_EDIT,
                 true,
                 true,
                 true,
-                targets,
+                mutationTargets,
+                verifyOnlyTargets,
+                explicitForbiddenTargets(userRequest, legacyContract),
+                legacyContract.sourceEvidenceTargets(),
                 legacyContract.originalUserRequest(),
                 "explicit-mutation-with-scoped-output-constraint");
     }
@@ -62,6 +68,41 @@ public final class TaskIntentResolver {
                 contract.classificationReason());
     }
 
+    private static TaskIntent rolefulIntent(
+            TaskType type,
+            boolean mutationRequested,
+            boolean mutationAllowed,
+            boolean verificationRequired,
+            Set<String> mutationTargets,
+            Set<String> verifyOnlyTargets,
+            Set<String> forbiddenTargets,
+            Set<String> sourceEvidenceTargets,
+            String originalUserRequest,
+            String classificationReason
+    ) {
+        ArtifactTargetSet targets = ArtifactTargetSet.empty();
+        for (String target : mutationTargets) {
+            targets = targets.with(TargetRef.of(target, TargetRole.MUST_MUTATE));
+        }
+        for (String target : verifyOnlyTargets) {
+            targets = targets.with(TargetRef.of(target, TargetRole.VERIFY_ONLY));
+        }
+        for (String target : sourceEvidenceTargets) {
+            targets = targets.with(TargetRef.of(target, TargetRole.SOURCE_EVIDENCE));
+        }
+        for (String target : forbiddenTargets) {
+            targets = targets.with(TargetRef.of(target, TargetRole.FORBIDDEN));
+        }
+        return new TaskIntent(
+                type,
+                mutationRequested,
+                mutationAllowed,
+                verificationRequired,
+                targets,
+                originalUserRequest,
+                classificationReason);
+    }
+
     private static boolean shouldTreatExtraFileConstraintAsScoped(
             String userRequest,
             TaskContract legacyContract,
@@ -73,6 +114,17 @@ public final class TaskIntentResolver {
                 && !mutationTargets.isEmpty();
     }
 
+    private static boolean shouldTreatConstraintTargetsAsVerifyOnly(
+            TaskContract legacyContract,
+            Set<String> mutationTargets,
+            Set<String> verifyOnlyTargets
+    ) {
+        return legacyContract != null
+                && legacyContract.mutationAllowed()
+                && !mutationTargets.isEmpty()
+                && !verifyOnlyTargets.isEmpty();
+    }
+
     private static Set<String> explicitMutationTargets(String userRequest, TaskContract legacyContract) {
         if (userRequest == null || userRequest.isBlank()
                 || legacyContract == null
@@ -81,14 +133,34 @@ public final class TaskIntentResolver {
         }
         LinkedHashSet<String> targets = new LinkedHashSet<>();
         for (String clause : clauses(userRequest)) {
-            String lowerClause = clause.toLowerCase(Locale.ROOT);
+            String mutationFragment = mutationFragment(clause);
+            String lowerClause = mutationFragment.toLowerCase(Locale.ROOT);
             if (isNegatedClause(lowerClause)
                     || isAdvisoryClause(lowerClause)
                     || !containsExplicitMutationVerb(lowerClause)) {
                 continue;
             }
             for (String target : legacyContract.expectedTargets()) {
-                if (!legacyContract.forbiddenTargets().contains(target) && containsTarget(clause, target)) {
+                if (!legacyContract.forbiddenTargets().contains(target) && containsTarget(mutationFragment, target)) {
+                    targets.add(target);
+                }
+            }
+        }
+        return Set.copyOf(targets);
+    }
+
+    private static Set<String> explicitVerifyOnlyTargets(String userRequest, TaskContract legacyContract) {
+        if (userRequest == null || userRequest.isBlank()
+                || legacyContract == null
+                || legacyContract.expectedTargets().isEmpty()) {
+            return Set.of();
+        }
+        LinkedHashSet<String> targets = new LinkedHashSet<>();
+        for (String clause : clauses(userRequest)) {
+            String fragment = constraintFragment(clause);
+            if (fragment.isBlank()) continue;
+            for (String target : legacyContract.expectedTargets()) {
+                if (containsTarget(fragment, target)) {
                     targets.add(target);
                 }
             }
@@ -120,6 +192,36 @@ public final class TaskIntentResolver {
                 "(?i)\\b(?:and|but)\\s+((?:do\\s+not|don't|dont)\\b)",
                 ". $1");
         return normalized.split("(?<=[.!?])\\s+|[;\\n]+");
+    }
+
+    private static String mutationFragment(String clause) {
+        if (clause == null || clause.isBlank()) return "";
+        int boundary = firstConstraintMarkerIndex(clause.toLowerCase(Locale.ROOT));
+        return boundary < 0 ? clause : clause.substring(0, boundary);
+    }
+
+    private static String constraintFragment(String clause) {
+        if (clause == null || clause.isBlank()) return "";
+        int boundary = firstConstraintMarkerIndex(clause.toLowerCase(Locale.ROOT));
+        return boundary < 0 ? "" : clause.substring(boundary);
+    }
+
+    private static int firstConstraintMarkerIndex(String lowerClause) {
+        int first = -1;
+        for (String marker : new String[] {
+                " so ",
+                " without breaking ",
+                " without changing ",
+                " compatible with ",
+                " stay compatible with ",
+                " stays compatible with "
+        }) {
+            int index = lowerClause.indexOf(marker);
+            if (index >= 0 && (first < 0 || index < first)) {
+                first = index;
+            }
+        }
+        return first;
     }
 
     private static boolean containsExtraFileCreationConstraint(String userRequest) {

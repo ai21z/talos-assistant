@@ -851,6 +851,19 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void constraintMentionDoesNotBecomeExpectedMutationTarget() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Rewrite styles.css so index.html still works.");
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("styles.css"), contract.expectedTargets());
+        assertFalse(contract.expectedTargets().contains("index.html"));
+    }
+
+    @Test
     void commaNotSimilarTargetWordingCapturesForbiddenTarget() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "After approval, edit only script.js, not scripts.js. "

@@ -23,4 +23,20 @@ class TaskIntentResolverTest {
         assertEquals(TargetRole.FORBIDDEN, intent.targets().find("index.html").orElseThrow().role());
         assertEquals(TargetRole.FORBIDDEN, intent.targets().find("scripts.js").orElseThrow().role());
     }
+
+    @Test
+    void rolefulIntentTreatsConstraintTargetsAsVerifyOnly() {
+        for (String prompt : java.util.List.of(
+                "Rewrite styles.css so index.html still works.",
+                "Rewrite styles.css without breaking index.html.",
+                "Update styles.css to stay compatible with index.html.")) {
+            TaskIntent intent = TaskIntentResolver.fromUserRequest(
+                    prompt,
+                    TaskContractResolver.resolveLegacyFromUserRequest(prompt));
+
+            assertEquals(TaskType.FILE_EDIT, intent.type(), prompt);
+            assertEquals(TargetRole.MUST_MUTATE, intent.targets().find("styles.css").orElseThrow().role(), prompt);
+            assertEquals(TargetRole.VERIFY_ONLY, intent.targets().find("index.html").orElseThrow().role(), prompt);
+        }
+    }
 }
