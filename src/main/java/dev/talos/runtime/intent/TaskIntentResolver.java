@@ -15,8 +15,10 @@ public final class TaskIntentResolver {
         TaskIntent parityIntent = fromLegacyContract(legacyContract);
         Set<String> mutationTargets = explicitMutationTargets(userRequest, legacyContract);
         Set<String> verifyOnlyTargets = explicitVerifyOnlyTargets(userRequest, legacyContract);
+        Set<String> forbiddenTargets = explicitForbiddenTargets(userRequest, legacyContract);
         if (!shouldTreatExtraFileConstraintAsScoped(userRequest, legacyContract, mutationTargets)) {
-            if (!shouldTreatConstraintTargetsAsVerifyOnly(legacyContract, mutationTargets, verifyOnlyTargets)) {
+            if (!shouldTreatConstraintTargetsAsVerifyOnly(legacyContract, mutationTargets, verifyOnlyTargets)
+                    && !shouldApplyExplicitForbiddenTargets(legacyContract, mutationTargets, forbiddenTargets)) {
                 return parityIntent;
             }
             return rolefulIntent(
@@ -26,7 +28,7 @@ public final class TaskIntentResolver {
                     legacyContract.verificationRequired(),
                     mutationTargets,
                     verifyOnlyTargets,
-                    explicitForbiddenTargets(userRequest, legacyContract),
+                    forbiddenTargets,
                     legacyContract.sourceEvidenceTargets(),
                     legacyContract.originalUserRequest(),
                     legacyContract.classificationReason());
@@ -38,7 +40,7 @@ public final class TaskIntentResolver {
                 true,
                 mutationTargets,
                 verifyOnlyTargets,
-                explicitForbiddenTargets(userRequest, legacyContract),
+                forbiddenTargets,
                 legacyContract.sourceEvidenceTargets(),
                 legacyContract.originalUserRequest(),
                 "explicit-mutation-with-scoped-output-constraint");
@@ -123,6 +125,18 @@ public final class TaskIntentResolver {
                 && legacyContract.mutationAllowed()
                 && !mutationTargets.isEmpty()
                 && !verifyOnlyTargets.isEmpty();
+    }
+
+    private static boolean shouldApplyExplicitForbiddenTargets(
+            TaskContract legacyContract,
+            Set<String> mutationTargets,
+            Set<String> forbiddenTargets
+    ) {
+        return legacyContract != null
+                && legacyContract.mutationAllowed()
+                && !mutationTargets.isEmpty()
+                && forbiddenTargets != null
+                && !forbiddenTargets.equals(legacyContract.forbiddenTargets());
     }
 
     private static Set<String> explicitMutationTargets(String userRequest, TaskContract legacyContract) {
