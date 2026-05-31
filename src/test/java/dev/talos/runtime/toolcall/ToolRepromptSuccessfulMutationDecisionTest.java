@@ -48,6 +48,26 @@ class ToolRepromptSuccessfulMutationDecisionTest {
     }
 
     @Test
+    void successfulMutationOfMustTargetDoesNotBlockOnVerifyOnlyConstraintTarget() {
+        LoopState state = state("Rewrite styles.css so index.html still works.");
+        state.toolOutcomes.add(successfulMutation("talos.write_file", "styles.css"));
+        var outcome = new ToolCallExecutionStage.IterationOutcome(
+                1,
+                List.of("Updated styles.css"),
+                0,
+                false,
+                false,
+                false,
+                1);
+
+        Optional<Boolean> decision = ToolRepromptSuccessfulMutationDecision.tryHandle(state, outcome);
+
+        assertTrue(decision.isPresent());
+        assertFalse(decision.get());
+        assertEquals("Updated styles.css", state.currentText);
+    }
+
+    @Test
     void noSuccessfulMutationReturnsEmptyDecision() {
         LoopState state = state();
         var outcome = new ToolCallExecutionStage.IterationOutcome(
@@ -82,12 +102,16 @@ class ToolRepromptSuccessfulMutationDecisionTest {
     }
 
     private static LoopState state() {
+        return state("Update README.md.");
+    }
+
+    private static LoopState state(String userRequest) {
         return new LoopState(
                 "",
                 List.of(),
                 new ArrayList<>(List.of(
                         ChatMessage.system("sys"),
-                        ChatMessage.user("Update README.md."))),
+                        ChatMessage.user(userRequest))),
                 Path.of("."),
                 null,
                 null,
