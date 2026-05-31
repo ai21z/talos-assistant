@@ -174,8 +174,9 @@ public final class StaticTaskVerifier {
         if (StaticWebCapabilityProfile.requiresSeparateAssetMutations(profile)) {
             verifyPrimaryWebMutationCoverage(mutatedPaths, facts, problems);
         }
+        VerificationReport claimReport = VerificationReport.empty();
         if (webCoherenceRequired) {
-            verifySmallWebWorkspace(root, contract, profile, mutatedPaths, facts, problems);
+            claimReport = verifySmallWebWorkspace(root, contract, profile, mutatedPaths, facts, problems);
         }
 
         return TaskVerificationOutcomeSelector.select(
@@ -185,7 +186,8 @@ public final class StaticTaskVerifier {
                 webCoherenceRequired,
                 expectationVerification,
                 exactEditVerification,
-                sourceDerivedVerification);
+                sourceDerivedVerification,
+                claimReport);
     }
 
     private static void verifyPrimaryWebMutationCoverage(
@@ -210,7 +212,7 @@ public final class StaticTaskVerifier {
         }
     }
 
-    private static void verifySmallWebWorkspace(
+    private static VerificationReport verifySmallWebWorkspace(
             Path root,
             TaskContract contract,
             CapabilityProfile profile,
@@ -231,33 +233,33 @@ public final class StaticTaskVerifier {
                     && profile.targetSurface().allowsFunctionalPartial()
                     && StaticWebCapabilityProfile.looksStyledWebTask(contract, mutatedPaths)) {
                 StaticWebPartialVerifier.verifyStyledWebWorkspace(root, primary, facts, problems);
-                if (!problems.isEmpty()) return;
+                if (!problems.isEmpty()) return VerificationReport.empty();
                 facts.add("Styled web checks passed for " + String.join(", ", primary) + ".");
-                return;
+                return VerificationReport.empty();
             }
             if (!primary.isEmpty()
                     && profile.targetSurface().allowsFunctionalPartial()
                     && StaticWebCapabilityProfile.looksFunctionalWebTask(contract)) {
                 StaticWebPartialVerifier.verifyFunctionalWebWorkspace(root, contract, primary, facts, problems);
-                if (!problems.isEmpty()) return;
+                if (!problems.isEmpty()) return VerificationReport.empty();
                 facts.add("Self-contained functional web checks passed for "
                         + String.join(", ", primary) + ".");
-                return;
+                return VerificationReport.empty();
             }
             problems.add("web coherence could not be checked because the workspace does not expose a small HTML/CSS/JS surface.");
-            return;
+            return VerificationReport.empty();
         }
         if (!hasPrimaryWebSurface(primary)) {
             if (profile.targetSurface().allowsFunctionalPartial()
                     && StaticWebCapabilityProfile.looksFunctionalWebTask(contract)) {
                 StaticWebPartialVerifier.verifyFunctionalWebWorkspace(root, contract, primary, facts, problems);
-                if (!problems.isEmpty()) return;
+                if (!problems.isEmpty()) return VerificationReport.empty();
                 facts.add("Self-contained functional web checks passed for "
                         + String.join(", ", primary) + ".");
-                return;
+                return VerificationReport.empty();
             }
             problems.add("web coherence could not be checked because HTML, CSS, and JavaScript primary files were not all present.");
-            return;
+            return VerificationReport.empty();
         }
 
         StaticWebSelectorAnalyzer.Facts selectors = StaticWebSelectorAnalyzer.analyze(
@@ -266,7 +268,7 @@ public final class StaticTaskVerifier {
                 preferredWebTargetFiles(contract, mutatedPaths));
         if (selectors == null) {
             problems.add("web coherence could not be checked because primary web files could not be read.");
-            return;
+            return VerificationReport.empty();
         }
 
         List<String> staticWebProblems = new ArrayList<>();
@@ -275,6 +277,14 @@ public final class StaticTaskVerifier {
         staticWebProblems.addAll(selectors.selectorProblems());
         List<String> buttonBehaviorProblems = selectors.buttonResultBehaviorProblems(contract.originalUserRequest());
         staticWebProblems.addAll(buttonBehaviorProblems);
+        VerificationReport interactionReport = StaticWebInteractionVerifier.verify(
+                contract.originalUserRequest(),
+                selectors);
+        facts.addAll(interactionReport.facts());
+        facts.addAll(interactionReport.limitations());
+        if (interactionReport.hasRequiredFailure()) {
+            staticWebProblems.addAll(interactionReport.problems());
+        }
         if (buttonBehaviorProblems.isEmpty()
                 && StaticWebSelectorAnalyzer.expectsRunButtonResultClicked(contract.originalUserRequest())) {
             facts.add("Static button/result behavior passed for " + selectors.jsFile() + ".");
@@ -300,6 +310,7 @@ public final class StaticTaskVerifier {
             facts.add("HTML/CSS/JS selector coherence passed for "
                     + selectors.htmlFile() + ", " + selectors.cssFile() + ", and " + selectors.jsFile() + ".");
         }
+        return interactionReport;
     }
 
     public static List<String> obviousPrimaryFiles(Path workspace) {

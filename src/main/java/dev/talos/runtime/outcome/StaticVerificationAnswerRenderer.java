@@ -41,7 +41,10 @@ public final class StaticVerificationAnswerRenderer {
         String readbackKind = hasSuccessfulWorkspaceOperation(loopResult)
                 ? "Workspace operation/readback"
                 : "File write/readback";
-        return "[" + readbackKind + " passed. No task-specific verifier was applicable, "
+        String verifierReason = hasUnsatisfiedTaskSpecificVerification(result)
+                ? "Task-specific verification did not satisfy the requested claim, "
+                : "No task-specific verifier was applicable, ";
+        return "[" + readbackKind + " passed. " + verifierReason
                 + "so task completion was not verified. "
                 + verificationSummary(result) + "]\n\n";
     }
@@ -185,6 +188,13 @@ public final class StaticVerificationAnswerRenderer {
         }
         String summary = result.summary().replace('\n', ' ').replace('\r', ' ').strip();
         return summary.length() <= 240 ? summary : summary.substring(0, 237) + "...";
+    }
+
+    private static boolean hasUnsatisfiedTaskSpecificVerification(TaskVerificationResult result) {
+        String summary = verificationSummary(result).toLowerCase();
+        return summary.contains("verification was not satisfied")
+                || summary.contains("required verification")
+                || summary.contains("required interaction verification");
     }
 
     private static List<String> contextualStaticWebFacts(TaskVerificationResult result) {

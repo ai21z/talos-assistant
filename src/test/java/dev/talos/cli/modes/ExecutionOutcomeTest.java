@@ -3432,6 +3432,63 @@ class ExecutionOutcomeTest {
         assertFalse(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
     }
 
+    @Test
+    void staticWebCoherenceDoesNotVerifyRequestedButtonStatusInteractionNoOp() throws Exception {
+        Path ws = Files.createTempDirectory("talos-execution-outcome-t623-interaction-");
+        try {
+            Files.writeString(ws.resolve("index.html"), """
+                    <!doctype html>
+                    <html>
+                      <head><link rel="stylesheet" href="styles.css"></head>
+                      <body>
+                        <button id="teaser-button">Show teaser</button>
+                        <p id="teaser-status">Waiting.</p>
+                        <script src="scripts.js"></script>
+                      </body>
+                    </html>
+                    """);
+            Files.writeString(ws.resolve("styles.css"), "button { font: inherit; }\n");
+            Files.writeString(ws.resolve("scripts.js"), """
+                    document.getElementById('teaser-button').addEventListener('click', function() {
+                      document.getElementById('teaser-status').textC;
+                    });
+                    """);
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Update scripts.js so #teaser-button updates #teaser-status when clicked."));
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "Updated scripts.js.", 1, 1,
+                    List.of("talos.write_file"), List.of(),
+                    0, 0, false, 1, List.of(),
+                    0, 0, 0, 0,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.write_file", "scripts.js", true, true, false,
+                            "wrote scripts.js", "", dev.talos.tools.VerificationStatus.PASS)));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    loopResult.finalAnswer(), messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+            assertEquals(ExecutionOutcome.VerificationStatus.READBACK_ONLY, outcome.verificationStatus());
+            assertEquals(TaskCompletionStatus.COMPLETED_UNVERIFIED, outcome.taskOutcome().completionStatus());
+            assertFalse(outcome.finalAnswer().contains("Static verification: passed"), outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("No task-specific verifier was applicable"),
+                    outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains(
+                    "Task-specific verification did not satisfy the requested claim"), outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("task completion was not verified"), outcome.finalAnswer());
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
     private static ToolCallLoop.ToolOutcome workspaceOutcome(
             String toolName,
             String pathHint,

@@ -1963,6 +1963,192 @@ class StaticTaskVerifierTest {
     }
 
     @Test
+    void requestedButtonStatusInteractionNoOpDoesNotPassStaticVerification() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head><link rel="stylesheet" href="styles.css"></head>
+                  <body>
+                    <button id="teaser-button">Show teaser</button>
+                    <p id="teaser-status">Waiting.</p>
+                    <script src="scripts.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), "button { font: inherit; }\n");
+        Files.writeString(workspace.resolve("scripts.js"), """
+                document.getElementById('teaser-button').addEventListener('click', function() {
+                  document.getElementById('teaser-status').textC;
+                });
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Update scripts.js so #teaser-button updates #teaser-status when clicked.",
+                loopResult(List.of(successfulWrite("scripts.js", VerificationStatus.PASS))),
+                0);
+
+        assertNotEquals(TaskVerificationStatus.PASSED, result.status(), result.summary());
+        assertTrue(result.summary().contains("interaction"), result.summary());
+    }
+
+    @Test
+    void requestedButtonStatusInteractionPassesWithTextContentAssignmentToBoundTarget() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head><link rel="stylesheet" href="styles.css"></head>
+                  <body>
+                    <button id="teaser-button">Show teaser</button>
+                    <p id="teaser-status">Waiting.</p>
+                    <script src="scripts.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), "button { font: inherit; }\n");
+        Files.writeString(workspace.resolve("scripts.js"), """
+                const trigger = document.getElementById('teaser-button');
+                const status = document.getElementById('teaser-status');
+                trigger.addEventListener('click', function() {
+                  status.textContent = 'Teaser ready';
+                });
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Update scripts.js so #teaser-button updates #teaser-status when clicked.",
+                loopResult(List.of(successfulWrite("scripts.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.summary());
+        assertTrue(result.facts().stream().anyMatch(f -> f.contains("#teaser-button")
+                && f.contains("#teaser-status")), result.facts().toString());
+    }
+
+    @Test
+    void requestedButtonStatusInteractionRejectsAssignmentToWrongOutputTarget() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head><link rel="stylesheet" href="styles.css"></head>
+                  <body>
+                    <button id="teaser-button">Show teaser</button>
+                    <p id="teaser-status">Waiting.</p>
+                    <p id="other-status">Other.</p>
+                    <script src="scripts.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), "button { font: inherit; }\n");
+        Files.writeString(workspace.resolve("scripts.js"), """
+                document.getElementById('teaser-button').addEventListener('click', function() {
+                  document.getElementById('other-status').textContent = 'Wrong target';
+                });
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Update scripts.js so #teaser-button updates #teaser-status when clicked.",
+                loopResult(List.of(successfulWrite("scripts.js", VerificationStatus.PASS))),
+                0);
+
+        assertNotEquals(TaskVerificationStatus.PASSED, result.status(), result.summary());
+        assertTrue(result.problems().stream().anyMatch(p -> p.contains("#teaser-status")),
+                result.problems().toString());
+    }
+
+    @Test
+    void requestedButtonStatusInteractionPassesWithInnerTextAssignmentToBoundTarget() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head><link rel="stylesheet" href="styles.css"></head>
+                  <body>
+                    <button id="teaser-button">Show teaser</button>
+                    <p id="teaser-status">Waiting.</p>
+                    <script src="scripts.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), "button { font: inherit; }\n");
+        Files.writeString(workspace.resolve("scripts.js"), """
+                document.getElementById('teaser-button').addEventListener('click', function() {
+                  document.querySelector('#teaser-status').innerText = 'Teaser ready';
+                });
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Update scripts.js so #teaser-button updates #teaser-status when clicked.",
+                loopResult(List.of(successfulWrite("scripts.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.summary());
+    }
+
+    @Test
+    void requestedButtonStatusInteractionRejectsHandlerBoundToWrongTrigger() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head><link rel="stylesheet" href="styles.css"></head>
+                  <body>
+                    <button id="teaser-button">Show teaser</button>
+                    <button id="other-button">Other</button>
+                    <p id="teaser-status">Waiting.</p>
+                    <script src="scripts.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), "button { font: inherit; }\n");
+        Files.writeString(workspace.resolve("scripts.js"), """
+                document.getElementById('other-button').addEventListener('click', function() {
+                  document.getElementById('teaser-status').textContent = 'Wrong trigger';
+                });
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Update scripts.js so #teaser-button updates #teaser-status when clicked.",
+                loopResult(List.of(successfulWrite("scripts.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.FAILED, result.status(), result.summary());
+        assertTrue(result.problems().stream().anyMatch(p ->
+                        p.contains("#teaser-button") && p.contains("#teaser-status")),
+                result.problems().toString());
+    }
+
+    @Test
+    void pureSelectorCoherenceRequestDoesNotCreateInteractionObligation() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                  <head><link rel="stylesheet" href="styles.css"></head>
+                  <body>
+                    <button class="cta-button">Show teaser</button>
+                    <script src="scripts.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), ".cta-button { font: inherit; }\n");
+        Files.writeString(workspace.resolve("scripts.js"), """
+                document.querySelector('.cta-button').addEventListener('click', function() {
+                  console.log('ok');
+                });
+                """);
+
+        TaskVerificationResult result = StaticTaskVerifier.verify(
+                workspace,
+                "Fix the selector mismatch by changing .missing-button to .cta-button.",
+                loopResult(List.of(successfulWrite("scripts.js", VerificationStatus.PASS))),
+                0);
+
+        assertEquals(TaskVerificationStatus.PASSED, result.status(), result.summary());
+        assertFalse(result.summary().contains("interaction"), result.summary());
+    }
+
+    @Test
     void expectedJavaScriptTargetBeatsStaleSiblingWhenHtmlLinkIsMissing() throws Exception {
         Files.writeString(workspace.resolve("index.html"), """
                 <!DOCTYPE html>

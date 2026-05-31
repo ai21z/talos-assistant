@@ -16,6 +16,27 @@ final class TaskVerificationOutcomeSelector {
             ExactEditReplacementVerifier.Result exactEditVerification,
             SourceDerivedArtifactVerifier.Result sourceDerivedVerification
     ) {
+        return select(
+                facts,
+                problems,
+                mutatedTargetCount,
+                webCoherenceRequired,
+                expectationVerification,
+                exactEditVerification,
+                sourceDerivedVerification,
+                VerificationReport.empty());
+    }
+
+    static TaskVerificationResult select(
+            List<String> facts,
+            List<String> problems,
+            int mutatedTargetCount,
+            boolean webCoherenceRequired,
+            TaskExpectationStaticVerifier.Result expectationVerification,
+            ExactEditReplacementVerifier.Result exactEditVerification,
+            SourceDerivedArtifactVerifier.Result sourceDerivedVerification,
+            VerificationReport verificationReport
+    ) {
         List<String> safeFacts = facts == null ? List.of() : facts;
         List<String> safeProblems = problems == null ? List.of() : problems;
         TaskExpectationStaticVerifier.Result expectation = expectationVerification == null
@@ -49,6 +70,11 @@ final class TaskVerificationOutcomeSelector {
                             : firstProblemSummary(safeProblems),
                     safeFacts,
                     safeProblems);
+        }
+        java.util.Optional<TaskVerificationResult> claimOverride =
+                VerificationOutcomeGate.compatibilityOverride(verificationReport, safeFacts);
+        if (claimOverride.isPresent()) {
+            return claimOverride.get();
         }
         if (expectation.verifiedAny() && !webCoherenceRequired) {
             if (expectation.replacementRequired()) {
