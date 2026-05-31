@@ -147,20 +147,26 @@ final class StaticWebBrowserBehaviorVerifier {
                 String after = visibleText(page, id(binding.outputSelector()));
                 List<String> facts = new ArrayList<>();
                 List<String> limitations = new ArrayList<>();
+                boolean fallbackEvalChangedWithoutClickChange = false;
                 facts.add("Browser behavior runner loaded `" + htmlFile + "` from the workspace.");
                 facts.add("Browser behavior runner clicked `" + binding.triggerSelector()
                         + "` and observed `" + binding.outputSelector() + "`.");
                 if (!changed(before, after) && linkedJavaScript != null && !linkedJavaScript.isBlank()) {
-                    before = visibleText(page, id(binding.outputSelector()));
-                    after = executeWorkspaceJavaScriptAndClick(
+                    String beforeFallbackEval = visibleText(page, id(binding.outputSelector()));
+                    FallbackClickObservation fallback = executeWorkspaceJavaScriptAndClick(
                             page,
                             linkedJavaScript,
                             id(binding.triggerSelector()),
                             id(binding.outputSelector()));
                     client.waitForBackgroundJavaScript(JAVASCRIPT_WAIT_MS);
-                    if (after.isBlank()) {
-                        after = visibleText(page, id(binding.outputSelector()));
+                    String afterFallbackClick = fallback.afterClick();
+                    if (afterFallbackClick.isBlank()) {
+                        afterFallbackClick = visibleText(page, id(binding.outputSelector()));
                     }
+                    before = fallback.afterEval();
+                    after = afterFallbackClick;
+                    fallbackEvalChangedWithoutClickChange = changed(beforeFallbackEval, before)
+                            && !changed(before, after);
                     facts.add("Browser behavior runner executed the linked workspace JavaScript in the loaded page context.");
                     limitations.add("HtmlUnit browser runner did not observe the interaction before executing linked "
                             + "workspace JavaScript in-page; static linkage evidence covers the script reference.");
@@ -177,6 +183,16 @@ final class StaticWebBrowserBehaviorVerifier {
                     facts.add("Browser behavior verified `" + binding.triggerSelector()
                             + "` changed visible text on `" + binding.outputSelector() + "`.");
                     return BrowserRunResult.verified(facts, limitations);
+                }
+                if (fallbackEvalChangedWithoutClickChange) {
+                    return BrowserRunResult.failed(
+                            facts,
+                            List.of("Browser behavior assertion failed: linked workspace JavaScript changed `"
+                                    + binding.outputSelector()
+                                    + "` before the fallback click, but clicking `"
+                                    + binding.triggerSelector()
+                                    + "` did not change it."),
+                            limitations);
                 }
                 return BrowserRunResult.failed(
                         facts,
@@ -277,7 +293,9 @@ final class StaticWebBrowserBehaviorVerifier {
                 """.formatted(jsString(id)));
     }
 
-    private static String executeWorkspaceJavaScriptAndClick(
+    private record FallbackClickObservation(String afterEval, String afterClick) {}
+
+    private static FallbackClickObservation executeWorkspaceJavaScriptAndClick(
             HtmlPage page,
             String linkedJavaScript,
             String triggerId,
@@ -286,6 +304,8 @@ final class StaticWebBrowserBehaviorVerifier {
         Object result = page.executeJavaScript("""
                 (function() {
                 %s
+                  var outputAfterEval = document.getElementById('%s');
+                  var textAfterEval = outputAfterEval ? (outputAfterEval.innerText || outputAfterEval.textContent || '') : '';
                   var el = document.getElementById('%s');
                   if (el) {
                     var event = document.createEvent('MouseEvents');
@@ -293,12 +313,18 @@ final class StaticWebBrowserBehaviorVerifier {
                     el.dispatchEvent(event);
                   }
                   var output = document.getElementById('%s');
-                  return output ? (output.innerText || output.textContent || '') : '';
+                  var textAfterClick = output ? (output.innerText || output.textContent || '') : '';
+                  return String(textAfterEval) + '\\u0000' + String(textAfterClick);
                 })();
-                """.formatted(linkedJavaScript, jsString(triggerId), jsString(outputId))).getJavaScriptResult();
-        if (result == null) return "";
+                """.formatted(linkedJavaScript, jsString(outputId), jsString(triggerId), jsString(outputId)))
+                .getJavaScriptResult();
+        if (result == null) return new FallbackClickObservation("", "");
         String text = result.toString();
-        return "undefined".equalsIgnoreCase(text) ? "" : text.strip();
+        if ("undefined".equalsIgnoreCase(text)) return new FallbackClickObservation("", "");
+        String[] parts = text.split("\u0000", -1);
+        return new FallbackClickObservation(
+                parts.length > 0 ? parts[0].strip() : "",
+                parts.length > 1 ? parts[1].strip() : "");
     }
 
     private static String visibleText(HtmlPage page, String id) {

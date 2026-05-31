@@ -57,6 +57,53 @@ class StaticWebBrowserBehaviorVerifierTest {
     }
 
     @Test
+    void fallbackLoadTimeMutationWithoutClickChangeFailsBrowserBehaviorProof() throws Exception {
+        writeWebFixture("""
+                window.teaserLoads = (window.teaserLoads || 0) + 1;
+                document.getElementById('teaser-status').textContent = 'Loaded ' + window.teaserLoads;
+                document.getElementById('teaser-button').addEventListener('click', function() {
+                  document.getElementById('teaser-status').textContent;
+                });
+                """);
+
+        VerificationReport report = StaticWebBrowserBehaviorVerifier.verify(
+                workspace,
+                "Update scripts.js so #teaser-button updates #teaser-status when clicked.",
+                selectors());
+
+        assertFalse(report.requiredClaimsSatisfied(), report.toString());
+        assertTrue(report.hasRequiredFailure(), report.toString());
+        assertTrue(report.limitations().stream().anyMatch(limit -> limit.contains("executing linked workspace JavaScript")),
+                report.limitations().toString());
+        assertTrue(report.problems().stream().anyMatch(problem -> problem.contains("did not change")),
+                report.problems().toString());
+    }
+
+    @Test
+    void fallbackVerifiesWhenInlineEvalMutatesAndClickChangesOutputFurther() throws Exception {
+        writeWebFixture("""
+                window.teaserLoads = (window.teaserLoads || 0) + 1;
+                document.getElementById('teaser-status').textContent = 'Loaded ' + window.teaserLoads;
+                if (window.teaserLoads > 1) {
+                  document.getElementById('teaser-button').addEventListener('click', function() {
+                    document.getElementById('teaser-status').textContent = 'Clicked ' + window.teaserLoads;
+                  });
+                }
+                """);
+
+        VerificationReport report = StaticWebBrowserBehaviorVerifier.verify(
+                workspace,
+                "Update scripts.js so #teaser-button updates #teaser-status when clicked.",
+                selectors());
+
+        assertTrue(report.requiredClaimsSatisfied(), report.toString());
+        assertEquals(0, report.unsatisfiedRequiredClaimCount());
+        assertTrue(report.authoritativeProofKinds().contains(ProofKind.BROWSER_BEHAVIOR.name()));
+        assertTrue(report.limitations().stream().anyMatch(limit -> limit.contains("executing linked workspace JavaScript")),
+                report.limitations().toString());
+    }
+
+    @Test
     void unavailableRunnerReportsUnavailableRequiredClaim() throws Exception {
         writeWebFixture("""
                 document.getElementById('teaser-button').addEventListener('click', function() {
