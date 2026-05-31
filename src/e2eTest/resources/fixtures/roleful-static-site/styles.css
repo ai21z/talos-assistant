@@ -1,0 +1,13 @@
+body {
+  background: #09031a;
+  color: #f5f7ff;
+}
+
+.card {
+  border: 1px solid #00e5ff;
+  padding: 2rem;
+}
+
+#pulse-button {
+  cursor: pointer;
+}

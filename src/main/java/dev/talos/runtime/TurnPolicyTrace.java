@@ -5,7 +5,9 @@ import dev.talos.runtime.intent.TaskIntent;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Structured current-turn policy metadata persisted with the turn audit.
@@ -155,7 +157,7 @@ public record TurnPolicyTrace(
                 promptTools,
                 List.of(),
                 contract.classificationReason(),
-                rolefulTargetsFrom(intent));
+                rolefulTargetsFrom(intent, contract));
     }
 
     public TurnPolicyTrace withInitialPhase(String phase) {
@@ -201,10 +203,44 @@ public record TurnPolicyTrace(
         return value == null || value.isBlank() ? fallback : value;
     }
 
-    private static List<RolefulTarget> rolefulTargetsFrom(TaskIntent intent) {
-        if (intent == null || intent.targets().targets().isEmpty()) return List.of();
-        return intent.targets().targets().stream()
-                .map(RolefulTarget::from)
-                .toList();
+    private static List<RolefulTarget> rolefulTargetsFrom(TaskIntent intent, TaskContract contract) {
+        LinkedHashMap<String, RolefulTarget> out = new LinkedHashMap<>();
+        Set<String> activeExpected = contract == null ? Set.of() : contract.expectedTargets();
+        Set<String> activeForbidden = contract == null ? Set.of() : contract.forbiddenTargets();
+        if (intent != null && !intent.targets().targets().isEmpty()) {
+            for (TargetRef ref : intent.targets().targets()) {
+                if (ref == null) continue;
+                String role = ref.role().name();
+                if (("MUST_MUTATE".equals(role) || "OUTPUT_DESTINATION".equals(role))
+                        && !activeExpected.contains(ref.path())) {
+                    continue;
+                }
+                if ("FORBIDDEN".equals(role) && !activeForbidden.contains(ref.path())) {
+                    continue;
+                }
+                out.putIfAbsent(ref.path() + "\u0000" + role, RolefulTarget.from(ref));
+            }
+        }
+        for (String expected : activeExpected.stream().sorted().toList()) {
+            String key = expected + "\u0000MUST_MUTATE";
+            out.putIfAbsent(key, new RolefulTarget(
+                    expected,
+                    "MUST_MUTATE",
+                    "RUNTIME_DEFAULT",
+                    "active-contract-projection",
+                    "",
+                    1.0));
+        }
+        for (String forbidden : activeForbidden.stream().sorted().toList()) {
+            String key = forbidden + "\u0000FORBIDDEN";
+            out.putIfAbsent(key, new RolefulTarget(
+                    forbidden,
+                    "FORBIDDEN",
+                    "RUNTIME_DEFAULT",
+                    "active-contract-projection",
+                    "",
+                    1.0));
+        }
+        return List.copyOf(out.values());
     }
 }
