@@ -1,6 +1,7 @@
 package dev.talos.runtime.trace;
 
 import dev.talos.runtime.task.TaskContract;
+import dev.talos.runtime.TurnPolicyTrace;
 import dev.talos.core.context.ContextLedgerSummary;
 
 import java.util.ArrayList;
@@ -75,7 +76,8 @@ public record LocalTurnTrace(
             boolean mutationRequested,
             List<String> expectedTargets,
             List<String> forbiddenTargets,
-            String classificationReason
+            String classificationReason,
+            List<RolefulTargetSummary> rolefulTargets
     ) {
         public TaskContractSummary(
                 String type,
@@ -92,7 +94,28 @@ public record LocalTurnTrace(
                     mutationRequested,
                     expectedTargets,
                     forbiddenTargets,
-                    "");
+                    "",
+                    List.of());
+        }
+
+        public TaskContractSummary(
+                String type,
+                boolean mutationAllowed,
+                boolean verificationRequired,
+                boolean mutationRequested,
+                List<String> expectedTargets,
+                List<String> forbiddenTargets,
+                String classificationReason
+        ) {
+            this(
+                    type,
+                    mutationAllowed,
+                    verificationRequired,
+                    mutationRequested,
+                    expectedTargets,
+                    forbiddenTargets,
+                    classificationReason,
+                    List.of());
         }
 
         public TaskContractSummary {
@@ -100,10 +123,11 @@ public record LocalTurnTrace(
             expectedTargets = expectedTargets == null ? List.of() : List.copyOf(expectedTargets);
             forbiddenTargets = forbiddenTargets == null ? List.of() : List.copyOf(forbiddenTargets);
             classificationReason = safe(classificationReason);
+            rolefulTargets = rolefulTargets == null ? List.of() : List.copyOf(rolefulTargets);
         }
 
         static TaskContractSummary empty() {
-            return new TaskContractSummary("", false, false, false, List.of(), List.of(), "");
+            return new TaskContractSummary("", false, false, false, List.of(), List.of(), "", List.of());
         }
 
         static TaskContractSummary from(TaskContract contract) {
@@ -115,7 +139,39 @@ public record LocalTurnTrace(
                     contract.mutationRequested(),
                     contract.expectedTargets().stream().sorted().toList(),
                     contract.forbiddenTargets().stream().sorted().toList(),
-                    contract.classificationReason());
+                    contract.classificationReason(),
+                    List.of());
+        }
+
+        static RolefulTargetSummary rolefulTargetFrom(TurnPolicyTrace.RolefulTarget target) {
+            if (target == null) return new RolefulTargetSummary("", "", "", "", "", 0.0);
+            return new RolefulTargetSummary(
+                    target.path(),
+                    target.role(),
+                    target.source(),
+                    target.reason(),
+                    target.sourceText(),
+                    target.confidence());
+        }
+    }
+
+    public record RolefulTargetSummary(
+            String path,
+            String role,
+            String source,
+            String reason,
+            String sourceText,
+            double confidence
+    ) {
+        public RolefulTargetSummary {
+            path = safe(path);
+            role = safe(role);
+            source = safe(source);
+            reason = safe(reason);
+            sourceText = sourceText == null ? "" : sourceText;
+            if (Double.isNaN(confidence) || confidence < 0.0 || confidence > 1.0) {
+                confidence = 0.0;
+            }
         }
     }
 

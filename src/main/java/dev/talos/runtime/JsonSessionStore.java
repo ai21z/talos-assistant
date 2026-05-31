@@ -448,6 +448,18 @@ public final class JsonSessionStore implements SessionStore {
         out.put("promptTools", safe.promptTools());
         out.put("blocks", safe.blocks());
         out.put("classificationReason", safe.classificationReason());
+        List<Map<String, Object>> rolefulTargets = new java.util.ArrayList<>();
+        for (TurnPolicyTrace.RolefulTarget target : safe.rolefulTargets()) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("path", target.path());
+            row.put("role", target.role());
+            row.put("source", target.source());
+            row.put("reason", target.reason());
+            row.put("sourceText", target.sourceText());
+            row.put("confidence", target.confidence());
+            rolefulTargets.add(row);
+        }
+        out.put("rolefulTargets", rolefulTargets);
         return out;
     }
 
@@ -464,7 +476,24 @@ public final class JsonSessionStore implements SessionStore {
                 stringList(map.get("nativeTools")),
                 stringList(map.get("promptTools")),
                 stringList(map.get("blocks")),
-                stringVal(map, "classificationReason", ""));
+                stringVal(map, "classificationReason", ""),
+                rolefulTargetsFrom(map.get("rolefulTargets")));
+    }
+
+    private static List<TurnPolicyTrace.RolefulTarget> rolefulTargetsFrom(Object raw) {
+        if (!(raw instanceof List<?> list)) return List.of();
+        List<TurnPolicyTrace.RolefulTarget> out = new java.util.ArrayList<>();
+        for (Object value : list) {
+            if (!(value instanceof Map<?, ?> map)) continue;
+            out.add(new TurnPolicyTrace.RolefulTarget(
+                    stringVal(map, "path", ""),
+                    stringVal(map, "role", ""),
+                    stringVal(map, "source", ""),
+                    stringVal(map, "reason", ""),
+                    stringVal(map, "sourceText", ""),
+                    doubleVal(map, "confidence")));
+        }
+        return out;
     }
 
     private static String stringVal(Map<?, ?> map, String key, String fallback) {
@@ -475,6 +504,13 @@ public final class JsonSessionStore implements SessionStore {
     private static boolean boolVal(Map<?, ?> map, String key) {
         Object value = map.get(key);
         return value instanceof Boolean b && b;
+    }
+
+    private static double doubleVal(Map<?, ?> map, String key) {
+        Object value = map.get(key);
+        if (value instanceof Number n) return n.doubleValue();
+        try { return Double.parseDouble(String.valueOf(value)); }
+        catch (Exception e) { return 0.0; }
     }
 
     private static int intValLoose(Map<?, ?> map, String key) {
