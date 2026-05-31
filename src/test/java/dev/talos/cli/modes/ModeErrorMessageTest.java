@@ -5,7 +5,9 @@ import dev.talos.runtime.Result;
 import dev.talos.core.Config;
 import dev.talos.core.llm.LlmClient;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
 
@@ -41,11 +43,12 @@ class ModeErrorMessageTest {
     }
 
     @Test
-    void ragMode_placeholder_still_returns_ok() throws Exception {
+    void ragMode_placeholder_still_returns_ok(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "Tiny RAG fixture workspace.\n");
         var ctx = scriptedContext("project summary");
         var mode = new RagMode();
 
-        Optional<Result> result = mode.handle("what is this project", WS, ctx);
+        Optional<Result> result = mode.handle("what is this project", workspace, ctx);
 
         assertTrue(result.isPresent());
         assertInstanceOf(Result.Ok.class, result.get());

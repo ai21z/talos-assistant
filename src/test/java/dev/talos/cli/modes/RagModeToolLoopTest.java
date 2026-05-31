@@ -7,7 +7,9 @@ import dev.talos.core.Config;
 import dev.talos.spi.types.ChatMessage;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -33,6 +35,11 @@ class RagModeToolLoopTest {
         llm.put("default_backend", "ollama");
         cfg.data.put("llm", llm);
         return cfg;
+    }
+
+    private static Path tinyWorkspace(Path workspace) throws java.io.IOException {
+        Files.writeString(workspace.resolve("README.md"), "Tiny RAG fixture workspace.\n");
+        return workspace;
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -197,11 +204,11 @@ class RagModeToolLoopTest {
     class Handle {
 
         @Test
-        void handle_returns_ok_result() throws Exception {
+        void handle_returns_ok_result(@TempDir Path workspace) throws Exception {
             var ctx = Context.builder(placeholderConfig()).build();
             var mode = new RagMode();
 
-            Optional<Result> result = mode.handle("what is this project", WS, ctx);
+            Optional<Result> result = mode.handle("what is this project", tinyWorkspace(workspace), ctx);
 
             assertTrue(result.isPresent());
             assertInstanceOf(Result.Ok.class, result.get());
@@ -221,25 +228,25 @@ class RagModeToolLoopTest {
         }
 
         @Test
-        void handle_does_not_update_memory_directly() throws Exception {
+        void handle_does_not_update_memory_directly(@TempDir Path workspace) throws Exception {
             // Memory updates are centralized in TurnProcessor via MemoryUpdateListener
             var memory = new SessionMemory();
             var ctx = Context.builder(placeholderConfig()).memory(memory).build();
             var mode = new RagMode();
 
-            mode.handle("test query", WS, ctx);
+            mode.handle("test query", tinyWorkspace(workspace), ctx);
 
             assertFalse(memory.hasContent(),
                     "RagMode should not update memory directly (centralized in TurnProcessor)");
         }
 
         @Test
-        void handle_null_toolCallLoop_does_not_throw() throws Exception {
+        void handle_null_toolCallLoop_does_not_throw(@TempDir Path workspace) throws Exception {
             // Context with no toolCallLoop (null) should not cause NPE
             var ctx = Context.builder(placeholderConfig()).build();
             var mode = new RagMode();
 
-            assertDoesNotThrow(() -> mode.handle("test query", WS, ctx));
+            assertDoesNotThrow(() -> mode.handle("test query", tinyWorkspace(workspace), ctx));
         }
     }
 
