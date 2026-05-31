@@ -1,6 +1,8 @@
 package dev.talos.runtime.task;
 
 import dev.talos.runtime.MutationIntent;
+import dev.talos.runtime.intent.TaskContractCompiler;
+import dev.talos.runtime.intent.TaskIntentResolver;
 import dev.talos.runtime.policy.CapabilityAnswerPolicy;
 import dev.talos.runtime.policy.ConversationBoundaryPolicy;
 import dev.talos.runtime.toolcall.ToolCallSupport;
@@ -298,6 +300,11 @@ public final class TaskContractResolver {
     }
 
     public static TaskContract fromUserRequest(String userRequest) {
+        return TaskContractCompiler.compile(
+                TaskIntentResolver.fromLegacyContract(resolveLegacyFromUserRequest(userRequest)));
+    }
+
+    static TaskContract resolveLegacyFromUserRequest(String userRequest) {
         if (userRequest == null || userRequest.isBlank()
                 || ToolCallSupport.isSyntheticToolResultContent(userRequest)) {
             return TaskContract.unknown(userRequest);
