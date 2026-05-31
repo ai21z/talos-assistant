@@ -168,6 +168,60 @@ class StaticWebContinuationPlannerTest {
         assertEquals(List.of("script.js"), plan.get().missingTargets());
     }
 
+    @Test
+    void verificationFailurePlanPreservesExactLinkedPluralScriptTarget() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!doctype html>
+                <html>
+                <head>
+                  <title>BMI Calculator</title>
+                  <link rel="stylesheet" href="styles.css">
+                </head>
+                <body>
+                  <form id="bmiForm">
+                    <input id="height" type="number">
+                    <input id="weight" type="number">
+                    <button type="submit">Calculate BMI</button>
+                  </form>
+                  <p id="result"></p>
+                  <script src="scripts.js"></script>
+                </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), "form { display: grid; gap: 0.5rem; }\n");
+        LoopState state = state(
+                "Create index.html, styles.css, and scripts.js for a BMI calculator.");
+        state.toolOutcomes.add(new ToolCallLoop.ToolOutcome(
+                "talos.write_file",
+                "index.html",
+                true,
+                true,
+                false,
+                "Wrote index.html",
+                ""));
+        state.toolOutcomes.add(new ToolCallLoop.ToolOutcome(
+                "talos.write_file",
+                "styles.css",
+                true,
+                true,
+                false,
+                "Wrote styles.css",
+                ""));
+        state.mutatingToolSuccesses = 2;
+
+        Optional<StaticWebContinuationPlanner.Plan> plan =
+                StaticWebContinuationPlanner.verificationFailurePlan(state, baseTools());
+
+        assertTrue(plan.isPresent(), "missing linked scripts.js should require continuation");
+        StaticWebContinuationPlanner.Plan continuation = plan.get();
+        assertEquals(List.of("scripts.js"), continuation.missingTargets());
+        assertTrue(continuation.pendingActionObligation().isPresent());
+        assertEquals(List.of("scripts.js"), continuation.pendingActionObligation().orElseThrow().targets());
+        String prompt = prompt(continuation.messages());
+        assertTrue(prompt.contains("Missing or unmutated target files: scripts.js"), prompt);
+        assertFalse(prompt.contains("Missing or unmutated target files: script.js"), prompt);
+    }
+
     private LoopState state(String request) {
         var messages = new ArrayList<>(List.of(
                 ChatMessage.system("sys"),
