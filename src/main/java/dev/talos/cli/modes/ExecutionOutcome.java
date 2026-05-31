@@ -236,6 +236,9 @@ record ExecutionOutcome(
         boolean partialMutation = !Objects.equals(current, shaped);
         current = shaped;
 
+        current = MutationFailureAnswerRenderer.discloseActionObligationBlockedAfterMutationIfNeeded(
+                current, loopResult, extraMutationSuccesses);
+
         boolean falseMutationClaim = false;
         if (!invalidMutation) {
             shaped = MutationFailureAnswerRenderer.annotateIfFalseMutationClaim(
