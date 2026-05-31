@@ -1417,6 +1417,22 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void consecutiveDoNotEditTargetsAreForbiddenButNotExpectedMutationTargets() {
+        for (String input : List.of(
+                "Rewrite styles.css so index.html still works. "
+                        + "Do not edit index.html. Do not edit scripts.js.",
+                "Edit styles.css. Do not edit index.html. Do not edit scripts.js.",
+                "Edit styles.css. Do not edit index.html or scripts.js.")) {
+            TaskContract contract = TaskContractResolver.fromUserRequest(input);
+
+            assertEquals(TaskType.FILE_EDIT, contract.type(), input);
+            assertTrue(contract.mutationAllowed(), input);
+            assertEquals(Set.of("styles.css"), contract.expectedTargets(), input);
+            assertEquals(Set.of("index.html", "scripts.js"), contract.forbiddenTargets(), input);
+        }
+    }
+
+    @Test
     void naturalReviewAndFixFollowUpAfterStaticVerificationFailureInheritsExpectedTargets() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.user(
