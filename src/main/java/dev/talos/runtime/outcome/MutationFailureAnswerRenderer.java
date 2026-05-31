@@ -10,6 +10,7 @@ import dev.talos.spi.types.ChatMessage;
 import dev.talos.tools.ToolError;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -147,6 +148,31 @@ public final class MutationFailureAnswerRenderer {
                     .append('\n');
         }
         out.append("\nThe assistant summary was replaced with this verified mutation outcome because the turn had partial success.");
+        return out.toString().stripTrailing();
+    }
+
+    public static String discloseActionObligationBlockedAfterMutationIfNeeded(
+            String answer,
+            ToolCallLoop.LoopResult loopResult,
+            int extraMutationSuccesses
+    ) {
+        if (answer == null || answer.isBlank()) return answer;
+        if (!answer.startsWith("[Action obligation failed:")) return answer;
+        if (loopResult == null) return answer;
+        if (loopResult.mutatingToolSuccesses() + Math.max(0, extraMutationSuccesses) <= 0) {
+            return answer;
+        }
+        List<String> changedTargets = successfulMutatingTargets(loopResult);
+        if (changedTargets.isEmpty()) return answer;
+        if (answer.contains("Changed target(s) before the block:")) return answer;
+
+        String cleaned = removeNoMutationAppliedClauses(answer);
+        StringBuilder out = new StringBuilder();
+        out.append("[Truth check: Talos applied mutation(s) before this action-obligation block.]\n\n");
+        out.append("Changed target(s) before the block: ")
+                .append(String.join(", ", changedTargets))
+                .append(".\n\n");
+        out.append(cleaned);
         return out.toString().stripTrailing();
     }
 
@@ -328,6 +354,26 @@ public final class MutationFailureAnswerRenderer {
         if (newline > 0) msg = msg.substring(0, newline).strip();
         if (msg.length() > 180) msg = msg.substring(0, 177) + "…";
         return msg;
+    }
+
+    private static List<String> successfulMutatingTargets(ToolCallLoop.LoopResult loopResult) {
+        if (loopResult == null || loopResult.toolOutcomes() == null) return List.of();
+        LinkedHashSet<String> targets = new LinkedHashSet<>();
+        for (ToolCallLoop.ToolOutcome outcome : loopResult.toolOutcomes()) {
+            if (outcome == null || !outcome.mutating() || !outcome.success()) continue;
+            String target = outcome.pathHint() == null ? "" : outcome.pathHint().strip().replace('\\', '/');
+            if (target.isBlank()) target = outcome.toolName();
+            if (!target.isBlank()) targets.add(target);
+        }
+        return List.copyOf(targets);
+    }
+
+    private static String removeNoMutationAppliedClauses(String answer) {
+        String cleaned = answer
+                .replace("No approval was requested and no additional file was changed.", "")
+                .replace("No approval was requested and no file was changed.", "")
+                .replace("No approval was requested and no additional file change was made.", "");
+        return cleaned.replaceAll("(?m)[ \\t]+$", "").strip();
     }
 
     private static boolean planRequestsMutation(CurrentTurnPlan plan, List<ChatMessage> messages) {
