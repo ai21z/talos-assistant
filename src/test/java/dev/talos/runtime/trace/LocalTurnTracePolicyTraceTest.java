@@ -116,6 +116,32 @@ class LocalTurnTracePolicyTraceTest {
     }
 
     @Test
+    void readOnlyPolicyTraceDoesNotRenderTargetHintsAsMutationObligations() {
+        beginTrace();
+
+        TurnPolicyTrace policyTrace = TurnPolicyTrace.from(
+                TaskContractResolver.fromUserRequest(
+                        "Check whether scripts.js exists and whether script.js exists. Do not change anything."),
+                "INSPECT",
+                List.of("talos.read_file"),
+                List.of("tool_use:read_file"));
+
+        LocalTurnTraceCapture.recordPolicyTrace(policyTrace);
+
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+        assertFalse(trace.taskContract().mutationAllowed());
+        assertEquals(List.of("script.js", "scripts.js"), trace.taskContract().expectedTargets());
+        assertFalse(trace.taskContract().rolefulTargets().stream()
+                .anyMatch(target -> "MUST_MUTATE".equals(target.role())));
+        assertTrue(trace.taskContract().rolefulTargets().stream()
+                .anyMatch(target -> "script.js".equals(target.path())
+                        && "MUST_READ".equals(target.role())));
+        assertTrue(trace.taskContract().rolefulTargets().stream()
+                .anyMatch(target -> "scripts.js".equals(target.path())
+                        && "MUST_READ".equals(target.role())));
+    }
+
+    @Test
     void policyTraceRecordingHasDedicatedRecorderOwner() throws Exception {
         Path capturePath = Path.of("src/main/java/dev/talos/runtime/trace/LocalTurnTraceCapture.java");
         Path recorderPath = Path.of("src/main/java/dev/talos/runtime/trace/PolicyTraceRecorder.java");
