@@ -325,7 +325,7 @@ public final class ScenarioRunner {
     //
     //  Scenarios that only need ToolCallLoop behavior should keep using
     //  run() / runStrict() — those do NOT invoke the executor gates.
-    //  See docs/new-architecture/talos-harness-main-plan.md §8 N4.
+    //  See docs/architecture/talos-harness-main-plan.md §8 N4.
     // ══════════════════════════════════════════════════════════════════
 
     /**

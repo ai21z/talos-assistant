@@ -4,7 +4,7 @@ Priority: high
 Status: done
 Architecture references:
 - `work-cycle-docs/tickets/new-work.md`
-- `docs/new-architecture/talos-harness-source-of-truth.md`
+- `docs/architecture/talos-harness-source-of-truth.md`
 - `work-cycle-docs/work-test-cycle.md`
 - `work-cycle-docs/tickets/done/talos-execution-outcome-centralization.md`
 - `work-cycle-docs/tickets/done/[T03-done-high] talos-natural-workspace-explain-underinspection.md`

@@ -326,7 +326,7 @@ lookup, execution, context-aware vs legacy-no-context execution paths.
 |---|---|---|
 | `@Deprecated(since = "0.9.0", forRemoval = true)` | `app/ui/FirstRunWizard.java` (JavaFX) | Only referenced from `TerminalFirstRun` javadoc. **Safe to delete** in a single-file PR once a parity check confirms the JavaFX dep is otherwise unused. |
 | `"legacy, no context"` in javadoc | `tools/ToolRegistry.java:242`, `tools/TalosTool.java:11,25,29,35` | Default interface method wraps legacy. Convert all callers to context-aware, then delete the default. Moderate-risk (tests reference both). |
-| `"DEPRECATED COMPATIBILITY ONLY"` (XML tool-call parsing) | `runtime/ToolCallStreamFilter.java` (lines 22, 51, 57, 64, 71, 156), `runtime/ToolCallParser.java` (lines 31, 79, 104, 133, 139), `core/util/Sanitize.java` (lines 24, 142) | XML parsing is retained *only* for models that emit XML from training habits. Per `docs/new-architecture/25-xml-retirement-review.md`, retirement is planned. **Needs a parity metric**: count of real transcripts where XML fallback fires. Defer deletion until that metric is zero for N releases. |
+| `"DEPRECATED COMPATIBILITY ONLY"` (XML tool-call parsing) | `runtime/ToolCallStreamFilter.java` (lines 22, 51, 57, 64, 71, 156), `runtime/ToolCallParser.java` (lines 31, 79, 104, 133, 139), `core/util/Sanitize.java` (lines 24, 142) | XML parsing is retained *only* for models that emit XML from training habits. Per `docs/architecture/25-xml-retirement-review.md`, retirement is planned. **Needs a parity metric**: count of real transcripts where XML fallback fires. Defer deletion until that metric is zero for N releases. |
 | `"legacy key"` | `core/embed/EmbeddingsFactory.java:29` (`ollama.embed`) | Old config key retained for backward compat. Add a one-release deprecation warning then remove in the next minor. |
 
 ### 5.2 Potentially dead — needs caller verification before removal
@@ -358,7 +358,7 @@ treat them as dead.
   `dev.talos.core.engine`). See §3.3.
 - **Two command packages** (`cli.cmds` and `cli.commands`). See §3.2.
 
-### 5.4 Abandoned assets hinted by `docs/new-architecture/25-xml-retirement-review.md`
+### 5.4 Abandoned assets hinted by `docs/architecture/25-xml-retirement-review.md`
 
 Worth a follow-up sweep through `build/resources/main/prompts/` and any
 `.xml` files lingering from the pre-JSON tool-call era. Out of scope for
@@ -610,7 +610,7 @@ Two independent moves, either of which unblocks the 16 placeholder tests:
 
 ### 9.12 XML-parsing retirement
 
-- Gate: `docs/new-architecture/25-xml-retirement-review.md` metric reaches
+- Gate: `docs/architecture/25-xml-retirement-review.md` metric reaches
   zero for N releases.
 - Delete the `DEPRECATED COMPATIBILITY ONLY` branches in
   `ToolCallStreamFilter`, `ToolCallParser`, `Sanitize`.
@@ -655,7 +655,7 @@ Per `.github/assistant-instructions.md` and this review:
   `PromptClassifier`, `NoOpApprovalGate`, `NoOpSessionStore`.
 - `build/test-results/test/*.xml` for per-test failure classification.
 - Cross-reference against `.github/assistant-instructions.md`,
-  `README.md`, and `docs/new-architecture/{21,23,24,25,26,talos-harness-*}.md`.
+  `README.md`, and `docs/architecture/{21,23,24,25,26,talos-harness-*}.md`.
 
 ## Appendix B — Change log
 

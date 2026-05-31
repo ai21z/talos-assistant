@@ -1,10 +1,5 @@
 # Talos Current Architecture Design Review
 
-> Note on filename: the originating request asked for `13-current-architecture-design-review.md`,
-> but `13-external-architecture-visualization-plan.md` already exists in this branch. To avoid
-> overwriting a committed deliverable, this review is written as **`14-current-architecture-design-review.md`**.
-> All cross-references below assume this numbering.
-
 This is a rigorous, evidence-driven architecture audit. It is deliberately blunt. Claims are split
 into **hard evidence** (measured via ArchUnit/bytecode, `git`, source reads, line counts) and
 **interpretation** (architectural judgment). Where something is unknown, it is marked unknown.

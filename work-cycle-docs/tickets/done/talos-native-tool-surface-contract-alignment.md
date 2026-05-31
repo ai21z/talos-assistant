@@ -4,7 +4,7 @@ Priority: high
 Status: done
 Architecture references:
 - `work-cycle-docs/tickets/new-work.md`
-- `docs/new-architecture/talos-harness-source-of-truth.md`
+- `docs/architecture/talos-harness-source-of-truth.md`
 - `local/docs/talos-source-pack-safe-local-alternative-2026-04-19.md`
 Related tickets:
 - `work-cycle-docs/tickets/done/talos-minimal-execution-phase-policy.md`

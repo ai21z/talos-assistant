@@ -4,8 +4,8 @@ Priority: high
 Status: done
 Architecture references:
 - `work-cycle-docs/new-work.md`
-- `docs/new-architecture/talos-harness-source-of-truth.md`
-- `docs/new-architecture/talos-harness-plan.md`
+- `docs/architecture/talos-harness-source-of-truth.md`
+- `docs/architecture/talos-harness-plan.md`
 - `work-cycle-docs/tickets/done/[T11-done-high] talos-status-question-verify-only.md`
 - `work-cycle-docs/tickets/done/[T14-done-high] talos-repair-followup-after-incomplete-outcome.md`
 - `work-cycle-docs/tickets/done/[T15-done-high] talos-readback-verification-wording.md`

@@ -5,7 +5,7 @@ Status: done
 Architecture references:
 - `work-cycle-docs/work-test-cycle.md`
 - `work-cycle-docs/work-test-cycle-step-by-step.md`
-- `docs/new-architecture/30-cli-ui-output-architecture-audit.md`
+- `docs/architecture/30-cli-ui-output-architecture-audit.md`
 - `work-cycle-docs/tickets/done/talos-cli-normal-output-log-noise.md`
 
 ## Why This Ticket Exists
