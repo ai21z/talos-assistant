@@ -300,8 +300,8 @@ public final class TaskContractResolver {
     }
 
     public static TaskContract fromUserRequest(String userRequest) {
-        return TaskContractCompiler.compile(
-                TaskIntentResolver.fromLegacyContract(resolveLegacyFromUserRequest(userRequest)));
+        TaskContract legacy = resolveLegacyFromUserRequest(userRequest);
+        return TaskContractCompiler.compile(TaskIntentResolver.fromUserRequest(userRequest, legacy));
     }
 
     static TaskContract resolveLegacyFromUserRequest(String userRequest) {
