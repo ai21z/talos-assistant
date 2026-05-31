@@ -285,6 +285,25 @@ class ToolSurfacePlannerTest {
     }
 
     @Test
+    void fileExistenceQuestionsExposeDirectoryAndFileReadEvidenceTools() {
+        var contract = TaskContractResolver.fromUserRequest(
+                "Check whether scripts.js exists and whether script.js exists. Do not change anything.");
+
+        ToolSurfacePlanner.Plan plan = ToolSurfacePlanner.plan(contract, ExecutionPhase.INSPECT, registry());
+
+        List<String> names = plan.nativeToolNames();
+        assertEquals("read-only path existence surface", plan.reason());
+        assertTrue(names.contains("talos.list_dir"), names.toString());
+        assertTrue(names.contains("talos.read_file"), names.toString());
+        assertFalse(names.contains("talos.write_file"), names.toString());
+        assertFalse(names.contains("talos.edit_file"), names.toString());
+        assertFalse(names.contains("talos.run_command"), names.toString());
+        assertEquals(
+                List.of("talos.list_dir", "talos.read_file"),
+                ToolSurfacePlanner.defaultVisibleToolNames(contract, ExecutionPhase.INSPECT));
+    }
+
+    @Test
     void verifyOnlyMixedFileAndDirectoryPathChecksExposeReadFileAndListDirOnly() {
         var contract = TaskContractResolver.fromUserRequest(
                 "Verify the final workspace paths for archive/readme-renamed.md, "
