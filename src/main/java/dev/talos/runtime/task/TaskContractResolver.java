@@ -1,6 +1,9 @@
 package dev.talos.runtime.task;
 
 import dev.talos.runtime.MutationIntent;
+import dev.talos.runtime.intent.TaskContractCompiler;
+import dev.talos.runtime.intent.TaskIntent;
+import dev.talos.runtime.intent.TaskIntentResolver;
 import dev.talos.runtime.policy.CapabilityAnswerPolicy;
 import dev.talos.runtime.policy.ConversationBoundaryPolicy;
 import dev.talos.runtime.toolcall.ToolCallSupport;
@@ -297,7 +300,21 @@ public final class TaskContractResolver {
         return withContextualStaticWebTargets(messages, latest, current);
     }
 
+    public static TaskIntent intentFromMessages(List<ChatMessage> messages) {
+        return intentFromUserRequest(latestUserRequest(messages));
+    }
+
     public static TaskContract fromUserRequest(String userRequest) {
+        TaskContract legacy = resolveLegacyFromUserRequest(userRequest);
+        return TaskContractCompiler.compile(TaskIntentResolver.fromUserRequest(userRequest, legacy));
+    }
+
+    public static TaskIntent intentFromUserRequest(String userRequest) {
+        TaskContract legacy = resolveLegacyFromUserRequest(userRequest);
+        return TaskIntentResolver.fromUserRequest(userRequest, legacy);
+    }
+
+    static TaskContract resolveLegacyFromUserRequest(String userRequest) {
         if (userRequest == null || userRequest.isBlank()
                 || ToolCallSupport.isSyntheticToolResultContent(userRequest)) {
             return TaskContract.unknown(userRequest);

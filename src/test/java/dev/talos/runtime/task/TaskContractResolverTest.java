@@ -836,6 +836,34 @@ class TaskContractResolverTest {
     }
 
     @Test
+    void scopedExtraFileCreationConstraintDoesNotSuppressExplicitStyleMutation() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Improve only styles.css. Do not create extra files. "
+                        + "Do not modify index.html or scripts.js.");
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("styles.css"), contract.expectedTargets());
+        assertEquals(Set.of("index.html", "scripts.js"), contract.forbiddenTargets());
+        assertFalse("global-read-only-negation".equals(contract.classificationReason()));
+    }
+
+    @Test
+    void constraintMentionDoesNotBecomeExpectedMutationTarget() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Rewrite styles.css so index.html still works.");
+
+        assertEquals(TaskType.FILE_EDIT, contract.type());
+        assertTrue(contract.mutationRequested());
+        assertTrue(contract.mutationAllowed());
+        assertTrue(contract.verificationRequired());
+        assertEquals(Set.of("styles.css"), contract.expectedTargets());
+        assertFalse(contract.expectedTargets().contains("index.html"));
+    }
+
+    @Test
     void commaNotSimilarTargetWordingCapturesForbiddenTarget() {
         TaskContract contract = TaskContractResolver.fromUserRequest(
                 "After approval, edit only script.js, not scripts.js. "
@@ -873,6 +901,15 @@ class TaskContractResolverTest {
             assertFalse(contract.mutationRequested(), input);
             assertFalse(contract.mutationAllowed(), input);
         }
+    }
+
+    @Test
+    void reviewDoNotCreateFilesRemainsReadOnly() {
+        TaskContract contract = TaskContractResolver.fromUserRequest("Review files. Do not create files.");
+
+        assertFalse(contract.mutationRequested());
+        assertFalse(contract.mutationAllowed());
+        assertFalse(contract.type() == TaskType.FILE_EDIT || contract.type() == TaskType.FILE_CREATE);
     }
 
     @Test

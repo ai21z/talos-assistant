@@ -4,6 +4,7 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.capability.StaticWebCapabilityProfile;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.WorkspaceTargetReconciler;
 import dev.talos.runtime.verification.StaticTaskVerifier;
 import dev.talos.runtime.verification.TaskVerificationResult;
 import dev.talos.runtime.verification.TaskVerificationStatus;
@@ -125,7 +126,7 @@ final class StaticWebContinuationPlanner {
 
     private static boolean shouldContinueAfterDirectoryOnlyMutation(LoopState state) {
         if (state == null || state.toolOutcomes == null || state.toolOutcomes.isEmpty()) return false;
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract contract = taskContract(state);
         if (contract == null || !contract.mutationAllowed() || !contract.mutationRequested()) return false;
         if (!StaticWebCapabilityProfile.looksFunctionalWebTask(contract)) return false;
         if (staticWebVerificationAlreadyPasses(state)) return false;
@@ -161,7 +162,7 @@ final class StaticWebContinuationPlanner {
     private static List<ChatMessage> staticWebCreationContinuationMessages(LoopState state) {
         String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
         if (userTask == null || userTask.isBlank()) {
-            TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+            TaskContract contract = taskContract(state);
             userTask = contract == null ? "Create the requested static web artifact." : contract.originalUserRequest();
         }
         String directorySummary = successfulDirectoryMutationSummary(state);
@@ -195,7 +196,7 @@ final class StaticWebContinuationPlanner {
     ) {
         String userTask = ToolCallSupport.latestUserRequestIn(state.messages);
         if (userTask == null || userTask.isBlank()) {
-            TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+            TaskContract contract = taskContract(state);
             userTask = contract == null ? "Create the requested static web artifact." : contract.originalUserRequest();
         }
         TaskVerificationResult verification = continuation == null ? null : continuation.verification();
@@ -284,7 +285,7 @@ final class StaticWebContinuationPlanner {
 
     private static Optional<VerificationContinuation> verificationContinuation(LoopState state) {
         if (state == null || state.workspace == null) return Optional.empty();
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract contract = taskContract(state);
         if (contract == null || !contract.mutationAllowed() || !contract.mutationRequested()) {
             return Optional.empty();
         }
@@ -301,22 +302,32 @@ final class StaticWebContinuationPlanner {
         if (verification == null || verification.problems().isEmpty()) return List.of();
         Set<String> satisfied = successfulSmallWebMutationKeys(state);
         LinkedHashSet<String> targets = new LinkedHashSet<>();
+        LinkedHashSet<String> exactTargets = new LinkedHashSet<>();
         for (String problem : verification.problems()) {
             if (problem == null || problem.isBlank()) continue;
             String lower = problem.toLowerCase(Locale.ROOT);
-            addBacktickStaticWebTargets(problem, targets);
-            if (lower.contains("css file") || lower.contains("css target")) {
+            Set<String> problemTargets = addBacktickStaticWebTargets(problem, targets);
+            exactTargets.addAll(problemTargets);
+            if ((lower.contains("css file") || lower.contains("css target"))
+                    && !hasTargetWithExtension(problemTargets, ".css")) {
                 targets.add("styles.css");
             }
             if (lower.contains("javascript file") || lower.contains("js file")
                     || lower.contains("javascript target") || lower.contains("js target")) {
-                targets.add("script.js");
+                if (!hasTargetWithExtension(problemTargets, ".js")) {
+                    targets.add("script.js");
+                }
             }
-            if (lower.contains("html file") || lower.contains("html target")) {
+            if ((lower.contains("html file") || lower.contains("html target"))
+                    && !hasTargetWithExtension(problemTargets, ".html")
+                    && !hasTargetWithExtension(problemTargets, ".htm")) {
                 targets.add("index.html");
             }
         }
-        addLinkedMissingStaticWebAssetsFromMutatedHtml(state, targets);
+        exactTargets.addAll(addLinkedMissingStaticWebAssetsFromMutatedHtml(state, targets));
+        removeConventionalFallbackWhenExactTargetExists(targets, exactTargets, "script.js", ".js");
+        removeConventionalFallbackWhenExactTargetExists(targets, exactTargets, "styles.css", ".css");
+        removeConventionalFallbackWhenExactTargetExists(targets, exactTargets, "index.html", ".html");
         return targets.stream()
                 .map(ToolCallSupport::normalizePath)
                 .filter(target -> !target.isBlank())
@@ -326,8 +337,9 @@ final class StaticWebContinuationPlanner {
                 .toList();
     }
 
-    private static void addLinkedMissingStaticWebAssetsFromMutatedHtml(LoopState state, Set<String> targets) {
-        if (state == null || state.workspace == null || state.toolOutcomes == null || targets == null) return;
+    private static Set<String> addLinkedMissingStaticWebAssetsFromMutatedHtml(LoopState state, Set<String> targets) {
+        LinkedHashSet<String> added = new LinkedHashSet<>();
+        if (state == null || state.workspace == null || state.toolOutcomes == null || targets == null) return added;
         Path root = state.workspace.toAbsolutePath().normalize();
         for (ToolCallLoop.ToolOutcome outcome : state.toolOutcomes) {
             if (!mutatedSmallWebFile(outcome)) continue;
@@ -343,11 +355,13 @@ final class StaticWebContinuationPlanner {
                     Path linkedPath = root.resolve(target).toAbsolutePath().normalize();
                     if (!linkedPath.startsWith(root) || Files.isRegularFile(linkedPath)) continue;
                     targets.add(target);
+                    added.add(target);
                 }
             } catch (Exception ignored) {
                 // Verification already reports the failure; missing target inference is best effort.
             }
         }
+        return added;
     }
 
     private static List<String> linkedStaticWebAssets(String html) {
@@ -429,19 +443,49 @@ final class StaticWebContinuationPlanner {
         return ToolCallSupport.normalizePath(normalizedHtml.substring(0, slash + 1) + normalizedLinked);
     }
 
-    private static void addBacktickStaticWebTargets(String text, Set<String> targets) {
-        if (text == null || text.isBlank() || targets == null) return;
+    private static Set<String> addBacktickStaticWebTargets(String text, Set<String> targets) {
+        LinkedHashSet<String> added = new LinkedHashSet<>();
+        if (text == null || text.isBlank() || targets == null) return added;
         int start = 0;
         while (start < text.length()) {
             int open = text.indexOf('`', start);
-            if (open < 0) return;
+            if (open < 0) return added;
             int close = text.indexOf('`', open + 1);
-            if (close < 0) return;
+            if (close < 0) return added;
             String candidate = ToolCallSupport.normalizePath(text.substring(open + 1, close).strip());
             if (StaticWebCapabilityProfile.isSmallWebFile(candidate)) {
                 targets.add(candidate);
+                added.add(candidate);
             }
             start = close + 1;
+        }
+        return added;
+    }
+
+    private static boolean hasTargetWithExtension(Set<String> targets, String extension) {
+        if (targets == null || targets.isEmpty() || extension == null || extension.isBlank()) return false;
+        String normalizedExtension = extension.toLowerCase(Locale.ROOT);
+        for (String target : targets) {
+            String normalized = ToolCallSupport.normalizePath(target).toLowerCase(Locale.ROOT);
+            if (normalized.endsWith(normalizedExtension)) return true;
+        }
+        return false;
+    }
+
+    private static void removeConventionalFallbackWhenExactTargetExists(
+            Set<String> targets,
+            Set<String> exactTargets,
+            String conventional,
+            String extension
+    ) {
+        if (targets == null || targets.isEmpty() || exactTargets == null || exactTargets.isEmpty()) return;
+        if (!hasTargetWithExtension(exactTargets, extension)) return;
+        String conventionalKey = normalizeExpectedTargetKey(conventional);
+        boolean exactIncludesConventional = exactTargets.stream()
+                .map(StaticWebContinuationPlanner::normalizeExpectedTargetKey)
+                .anyMatch(conventionalKey::equals);
+        if (!exactIncludesConventional) {
+            targets.remove(conventional);
         }
     }
 
@@ -478,7 +522,7 @@ final class StaticWebContinuationPlanner {
 
     private static TaskVerificationResult staticWebVerification(LoopState state) {
         if (state == null || state.workspace == null) return TaskVerificationResult.notRun("");
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract contract = taskContract(state);
         if (contract == null || !contract.mutationAllowed() || !contract.verificationRequired()) {
             return TaskVerificationResult.notRun("");
         }
@@ -505,6 +549,13 @@ final class StaticWebContinuationPlanner {
                 contract,
                 snapshot,
                 0);
+    }
+
+    private static TaskContract taskContract(LoopState state) {
+        if (state == null) return null;
+        return WorkspaceTargetReconciler.reconcile(
+                TaskContractResolver.fromMessages(state.messages),
+                state.workspace);
     }
 
     private static List<ToolSpec> safeTools(List<ToolSpec> baseTools) {

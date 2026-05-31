@@ -4,6 +4,7 @@ import dev.talos.runtime.ToolCallLoop;
 import dev.talos.runtime.repair.RepairPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
+import dev.talos.runtime.task.WorkspaceTargetReconciler;
 import dev.talos.runtime.workspace.WorkspaceOperationPlan;
 
 import java.util.List;
@@ -16,7 +17,9 @@ final class ExpectedTargetProgressAccounting {
 
     static List<String> remainingExpectedMutationTargets(LoopState state) {
         if (state == null || state.messages == null) return List.of();
-        TaskContract contract = TaskContractResolver.fromMessages(state.messages);
+        TaskContract contract = WorkspaceTargetReconciler.reconcile(
+                TaskContractResolver.fromMessages(state.messages),
+                state.workspace);
         if (contract == null || !contract.mutationAllowed()) {
             return List.of();
         }

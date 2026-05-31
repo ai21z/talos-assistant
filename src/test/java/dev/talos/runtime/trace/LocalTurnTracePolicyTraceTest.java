@@ -1,6 +1,7 @@
 package dev.talos.runtime.trace;
 
 import dev.talos.runtime.TurnPolicyTrace;
+import dev.talos.runtime.task.TaskContractResolver;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -90,6 +91,28 @@ class LocalTurnTracePolicyTraceTest {
                 .anyMatch(candidate -> "TASK_CONTRACT_RESOLVED".equals(candidate.type())));
         assertTrue(trace.taskContract().type().isBlank());
         assertTrue(trace.phaseTransitions().isEmpty());
+    }
+
+    @Test
+    void recordsRolefulTargetEvidenceWhilePreservingLegacyProjection() {
+        beginTrace();
+
+        TurnPolicyTrace policyTrace = TurnPolicyTrace.from(
+                TaskContractResolver.fromUserRequest("Rewrite styles.css so index.html still works."),
+                "APPLY",
+                List.of("talos.write_file", "talos.edit_file"),
+                List.of("tool_use:write_file", "tool_use:edit_file"));
+
+        LocalTurnTraceCapture.recordPolicyTrace(policyTrace);
+
+        LocalTurnTrace trace = LocalTurnTraceCapture.complete();
+        assertEquals(List.of("styles.css"), trace.taskContract().expectedTargets());
+        assertTrue(trace.taskContract().rolefulTargets().stream()
+                .anyMatch(target -> "styles.css".equals(target.path())
+                        && "MUST_MUTATE".equals(target.role())));
+        assertTrue(trace.taskContract().rolefulTargets().stream()
+                .anyMatch(target -> "index.html".equals(target.path())
+                        && "VERIFY_ONLY".equals(target.role())));
     }
 
     @Test

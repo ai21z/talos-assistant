@@ -10,6 +10,7 @@ import dev.talos.runtime.phase.ExecutionPhase;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
+import dev.talos.runtime.task.WorkspaceTargetReconciler;
 import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
 import dev.talos.runtime.turn.CurrentTurnPlan;
 import dev.talos.spi.types.ChatMessage;
@@ -92,7 +93,9 @@ public final class UnifiedAssistantMode implements Mode {
         // System prompt — unified mode: tools + workspace + retrieval guidance
         boolean hasHistory = !history.isEmpty();
         boolean nativeTools = CfgUtil.boolAt(CfgUtil.map(ctx.cfg().data.get("tools")), "native_calling", true);
-        TaskContract taskContract = TaskContractResolver.fromMessages(contractMessages);
+        TaskContract taskContract = WorkspaceTargetReconciler.reconcile(
+                TaskContractResolver.fromMessages(contractMessages),
+                workspace);
         boolean smallTalk = taskContract.type() == TaskType.SMALL_TALK;
         boolean directoryListing = taskContract.type() == TaskType.DIRECTORY_LISTING;
         ExecutionPhase initialPhase = CurrentTurnPlan.defaultPhaseFor(taskContract);

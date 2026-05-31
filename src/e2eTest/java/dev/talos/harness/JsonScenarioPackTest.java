@@ -985,6 +985,120 @@ class JsonScenarioPackTest {
     }
 
     @Test
+    @DisplayName("[json-scenario:scenarios/83-static-verification-continuation-preserves-scripts-js.json] 83: static verification continuation preserves scripts.js")
+    void staticVerificationContinuationPreservesScriptsJs() {
+        var loaded = JsonScenarioLoader.load("scenarios/83-static-verification-continuation-preserves-scripts-js.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(2, 2, 0, 0)
+                    .assertAnswerContains("Remaining target(s): scripts.js")
+                    .assertAnswerNotContains("Remaining target(s): script.js")
+                    .assertAnswerNotContains("Missing or unmutated target files: script.js")
+                    .assertAnswerNotContains("Static verification: passed")
+                    .assertFileContains("index.html", "<script src=\"scripts.js\"></script>")
+                    .assertFileContains("styles.css", ".calculator")
+                    .assertFileAbsent("scripts.js")
+                    .assertLocalTraceRecorded();
+            assertEquals("BLOCKED", result.localTrace().outcome().status());
+            assertEquals("BLOCKED_BY_POLICY", result.localTrace().outcome().classification());
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/84-roleful-scoped-extra-files-mutates-requested-target.json] 84: scoped extra-files constraint still mutates requested target")
+    void rolefulScopedExtraFilesMutatesRequestedTarget() {
+        var loaded = JsonScenarioLoader.load("scenarios/84-roleful-scoped-extra-files-mutates-requested-target.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(1, 1, 0, 0)
+                    .assertAnswerNotContains("read-only")
+                    .assertAnswerNotContains("No file changes were applied")
+                    .assertFileContains("styles.css", "#ff3df2")
+                    .assertFileContains("index.html", "<title>Roleful Static Site</title>")
+                    .assertFileNotContains("index.html", "forbidden mutation")
+                    .assertFileContains("scripts.js", "Pulse active")
+                    .assertFileAbsent("improvements.txt")
+                    .assertFileAbsent("site/index.html")
+                    .assertFileAbsent("script.js")
+                    .assertFileAbsent("style.css")
+                    .assertLocalTraceRecorded();
+
+            assertTraceExpectedTargets(result, "styles.css");
+            assertTraceForbiddenTargets(result, "index.html", "scripts.js");
+            assertRolefulTarget(result, "styles.css", "MUST_MUTATE");
+            assertRolefulTarget(result, "index.html", "FORBIDDEN");
+            assertRolefulTarget(result, "scripts.js", "FORBIDDEN");
+            assertTraceOutcome(result, "COMPLETE", "COMPLETED_VERIFIED");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/85-roleful-constraint-target-is-verify-only.json] 85: constraint target is verify-only, not a mutation obligation")
+    void rolefulConstraintTargetIsVerifyOnly() {
+        var loaded = JsonScenarioLoader.load("scenarios/85-roleful-constraint-target-is-verify-only.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(1, 1, 0, 0)
+                    .assertAnswerNotContains("Remaining target(s): index.html")
+                    .assertAnswerNotContains("index.html: expected target was not successfully mutated")
+                    .assertFileContains("styles.css", "#00e5ff")
+                    .assertFileContains("index.html", "<script src=\"scripts.js\"></script>")
+                    .assertFileContains("scripts.js", "Pulse active")
+                    .assertFileAbsent("improvements.txt")
+                    .assertFileAbsent("site/index.html")
+                    .assertFileAbsent("script.js")
+                    .assertFileAbsent("style.css")
+                    .assertLocalTraceRecorded();
+
+            assertTraceExpectedTargets(result, "styles.css");
+            assertTraceForbiddenTargets(result);
+            assertRolefulTarget(result, "styles.css", "MUST_MUTATE");
+            assertRolefulTarget(result, "index.html", "VERIFY_ONLY");
+            assertTraceOutcome(result, "COMPLETE", "COMPLETED_UNVERIFIED");
+        }
+    }
+
+    @Test
+    @DisplayName("[json-scenario:scenarios/86-roleful-existing-static-web-targets-keep-plural-names.json] 86: existing static-web targets keep plural names")
+    void rolefulExistingStaticWebTargetsKeepPluralNames() {
+        var loaded = JsonScenarioLoader.load("scenarios/86-roleful-existing-static-web-targets-keep-plural-names.json");
+
+        try (var result = ScenarioRunner.runThroughExecutor(
+                loaded.definition(),
+                loaded.definition().userPrompt(),
+                loaded.scriptedResponses())) {
+            result.assertApprovalCounts(3, 3, 0, 0)
+                    .assertAnswerContains("Static verification: passed")
+                    .assertAnswerNotContains("script.js")
+                    .assertAnswerNotContains("style.css")
+                    .assertFileContains("index.html", "<script src=\"scripts.js\"></script>")
+                    .assertFileContains("styles.css", "#pulse-button")
+                    .assertFileContains("scripts.js", "getElementById('pulse-button')")
+                    .assertFileAbsent("script.js")
+                    .assertFileAbsent("style.css")
+                    .assertLocalTraceRecorded();
+
+            assertTraceExpectedTargets(result, "index.html", "scripts.js", "styles.css");
+            assertTraceForbiddenTargets(result);
+            assertRolefulTarget(result, "index.html", "MUST_MUTATE");
+            assertRolefulTarget(result, "scripts.js", "MUST_MUTATE");
+            assertRolefulTarget(result, "styles.css", "MUST_MUTATE");
+            assertNoRolefulTarget(result, "script.js", "MUST_MUTATE");
+            assertNoRolefulTarget(result, "style.css", "MUST_MUTATE");
+            assertTraceOutcome(result, "COMPLETE", "COMPLETED_VERIFIED");
+        }
+    }
+
+    @Test
     @DisplayName("[json-scenario:scenarios/63-functional-web-task-missing-js-fails-verification.json] 63: functional web task missing JavaScript fails verification")
     void functionalWebTaskMissingJavascriptFailsVerification() {
         var loaded = JsonScenarioLoader.load("scenarios/63-functional-web-task-missing-js-fails-verification.json");
@@ -1575,5 +1689,46 @@ class JsonScenarioPackTest {
             assertTrue(result.streamedText().isEmpty(),
                     "buffered workspace-evidence turn should not stream the ungrounded first answer");
         }
+    }
+
+    private static void assertTraceExpectedTargets(ExecutorScenarioResult result, String... expectedTargets) {
+        assertEquals(List.of(expectedTargets), result.localTrace().taskContract().expectedTargets(),
+                "trace expected targets");
+    }
+
+    private static void assertTraceForbiddenTargets(ExecutorScenarioResult result, String... forbiddenTargets) {
+        assertEquals(List.of(forbiddenTargets), result.localTrace().taskContract().forbiddenTargets(),
+                "trace forbidden targets");
+    }
+
+    private static void assertRolefulTarget(ExecutorScenarioResult result, String path, String role) {
+        assertTrue(result.localTrace().taskContract().rolefulTargets().stream()
+                        .anyMatch(target -> path.equals(target.path()) && role.equals(target.role())),
+                "expected trace roleful target " + path + " = " + role
+                        + ", actual: " + result.localTrace().taskContract().rolefulTargets());
+    }
+
+    private static void assertNoRolefulTarget(ExecutorScenarioResult result, String path, String role) {
+        assertFalse(result.localTrace().taskContract().rolefulTargets().stream()
+                        .anyMatch(target -> path.equals(target.path()) && role.equals(target.role())),
+                "unexpected trace roleful target " + path + " = " + role
+                        + ", actual: " + result.localTrace().taskContract().rolefulTargets());
+    }
+
+    private static void assertTraceOutcome(
+            ExecutorScenarioResult result,
+            String expectedStatus,
+            String expectedClassification
+    ) {
+        assertEquals(expectedStatus, result.localTrace().outcome().status(),
+                "trace outcome status\n"
+                        + "trace=" + result.traceSummary() + "\n"
+                        + "verification=" + result.localTrace().verification() + "\n"
+                        + "answer=\n" + result.finalAnswer());
+        assertEquals(expectedClassification, result.localTrace().outcome().classification(),
+                "trace outcome classification\n"
+                        + "trace=" + result.traceSummary() + "\n"
+                        + "verification=" + result.localTrace().verification() + "\n"
+                        + "answer=\n" + result.finalAnswer());
     }
 }
