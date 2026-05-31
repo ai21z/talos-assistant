@@ -28,6 +28,20 @@ downstream access to claim results, proof kind, authority, coverage, target
 binding, limitations, and obligation sufficiency without reverse-engineering
 legacy summaries.
 
+Post-T623 review added two concrete requirements:
+
+- The T622-style `.textC;` no-op currently downgrades through `UNVERIFIED` /
+  `READBACK_ONLY`, not `FAILED`. That conservative verdict is acceptable for a
+  non-executing static lane, but the rich report should still surface the
+  specific static limitation/problem line so the user sees why the claim was not
+  verified.
+- `EmbeddedStaticVerificationResultParser` is currently failure-only and T623
+  added a positive-pass ignore regression, but the architectural invariant is
+  still implicit. T624 must model embedded model-authored verification text as
+  advisory or negative-only compatibility evidence. It must never satisfy a
+  required obligation or raise an outcome to verified when post-apply
+  verification is skipped.
+
 ## Classification
 
 Primary taxonomy bucket:
@@ -109,6 +123,11 @@ letting compatibility TaskVerificationResult become the authoritative source.
   count, strongest authoritative proof kinds, and limitations.
 - Keep text rendering conservative: structured report can downgrade claims, but
   no model-authored or advisory evidence can raise a verdict.
+- Carry verifier problems/limitations for unsatisfied required claims into
+  outcome rendering, even when the compatibility status is `READBACK_ONLY`
+  rather than `FAILED`.
+- Fence embedded static verification parsing as advisory/negative-only evidence
+  at the same boundary that consumes first-class reports.
 
 ## Architecture Metadata
 
@@ -163,7 +182,16 @@ Refactor scope:
 - `COMPLETED_VERIFIED` is still emitted only when required obligations are
   sufficiently satisfied by authoritative evidence.
 - Readback-only README mutation behavior remains `COMPLETED_UNVERIFIED`.
-- Embedded model-authored positive verification text remains non-authoritative.
+- Embedded model-authored positive verification text remains non-authoritative
+  and cannot produce `COMPLETED_VERIFIED`, including when
+  `shouldVerifyPostApply(...)` is false.
+- Embedded model-authored failure text may still lower/downgrade the outcome,
+  but it must be labeled as embedded/advisory compatibility evidence rather than
+  authoritative verifier proof.
+- Unsatisfied required static-web interaction claims surface a concrete
+  problem/limitation line in the final answer and trace/debug evidence while
+  preserving the conservative `UNVERIFIED` verdict when runtime execution did
+  not occur.
 - Trace/debug output includes structured report summary without leaking
   protected content.
 - No regressions to privacy, permissions, checkpointing, trace redaction, or
@@ -176,6 +204,12 @@ Required deterministic regression:
 - Unit test: rich report survives projection.
 - Integration/executor test: `ExecutionOutcome` exposes report and still maps
   unsatisfied obligations to `COMPLETED_UNVERIFIED`.
+- Integration/executor test: model-authored `[Static verification: passed - ...]`
+  cannot produce `COMPLETED_VERIFIED` when post-apply verification is skipped.
+- Integration/executor test: embedded static-verification failure remains a
+  negative/downgrade path but is not authoritative positive evidence.
+- Rendering test: unsatisfied required interaction report includes the specific
+  static problem/limitation line rather than only generic readback wording.
 - Trace assertion: required claim count and unsatisfied claim count recorded.
 
 Commands:
