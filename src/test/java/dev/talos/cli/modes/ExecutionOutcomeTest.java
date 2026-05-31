@@ -3119,6 +3119,121 @@ class ExecutionOutcomeTest {
     }
 
     @Test
+    void pathExistenceAnswerPrependsExactStatusWhenListDirEvidenceIsSatisfied() throws Exception {
+        Path ws = Files.createTempDirectory("talos-path-existence-summary-");
+        try {
+            Files.writeString(ws.resolve("scripts.js"), "console.log('present');\n");
+            Files.writeString(ws.resolve("styles.css"), "body { color: red; }\n");
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Check whether scripts.js exists and whether script.js exists. Do not change anything."));
+
+            var plan = dev.talos.runtime.turn.CurrentTurnPlan.create(
+                    dev.talos.runtime.task.TaskContractResolver.fromMessages(messages),
+                    dev.talos.runtime.phase.ExecutionPhase.INSPECT,
+                    List.of("talos.list_dir", "talos.read_file"),
+                    List.of("talos.list_dir", "talos.read_file"),
+                    List.of());
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "I checked the files.",
+                    1,
+                    1,
+                    List.of("talos.list_dir"),
+                    List.of(),
+                    0,
+                    0,
+                    false,
+                    0,
+                    List.of(),
+                    0,
+                    0,
+                    0,
+                    0,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.list_dir", ".", true, false, false,
+                            "scripts.js\nstyles.css\n", "")));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    loopResult.finalAnswer(), plan, messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.COMPLETE, outcome.completionStatus());
+            assertEquals(TaskCompletionStatus.READ_ONLY_ANSWERED, outcome.taskOutcome().completionStatus());
+            assertTrue(outcome.finalAnswer().startsWith("[Path existence verified]"),
+                    outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("scripts.js: exists"), outcome.finalAnswer());
+            assertTrue(outcome.finalAnswer().contains("script.js: not found"), outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().startsWith("[Evidence incomplete:"), outcome.finalAnswer());
+            assertFalse(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
+    void pathExistenceAnswerWithOnlyIrrelevantReadEvidenceRemainsContained() throws Exception {
+        Path ws = Files.createTempDirectory("talos-path-existence-irrelevant-read-");
+        try {
+            Files.writeString(ws.resolve("scripts.js"), "console.log('present');\n");
+            Files.writeString(ws.resolve("styles.css"), "body { color: red; }\n");
+
+            var messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system("sys"));
+            messages.add(ChatMessage.user(
+                    "Check whether scripts.js exists and whether script.js exists. Do not change anything."));
+
+            var plan = dev.talos.runtime.turn.CurrentTurnPlan.create(
+                    dev.talos.runtime.task.TaskContractResolver.fromMessages(messages),
+                    dev.talos.runtime.phase.ExecutionPhase.INSPECT,
+                    List.of("talos.list_dir", "talos.read_file"),
+                    List.of("talos.list_dir", "talos.read_file"),
+                    List.of());
+
+            var loopResult = new ToolCallLoop.LoopResult(
+                    "scripts.js does not exist.",
+                    1,
+                    1,
+                    List.of("talos.read_file"),
+                    List.of(),
+                    1,
+                    0,
+                    false,
+                    0,
+                    List.of("styles.css"),
+                    0,
+                    0,
+                    0,
+                    0,
+                    List.of(new ToolCallLoop.ToolOutcome(
+                            "talos.read_file", "styles.css", true, false, false,
+                            "body { color: red; }", "")));
+
+            ExecutionOutcome outcome = ExecutionOutcome.fromToolLoop(
+                    loopResult.finalAnswer(), plan, messages, loopResult, ws, 0);
+
+            assertEquals(ExecutionOutcome.CompletionStatus.ADVISORY_ONLY, outcome.completionStatus());
+            assertTrue(outcome.finalAnswer().startsWith(
+                    "[Evidence incomplete: required workspace evidence was not gathered in this turn.]"),
+                    outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("scripts.js does not exist"), outcome.finalAnswer());
+            assertFalse(outcome.finalAnswer().contains("scripts.js: exists"), outcome.finalAnswer());
+            assertTrue(outcome.taskOutcome().hasWarning(TruthWarningType.MISSING_EVIDENCE));
+        } finally {
+            try (var walk = Files.walk(ws)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); } catch (Exception ignored) { }
+                });
+            }
+        }
+    }
+
+    @Test
     void listOnlyWithReadFileIsAdvisoryWithMissingEvidenceWarning() {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system("sys"));

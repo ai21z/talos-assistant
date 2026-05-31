@@ -9,6 +9,7 @@ import dev.talos.runtime.outcome.InspectUnderCompletionAnswerGuard;
 import dev.talos.runtime.outcome.MutationFailureAnswerRenderer;
 import dev.talos.runtime.outcome.MutationOutcome;
 import dev.talos.runtime.outcome.NoToolAnswerTruthfulnessGuard;
+import dev.talos.runtime.outcome.PathExistenceAnswerRenderer;
 import dev.talos.runtime.outcome.ProtectedReadAnswerGuard;
 import dev.talos.runtime.outcome.ReadOnlyToolLimitOutcome;
 import dev.talos.runtime.outcome.StaticVerificationAnswerRenderer;
@@ -285,6 +286,12 @@ record ExecutionOutcome(
                     current,
                     messages,
                     loopResult,
+                    workspace);
+            current = PathExistenceAnswerRenderer.prependVerifiedStatusIfNeeded(
+                    current,
+                    safePlan,
+                    evidenceObligation,
+                    evidenceResult,
                     workspace);
         }
         ReadOnlyToolLimitOutcome readOnlyToolLimit = ReadOnlyToolLimitOutcome.assess(
