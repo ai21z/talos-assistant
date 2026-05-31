@@ -78,6 +78,7 @@ public final class EvidenceObligationVerifier {
             case NONE -> Result.satisfied("No workspace evidence was required.");
             case LIST_DIRECTORY_ONLY -> verifyListDirectoryOnly(safeOutcomes);
             case READ_TARGET_REQUIRED -> verifyReadTargets(targets, safeOutcomes, false);
+            case PATH_EXISTENCE_EVIDENCE_REQUIRED -> verifyPathExistenceTargets(targets, safeOutcomes);
             case PROTECTED_READ_APPROVAL_REQUIRED -> verifyProtectedRead(targets, safeOutcomes);
             case STATIC_WEB_DIAGNOSIS_REQUIRED -> verifyStaticWebDiagnosis(targets, safeOutcomes, workspace);
             case WORKSPACE_INSPECTION_REQUIRED, VERIFY_FROM_TRACE_OR_EVIDENCE ->
@@ -188,6 +189,46 @@ public final class EvidenceObligationVerifier {
                     "Protected read was not attempted; no approval prompt ran and no protected content was read.");
         }
         return verifyReadTargets(expectedTargets, outcomes, true);
+    }
+
+    private static Result verifyPathExistenceTargets(
+            Set<String> expectedTargets,
+            List<ToolCallLoop.ToolOutcome> outcomes
+    ) {
+        if (outcomes.isEmpty()) {
+            return Result.unsatisfied("Path existence evidence was not gathered.");
+        }
+        return aggregateTargetResults(
+                expectedTargets,
+                target -> verifyPathExistenceTarget(target, outcomes),
+                "Path existence evidence was gathered.");
+    }
+
+    private static Result verifyPathExistenceTarget(
+            String expectedTarget,
+            List<ToolCallLoop.ToolOutcome> outcomes
+    ) {
+        String expected = normalizePath(expectedTarget);
+        for (ToolCallLoop.ToolOutcome outcome : outcomes) {
+            if (!"talos.read_file".equals(canonicalToolName(outcome.toolName()))) continue;
+            if (!expected.equals(normalizePath(outcome.pathHint()))) continue;
+            if (outcome.denied()) {
+                return Result.blocked("Path existence read was blocked by approval.");
+            }
+            return Result.satisfied("Path existence evidence was gathered.");
+        }
+        String expectedParent = parentDirectory(expected);
+        for (ToolCallLoop.ToolOutcome outcome : outcomes) {
+            if (!"talos.list_dir".equals(canonicalToolName(outcome.toolName()))) continue;
+            if (outcome.denied()) {
+                return Result.blocked("Path existence directory listing was blocked by approval.");
+            }
+            if (!outcome.success()) continue;
+            if (expectedParent.equals(normalizeDirectory(outcome.pathHint()))) {
+                return Result.satisfied("Path existence evidence was gathered.");
+            }
+        }
+        return Result.unsatisfied("Path existence evidence was not gathered for " + expectedTarget + ".");
     }
 
     private static Result verifyReadTarget(
@@ -488,6 +529,19 @@ public final class EvidenceObligationVerifier {
             normalized = normalized.substring(0, normalized.length() - 1);
         }
         return normalized;
+    }
+
+    private static String normalizeDirectory(String path) {
+        String normalized = normalizePath(path);
+        return normalized.isBlank() ? "." : normalized;
+    }
+
+    private static String parentDirectory(String normalizedPath) {
+        String normalized = normalizePath(normalizedPath);
+        int slash = normalized.lastIndexOf('/');
+        if (slash < 0) return ".";
+        String parent = normalized.substring(0, slash);
+        return parent.isBlank() ? "." : parent;
     }
 
     private static String canonicalToolName(String toolName) {

@@ -163,6 +163,60 @@ class ReadEvidenceHandoffTest {
         assertNull(result.extraSummary());
     }
 
+    @Test
+    void pathExistenceRecoveryRunsAfterIrrelevantReadEvidence(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("scripts.js"), "console.log('present');\n");
+        Files.writeString(workspace.resolve("styles.css"), "body { color: red; }\n");
+        Context ctx = context(workspace, "Path existence answer after deterministic handoff.");
+        List<ChatMessage> messages = messages(
+                "Check whether scripts.js exists and whether script.js exists. Do not change anything.");
+        CurrentTurnPlan plan = plan(
+                new TaskContract(
+                        TaskType.DIAGNOSE_ONLY,
+                        false,
+                        false,
+                        false,
+                        Set.of("scripts.js", "script.js"),
+                        Set.of(),
+                        "Check whether scripts.js exists and whether script.js exists. Do not change anything."),
+                EvidenceObligation.PATH_EXISTENCE_EVIDENCE_REQUIRED);
+        ToolCallLoop.LoopResult irrelevantRead = new ToolCallLoop.LoopResult(
+                "scripts.js does not exist.",
+                1,
+                1,
+                List.of("talos.read_file"),
+                messages,
+                1,
+                0,
+                false,
+                0,
+                List.of("styles.css"),
+                0,
+                0,
+                0,
+                0,
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.read_file",
+                        "styles.css",
+                        true,
+                        false,
+                        false,
+                        "body { color: red; }",
+                        "")));
+
+        ReadEvidenceHandoff.Result result = ReadEvidenceHandoff.readEvidenceRecoveryForPartialTargetsIfNeeded(
+                "scripts.js does not exist.",
+                messages,
+                plan,
+                irrelevantRead,
+                workspace,
+                ctx);
+
+        assertNotNull(result.loopResult(), "path existence should recover from irrelevant read evidence");
+        assertEquals("Path existence answer after deterministic handoff.", result.answer());
+        assertTrue(result.extraSummary().contains("talos.read_file"), result.extraSummary());
+    }
+
     private static CurrentTurnPlan plan(TaskContract contract, EvidenceObligation obligation) {
         return new CurrentTurnPlan(
                 contract,

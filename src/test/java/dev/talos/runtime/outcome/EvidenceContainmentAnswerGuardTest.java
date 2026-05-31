@@ -48,6 +48,27 @@ class EvidenceContainmentAnswerGuardTest {
     }
 
     @Test
+    void pathExistenceMissingEvidenceSuppressesFabricatedExistenceAnswer() {
+        String answer = EvidenceContainmentAnswerGuard.containMissingEvidence(
+                "scripts.js does not exist and script.js exists.",
+                pathExistencePlan(),
+                EvidenceObligation.PATH_EXISTENCE_EVIDENCE_REQUIRED,
+                EvidenceObligationVerifier.Result.unsatisfied(
+                        "Path existence evidence was not gathered for scripts.js."),
+                MARKERS);
+
+        assertTrue(answer.startsWith(EvidenceObligationVerifier.MISSING_EVIDENCE_PREFIX), answer);
+        assertTrue(answer.contains(
+                "I did not gather directory or target-read evidence for the requested path existence check"),
+                answer);
+        assertTrue(answer.contains("Required target(s):"), answer);
+        assertTrue(answer.contains("scripts.js"), answer);
+        assertTrue(answer.contains("script.js"), answer);
+        assertFalse(answer.contains("scripts.js does not exist"), answer);
+        assertFalse(answer.contains("script.js exists"), answer);
+    }
+
+    @Test
     void protectedReadNotAttemptedSuppressesFabricatedProtectedBody() {
         String answer = EvidenceContainmentAnswerGuard.containMissingEvidence(
                 "API_KEY=pretend-secret",
@@ -162,6 +183,23 @@ class EvidenceContainmentAnswerGuardTest {
                 ExecutionPhase.INSPECT,
                 List.of("talos.read_file"),
                 List.of("talos.read_file"),
+                List.of());
+    }
+
+    private static CurrentTurnPlan pathExistencePlan() {
+        TaskContract contract = new TaskContract(
+                TaskType.DIAGNOSE_ONLY,
+                false,
+                false,
+                false,
+                Set.of("scripts.js", "script.js"),
+                Set.of(),
+                "Check whether scripts.js exists and whether script.js exists. Do not change anything.");
+        return CurrentTurnPlan.create(
+                contract,
+                ExecutionPhase.INSPECT,
+                List.of("talos.list_dir", "talos.read_file"),
+                List.of("talos.list_dir", "talos.read_file"),
                 List.of());
     }
 }

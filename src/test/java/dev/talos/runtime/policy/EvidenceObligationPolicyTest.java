@@ -76,6 +76,16 @@ class EvidenceObligationPolicyTest {
     }
 
     @Test
+    void fileExistenceQuestionRequiresPathExistenceEvidenceBeforeStaticWebDiagnosis() {
+        TaskContract contract = TaskContractResolver.fromUserRequest(
+                "Check whether scripts.js exists and whether script.js exists. Do not change anything.");
+
+        assertEquals(
+                EvidenceObligation.PATH_EXISTENCE_EVIDENCE_REQUIRED,
+                EvidenceObligationPolicy.derive(contract, ExecutionPhase.INSPECT, WORKSPACE));
+    }
+
+    @Test
     void extractableDocumentTargetRequiresNormalReadEvidence() {
         TaskContract contract = TaskContractResolver.fromUserRequest("Read report.docx and summarize it.");
 

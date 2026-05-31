@@ -39,6 +39,7 @@ public final class EvidenceGate {
 
     public static boolean requiresReadEvidenceHandoff(EvidenceObligation obligation) {
         return obligation == EvidenceObligation.READ_TARGET_REQUIRED
+                || obligation == EvidenceObligation.PATH_EXISTENCE_EVIDENCE_REQUIRED
                 || obligation == EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED
                 || obligation == EvidenceObligation.UNSUPPORTED_CAPABILITY_CHECK_REQUIRED;
     }
@@ -70,7 +71,8 @@ public final class EvidenceGate {
             } else if (obligation == EvidenceObligation.UNSUPPORTED_CAPABILITY_CHECK_REQUIRED
                     && isUnsupportedExpectedTarget(target, cfg)) {
                 targets.add(target);
-            } else if (obligation == EvidenceObligation.READ_TARGET_REQUIRED && !protectedTarget) {
+            } else if ((obligation == EvidenceObligation.READ_TARGET_REQUIRED
+                    || obligation == EvidenceObligation.PATH_EXISTENCE_EVIDENCE_REQUIRED) && !protectedTarget) {
                 targets.add(target);
             }
         }
