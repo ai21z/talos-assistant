@@ -81,6 +81,12 @@ final class TaskVerificationOutcomeSelector {
                     safeFacts);
         }
         if (webCoherenceRequired) {
+            if (hasContextualStaticWebFindings(safeFacts)) {
+                return TaskVerificationResult.passed(
+                        "Scoped static web checks passed for " + mutatedTargetCount
+                                + " mutated target(s); contextual static-web findings remain outside this turn.",
+                        safeFacts);
+            }
             return TaskVerificationResult.passed(
                     "Static web coherence checks passed for " + mutatedTargetCount + " mutated target(s).",
                     safeFacts);
@@ -116,5 +122,10 @@ final class TaskVerificationOutcomeSelector {
         String summary = String.join("; ", problems.subList(0, Math.min(3, problems.size())));
         if (summary.length() > 220) summary = summary.substring(0, 217) + "...";
         return summary;
+    }
+
+    private static boolean hasContextualStaticWebFindings(List<String> facts) {
+        if (facts == null || facts.isEmpty()) return false;
+        return facts.stream().anyMatch(StaticWebProblemScope::isContextualFact);
     }
 }
