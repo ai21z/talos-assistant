@@ -3,7 +3,9 @@ package dev.talos.core.rag;
 import dev.talos.core.Config;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -11,11 +13,11 @@ import static org.junit.jupiter.api.Assertions.*;
 public class RagFlowSmokeTest {
 
     @Test
-    public void prepare_doNotThrow() {
+    public void prepare_doNotThrow(@TempDir Path workspace) throws Exception {
         RagService svc = new RagService(new Config());
-        Path ws = Path.of(".").toAbsolutePath().normalize();
+        Files.writeString(workspace.resolve("README.md"), "Tiny RAG fixture workspace.\n");
 
-        RagService.Prepared p = svc.prepare(ws, "what is this project", 3);
+        RagService.Prepared p = svc.prepare(workspace, "what is this project", 3);
         assertNotNull(p, "Prepared must not be null");
         assertNotNull(p.snippetMaps(), "snippets list must not be null");
         assertNotNull(p.citations(), "citations list must not be null");

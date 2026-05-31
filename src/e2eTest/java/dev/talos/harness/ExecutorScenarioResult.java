@@ -23,7 +23,7 @@ import java.util.function.Consumer;
  *
  * <p>The primary assertion surface is answer text — which is exactly
  * what the executor-seam gates (R2 / R6 / N2 / N3) produce. See
- * §8 N4 of {@code docs/new-architecture/talos-harness-main-plan.md}
+ * §8 N4 of {@code docs/architecture/talos-harness-main-plan.md}
  * for the seam design.
  */
 public final class ExecutorScenarioResult implements AutoCloseable {

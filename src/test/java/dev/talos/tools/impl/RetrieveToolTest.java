@@ -7,6 +7,7 @@ import dev.talos.core.rag.RagService;
 import dev.talos.core.security.Sandbox;
 import dev.talos.tools.*;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -21,8 +22,8 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class RetrieveToolTest {
 
-    private static ToolContext testContext() {
-        Path workspace = Path.of(".").toAbsolutePath().normalize();
+    private static ToolContext testContext(Path workspace) {
+        workspace = workspace.toAbsolutePath().normalize();
         return new ToolContext(workspace, new Sandbox(workspace, Map.of()), new Config());
     }
 
@@ -48,10 +49,10 @@ class RetrieveToolTest {
     }
 
     @Test
-    void missingQueryParam() {
+    void missingQueryParam(@TempDir Path workspace) {
         RetrieveTool tool = new RetrieveTool(new RagService(new Config()));
         ToolCall call = new ToolCall("talos.retrieve", Map.of());
-        ToolResult r = tool.execute(call, testContext());
+        ToolResult r = tool.execute(call, testContext(workspace));
 
         assertFalse(r.success());
         assertEquals(ToolError.INVALID_PARAMS, r.error().code());
@@ -59,20 +60,21 @@ class RetrieveToolTest {
     }
 
     @Test
-    void emptyQueryParam() {
+    void emptyQueryParam(@TempDir Path workspace) {
         RetrieveTool tool = new RetrieveTool(new RagService(new Config()));
         ToolCall call = new ToolCall("talos.retrieve", Map.of("query", "  "));
-        ToolResult r = tool.execute(call, testContext());
+        ToolResult r = tool.execute(call, testContext(workspace));
 
         assertFalse(r.success());
         assertEquals(ToolError.INVALID_PARAMS, r.error().code());
     }
 
     @Test
-    void queryWithNoIndexDoesNotCrash() {
+    void queryWithNoIndexDoesNotCrash(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "Tiny retrieve fixture workspace.\n");
         RetrieveTool tool = new RetrieveTool(new RagService(new Config()));
         ToolCall call = new ToolCall("talos.retrieve", Map.of("query", "test search"));
-        ToolResult r = tool.execute(call, testContext());
+        ToolResult r = tool.execute(call, testContext(workspace));
 
         // With no real workspace/index, tool should either:
         //  - succeed with "No results" (empty retrieval)
@@ -88,21 +90,23 @@ class RetrieveToolTest {
     }
 
     @Test
-    void topKParamParsed() {
+    void topKParamParsed(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "Tiny retrieve fixture workspace.\n");
         // Just verify it doesn't crash with a top_k param
         RetrieveTool tool = new RetrieveTool(new RagService(new Config()));
         ToolCall call = new ToolCall("talos.retrieve", Map.of("query", "test", "top_k", "3"));
-        ToolResult r = tool.execute(call, testContext());
+        ToolResult r = tool.execute(call, testContext(workspace));
 
         // Should not crash regardless of index state
         assertNotNull(r);
     }
 
     @Test
-    void invalidTopKIgnored() {
+    void invalidTopKIgnored(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("README.md"), "Tiny retrieve fixture workspace.\n");
         RetrieveTool tool = new RetrieveTool(new RagService(new Config()));
         ToolCall call = new ToolCall("talos.retrieve", Map.of("query", "test", "top_k", "not-a-number"));
-        ToolResult r = tool.execute(call, testContext());
+        ToolResult r = tool.execute(call, testContext(workspace));
 
         // Should use default top_k, not crash
         assertNotNull(r);
@@ -110,7 +114,13 @@ class RetrieveToolTest {
 
     @Test
     void nullContextStillFallsBackToDefaultWorkspace() {
-        RetrieveTool tool = new RetrieveTool(new RagService(new Config()));
+        RetrieveTool tool = new RetrieveTool(new RagService(new Config()) {
+            @Override
+            public Prepared prepare(Path ws, String query, Integer topKOverride) {
+                assertNotNull(ws);
+                return new Prepared(List.of(), List.of());
+            }
+        });
         ToolCall call = new ToolCall("talos.retrieve", Map.of("query", "test"));
         ToolResult r = tool.execute(call, null);
 
@@ -118,7 +128,7 @@ class RetrieveToolTest {
     }
 
     @Test
-    void retrieve_does_not_leak_dirty_index_canary() {
+    void retrieve_does_not_leak_dirty_index_canary(@TempDir Path workspace) {
         RetrieveTool tool = new RetrieveTool(new RagService(new Config()) {
             @Override
             public Prepared prepare(Path ws, String query, Integer topKOverride) {
@@ -132,7 +142,7 @@ class RetrieveToolTest {
         });
 
         ToolResult r = tool.execute(new ToolCall("talos.retrieve", Map.of("query", "DO_NOT_LEAK_T267_ENV")),
-                testContext());
+                testContext(workspace));
 
         assertTrue(r.success());
         assertFalse(r.output().contains("DO_NOT_LEAK_T267_ENV"));

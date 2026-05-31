@@ -722,7 +722,7 @@ whether the fallback path is still used.
 - `src/main/java/dev/talos/runtime/ToolCallStreamFilter.java`
 - `src/main/java/dev/talos/runtime/ToolCallParser.java`
 - `src/main/java/dev/talos/core/util/Sanitize.java`
-- `docs/new-architecture/25-xml-retirement-review.md`
+- `docs/architecture/25-xml-retirement-review.md`
 
 **Risks**
 
@@ -769,7 +769,7 @@ longer needed.
 - `src/main/java/dev/talos/runtime/ToolCallStreamFilter.java`
 - `src/main/java/dev/talos/runtime/ToolCallParser.java`
 - `src/main/java/dev/talos/core/util/Sanitize.java`
-- `docs/new-architecture/25-xml-retirement-review.md`
+- `docs/architecture/25-xml-retirement-review.md`
 
 **Risks**
 
@@ -867,10 +867,10 @@ accidental side effect of a mechanical rename ticket.
 
 **Scope**
 
-- Decide whether the tracked `docs/new-architecture/` architecture/planning
+- Decide whether the tracked `docs/architecture/` architecture/planning
   set should be treated as intentional repo content or as local-only ignored docs
 - If they should remain ignored:
-  untrack the tracked `docs/new-architecture/` files from git while preserving
+  untrack the tracked `docs/architecture/` files from git while preserving
   local files, and define whether any exception (such as the active cleanup
   backlog) should remain tracked
 - If they should become tracked:
@@ -888,7 +888,7 @@ accidental side effect of a mechanical rename ticket.
 **Main files**
 
 - `.gitignore`
-- tracked `docs/new-architecture/*` files that are part of the ownership decision
+- tracked `docs/architecture/*` files that are part of the ownership decision
 
 **Risks**
 
@@ -897,7 +897,7 @@ accidental side effect of a mechanical rename ticket.
 
 **Acceptance criteria**
 
-- The ownership of the tracked `docs/new-architecture/` docs is explicit and consistent
+- The ownership of the tracked `docs/architecture/` docs is explicit and consistent
 - The repo no longer contains a repo-level mismatch between ignore policy and tracked architecture/planning docs
 - No production code files change
 - The cleanup branch’s documentation surface is easier to reason about than before
@@ -1171,8 +1171,8 @@ remaining in a permanent "we will decide later" state.
 
 **Main files**
 
-- `docs/new-architecture/25-xml-retirement-review.md`
-- `docs/new-architecture/28-codebase-cleanup-ticket-backlog.md`
+- `docs/architecture/25-xml-retirement-review.md`
+- `docs/architecture/28-codebase-cleanup-ticket-backlog.md`
 - telemetry review surfaces such as `/status --verbose` output or other agreed
   local observation notes
 
@@ -1374,7 +1374,7 @@ and generated coverage/test artifacts.
 
 ### 7.2 Harness seam status against source-of-truth
 
-`docs/new-architecture/talos-harness-source-of-truth.md` identifies the
+`docs/architecture/talos-harness-source-of-truth.md` identifies the
 critical runtime seams for harness work as:
 
 - `AssistantTurnExecutor`

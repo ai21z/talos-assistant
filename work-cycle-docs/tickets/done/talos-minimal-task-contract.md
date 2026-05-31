@@ -5,9 +5,9 @@ Priority: high
 Status: done
 Architecture references:
 - `work-cycle-docs/tickets/new-work.md`
-- `docs/new-architecture/talos-harness-source-of-truth.md`
-- `docs/new-architecture/talos-harness-plan.md`
-- `docs/new-architecture/29-v1-scenario-pack.md`
+- `docs/architecture/talos-harness-source-of-truth.md`
+- `docs/architecture/talos-harness-plan.md`
+- `docs/architecture/29-v1-scenario-pack.md`
 Depends on / should follow:
 - `work-cycle-docs/tickets/done/talos-minimal-execution-phase-policy.md`
 - `work-cycle-docs/tickets/done/talos-execution-outcome-centralization.md`

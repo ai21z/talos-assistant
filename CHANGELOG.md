@@ -2,6 +2,46 @@
 
 ## [Unreleased]
 
+### Added
+- Added ArchUnit (`com.tngtech.archunit:archunit-junit5`) bytecode-level
+  architecture guards in `dev.talos.architecture.LayeredArchitectureTest`,
+  mirroring the six package-direction invariants enforced by the regex-based
+  `validateArchitectureBoundaries` ratchet. ArchUnit additionally catches
+  dependencies expressed through types, generics, annotations, and exceptions
+  that the source scanner cannot see.
+- Added a report-only architecture discovery pass
+  (`dev.talos.architecture.ArchitectureDiscoveryReportTest`) that uses the
+  ArchUnit Core API to write a deterministic Markdown report to
+  `build/reports/talos/architecture/architecture-discovery-report.md` (package
+  counts, dependency hotspots/fan-in/fan-out, package dependency map,
+  runtime-control spine, layer-boundary candidates, and top-level package
+  cycles). It never fails the build on findings; it is evidence for manual
+  review before any rule is promoted to a hard guard.
+- Added a report-only architecture cycle analysis pass
+  (`dev.talos.architecture.ArchitectureCycleReportTest`) that slices the
+  imported `dev.talos` bytecode at four levels (top-level packages, runtime
+  subpackages, cli subpackages, core subpackages) and writes a deterministic
+  Markdown report to
+  `build/reports/talos/architecture/architecture-cycle-report.md`. Cycles are
+  detected by a Tarjan strongly-connected-component pass and cross-checked with
+  ArchUnit's caught `beFreeOfCycles` rule; severity is classified per level. It
+  never fails the build on detected cycles.
+- Added a report-only execution-harness spine access report
+  (`dev.talos.architecture.ArchitectureSpineAccessReportTest`) that, for a fixed
+  set of runtime-control "spine" classes (e.g. `AssistantTurnExecutor`,
+  `ToolCallLoop`, `TaskContractResolver`, the policy/verifier classes,
+  `CurrentTurnPlan`, `ExecutionOutcome`, `ConversationManager`), reports
+  class-level fan-in/fan-out, top callers/callees, and ArchUnit-resolved
+  method/constructor call counts to
+  `build/reports/talos/architecture/harness-spine-access-report.md`. Deterministic,
+  capped to top-N, and never fails the build on high fan-in/fan-out.
+- Added a second generation of hard ArchUnit guards in
+  `dev.talos.architecture.LayeredArchitectureTest`, promoted only after the
+  report-only passes showed zero edges: `runtime.policy`, `runtime.verification`
+  ↛ `cli`; `runtime.toolcall` ↛ `cli.repl`; `tools` ↛ `cli`; and `spi` ↛ `app`.
+  Documented hard guards, report-only findings, accepted exceptions, and
+  candidate future guards in `docs/architecture/11-architecture-guardrails.md`.
+
 ### Changed
 - [T334-done-high] Added release-ledger discipline for beta candidates:
   `CHANGELOG.md` now keeps an `Unreleased` section, the patch bump script moves
