@@ -37,6 +37,7 @@ import dev.talos.runtime.policy.UnsupportedDocumentMutationPolicy;
 import dev.talos.runtime.task.TaskContract;
 import dev.talos.runtime.task.TaskContractResolver;
 import dev.talos.runtime.task.TaskType;
+import dev.talos.runtime.task.WorkspaceTargetReconciler;
 import dev.talos.runtime.toolcall.DirectoryListingEvidence;
 import dev.talos.runtime.toolcall.NativeToolSpecPolicy;
 import dev.talos.tools.ToolAliasPolicy;
@@ -192,10 +193,14 @@ public final class AssistantTurnExecutor {
         if (workspaceBoundaryPreflight.effectiveUserRequest() != null) {
             messages = replaceLatestUserRequest(messages, workspaceBoundaryPreflight.effectiveUserRequest());
         }
-        TaskContract rawTaskContract = TaskContractResolver.fromMessages(messages);
+        TaskContract rawTaskContract = WorkspaceTargetReconciler.reconcile(
+                TaskContractResolver.fromMessages(messages),
+                workspace);
         ActiveTaskContextPolicy.Decision activeDecision = activeTaskContextDecision(
                 latestUserRequest(messages), rawTaskContract, ctx);
-        TaskContract taskContract = activeDecision.taskContract();
+        TaskContract taskContract = WorkspaceTargetReconciler.reconcile(
+                activeDecision.taskContract(),
+                workspace);
         boolean activeDecisionUpdatesTurnSurface =
                 activeDecisionUpdatesTurnSurface(rawTaskContract, activeDecision);
         applyActiveTaskMemoryDecision(activeDecision, ctx);

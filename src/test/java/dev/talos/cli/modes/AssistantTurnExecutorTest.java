@@ -165,6 +165,27 @@ class AssistantTurnExecutorTest {
     }
 
     @Test
+    void policyTraceUsesWorkspaceReconciledStaticWebTargets(@TempDir Path workspace) throws Exception {
+        Files.writeString(workspace.resolve("scripts.js"), "console.log('existing');\n");
+        Files.writeString(workspace.resolve("styles.css"), "body { margin: 0; }\n");
+        var ctx = scriptedContext("done");
+        List<ChatMessage> messages = new ArrayList<>(List.of(
+                ChatMessage.system("system"),
+                ChatMessage.user("Create a modern synthwave website here with CSS styling and JavaScript interaction.")));
+
+        TurnAuditCapture.begin();
+        try {
+            AssistantTurnExecutor.execute(messages, workspace, ctx, new AssistantTurnExecutor.Options());
+            var audit = TurnAuditCapture.end();
+
+            assertEquals(List.of("index.html", "scripts.js", "styles.css"),
+                    audit.policyTrace().expectedTargets());
+        } finally {
+            if (TurnAuditCapture.isActive()) TurnAuditCapture.end();
+        }
+    }
+
+    @Test
     void directoryListingDoesNotTriggerPrimaryFileInspectionRetry(@TempDir Path workspace) throws Exception {
         Files.writeString(workspace.resolve("README.md"), "Directory listing fixture.\n");
         Files.writeString(workspace.resolve("index.html"), "<h1>hello</h1>\n");
