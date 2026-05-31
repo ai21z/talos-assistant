@@ -131,7 +131,8 @@ final class ReadEvidenceHandoff {
                 safePlan,
                 workspace,
                 ctx == null ? null : ctx.cfg());
-        if (obligation != EvidenceObligation.READ_TARGET_REQUIRED) {
+        if (obligation != EvidenceObligation.READ_TARGET_REQUIRED
+                && obligation != EvidenceObligation.PATH_EXISTENCE_EVIDENCE_REQUIRED) {
             return new Result(answer, null, null);
         }
         if (contract.mutationRequested() || contract.mutationAllowed()) {

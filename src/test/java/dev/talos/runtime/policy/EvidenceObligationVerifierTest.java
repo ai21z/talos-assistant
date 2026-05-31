@@ -209,6 +209,46 @@ class EvidenceObligationVerifierTest {
     }
 
     @Test
+    void pathExistenceRejectsIrrelevantReadEvidence() {
+        var result = EvidenceObligationVerifier.verify(
+                EvidenceObligation.PATH_EXISTENCE_EVIDENCE_REQUIRED,
+                Set.of("scripts.js", "script.js"),
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.read_file", "styles.css", true, false, false,
+                        "body { color: red; }", "")));
+
+        assertEquals(EvidenceObligationVerifier.Status.UNSATISFIED, result.status());
+    }
+
+    @Test
+    void pathExistenceAcceptsParentDirectoryListingEvidence() {
+        var result = EvidenceObligationVerifier.verify(
+                EvidenceObligation.PATH_EXISTENCE_EVIDENCE_REQUIRED,
+                Set.of("scripts.js", "script.js"),
+                List.of(new ToolCallLoop.ToolOutcome(
+                        "talos.list_dir", ".", true, false, false,
+                        "index.html\nscripts.js\nstyles.css\n", "")));
+
+        assertEquals(EvidenceObligationVerifier.Status.SATISFIED, result.status());
+    }
+
+    @Test
+    void pathExistenceAcceptsDirectTargetReadAttempts() {
+        var result = EvidenceObligationVerifier.verify(
+                EvidenceObligation.PATH_EXISTENCE_EVIDENCE_REQUIRED,
+                Set.of("scripts.js", "script.js"),
+                List.of(
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", "scripts.js", true, false, false,
+                                "console.log('ok');", ""),
+                        new ToolCallLoop.ToolOutcome(
+                                "talos.read_file", "script.js", false, false, false,
+                                "", "script.js was not found.", null, ToolError.NOT_FOUND)));
+
+        assertEquals(EvidenceObligationVerifier.Status.SATISFIED, result.status());
+    }
+
+    @Test
     void staticWebDiagnosisRejectsDirectoryListingOnlyWhenIndexIsPresent() {
         var result = EvidenceObligationVerifier.verify(
                 EvidenceObligation.STATIC_WEB_DIAGNOSIS_REQUIRED,

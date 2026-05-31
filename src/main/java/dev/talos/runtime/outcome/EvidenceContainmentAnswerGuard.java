@@ -77,6 +77,10 @@ public final class EvidenceContainmentAnswerGuard {
                     "I did not inspect the required workspace target this turn, so I cannot "
                             + "answer from its contents or propose grounded changes yet."
                             + targetSentence(plan);
+            case PATH_EXISTENCE_EVIDENCE_REQUIRED ->
+                    "I did not gather directory or target-read evidence for the requested path "
+                            + "existence check, so I cannot answer whether those files exist yet."
+                            + targetSentence(plan);
             case LIST_DIRECTORY_ONLY ->
                     "I did not complete a directory-list-only evidence path this turn. "
                             + "I cannot answer with file contents or derived file claims from "

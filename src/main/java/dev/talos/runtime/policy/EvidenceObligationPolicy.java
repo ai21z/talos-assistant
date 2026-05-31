@@ -45,6 +45,9 @@ public final class EvidenceObligationPolicy {
         if (!contract.mutationAllowed() && hasProtectedExpectedTarget(contract, workspace)) {
             return EvidenceObligation.PROTECTED_READ_APPROVAL_REQUIRED;
         }
+        if (hasReadOnlyPathExistenceObligation(contract)) {
+            return EvidenceObligation.PATH_EXISTENCE_EVIDENCE_REQUIRED;
+        }
         if (hasStaticWebDiagnosisObligation(contract, type)) {
             return EvidenceObligation.STATIC_WEB_DIAGNOSIS_REQUIRED;
         }
@@ -126,6 +129,23 @@ public final class EvidenceObligationPolicy {
                 || lower.contains("script")
                 || lower.contains("selector")
                 || lower.contains("button");
+    }
+
+    private static boolean hasReadOnlyPathExistenceObligation(TaskContract contract) {
+        if (contract == null || contract.mutationAllowed() || contract.expectedTargets().isEmpty()) {
+            return false;
+        }
+        String request = contract.originalUserRequest();
+        if (request == null || request.isBlank()) return false;
+        String lower = request.toLowerCase(Locale.ROOT);
+        boolean asksExistence = lower.contains("exists")
+                || lower.contains("exist")
+                || lower.contains("present")
+                || lower.contains("is there")
+                || lower.contains("are there");
+        boolean asksPathStatus = lower.contains("path")
+                && (lower.contains("check") || lower.contains("verify") || lower.contains("whether"));
+        return asksExistence || asksPathStatus;
     }
 
     private static boolean isStaticWebTarget(String target) {
