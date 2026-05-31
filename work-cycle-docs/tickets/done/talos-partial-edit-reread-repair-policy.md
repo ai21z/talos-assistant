@@ -4,7 +4,7 @@ Priority: medium
 Status: done
 Architecture references:
 - `work-cycle-docs/tickets/new-work.md`
-- `docs/new-architecture/talos-harness-source-of-truth.md`
+- `docs/architecture/talos-harness-source-of-truth.md`
 - `work-cycle-docs/tickets/done/talos-minimal-failure-policy.md`
 - `work-cycle-docs/tickets/done/talos-empty-edit-args-functional-recovery.md`
 

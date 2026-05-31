@@ -3,7 +3,7 @@ Date: 2026-04-26
 Priority: medium
 Status: done
 Architecture references:
-- `docs/new-architecture/30-cli-ui-output-architecture-audit.md`
+- `docs/architecture/30-cli-ui-output-architecture-audit.md`
 - `work-cycle-docs/tickets/done/talos-cli-ui-audit-and-architecture-note.md`
 - `work-cycle-docs/tickets/done/talos-embedding-nan-retrieval-diagnostic.md`
 - `work-cycle-docs/work-test-cycle.md`

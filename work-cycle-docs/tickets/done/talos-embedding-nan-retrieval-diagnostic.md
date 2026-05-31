@@ -4,7 +4,7 @@ Date: 2026-04-26
 Priority: medium
 Status: done
 Architecture references:
-- `docs/new-architecture/23-embedding-provider-architecture.md`
+- `docs/architecture/23-embedding-provider-architecture.md`
 - `work-cycle-docs/work-test-cycle.md`
 
 ## Why This Ticket Exists
@@ -62,7 +62,7 @@ Keep any fix narrow and evidence-driven.
 
 - `src/main/java/dev/talos/core/embed/EmbeddingsClient.java`
 - `src/main/java/dev/talos/core/rag/RagService.java`
-- `docs/new-architecture/23-embedding-provider-architecture.md`
+- `docs/architecture/23-embedding-provider-architecture.md`
 - local Ollama model/config state
 
 ## Test / Verification Plan

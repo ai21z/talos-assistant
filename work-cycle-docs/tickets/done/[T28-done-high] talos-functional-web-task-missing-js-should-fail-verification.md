@@ -4,8 +4,8 @@ Priority: high
 Status: done
 Architecture references:
 - work-cycle-docs/new-work.md
-- docs/new-architecture/talos-harness-source-of-truth.md
-- docs/new-architecture/talos-harness-plan.md
+- docs/architecture/talos-harness-source-of-truth.md
+- docs/architecture/talos-harness-plan.md
 - work-cycle-docs/tickets/done/[T15-done-high] talos-readback-verification-wording.md
 - work-cycle-docs/tickets/done/[T16-done-high] talos-web-app-static-verifier-v0.md
 

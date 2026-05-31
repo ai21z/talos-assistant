@@ -3,7 +3,7 @@ Date: 2026-04-26
 Priority: medium
 Status: done
 Architecture references:
-- docs/new-architecture/30-cli-ui-output-architecture-audit.md
+- docs/architecture/30-cli-ui-output-architecture-audit.md
 - work-cycle-docs/tickets/new-work.md
 
 ## Why This Ticket Exists

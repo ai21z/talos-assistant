@@ -3,7 +3,7 @@
 **Branch:** `chore/codebase-cleanup-refactor`  
 **Purpose:** give Opus one clear, aligned document that separates **hard evidence**, **useful source material**, and **Talos-specific architectural judgment**.  
 **Audience:** human reviewer + Opus  
-**Status:** working source-of-truth companion to `docs/new-architecture/talos-harness-plan.md`
+**Status:** working source-of-truth companion to `docs/architecture/talos-harness-plan.md`
 
 ---
 
@@ -79,7 +79,7 @@ The problem is **not** lack of architecture seams.
 The problem is missing harness layers.
 
 Primary local reference:
-- `docs/new-architecture/talos-harness-plan.md`
+- `docs/architecture/talos-harness-plan.md`
 
 Current working baseline for harness preparation:
 - `chore/codebase-cleanup-refactor`
@@ -138,7 +138,7 @@ This section is the practical source pack.
 
 These are mandatory.
 
-1. `docs/new-architecture/talos-harness-plan.md`
+1. `docs/architecture/talos-harness-plan.md`
    - current internal harness architecture plan
    - best source for Talos-specific goals, runtime seams, pain points, and rollout order
 
@@ -155,7 +155,7 @@ These are mandatory.
      - bootstrap wiring
 
 3. this document
-   - `docs/new-architecture/talos-harness-source-of-truth.md`
+   - `docs/architecture/talos-harness-source-of-truth.md`
    - use as the alignment and source-evaluation layer
 
 ## 5.2 Internal project source files already provided in local sources
@@ -429,8 +429,8 @@ The book is useful for understanding, but Talos needs stricter production harnes
 If giving Opus a compact, high-value pack, use this order:
 
 ### Mandatory pack
-1. `docs/new-architecture/talos-harness-plan.md`
-2. `docs/new-architecture/talos-harness-source-of-truth.md`
+1. `docs/architecture/talos-harness-plan.md`
+2. `docs/architecture/talos-harness-source-of-truth.md`
 3. relevant runtime classes from `chore/codebase-cleanup-refactor`
 4. `alex000kim-article.txt`
 

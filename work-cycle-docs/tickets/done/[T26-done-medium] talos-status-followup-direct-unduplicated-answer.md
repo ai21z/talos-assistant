@@ -4,8 +4,8 @@ Priority: medium
 Status: done
 Architecture references:
 - work-cycle-docs/new-work.md
-- docs/new-architecture/talos-harness-source-of-truth.md
-- docs/new-architecture/talos-harness-plan.md
+- docs/architecture/talos-harness-source-of-truth.md
+- docs/architecture/talos-harness-plan.md
 - work-cycle-docs/tickets/done/[T19-done-high] talos-status-followup-must-use-verified-outcome.md
 
 ## Why This Ticket Exists

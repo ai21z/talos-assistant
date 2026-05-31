@@ -4,7 +4,7 @@ Priority: high
 Status: done
 Architecture references:
 - `work-cycle-docs/tickets/new-work.md`
-- `docs/new-architecture/talos-harness-source-of-truth.md`
+- `docs/architecture/talos-harness-source-of-truth.md`
 - `work-cycle-docs/tickets/done/talos-read-only-web-diagnostics-static-grounding.md`
 - `work-cycle-docs/tickets/done/talos-read-only-web-diagnostic-loop-short-circuit.md`
 

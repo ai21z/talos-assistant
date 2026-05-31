@@ -4,7 +4,7 @@ Priority: high
 Status: done
 Architecture references:
 - `work-cycle-docs/tickets/new-work.md`
-- `docs/new-architecture/29-v1-scenario-pack.md`
+- `docs/architecture/29-v1-scenario-pack.md`
 - `local/docs/talos-source-pack-safe-local-alternative-2026-04-19.md`
 Related tickets:
 - `work-cycle-docs/tickets/done/talos-streaming-bare-tool-json-display-hygiene.md`
