@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -57,5 +58,39 @@ class StaticWebSelectorAnalyzerTest {
                         .anyMatch(p -> p.contains("button click handler references `#result`")),
                 facts.genericButtonResultDiagnosticProblems().toString());
         assertTrue(facts.renderInspection().contains("Observed in HTML:"), facts.renderInspection());
+    }
+
+    @Test
+    void cssFileNameInCommentIsNotTreatedAsMissingClassSelector() throws Exception {
+        Files.writeString(workspace.resolve("index.html"), """
+                <!DOCTYPE html>
+                <html>
+                  <head><link rel="stylesheet" href="styles.css"></head>
+                  <body>
+                    <main class="hero">Neon Arcadia</main>
+                    <script src="scripts.js"></script>
+                  </body>
+                </html>
+                """);
+        Files.writeString(workspace.resolve("styles.css"), """
+                /*
+                  styles.css
+                  Generated stylesheet header.
+                */
+                .hero {
+                  color: #ff2bd6;
+                }
+                """);
+        Files.writeString(workspace.resolve("scripts.js"), "console.log('ready');\n");
+
+        StaticWebSelectorAnalyzer.Facts facts = StaticWebSelectorAnalyzer.analyze(
+                workspace.toAbsolutePath().normalize(),
+                List.of("index.html", "styles.css", "scripts.js"),
+                List.of());
+
+        assertNotNull(facts);
+        assertFalse(facts.selectorProblems().stream()
+                        .anyMatch(problem -> problem.contains("`.css`")),
+                facts.selectorProblems().toString());
     }
 }
